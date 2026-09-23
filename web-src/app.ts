@@ -2816,11 +2816,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   ]
 }`,
-        agentRulesSave: "Validate and save",
         agentRulesReset: "Use built-in rules",
-        agentRulesSaving: "Validating and saving…",
         agentRulesSourceDefault: "Source: built-in rules",
-        agentRulesSourceSaved: "Source: saved rules (active immediately)",
+        agentRulesSourceSaved: "Source: saved rules",
+        agentRulesSourceEdited:
+          "Edited: Save changes validates these rules and uses them right away.",
+        agentRulesSourceRestore:
+          "Built-in rules: Save changes removes the saved rules and uses the built-in ones.",
         categories: {
           general: {
             label: "General",
@@ -3221,11 +3223,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   ]
 }`,
-        agentRulesSave: "検証して保存",
         agentRulesReset: "組み込みルールに戻す",
-        agentRulesSaving: "検証して保存しています…",
         agentRulesSourceDefault: "適用中: 組み込みルール",
-        agentRulesSourceSaved: "適用中: 保存したルール（即時反映）",
+        agentRulesSourceSaved: "適用中: 保存したルール",
+        agentRulesSourceEdited:
+          "編集中: 「変更を保存」で検証し、すぐに使います。",
+        agentRulesSourceRestore:
+          "組み込みルール: 「変更を保存」で保存したルールを消し、組み込みのルールを使います。",
         categories: {
           general: {
             label: "一般",
@@ -5141,6 +5145,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         scopeOmitSourceLabel(),
       ),
       agentRulesJson: AGENT_SCREEN_RULES,
+      agentRulesDefaultJson: formatAgentScreenRuleSet(
+        DEFAULT_AGENT_SCREEN_RULES,
+      ),
       agentRulesSource: AGENT_SCREEN_RULES_SOURCE,
       agentRulesErrors: agentScreenRuleErrorsText(AGENT_SCREEN_RULE_ERRORS),
     }),

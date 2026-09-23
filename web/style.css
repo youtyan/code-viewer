@@ -2925,6 +2925,12 @@ body.gdp-history-resizing * {
 .scope-settings-title-row > .scope-settings-section-title {
   margin-bottom: 0;
 }
+/* 分類にこの節しかないとき、節の見出しはページの見出しと同じ役なので出さない
+   (viewer-settings.ts の applyCategory)。「全プロジェクト共通」の札は残す。 */
+.scope-settings-section-sole > .scope-settings-section-title,
+.scope-settings-section-sole > .scope-settings-title-row > .scope-settings-section-title {
+  display: none;
+}
 .scope-settings-shared {
   padding: 0 6px;
   border: 1px solid var(--border);
@@ -3400,7 +3406,7 @@ body.gdp-help-page #content {
    名前の幅を残すよう、キーの列は幅を分け合って折り返す。 */
 .shortcut-row-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) calc(var(--space-unit) * 20) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) calc(var(--space-unit) * 20) minmax(0, 1.4fr);
   align-items: center;
   gap: var(--space-3);
   box-sizing: border-box;
@@ -3435,12 +3441,36 @@ body.gdp-help-page #content {
   text-align: right;
   white-space: nowrap;
 }
+/* キーは幅をそろえた升の列。キーの多い行で折り返しても、升の右端が縦にそろう。
+   升が 1 つ 2 つの行は、空いた列を詰めて右端に寄せる (auto-fit)。 */
 .shortcut-keys {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--space-1);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, var(--shortcut-key-w));
+  justify-content: end;
+  justify-items: end;
+  gap: var(--space-1) var(--space-2);
   padding: var(--space-1) 0;
+  --shortcut-key-w: calc(var(--space-unit) * 38);
+}
+.shortcut-key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  min-width: 0;
+}
+.shortcut-key kbd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shortcut-key-pwa {
+  flex: none;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-xs);
+  line-height: 1.6;
 }
 .shortcut-none {
   color: var(--color-text-3);
@@ -3514,9 +3544,8 @@ body.gdp-help-page #content {
   background: var(--color-raised);
   color: var(--color-text);
 }
-.shortcut-chord .shortcut-chord-note {
-  grid-column: 2 / -1;
-  margin: 0;
+.shortcut-row-detail > .shortcut-chord-note {
+  margin: var(--space-2) 0 0;
 }
 .shortcut-row-actions {
   display: flex;

@@ -291,7 +291,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Status first uses lifecycle reports when they are available. Otherwise it evaluates every enabled screen rule against the live terminal title and recent visible lines, then uses the highest-priority match. A terminal is tracked only after a report or a visible rule identifies it; screen motion then provides the working/idle fallback. Working matches expire when the title and screen stop changing, so stale status text does not stay active. Settings & Help → Settings contains the full JSON rule set, including regions, priorities, contains checks, regular expressions, and nested all/any/not conditions. Regular expressions use a bounded safe subset: groups, alternation, and backreferences are rejected, and AND/OR belongs in all/any. Saving validates the whole set and shows every error without replacing the active rules. If the saved rules cannot be read again (for example, another code-viewer holds their lock), the rules in use stay and Settings shows why, instead of switching to the built-in rules. Restoring the built-in rules removes the saved override so updated defaults can arrive with later releases.",
+                text: "Status first uses lifecycle reports when they are available. Otherwise it evaluates every enabled screen rule against the live terminal title and recent visible lines, then uses the highest-priority match. A terminal is tracked only after a report or a visible rule identifies it; screen motion then provides the working/idle fallback. Working matches expire when the title and screen stop changing, so stale status text does not stay active. Settings & Help → Settings contains the full JSON rule set, including regions, priorities, contains checks, regular expressions, and nested all/any/not conditions. Regular expressions use a bounded safe subset: groups, alternation, and backreferences are rejected, and AND/OR belongs in all/any. Edits to the rules are saved with Save changes at the bottom of the settings, like every other setting; saving validates the whole set and shows every error next to the rules without replacing the active rules. If the saved rules cannot be read again (for example, another code-viewer holds their lock), the rules in use stay and Settings shows why, instead of switching to the built-in rules. Use built-in rules fills in the built-in set; after Save changes the saved override is removed so updated defaults can arrive with later releases.",
               },
               {
                 kind: "paragraph",
@@ -1213,7 +1213,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "状態変更の申告がある場合はそれを先に使います。申告が無い場合は、現在のターミナルタイトルと画面下端の表示に対して全ルールを評価し、優先度が最大の一致から「作業中」「入力待ち」「待機中」「直前の状態を維持」を決めます。申告か見えているルールで対象を識別した後だけ、画面の変化量を作業中・待機中の補助判定に使います。作業中ルールの文字が残っていても、タイトルと画面が変化しなくなれば待機中へ移ります。設定・ヘルプ → 設定では、見る範囲、優先度、contains、正規表現、入れ子の all/any/not を含むJSONルール集を編集できます。正規表現は処理時間を抑えた範囲だけを許可し、グループ・選択・後方参照は使えません。AND/OR は all/any で表します。保存時は全ルールを検証し、エラーはすべて表示して適用中のルールを置き換えません。保存したルールを読み直せないとき (別の code-viewer がロックを持ったままなど) は、組み込みのルールに戻さず、使っているルールのまま設定画面に理由を出します。組み込みルールへ戻すと保存済みの上書きを削除するため、以後の更新で新しい既定ルールを受け取れます。",
+                text: "状態変更の申告がある場合はそれを先に使います。申告が無い場合は、現在のターミナルタイトルと画面下端の表示に対して全ルールを評価し、優先度が最大の一致から「作業中」「入力待ち」「待機中」「直前の状態を維持」を決めます。申告か見えているルールで対象を識別した後だけ、画面の変化量を作業中・待機中の補助判定に使います。作業中ルールの文字が残っていても、タイトルと画面が変化しなくなれば待機中へ移ります。設定・ヘルプ → 設定では、見る範囲、優先度、contains、正規表現、入れ子の all/any/not を含むJSONルール集を編集できます。正規表現は処理時間を抑えた範囲だけを許可し、グループ・選択・後方参照は使えません。AND/OR は all/any で表します。ルールの編集は、ほかの設定と同じく設定の下の「変更を保存」で保存します。保存時は全ルールを検証し、エラーはすべてルールの欄の下に表示して、適用中のルールを置き換えません。保存したルールを読み直せないとき (別の code-viewer がロックを持ったままなど) は、組み込みのルールに戻さず、使っているルールのまま設定画面に理由を出します。「組み込みルールに戻す」は欄に組み込みのルールを入れ、「変更を保存」で保存済みの上書きを削除するため、以後の更新で新しい既定ルールを受け取れます。",
               },
               {
                 kind: "paragraph",
@@ -2216,7 +2216,8 @@ export function createHelpPage(deps: HelpPageDeps) {
           goToSection("settings");
         },
       );
-      if (category.id === "accounts")
+      // キーの一覧は、キーを変える「ショートカット」のすぐ下 (行き来しやすく)。
+      if (category.id === "shortcuts")
         navButton(
           content.sections.keybindings.nav,
           section === "keybindings",

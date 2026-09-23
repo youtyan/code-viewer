@@ -82,7 +82,8 @@ type ShortcutText = {
   whereInputs: string;
   whereTerminal: string;
   wherePwa: string;
-  browserTakes: string;
+  /** 普通のタブではブラウザが先に取るキーの説明 (行に 1 回。keys はそのキーの並び) */
+  browserTakes: (keys: string) => string;
   conflict: (key: string, actions: string) => string;
   replace: string;
   cancel: string;
@@ -145,8 +146,8 @@ const TEXT: Record<HelpKeybindingLanguage, ShortcutText> = {
     whereInputs: "In text fields",
     whereTerminal: "In terminals",
     wherePwa: "App window (PWA) only",
-    browserTakes:
-      "A browser tab keeps this key for itself, so it works only in the installed app window (PWA).",
+    browserTakes: (keys) =>
+      `A browser tab keeps ${keys} for itself, so these keys work only in the installed app window (PWA).`,
     conflict: (key, actions) => `${key} is used by ${actions}.`,
     replace: "Replace",
     cancel: "Cancel",
@@ -213,8 +214,8 @@ const TEXT: Record<HelpKeybindingLanguage, ShortcutText> = {
     whereInputs: "入力欄の中でも",
     whereTerminal: "端末の中でも",
     wherePwa: "PWA の窓だけ",
-    browserTakes:
-      "普通のブラウザのタブではブラウザが先に取るので、PWA の窓 (インストールしたアプリ) だけで効きます。",
+    browserTakes: (keys) =>
+      `${keys} は、普通のブラウザのタブではブラウザが先に取るので、PWA の窓 (インストールしたアプリ) だけで効きます。`,
     conflict: (key, actions) => `${key} は「${actions}」が使っています。`,
     replace: "置き換える",
     cancel: "取りやめる",
@@ -537,12 +538,6 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
       changed();
     });
     item.append(kbd, wheres, remove);
-    if (taken) {
-      const note = document.createElement("p");
-      note.className = "scope-settings-help shortcut-chord-note";
-      note.textContent = t.browserTakes;
-      item.append(note);
-    }
     return item;
   }
 
@@ -559,6 +554,18 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
         ...chords.map((chord, index) => renderChord(action, chord, index)),
       );
       detail.append(items);
+      // ブラウザが先に取るキーの説明は行に 1 回 (キーごとに繰り返さない)。
+      const taken = chords
+        .filter((chord) => browserTabTakes(chord, deps.mac))
+        .map((chord) => chordLabel(action, chord));
+      if (taken.length) {
+        const note = document.createElement("p");
+        note.className = "scope-settings-help shortcut-chord-note";
+        note.textContent = t.browserTakes(
+          taken.join(deps.getLanguage() === "ja" ? "・" : ", "),
+        );
+        detail.append(note);
+      }
     }
     const actions = document.createElement("div");
     actions.className = "shortcut-row-actions";
@@ -646,7 +653,7 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
     return detail;
   }
 
-  function renderRow(action: KeymapAction, keys: string[]): HTMLElement {
+  function renderRow(action: KeymapAction, keys: KeyLabel[]): HTMLElement {
     const t = text();
     const row = document.createElement("div");
     row.className = "shortcut-row";
@@ -669,10 +676,21 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
       none.textContent = t.noKey;
       keyList.append(none);
     }
-    for (const label of keys) {
+    // キーは幅をそろえた升に 1 つずつ入れる (折り返しても列がそろう)。
+    for (const key of keys) {
+      const cell = document.createElement("span");
+      cell.className = "shortcut-key";
       const kbd = document.createElement("kbd");
-      kbd.textContent = label;
-      keyList.append(kbd);
+      kbd.textContent = key.label;
+      cell.append(kbd);
+      if (key.pwa) {
+        const tag = document.createElement("span");
+        tag.className = "shortcut-key-pwa";
+        tag.textContent = "PWA";
+        tag.title = t.wherePwa;
+        cell.append(tag);
+      }
+      keyList.append(cell);
     }
     head.append(name, mark, keyList);
     head.addEventListener("click", () => {
@@ -687,14 +705,16 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
     return row;
   }
 
-  function keyLabels(action: KeymapAction): string[] {
-    return chordsOf(action).map((chord) => {
-      const label = chordLabel(action, chord);
-      return chordWhere(action, chord, defaults).pwa ||
-        browserTabTakes(chord, deps.mac)
-        ? `${label} (PWA)`
-        : label;
-    });
+  type KeyLabel = { label: string; pwa: boolean };
+
+  /** 行に出すキー。PWA の窓だけで効くキーは印を付ける (文字の後ろに足さない)。 */
+  function keyLabels(action: KeymapAction): KeyLabel[] {
+    return chordsOf(action).map((chord) => ({
+      label: chordLabel(action, chord),
+      pwa:
+        chordWhere(action, chord, defaults).pwa ||
+        browserTabTakes(chord, deps.mac),
+    }));
   }
 
   function render(): void {
@@ -712,7 +732,7 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
         const haystack = [
           actionLabel(action, deps.getLanguage()),
           action,
-          ...keys,
+          ...keys.map((key) => (key.pwa ? `${key.label} (PWA)` : key.label)),
         ]
           .join("\n")
           .toLocaleLowerCase();

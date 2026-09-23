@@ -2,7 +2,7 @@
 // ここで作った root を使い回して入力中の下書きを保持する。値の保存や、
 // フォント適用などの副作用は deps 経由で app.ts に任せる。
 
-import { formatErrorDetail } from "../core/error-detail";
+import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import { iconSvg, SEARCH_16_PATH } from "../core/icons";
 import {
   highlightToInnerHtml,
@@ -67,11 +67,13 @@ export type ViewerSettingsText = {
   agentRulesGuideMatchers: string;
   agentRulesGuideRegions: string;
   agentRulesGuideExample: string;
-  agentRulesSave: string;
   agentRulesReset: string;
-  agentRulesSaving: string;
   agentRulesSourceDefault: string;
   agentRulesSourceSaved: string;
+  /** 規則を書き換えて、まだ保存していないとき */
+  agentRulesSourceEdited: string;
+  /** 「組み込みルールに戻す」を押して、まだ保存していないとき */
+  agentRulesSourceRestore: string;
   /** 左の分類の名前と、分類を切り替えたときの見出しの下の 1 文。 */
   categories: Record<SettingsCategory, { label: string; description: string }>;
   searchPlaceholder: string;
@@ -100,6 +102,8 @@ export type ViewerSettingsValues = ViewerSettingsDraft & {
   watchLimitDefault: number;
   scopeSource: string;
   agentRulesJson: string;
+  /** 組み込みの規則を agentRulesJson と同じ形で書いたもの (戻すときに欄へ入れる) */
+  agentRulesDefaultJson: string;
   agentRulesSource: "default" | "saved";
   agentRulesErrors: string;
 };
@@ -342,7 +346,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   const agentRulesGuideRegions = helpText();
   const agentRulesGuideExample = document.createElement("pre");
   agentRulesGuideExample.className = "agent-screen-rules-guide-example";
-  const agentRulesSave = document.createElement("button");
   const agentRulesReset = document.createElement("button");
 
   const saveNote = helpText("scope-settings-save-note");
@@ -378,8 +381,12 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   let restoreDefaults = false;
   const changedGeneralFields = new Set<keyof ViewerSettingsDraft>();
   let generalStatus: "idle" | "dirty" | "saving" | "saved" = "idle";
-  let agentRulesPending = false;
+  /**
+   * 判定ルールの下書き。保存はページの「変更を保存」だけ (節の中に保存を置かない)。
+   * restore は「組み込みルールに戻す」を押した後 (保存すると保存した規則を消す)。
+   */
   let agentRulesDirty = false;
+  let agentRulesRestore = false;
   let jsonHighlighter: ShikiHighlighter | null = null;
   let refreshGeneration = 0;
 
@@ -503,13 +510,11 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       agentRulesGuideRegions,
       agentRulesGuideExample,
     );
-    agentRulesSave.type = "button";
-    agentRulesSave.id = "agent-screen-rules-save";
     agentRulesReset.type = "button";
     agentRulesReset.id = "agent-screen-rules-reset";
     const agentRuleActions = document.createElement("div");
     agentRuleActions.className = "scope-settings-actions";
-    agentRuleActions.append(agentRulesReset, agentRulesSave);
+    agentRuleActions.append(agentRulesReset);
     const ruleSettings = section();
     ruleSettings.classList.add("agent-screen-rules-section");
     ruleSettings.append(
@@ -626,15 +631,16 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       markGeneralDirty("watchLimit"),
     );
     agentRules.addEventListener("input", () => {
-      agentRulesDirty = true;
+      if (generalSavePending) return;
+      markAgentRulesDirty(false);
       syncAgentRulesHighlight();
     });
     agentRules.addEventListener("scroll", syncAgentRulesScroll);
-    agentRulesSave.addEventListener("click", () => {
-      void updateAgentRules(() => deps.onAgentRulesSave(agentRules.value));
-    });
+    // 組み込みの規則を欄に入れるだけ。保存するまで今の規則のまま動く。
     agentRulesReset.addEventListener("click", () => {
-      void updateAgentRules(() => deps.onAgentRulesReset());
+      setFieldValue(agentRules, deps.getValues().agentRulesDefaultJson, true);
+      syncAgentRulesHighlight();
+      markAgentRulesDirty(true);
     });
     resetButton.addEventListener("click", () => {
       applyGeneralFields(deps.getDefaultValues(), true);
@@ -665,7 +671,33 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   }
 
   function anyDirty(): boolean {
-    return generalDirty || deps.drafts.some((draft) => draft.dirty());
+    return (
+      generalDirty ||
+      agentRulesDirty ||
+      deps.drafts.some((draft) => draft.dirty())
+    );
+  }
+
+  function markAgentRulesDirty(restore: boolean): void {
+    agentRulesDirty = true;
+    agentRulesRestore = restore;
+    agentRulesError.hidden = true;
+    agentRulesError.textContent = "";
+    generalStatus = "dirty";
+    clearGeneralSaveError();
+    renderAgentRulesSource();
+    renderGeneralSaveState();
+  }
+
+  function renderAgentRulesSource(): void {
+    const text = deps.getText();
+    agentRulesSource.textContent = agentRulesDirty
+      ? agentRulesRestore
+        ? text.agentRulesSourceRestore
+        : text.agentRulesSourceEdited
+      : deps.getValues().agentRulesSource === "saved"
+        ? text.agentRulesSourceSaved
+        : text.agentRulesSourceDefault;
   }
 
   function markGeneralDirty(field: keyof ViewerSettingsDraft): void {
@@ -724,6 +756,8 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       s3Tooltip.input,
       watchLimitNumber,
       watchLimitRange,
+      agentRules,
+      agentRulesReset,
     ]) {
       field.disabled = disabled;
     }
@@ -811,6 +845,11 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
         restoreDefaults = false;
         changedGeneralFields.clear();
       }
+      if (agentRulesDirty) {
+        await saveAgentRules();
+        agentRulesDirty = false;
+        agentRulesRestore = false;
+      }
       for (const section of deps.drafts) {
         if (section.dirty()) await section.save();
       }
@@ -863,40 +902,18 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     agentRulesHighlight.scrollLeft = agentRules.scrollLeft;
   }
 
-  async function updateAgentRules(
-    operation: () => Promise<void>,
-  ): Promise<void> {
-    if (agentRulesPending) return;
-    refreshGeneration += 1;
-    agentRulesPending = true;
-    agentRules.disabled = true;
-    agentRulesSave.disabled = true;
-    agentRulesReset.disabled = true;
-    agentRulesSource.textContent = deps.getText().agentRulesSaving;
-    agentRulesError.hidden = true;
-    agentRulesError.textContent = "";
-    let completed = false;
+  /**
+   * 判定ルールを保存する (ページの「変更を保存」から)。検証の誤りは欄の下にも
+   * 出す (どの規則のどこが違うかを、書いている欄のそばで読めるように)。
+   */
+  async function saveAgentRules(): Promise<void> {
     try {
-      await operation();
-      agentRulesDirty = false;
-      completed = true;
+      if (agentRulesRestore) await deps.onAgentRulesReset();
+      else await deps.onAgentRulesSave(agentRules.value);
     } catch (error) {
-      console.error("[code-viewer] terminal rule update failed", error);
       agentRulesError.textContent = formatErrorDetail(error);
       agentRulesError.hidden = false;
-    } finally {
-      agentRulesPending = false;
-      agentRules.disabled = false;
-      agentRulesSave.disabled = false;
-      agentRulesReset.disabled = false;
-      if (completed) {
-        sync();
-      } else {
-        agentRulesSource.textContent =
-          deps.getValues().agentRulesSource === "saved"
-            ? deps.getText().agentRulesSourceSaved
-            : deps.getText().agentRulesSourceDefault;
-      }
+      throw errorWithCause("save the terminal status rules", error);
     }
   }
 
@@ -954,7 +971,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     agentRulesGuideMatchers.textContent = text.agentRulesGuideMatchers;
     agentRulesGuideRegions.textContent = text.agentRulesGuideRegions;
     agentRulesGuideExample.textContent = text.agentRulesGuideExample;
-    agentRulesSave.textContent = text.agentRulesSave;
     agentRulesReset.textContent = text.agentRulesReset;
     saveNote.textContent = text.saveNote;
     applySearchText();
@@ -987,18 +1003,14 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     if (!generalDirty && !generalSavePending) applyGeneralFields(values);
     setFieldValue(theme, deps.getTheme());
     scopeSource.textContent = values.scopeSource;
-    if (!agentRulesDirty && !agentRulesPending) {
+    // 書きかけの規則 (と、保存に失敗した誤りの表示) は保存するまで残す。
+    if (!agentRulesDirty && !generalSavePending) {
       setFieldValue(agentRules, values.agentRulesJson);
       syncAgentRulesHighlight();
-    }
-    if (!agentRulesPending) {
-      agentRulesSource.textContent =
-        values.agentRulesSource === "saved"
-          ? deps.getText().agentRulesSourceSaved
-          : deps.getText().agentRulesSourceDefault;
       agentRulesError.textContent = values.agentRulesErrors;
       agentRulesError.hidden = !values.agentRulesErrors;
     }
+    renderAgentRulesSource();
   }
 
   function mount(host: HTMLElement): void {
@@ -1055,6 +1067,14 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       element.hidden = !visible;
       if (visible) shown += 1;
     }
+    // 分類に節が 1 つだけなら、その節の見出しはページの見出し (分類の名前) と役が
+    // 重なる (「ショートカット」が 2 回続いた) ので出さない。検索中は分類をまたいで
+    // 並ぶので出す。
+    for (const [element] of categorized)
+      element.classList.toggle(
+        "scope-settings-section-sole",
+        !query && shown === 1 && !element.hidden,
+      );
     searchEmpty.hidden = !query || shown > 0;
     resetButton.hidden = !generalSections.some((section) => !section.hidden);
     searchEmpty.textContent = query

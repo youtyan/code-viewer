@@ -165,6 +165,11 @@ describe("help page settings categories", () => {
       },
       settingsCategories: () => [
         { id: "general", label: "General", description: "General text." },
+        {
+          id: "shortcuts",
+          label: "Shortcuts",
+          description: "Shortcuts text.",
+        },
         { id: "agents", label: "Agents", description: "Agents text." },
         { id: "accounts", label: "Accounts", description: "Accounts text." },
         { id: "advanced", label: "Advanced", description: "Advanced text." },
@@ -290,9 +295,10 @@ describe("help page settings categories", () => {
     expect(view.nav()).toEqual([
       "# Settings",
       "General *",
+      "Shortcuts",
+      "Keybindings",
       "Agents",
       "Accounts",
-      "Keybindings",
       "Advanced",
       "# Help",
       "Getting Started",

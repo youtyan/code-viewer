@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   afterAll,
@@ -103,11 +104,11 @@ const EN_TEXT: ViewerSettingsText = {
   agentRulesGuideRegions:
     "Regions: osc_title, whole_recent, bottom_non_empty, last_non_empty.",
   agentRulesGuideExample: '{"version":1,"rules":[]}',
-  agentRulesSave: "Save rules",
   agentRulesReset: "Use defaults",
-  agentRulesSaving: "Saving rules…",
   agentRulesSourceDefault: "Built-in rules",
   agentRulesSourceSaved: "Saved rules",
+  agentRulesSourceEdited: "Edited rules",
+  agentRulesSourceRestore: "Built-in rules after saving",
   categories: {
     general: { label: "General", description: "General settings." },
     appearance: { label: "Appearance", description: "Look." },
@@ -148,6 +149,7 @@ function defaultValues(): ViewerSettingsValues {
     s3TooltipEnabled: true,
     scopeSource: "sample-project / server default",
     agentRulesJson: '{\n  "version": 1,\n  "rules": []\n}\n',
+    agentRulesDefaultJson: '{\n  "version": 1,\n  "rules": ["default"]\n}\n',
     agentRulesSource: "saved",
     agentRulesErrors: "",
   };
@@ -310,6 +312,7 @@ describe("viewer settings form", () => {
   test.each([
     ["general", ["Uploads", "Excluded directories"]],
     ["appearance", ["Display"]],
+    ["shortcuts", ["Shortcut list"]],
     ["agents", ["Agent notifications", "Hooks"]],
     ["accounts", ["Accounts list"]],
     [
@@ -347,6 +350,71 @@ describe("viewer settings form", () => {
       "Uploads",
       "Excluded directories",
     ]);
+  });
+
+  // 分類に節が 1 つだけなら、その節の見出しはページの見出し (分類の名前) と同じ役
+  // なので出さない (「ショートカット」「表示」が 2 回続いていた)。検索中は分類を
+  // またいで並ぶので出す。実物の style.css を当てて、見出しが消えるかを見る。
+  describe("the heading of the only section in a category", () => {
+    let style: HTMLStyleElement;
+    beforeAll(() => {
+      style = document.createElement("style");
+      style.textContent = readFileSync("web/style.css", "utf8");
+      document.head.append(style);
+    });
+    afterAll(() => style.remove());
+
+    /** 見えている節ごとに、節の見出し (.scope-settings-section-title) が出ているか。 */
+    function titleShown(host: HTMLElement): Record<string, boolean> {
+      const out: Record<string, boolean> = {};
+      for (const title of host.querySelectorAll<HTMLElement>(
+        ".scope-settings-section-title",
+      )) {
+        const section = title.closest<HTMLElement>(".scope-settings-section");
+        if (!section || section.hidden) continue;
+        out[title.textContent ?? ""] =
+          getComputedStyle(title).display !== "none";
+      }
+      return out;
+    }
+
+    test.each([
+      { category: "appearance", expected: { Display: false } },
+      {
+        category: "general",
+        expected: { Uploads: true, "Excluded directories": true },
+      },
+      {
+        category: "advanced",
+        expected: {
+          Datastores: true,
+          "File change watcher": true,
+          "Terminal state detection": true,
+        },
+      },
+    ] as const)("in $category", ({ category, expected }) => {
+      const { settings, host } = setup();
+      settings.mount(host);
+
+      settings.setCategory(category);
+
+      expect(titleShown(host)).toEqual(expected);
+    });
+
+    test("is shown again while searching", () => {
+      const { settings, host } = setup();
+      settings.mount(host);
+      settings.setCategory("appearance");
+      const search = document.createElement("div");
+      settings.mountSearch(search);
+      const input = search.querySelector<HTMLInputElement>("input");
+      if (!input) throw new Error("missing search input");
+
+      input.value = "theme";
+      fire(input, "input");
+
+      expect(titleShown(host)).toEqual({ Display: true });
+    });
   });
 
   // ヘルプの節 (設定以外) から開くと、設定の節を組む前に検索欄だけを出す。
@@ -409,53 +477,156 @@ describe("viewer settings form", () => {
     ).toBe("Saved rules");
   });
 
-  test("判定ルールをボタンで保存する", async () => {
-    const { settings, host, calls } = setup();
-    settings.mount(host);
-    const editor = q<HTMLTextAreaElement>(document, "#agent-screen-rules");
-    editor.value = '{"version":1,"rules":[]}';
-    q<HTMLButtonElement>(document, "#agent-screen-rules-save").click();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(calls.agentRulesSave).toEqual(['{"version":1,"rules":[]}']);
-    expect(editor.disabled).toBe(false);
-  });
+  // 判定ルールの節に「保存」は置かない。欄を書き換えると未保存の印が付き、
+  // ページの「変更を保存」で検証して保存する (ui-surface.md の設定の節の決まり)。
+  describe("terminal status rules are saved by Save changes only", () => {
+    const status = () =>
+      q<HTMLElement>(document, "#scope-settings-save-status");
+    const saveButton = () =>
+      q<HTMLButtonElement>(document, "#scope-settings-save");
+    const editor = () =>
+      q<HTMLTextAreaElement>(document, "#agent-screen-rules");
+    const source = () =>
+      q<HTMLElement>(document, "#agent-screen-rules-source").textContent;
 
-  test("判定ルールを既定へ戻して表示を同期する", async () => {
-    const { settings, host, calls } = setup();
-    settings.mount(host);
-    q<HTMLButtonElement>(document, "#agent-screen-rules-reset").click();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(calls.agentRulesReset).toBe(1);
-    expect(
-      q<HTMLTextAreaElement>(document, "#agent-screen-rules").value,
-    ).toContain('"default"');
-    expect(
-      q<HTMLElement>(document, "#agent-screen-rules-source").textContent,
-    ).toBe("Built-in rules");
-  });
+    test("the section has no save button of its own", () => {
+      const { settings, host } = setup();
+      settings.mount(host);
 
-  test("判定ルールの保存失敗を原因まで表示する", async () => {
-    const harness = setup({
-      saveRules: () =>
-        Promise.reject(
-          Object.assign(new Error("rule validation failed"), {
-            errors: [
-              { path: "rules[0].regex[0]", code: "invalid_regex" },
-              { path: "rules[1].state", code: "invalid_state" },
-            ],
-          }),
+      expect([
+        document.querySelector("#agent-screen-rules-save"),
+        Array.from(
+          document.querySelectorAll(".agent-screen-rules-section button"),
+          (button) => button.id,
         ),
+      ]).toEqual([null, ["agent-screen-rules-reset"]]);
     });
-    harness.settings.mount(harness.host);
-    q<HTMLButtonElement>(document, "#agent-screen-rules-save").click();
-    await Promise.resolve();
-    await Promise.resolve();
-    const error = q<HTMLElement>(document, "#agent-screen-rules-error");
-    expect(error.hidden).toBe(false);
-    expect(error.textContent).toContain("rules[0].regex[0]");
-    expect(error.textContent).toContain("rules[1].state");
+
+    test("editing the rules marks the page unsaved and saves nothing yet", () => {
+      const { settings, host, calls } = setup();
+      settings.mount(host);
+
+      editor().value = '{"version":1,"rules":[]}';
+      fire(editor(), "input");
+
+      expect([
+        status().dataset.state,
+        saveButton().disabled,
+        source(),
+        calls.agentRulesSave,
+      ]).toEqual(["unsaved", false, "Edited rules", []]);
+    });
+
+    test("Save changes validates and saves the edited rules", async () => {
+      const { settings, host, calls } = setup();
+      settings.mount(host);
+      editor().value = '{"version":1,"rules":[]}';
+      fire(editor(), "input");
+
+      saveButton().click();
+      await vi.waitFor(() => expect(status().dataset.state).toBe("saved"));
+
+      expect([
+        calls.agentRulesSave,
+        calls.agentRulesReset,
+        calls.save,
+        editor().disabled,
+        source(),
+      ]).toEqual([['{"version":1,"rules":[]}'], 0, [], false, "Saved rules"]);
+    });
+
+    test("Use defaults only fills in the built-in rules until Save changes", async () => {
+      const { settings, host, calls } = setup();
+      settings.mount(host);
+
+      q<HTMLButtonElement>(document, "#agent-screen-rules-reset").click();
+      const before = [
+        editor().value,
+        source(),
+        status().dataset.state,
+        calls.agentRulesReset,
+      ];
+      saveButton().click();
+      await vi.waitFor(() => expect(status().dataset.state).toBe("saved"));
+
+      expect([...before, calls.agentRulesReset, calls.agentRulesSave]).toEqual([
+        '{\n  "version": 1,\n  "rules": ["default"]\n}\n',
+        "Built-in rules after saving",
+        "unsaved",
+        0,
+        1,
+        [],
+      ]);
+      expect(source()).toBe("Built-in rules");
+    });
+
+    test("editing after Use defaults saves the edited text instead", async () => {
+      const { settings, host, calls } = setup();
+      settings.mount(host);
+      q<HTMLButtonElement>(document, "#agent-screen-rules-reset").click();
+      editor().value = '{"version":1,"rules":["edited"]}';
+      fire(editor(), "input");
+
+      saveButton().click();
+      await vi.waitFor(() => expect(status().dataset.state).toBe("saved"));
+
+      expect([calls.agentRulesReset, calls.agentRulesSave]).toEqual([
+        0,
+        ['{"version":1,"rules":["edited"]}'],
+      ]);
+    });
+
+    test("a rule set that fails validation stays unsaved and shows every error next to the rules and by Save", async () => {
+      const harness = setup({
+        saveRules: () =>
+          Promise.reject(
+            Object.assign(new Error("rule validation failed"), {
+              errors: [
+                { path: "rules[0].regex[0]", code: "invalid_regex" },
+                { path: "rules[1].state", code: "invalid_state" },
+              ],
+            }),
+          ),
+      });
+      harness.settings.mount(harness.host);
+      editor().value = '{"version":1,"rules":[{}]}';
+      fire(editor(), "input");
+
+      saveButton().click();
+      const error = q<HTMLElement>(document, "#agent-screen-rules-error");
+      await vi.waitFor(() => expect(error.hidden).toBe(false));
+      const pageError = q<HTMLElement>(document, "#scope-settings-save-error");
+
+      expect([
+        error.textContent?.includes("rules[0].regex[0]"),
+        error.textContent?.includes("rules[1].state"),
+        pageError.hidden,
+        pageError.textContent?.includes("save the terminal status rules"),
+        pageError.textContent?.includes("rules[1].state"),
+        status().dataset.state,
+        editor().value,
+      ]).toEqual([
+        true,
+        true,
+        false,
+        true,
+        true,
+        "unsaved",
+        '{"version":1,"rules":[{}]}',
+      ]);
+    });
+
+    test("a refresh while editing keeps the text being written", async () => {
+      const { settings, host, values } = setup();
+      settings.mount(host);
+      editor().value = '{"version":1,"rules":["draft"]}';
+      fire(editor(), "input");
+
+      values.agentRulesJson = '{"version":1,"rules":["from the server"]}';
+      settings.sync();
+
+      expect(editor().value).toBe('{"version":1,"rules":["draft"]}');
+    });
   });
 
   test.each([

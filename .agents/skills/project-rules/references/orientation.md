@@ -111,7 +111,7 @@ global の `my-reuse-first` に従う。ここに置くのは**このリポジ�
 | 確認・入力ダイアログ | `views/ui-dialog.ts` `showConfirmDialog` / `showAlertDialog` / `showPromptDialog` / `showFormDialog` |
 | 遅延バンドルの読み込み | `core/lazy-bundle.ts` `createBundleLoader` + `core/*-loader.ts` |
 | クライアント / サーバ共通の型 | `core/types.ts` |
-| キーボード操作・フォーカス制御 | `core/keymap.ts` / `core/focus-scope.ts` / `core/keyboard.ts`（xterm とダイアログの中では画面のキーを実行しない判定は `isPageKeymapBlockedTarget`） |
+| キーボード操作・フォーカス制御 | `core/keymap.ts` / `core/focus-scope.ts` / `core/keyboard.ts`。ページのキー割り当ては `resolveKeyOutcome` 1 本で解く: ダイアログの中は何も動かさず（`isInModalDialog`）、端末（xterm）の中で効くかは割り当てごとに決まる（`KeyBinding.terminal`。書かなければ `terminalAllowed` = Meta 付きで入力欄でも効くキーだけ）。PWA の窓のキーを止める一覧は `core/pwa.ts` の `PWA_WINDOW_KEYS`。部品が自分でキーを受けるときに「xterm とダイアログの中では受けない」を見るのは `isPageKeymapBlockedTarget`（ソース表示・差分の行選択） |
 | スクロール連鎖の抑止 | `core/scroll-chaining.ts` `blockScrollChaining` |
 | 戻る / 進むで本文のスクロール位置を戻す | `core/scroll-memory.ts` `createScrollMemory` / `scrollKeyOfHistoryState`（本文の箱は窓でないのでブラウザが戻さない。配線は `app.ts` の `restoreMainScroll`） |
 | 長い横スクロールの箱に、見えている下端へ貼り付く代わりのスクロールバーを付ける | `core/hscroll-proxy.ts`（数え方）+ `views/diff-hscroll.ts` `attachStickyHScroll` / `detachStickyHScroll` |

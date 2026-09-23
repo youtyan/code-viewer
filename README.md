@@ -315,11 +315,12 @@ Requires Node.js 20 or newer. Development uses
   after a lifecycle report or a visible rule identifies it; screen motion is
   then used as a fallback. A working match expires when its title and screen
   stop changing, so a stale status line does not stay active. Edit the complete
-  JSON rule set under Settings & Help → Settings. Its regular expressions use a
-  bounded safe subset; combine conditions with `all` / `any`. Invalid changes
-  list every validation error and do not replace the active rules; restoring
-  the built-in set removes the saved override so later releases can supply
-  updated defaults. If the saved rules cannot be read again (for example,
+  JSON rule set under Settings & Help → Settings → Advanced; the rules are
+  saved with the page's Save changes, like every other setting. Its regular
+  expressions use a bounded safe subset; combine conditions with `all` /
+  `any`. Invalid changes list every validation error and do not replace the
+  active rules; Use built-in rules followed by Save changes removes the saved
+  override so later releases can supply updated defaults. If the saved rules cannot be read again (for example,
   another code-viewer holds their lock), the rules in use stay and Settings
   shows why, instead of falling back to the built-in set. The editor includes an expandable field guide, a valid
   example, and live JSON syntax highlighting.

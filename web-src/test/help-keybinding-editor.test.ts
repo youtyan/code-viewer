@@ -12,6 +12,12 @@ import {
   resolveKeyOutcome,
 } from "../core/keymap";
 import {
+  baseRules,
+  cascadedDeclarations,
+  loadStyleSheet,
+  resolveVar,
+} from "./_css-fixture";
+import {
   clickDialogCancel,
   clickDialogConfirm,
   closeOpenDialog,
@@ -73,10 +79,12 @@ function open(root: HTMLElement, action: string): HTMLElement {
   return row(root, action);
 }
 
+/** 行のキー。PWA の窓だけの印が付いた升は「(PWA)」を添えて読む。 */
 function keysOf(root: HTMLElement, action: string): string[] {
   return Array.from(
-    row(root, action).querySelectorAll(".shortcut-keys kbd"),
-    (kbd) => kbd.textContent ?? "",
+    row(root, action).querySelectorAll(".shortcut-keys .shortcut-key"),
+    (cell) =>
+      `${cell.querySelector("kbd")?.textContent ?? ""}${cell.querySelector(".shortcut-key-pwa") ? " (PWA)" : ""}`,
   );
 }
 
@@ -552,8 +560,22 @@ describe("where a key works", () => {
     ]).toEqual([
       ["t", "Meta+N (PWA)"],
       [
-        "A browser tab keeps this key for itself, so it works only in the installed app window (PWA).",
+        "A browser tab keeps Meta+N for itself, so these keys work only in the installed app window (PWA).",
       ],
+    ]);
+  });
+
+  test("the browser-keeps note is written once per action, naming its keys", () => {
+    const { root } = setup();
+    open(root, "main-tab-previous");
+
+    expect(
+      Array.from(
+        row(root, "main-tab-previous").querySelectorAll(".shortcut-chord-note"),
+        (note) => note.textContent,
+      ),
+    ).toEqual([
+      "A browser tab keeps Ctrl+Shift+Tab, Meta+Shift+[, Meta+Shift+{ for itself, so these keys work only in the installed app window (PWA).",
     ]);
   });
 });
@@ -694,6 +716,39 @@ describe("JSON", () => {
       ["t"],
       [],
       ["x"],
+    ]);
+  });
+});
+
+// キーの多い行で折り返しても列がそろうこと: キーの升は同じ幅の列 (auto-fit で空いた
+// 列は詰める) に右寄せで入る。幅の値そのものは固定しない (変数を変えれば列の幅も
+// 変わる形で見る)。
+describe("the key cells of a row", () => {
+  const rules = baseRules(loadStyleSheet());
+  const keys = cascadedDeclarations(rules, (s) => s === ".shortcut-keys");
+  const vars = new Map([
+    ...cascadedDeclarations(rules, (s) => s === ":root"),
+    // --space-unit (密度の段階) は html, body の規則にある。
+    ...cascadedDeclarations(rules, (s) => s === "html" || s === "body"),
+    ...keys,
+  ]);
+
+  test("are a grid of equal fixed-width columns, right-aligned", () => {
+    const columns = keys.get("grid-template-columns") ?? "";
+    const width = resolveVar(keys.get("--shortcut-key-w") ?? "", vars);
+
+    expect([
+      keys.get("display"),
+      columns,
+      resolveVar(columns, vars),
+      keys.get("justify-content"),
+      keys.get("justify-items"),
+    ]).toEqual([
+      "grid",
+      "repeat(auto-fit, var(--shortcut-key-w))",
+      `repeat(auto-fit, ${width})`,
+      "end",
+      "end",
     ]);
   });
 });
