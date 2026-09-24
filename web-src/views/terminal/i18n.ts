@@ -3,7 +3,10 @@
 // terminal-view の localize() が担当する。
 
 import { formatBytes } from "../../core/source-meta";
-import type { TerminalImageRejectReason } from "../../core/terminal-images";
+import type {
+  TerminalImageRejectReason,
+  TerminalImageShelfPlacement,
+} from "../../core/terminal-images";
 
 export type TerminalLang = "en" | "ja";
 
@@ -104,8 +107,35 @@ export type TerminalText = {
   imageOpenInTab: string;
   /** 棚の項目の右クリック: 覆いの拡大表示で開く (Alt / Shift + クリックと同じ)。 */
   imageOpenInViewer: string;
+  /** 画面の中の URL・パスの帯: 開く・コピー・コピーした・失敗。 */
+  linkOpen: string;
+  linkCopy: string;
+  linkCopied: string;
+  linkCopyFailed: string;
+  /** 画面の中のファイルのパスを確かめられなかった。 */
+  linkLookupFailed: string;
+  /** 棚の項目の右クリック: 端末の中でそのパスが出た行を見せる。 */
+  imageShowInTerminal: string;
+  /** 棚の項目の出どころ: tmux のペイン (番号とそのペインの題名)。 */
+  imageOriginPane: (index: number, title: string) => string;
+  /** 棚のまとまりの見出し: 出た所が分からない画像。 */
+  imageOriginUnknown: string;
+  /** 棚の札: 同じ画像がほかにも出たペイン。 */
+  imageOriginsOthers: string;
+  /** tmux のペインを読めず、どのペインに出たかを示せない。 */
+  imageOriginFailed: string;
+  /** 「ターミナルで見る」に失敗した。 */
+  imageRevealFailed: string;
+  /** 「ターミナルで見る」: 端末の中にもうそのパスが無い。 */
+  imageRevealNotFound: string;
   /** 棚を畳む・開く。 */
   imageShelfCollapse: string;
+  /** 棚の見出しの ⋯: 棚の置き場所を移す。 */
+  imageShelfMove: string;
+  /** 棚の置き場所の名前 (メニューと設定の欄)。 */
+  imageShelfPlacementNames: Record<TerminalImageShelfPlacement, string>;
+  /** 棚の内側の縁の掴み (大きさを変える)。 */
+  imageShelfResize: string;
   imageShelfExpand: (count: number) => string;
   /** 棚の項目の寸法 (読み込めたら)。 */
   imageSize: (width: number, height: number) => string;
@@ -127,6 +157,8 @@ export type TerminalText = {
   imageHistoryFailed: string;
   /** 画像を貼り付けられなかった。 */
   pasteFailed: string;
+  /** 貼り付けた画像を保存し、そのパスを入力した (保存先はリポジトリからの相対パス)。 */
+  pasteSaved: (relativePath: string) => string;
   /** 最後に人間が出した指示の見出し。 */
   lastPrompt: string;
   /** 状態が変わってからの経過。 */
@@ -217,7 +249,29 @@ const EN: TerminalText = {
   imageShelfTitle: "Images",
   imageOpenInTab: "Open in new tab",
   imageOpenInViewer: "Open in the viewer (Alt+click)",
+  imageShowInTerminal: "Show in terminal",
+  linkOpen: "Open",
+  linkCopy: "Copy",
+  linkCopied: "Copied",
+  linkCopyFailed: "Could not copy.",
+  linkLookupFailed: "Could not check the file paths on the terminal screen.",
+  imageOriginPane: (index, title) =>
+    title ? `Pane ${index} · ${title}` : `Pane ${index}`,
+  imageOriginUnknown: "Unknown pane",
+  imageOriginsOthers: "Also in",
+  imageOriginFailed:
+    "Could not read the tmux panes, so the image shelf cannot tell which pane an image came from.",
+  imageRevealFailed: "Could not show the image's line in the terminal.",
+  imageRevealNotFound: "The path is no longer in the terminal.",
   imageShelfCollapse: "collapse images",
+  imageShelfMove: "Move the image shelf",
+  imageShelfPlacementNames: {
+    right: "Right of the terminal",
+    left: "Left of the terminal",
+    bottom: "Below the terminal",
+    top: "Above the terminal",
+  },
+  imageShelfResize: "Resize the image shelf",
   imageShelfExpand: (count) => `show images (${count})`,
   imageSize: (width, height) => `${width} × ${height}`,
   imageRejected: (reason, bytes) => {
@@ -249,6 +303,8 @@ const EN: TerminalText = {
     "Could not read the tmux pane's working directory; relative image paths are resolved from the shell's directory.",
   imageHistoryFailed: "Could not scan the pane history for images.",
   pasteFailed: "Could not attach the pasted image.",
+  pasteSaved: (relativePath) =>
+    `Pasted image saved in this project as ${relativePath} (not tracked by git); its path is typed for the agent.`,
   lastPrompt: "last instruction",
   elapsed: elapsedFormatter("now", "m", "h", "d"),
 };
@@ -317,7 +373,29 @@ const JA: TerminalText = {
   imageShelfTitle: "画像",
   imageOpenInTab: "新しいタブで開く",
   imageOpenInViewer: "拡大表示で開く (Alt+クリック)",
+  imageShowInTerminal: "ターミナルで見る",
+  linkOpen: "開く",
+  linkCopy: "コピー",
+  linkCopied: "コピーしました",
+  linkCopyFailed: "コピーできませんでした。",
+  linkLookupFailed: "画面のファイルのパスを確かめられませんでした。",
+  imageOriginPane: (index, title) =>
+    title ? `ペイン ${index} · ${title}` : `ペイン ${index}`,
+  imageOriginUnknown: "出た所が不明",
+  imageOriginsOthers: "ほかに出た所",
+  imageOriginFailed:
+    "tmux のペインを読めませんでした。画像がどのペインに出たかを示せません。",
+  imageRevealFailed: "画像の行をターミナルで示せませんでした。",
+  imageRevealNotFound: "そのパスはもうターミナルにありません。",
   imageShelfCollapse: "画像の棚を畳む",
+  imageShelfMove: "画像の棚の場所を移す",
+  imageShelfPlacementNames: {
+    right: "ターミナルの右",
+    left: "ターミナルの左",
+    bottom: "ターミナルの下",
+    top: "ターミナルの上",
+  },
+  imageShelfResize: "画像の棚の大きさを変える",
   imageShelfExpand: (count) => `画像の棚を開く (${count} 件)`,
   imageSize: (width, height) => `${width} × ${height}`,
   imageRejected: (reason, bytes) => {
@@ -349,6 +427,8 @@ const JA: TerminalText = {
     "tmux のペインの作業場所を読めませんでした。相対パスの画像はシェルの場所から探しています。",
   imageHistoryFailed: "ペインの履歴から画像を探せませんでした。",
   pasteFailed: "貼り付けた画像を渡せませんでした。",
+  pasteSaved: (relativePath) =>
+    `貼り付けた画像をこのプロジェクトの ${relativePath} に保存し、エージェントに渡すパスを入力しました (git には入りません)。`,
   lastPrompt: "最後に出した指示",
   elapsed: elapsedFormatter("今", "分", "時間", "日"),
 };

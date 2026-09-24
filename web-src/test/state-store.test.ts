@@ -303,6 +303,25 @@ describe("state store", () => {
     });
   });
 
+  // ターミナルの明暗。未設定は常にダーク (画面側の既定)。知らない値は捨てる。
+  test.each([
+    { patch: { terminalTone: "dark" }, expected: { terminalTone: "dark" } },
+    { patch: { terminalTone: "match" }, expected: { terminalTone: "match" } },
+    { patch: { terminalTone: "light" }, expected: {} },
+    { patch: { terminalTone: true }, expected: {} },
+  ])("the terminal colors setting keeps $patch.terminalTone only when known", async ({
+    patch,
+    expected,
+  }) => {
+    await withTempProject(async (dir) => {
+      const saved = await patchAppSettingsState(dir, patch);
+      expect({ saved, reloaded: await loadAppSettingsState(dir) }).toEqual({
+        saved: { version: 1, ...expected },
+        reloaded: { version: 1, ...expected },
+      });
+    });
+  });
+
   test("grep selection history keeps the newest one hundred valid paths", async () => {
     await withTempProject(async (dir) => {
       const paths = Array.from(

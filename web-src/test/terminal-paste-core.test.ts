@@ -10,6 +10,7 @@ import {
   looksLikeBase64,
   MAX_PASTE_BODY_BYTES,
   MAX_PASTE_IMAGE_BYTES,
+  pastedImageName,
   pasteImageExtension,
   SHIFT_ENTER_SEQUENCE,
 } from "../core/terminal-paste";
@@ -144,5 +145,41 @@ describe("上限", () => {
     expect(MAX_PASTE_BODY_BYTES).toBeGreaterThan(
       Math.ceil(MAX_PASTE_IMAGE_BYTES * (4 / 3)),
     );
+  });
+});
+
+describe("pastedImageName", () => {
+  // 名前から「貼り付けた画像」と日時が読める。時刻はサーバの現地時刻。
+  test.each([
+    {
+      name: "1 枚目は連番なし",
+      at: new Date(2026, 8, 25, 14, 32, 1),
+      extension: "png",
+      attempt: 1,
+      expected: "pasted-image-20260925-143201.png",
+    },
+    {
+      name: "同じ秒の 2 枚目は -2",
+      at: new Date(2026, 8, 25, 14, 32, 1),
+      extension: "png",
+      attempt: 2,
+      expected: "pasted-image-20260925-143201-2.png",
+    },
+    {
+      name: "月・日・時・分・秒を 2 桁にそろえる",
+      at: new Date(2026, 0, 5, 3, 4, 9),
+      extension: "jpg",
+      attempt: 1,
+      expected: "pasted-image-20260105-030409.jpg",
+    },
+    {
+      name: "年末の最後の秒",
+      at: new Date(2026, 11, 31, 23, 59, 59),
+      extension: "webp",
+      attempt: 1,
+      expected: "pasted-image-20261231-235959.webp",
+    },
+  ])("$name", ({ at, extension, attempt, expected }) => {
+    expect(pastedImageName(at, extension, attempt)).toBe(expected);
   });
 });

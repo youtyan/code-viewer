@@ -27,7 +27,7 @@
 | 確認 / 入力ダイアログ | `views/ui-dialog.ts` の `showConfirmDialog` / `showAlertDialog` / `showPromptDialog` / `showFormDialog`。型は 1 つ (面は `--color-overlay`、内側 7 単位、右上の閉じる = 取り消し、ボタンは `gdp-dialog-cancel` / `gdp-dialog-confirm` / 危険は `danger`)。見出しの下の 1 文は `description`。本文の見出しつきの値・コードの枠・箇条書きは `agent-hooks-dialog-*` の部品 (`accounts-dialogs.ts` の `labeled`)。ボタンのクラスを呼び出し側で付け直さない |
 | 使用量 (5h / week の割合・バー・リセットまで・いつの値か) | `views/agents/usage-meter.ts` の `usageMeterRow` / `usageObservedText`。全体ボードのカードと最下段のポップオーバーが同じものを使う (場所で見え方を変えない) |
 | 全体ボードの操作 | 主の操作は `agents-primary`、枠つきの小さな操作は `agents-secondary`、文字だけは `agents-text-action`、アイコンは `agents-icon-action` (28px 角)。プロジェクトの見出しの開く・起動・⋯ は hover / フォーカスで出し、場所は最初から取る |
-| 設定の節 (設定のページ `/settings`) | `views/viewer-settings.ts`、文言は `views/viewer-settings-i18n.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: appearance / agents / accounts / shortcuts / files / advanced。よく使うものが先、最初のものが開いたときの分類) を 1 つ付ける (付けないと全部の分類に出る。並びは分類の並びに合わせる。検索の結果もこの順)。読む人は使う人: 節は見出し → 何のための設定かを 1 文 → 操作。内部の仕組み・ファイルの場所・判定の細部は畳んだ `details` かヘルプへのリンクに回す (判定ルールの JSON は畳み、誤りと「適用中」は畳んだ外に置く)。説明文の 1 段落は日本語 120 文字・英語 240 文字まで (`settings-text-length.test.ts` が設定・フック・アカウント・ショートカットの文言の表をすべて測る。長くなるなら段落を配列で分ける。例外は理由つきでそのテストの `EXCEPTIONS` に)。めったに触らないものは advanced へ。見出しの id は変えずに分類を移す (送り先は見出しを含む分類になる。`viewer-settings.test.ts` の見出しの移し先の表)。左の列・検索欄・見出しは `views/settings-page.ts` が描く (枠は `views/page-shell.ts`、ヘルプのページと共通)。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (設定のページを開き、分類も切り替わる。畳んだ `details` の中の id なら開く。実体は `settings-page.ts`)。設定とヘルプが 1 つのページだった頃の `/help?section=settings` は `core/routes.ts` の `parseRoute` が、`/help#<設定の見出し>` は起動時に `headingInHash` が設定のページへ移す。分類の説明の下にヘルプの節への 1 行を置くなら `settings-page.ts` の `CATEGORY_HELP_LINKS` (文字はヘルプの節の名前 `helpSectionName`)。保存はページの下の「変更を保存」1 つ: 節が下書きを持つなら `SettingsDraft` を `drafts` に渡し、節の中に「保存」を置かない (アカウントの節で保存が 2 つになり、利用者が迷った)。保存できない間 (JSON の誤りなど) は `problem()` で理由を返し、ページはどの節も保存しない。節の中の「既定に戻す」も下書きを変えるだけで、保存はページの「変更を保存」(判定ルールの「組み込みルールに戻す」も)。未保存は保存の横の文言 (`data-state="unsaved"`) で示す。分類に節が 1 つだけのときは、その節の見出しを出さない (ページの見出しと同じ役。`scope-settings-section-sole`。検索中は出す) |
+| 設定の節 (設定のページ `/settings`) | `views/viewer-settings.ts`、文言は `views/viewer-settings-i18n.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: appearance / agents / accounts / shortcuts / files / advanced。よく使うものが先、最初のものが開いたときの分類) を 1 つ付ける (付けないと全部の分類に出る。並びは分類の並びに合わせる。検索の結果もこの順)。読む人は使う人: 節は見出し → 何のための設定かを 1 文 → 操作。内部の仕組み・ファイルの場所・判定の細部は畳んだ `details` かヘルプへのリンクに回す (判定ルールの JSON は畳み、誤りと「適用中」は畳んだ外に置く)。説明文の 1 段落は日本語 120 文字・英語 240 文字まで (`settings-text-length.test.ts` が設定・フック・アカウント・ショートカットの文言の表をすべて測る。長くなるなら段落を配列で分ける。例外は理由つきでそのテストの `EXCEPTIONS` に)。めったに触らないものは advanced へ。見出しの id は変えずに分類を移す (送り先は見出しを含む分類になる。`viewer-settings.test.ts` の見出しの移し先の表)。左の列・検索欄・見出しは `views/settings-page.ts` が描く (枠は `views/page-shell.ts`、ヘルプのページと共通)。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (設定のページを開き、分類も切り替わる。畳んだ `details` の中の id なら開く。実体は `settings-page.ts`)。設定とヘルプが 1 つのページだった頃の `/help?section=settings` は `core/routes.ts` の `parseRoute` が、`/help#<設定の見出し>` は起動時に `headingInHash` が設定のページへ移す。分類の説明の下にヘルプの節への 1 行を置くなら `settings-page.ts` の `CATEGORY_HELP_LINKS` (文字はヘルプの節の名前 `helpSectionName`)。選ぶ欄 (選択の欄・トグル・テーマの見本) は選んだ時点で当てて保存する (`onChoose`。明暗・テーマは `setTheme` / `setColorTheme`。全プロジェクト共通の項目は別の窓にも当てる: app の `refreshLookFromServer` の `SHARED_CHOICE_KEYS`)。説明は「選ぶとすぐ効きます」にそろえる (テーマを選んだのに「変更を保存」が押せず、帯の「押すまで適用されません」と食い違った)。保存が要るのは打ち込む欄 (途中の値がありうるもの: 除外の一覧・監視の上限・判定ルールの JSON・起動コマンド・ショートカット) だけで、保存はページの下の「変更を保存」1 つ: 節が下書きを持つなら `SettingsDraft` を `drafts` に渡し、節の中に「保存」を置かない (アカウントの節で保存が 2 つになり、利用者が迷った)。保存の帯は、保存する欄のある節 (`viewer-settings.ts` の `savedSections`) が出ている間と、未保存の変更が残っている間だけ出す (表示・エージェントの分類には出さない)。未保存が無い間は保存の横に「保存の要る変更はありません」(`data-state="clean"`) を出す (押せないボタンだけを置かない)。保存できない間 (JSON の誤りなど) は `problem()` で理由を返し、ページはどの節も保存しない。節の中の「既定に戻す」も下書きを変えるだけで、保存はページの「変更を保存」(判定ルールの「組み込みルールに戻す」も)。未保存は保存の横の文言 (`data-state="unsaved"`) で示す。分類に節が 1 つだけのときは、その節の見出しを出さない (ページの見出しと同じ役。`scope-settings-section-sole`。検索中は出す) |
 | キーの割り当て (設定の「ショートカット」・ヘルプのキーの一覧・キーボードショートカットの小窓 (`?`、`views/quick-help.ts`)・パレットのキー) | 操作の名前と分類は `views/help-keybindings.ts` の `KEYMAP_ACTION_INFO` だけに書く (Record なので操作を足すと書き忘れが型で落ちる)。既定のキーは `core/keymap.ts` (`DEFAULT_KEY_BINDINGS` と、PWA の窓の `pwaKeyBindings`)、利用者の差分を重ねるのは `resolveKeyBindings`、画面に出すのは app の `activeKeyBindings` (ヘルプ) / `shownKeyBindings` (この窓で効くものだけ: title・パレット)。キーの効く所 (入力欄・端末・PWA の窓) は押し方ごと (`KeyChord` の inputs / terminal / pwa)。編集の画面は `views/help-keybinding-editor.ts` |
 | ⌘K のパレットの行き先 (ファイル以外) | `views/search-palette-ui.ts` の `PaletteCommand` (群 = projects / agents / sessions / actions。エージェントでないペインとシェルは sessions)。中身は `app.ts` の `paletteCommands()`、操作は `PALETTE_ACTIONS` (キー割り当てのある操作は `keymap` を書けばキーが右に出て、実行も同じ `dispatchKeymapAction`)。ファイルの絞り込み・grep の側には足さない |
 | 作業ツリーの一覧の行 | `views/worktree-view.ts`。何も選んでいないときは一覧だけの画面 (`body[data-worktree-overview]`、列は `--worktree-columns`)。行の「開く」はこのときだけ置き、選んだ後の狭い一覧は「…」だけ (選んだ瞬間にボタンを増やさない) |
@@ -138,8 +138,11 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
   ▾ のメニューの頭 (一覧の列の頭の 1 段目に同じ名前が出ているので、札に並べると 2 回出て、タブの幅を
   食った)。札を押すと畳む / 開く (畳むと頭文字の横に枚数。札の右が伸びる。前面のタブは畳んでも見せる)。
   ▾ (と札の右クリック) のメニューは、頭にプロジェクトの名前、区切って「新しいシェル」「新しい
-  エージェント…」、区切って「このプロジェクトに切り替える」「畳む / 開く」、区切って「このグループを
-  閉じる」。並びと押せるかは `main-tabs-view.ts` の `groupMenuFor` だけが決める (app は材料の
+  エージェント…」、区切って画面の行 (左の縦の列と同じ並び・絵・名前。`main-tabs-view.ts` の
+  `VIEW_SCREENS` で、並びは `web/index.html` とテストで突き合わせる。右端にキー、いま本文に出ている
+  画面に ✓。押すとそのプロジェクトのその画面をそのグループのタブで前面に。別のプロジェクトはタブを
+  前面に出すときと同じく移ってから。ファイルはフォルダ表示)、区切って「このプロジェクトに切り替える」
+  「畳む / 開く」、区切って「このグループを閉じる」。並びと押せるかは `main-tabs-view.ts` の `groupMenuFor` だけが決める (app は材料の
   `groupFacts` と作り方だけを渡す)。「新しいシェル」は ＋ と同じ `app.ts` の `openShellIn` に
   そのプロジェクトを渡し、その札の面に開いて前面に出す (カレントは入口が要求の鍵で決める。別の
   プロジェクトの鍵は `projectKeyFor` で、動いていなければ起こして知る)。「新しいエージェント…」は
@@ -201,8 +204,8 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
 | 文字の家族 | `--font-ui` / `--font-mono` |
 
 - 明暗とテーマは同じ名前の値を差し替えるだけ: `html[data-theme="light"|"dark"]` × `html[data-color-theme]`
-  (10 テーマ。id と表示名は `core/color-themes.ts`、無し = 既定)。**テーマごとに部品の規則を書き分けない。**
-  テーマの塊は 16 進で持つ色の名前を全部書き、下限は 10 テーマ × 明暗の全部で確かめる
+  (id と表示名は `core/color-themes.ts`、無し = 既定)。**テーマごとに部品の規則を書き分けない。**
+  テーマの塊は 16 進で持つ色の名前を全部書き、下限は全部のテーマ × 明暗で確かめる
   (`web-src/test/_color-themes.ts` を回すテスト。新しい色の下限のテストもこれで回す)
   古い `[data-theme="dark"] .x { color: #... }` を見つけたら、名前へ寄せる (触ったら直す)
 - 古い名前 (`--bg` `--fg` `--accent` `--border` …) は互換の層で、中身は名前の層への参照だけ。
@@ -212,6 +215,21 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
   (`.terminal-mark-*`)。色だけで伝えない。`prefers-reduced-motion` で回転を止めても形で読める
 - xterm は CSS 変数を読めないので、端末の色は `views/terminal/terminal-screen.ts` の
   `terminalTheme()` が `--color-term*` と状態の色から読み (ANSI の赤・緑・黄・紫・白も差し替えて、ライトの地でも読めるようにする)、テーマが変わったら当て直す。端末の色を足すなら名前の層に足す
+- **ターミナルの中は、既定で画面がライトでもダーク** (設定 → 表示の「ターミナルの明暗」。
+  `core/color-themes.ts` の `TerminalTone`、既定 `dark`、もう 1 つは `match`)。claude・codex の画面・
+  tmux の状態の行・シェルのプロンプトは暗い地を前提に色を決めていて、明るい地では読めない。
+  仕組みは style.css の名前の層だけ: `dark` のとき html に `data-terminal-tone="dark"` が付き、
+  ダークの塊とテーマの塊 (と `:root` の色の塊) が **ターミナルの面** (`[data-terminal-surface]`) にも
+  当たる。面は端末のタブの箱 (`app.ts` の `showPanes`)・ペインの見本 (`pane-preview.ts`)。端末の
+  中に見える部品を足すなら面の中に置き、面の外に端末の色の箱を作らない。`terminalTheme()` は面の
+  見本の箱から読む (裏のタブの端末は文書から外れていて、その箱の計算値は空になる)。
+  塊のセレクタに面を足し忘れると、そのテーマだけ面の中にライトの色が残る
+  (`terminal-tone-css.test.ts` が全部のテーマ × 画面の明暗で、面の中の値 = そのテーマのダークを確かめる)。
+  **寸法の名前は面に当てない** (`:root` の寸法の塊は面を含まない。含めると body や html の style で
+  変えた値が面の中だけ既定に戻る)
+- 端末の文字は xterm の `minimumContrastRatio` (`TERMINAL_MINIMUM_CONTRAST_RATIO` = 4.5、淡色はその半分) で
+  地に対して下限まで明るさを動かす。配色そのものも ANSI の色 4:1・カーソル 3:1 を
+  `color-themes-contrast.test.ts` で守る (下限の補正に頼って配色を崩さない)
 
 ## 余白と基準線は色と同じ重さの仕様
 
@@ -332,7 +350,7 @@ CLI のサブコマンド・フラグ・画面の操作が変わったら、**�
 - 1 行の長さは `--doc-measure` (枠の `lang` で日本語 40em・英語 68ch)。行間は `--doc-line-height`
 - まとまりは余白で分ける (群・設定の節の間は `--space-7`、中は詰める)。枠や面で囲まない
 - 強調色は押せるもの (リンク・ボタン) と目次の選択だけ。注意は `--color-waiting` の線、補足は無彩色の線
-- 設定の「変更を保存」は本文の箱の下端に貼り付ける (短い分類でも同じ場所)
+- 設定の「変更を保存」は本文の箱の下端に貼り付ける (短い分類でも同じ場所)。帯は後ろの面と同じ `--content-face` (本文の箱が決める: フォーカスがあれば本文の面、無ければ地) で塗り、`--color-ground` / `--color-doc` を決め打ちしない (本文の面と地が違うテーマで帯だけ浮いた。`settings-save-bar-css.test.ts` が 10 テーマ × 明暗 × フォーカスで見る)。左右の内側の余白を取り、その分だけ外へ出して、文言とボタンの端をほかの節の欄の端にそろえる
 - `web-src/test/help-typography-css.test.ts` (計算値) と `help-blocks.test.ts` (DOM) が見る
 
 リリース時の詳細な照合手順は `.agents/skills/project-npm-publish-procedure/SKILL.md` にある。

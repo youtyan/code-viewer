@@ -36,15 +36,18 @@ import {
 import { changedPathsCoverPath } from "./core/changed-paths";
 import {
   applyColorTheme,
+  applyTerminalTone,
   COLOR_THEME_NAMES,
   COLOR_THEMES,
   type ColorTheme,
   DEFAULT_COLOR_THEME,
+  DEFAULT_TERMINAL_TONE,
   isColorTheme,
+  isTerminalTone,
+  type TerminalTone,
 } from "./core/color-themes";
 import {
   errorWithCause,
-  errorWithCauses,
   formatErrorDetail,
   responseErrorMessage,
 } from "./core/error-detail";
@@ -151,6 +154,8 @@ import {
   clampPanelSize,
   HISTORY_WIDTH,
   SIDEBAR_WIDTH,
+  TERMINAL_IMAGE_SHELF_HEIGHT,
+  TERMINAL_IMAGE_SHELF_WIDTH,
 } from "./core/panel-sizes";
 import { isProjectColor, projectInitials } from "./core/project-colors";
 import {
@@ -200,6 +205,7 @@ import {
   writeStoredSize,
 } from "./core/stored-size";
 import {
+  isTerminalImageShelfPlacement,
   type TerminalImageRef,
   type TerminalImagesResponse,
   terminalImageExtension,
@@ -377,6 +383,10 @@ import {
 } from "./views/status-label";
 import { terminalText } from "./views/terminal/i18n";
 import {
+  DEFAULT_IMAGE_SHELF_LAYOUT,
+  type ImageShelfLayout,
+} from "./views/terminal/image-shelf";
+import {
   createShellEndNotice,
   createShellEndTracker,
 } from "./views/terminal/shell-ends";
@@ -388,6 +398,7 @@ import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
   createViewerSettings,
   SETTINGS_CATEGORIES,
+  type ViewerSettingsChoices,
   type ViewerSettingsDraft,
   type ViewerSettingsText,
 } from "./views/viewer-settings";
@@ -1234,6 +1245,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     return isColorTheme(APP_SETTINGS.colorTheme)
       ? APP_SETTINGS.colorTheme
       : DEFAULT_COLOR_THEME;
+  }
+
+  function savedTerminalTone(): TerminalTone {
+    return isTerminalTone(APP_SETTINGS.terminalTone)
+      ? APP_SETTINGS.terminalTone
+      : DEFAULT_TERMINAL_TONE;
   }
 
   function savedSidebarView(): SidebarView {
@@ -3489,6 +3506,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     // テーマ (配色) は明暗と別に選ぶ。既定は属性なし (style.css 先頭)。
     const colorTheme = savedColorTheme();
     applyColorTheme(document.documentElement, colorTheme);
+    // ターミナルの中の明暗 (既定はダーク)。端末の色は terminal-screen.ts が
+    // この属性の変化を見て当て直す。
+    applyTerminalTone(document.documentElement, savedTerminalTone());
     rememberEarlyLook({
       theme: STATE.theme,
       colorTheme: colorTheme === DEFAULT_COLOR_THEME ? undefined : colorTheme,
@@ -3506,10 +3526,29 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * 別の窓で変えた明暗・テーマ (全プロジェクト共通の設定) をこの窓にも当てる。
-   * サーバがユーザー単位の設定の書き換えを SSE (user-settings) で知らせる。裏に
-   * あった間は SSE を切っているので、前面に戻ったときにも取り直す。自分の書き込みが
-   * まだ終わっていなければ、それが済むまで待つ (古い値で戻さない)。
+   * 設定のページで選ぶとすぐ効く、全プロジェクト共通の項目。別の窓で変えたら
+   * この窓にも当てる (refreshLookFromServer)。
+   */
+  const SHARED_CHOICE_KEYS = [
+    "theme",
+    "colorTheme",
+    "terminalTone",
+    "terminalImageShelfPlacement",
+    "terminalImageShelfWidth",
+    "terminalImageShelfHeight",
+    "language",
+    "sidebarFontSize",
+    "codeFontSize",
+    "agentNotifyWaiting",
+    "agentNotifyDone",
+  ] as const;
+
+  /**
+   * 別の窓で変えた明暗・テーマ・言語・文字の大きさ・通知 (全プロジェクト共通の
+   * 設定) をこの窓にも当てる。サーバがユーザー単位の設定の書き換えを SSE
+   * (user-settings) で知らせる。裏にあった間は SSE を切っているので、前面に
+   * 戻ったときにも取り直す。自分の書き込みがまだ終わっていなければ、それが
+   * 済むまで待つ (古い値で戻さない)。
    */
   async function refreshLookFromServer(): Promise<void> {
     if (pendingSettingsPatch || settingsPatchInFlight) return;
@@ -3518,17 +3557,21 @@ window.GdpExpandLogic = GdpExpandLogic;
       "settings state request failed",
     );
     if (pendingSettingsPatch || settingsPatchInFlight) return;
-    if (
-      settings.theme === APP_SETTINGS.theme &&
-      settings.colorTheme === APP_SETTINGS.colorTheme
-    )
+    if (SHARED_CHOICE_KEYS.every((key) => settings[key] === APP_SETTINGS[key]))
       return;
-    mergeLocalSettings({
-      theme: settings.theme ?? null,
-      colorTheme: settings.colorTheme ?? null,
-    });
+    const languageChanged = settings.language !== APP_SETTINGS.language;
+    mergeLocalSettings(
+      Object.fromEntries(
+        SHARED_CHOICE_KEYS.map((key) => [key, settings[key] ?? null]),
+      ),
+    );
     STATE.theme = savedTheme();
     applyTheme();
+    applySidebarFontSize();
+    applyCodeFontSize();
+    TERMINAL_VIEW.applyImageShelfLayout();
+    if (languageChanged) setViewerLanguage(savedViewerLanguage(), false);
+    VIEWER_SETTINGS.sync();
     VIEWER_SETTINGS.syncTheme();
   }
 
@@ -3770,18 +3813,99 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function defaultViewerSettingsDraft(): ViewerSettingsDraft {
     return {
-      language: "en",
-      sidebarFontSize: "regular",
-      codeFontSize: "regular",
       omitDirs: serverScopeOmitDirsDefault().join("\n"),
       excludeNames: serverScopeExcludeNamesDefault().join("\n"),
       watchLimit: SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
-      uploadEnabled: true,
-      agentNotifyWaiting: true,
-      agentNotifyDone: true,
-      inferFkRails: false,
-      s3TooltipEnabled: true,
     };
+  }
+
+  /** 画像の棚の置き場所と大きさ (保存値。範囲外・未保存は既定)。 */
+  function imageShelfLayout(): ImageShelfLayout {
+    return {
+      placement: isTerminalImageShelfPlacement(
+        APP_SETTINGS.terminalImageShelfPlacement,
+      )
+        ? APP_SETTINGS.terminalImageShelfPlacement
+        : DEFAULT_IMAGE_SHELF_LAYOUT.placement,
+      width: clampPanelSize(
+        TERMINAL_IMAGE_SHELF_WIDTH,
+        APP_SETTINGS.terminalImageShelfWidth ??
+          TERMINAL_IMAGE_SHELF_WIDTH.default,
+      ),
+      height: clampPanelSize(
+        TERMINAL_IMAGE_SHELF_HEIGHT,
+        APP_SETTINGS.terminalImageShelfHeight ??
+          TERMINAL_IMAGE_SHELF_HEIGHT.default,
+      ),
+    };
+  }
+
+  function setImageShelfLayout(patch: Partial<ImageShelfLayout>): void {
+    const settings: SettingsPatch = {
+      ...(patch.placement !== undefined
+        ? { terminalImageShelfPlacement: patch.placement }
+        : {}),
+      ...(patch.width !== undefined
+        ? { terminalImageShelfWidth: patch.width }
+        : {}),
+      ...(patch.height !== undefined
+        ? { terminalImageShelfHeight: patch.height }
+        : {}),
+    };
+    mergeLocalSettings(settings);
+    patchSettings(settings);
+  }
+
+  /**
+   * 設定のページの選ぶ欄。テーマ (setColorTheme) と同じく、その場で当てて保存
+   * する。書き込みの失敗は reportPersistenceError が最下段に出す。
+   */
+  function chooseViewerSetting(choice: Partial<ViewerSettingsChoices>): void {
+    if (choice.language !== undefined)
+      setViewerLanguage(normalizeViewerLanguage(choice.language));
+    if (choice.sidebarFontSize !== undefined) {
+      patchSettings({
+        sidebarFontSize: normalizeViewerFontSize(choice.sidebarFontSize),
+      });
+      applySidebarFontSize();
+    }
+    if (choice.codeFontSize !== undefined)
+      saveCodeFontSize(choice.codeFontSize);
+    if (
+      choice.terminalTone !== undefined &&
+      isTerminalTone(choice.terminalTone)
+    ) {
+      patchSettings({ terminalTone: choice.terminalTone });
+      applyTheme();
+    }
+    if (
+      choice.terminalImageShelfPlacement !== undefined &&
+      isTerminalImageShelfPlacement(choice.terminalImageShelfPlacement)
+    ) {
+      setImageShelfLayout({ placement: choice.terminalImageShelfPlacement });
+      TERMINAL_VIEW.applyImageShelfLayout();
+    }
+    const appPatch: SettingsPatch = {};
+    for (const key of [
+      "uploadEnabled",
+      "agentNotifyWaiting",
+      "agentNotifyDone",
+    ] as const)
+      if (choice[key] !== undefined) appPatch[key] = choice[key];
+    if (Object.keys(appPatch).length > 0) patchSettings(appPatch);
+    const dbPrefsPatch: { inferFkRails?: boolean; s3TooltipEnabled?: boolean } =
+      {};
+    if (choice.inferFkRails !== undefined)
+      dbPrefsPatch.inferFkRails = choice.inferFkRails;
+    if (choice.s3TooltipEnabled !== undefined)
+      dbPrefsPatch.s3TooltipEnabled = choice.s3TooltipEnabled;
+    if (Object.keys(dbPrefsPatch).length > 0)
+      // 保存してある値は応答で決まるので、成否どちらでも欄を映し直す (失敗なら元に戻る)。
+      void DATABASE_VIEW.saveDbUiPrefs(dbPrefsPatch)
+        .catch((error: unknown) => {
+          reportPersistenceError("save datastore settings", error);
+        })
+        .then(() => VIEWER_SETTINGS.sync());
   }
 
   async function saveViewerSettings(
@@ -3791,91 +3915,27 @@ window.GdpExpandLogic = GdpExpandLogic;
       changedFields: readonly (keyof ViewerSettingsDraft)[];
     },
   ): Promise<void> {
-    const normalizedLanguage = normalizeViewerLanguage(draft.language);
-    const normalizedSidebarFontSize = normalizeViewerFontSize(
-      draft.sidebarFontSize,
-    );
-    const normalizedCodeFontSize = normalizeViewerFontSize(draft.codeFontSize);
-    const normalizedOmitDirs = normalizeScopeOmitDirs(draft.omitDirs);
-    const normalizedExcludeNames = normalizeScopeExcludeNames(
-      draft.excludeNames,
-    );
-    const normalized: ViewerSettingsDraft = {
-      language: normalizedLanguage,
-      sidebarFontSize: normalizedSidebarFontSize,
-      codeFontSize: normalizedCodeFontSize,
-      omitDirs: normalizedOmitDirs.join("\n"),
-      excludeNames: normalizedExcludeNames.join("\n"),
-      watchLimit:
-        normalizeScopeWatchLimit(draft.watchLimit) ??
-        SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
-      uploadEnabled: draft.uploadEnabled,
-      agentNotifyWaiting: draft.agentNotifyWaiting,
-      agentNotifyDone: draft.agentNotifyDone,
-      inferFkRails: draft.inferFkRails,
-      s3TooltipEnabled: draft.s3TooltipEnabled,
-    };
     const changed = new Set(options.changedFields);
     const appPatch: SettingsPatch = {};
-    const dbPrefsPatch: {
-      inferFkRails?: boolean | null;
-      s3TooltipEnabled?: boolean | null;
-    } = {};
     if (options.restoreDefaults) {
       Object.assign(appPatch, {
-        language: "en",
-        sidebarFontSize: null,
-        codeFontSize: null,
         scopeOmitDirs: null,
         scopeExcludeNames: null,
         scopeWatchLimit: null,
-        uploadEnabled: null,
-        agentNotifyWaiting: null,
-        agentNotifyDone: null,
       });
-      dbPrefsPatch.inferFkRails = null;
-      dbPrefsPatch.s3TooltipEnabled = null;
     } else {
-      if (changed.has("language")) appPatch.language = normalizedLanguage;
-      if (changed.has("sidebarFontSize"))
-        appPatch.sidebarFontSize = normalizedSidebarFontSize;
-      if (changed.has("codeFontSize"))
-        appPatch.codeFontSize = normalizedCodeFontSize;
-      if (changed.has("omitDirs")) appPatch.scopeOmitDirs = normalizedOmitDirs;
+      if (changed.has("omitDirs"))
+        appPatch.scopeOmitDirs = normalizeScopeOmitDirs(draft.omitDirs);
       if (changed.has("excludeNames"))
-        appPatch.scopeExcludeNames = normalizedExcludeNames;
+        appPatch.scopeExcludeNames = normalizeScopeExcludeNames(
+          draft.excludeNames,
+        );
       if (changed.has("watchLimit"))
-        appPatch.scopeWatchLimit = normalized.watchLimit;
-      if (changed.has("uploadEnabled"))
-        appPatch.uploadEnabled = normalized.uploadEnabled;
-      if (changed.has("agentNotifyWaiting"))
-        appPatch.agentNotifyWaiting = normalized.agentNotifyWaiting;
-      if (changed.has("agentNotifyDone"))
-        appPatch.agentNotifyDone = normalized.agentNotifyDone;
-      if (changed.has("inferFkRails"))
-        dbPrefsPatch.inferFkRails = normalized.inferFkRails;
-      if (changed.has("s3TooltipEnabled"))
-        dbPrefsPatch.s3TooltipEnabled = normalized.s3TooltipEnabled;
+        appPatch.scopeWatchLimit =
+          normalizeScopeWatchLimit(draft.watchLimit) ??
+          SERVER_SCOPE_WATCH_LIMIT_DEFAULT;
     }
-    const operations: Promise<void>[] = [];
-    if (Object.keys(appPatch).length > 0)
-      operations.push(persistSettingsPatch(appPatch));
-    if (Object.keys(dbPrefsPatch).length > 0)
-      operations.push(DATABASE_VIEW.saveDbUiPrefs(dbPrefsPatch));
-    const results = await Promise.allSettled(operations);
-    const errors = results.flatMap((result) =>
-      result.status === "rejected" ? [result.reason] : [],
-    );
-    if (errors.length > 0) {
-      throw errorWithCauses("save viewer settings failed", errors);
-    }
-
-    if (options.restoreDefaults || changed.has("language"))
-      setViewerLanguage(normalizedLanguage, false);
-    if (options.restoreDefaults || changed.has("sidebarFontSize"))
-      applySidebarFontSize();
-    if (options.restoreDefaults || changed.has("codeFontSize"))
-      applyCodeFontSize();
+    if (Object.keys(appPatch).length > 0) await persistSettingsPatch(appPatch);
     if (
       options.restoreDefaults ||
       changed.has("omitDirs") ||
@@ -5051,6 +5111,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       language: STATE.language,
       sidebarFontSize: savedSidebarFontSize(),
       codeFontSize: savedCodeFontSize(),
+      terminalTone: savedTerminalTone(),
+      terminalImageShelfPlacement: imageShelfLayout().placement,
       omitDirs: effectiveScopeOmitDirs().join("\n"),
       excludeNames: effectiveScopeExcludeNames().join("\n"),
       watchLimit: effectiveScopeWatchLimit(),
@@ -5075,6 +5137,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       agentRulesErrors: agentScreenRuleErrorsText(AGENT_SCREEN_RULE_ERRORS),
     }),
     getDefaultValues: defaultViewerSettingsDraft,
+    onChoose: chooseViewerSetting,
     refresh: async () => {
       await Promise.all([
         loadSettings(),
@@ -6998,6 +7061,35 @@ window.GdpExpandLogic = GdpExpandLogic;
       mergeLocalSettings({ terminalImageShelfCollapsed: collapsed });
       patchSettings({ terminalImageShelfCollapsed: collapsed });
     },
+    // 棚の置き場所と大きさも人に付く設定 (全部の窓で同じ)。
+    getImageShelfLayout: imageShelfLayout,
+    // 画面のファイルのパス: 端末を隠さないよう反対の面で開く (⌘/Ctrl は固定の
+    // タブ)。行があればその行へ。
+    onOpenFile: (path, line, kept) => {
+      const route: FileRoute = {
+        screen: "file",
+        path,
+        ref: "worktree",
+        range: currentRange(),
+        view: "blob",
+        ...(line !== undefined ? { line } : {}),
+      };
+      if (kept) MAIN_TABS.openingNewTab(() => openFileInOtherPane(route));
+      else openFileInOtherPane(route);
+    },
+    // 棚の見出し: エージェントのペインはサイドバーと同じ名前 (種類 · 作業)。
+    paneName: (paneId) => {
+      const pane = AGENT_MONITOR.snapshot().overview?.panes.find(
+        (item) => item.id === paneId,
+      );
+      return pane?.kind
+        ? paneText(pane, agentsText(STATE.language)).headline
+        : null;
+    },
+    onImageShelfLayoutChange: (patch) => {
+      setImageShelfLayout(patch);
+      VIEWER_SETTINGS.sync();
+    },
     onOpenInTab: (session, pane, side) => {
       if (pane) {
         TAB_SHELL_PANES.set(session.id, pane);
@@ -8275,6 +8367,12 @@ window.GdpExpandLogic = GdpExpandLogic;
           (side === "right" && tab.target.kind === "file"));
       host.classList.toggle("is-shown", shown);
       host.dataset.kind = shown && tab ? tab.target.kind : "";
+      // ターミナルの面: ターミナルの明暗がダークなら、画面がライトでも箱の中を
+      // ダークの配色で描く (style.css の「ダーク」の塊)。
+      host.toggleAttribute(
+        "data-terminal-surface",
+        host.dataset.kind === "terminal",
+      );
       if (!shown || !tab) continue;
       const foreign =
         MAIN_TABS.groupOf(tab) !== null &&

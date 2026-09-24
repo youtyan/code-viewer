@@ -10,6 +10,7 @@ import {
   COLOR_THEMES,
   type ColorTheme,
 } from "../core/color-themes";
+import { terminalText } from "./terminal/i18n";
 import type { ViewerSettingsText } from "./viewer-settings";
 
 function colorThemeNames(language: "en" | "ja"): Record<ColorTheme, string> {
@@ -37,15 +38,27 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
   en: {
     display: "Display",
     theme: "Light or dark",
-    themeHelp: "Applies right away. The T key switches between light and dark.",
+    themeHelp:
+      "Applies as soon as you pick it. The T key switches between light and dark.",
     themeNames: {
       dark: "Dark",
       light: "Light",
     },
     colorTheme: "Theme",
     colorThemeHelp:
-      "The colors, used with light or dark. Applies right away, in every window.",
+      "The colors, used with light or dark. Applies as soon as you pick it, in every window.",
     colorThemeNames: colorThemeNames("en"),
+    terminalTone: "Terminal colors",
+    terminalToneHelp:
+      "Agent screens, tmux, and shell prompts pick colors for a dark background, so the terminal stays dark even in light mode. Applies as soon as you pick it, in every window.",
+    terminalToneNames: {
+      dark: "Always dark (default)",
+      match: "Match light or dark",
+    },
+    imageShelfPlacement: "Image shelf",
+    imageShelfPlacementHelp:
+      "Where the terminal's image shelf sits. You can also move it from the ⋯ on the shelf. Applies as soon as you pick it, in every window.",
+    imageShelfPlacementNames: terminalText("en").imageShelfPlacementNames,
     language: "Language",
     fileListFontSize: "UI font size",
     fileListFontSizeHelp: "Applies to everything except code.",
@@ -71,7 +84,9 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
     saving: "Saving…",
     saved: "Saved.",
     unsaved: "Unsaved changes.",
-    saveNote: "Edits are not applied until you select Save changes.",
+    noChanges: "No changes to save.",
+    saveNote:
+      "What you type applies when you select Save changes. What you pick applies as soon as you pick it.",
     watchLimitInvalid: (min, max) =>
       `Enter a whole number from ${min} to ${max}.`,
     scopeSource: (project, source) =>
@@ -131,7 +146,7 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
       appearance: {
         label: "Appearance",
         description:
-          "Theme, language and text size. The same in every project.",
+          "Theme, language and text size. Applies as soon as you pick it, the same in every project.",
       },
       agents: {
         label: "Agents",
@@ -164,15 +179,26 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
   ja: {
     display: "表示",
     theme: "明暗",
-    themeHelp: "選ぶとすぐに変わります。T キーでライトとダークを切り替えます。",
+    themeHelp: "選ぶとすぐ効きます。T キーでライトとダークを切り替えます。",
     themeNames: {
       dark: "ダーク",
       light: "ライト",
     },
     colorTheme: "テーマ",
     colorThemeHelp:
-      "配色です。明暗と組み合わせて使います。選ぶとすぐに、ほかの窓にも効きます。",
+      "配色です。明暗と組み合わせて使います。選ぶとすぐ効きます (ほかの窓にも)。",
     colorThemeNames: colorThemeNames("ja"),
+    terminalTone: "ターミナルの明暗",
+    terminalToneHelp:
+      "エージェントの画面・tmux・シェルのプロンプトは暗い地に合わせた色なので、ライトでもターミナルの中はダークで描きます。選ぶとすぐ効きます (ほかの窓にも)。",
+    terminalToneNames: {
+      dark: "常にダーク (既定)",
+      match: "画面に合わせる",
+    },
+    imageShelfPlacement: "画像の棚",
+    imageShelfPlacementHelp:
+      "ターミナルの画像の棚を置く場所です。棚の ⋯ からも移せます。選ぶとすぐ効きます (ほかの窓にも)。",
+    imageShelfPlacementNames: terminalText("ja").imageShelfPlacementNames,
     language: "言語",
     fileListFontSize: "UIの文字サイズ",
     fileListFontSizeHelp: "コードの本文以外のすべてに効きます。",
@@ -198,7 +224,9 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
     saving: "保存しています…",
     saved: "保存しました。",
     unsaved: "未保存の変更があります。",
-    saveNote: "「変更を保存」を押すまで、編集内容は適用されません。",
+    noChanges: "保存の要る変更はありません。",
+    saveNote:
+      "打ち込む欄は「変更を保存」を押すまで適用されません。選ぶ設定は、選ぶとすぐ効きます。",
     watchLimitInvalid: (min, max) => `${min}〜${max}の整数を入力してください。`,
     scopeSource: (project, source) =>
       `この 2 つは、プロジェクト「${project}」だけの設定です (${source})。`,
@@ -256,7 +284,7 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
       appearance: {
         label: "表示",
         description:
-          "テーマ・言語・文字の大きさ。どのプロジェクトでも同じです。",
+          "テーマ・言語・文字の大きさ。選ぶとすぐ効き、どのプロジェクトでも同じです。",
       },
       agents: {
         label: "エージェント",

@@ -1,7 +1,8 @@
-import type { ColorTheme } from "./color-themes";
+import type { ColorTheme, TerminalTone } from "./color-themes";
 import type { DiffRowBasis } from "./diff-card-estimate";
 import type { GdpExpandLogic } from "./expand-logic";
 import type { KeymapOverrides } from "./keymap";
+import type { TerminalImageShelfPlacement } from "./terminal-images";
 import type { ToolId } from "./tools";
 import type {
   WorktreeFileOrigin,
@@ -188,6 +189,11 @@ export type AppSettingsState = {
    * 既定。以前の「ダークの色違い」(palette) は読むときに読み替える (state-store.ts)。
    */
   colorTheme?: ColorTheme;
+  /**
+   * ターミナルの中の明暗 (core/color-themes.ts の TerminalTone)。未設定なら
+   * dark (画面がライトでもターミナルの中はダーク)。
+   */
+  terminalTone?: TerminalTone;
   language?: "en" | "ja";
   sidebarView?: "tree" | "flat";
   sidebarWidth?: number;
@@ -238,8 +244,14 @@ export type AppSettingsState = {
   agentNotifyHintDismissed?: boolean;
   /** エージェント一覧のアカウントの帯を畳んだ。 */
   agentAccountsCollapsed?: boolean;
-  /** ターミナルの右の画像の棚を畳んだ。 */
+  /** ターミナルの画像の棚を畳んだ。 */
   terminalImageShelfCollapsed?: boolean;
+  /** 画像の棚の置き場所 (右・左・下・上)。 */
+  terminalImageShelfPlacement?: TerminalImageShelfPlacement;
+  /** 画像の棚を右・左に置いたときの幅 (core/panel-sizes.ts の範囲)。 */
+  terminalImageShelfWidth?: number;
+  /** 画像の棚を下・上に置いたときの高さ。 */
+  terminalImageShelfHeight?: number;
   /**
    * 下パネル (Tools / Search) を開いていたか。下パネルは無くなり (Tools と
    * Search はタブ)、いまは読まない。保存してある値の形を変えないために残す。

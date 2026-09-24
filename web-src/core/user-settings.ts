@@ -21,6 +21,7 @@ import type { AppSettingsState } from "./types";
 export const USER_SETTING_KEYS = [
   "theme",
   "colorTheme",
+  "terminalTone",
   "language",
   /** 文字の大きさと、それに連動する表示の密度 (body[data-sidebar-font-size])。 */
   "sidebarFontSize",
@@ -32,6 +33,9 @@ export const USER_SETTING_KEYS = [
   "agentNotifyHintDismissed",
   "agentAccountsCollapsed",
   "terminalImageShelfCollapsed",
+  "terminalImageShelfPlacement",
+  "terminalImageShelfWidth",
+  "terminalImageShelfHeight",
   "terminalPanelOpen",
   "navCollapsed",
   "navWidth",

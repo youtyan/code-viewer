@@ -86,6 +86,8 @@ vi.mock("../core/xterm-loader", () => {
       addon.activate(this);
     };
     onData = disposable;
+    onRender = disposable;
+    onScroll = disposable;
     onResize = (listener: () => void) => {
       this.resizeListeners.push(listener);
       return { dispose: noop };

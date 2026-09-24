@@ -76,6 +76,18 @@ const PAIRS = [
   ),
   { fg: "--color-term-text", bg: "--color-term", min: 7 },
   { fg: "--color-term-white", bg: "--color-term", min: 4.5 },
+  // 端末の ANSI の赤・緑・黄・紫 (terminal-screen.ts の terminalTheme が状態の色を
+  // 渡す)。足りない分は xterm が TERMINAL_MINIMUM_CONTRAST_RATIO (4.5) まで上げる
+  // が、上げる量が小さく済むよう、配色そのもので 4:1 以上。カーソルは 3:1。
+  // ターミナルの明暗が「常にダーク」なら、ライトの画面でも端末はダークの組を使う
+  // (terminal-tone-css.test.ts)。
+  ...[
+    "--color-failed",
+    "--color-working",
+    "--color-waiting",
+    "--color-done",
+  ].map((fg) => ({ fg, bg: "--color-term", min: 4 })),
+  { fg: "--color-accent-strong", bg: "--color-term", min: 3 },
   { fg: "--graph-branch", bg: "--color-doc", min: 3 },
   // 選んでいる行は本文の面から見分けられる。
   { fg: "--color-select", bg: "--color-doc", min: 1.15 },

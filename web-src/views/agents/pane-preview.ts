@@ -142,6 +142,8 @@ export function createPanePreview(
     head.setAttribute("aria-hidden", "true");
     const screen = document.createElement("pre");
     screen.className = "pane-preview-screen terminal-mono";
+    // 端末の中身なので、ターミナルの明暗 (既定はダーク) で描く (style.css)。
+    screen.dataset.terminalSurface = "";
     screen.setAttribute("aria-hidden", "true");
     root.append(head, screen);
     document.body.appendChild(root);

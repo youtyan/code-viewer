@@ -13,13 +13,32 @@
 //   拾い過ぎる前提 (文の中のファイル名や、割れた行を組み直した断片) なので、
 //   知らない候補の「無い」まで並べると棚が誤検出で埋まる
 // - 上限 (MAX_SHELF_IMAGES) を超えたら古いものから落とす
+// - 出どころ (どのペインのどの行に出たか) は新しい順に持つ。同じペインは 1 つ
+//   (新しい方)。先頭が棚に出す主で、ほかは説明 (title) に並べる
 
 import {
   MAX_SHELF_IMAGES,
   type TerminalImageRef,
   type TerminalImageRejection,
   type TerminalImageRejectReason,
+  type TerminalPaneBox,
 } from "../../core/terminal-images";
+
+/** 1 枚が持つ出どころの上限 (説明に並べる数)。 */
+export const MAX_SHELF_ORIGINS = 4;
+
+/**
+ * 画像のパスが出た所。tmux を映していれば pane (そのペイン)、tmux でない
+ * シェルなら pane は null で shell にシェルの名前。
+ */
+export type ShelfOrigin = {
+  /** 画面に出ていた綴り (どの項目の出どころかを決める)。 */
+  candidate: string;
+  pane: TerminalPaneBox | null;
+  shell: string | null;
+  /** パスが出た行。 */
+  line: string;
+};
 
 export type ShelfEntry = {
   /** 同じ 1 枚かを決める鍵。実体のパス (読めなかったものは解いた先のパス)。 */
@@ -36,6 +55,8 @@ export type ShelfEntry = {
   /** 大きすぎるとき、その大きさ。 */
   bytes: number | null;
   detail: string | null;
+  /** 出た所 (新しい順)。先頭が主。まだ分からなければ空。 */
+  origins: ShelfOrigin[];
 };
 
 export type ShelfUpdate = {
@@ -121,6 +142,7 @@ export function mergeShelf(
           reason: null,
           bytes: null,
           detail: null,
+          origins: [],
         });
         index += 1;
         continue;
@@ -177,6 +199,7 @@ export function mergeShelf(
       reason: rejection.reason,
       bytes: rejection.bytes ?? null,
       detail: rejection.detail ?? null,
+      origins: [],
     });
     index += 1;
   }
@@ -199,4 +222,36 @@ export function shelfEntryByCandidate(
   candidate: string,
 ): ShelfEntry | null {
   return list.find((entry) => entry.candidates.includes(candidate)) ?? null;
+}
+
+/** 出どころの場所の鍵。同じペイン (tmux でなければ同じシェル) は 1 つにまとめる。 */
+function originPlace(origin: ShelfOrigin): string {
+  return origin.pane ? `pane:${origin.pane.id}` : `shell:${origin.shell}`;
+}
+
+/**
+ * 見つけた出どころを項目に足す。origins は新しい順で、足したものが先頭 (主)
+ * になる。同じ場所の古い出どころは外し、上限を超えた古いものは落とす。
+ * 項目の無い綴りの出どころは捨てる。元の配列は変えない。
+ */
+export function addShelfOrigins(
+  list: readonly ShelfEntry[],
+  origins: readonly ShelfOrigin[],
+): ShelfEntry[] {
+  if (origins.length === 0) return [...list];
+  return list.map((entry) => {
+    const found = origins.filter((origin) =>
+      entry.candidates.includes(origin.candidate),
+    );
+    if (found.length === 0) return entry;
+    const merged: ShelfOrigin[] = [];
+    const places = new Set<string>();
+    for (const origin of [...found, ...entry.origins]) {
+      const place = originPlace(origin);
+      if (places.has(place)) continue;
+      places.add(place);
+      merged.push(origin);
+    }
+    return { ...entry, origins: merged.slice(0, MAX_SHELF_ORIGINS) };
+  });
 }

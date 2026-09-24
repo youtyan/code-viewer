@@ -64,6 +64,37 @@ export function colorThemeFromPalette(
   return undefined;
 }
 
+/**
+ * ターミナルの中の明暗。dark (既定) は画面がライトでもターミナルの中をそのテーマの
+ * ダークで描く: claude・codex の画面・tmux の状態の行・シェルのプロンプトは暗い地を
+ * 前提に色を決めていて、明るい地では薄い灰の文字や暗い面が読めない。match は
+ * 画面の明暗に合わせる。
+ */
+export const TERMINAL_TONES = ["dark", "match"] as const;
+
+export type TerminalTone = (typeof TERMINAL_TONES)[number];
+
+export const DEFAULT_TERMINAL_TONE: TerminalTone = "dark";
+
+export function isTerminalTone(value: unknown): value is TerminalTone {
+  return (
+    typeof value === "string" &&
+    (TERMINAL_TONES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * html にターミナルの明暗を付ける。dark のとき style.css のダークの塊が、ターミナルの
+ * 面 ([data-terminal-surface] の付いた箱) の中だけにも当たる。match は属性を外す。
+ */
+export function applyTerminalTone(
+  element: HTMLElement,
+  tone: TerminalTone,
+): void {
+  if (tone === "dark") element.dataset.terminalTone = "dark";
+  else delete element.dataset.terminalTone;
+}
+
 /** html (や見本の箱) にテーマを付ける。既定は属性を外す。 */
 export function applyColorTheme(element: HTMLElement, theme: ColorTheme): void {
   if (theme === DEFAULT_COLOR_THEME) delete element.dataset.colorTheme;

@@ -815,6 +815,7 @@ describe("user settings", () => {
   test.each([
     "theme",
     "colorTheme",
+    "terminalTone",
     "navCollapsed",
     "navWidth",
     "navCollapsedProjects",

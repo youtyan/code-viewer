@@ -17,6 +17,7 @@ const outputPath = join(projectRoot, "web/vendor/THIRD_PARTY_NOTICES.txt");
 const distributedPackageRoots = [
   "@redis/client",
   "@xterm/addon-fit",
+  "@xterm/addon-webgl",
   "@xterm/xterm",
   "d3-dsv",
   "highlight.js",

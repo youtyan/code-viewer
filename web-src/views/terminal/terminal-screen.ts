@@ -33,8 +33,18 @@ import {
   type TerminalImageHistoryResponse,
   type TerminalImageRef,
   type TerminalImagesResponse,
+  type TerminalPaneBox,
+  type TerminalPaneLayout,
+  type TerminalPaneLayoutResponse,
+  type TerminalRevealRequest,
   validateTerminalImageResponseUrls,
 } from "../../core/terminal-images";
+import {
+  findTextLinks,
+  MAX_TERMINAL_PATH_QUERY,
+  type TerminalPathHit,
+  type TerminalPathsResponse,
+} from "../../core/terminal-links";
 import {
   isShiftEnter,
   type PasteImageResponse,
@@ -45,20 +55,32 @@ import {
   loadXterm,
   type XtermBufferLine,
   type XtermFitAddon,
-  type XtermLink,
   type XtermTerminal,
   type XtermTheme,
 } from "../../core/xterm-loader";
 import type { TerminalText } from "./i18n";
 import { openImageLightbox } from "./image-lightbox";
-import { createImageShelf, type ShelfOpenMode } from "./image-shelf";
 import {
+  createImageShelf,
+  type ImageShelfLayout,
+  type ShelfOpenMode,
+} from "./image-shelf";
+import {
+  addShelfOrigins,
   mergeShelf,
   type ShelfEntry,
+  type ShelfOrigin,
   type ShelfUpdate,
   shelfEntryByCandidate,
   shelfGallery,
 } from "./image-shelf-list";
+import {
+  createTerminalLinkLayer,
+  type LinkSegment,
+  type ScreenLink,
+  screenLinkKey,
+} from "./terminal-links-layer";
+import { useWebglRenderer } from "./terminal-renderer";
 import { tmuxCover } from "./tmux-cover";
 
 /** シェルの scrollback 行数。 */
@@ -114,6 +136,18 @@ const SHELL_SCAN_TAIL = 512;
  */
 const IMAGE_REQUERY_MS = 3000;
 
+/** 画面のファイルのパスを確かめられなかったとき、聞き直すまでの間。 */
+const PATH_LOOKUP_RETRY_MS = 5000;
+
+/** 「ターミナルで見る」で示したペインの枠を残す間。 */
+const REVEAL_FRAME_MS = 3000;
+
+/**
+ * tmux でないシェルで、パスが出た行を探しにさかのぼる行数 (新しい方から)。
+ * 棚の出どころと「ターミナルで見る」の両方がこの範囲を見る。
+ */
+const SHELL_ORIGIN_SEARCH_LINES = 1000;
+
 export type TerminalScreenDeps = {
   trackLoad<T>(promise: Promise<T>): Promise<T>;
   /** 副作用リクエスト用のヘッダ (app.ts の actionHeaders)。 */
@@ -138,6 +172,17 @@ export type TerminalScreenDeps = {
   isImageShelfCollapsed(): boolean;
   /** 棚を畳んだ・開いた。保存は呼び出し側。 */
   setImageShelfCollapsed(collapsed: boolean): void;
+  /** 棚の置き場所と大きさ (ユーザー単位の設定)。無ければ右・既定の大きさ。 */
+  getImageShelfLayout?(): ImageShelfLayout;
+  /** そのペインのエージェントの名前 (棚の見出し)。エージェントでなければ null。 */
+  paneName?(paneId: string): string | null;
+  /**
+   * 画面のファイルのパスを code-viewer で開く (path はプロジェクトの根からの
+   * 相対パス、line は行)。kept なら固定のタブ。
+   */
+  onOpenFile?(path: string, line: number | undefined, kept: boolean): void;
+  /** 棚の置き場所か大きさを変えた。保存とほかの棚への当て直しは呼び出し側。 */
+  setImageShelfLayout?(patch: Partial<ImageShelfLayout>): void;
   /** 棚の画像を画像のタブで開く。無ければ覆いで開く。 */
   /** kept なら固定のタブで (中ボタン・⌘/Ctrl・右クリックの「タブで開く」)。 */
   onOpenImage?: (
@@ -168,18 +213,37 @@ export type TerminalScreenHandle = {
   localize(): void;
   /** tmux の大きさが届いた。ウインドウの外側の覆いを描き直す。 */
   updateTmuxCover(): void;
+  /** 画像の棚の置き場所と大きさを設定から当て直す。 */
+  applyImageShelfLayout(): void;
 };
 
 /**
- * 端末の色。style.css 先頭の名前の層 (--color-term*) から読む。xterm は
- * CSS 変数を読めないので、作るときとテーマが変わったときに値を渡す。
+ * 文字と地のコントラスト比の下限 (WCAG の AA)。TUI が暗い地を前提に選んだ
+ * 256 色の薄い灰や、明るい地の上の淡い色を、xterm が色相を保ったまま読める
+ * 明るさまで動かす (淡色 (SGR 2) はこの半分。xterm の決まり)。
  */
-function terminalTheme(): XtermTheme {
-  const style = getComputedStyle(document.documentElement);
+export const TERMINAL_MINIMUM_CONTRAST_RATIO = 4.5;
+
+/**
+ * 端末の色。style.css 先頭の名前の層 (--color-term*) から読む。xterm は
+ * CSS 変数を読めないので、作るときとテーマ・ターミナルの明暗が変わったときに
+ * 値を渡す。
+ *
+ * 読むのはターミナルの面 ([data-terminal-surface]) の値 (ターミナルの明暗が
+ * ダークなら、画面がライトでもダークの配色。style.css の「ダーク」の塊)。
+ * 画面の箱そのものではなく body に置いた見本の箱から読む: 裏にあるタブの端末は
+ * 文書から外れていることがあり、外れた箱の計算値は空になる。
+ */
+export function terminalTheme(): XtermTheme {
+  const probe = document.createElement("div");
+  probe.dataset.terminalSurface = "";
+  probe.hidden = true;
+  document.body.append(probe);
+  const style = getComputedStyle(probe);
   const read = (name: string) => style.getPropertyValue(name).trim();
   const background = read("--color-term");
   const foreground = read("--color-term-text");
-  return {
+  const theme = {
     background,
     foreground,
     cursor: read("--color-accent-strong"),
@@ -194,7 +258,12 @@ function terminalTheme(): XtermTheme {
     white: read("--color-term-white"),
     brightWhite: read("--color-term-text"),
   };
+  probe.remove();
+  return theme;
 }
+
+/** 貼り付けの知らせ (保存した場所) を出しておく時間。読み切れる長さ。 */
+const PASTE_NOTICE_MS = 8000;
 
 export function createTerminalScreen(
   deps: TerminalScreenDeps,
@@ -215,7 +284,11 @@ export function createTerminalScreen(
     setCollapsed: (collapsed) => deps.setImageShelfCollapsed(collapsed),
     onOpen: (entry, mode) => openShelfEntry(entry, mode),
     onImageError: (entry) => recheckShelfEntry(entry),
-    onLocate: (entry) => markPathOnScreen(entry),
+    onLocate: (entry) => locateShelfEntry(entry),
+    onReveal: (entry) => void revealShelfEntry(entry),
+    getLayout: deps.getImageShelfLayout,
+    paneName: deps.paneName,
+    setLayout: deps.setImageShelfLayout,
   });
 
   const screenRow = document.createElement("div");
@@ -229,10 +302,17 @@ export function createTerminalScreen(
   let source: EventSource | null = null;
   let attached: ShellSession | null = null;
   let resizeObserver: ResizeObserver | null = null;
+  /** 棚と端末を合わせた箱の大きさを棚に知らせる (狭すぎれば棚を畳む)。 */
+  let roomObserver: ResizeObserver | null = null;
   let themeObserver: MutationObserver | null = null;
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
   let inputEnabled = true;
   let disposed = false;
+  /** 状態の行に出している文。貼り付けの知らせを時間で消すときに、後から出た別の文を消さないため。 */
+  let shownStatus: string | null = null;
+  let pasteNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 出している貼り付けの知らせ。出力が来ても消さない (打ち込んだパスの反響で消えた)。 */
+  let pasteNotice: string | null = null;
   // attach の世代。読み込みを待つ間に別の対象へ切り替えられたら、後から
   // 返ってきた初期化で画面を作り直さない。
   let generation = 0;
@@ -254,13 +334,35 @@ export function createTerminalScreen(
   let queriedImagePaths = new Map<string, number>();
   // 棚の項目に合わせて、端末の中のパスを選択で示している間 true。外すのは
   // 自分が付けた選択だけ (利用者の選択は消さない)。
-  let markedPath = false;
+  /** 画面に見えているリンク (画像のパス・URL・ファイルのパス)。 */
+  let screenLinks: ScreenLink[] = [];
+  /** 描き直しの予約 (requestAnimationFrame)。 */
+  let linksFrame: number | null = null;
+  /**
+   * 画面のファイルのパス → プロジェクトの中の実在するファイル (無ければ null)。
+   * attach ごとに作り直す (相対パスの起点がシェルで変わる)。
+   */
+  let pathCache = new Map<string, TerminalPathHit | null>();
+  let pathsPending = new Set<string>();
+  let pathLookupPausedUntil = 0;
+  let pathLookupErrorShown = false;
   /** 棚の中身 (新しい順)。 */
   let shelfEntries: ShelfEntry[] = [];
   /** 見つけた順番の最後。新しく見つけたものほど大きい番号を振る。 */
   let shelfSeq = 0;
   /** ペインの作業場所を引けなかったことを、この attach で伝えたか。 */
   let baseErrorShown = false;
+  /** ペインの並び・中身を読めなかったことを、この attach で伝えたか。 */
+  let originErrorShown = false;
+  /**
+   * シェルが映している tmux のウインドウのペインの並び (最後に届いたもの)。
+   * tmux を映していなければ null。
+   */
+  let paneLayout: TerminalPaneLayout | null = null;
+  /** 棚の項目にカーソルが載っている間、その項目 (枠を描き直す宛先)。 */
+  let locatedEntry: ShelfEntry | null = null;
+  /** 「ターミナルで見る」の枠を消す時計。 */
+  let revealTimer: ReturnType<typeof setTimeout> | null = null;
   /** 読めなかったサムネイルのうち、もう聞き直した URL (聞き直しの繰り返しを止める)。 */
   let recheckedUrls = new Set<string>();
   /**
@@ -285,6 +387,33 @@ export function createTerminalScreen(
   const cover = document.createElement("div");
   cover.className = "terminal-tmux-cover";
   cover.hidden = true;
+  /**
+   * 棚の項目の出どころのペインの枠。覆いと同じく `.xterm-screen` の中に置き、
+   * 行と桁で位置を決める。描くのはペインの縁の線だけ (中の文字は覆わない)。
+   */
+  const paneFrame = document.createElement("div");
+  paneFrame.className = "terminal-pane-frame";
+  paneFrame.hidden = true;
+
+  // 画面の中の画像のパス・URL・ファイルのパスの印と操作 (terminal-links-layer.ts)。
+  const linkLayer = createTerminalLinkLayer(screenEl, {
+    getText: () => deps.getText(),
+    term: () => term,
+    links: () => screenLinks,
+    open: (link, mode) => openScreenLink(link, mode),
+    copyValue: (link) =>
+      link.url ??
+      link.file?.absolute ??
+      shelfEntryByCandidate(shelfEntries, link.text)?.path ??
+      link.text,
+    onHover: (link) =>
+      shelf.highlight(
+        link?.kind === "image"
+          ? (shelfEntryByCandidate(shelfEntries, link.text)?.key ?? null)
+          : null,
+      ),
+    onStatus: (message) => showStatus(message),
+  });
 
   function enqueueInput(data: string): void {
     if (!inputEnabled || !attached || disposed || data.length === 0) return;
@@ -344,7 +473,7 @@ export function createTerminalScreen(
         }),
       );
       if (!res.ok) {
-        deps.onStatus(
+        showStatus(
           await responseErrorMessage(res, deps.getText().resizeFailed),
         );
         return;
@@ -359,9 +488,7 @@ export function createTerminalScreen(
     } catch (error) {
       if (disposed) return;
       console.error("[code-viewer] shell resize request failed", error);
-      deps.onStatus(
-        `${deps.getText().resizeFailed}\n${formatErrorDetail(error)}`,
-      );
+      showStatus(`${deps.getText().resizeFailed}\n${formatErrorDetail(error)}`);
     }
   }
 
@@ -386,24 +513,18 @@ export function createTerminalScreen(
       );
       if (disposed) return;
       if (res.status === 410) {
-        deps.onStatus(
-          await responseErrorMessage(res, deps.getText().shellClosed),
-        );
+        showStatus(await responseErrorMessage(res, deps.getText().shellClosed));
         deps.onTargetGone(target);
         return;
       }
       if (!res.ok) {
-        deps.onStatus(
-          await responseErrorMessage(res, deps.getText().sendFailed),
-        );
+        showStatus(await responseErrorMessage(res, deps.getText().sendFailed));
       }
     } catch (error) {
       // 中断 (ナビゲーション) と通信断。打った内容は失われるので伝える。
       if (!disposed) {
         console.error("[code-viewer] shell input request failed", error);
-        deps.onStatus(
-          `${deps.getText().sendFailed}\n${formatErrorDetail(error)}`,
-        );
+        showStatus(`${deps.getText().sendFailed}\n${formatErrorDetail(error)}`);
       }
     } finally {
       sending = false;
@@ -415,6 +536,8 @@ export function createTerminalScreen(
   function setShelf(entries: ShelfEntry[]): void {
     shelfEntries = entries;
     shelf.render(entries);
+    // 画像のパスの印は棚にある画像だけに付ける。
+    scheduleLinks();
     if (!attached) return;
     rememberedShelves.delete(attached.id);
     rememberedShelves.set(attached.id, { entries, seq: shelfSeq });
@@ -452,6 +575,14 @@ export function createTerminalScreen(
 
   /** 応答の base に失敗の理由があれば、この attach で 1 回だけ伝える。 */
   function reportBase(body: TerminalImagesResponse): void {
+    if (body.originError && !originErrorShown) {
+      originErrorShown = true;
+      console.error(
+        "[code-viewer] terminal image origins failed",
+        body.originError,
+      );
+      showStatus(`${deps.getText().imageOriginFailed}\n${body.originError}`);
+    }
     if (!body.base?.error || baseErrorShown) return;
     baseErrorShown = true;
     console.error(
@@ -459,7 +590,7 @@ export function createTerminalScreen(
       body.base.source,
       body.base.error,
     );
-    deps.onStatus(`${deps.getText().imageBaseFailed}\n${body.base.error}`);
+    showStatus(`${deps.getText().imageBaseFailed}\n${body.base.error}`);
   }
 
   /**
@@ -490,7 +621,7 @@ export function createTerminalScreen(
       // だけ。
       if (!res.ok) {
         for (const path of paths) queried.delete(path);
-        deps.onStatus(
+        showStatus(
           await responseErrorMessage(res, deps.getText().imageListFailed),
         );
         return;
@@ -503,13 +634,14 @@ export function createTerminalScreen(
       if (disposed || myGen !== generation) return;
       reportBase(body);
       mergeLiveUpdate(body, paths);
+      applyOrigins(body, paths);
     } catch (error) {
       // 中断 (ナビゲーション) と通信断。覚えたままにすると聞き直せないので
       // 忘れる。同じパスがまた流れれば拾い直せる。
       for (const path of paths) queried.delete(path);
       if (!disposed && myGen === generation) {
         console.error("[code-viewer] terminal image lookup failed", error);
-        deps.onStatus(
+        showStatus(
           `${deps.getText().imageListFailed}\n${formatErrorDetail(error)}`,
         );
       }
@@ -535,7 +667,7 @@ export function createTerminalScreen(
       );
       if (disposed || myGen !== generation) return;
       if (!res.ok) {
-        deps.onStatus(
+        showStatus(
           await responseErrorMessage(res, deps.getText().imageHistoryFailed),
         );
         return;
@@ -560,10 +692,11 @@ export function createTerminalScreen(
           body.candidates,
         ),
       );
+      applyOrigins(body, body.candidates);
     } catch (error) {
       if (!disposed && myGen === generation) {
         console.error("[code-viewer] terminal image history failed", error);
-        deps.onStatus(
+        showStatus(
           `${deps.getText().imageHistoryFailed}\n${formatErrorDetail(error)}`,
         );
       }
@@ -645,7 +778,10 @@ export function createTerminalScreen(
    * バッファの 1 行を文字列にし、文字列の添字 → マス目の桁の表も作る。全角の
    * 字は 2 マスを取るので、添字と桁は一致しない。
    */
-  function readRow(line: XtermBufferLine | undefined): {
+  function readRow(
+    line: XtermBufferLine | undefined,
+    columns?: { from: number; to: number },
+  ): {
     text: string;
     cells: number[];
     widths: number[];
@@ -654,7 +790,9 @@ export function createTerminalScreen(
     let text = "";
     const cells: number[] = [];
     const widths: number[] = [];
-    for (let x = 0; x < line.length; x += 1) {
+    // columns を渡すと、その桁の範囲だけを読む (tmux のペイン 1 つぶん)。
+    const to = Math.min(line.length, columns?.to ?? line.length);
+    for (let x = columns?.from ?? 0; x < to; x += 1) {
       const cell = line.getCell(x);
       if (!cell) break;
       const width = cell.getWidth();
@@ -675,72 +813,213 @@ export function createTerminalScreen(
     };
   }
 
+  /** 描き直しを次の描画の前に 1 回だけ行う (出力が続いても重くしない)。 */
+  function scheduleLinks(): void {
+    if (linksFrame !== null || disposed) return;
+    linksFrame = requestAnimationFrame(() => {
+      linksFrame = null;
+      if (disposed) return;
+      screenLinks = computeLinks();
+      linkLayer.render();
+    });
+  }
+
   /**
-   * xterm のリンク。棚にある画像のパスに下線を引き、カーソルが載ったら棚の
-   * 同じ画像を強調する。文字の上には何も出さない。押すと拡大表示。
-   *
-   * 1 行ぶんを聞かれるので、前後 1 行も合わせて見る (折り返し・CLI が割った
-   * 行は 2 行にまたがる)。
+   * 画面に見えている範囲のリンク。tmux を映していればペインごとに (その桁の
+   * 範囲と幅で) 読む。画像のパスは棚にあるものだけ、ファイルのパスはサーバが
+   * このプロジェクトの中で実在すると答えたものだけ (まだ訊いていなければ訊く)。
    */
-  function provideImageLinks(
-    bufferLineNumber: number,
-    callback: (links: XtermLink[] | undefined) => void,
-  ): void {
-    if (!term || shelfEntries.length === 0) {
-      callback(undefined);
-      return;
-    }
+  function computeLinks(): ScreenLink[] {
+    if (!term) return [];
     const buffer = term.buffer.active;
-    const y = bufferLineNumber - 1;
-    const first = Math.max(0, y - 1);
-    const rows = [first, first + 1, first + 2].map((index) => ({
-      index,
-      ...readRow(buffer.getLine(index)),
-    }));
+    const top = buffer.viewportY;
+    const statusTop =
+      paneLayout?.statusAt === "top" ? paneLayout.statusLines : 0;
+    const regions =
+      paneLayout && paneLayout.panes.length > 0
+        ? paneLayout.panes.map((pane) => ({
+            first: top + statusTop + pane.top,
+            height: pane.height,
+            columns: { from: pane.left, to: pane.left + pane.width },
+            width: pane.width,
+          }))
+        : [
+            {
+              first: top,
+              height: term.rows,
+              columns: undefined,
+              width: term.cols,
+            },
+          ];
     const known = new Set<string>();
     for (const entry of shelfEntries) {
+      if (!entry.image) continue;
       for (const candidate of entry.candidates) known.add(candidate);
     }
-    const links: XtermLink[] = [];
-    for (const link of findImagePathLinks(
-      rows.map((row) => row.text),
-      term.cols,
-      (candidate) => known.has(candidate),
-    )) {
-      const cells = linkCells(rows, link);
-      if (!cells || cells.startY > y || cells.endY < y) continue;
-      const entry = shelfEntryByCandidate(shelfEntries, link.candidate);
-      if (!entry) continue;
-      links.push({
-        range: {
-          start: { x: cells.startX + 1, y: cells.startY + 1 },
-          end: { x: cells.endX + 1, y: cells.endY + 1 },
-        },
-        text: link.candidate,
-        decorations: { pointerCursor: true, underline: true },
-        activate: (event) => {
-          // Shift は xterm の選択に任せる。Alt は覆い、⌘/Ctrl は固定のタブ
-          // (棚と同じ押し分け。ui-surface.md の「タブの決まり」)。
-          if (event.shiftKey) return;
-          const current = shelfEntryByCandidate(shelfEntries, link.candidate);
-          if (current)
-            openShelfEntry(
-              current,
-              event.altKey
-                ? "overlay"
-                : event.metaKey || event.ctrlKey
-                  ? "kept-tab"
-                  : "tab",
-            );
-        },
-        hover: () => {
-          const current = shelfEntryByCandidate(shelfEntries, link.candidate);
-          shelf.highlight(current?.key ?? null);
-        },
-        leave: () => shelf.highlight(null),
-      });
+    const links: ScreenLink[] = [];
+    const unknownPaths = new Set<string>();
+    for (const region of regions) {
+      const rows = Array.from({ length: region.height }, (_, i) => ({
+        index: region.first + i,
+        ...readRow(buffer.getLine(region.first + i), region.columns),
+      }));
+      const texts = rows.map((row) => row.text);
+      const left = region.columns?.from ?? 0;
+      const right = (region.columns?.to ?? term.cols) - 1;
+      const taken = new Set<string>();
+      const add = (
+        link: Omit<ScreenLink, "key" | "segments">,
+        found: PathLink,
+      ) => {
+        const segments = linkSegments(rows, found, left, right);
+        const first = segments?.[0];
+        if (!segments || !first) return;
+        taken.add(`${found.start.row}:${found.start.col}`);
+        links.push({
+          ...link,
+          key: screenLinkKey(link.text, first),
+          segments,
+        });
+      };
+      for (const found of findImagePathLinks(texts, region.width, (value) =>
+        known.has(value),
+      )) {
+        const entry = shelfEntryByCandidate(shelfEntries, found.candidate);
+        if (!entry?.image) continue;
+        add(
+          {
+            kind: "image",
+            text: found.candidate,
+            image: { url: entry.image.url, name: entry.name },
+          },
+          found,
+        );
+      }
+      for (const found of findTextLinks(texts, region.width)) {
+        if (taken.has(`${found.start.row}:${found.start.col}`)) continue;
+        if (found.kind === "url") {
+          add({ kind: "url", text: found.candidate, url: found.path }, found);
+          continue;
+        }
+        const hit = pathCache.get(found.path);
+        if (hit === undefined) unknownPaths.add(found.path);
+        if (!hit) continue;
+        add(
+          {
+            kind: "file",
+            text: found.candidate,
+            file: {
+              path: hit.path,
+              absolute: hit.absolute,
+              ...(found.line !== undefined ? { line: found.line } : {}),
+              ...(found.column !== undefined ? { column: found.column } : {}),
+            },
+          },
+          found,
+        );
+      }
     }
-    callback(links.length > 0 ? links : undefined);
+    if (unknownPaths.size > 0) queuePathLookups([...unknownPaths]);
+    return links;
+  }
+
+  /**
+   * 拾ったリンクを、画面の行ごとの桁の範囲にする。2 行にまたがるものは、
+   * 1 行目の始まりから範囲の右端まで・2 行目の左端から終わりまで。
+   */
+  function linkSegments(
+    rows: Array<{ index: number; cells: number[]; widths: number[] }>,
+    link: PathLink,
+    left: number,
+    right: number,
+  ): LinkSegment[] | null {
+    const cells = linkCells(rows, link);
+    if (!cells) return null;
+    if (cells.startY === cells.endY) {
+      return [{ y: cells.startY, x0: cells.startX, x1: cells.endX }];
+    }
+    return [
+      { y: cells.startY, x0: cells.startX, x1: right },
+      { y: cells.endY, x0: left, x1: cells.endX },
+    ];
+  }
+
+  /** まだ確かめていないファイルのパスをサーバに訊く (見えている分だけ)。 */
+  function queuePathLookups(paths: string[]): void {
+    if (!attached || Date.now() < pathLookupPausedUntil) return;
+    const fresh = paths
+      .filter((path) => !pathsPending.has(path))
+      .slice(0, MAX_TERMINAL_PATH_QUERY);
+    if (fresh.length === 0) return;
+    for (const path of fresh) pathsPending.add(path);
+    void lookupPaths(fresh, generation, pathCache, pathsPending);
+  }
+
+  /**
+   * @param cache attach ごとに作り直す表。途中で対象が変わっても前の表を
+   *   掴んだまま書くので、次の対象の表を汚さない
+   */
+  async function lookupPaths(
+    paths: string[],
+    myGen: number,
+    cache: Map<string, TerminalPathHit | null>,
+    pending: Set<string>,
+  ): Promise<void> {
+    const target = attached;
+    if (!target) return;
+    const params = new URLSearchParams();
+    params.set("shell", target.id);
+    for (const path of paths) params.append("path", path);
+    const text = deps.getText();
+    try {
+      const res = await deps.trackLoad(
+        fetch(`${apiUrl("agentPaths")}?${params.toString()}`),
+      );
+      if (disposed || myGen !== generation) return;
+      if (!res.ok) {
+        pathLookupFailed(
+          await responseErrorMessage(res, text.linkLookupFailed),
+        );
+        return;
+      }
+      const body = (await res.json()) as TerminalPathsResponse;
+      if (disposed || myGen !== generation) return;
+      const hits = new Map(body.files.map((file) => [file.candidate, file]));
+      for (const path of paths) cache.set(path, hits.get(path) ?? null);
+      scheduleLinks();
+    } catch (error) {
+      if (disposed || myGen !== generation) return;
+      console.error("[code-viewer] terminal path lookup failed", error);
+      pathLookupFailed(`${text.linkLookupFailed}\n${formatErrorDetail(error)}`);
+    } finally {
+      for (const path of paths) pending.delete(path);
+    }
+  }
+
+  /** 訊けなかった: 理由をこの attach で 1 回出し、しばらく訊き直さない。 */
+  function pathLookupFailed(message: string): void {
+    pathLookupPausedUntil = Date.now() + PATH_LOOKUP_RETRY_MS;
+    if (pathLookupErrorShown) return;
+    pathLookupErrorShown = true;
+    showStatus(message);
+  }
+
+  /**
+   * 画面のリンクを開く。URL は新しいブラウザのタブ (opener を渡さない)、
+   * ファイルは code-viewer でそのファイル (行があればその行)、画像は棚と同じ
+   * 開き方。
+   */
+  function openScreenLink(link: ScreenLink, mode: ShelfOpenMode): void {
+    if (link.kind === "url" && link.url) {
+      window.open(link.url, "_blank", "noopener");
+      return;
+    }
+    if (link.kind === "file" && link.file) {
+      deps.onOpenFile?.(link.file.path, link.file.line, mode === "kept-tab");
+      return;
+    }
+    const entry = shelfEntryByCandidate(shelfEntries, link.text);
+    if (entry) openShelfEntry(entry, mode);
   }
 
   /**
@@ -767,55 +1046,312 @@ export function createTerminalScreen(
   }
 
   /**
+   * 応答に載っていた出どころを棚の項目に足す。tmux を映していれば、サーバが
+   * ペインを読んで見つけた行 (layout と sightings)。tmux でないシェルなら、
+   * 端末のバッファを新しい方からさかのぼって見つけた行。
+   *
+   * @param candidates 問い合わせた候補
+   */
+  function applyOrigins(
+    body: TerminalImagesResponse,
+    candidates: readonly string[],
+  ): void {
+    if (!attached) return;
+    let origins: ShelfOrigin[] = [];
+    if ("layout" in body) {
+      paneLayout = body.layout ?? null;
+      const panes = new Map(
+        (paneLayout?.panes ?? []).map((pane) => [pane.id, pane] as const),
+      );
+      for (const sighting of body.sightings ?? []) {
+        const pane = panes.get(sighting.pane);
+        if (!pane) continue;
+        origins.push({
+          candidate: sighting.candidate,
+          pane,
+          shell: null,
+          line: sighting.line,
+        });
+      }
+    } else {
+      paneLayout = null;
+      const shell = shellName(attached);
+      origins = candidates.flatMap((candidate) => {
+        const found = findInBuffer(candidate);
+        return found
+          ? [{ candidate, pane: null, shell, line: found.line }]
+          : [];
+      });
+    }
+    scheduleLinks();
+    if (origins.length === 0) return;
+    setShelf(addShelfOrigins(shelfEntries, origins));
+  }
+
+  /** シェルの名前 (起動したコマンドの最後の部分)。 */
+  function shellName(session: ShellSession): string {
+    const command = session.command.trim().split(/\s+/)[0] ?? "";
+    return command.slice(command.lastIndexOf("/") + 1) || command;
+  }
+
+  /**
+   * tmux でないシェルのバッファを新しい方からさかのぼり、その綴りが出ている
+   * 行を探す。y はその行の先頭 (折り返しの続きなら折り返し始めの行)。
+   */
+  function findInBuffer(candidate: string): { y: number; line: string } | null {
+    if (!term) return null;
+    const buffer = term.buffer.active;
+    const last = buffer.length - 1;
+    for (let y = last; y >= 0 && y > last - SHELL_ORIGIN_SEARCH_LINES; y -= 1) {
+      if (buffer.getLine(y)?.isWrapped) continue;
+      let text = "";
+      for (let row = y; row <= last; row += 1) {
+        const line = buffer.getLine(row);
+        if (!line || (row > y && !line.isWrapped)) break;
+        text += line.translateToString(
+          row === last || !buffer.getLine(row + 1)?.isWrapped,
+        );
+      }
+      if (text.includes(candidate)) return { y, line: text.trim() };
+    }
+    return null;
+  }
+
+  /** 棚の項目の出どころが tmux のペインなら、今の並びでのそのペイン。 */
+  function originPane(entry: ShelfEntry): TerminalPaneBox | null {
+    const pane = entry.origins[0]?.pane;
+    if (!pane || !paneLayout) return null;
+    return paneLayout.panes.find((item) => item.id === pane.id) ?? null;
+  }
+
+  /**
+   * ペインの枠を描く (null で消す)。ペインの縁だけを線で囲む (中の文字の上には
+   * 何も置かない)。隣にペインがある辺は、境目の線のマス (半マス外) に線を
+   * 重ねる。ウインドウの端の辺はペインの内側に収める (その外はステータスの行や
+   * 画面の外なので、線が文字に掛かる)。
+   */
+  function drawPaneFrame(pane: TerminalPaneBox | null): void {
+    const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+    if (!term || !screen || !pane || !paneLayout) {
+      paneFrame.hidden = true;
+      return;
+    }
+    if (paneFrame.parentElement !== screen) screen.append(paneFrame);
+    const statusTop =
+      paneLayout.statusAt === "top" ? paneLayout.statusLines : 0;
+    const windowCols = Math.max(
+      ...paneLayout.panes.map((item) => item.left + item.width),
+    );
+    const windowRows = Math.max(
+      ...paneLayout.panes.map((item) => item.top + item.height),
+    );
+    const before = (start: number) => (start > 0 ? 0.5 : 0);
+    const after = (end: number, limit: number) => (end < limit ? 0.5 : 0);
+    const top = pane.top - before(pane.top);
+    const left = pane.left - before(pane.left);
+    const set = (name: string, value: string | number) =>
+      paneFrame.style.setProperty(name, String(value));
+    set("--frame-cell-w", `${screen.clientWidth / term.cols}px`);
+    set("--frame-cell-h", `${screen.clientHeight / term.rows}px`);
+    set("--frame-top", top + statusTop);
+    set("--frame-left", left);
+    set(
+      "--frame-rows",
+      pane.top + pane.height + after(pane.top + pane.height, windowRows) - top,
+    );
+    set(
+      "--frame-cols",
+      pane.left + pane.width + after(pane.left + pane.width, windowCols) - left,
+    );
+    paneFrame.hidden = false;
+  }
+
+  /**
+   * 棚のサムネイルにカーソルかフォーカスが載った (null で離れた)。端末の中の
+   * そのパスを選択で示し、tmux ならそのペインに枠を描く。ペインは後から動かせる
+   * ので、並びを取り直して描き直す。
+   */
+  function locateShelfEntry(entry: ShelfEntry | null): void {
+    locatedEntry = entry;
+    if (revealTimer) {
+      clearTimeout(revealTimer);
+      revealTimer = null;
+    }
+    markPathOnScreen(entry);
+    drawPaneFrame(entry ? originPane(entry) : null);
+    if (entry?.origins[0]?.pane && attached) void refreshPaneLayout(entry);
+  }
+
+  /** ペインの並びを取り直し、まだ同じ項目に載っていれば描き直す。 */
+  async function refreshPaneLayout(entry: ShelfEntry): Promise<void> {
+    const target = attached;
+    if (!target) return;
+    const myGen = generation;
+    try {
+      const res = await deps.trackLoad(
+        fetch(
+          `${apiUrl("agentImagesLayout")}?shell=${encodeURIComponent(target.id)}`,
+        ),
+      );
+      if (disposed || myGen !== generation) return;
+      if (!res.ok) {
+        showStatus(
+          await responseErrorMessage(res, deps.getText().imageOriginFailed),
+        );
+        return;
+      }
+      const body = (await res.json()) as TerminalPaneLayoutResponse;
+      if (disposed || myGen !== generation) return;
+      paneLayout = body.layout;
+      scheduleLinks();
+      if (locatedEntry?.key !== entry.key) return;
+      markPathOnScreen(entry);
+      drawPaneFrame(originPane(entry));
+    } catch (error) {
+      if (disposed || myGen !== generation) return;
+      console.error("[code-viewer] terminal pane layout failed", error);
+      showStatus(
+        `${deps.getText().imageOriginFailed}\n${formatErrorDetail(error)}`,
+      );
+    }
+  }
+
+  /**
    * 棚のサムネイルにカーソルかフォーカスが載ったら、端末の画面の中でその画像の
    * パスが出ている所を xterm の選択で示す (null で外す)。棚の 1 枚が画面の
    * どの文字列に当たるかを見せるため。
    *
    * - 文字の上に何も重ねない。decoration は代替画面 (tmux が使う) では付かない
    *   ので、xterm の標準の選択を使う
+   * - 出どころが tmux のペインなら、そのペインの中だけを探す (隣のペインに
+   *   同じパスが出ていても、そのペインの行を示す)
    * - 画面に何度も出ていれば一番下 (新しい方)。画面に無ければ何もしない
    *   (端末のスクロールは触らない)
    * - 利用者が選択中なら上書きせず、外すときも自分が付けた選択だけを消す
+   *
+   * @returns 示せたか
    */
-  function markPathOnScreen(entry: ShelfEntry | null): void {
-    if (!term) return;
-    if (markedPath) {
-      markedPath = false;
-      term.clearSelection();
+  function markPathOnScreen(entry: ShelfEntry | null): boolean {
+    if (!term || !entry) {
+      linkLayer.setStrong(null);
+      return false;
     }
-    if (!entry || term.hasSelection()) return;
     const buffer = term.buffer.active;
-    const top = buffer.viewportY;
+    const pane = originPane(entry);
+    const statusTop =
+      paneLayout?.statusAt === "top" ? paneLayout.statusLines : 0;
+    // 見る範囲: ペインが分かればそのペインの行と桁、分からなければ画面全体。
+    const top = buffer.viewportY + (pane ? pane.top + statusTop : 0);
+    const height = pane ? pane.height : term.rows;
+    const columns = pane
+      ? { from: pane.left, to: pane.left + pane.width }
+      : undefined;
     // 1 行上から読む (画面の頭で折り返しの続きになっているパス)。
-    const first = Math.max(0, top - 1);
-    const rows = Array.from({ length: top + term.rows - first }, (_, i) => ({
+    const first = pane ? top : Math.max(0, top - 1);
+    const rows = Array.from({ length: top + height - first }, (_, i) => ({
       index: first + i,
-      ...readRow(buffer.getLine(first + i)),
+      ...readRow(buffer.getLine(first + i), columns),
     }));
     const known = new Set(entry.candidates);
-    let found: ReturnType<typeof linkCells> = null;
+    let found: PathLink | null = null;
+    let foundCells: ReturnType<typeof linkCells> = null;
     for (const link of findImagePathLinks(
       rows.map((row) => row.text),
-      term.cols,
+      pane ? pane.width : term.cols,
       (candidate) => known.has(candidate),
     )) {
       const cells = linkCells(rows, link);
       if (!cells || cells.endY < top) continue;
       if (
-        !found ||
-        cells.startY > found.startY ||
-        (cells.startY === found.startY && cells.startX > found.startX)
+        !foundCells ||
+        cells.startY > foundCells.startY ||
+        (cells.startY === foundCells.startY && cells.startX > foundCells.startX)
       ) {
-        found = cells;
+        found = link;
+        foundCells = cells;
       }
     }
-    if (!found) return;
-    term.select(
-      found.startX,
-      found.startY,
-      (found.endY - found.startY) * term.cols + found.endX - found.startX + 1,
-    );
-    markedPath = true;
+    const segments = found
+      ? linkSegments(
+          rows,
+          found,
+          columns?.from ?? 0,
+          (columns?.to ?? term.cols) - 1,
+        )
+      : null;
+    linkLayer.setStrong(segments);
+    return segments !== null;
+  }
+
+  /**
+   * 棚の項目の右クリックの「ターミナルで見る」。そのパスが出た行が見える所まで
+   * 端末を動かして示す。
+   *
+   * - tmux のペイン: 画面に出ていればそのまま選択とペインの枠で示す。流れて
+   *   いれば、そのペインを tmux のコピーモードにして後ろ向きに探させる (tmux が
+   *   その行まで遡り、文字を強調する)。枠はしばらく残す
+   * - tmux でないシェル: 端末のバッファをさかのぼり、その行が画面の中ほどに
+   *   来るまでスクロールして選択で示す
+   */
+  async function revealShelfEntry(entry: ShelfEntry): Promise<void> {
+    if (!term || !attached) return;
+    const text = deps.getText();
+    const origin = entry.origins[0];
+    if (origin?.pane) {
+      const pane = originPane(entry);
+      const shown = markPathOnScreen(entry);
+      drawPaneFrame(pane);
+      holdRevealFrame();
+      if (shown) return;
+      const request: TerminalRevealRequest = {
+        shell: attached.id,
+        pane: origin.pane.id,
+        text: origin.candidate,
+      };
+      try {
+        const res = await deps.trackLoad(
+          fetch(apiUrl("agentImagesReveal"), {
+            method: "POST",
+            headers: {
+              ...deps.actionHeaders(),
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(request),
+          }),
+        );
+        if (disposed) return;
+        if (!res.ok) {
+          showStatus(await responseErrorMessage(res, text.imageRevealFailed));
+        }
+      } catch (error) {
+        if (disposed) return;
+        console.error("[code-viewer] terminal reveal failed", error);
+        showStatus(`${text.imageRevealFailed}\n${formatErrorDetail(error)}`);
+      }
+      return;
+    }
+    const candidates = origin ? [origin.candidate] : entry.candidates;
+    const found = candidates
+      .map((candidate) => findInBuffer(candidate))
+      .find((item) => item !== null);
+    if (!found) {
+      showStatus(text.imageRevealNotFound);
+      return;
+    }
+    term.scrollToLine(Math.max(0, found.y - Math.floor(term.rows / 2)));
+    markPathOnScreen(entry);
+    holdRevealFrame();
+  }
+
+  /** 「ターミナルで見る」の枠を、しばらくしてから消す。 */
+  function holdRevealFrame(): void {
+    if (revealTimer) clearTimeout(revealTimer);
+    revealTimer = setTimeout(() => {
+      revealTimer = null;
+      if (locatedEntry) return;
+      drawPaneFrame(null);
+      linkLayer.setStrong(null);
+    }, REVEAL_FRAME_MS);
   }
 
   /** File を base64 にする。data URL の接頭辞は落として本体だけ返す。 */
@@ -848,6 +1384,23 @@ export function createTerminalScreen(
    * 打ち込むのは改行を付けない。人が続けて文章を書いてから送れるようにする
    * (勝手に送ると、画像だけが単独で送信されてしまう)。
    */
+  function showStatus(message: string | null): void {
+    shownStatus = message;
+    deps.onStatus(message);
+  }
+
+  /** 貼り付けた画像をどこに置いたかを、しばらく状態の行に出す。 */
+  function showPasteNotice(message: string): void {
+    showStatus(message);
+    pasteNotice = message;
+    if (pasteNoticeTimer) clearTimeout(pasteNoticeTimer);
+    pasteNoticeTimer = setTimeout(() => {
+      pasteNoticeTimer = null;
+      pasteNotice = null;
+      if (!disposed && shownStatus === message) showStatus(null);
+    }, PASTE_NOTICE_MS);
+  }
+
   async function pasteImage(file: File): Promise<void> {
     if (!attached) return;
     let read: { base64: string; url: string };
@@ -855,9 +1408,7 @@ export function createTerminalScreen(
       read = await readAsBase64(file);
     } catch (error) {
       console.error("[code-viewer] pasted image read failed", error);
-      deps.onStatus(
-        `${deps.getText().pasteFailed}\n${formatErrorDetail(error)}`,
-      );
+      showStatus(`${deps.getText().pasteFailed}\n${formatErrorDetail(error)}`);
       return;
     }
     try {
@@ -873,9 +1424,7 @@ export function createTerminalScreen(
       );
       if (disposed) return;
       if (!res.ok) {
-        deps.onStatus(
-          await responseErrorMessage(res, deps.getText().pasteFailed),
-        );
+        showStatus(await responseErrorMessage(res, deps.getText().pasteFailed));
         return;
       }
       const saved = (await res.json()) as PasteImageResponse;
@@ -886,11 +1435,11 @@ export function createTerminalScreen(
       // パスに空白は入らない命名にしてあるが、引用しておけば将来変えても壊れない。
       pendingInput += `'${saved.path}' `;
       void flushInput();
-      deps.onStatus(null);
+      showPasteNotice(deps.getText().pasteSaved(saved.relativePath));
     } catch (error) {
       if (!disposed) {
         console.error("[code-viewer] pasted image save failed", error);
-        deps.onStatus(
+        showStatus(
           `${deps.getText().pasteFailed}\n${formatErrorDetail(error)}`,
         );
       }
@@ -1005,23 +1554,38 @@ export function createTerminalScreen(
       fontFamily: TERMINAL_FONT_FAMILY,
       scrollback: SHELL_SCROLLBACK,
       cursorBlink: true,
+      // 枠の線とブロックの字を升目いっぱいに描く (WebGL の描画で効く)。
+      customGlyphs: true,
       theme: terminalTheme(),
+      minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
     });
-    // 明暗とテーマ (html の data-theme / data-color-theme) が変わったら色を当て直す。
+    // 明暗・テーマ・ターミナルの明暗 (html の data-theme / data-color-theme /
+    // data-terminal-tone) が変わったら色を当て直す。
     themeObserver ??= new MutationObserver(() => {
       if (term) term.options.theme = terminalTheme();
     });
     themeObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-theme", "data-color-theme"],
+      attributeFilter: ["data-theme", "data-color-theme", "data-terminal-tone"],
     });
     const fit = new api.FitAddon();
     created.loadAddon(fit);
     created.open(screenEl);
-    created.registerLinkProvider({ provideLinks: provideImageLinks });
+    // tmux のペインの境目の線が行ごとにずれて波打たないよう、WebGL で描く。
+    // 使えなければ DOM のまま (理由は console に出る)。
+    screenEl.dataset.renderer = useWebglRenderer(created, api, () => {
+      screenEl.dataset.renderer = "dom";
+    });
+    // 画面のリンクは描き直しのたびに見えている範囲だけを読み直す (xterm の
+    // リンクは代替画面・tmux のマウスの下で出入りと押下が届かないので使わない)。
+    created.onRender(() => scheduleLinks());
+    created.onScroll(() => scheduleLinks());
     // 桁数・行数が変われば覆う所も変わる (届いている tmux の大きさと合わなく
     // なれば、合うまで隠す)。
-    created.onResize(() => renderTmuxCover());
+    created.onResize(() => {
+      renderTmuxCover();
+      scheduleLinks();
+    });
     created.onData((data) => {
       if (replayWrites > 0) return;
       enqueueInput(data);
@@ -1044,6 +1608,15 @@ export function createTerminalScreen(
     if (!resizeObserver) {
       resizeObserver = new ResizeObserver(() => refit());
       resizeObserver.observe(screenEl);
+    }
+    if (!roomObserver) {
+      roomObserver = new ResizeObserver(() =>
+        shelf.setRoom({
+          width: screenRow.clientWidth,
+          height: screenRow.clientHeight,
+        }),
+      );
+      roomObserver.observe(screenRow);
     }
     return created;
   }
@@ -1072,10 +1645,11 @@ export function createTerminalScreen(
           term.write(payload.data);
         }
         scanShellOutput(payload.data);
-        deps.onStatus(null);
+        // 出力が戻ったので、前の失敗の行を片付ける (貼り付けの知らせは残す)。
+        if (shownStatus !== pasteNotice) showStatus(null);
       } catch (error) {
         console.error("[code-viewer] terminal output event failed", error);
-        deps.onStatus(
+        showStatus(
           `${deps.getText().screenFailed}\n${formatErrorDetail(error)}`,
         );
       }
@@ -1091,20 +1665,20 @@ export function createTerminalScreen(
         ).exitCode;
       } catch (error) {
         console.error("[code-viewer] terminal exit event failed", error);
-        deps.onStatus(
+        showStatus(
           `${deps.getText().shellExited(null)}\n${formatErrorDetail(error)}`,
         );
         closeSource();
         deps.onShellExited(session);
         return;
       }
-      deps.onStatus(deps.getText().shellExited(code));
+      showStatus(deps.getText().shellExited(code));
       closeSource();
       deps.onShellExited(session);
     });
     stream.addEventListener("gone", () => {
       if (stale()) return;
-      deps.onStatus(deps.getText().shellClosed);
+      showStatus(deps.getText().shellClosed);
       closeSource();
       deps.onTargetGone(session);
     });
@@ -1112,7 +1686,7 @@ export function createTerminalScreen(
       // EventSource は自動で繋ぎ直す。落ちたままなら状態表示だけ残す。
       if (stale()) return;
       if (stream.readyState === EventSource.CLOSED) {
-        deps.onStatus(deps.getText().screenFailed);
+        showStatus(deps.getText().screenFailed);
       }
     };
   }
@@ -1129,12 +1703,12 @@ export function createTerminalScreen(
     const remembered = rememberedShelves.get(session.id);
     shelfSeq = remembered?.seq ?? 0;
     setShelf(remembered?.entries ?? []);
-    deps.onStatus(deps.getText().connecting);
+    showStatus(deps.getText().connecting);
 
     const created = await ensureTerminal(myGen);
     if (!created) {
       if (myGen === generation && !disposed) {
-        deps.onStatus(deps.getText().loadFailed);
+        showStatus(deps.getText().loadFailed);
       }
       return;
     }
@@ -1166,9 +1740,21 @@ export function createTerminalScreen(
     shelf.highlight(null);
     shelf.setOpened(null);
     queriedImagePaths = new Map<string, number>();
-    markedPath = false;
+    screenLinks = [];
+    pathCache = new Map<string, TerminalPathHit | null>();
+    pathsPending = new Set<string>();
+    pathLookupPausedUntil = 0;
+    pathLookupErrorShown = false;
+    linkLayer.hide();
+    linkLayer.setStrong(null);
     recheckedUrls = new Set<string>();
     baseErrorShown = false;
+    originErrorShown = false;
+    paneLayout = null;
+    locatedEntry = null;
+    if (revealTimer) clearTimeout(revealTimer);
+    revealTimer = null;
+    paneFrame.hidden = true;
     shellScanTail = "";
   }
 
@@ -1184,7 +1770,7 @@ export function createTerminalScreen(
     pendingInput = "";
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = null;
-    deps.onStatus(null);
+    showStatus(null);
   }
 
   return {
@@ -1228,9 +1814,11 @@ export function createTerminalScreen(
     },
     localize() {
       shelf.localize();
+      linkLayer.localize();
       renderTmuxCover();
     },
     updateTmuxCover: renderTmuxCover,
+    applyImageShelfLayout: () => shelf.applyLayout(),
     dispose() {
       disposed = true;
       generation += 1;
@@ -1238,8 +1826,15 @@ export function createTerminalScreen(
       shelf.dispose();
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = null;
+      if (revealTimer) clearTimeout(revealTimer);
+      revealTimer = null;
+      if (linksFrame !== null) cancelAnimationFrame(linksFrame);
+      linksFrame = null;
+      linkLayer.dispose();
       resizeObserver?.disconnect();
       resizeObserver = null;
+      roomObserver?.disconnect();
+      roomObserver = null;
       themeObserver?.disconnect();
       themeObserver = null;
       destroyTerminal();

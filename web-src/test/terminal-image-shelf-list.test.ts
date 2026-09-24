@@ -6,6 +6,7 @@
 // - エージェントが同じ名前で上書きしたのに、棚の古い位置に古い版のまま残る
 // - 読めなかった画像が黙って消える (大きすぎる・消された)
 // - 逆に、拾い過ぎた候補の「無い」まで並んで棚が埋まる
+// - 同じ画像が 2 つのペインに出たとき、古い方の出どころを主にする
 
 import { describe, expect, test } from "vitest";
 import {
@@ -14,8 +15,11 @@ import {
   type TerminalImageRejection,
 } from "../core/terminal-images";
 import {
+  addShelfOrigins,
+  MAX_SHELF_ORIGINS,
   mergeShelf,
   type ShelfEntry,
+  type ShelfOrigin,
   type ShelfSeq,
   shelfEntryByCandidate,
   shelfGallery,
@@ -292,5 +296,95 @@ describe("mergeShelf の読めなかった項目", () => {
     list = mergeShelf(list, { images: [image("a.png")], rejected: [] }, seq);
     expect(names(list)).toEqual(["a.png", "c.png", "b.png"]);
     expect(list[0]?.reason).toBeNull();
+  });
+});
+
+/** tmux のペイン %id に出た出どころ。 */
+function paneOrigin(
+  candidate: string,
+  id: string,
+  line = `wrote ${candidate}`,
+): ShelfOrigin {
+  return {
+    candidate,
+    pane: {
+      id,
+      index: Number(id.slice(1)),
+      title: `pane ${id}`,
+      command: "zsh",
+      folder: "sample-app",
+      left: 0,
+      top: 0,
+      width: 80,
+      height: 24,
+    },
+    shell: null,
+    line,
+  };
+}
+
+describe("addShelfOrigins (出どころ)", () => {
+  const A = image("a.png");
+  const shelfOf = () =>
+    mergeShelf([], { images: [A], rejected: [] }, liveSeq());
+  const places = (entry: ShelfEntry | undefined) =>
+    (entry?.origins ?? []).map((origin) => origin.pane?.id ?? origin.shell);
+
+  test("見つけたばかりの項目は出どころが空", () => {
+    expect(shelfOf()[0]?.origins).toEqual([]);
+  });
+
+  test.each([
+    {
+      name: "足したものが主 (先頭)",
+      steps: [[paneOrigin(A.candidate, "%1")], [paneOrigin(A.candidate, "%2")]],
+      expected: ["%2", "%1"],
+    },
+    {
+      name: "同じペインにまた出たら、そのペインを先頭へ (1 つにまとめる)",
+      steps: [
+        [paneOrigin(A.candidate, "%1")],
+        [paneOrigin(A.candidate, "%2")],
+        [paneOrigin(A.candidate, "%1", "again")],
+      ],
+      expected: ["%1", "%2"],
+    },
+    {
+      name: "1 回の応答に 2 つのペイン (新しい順) はその順のまま",
+      steps: [[paneOrigin(A.candidate, "%3"), paneOrigin(A.candidate, "%1")]],
+      expected: ["%3", "%1"],
+    },
+    {
+      name: "上限を超えた古いものは落とす",
+      steps: ["%1", "%2", "%3", "%4", "%5"].map((id) => [
+        paneOrigin(A.candidate, id),
+      ]),
+      expected: ["%5", "%4", "%3", "%2"].slice(0, MAX_SHELF_ORIGINS),
+    },
+    {
+      name: "tmux でないシェルはシェルの名前でまとめる",
+      steps: [
+        [{ candidate: A.candidate, pane: null, shell: "zsh", line: "x" }],
+        [{ candidate: A.candidate, pane: null, shell: "zsh", line: "y" }],
+      ],
+      expected: ["zsh"],
+    },
+    {
+      name: "項目の無い綴りの出どころは捨てる",
+      steps: [[paneOrigin("/tmp/other.png", "%1")]],
+      expected: [],
+    },
+  ])("$name", ({ steps, expected }) => {
+    let list = shelfOf();
+    for (const origins of steps) list = addShelfOrigins(list, origins);
+    expect(places(list[0])).toEqual(expected);
+  });
+
+  test("新しい行で置き換わる", () => {
+    let list = addShelfOrigins(shelfOf(), [
+      paneOrigin(A.candidate, "%1", "old"),
+    ]);
+    list = addShelfOrigins(list, [paneOrigin(A.candidate, "%1", "new")]);
+    expect(list[0]?.origins.map((origin) => origin.line)).toEqual(["new"]);
   });
 });

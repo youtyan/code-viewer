@@ -11,14 +11,21 @@
  *
  * 明暗: 既定はダーク。ライトは data-theme="light"。
  * テーマ (配色): 既定 (紫) は属性なしで、下の :root と [data-theme="dark"] の値。
- * ほかの 9 つは「テーマ」の節 (core/color-themes.ts の一覧と同じ id) で名前の層の
+ * ほかのテーマは「テーマ」の節 (core/color-themes.ts の一覧と同じ id) で名前の層の
  * 色を上書きする。どの組もコントラストの下限を満たす (color-themes-contrast.test.ts)。
  */
 
 /* [data-theme="light"] は設定のテーマの見本の箱 (views/viewer-settings.ts) で、
-   ダークの窓の中にもライトの既定を描くため (html には :root で当たる)。 */
+   ダークの窓の中にもライトの既定を描くため (html には :root で当たる)。
+   ターミナルの面 ([data-terminal-surface]) にも当てるのは、var() で作る値
+   (光・輪・互換の層・影など) を面の中で作り直すため: custom property は宣言した
+   箱で var() を解いた値を子へ継ぐので、html で解いたままではターミナルの明暗が
+   ダークのとき (下の「ダーク」の塊の説明)、面の中にライトの色が残る。
+   寸法の名前は下の別の塊に置く: 面の中で作り直すと、body や html の style で
+   変えた値が面の中だけ既定に戻る。 */
 :root,
-[data-theme="light"] {
+[data-theme="light"],
+[data-terminal-tone="dark"] [data-terminal-surface] {
   /* ---- 1. 名前の層: ライト (ごく薄い紫の明暗で分ける。純白を広く敷かない) ---- */
   --color-ground:       #f3f1f7;   /* 窓の地。上の行・最下段 */
   --color-nav:          #eae6f0;   /* サイドバー */
@@ -169,7 +176,16 @@
   --diff-add-fg:        #1d4a31;
   --diff-del-fg:        #7a2436;
   --blob-tab-active:    var(--accent);
+  /* shadows */
+  --shadow-sm: 0 1px 0 var(--color-shadow);
+  --shadow-md: 0 3px 6px var(--color-shadow);
+  --shadow-pop: 0 16px 48px var(--color-shadow);
+  --shadow-context-menu: 0 12px 36px var(--color-shadow);
+}
 
+/* 寸法の名前。ターミナルの面には当てない (上の塊の説明)。 */
+:root,
+[data-theme="light"] {
   /* ---- 寸法 (T1: 固定物の実寸。ui-layout.md の 4 層) ---- */
   /* 上に居座る固定物の合計 = 最上段のタブ列 (#main-tabs) だけ。
      消費側 (ツールバーの top・各ページの --chrome-h・sticky) はこれだけを読む。
@@ -212,17 +228,19 @@
      タブや情報バーの見た目を変えたらこの 1 つを直す。
      いまはパンくず・情報のボタン・切替が 1 行 (文書の面の余白の節)。 */
   --file-detail-head-h: 75px;
-  /* shadows */
-  --shadow-sm: 0 1px 0 var(--color-shadow);
-  --shadow-md: 0 3px 6px var(--color-shadow);
-  --shadow-pop: 0 16px 48px var(--color-shadow);
-  --shadow-context-menu: 0 12px 36px var(--color-shadow);
   --context-menu-w: 240px;
   --context-menu-inline-pad: 16px;
 }
 
-/* ---- ダーク: 既定 (紫・面の奥行き) ---- */
-[data-theme="dark"] {
+/* ---- ダーク: 既定 (紫・面の奥行き) ----
+   ターミナルの明暗 (設定 → 表示。core/color-themes.ts の TerminalTone) がダークの
+   とき (html[data-terminal-tone="dark"])、ダークの塊とテーマの塊はターミナルの面
+   ([data-terminal-surface]: 端末のタブの箱・端末の枠・ペインの見本) にも当たり、
+   画面がライトでも面の中はそのテーマのダークになる。塊の後ろの並びと詳細度は
+   html のダークと同じ順 (:root → ダーク → テーマ → テーマのダーク) になるよう、
+   テーマの塊にはテーマの属性を足した形で書く (terminal-tone-css.test.ts)。 */
+[data-theme="dark"],
+[data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:       #101014;
   --color-nav:          #16141c;
   --color-doc:          #1f1b27;
@@ -302,7 +320,8 @@
    状態の色の色相はどのテーマでも同じ。プロジェクトの色はテーマで変えない。
    ダークの塊は [data-theme="dark"] より詳細度が高いので、書いた名前は全部上書きする。 */
 /* 夜の海 / Night sea: 青みの灰の面に、海の青の強調色。キーワードは桃色 */
-[data-color-theme="night-sea"] {
+[data-color-theme="night-sea"],
+[data-color-theme="night-sea"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #edf3f8;
   --color-nav:           #e0eaf2;
   --color-tree:          #e8f0f7;
@@ -351,7 +370,8 @@
   --diff-add-fg:         #264e30;
   --diff-del-fg:         #762828;
 }
-[data-color-theme="night-sea"][data-theme="dark"] {
+[data-color-theme="night-sea"][data-theme="dark"],
+[data-color-theme="night-sea"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #0a0f13;
   --color-nav:           #09141d;
   --color-tree:          #09141d;
@@ -401,7 +421,8 @@
   --diff-del-fg:         #f8ada7;
 }
 /* 森 / Forest: 緑みの灰の面に、深い緑の強調色。キーワードは煉瓦色 */
-[data-color-theme="forest"] {
+[data-color-theme="forest"],
+[data-color-theme="forest"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #eef4f0;
   --color-nav:           #e1ebe4;
   --color-tree:          #e9f1ec;
@@ -450,7 +471,8 @@
   --diff-add-fg:         #264e30;
   --diff-del-fg:         #762828;
 }
-[data-color-theme="forest"][data-theme="dark"] {
+[data-color-theme="forest"][data-theme="dark"],
+[data-color-theme="forest"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #0e120f;
   --color-nav:           #0f1812;
   --color-tree:          #0f1812;
@@ -500,7 +522,8 @@
   --diff-del-fg:         #f8ada7;
 }
 /* 砂 / Sand: 暖かい砂色の面に、素焼きの赤茶の強調色。ダークは今の「暖かい灰色」に近い */
-[data-color-theme="sand"] {
+[data-color-theme="sand"],
+[data-color-theme="sand"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #f6f1ea;
   --color-nav:           #efe7db;
   --color-tree:          #f4eee4;
@@ -549,7 +572,8 @@
   --diff-add-fg:         #264e30;
   --diff-del-fg:         #762828;
 }
-[data-color-theme="sand"][data-theme="dark"] {
+[data-color-theme="sand"][data-theme="dark"],
+[data-color-theme="sand"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #12100d;
   --color-nav:           #18150f;
   --color-tree:          #18150f;
@@ -599,7 +623,8 @@
   --diff-del-fg:         #f8ada7;
 }
 /* 薄墨 / Ink wash: ほぼ無彩色の面と、青灰の強調色。静か。ダークは今の「無彩色」に近い */
-[data-color-theme="ink"] {
+[data-color-theme="ink"],
+[data-color-theme="ink"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #f1f2f4;
   --color-nav:           #e6e8eb;
   --color-tree:          #edeff1;
@@ -648,7 +673,8 @@
   --diff-add-fg:         #264e30;
   --diff-del-fg:         #762828;
 }
-[data-color-theme="ink"][data-theme="dark"] {
+[data-color-theme="ink"][data-theme="dark"],
+[data-color-theme="ink"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #101012;
   --color-nav:           #141518;
   --color-tree:          #141518;
@@ -698,7 +724,8 @@
   --diff-del-fg:         #f8ada7;
 }
 /* 桜 / Blossom: ほんのり桃色の面に、紅紫の強調色 */
-[data-color-theme="sakura"] {
+[data-color-theme="sakura"],
+[data-color-theme="sakura"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #f7f0f3;
   --color-nav:           #f1e4ea;
   --color-tree:          #f6ecf0;
@@ -747,7 +774,8 @@
   --diff-add-fg:         #264e30;
   --diff-del-fg:         #762828;
 }
-[data-color-theme="sakura"][data-theme="dark"] {
+[data-color-theme="sakura"][data-theme="dark"],
+[data-color-theme="sakura"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #140f11;
   --color-nav:           #1c1216;
   --color-tree:          #1c1216;
@@ -797,7 +825,8 @@
   --diff-del-fg:         #f8ada7;
 }
 /* 苔 / Moss: 黄みのある苔色の面に、苔の強調色。型は藤色 */
-[data-color-theme="moss"] {
+[data-color-theme="moss"],
+[data-color-theme="moss"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #f2f3eb;
   --color-nav:           #e9e9dc;
   --color-tree:          #eff0e5;
@@ -846,7 +875,8 @@
   --diff-add-fg:         #264e30;
   --diff-del-fg:         #762828;
 }
-[data-color-theme="moss"][data-theme="dark"] {
+[data-color-theme="moss"][data-theme="dark"],
+[data-color-theme="moss"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #11110c;
   --color-nav:           #16160c;
   --color-tree:          #16160c;
@@ -896,7 +926,8 @@
   --diff-del-fg:         #f8ada7;
 }
 /* 霧 / Mist: 冷たい薄灰の面に、青磁のような淡い青緑の強調色。面どうしの差を少なく */
-[data-color-theme="mist"] {
+[data-color-theme="mist"],
+[data-color-theme="mist"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #f0f5f5;
   --color-nav:           #e3ecec;
   --color-tree:          #ebf2f2;
@@ -945,7 +976,8 @@
   --diff-add-fg:         #264e30;
   --diff-del-fg:         #762828;
 }
-[data-color-theme="mist"][data-theme="dark"] {
+[data-color-theme="mist"][data-theme="dark"],
+[data-color-theme="mist"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #0d1111;
   --color-nav:           #0f1717;
   --color-tree:          #0f1717;
@@ -995,7 +1027,8 @@
   --diff-del-fg:         #f8ada7;
 }
 /* 琥珀 / Amber: 蜂蜜色の面に、琥珀 (黄) の強調色。キーワードは紫、型は青緑 */
-[data-color-theme="amber"] {
+[data-color-theme="amber"],
+[data-color-theme="amber"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #f7f1e9;
   --color-nav:           #f1e7d9;
   --color-tree:          #f6eee3;
@@ -1044,7 +1077,8 @@
   --diff-add-fg:         #264e30;
   --diff-del-fg:         #762828;
 }
-[data-color-theme="amber"][data-theme="dark"] {
+[data-color-theme="amber"][data-theme="dark"],
+[data-color-theme="amber"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #13100b;
   --color-nav:           #1b140b;
   --color-tree:          #1b140b;
@@ -1094,7 +1128,8 @@
   --diff-del-fg:         #f8ada7;
 }
 /* 藍 / Indigo: 藍の面に、藍の強調色。キーワードは珊瑚色 */
-[data-color-theme="indigo"] {
+[data-color-theme="indigo"],
+[data-color-theme="indigo"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #eff2f9;
   --color-nav:           #e3e8f4;
   --color-tree:          #eaeff8;
@@ -1143,7 +1178,8 @@
   --diff-add-fg:         #264e30;
   --diff-del-fg:         #762828;
 }
-[data-color-theme="indigo"][data-theme="dark"] {
+[data-color-theme="indigo"][data-theme="dark"],
+[data-color-theme="indigo"][data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:        #0c0e14;
   --color-nav:           #0d131f;
   --color-tree:          #0d131f;
@@ -3601,7 +3637,8 @@ body[data-focus-scope="sidebar"] :is(#sidebar, #file-list) {
   box-shadow: none;
 }
 body[data-focus-scope="main"] #content {
-  background: var(--bg);
+  --content-face: var(--bg);
+  background: var(--content-face);
   outline: none;
   box-shadow: none;
 }
@@ -3825,10 +3862,9 @@ body.gdp-history-resizing * {
 .scope-settings-title-row + label {
   margin-top: 0;
 }
-#viewer-theme,
-#viewer-language,
-#sidebar-font-size,
-#code-font-size {
+/* 設定のページの選択の欄は全部この見た目 (欄を足しても id を並べ足さずに済むよう、
+   ページの中の select 全部に当てる。viewer-settings.test.ts が確かめる)。 */
+.scope-settings select {
   appearance: none;
   box-sizing: border-box;
   width: 100%;
@@ -3846,25 +3882,16 @@ body.gdp-history-resizing * {
   line-height: 34px;
   cursor: pointer;
 }
-#viewer-theme:hover,
-#viewer-language:hover,
-#sidebar-font-size:hover,
-#code-font-size:hover {
+.scope-settings select:hover {
   border-color: var(--border-strong);
   background-color: var(--bg-mute);
 }
-#viewer-theme:focus,
-#viewer-language:focus,
-#sidebar-font-size:focus,
-#code-font-size:focus {
+.scope-settings select:focus {
   border-color: var(--accent);
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-muted);
 }
-#viewer-theme:disabled,
-#viewer-language:disabled,
-#sidebar-font-size:disabled,
-#code-font-size:disabled {
+.scope-settings select:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
@@ -4844,6 +4871,10 @@ body.gdp-help-page #content {
    縦のスクロールバーはこの箱の右端 = 右の列の左に出る。箱の中の sticky は
    この箱の上端 (0) が基準になるので、中の見出しは chrome の変数を読まない。 */
 #content {
+  /* 本文の箱の後ろに見えている面。本文にフォーカスがある間は本文の面 (上の
+     data-focus-scope)、それ以外は何も塗らず body の地が見える。本文の箱の中で
+     面を塗る部品 (設定の保存の帯) はこれを読む (後ろと違う色で浮かないように)。 */
+  --content-face: var(--color-ground);
   --content-top-gap: 18px;
   /* 本文の左右の余白 (T3)。ソース表示はこの分だけ外へ出て、面を端まで敷く。 */
   --content-pad-x: 24px;
@@ -20258,32 +20289,219 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   text-align: center;
 }
 
+/* ---- ターミナル: 棚の画像が出たペインの枠 (terminal-screen.ts の drawPaneFrame) ----
+   棚の項目にカーソルが載った間 (と「ターミナルで見る」の後しばらく)、その画像の
+   パスが出た tmux のペインを囲む。覆いと同じく .xterm-screen の中で、行と桁
+   (--frame-*。隣にペインがある辺は境目の線のマスまで半マス外へ、ウインドウの
+   端の辺はペインの内側) にマス目の大きさを掛けて位置を決める。線だけで中の
+   文字には重ねない。操作は下の端末へ通す。 */
+.terminal-pane-frame {
+  position: absolute;
+  top: calc(var(--frame-top) * var(--frame-cell-h));
+  left: calc(var(--frame-left) * var(--frame-cell-w));
+  width: calc(var(--frame-cols) * var(--frame-cell-w));
+  height: calc(var(--frame-rows) * var(--frame-cell-h));
+  z-index: 4;
+  box-sizing: border-box;
+  border: 2px solid var(--color-accent-strong);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+.terminal-pane-frame[hidden] {
+  display: none;
+}
+
+/* ---- ターミナル: 画面の中のリンクの印 (views/terminal/terminal-links-layer.ts) ----
+   画像のパス・URL・ファイルのパス。xterm の decoration は代替画面 (tmux) で付か
+   ないので、.xterm-screen の中の層に行と桁 (--link-*) × マス目の大きさで描く。
+   常に出すのは画像のパスの細い下線だけ。カーソルが載った文字列 (と棚から示す
+   パス) は強調色の半透明の面と下線。線と半透明の面だけで文字は読め、操作は下の
+   端末へ通す。重なりは覆い (z-index 4) より下。 */
+.terminal-link-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.terminal-link-mark,
+.terminal-link-hover {
+  position: absolute;
+  top: calc(var(--link-row) * var(--link-cell-h));
+  left: calc(var(--link-col) * var(--link-cell-w));
+  width: calc(var(--link-cols) * var(--link-cell-w));
+  height: var(--link-cell-h);
+}
+.terminal-link-mark {
+  box-shadow: inset 0 -1px 0
+    color-mix(in srgb, var(--color-accent) 70%, transparent);
+}
+.terminal-link-hover {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--color-accent) 34%, transparent);
+  box-shadow: inset 0 -2px 0 var(--color-accent-strong);
+}
+.terminal-screen[data-link-hover="true"] .xterm-screen {
+  cursor: pointer;
+}
+/* リンクに載ったときの帯: 開く・コピー (画像なら見本と名前・寸法も)。見た目は
+   title の吹き出しと同じ系統 (浮く面・線・影)。文字列のすぐ上か下に出し、
+   文字列そのものは隠さない。 */
+.terminal-link-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-overlay);
+  color: var(--color-text);
+  box-shadow: var(--shadow-md);
+  font-family: var(--font-ui);
+  font-size: var(--ui-font-sm);
+}
+.terminal-link-bar[hidden],
+.terminal-link-preview[hidden] {
+  display: none;
+}
+.terminal-link-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-1) 0;
+}
+.terminal-link-preview img {
+  display: block;
+  max-width: calc(var(--space-unit) * 60);
+  max-height: calc(var(--space-unit) * 60);
+  border-radius: var(--radius-sm);
+  background: var(--color-term);
+  object-fit: contain;
+}
+.terminal-link-preview-caption {
+  max-width: calc(var(--space-unit) * 60);
+  overflow: hidden;
+  color: var(--color-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-link-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+.terminal-link-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--ui-control-md);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+.terminal-link-action:hover {
+  background: var(--color-raised);
+}
+.terminal-link-action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.terminal-link-action[data-copied] {
+  color: var(--color-working);
+}
+.terminal-link-action-icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  fill: currentColor;
+}
+
 /* ---- ターミナル: 画像の棚 (views/terminal/image-shelf.ts) ----
-   端末の文字の上に重ねず、画面の右に別の列として場所を取る。画像が無ければ
-   出さない。畳むと画像の印と件数のボタンだけの細い列になる。 */
+   端末の文字の上に重ねず、画面の横に別の列 (右・左) か帯 (下・上) として場所を
+   取る。置き場所は棚の data-placement、大きさは :root の --terminal-shelf-w /
+   --terminal-shelf-h (image-shelf.ts が core/panel-sizes.ts の範囲で書く。CSS に
+   数値を書かない)。画像が無ければ出さない。
+   1 枚 = サムネイル・名前・時刻のまとまり。まとまりの中は詰め (--space-1)、
+   まとまりの間は広く取って薄い線 (--color-line-row) で区切る。ホバーと開いて
+   いる 1 枚は面の色で、どこからどこまでが 1 枚かを見せる。
+   出た所 (ペイン) ごとのまとまりの頭に小さな見出し (補足の色・上に広い間)。 */
+.terminal-screen-row:has(> .terminal-image-shelf[data-placement="left"]) {
+  flex-direction: row-reverse;
+}
+.terminal-screen-row:has(> .terminal-image-shelf[data-placement="bottom"]) {
+  flex-direction: column;
+}
+.terminal-screen-row:has(> .terminal-image-shelf[data-placement="top"]) {
+  flex-direction: column-reverse;
+}
 .terminal-image-shelf {
-  /* T3: サムネイルの枠 (既定の密度で 108×72)。--space-unit から作るので、
-     密度で余白と一緒に比例して変わる。棚の幅は枠 + 左右の余白。 */
-  --shelf-thumb-w: calc(var(--space-unit) * 27);
-  --shelf-thumb-h: calc(var(--space-unit) * 18);
   --shelf-pad: var(--space-3);
+  /* 1 枚のまとまりの内側 (面の色を付けたとき、枠と文字が面の端に接しない)。 */
+  --shelf-item-pad: var(--space-1);
+  /* まとまりの間。真ん中に区切りの線を引く。 */
+  --shelf-item-gap: var(--space-4);
+  --shelf-line-h: calc(var(--ui-font-base) * 1.4);
+  position: relative;
   flex: none;
   display: flex;
   flex-direction: column;
-  width: calc(var(--shelf-thumb-w) + 2 * var(--shelf-pad));
+  min-width: 0;
   min-height: 0;
   background: var(--color-nav);
   color: var(--color-text);
 }
+.terminal-image-shelf[data-placement="right"],
+.terminal-image-shelf[data-placement="left"] {
+  width: var(--terminal-shelf-w);
+}
+.terminal-image-shelf[data-placement="bottom"],
+.terminal-image-shelf[data-placement="top"] {
+  /* 下・上: サムネイルの高さは棚の高さから、見出し・名前と時刻の 2 行・余白を
+     引いたもの。幅はその 3:2。 */
+  --shelf-thumb-h: calc(
+    var(--terminal-shelf-h) - var(--space-6) - var(--shelf-pad) - 2 *
+      var(--shelf-item-pad) - 3 * var(--space-1) - 3 * var(--shelf-line-h)
+  );
+  height: var(--terminal-shelf-h);
+}
 .terminal-image-shelf[hidden],
 .terminal-image-shelf-head[hidden],
 .terminal-image-shelf-list[hidden],
-.terminal-image-shelf-expand[hidden] {
+.terminal-image-shelf-expand[hidden],
+.terminal-image-shelf-resizer[hidden] {
   display: none;
 }
+/* 畳んだ棚: 画像の印と件数のボタンだけの細い帯。 */
 .terminal-image-shelf[data-collapsed="true"] {
-  width: calc(var(--ui-control-sm) + 2 * var(--space-2));
   padding: var(--space-2);
+}
+.terminal-image-shelf[data-collapsed="true"]:is(
+    [data-placement="right"],
+    [data-placement="left"]
+  ) {
+  width: calc(var(--ui-control-sm) + 2 * var(--space-2));
+}
+.terminal-image-shelf[data-collapsed="true"]:is(
+    [data-placement="bottom"],
+    [data-placement="top"]
+  ) {
+  height: auto;
+  flex-direction: row;
+  padding: var(--space-1) var(--space-2);
+}
+/* 見出し・ペインの見出し・画像の名前は、縁のドラッグで選ばれないようにする
+   (パスのコピーは右クリックのメニューで)。 */
+.terminal-image-shelf-head,
+.terminal-image-shelf-group-head,
+.terminal-image-shelf-open,
+.terminal-image-shelf-name,
+.terminal-image-shelf-meta {
+  user-select: none;
 }
 .terminal-image-shelf-head {
   flex: none;
@@ -20301,6 +20519,41 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   color: var(--color-text-3);
   font-variant-numeric: tabular-nums;
 }
+/* カーソルかフォーカスが載っている項目の詳しいこと。見出しの行の中で題と件数に
+   代わる (行の高さは変えない)。パスは真ん中 (ディレクトリ) を省略し、ファイル名は
+   残す。全文は行の title。 */
+.terminal-image-shelf-detail {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+.terminal-image-shelf-detail[hidden] {
+  display: none;
+}
+.terminal-image-shelf-detail-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.terminal-image-shelf-detail-name {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--color-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+.terminal-image-shelf-detail-facts {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  /* 頭の「 · 」の空白を詰めない (flex の項目の頭の空白は消える)。 */
+  white-space: pre;
+}
 .terminal-image-shelf-toggle,
 .terminal-image-shelf-expand {
   display: inline-grid;
@@ -20316,6 +20569,8 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 }
 .terminal-image-shelf-toggle {
   width: var(--ui-control-sm);
+}
+.terminal-image-shelf-move {
   margin-left: auto;
 }
 .terminal-image-shelf-expand {
@@ -20324,6 +20579,14 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   width: 100%;
   font-size: var(--ui-font-sm);
 }
+.terminal-image-shelf[data-collapsed="true"]:is(
+    [data-placement="bottom"],
+    [data-placement="top"]
+  )
+  .terminal-image-shelf-expand {
+  width: auto;
+  padding: 0 var(--space-2);
+}
 .terminal-image-shelf-toggle:hover,
 .terminal-image-shelf-expand:hover {
   background: var(--color-raised);
@@ -20331,6 +20594,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 }
 .terminal-image-shelf-toggle:focus-visible,
 .terminal-image-shelf-expand:focus-visible,
+.terminal-image-shelf-resizer:focus-visible,
 .terminal-image-shelf-open:focus-visible .terminal-image-shelf-frame {
   outline: none;
   box-shadow: var(--focus-ring);
@@ -20346,21 +20610,170 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   height: var(--icon-md);
   fill: currentColor;
 }
+/* 内側の縁 (端末の側) の掴み。掴みしろは面の分割線 (.main-split-divider) と
+   同じ 1.5 単位で縁をまたぎ、ホバー・ドラッグ中に 2px の線。 */
+.terminal-image-shelf-resizer {
+  --shelf-grip: calc(var(--space-unit) * 1.5);
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+.terminal-image-shelf-resizer::after {
+  content: "";
+  position: absolute;
+  background: transparent;
+}
+.terminal-image-shelf-resizer:hover::after,
+.terminal-image-shelf.is-resizing .terminal-image-shelf-resizer::after {
+  background: var(--color-accent);
+}
+.terminal-image-shelf:is([data-placement="right"], [data-placement="left"])
+  .terminal-image-shelf-resizer {
+  top: 0;
+  bottom: 0;
+  width: var(--shelf-grip);
+  cursor: col-resize;
+}
+.terminal-image-shelf:is([data-placement="right"], [data-placement="left"])
+  .terminal-image-shelf-resizer::after {
+  top: 0;
+  bottom: 0;
+  left: calc(var(--shelf-grip) / 2 - 1px);
+  width: 2px;
+}
+.terminal-image-shelf[data-placement="right"] .terminal-image-shelf-resizer {
+  left: calc(var(--shelf-grip) / -2);
+}
+.terminal-image-shelf[data-placement="left"] .terminal-image-shelf-resizer {
+  right: calc(var(--shelf-grip) / -2);
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-resizer {
+  left: 0;
+  right: 0;
+  height: var(--shelf-grip);
+  cursor: row-resize;
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-resizer::after {
+  left: 0;
+  right: 0;
+  top: calc(var(--shelf-grip) / 2 - 1px);
+  height: 2px;
+}
+.terminal-image-shelf[data-placement="bottom"] .terminal-image-shelf-resizer {
+  top: calc(var(--shelf-grip) / -2);
+}
+.terminal-image-shelf[data-placement="top"] .terminal-image-shelf-resizer {
+  bottom: calc(var(--shelf-grip) / -2);
+}
+.terminal-image-shelf-list,
+.terminal-image-shelf-group-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 .terminal-image-shelf-list {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: var(--shelf-pad);
+  min-width: 0;
   min-height: 0;
-  margin: 0;
-  padding: 0 var(--shelf-pad) var(--shelf-pad);
+  padding: 0 calc(var(--shelf-pad) - var(--shelf-item-pad)) var(--shelf-pad);
   overflow-y: auto;
   overscroll-behavior: contain;
-  list-style: none;
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-list {
+  flex-direction: row;
+  align-items: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* 出た所 (ペイン) ごとのまとまり。見出しは画像のまとまりと違う見た目: 小さな
+   補足の色の 1 行で、上に広い間を取る (最初のまとまりは棚の見出しの下に詰める)。 */
+.terminal-image-shelf-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.terminal-image-shelf-group + .terminal-image-shelf-group {
+  margin-top: var(--space-5);
+}
+.terminal-image-shelf-group-head {
+  padding: 0 var(--shelf-item-pad) var(--space-1);
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 下・上: まとまりは横に並び、見出しは画像のまとまりの上の横書きの 1 行
+   (まとまりの幅で省略。全文は title)。 */
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-group {
+  flex: none;
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-group
+  + .terminal-image-shelf-group {
+  margin-top: 0;
+  margin-left: var(--space-5);
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-group-head {
+  /* 見出しの長さでまとまりを広げない (幅は画像の並びが決める)。 */
+  width: 0;
+  min-width: 100%;
+  line-height: var(--shelf-line-h);
+}
+.terminal-image-shelf-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--shelf-item-gap);
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-group-items {
+  flex-direction: row;
+}
+/* 1 枚のまとまり。 */
+.terminal-image-shelf-item {
+  position: relative;
+  padding: var(--shelf-item-pad);
+  border-radius: var(--radius-md);
+}
+/* まとまりの間の区切りの線 (間の真ん中)。 */
+.terminal-image-shelf-item + .terminal-image-shelf-item::before {
+  content: "";
+  position: absolute;
+  top: calc(var(--shelf-item-gap) / -2);
+  left: var(--shelf-item-pad);
+  right: var(--shelf-item-pad);
+  border-top: 1px solid var(--color-line-row);
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-item
+  + .terminal-image-shelf-item::before {
+  top: var(--shelf-item-pad);
+  bottom: var(--shelf-item-pad);
+  left: calc(var(--shelf-item-gap) / -2);
+  right: auto;
+  border-top: 0;
+  border-left: 1px solid var(--color-line-row);
+}
+.terminal-image-shelf-item:hover,
+.terminal-image-shelf-item:has(.terminal-image-shelf-open:focus-visible) {
+  background: var(--color-raised);
+}
+.terminal-image-shelf-item[data-opened],
+.terminal-image-shelf-item[data-linked] {
+  background: var(--color-select);
 }
 .terminal-image-shelf-open {
   display: flex;
   flex-direction: column;
+  gap: var(--space-1);
   width: 100%;
   padding: 0;
   border: 0;
@@ -20370,15 +20783,22 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   text-align: left;
   cursor: zoom-in;
 }
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-open {
+  width: calc(var(--shelf-thumb-h) * 3 / 2);
+}
 .terminal-image-shelf-frame {
   display: grid;
   place-items: center;
-  width: var(--shelf-thumb-w);
-  height: var(--shelf-thumb-h);
-  margin-bottom: var(--space-1);
+  width: 100%;
+  aspect-ratio: 3 / 2;
   overflow: hidden;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--color-term);
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-frame {
+  height: var(--shelf-thumb-h);
 }
 .terminal-image-shelf-frame img {
   display: block;
@@ -20386,33 +20806,27 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   height: 100%;
   object-fit: contain;
 }
-.terminal-image-shelf-open:hover .terminal-image-shelf-frame {
-  box-shadow: 0 0 0 1px var(--color-line-strong);
-}
 /* 文字の中のパスにカーソルが載った画像。棚の同じ列で強い選択は 1 つだけ。 */
 .terminal-image-shelf-item[data-linked] .terminal-image-shelf-frame,
 .terminal-image-shelf-list:not(:has([data-linked])) .terminal-image-shelf-item[data-opened] .terminal-image-shelf-frame {
   box-shadow: 0 0 0 2px var(--color-accent-strong), var(--glow-select);
 }
-.terminal-image-shelf-name {
+.terminal-image-shelf-name,
+.terminal-image-shelf-meta {
   overflow: hidden;
-  font-size: var(--ui-font-base);
+  line-height: var(--shelf-line-h);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 寸法と「何分前」は塊ごとに折り返す (途中で省略しない)。 */
+.terminal-image-shelf-name {
+  font-size: var(--ui-font-base);
+}
 .terminal-image-shelf-meta {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: var(--space-2);
   color: var(--color-text-3);
   font-size: var(--ui-font-sm);
   font-variant-numeric: tabular-nums;
 }
-.terminal-image-shelf-meta > span {
-  white-space: nowrap;
-}
-/* 読めなかった項目: サムネイルの代わりに印、理由は折り返して全部読ませる。 */
+/* 読めなかった項目: サムネイルの代わりに印、2 行目に理由 (全文は札)。 */
 .terminal-image-shelf-item[data-failed="true"] .terminal-image-shelf-open {
   cursor: pointer;
 }
@@ -20425,11 +20839,9 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   fill: currentColor;
   opacity: 0.6;
 }
-.terminal-image-shelf-item[data-failed="true"] .terminal-image-shelf-meta > span {
+.terminal-image-shelf-item[data-failed="true"] .terminal-image-shelf-meta {
   color: var(--color-waiting);
-  white-space: normal;
 }
-
 /* 拡大表示の前へ・次へ・パスのコピー。 */
 .terminal-lightbox-nav {
   flex: none;
@@ -24064,20 +24476,14 @@ body.gdp-help-page #content {
 .scope-settings .scope-settings-help + .scope-settings-toggle {
   margin-top: var(--space-4);
 }
-#viewer-theme,
-#viewer-language,
-#sidebar-font-size,
-#code-font-size,
+.scope-settings select,
 #scope-omit-dirs,
 #scope-exclude-names {
   border-color: var(--color-line-soft);
   background-color: var(--color-inset);
   color: var(--color-text);
 }
-#viewer-theme,
-#viewer-language,
-#sidebar-font-size,
-#code-font-size {
+.scope-settings select {
   width: min(calc(var(--space-unit) * 110), 100%);
   height: var(--ui-control-md);
 }
@@ -24234,9 +24640,15 @@ body.gdp-help-page #content {
   align-items: center;
   column-gap: var(--space-4);
   margin-top: auto;
-  padding: var(--space-4) 0;
+  /* 左右に内側の余白を取り、その分だけ外へ出す: 文言の左端とボタンの右端は
+     ほかの節の欄の端にそろい、帯の端には接しない。 */
+  margin-inline: calc(-1 * var(--space-4));
+  padding: var(--space-4);
   border-top: 1px solid var(--color-line-soft);
-  background: var(--color-ground);
+  background: var(--content-face);
+}
+.scope-settings-footer[hidden] {
+  display: none;
 }
 .scope-settings-footer > p {
   grid-column: 1;

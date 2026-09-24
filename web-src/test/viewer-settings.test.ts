@@ -22,6 +22,7 @@ import {
   type SettingsCategory,
   type SettingsDraft,
   type ThemeChoice,
+  type ViewerSettingsChoices,
   type ViewerSettingsDraft,
   type ViewerSettingsText,
   type ViewerSettingsValues,
@@ -71,6 +72,21 @@ const EN_TEXT: ViewerSettingsText = {
     mist: "Mist",
     amber: "Amber",
     indigo: "Indigo",
+    github: "GitHub",
+  },
+  terminalTone: "Terminal colors",
+  terminalToneHelp: "The terminal stays dark.",
+  terminalToneNames: {
+    dark: "Always dark (default)",
+    match: "Match light or dark",
+  },
+  imageShelfPlacement: "Image shelf",
+  imageShelfPlacementHelp: "Where the image shelf sits.",
+  imageShelfPlacementNames: {
+    right: "Right of the terminal",
+    left: "Left of the terminal",
+    bottom: "Below the terminal",
+    top: "Above the terminal",
   },
   language: "Language",
   fileListFontSize: "UI font size",
@@ -93,6 +109,7 @@ const EN_TEXT: ViewerSettingsText = {
   saving: "Saving…",
   saved: "Saved.",
   unsaved: "Unsaved changes.",
+  noChanges: "No changes to save.",
   saveNote: "Edits are not applied until you save.",
   watchLimitInvalid: (min, max) => `Use an integer from ${min} to ${max}.`,
   scopeSource: (project, source) => `${project} / ${source}`,
@@ -159,6 +176,7 @@ const JA_TEXT: ViewerSettingsText = {
     mist: "霧",
     amber: "琥珀",
     indigo: "藍",
+    github: "GitHub",
   },
   sizeRegular: "標準",
   reset: "デフォルトに戻す",
@@ -171,6 +189,8 @@ function defaultValues(): ViewerSettingsValues {
     language: "en",
     sidebarFontSize: "regular",
     codeFontSize: "regular",
+    terminalTone: "dark",
+    terminalImageShelfPlacement: "right",
     omitDirs: "node_modules\ndist",
     excludeNames: ".DS_Store",
     watchLimit: 2048,
@@ -193,6 +213,7 @@ function defaultValues(): ViewerSettingsValues {
 
 type Recorded = {
   save: Array<{ draft: ViewerSettingsDraft; restoreDefaults: boolean }>;
+  choose: Partial<ViewerSettingsChoices>[];
   agentRulesSave: string[];
   agentRulesReset: number;
   refresh: number;
@@ -224,20 +245,13 @@ function setup(
   let language: "en" | "ja" = options.language ?? "en";
   const values = defaultValues();
   const defaults: ViewerSettingsDraft = {
-    language: "en",
-    sidebarFontSize: "regular",
-    codeFontSize: "regular",
     omitDirs: "node_modules",
     excludeNames: ".DS_Store",
     watchLimit: 4096,
-    uploadEnabled: true,
-    agentNotifyWaiting: true,
-    agentNotifyDone: true,
-    inferFkRails: false,
-    s3TooltipEnabled: true,
   };
   const calls: Recorded = {
     save: [],
+    choose: [],
     agentRulesSave: [],
     agentRulesReset: 0,
     refresh: 0,
@@ -271,6 +285,10 @@ function setup(
       return { ...values };
     },
     getDefaultValues: () => ({ ...defaults }),
+    onChoose: (choice) => {
+      calls.choose.push(choice);
+      Object.assign(values, choice);
+    },
     refresh:
       options.refresh ??
       (async () => {
@@ -804,77 +822,178 @@ describe("viewer settings form", () => {
 
   test.each([
     {
-      name: "language",
-      selector: "#viewer-language",
-      value: "ja",
-      event: "change" as const,
-    },
-    {
-      name: "UI font size",
-      selector: "#sidebar-font-size",
-      value: "large",
-      event: "change" as const,
-    },
-    {
-      name: "code font size",
-      selector: "#code-font-size",
-      value: "compact",
-      event: "change" as const,
-    },
-    {
       name: "excluded directories",
       selector: "#scope-omit-dirs",
       value: "vendor",
-      event: "input" as const,
     },
     {
       name: "hidden names",
       selector: "#scope-exclude-names",
       value: "Thumbs.db",
-      event: "input" as const,
     },
-  ])("editing $name does not save it", (testCase) => {
+  ])("typing in $name only marks it unsaved", (testCase) => {
     const { settings, host, calls } = setup();
     settings.mount(host);
 
-    const target = q<HTMLSelectElement | HTMLTextAreaElement>(
-      document,
-      testCase.selector,
-    );
+    const target = q<HTMLTextAreaElement>(document, testCase.selector);
     target.value = testCase.value;
-    fire(target, testCase.event);
+    fire(target, "input");
 
-    expect(calls.save).toEqual([]);
-    expect(
-      q<HTMLButtonElement>(document, "#scope-settings-save").disabled,
-    ).toBe(false);
+    expect({
+      saved: calls.save,
+      chosen: calls.choose,
+      saveDisabled: q<HTMLButtonElement>(document, "#scope-settings-save")
+        .disabled,
+    }).toEqual({ saved: [], chosen: [], saveDisabled: false });
   });
 
+  // 選ぶ欄 (選択の欄・トグル) は選んだ時点で当てて保存する。保存の帯を通らない。
   test.each([
+    { selector: "#viewer-language", choice: { language: "ja" } },
+    { selector: "#sidebar-font-size", choice: { sidebarFontSize: "large" } },
+    { selector: "#code-font-size", choice: { codeFontSize: "compact" } },
+    { selector: "#viewer-terminal-tone", choice: { terminalTone: "match" } },
     {
-      name: "uploads",
-      selector: "#upload-enabled",
-      checked: false,
+      selector: "#viewer-image-shelf-placement",
+      choice: { terminalImageShelfPlacement: "bottom" },
     },
+    { selector: "#upload-enabled", choice: { uploadEnabled: false } },
     {
-      name: "Rails FK inference",
-      selector: "#datastore-infer-fk",
-      checked: true,
+      selector: "#agent-notify-waiting",
+      choice: { agentNotifyWaiting: false },
     },
-    {
-      name: "the S3 hover preview",
-      selector: "#datastore-s3-tooltip",
-      checked: false,
-    },
-  ])("toggling $name does not save it", (testCase) => {
+    { selector: "#agent-notify-done", choice: { agentNotifyDone: false } },
+    { selector: "#datastore-infer-fk", choice: { inferFkRails: true } },
+    { selector: "#datastore-s3-tooltip", choice: { s3TooltipEnabled: false } },
+  ] satisfies Array<{
+    selector: string;
+    choice: Partial<ViewerSettingsChoices>;
+  }>)("picking $selector applies and saves it at once, without the save button", ({
+    selector,
+    choice,
+  }) => {
     const { settings, host, calls } = setup();
     settings.mount(host);
 
-    const toggle = q<HTMLInputElement>(document, testCase.selector);
-    toggle.checked = testCase.checked;
-    fire(toggle, "change");
+    const field = q<HTMLInputElement | HTMLSelectElement>(document, selector);
+    const [value] = Object.values(choice);
+    if (typeof value === "boolean") (field as HTMLInputElement).checked = value;
+    else field.value = value;
+    fire(field, "change");
 
-    expect(calls.save).toEqual([]);
+    expect({
+      chosen: calls.choose,
+      saved: calls.save,
+      state: q<HTMLElement>(document, "#scope-settings-save-status").dataset
+        .state,
+      saveDisabled: q<HTMLButtonElement>(document, "#scope-settings-save")
+        .disabled,
+    }).toEqual({
+      chosen: [choice],
+      saved: [],
+      state: "clean",
+      saveDisabled: true,
+    });
+  });
+
+  // ターミナルの明暗は 2 択。既定 (常にダーク) が先頭で、保存してある値を映す。
+  test.each([
+    { saved: "dark", shown: "dark" },
+    { saved: "match", shown: "match" },
+  ])("the terminal colors field shows the saved $saved", ({ saved, shown }) => {
+    const { settings, host, values } = setup();
+    values.terminalTone = saved;
+    settings.mount(host);
+
+    const field = q<HTMLSelectElement>(document, "#viewer-terminal-tone");
+    expect({
+      value: field.value,
+      options: Array.from(field.options).map((option) => [
+        option.value,
+        option.textContent,
+      ]),
+      label: q<HTMLLabelElement>(document, 'label[for="viewer-terminal-tone"]')
+        .textContent,
+    }).toEqual({
+      value: shown,
+      options: [
+        ["dark", "Always dark (default)"],
+        ["match", "Match light or dark"],
+      ],
+      label: "Terminal colors",
+    });
+  });
+
+  test("a picked value stays picked when the page is shown again", () => {
+    const { settings, host } = setup();
+    settings.mount(host);
+    const size = q<HTMLSelectElement>(document, "#code-font-size");
+    size.value = "xlarge";
+    fire(size, "change");
+    const upload = q<HTMLInputElement>(document, "#upload-enabled");
+    upload.checked = false;
+    fire(upload, "change");
+
+    settings.mount(host);
+
+    expect([size.value, upload.checked]).toEqual(["xlarge", false]);
+  });
+
+  // 保存の帯は、打ち込む欄 (「変更を保存」で保存するもの) のある分類にだけ出す。
+  describe("the save bar", () => {
+    const footer = () => q<HTMLElement>(document, ".scope-settings-footer");
+
+    test.each([
+      ["appearance", false],
+      ["agents", false],
+      ["accounts", true],
+      ["shortcuts", true],
+      ["files", true],
+      ["advanced", true],
+    ] as const)("in the %s category is shown: %s", (category, shown) => {
+      const { settings, host } = setup();
+      settings.mount(host);
+      settings.setCategory(category);
+      expect(footer().hidden).toBe(!shown);
+    });
+
+    test("says there is nothing to save while nothing typed is unsaved", () => {
+      const { settings, host } = setup();
+      settings.mount(host);
+      settings.setCategory("files");
+      const status = q<HTMLElement>(document, "#scope-settings-save-status");
+      expect([status.dataset.state, status.textContent]).toEqual([
+        "clean",
+        "No changes to save.",
+      ]);
+    });
+
+    test("stays in a category without typed fields while an edit elsewhere is unsaved", () => {
+      const { settings, host } = setup();
+      settings.mount(host);
+      settings.setCategory("files");
+      const omitDirs = q<HTMLTextAreaElement>(document, "#scope-omit-dirs");
+      omitDirs.value = "vendor";
+      fire(omitDirs, "input");
+
+      settings.setCategory("appearance");
+
+      expect(footer().hidden).toBe(false);
+    });
+
+    test("is shown while searching lists a typed field", () => {
+      const { settings, host } = setup();
+      settings.mount(host);
+      const searchHost = document.createElement("div");
+      settings.mountSearch(searchHost);
+      const search = q<HTMLInputElement>(searchHost, "#scope-settings-search");
+      search.value = "Language";
+      fire(search, "input");
+      expect(footer().hidden).toBe(true);
+      search.value = "Excluded";
+      fire(search, "input");
+      expect(footer().hidden).toBe(false);
+    });
   });
 
   test("the theme applies as soon as it is picked, without the save button", () => {
@@ -897,7 +1016,7 @@ describe("viewer settings form", () => {
     ).toBe(true);
   });
 
-  // テーマの見本: 10 個が一覧の順に並び、各見本はライトとダークの箱をそのテーマの
+  // テーマの見本: 全部が一覧の順に並び、各見本はライトとダークの箱をそのテーマの
   // 属性 (html と同じ) で描く。既定は data-color-theme を付けない (style.css の既定)。
   test("the theme picker shows every theme with a light and a dark sample", () => {
     const { settings, host } = setup();
@@ -996,25 +1115,16 @@ describe("viewer settings form", () => {
     ).toEqual(COLOR_THEMES.map((id) => COLOR_THEME_NAMES[id].ja));
   });
 
-  test("the save button submits all edited settings once", async () => {
+  test("the save button submits all typed settings once", async () => {
     const { settings, host, calls } = setup();
     settings.mount(host);
 
-    const language = q<HTMLSelectElement>(document, "#viewer-language");
-    language.value = "ja";
-    fire(language, "change");
     const omitDirs = q<HTMLTextAreaElement>(document, "#scope-omit-dirs");
     omitDirs.value = "vendor";
     fire(omitDirs, "input");
-    const upload = q<HTMLInputElement>(document, "#upload-enabled");
-    upload.checked = false;
-    fire(upload, "change");
-    const notifyWaiting = q<HTMLInputElement>(
-      document,
-      "#agent-notify-waiting",
-    );
-    notifyWaiting.checked = false;
-    fire(notifyWaiting, "change");
+    const watchLimit = q<HTMLInputElement>(document, "#scope-watch-limit");
+    watchLimit.value = "512";
+    fire(watchLimit, "input");
     q<HTMLButtonElement>(document, "#scope-settings-save").click();
     await Promise.resolve();
     await Promise.resolve();
@@ -1022,17 +1132,9 @@ describe("viewer settings form", () => {
     expect(calls.save).toEqual([
       {
         draft: {
-          language: "ja",
-          sidebarFontSize: "regular",
-          codeFontSize: "regular",
           omitDirs: "vendor",
           excludeNames: ".DS_Store",
-          watchLimit: 2048,
-          uploadEnabled: false,
-          agentNotifyWaiting: false,
-          agentNotifyDone: true,
-          inferFkRails: false,
-          s3TooltipEnabled: true,
+          watchLimit: 512,
         },
         restoreDefaults: false,
       },
@@ -1050,21 +1152,24 @@ describe("viewer settings form", () => {
       },
     });
     settings.mount(host);
-    const fontSize = q<HTMLSelectElement>(document, "#sidebar-font-size");
-    fontSize.value = "large";
-    fire(fontSize, "change");
-    const upload = q<HTMLInputElement>(document, "#upload-enabled");
-    upload.checked = false;
-    fire(upload, "change");
+    const excludeNames = q<HTMLTextAreaElement>(
+      document,
+      "#scope-exclude-names",
+    );
+    excludeNames.value = "Thumbs.db";
+    fire(excludeNames, "input");
+    const range = q<HTMLInputElement>(document, "#scope-watch-limit-range");
+    range.value = "8192";
+    fire(range, "change");
 
     q<HTMLButtonElement>(document, "#scope-settings-save").click();
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(changedFields).toEqual(["sidebarFontSize", "uploadEnabled"]);
+    expect(changedFields).toEqual(["excludeNames", "watchLimit"]);
   });
 
-  test("mounting again does not register the save handler twice", async () => {
+  test("mounting again does not register the handlers twice", async () => {
     const { settings, host, calls } = setup();
     settings.mount(host);
     settings.mount(host);
@@ -1072,11 +1177,14 @@ describe("viewer settings form", () => {
     const select = q<HTMLSelectElement>(document, "#viewer-language");
     select.value = "ja";
     fire(select, "change");
+    const omitDirs = q<HTMLTextAreaElement>(document, "#scope-omit-dirs");
+    omitDirs.value = "vendor";
+    fire(omitDirs, "input");
     q<HTMLButtonElement>(document, "#scope-settings-save").click();
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(calls.save).toHaveLength(1);
+    expect([calls.choose.length, calls.save.length]).toEqual([1, 1]);
     expect(document.querySelectorAll("#viewer-language")).toHaveLength(1);
   });
 
@@ -1185,7 +1293,7 @@ describe("viewer settings form", () => {
       const { settings, host, calls } = setup({ draft: section.draft });
       settings.mount(host);
       expect(saveButton().disabled).toBe(true);
-      expect(status().dataset.state).toBe("");
+      expect(status().dataset.state).toBe("clean");
 
       section.edit();
       expect(saveButton().disabled).toBe(false);
@@ -1205,7 +1313,7 @@ describe("viewer settings form", () => {
       settings.mount(host);
       section.edit();
       section.edit(false);
-      expect(status().dataset.state).toBe("");
+      expect(status().dataset.state).toBe("clean");
       expect(saveButton().disabled).toBe(true);
     });
 
@@ -1213,9 +1321,9 @@ describe("viewer settings form", () => {
       const section = fakeDraft();
       const { settings, host, calls } = setup({ draft: section.draft });
       settings.mount(host);
-      const upload = q<HTMLInputElement>(document, "#upload-enabled");
-      upload.checked = !upload.checked;
-      fire(upload, "change");
+      const omitDirs = q<HTMLTextAreaElement>(document, "#scope-omit-dirs");
+      omitDirs.value = "vendor";
+      fire(omitDirs, "input");
       section.edit();
       saveButton().click();
       await vi.waitFor(() => expect(status().dataset.state).toBe("saved"));
@@ -1228,9 +1336,9 @@ describe("viewer settings form", () => {
       section.draft.problem = () => "Fix the sample JSON before saving.";
       const { settings, host, calls } = setup({ draft: section.draft });
       settings.mount(host);
-      const upload = q<HTMLInputElement>(document, "#upload-enabled");
-      upload.checked = !upload.checked;
-      fire(upload, "change");
+      const omitDirs = q<HTMLTextAreaElement>(document, "#scope-omit-dirs");
+      omitDirs.value = "vendor";
+      fire(omitDirs, "input");
       section.edit();
       saveButton().click();
       const error = q<HTMLElement>(document, "#scope-settings-save-error");
@@ -1266,6 +1374,8 @@ describe("viewer settings form", () => {
       const { settings, host } = setup();
       settings.mount(host);
       const reset = () => q<HTMLButtonElement>(document, "#scope-omit-reset");
+      expect(reset().hidden).toBe(true);
+      settings.setCategory("files");
       expect(reset().hidden).toBe(false);
       settings.setCategory("accounts");
       expect(reset().hidden).toBe(true);
@@ -1496,9 +1606,9 @@ describe("viewer settings form", () => {
     const harness = setup({ refresh: () => refresh.promise });
     harness.settings.mount(harness.host);
 
-    const language = q<HTMLSelectElement>(document, "#viewer-language");
-    language.value = "ja";
-    fire(language, "change");
+    const omitDirs = q<HTMLTextAreaElement>(document, "#scope-omit-dirs");
+    omitDirs.value = "vendor";
+    fire(omitDirs, "input");
     q<HTMLButtonElement>(document, "#scope-settings-save").click();
     await Promise.resolve();
     await Promise.resolve();
@@ -1509,5 +1619,34 @@ describe("viewer settings form", () => {
     expect(
       q<HTMLElement>(document, "#scope-settings-refresh-error").hidden,
     ).toBe(true);
+  });
+});
+
+// 設定のページの選択の欄は、どれも同じ見た目 (矢印を自前で描いた欄)。見た目を id の
+// 一覧で当てていたときは、足した欄 (ターミナルの明暗) が素の select のまま出た。
+describe("every choice field on the page has the settings look", () => {
+  let style: HTMLStyleElement;
+  beforeAll(() => {
+    style = document.createElement("style");
+    style.textContent = readFileSync("web/style.css", "utf8");
+    document.head.append(style);
+  });
+  afterAll(() => style.remove());
+
+  test("each select", () => {
+    const { settings, host } = setup();
+    settings.mount(host);
+
+    const looks = Array.from(host.querySelectorAll("select")).map((select) => {
+      const css = getComputedStyle(select);
+      return [select.id, css.appearance, css.cursor];
+    });
+    expect(looks.length).toBeGreaterThanOrEqual(5);
+    expect(
+      looks.filter(
+        ([, appearance, cursor]) =>
+          appearance !== "none" || cursor !== "pointer",
+      ),
+    ).toEqual([]);
   });
 });

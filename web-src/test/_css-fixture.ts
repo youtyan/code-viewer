@@ -119,7 +119,17 @@ function splitSelectorList(list: string): string[] {
     }
   }
   parts.push(list.slice(start));
-  return parts.map((part) => part.trim()).filter(Boolean);
+  // 整形で折り返した選択子 (`:is(\n  [a],\n  [b]\n)`) を 1 行に戻す。happy-dom の
+  // matches は括弧の内側の改行を受け付けない。空白の並びは CSS では 1 つと同じ。
+  return parts
+    .map((part) =>
+      part
+        .replace(/\s+/g, " ")
+        .replace(/\(\s+/g, "(")
+        .replace(/\s+\)/g, ")")
+        .trim(),
+    )
+    .filter(Boolean);
 }
 
 export function parseCss(source: string): CssRule[] {
@@ -238,4 +248,21 @@ export function resolveVar(
     resolvedValue = next;
   }
   throw new Error(`Could not resolve CSS variables in ${value}`);
+}
+
+/**
+ * 長さを px の数にする。var() を variables で解いてから、px と数と四則と calc()
+ * だけの式を計算する (それ以外が残れば投げる)。
+ */
+export function resolvePx(
+  value: string,
+  variables: Map<string, string>,
+): number {
+  const resolved = resolveVar(value, variables);
+  const expression = resolved
+    .replace(/calc\(/g, "(")
+    .replace(/(\d*\.?\d+)px/g, "$1");
+  if (!/^[\d\s.+\-*/()]+$/.test(expression))
+    throw new Error(`not a plain length: ${value} (${resolved})`);
+  return Number(new Function(`return (${expression});`)());
 }

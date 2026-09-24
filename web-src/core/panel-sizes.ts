@@ -20,6 +20,23 @@ export const SIDEBAR_WIDTH: PanelSize = { default: 240, min: 180, max: 900 };
  */
 export const HISTORY_WIDTH: PanelSize = { default: 320, min: 240, max: 800 };
 
+/**
+ * ターミナルの画像の棚を右・左に置いたときの幅。既定はサムネイルが見分けられ、
+ * 名前が 1 行で読める幅。
+ */
+export const TERMINAL_IMAGE_SHELF_WIDTH: PanelSize = {
+  default: 220,
+  min: 160,
+  max: 480,
+};
+
+/** 同じく下・上に置いたときの高さ (見出しの行・サムネイル・名前と時刻の 2 行)。 */
+export const TERMINAL_IMAGE_SHELF_HEIGHT: PanelSize = {
+  default: 180,
+  min: 140,
+  max: 400,
+};
+
 export function clampPanelSize(size: PanelSize, value: number): number {
   return Math.max(size.min, Math.min(size.max, value));
 }

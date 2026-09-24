@@ -21,7 +21,7 @@ import {
 
 const rules = baseRules(loadStyleSheet());
 
-// 10 テーマ × 明暗の全部 (`default light`・`forest dark` …)。
+// 全部のテーマ × 明暗 (`default light`・`forest dark` …)。
 const PALETTES = Object.fromEntries(
   themeVariants(rules).map((variant) => [variant.name, variant.vars]),
 );
@@ -72,6 +72,16 @@ describe("the row line of tables", () => {
     );
     expect(ratio).toBeGreaterThanOrEqual(1.5);
   });
+});
+
+// メニューの区切りも同じ線 (浮く面の上で 1.5:1 以上は上の表で見ている)。
+// --color-line はダークで浮く面とほぼ同じ色 (#28242f と #28232f) で、区切りが消えていた。
+test("the separator of menus is drawn with the row line", () => {
+  expect(
+    cascadedDeclarations(rules, (s) => s === ".gdp-context-menu-sep").get(
+      "border-top",
+    ),
+  ).toBe("1px solid var(--color-line-row)");
 });
 
 describe("tables drawn with the rule", () => {

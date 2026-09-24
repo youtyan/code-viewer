@@ -514,7 +514,7 @@ describe("image tab close look", () => {
   );
 
   // 枠の色だけを比べる (ほかのボタンの枠は border の一括指定の最後の語)。
-  // 10 テーマ × 明暗の全部。
+  // 全部のテーマ × 明暗。
   test.each(
     themeVariants(rules),
   )("the close border stands out more than the other buttons' ($name)", ({

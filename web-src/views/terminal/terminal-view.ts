@@ -32,6 +32,7 @@ import {
 import type { ContextMenuItem } from "../context-menu";
 import { renderEmptyState } from "../empty-state";
 import { type TerminalLang, type TerminalText, terminalText } from "./i18n";
+import type { ImageShelfLayout } from "./image-shelf";
 import {
   createTerminalScreen,
   type TerminalScreenHandle,
@@ -50,6 +51,14 @@ export type TerminalViewDeps = {
   isImageShelfCollapsed(): boolean;
   /** 棚を畳んだ・開いた。保存は呼び出し側 (app.ts) が持つ。 */
   onImageShelfCollapsedChange(collapsed: boolean): void;
+  /** 画像の棚の置き場所と大きさ (ユーザー単位の設定)。 */
+  getImageShelfLayout?(): ImageShelfLayout;
+  /** そのペインのエージェントの名前 (棚の見出し)。エージェントでなければ null。 */
+  paneName?(paneId: string): string | null;
+  /** 画面のファイルのパスを開く (プロジェクトの根からの相対パスと行)。 */
+  onOpenFile?(path: string, line: number | undefined, kept: boolean): void;
+  /** 棚の置き場所か大きさを変えた。保存は呼び出し側 (app.ts) が持つ。 */
+  onImageShelfLayoutChange?(patch: Partial<ImageShelfLayout>): void;
   /**
    * そのシェルのタブを開いて前面に出してもらう。pane は tmux ペインから
    * 開いたとき、そのペイン (シェルとペインの対応をサーバがまだ知らないときの
@@ -99,6 +108,8 @@ export type TerminalViewHandle = {
    */
   menuItems(): ContextMenuItem[];
   localize(): void;
+  /** 画像の棚の置き場所と大きさを設定から当て直す (設定の欄・別の窓で変えたとき)。 */
+  applyImageShelfLayout(): void;
   dispose(): void;
   /** メインの面 (左 / 右) のターミナルの置き場所。app がその面の箱に置く。 */
   tabPaneFor(side: TabSide): HTMLElement;
@@ -248,6 +259,14 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       onTmuxWindowStale: deps.onTmuxWindowStale,
       isImageShelfCollapsed: deps.isImageShelfCollapsed,
       setImageShelfCollapsed: deps.onImageShelfCollapsedChange,
+      getImageShelfLayout: deps.getImageShelfLayout,
+      paneName: deps.paneName,
+      onOpenFile: deps.onOpenFile,
+      // 棚で変えたら、保存してから両方の面の棚に当て直す。
+      setImageShelfLayout: (patch) => {
+        deps.onImageShelfLayoutChange?.(patch);
+        for (const slot of slots()) slot.screen.applyImageShelfLayout();
+      },
       onOpenImage: deps.onOpenImage,
     });
     screen.setInputEnabled(inputEnabled);
@@ -632,6 +651,9 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       for (const slot of slots()) slot.screen.applyFontSize();
     },
     menuItems,
+    applyImageShelfLayout() {
+      for (const slot of slots()) slot.screen.applyImageShelfLayout();
+    },
     localize() {
       for (const slot of slots()) slot.screen.localize();
       for (const side of ["left", "right"] as const) {

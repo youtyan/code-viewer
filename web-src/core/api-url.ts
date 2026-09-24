@@ -35,9 +35,12 @@ const API_ENDPOINTS = {
   agentHooksPlan: { path: "/_agent/hooks/plan", zone: "entry" },
   agentImages: { path: "/_agent/images", zone: "entry" },
   agentImagesHistory: { path: "/_agent/images/history", zone: "entry" },
+  agentImagesLayout: { path: "/_agent/images/layout", zone: "entry" },
+  agentImagesReveal: { path: "/_agent/images/reveal", zone: "entry" },
   agentLaunch: { path: "/_agent/launch", zone: "entry" },
   agentOverview: { path: "/_agent/overview", zone: "entry" },
   agentPaste: { path: "/_agent/paste", zone: "entry" },
+  agentPaths: { path: "/_agent/paths", zone: "entry" },
   agentProjects: { path: "/_agent/projects", zone: "entry" },
   agentProjectsDirectories: {
     path: "/_agent/projects/directories",

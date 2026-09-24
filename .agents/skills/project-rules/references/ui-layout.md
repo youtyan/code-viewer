@@ -218,7 +218,8 @@ grep -n "100vh\|100dvh" web/style.css \
   `getBoundingClientRect().left` で読む。`0` 起点の座標を書かない
 - 骨格の幅・高さ (`--nav-w` など) の既定・下限・上限は `core/panel-sizes.ts`
   だけが持つ（画面とサーバの設定の検査が同じ値を使う）。保存先はサーバの設定: 左のサイドバーの
-  幅と畳みは全プロジェクト共通の設定 (`core/user-settings.ts` の `USER_SETTING_KEYS`)、ファイル一覧の
+  幅と畳み・ターミナルの画像の棚の置き場所と大きさ (`TERMINAL_IMAGE_SHELF_WIDTH` /
+  `_HEIGHT`。仕様は `agents.md` の 12) は全プロジェクト共通の設定 (`core/user-settings.ts` の `USER_SETTING_KEYS`)、ファイル一覧の
   幅 (`sidebarWidth`)・畳み (`sidebarHidden`) と一覧の幅 (`historyWidth`) はリポジトリの設定 (`server/state-store.ts` が検査する)。**localStorage に
   置かない**: localStorage はオリジン (ポート) ごとで、ポートは続かない。入口のサーバは `--port` を
   付けなければ起動のたびに OS が選ぶポートで待ち受ける (`server/entry/args.ts` の
@@ -526,6 +527,9 @@ grep -rh -A2 "setProperty(" web-src --include=*.ts | grep -oE '"--[a-z-]+"' | so
   ドラッグで数十回 localStorage を叩く
 - 寸法が変わったとき追従が必要なものを忘れない。既知のもの:
   - ターミナル（面の箱の大きさが変わると桁数・行数が変わる → `TERMINAL_VIEW.refit()`）
+  - ターミナルの画像の棚の大きさ・置き場所（端末の画面の箱が縮む。`terminal-screen.ts` の
+    `ResizeObserver` が桁数・行数を測り直す。棚と端末を合わせた箱は `setRoom` で棚に渡し、
+    狭すぎれば棚を畳む）
   - 他に追従が要るものを見つけたら、この行に足す
 
 ## 密度モードを壊さない
@@ -539,6 +543,14 @@ grep -rh -A2 "setProperty(" web-src --include=*.ts | grep -oE '"--[a-z-]+"' | so
 - ジオメトリの計算に出る px が「ヘッダの高さ」「コントロールの高さ」「行の高さ」の意味を
   持つなら、それは T0 か T1 の**変数**であってリテラルではない
 - レイアウトを変えたら **4 モードすべてで確認する。** 既定モードだけの確認は不十分
+
+## 面・帯の端に操作を接させない
+
+塗った面・線で区切った帯の中の操作 (ボタン・欄) は、面の左右の端から離す。内側の余白は
+面の角丸以上 (角丸が無ければ 1px 以上)。行が自分の角丸の面を持つ一覧 (メニュー・フォルダの
+一覧) は、余白 + 行の角丸 ≥ 面の角丸。設定の保存の帯が余白 0 で、「変更を保存」が帯の右端に
+付いていた。主な帯・面は `web-src/test/surface-edge-inset-css.test.ts` が見る。帯・面を足したら
+その表に足す。タブ列 (タブが列の端から並ぶ)・セグメント (1 つの操作)・入力欄の枠は対象外。
 
 ## 既存の違反をどう扱うか
 
