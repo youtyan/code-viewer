@@ -186,7 +186,7 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 |---|---|
 | `ACTIVITY_POLL_INTERVAL_MS`（1.5 秒） | 状態が変わってから一覧に出るまでを 5 秒以内にするため。作業中 → 待機は「待機の表示を 2 回続けて見て」決まるので、2 周 + 画面側の取り直し（`AGENT_MONITOR_INTERVAL_MS`）がそこに収まる値 |
 | `ACTIVITY_IDLE_POLL_INTERVAL_MS`・`ACTIVITY_UNWATCHED_AFTER_MS` | プロジェクトごとにサーバが立つので、誰も見ていないサーバまで速く回すと tmux の呼び出しがサーバの数だけ増える（1 本で毎秒約 45 回を実測）。一覧の取得が来ない間は遅く回す。フックの申告は遅くしない |
-| `ACTIVITY_CAPTURE_CONCURRENCY`（8）・`MAX_PANES_PER_SWEEP`（24）・`ACTIVITY_SWEEP_TIMEOUT_MS`（6 秒） | capture は固定数の worker で並べ、1 周で扱う数も制限し、巡回を期限内で終える。期限を越えたペインは前回の状態を保ち、`errors` に理由を残す。停止へ丸めない |
+| `ACTIVITY_CAPTURE_CONCURRENCY`（8）・`MAX_PANES_PER_SWEEP`（24）・`ACTIVITY_SWEEP_TIMEOUT_MS`（6 秒）・`ACTIVITY_DEFERRED_ERROR_STREAK`（3） | capture は固定数の worker で並べ、1 周で扱う数も制限し、巡回を期限内で終える。期限で始められなかったペインは前回の状態を保ち、次の周の先頭に回す（越えて進めると、混んでいる間は同じ位置のペインが毎周打ち切られて読まれない）。打ち切りは失敗ではなく遅延なので、ログは周ごとに 1 行（ID・件数・かかった時間・期限、スタック無し）。同じペインが 3 周続けて打ち切られたときだけ `errors` に出し（何周続いたか・最後に読めた時刻）、読めたら消す。`capture-pane` 自体の失敗は 1 件ずつ `errors` に出す。停止へ丸めない |
 | `activityIsStale`（`noteAgentListWatched`） | 古ければ巡回を起動するが、一覧の要求は待たせない。`/_agent/overview` の `observedAt` に最後の巡回完了時刻を返し、0 または古い値なら利用側が古さを判断できるようにする |
 | `OVERRIDE_CHANGE_STREAK` を `OVERRIDE_MOTION_MS` から導く | 守りたいのは「12 秒動き続けた」という**時間**。回数の定数のままだと、巡回を 3 秒から 1.5 秒にした時点で 6 秒に縮んでいた。**巡回の間隔を変えるなら、回数で決めている値が無いか探す** |
 

@@ -116,6 +116,13 @@ export const ACTIVITY_CAPTURE_CONCURRENCY = 8;
 export const MAX_PANES_PER_SWEEP = ACTIVITY_CAPTURE_CONCURRENCY * 3;
 /** 一覧・世代確認・capture を含む巡回 1 回の上限。 */
 export const ACTIVITY_SWEEP_TIMEOUT_MS = 6000;
+/**
+ * 期限で capture を始められなかったのが何周続いたら、観測の失敗として画面に出すか。
+ *
+ * 1 周の打ち切りはマシンが混んでいるだけの遅延で、次の周の先頭で読まれる。
+ * それが続くときだけ「このペインを見られていない」ことを利用者に知らせる。
+ */
+export const ACTIVITY_DEFERRED_ERROR_STREAK = 3;
 
 export type ActivitySeen = {
   hash: string;
@@ -127,6 +134,14 @@ export type ActivitySeen = {
 };
 
 const seen = new Map<string, ActivitySeen>();
+/**
+ * ペインごとの、最後に capture が返った時刻と、期限で後回しにした連続回数。
+ * 鍵は seen と同じ (世代 + pane id)。
+ */
+const captureProgress = new Map<
+  string,
+  { lastCapturedAt: number | null; deferredStreak: number }
+>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 /** 走っている巡回。重ねて走らせない。一覧要求は完了を待たない。 */
 let inFlight: Promise<void> | null = null;
@@ -287,6 +302,28 @@ function observationError(
   };
 }
 
+/**
+ * 何周も続けて期限で読めなかったペインの、画面に出す観測の失敗。
+ * 例外ではないのでスタックは無い。
+ */
+function deferredCaptureError(
+  target: string,
+  progress: { lastCapturedAt: number | null; deferredStreak: number },
+  at: number,
+): AgentStateObservationError {
+  const lastCaptured =
+    progress.lastCapturedAt === null
+      ? "not captured since this server started watching"
+      : `last captured at ${new Date(progress.lastCapturedAt).toISOString()}`;
+  return {
+    operation: "capture_screen",
+    target,
+    at,
+    detail: `capture could not start before the ${ACTIVITY_SWEEP_TIMEOUT_MS}ms activity sweep deadline for ${progress.deferredStreak} consecutive sweeps; ${lastCaptured}`,
+    stack: "",
+  };
+}
+
 export function getAgentActivityErrors(): AgentStateObservationError[] {
   return [...activityErrors.values()]
     .sort((a, b) => a.at - b.at)
@@ -334,7 +371,8 @@ async function sweepOnce(
   cwd: string,
   paneListOptions: ListTmuxPanesOptions,
 ): Promise<void> {
-  const deadline = Date.now() + ACTIVITY_SWEEP_TIMEOUT_MS;
+  const startedAt = Date.now();
+  const deadline = startedAt + ACTIVITY_SWEEP_TIMEOUT_MS;
   try {
     const [panes, generation] = await Promise.all([
       listTmuxPanes(cwd, paneListOptions),
@@ -371,6 +409,7 @@ async function sweepOnce(
       const changed = setAgentTmuxGeneration(generation.generation);
       if (changed.changed) {
         seen.clear();
+        captureProgress.clear();
         resetAgentUnread();
         console.info(
           `[code-viewer] tmux server generation changed (${changed.previous} -> ${generation.generation}); cleared agent state`,
@@ -390,6 +429,17 @@ async function sweepOnce(
       for (const target of [...seen.keys()]) {
         if (!knownKeys.has(target)) seen.delete(target);
       }
+      for (const target of [...captureProgress.keys()]) {
+        if (!knownKeys.has(target)) captureProgress.delete(target);
+      }
+      // 消えたペインの capture の失敗を出し続けない。二度と読まれないので消えない。
+      for (const error of [...activityErrors.values()]) {
+        if (error.operation === "capture_screen" && !known.has(error.target)) {
+          activityErrors.delete(
+            activityErrorKey(error.operation, error.target),
+          );
+        }
+      }
     }
 
     // シェルは溜め置きを覗くだけなので、毎周すべて見る。
@@ -402,12 +452,12 @@ async function sweepOnce(
     if (panes.running && generation.status !== "ok") return;
 
     const targets = allPanes;
+    const offset = sweepOffset;
     const { batch, nextOffset } = rotateForSweep(
       targets,
-      sweepOffset,
+      offset,
       MAX_PANES_PER_SWEEP,
     );
-    sweepOffset = nextOffset;
     const captures = await mapWithConcurrency(
       batch,
       ACTIVITY_CAPTURE_CONCURRENCY,
@@ -420,26 +470,46 @@ async function sweepOnce(
         };
       },
     );
+    // 期限で始められなかったペインは、次の周の先頭にする。越えて進めると、
+    // 混んでいる間は同じ位置のペインが毎周打ち切られて読まれなくなる。
+    const firstDeferred = captures.findIndex(({ result }) => result === null);
+    sweepOffset =
+      firstDeferred === -1
+        ? nextOffset
+        : (offset + firstDeferred) % targets.length;
+    const deferred: string[] = [];
+    const settledAt = Date.now();
     for (const { pane, result } of captures) {
+      const progressKey = agentTargetKey(pane.id);
       if (result === null) {
-        const error = new Error(
-          "activity sweep deadline exceeded before this pane could be captured",
-        );
-        console.error(
-          `[code-viewer] terminal screen capture failed for ${pane.id}`,
-          error,
-        );
-        activityErrors.set(
-          activityErrorKey("capture_screen", pane.id),
-          observationError("capture_screen", pane.id, error),
-        );
+        deferred.push(pane.id);
+        const progress = captureProgress.get(progressKey) ?? {
+          lastCapturedAt: null,
+          deferredStreak: 0,
+        };
+        progress.deferredStreak += 1;
+        captureProgress.set(progressKey, progress);
+        if (progress.deferredStreak >= ACTIVITY_DEFERRED_ERROR_STREAK) {
+          activityErrors.set(
+            activityErrorKey("capture_screen", pane.id),
+            deferredCaptureError(pane.id, progress, settledAt),
+          );
+        }
         continue;
       }
       if (result.status === "gone") {
         activityErrors.delete(activityErrorKey("capture_screen", pane.id));
-        seen.delete(agentTargetKey(pane.id));
+        seen.delete(progressKey);
+        captureProgress.delete(progressKey);
         continue;
       }
+      captureProgress.set(progressKey, {
+        lastCapturedAt:
+          result.status === "ok"
+            ? settledAt
+            : (captureProgress.get(progressKey)?.lastCapturedAt ?? null),
+        deferredStreak: 0,
+      });
       if (result.status === "error") {
         console.error(
           `[code-viewer] terminal screen capture failed for ${pane.id}`,
@@ -453,6 +523,12 @@ async function sweepOnce(
       }
       activityErrors.delete(activityErrorKey("capture_screen", pane.id));
       observe(pane.id, result.screen.content, pane.title, pane.title);
+    }
+    // 遅延は失敗ではないので、ペインごとのスタックは出さず周ごとに 1 行にまとめる。
+    if (deferred.length > 0) {
+      console.warn(
+        `[code-viewer] activity sweep reached its ${ACTIVITY_SWEEP_TIMEOUT_MS}ms deadline after ${settledAt - startedAt}ms; deferred ${deferred.length} pane(s) to the front of the next sweep: ${deferred.join(" ")}`,
+      );
     }
   } catch (error) {
     console.error("[code-viewer] terminal state observation failed", error);
@@ -520,6 +596,7 @@ export function stopAgentActivityWatch(): void {
   timer = null;
   watching = null;
   seen.clear();
+  captureProgress.clear();
   activityErrors.clear();
   sweepOffset = 0;
   lastSweepAt = 0;
