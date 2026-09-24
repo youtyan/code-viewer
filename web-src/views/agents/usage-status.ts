@@ -233,7 +233,7 @@ export function mountUsageStatus(deps: UsageStatusDeps): UsageStatus {
       return block;
     }
     for (const view of usageWindowViews(usage, now)) {
-      block.appendChild(usageMeterRow(view, now, t, { showReset: true }));
+      block.appendChild(usageMeterRow(view, now, t, { reset: "remaining" }));
     }
     const mixed = usageMixedText(usage, now, t);
     if (mixed) {

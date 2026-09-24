@@ -13,6 +13,7 @@
 //   [アカウントを追加…]
 //   使用量
 //   claude · 既定  5 時間と週の使用量を受け取っています（最後に受け取った時刻: たった今）  [無効にする…]
+//   [使用量を確かめる]（値が無い・古いとき。usage-check.ts）
 //   ▸ 仕組み
 //   起動コマンド  (未保存)
 //   claude [claude    ]  codex [codex    ]  [起動コマンドを既定に戻す]
@@ -47,10 +48,12 @@ import {
   accountDisplayName,
   el,
   labeled,
+  planLabel,
   resultLine,
 } from "./accounts-dialogs";
 import type { AccountsText } from "./accounts-i18n";
 import type { AgentHooksSettings } from "./agent-hooks-settings";
+import { usageCheckBlock } from "./usage-check";
 
 export type AccountsSettingsDeps = {
   client: AccountsClient;
@@ -92,10 +95,6 @@ function json(value: unknown, none: string): string {
 function commandToSave(agent: AccountAgent, value: string): string {
   const trimmed = value.trim();
   return trimmed === DEFAULT_COMMANDS[agent] ? "" : trimmed;
-}
-
-function planLabel(plan: string): string {
-  return plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : "";
 }
 
 export function createAccountsSettings(
@@ -601,6 +600,14 @@ export function createAccountsSettings(
         );
       }
       box.append(names, line, actions);
+      // 使用量を確かめる (全体ボードのカードと同じ部品)。同じ設定ファイルを
+      // 共有するアカウントが並ぶときは、ボタンに名前を添える。
+      for (const member of members) {
+        const check = usageCheckBlock(member, now(), deps.client, t, {
+          name: members.length > 1 ? accountDisplayName(member, t) : undefined,
+        });
+        if (check) box.appendChild(check);
+      }
       const problems: string[] = [];
       if (status.wrapperMissing) problems.push(t.statusLineWrapperMissing);
       if (status.detail) problems.push(status.detail);

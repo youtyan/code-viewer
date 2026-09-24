@@ -6,6 +6,7 @@ import type {
   BlockedReason,
   HandoffLanguage,
   StatusLineState,
+  UsageCheckFailure,
   UsageUnavailableReason,
   UsageWindow,
 } from "../../core/agent-accounts";
@@ -48,6 +49,14 @@ export type AccountsText = {
   usagePopoverManage: string;
   usagePopoverOpen: string;
   resetsIn: (duration: string) => string;
+  /** 窓が戻る時刻 (全体ボードのカード)。when は resetClock (usage-meter.ts) が作る。 */
+  resetsAt: (when: string) => string;
+  /** 曜日の短い名前 (日曜から)。 */
+  weekdays: readonly string[];
+  /** 24 時間以上先の日付。 */
+  resetDate: (month: number, day: number) => string;
+  /** カードの 2 行目: ログイン済みだがメールアドレスが分からない。 */
+  cardNoEmail: string;
   resetPassed: string;
   duration: (ms: number) => string;
   warn: string;
@@ -62,6 +71,22 @@ export type AccountsText = {
   /** その説明。others = 別の記録の値 (枠と割合とリセット)。 */
   usageMixedHint: (others: string) => string;
   usageReason: Record<UsageUnavailableReason, string>;
+  // 使用量を確かめる (views/agents/usage-check.ts。カードと設定の使用量の行)
+  usageCheck: string;
+  /** 設定の行で複数のアカウントが並ぶときのボタン。 */
+  usageCheckFor: (name: string) => string;
+  /** ボタンと ⋯ の項目の title。わずかに使用量を使うことを書く。 */
+  usageCheckTitle: string;
+  usageChecking: string;
+  /** 止まった理由 (見出しの 1 行)。 */
+  usageCheckFailed: Record<UsageCheckFailure, string>;
+  /** 利用者の次の手順。 */
+  usageCheckNext: Record<UsageCheckFailure, string>;
+  usageCheckRequestFailed: string;
+  usageCheckCloseFailed: string;
+  /** 畳んだ根拠の欄の見出し。 */
+  usageCheckMore: string;
+  usageCheckEvidence: string;
   agentsCount: (count: number) => string;
   hooksShort: (state: string) => string;
   registerUnregistered: string;
@@ -311,6 +336,11 @@ export const ACCOUNTS_EN: AccountsText = {
   usagePopoverManage: "Manage accounts",
   usagePopoverOpen: "Show usage for every account",
   resetsIn: (duration) => `resets in ${duration}`,
+  resetsAt: (when) => `resets ${when}`,
+  weekdays: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+  resetDate: (month, day) =>
+    `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month - 1]} ${day}`,
+  cardNoEmail: "Email unknown",
   resetPassed: "window has reset; waiting for a new value",
   duration: durationFormatter({ minute: "m", hour: "h", day: "d", join: " " }),
   warn: "High",
@@ -335,6 +365,38 @@ export const ACCOUNTS_EN: AccountsText = {
     unreadable:
       "The saved data could not be read (the format is not a public contract).",
   },
+  usageCheck: "Check usage",
+  usageCheckFor: (name) => `Check usage (${name})`,
+  usageCheckTitle:
+    "Starts claude with this account in the background, sends one short message and reads the usage that comes back. This uses a little of your usage.",
+  usageChecking: "Checking…",
+  usageCheckFailed: {
+    "not-wrapped": "Usage is not being received for this account",
+    onboarding: "Stopped at claude's first-run setup",
+    trust: "Stopped at the folder trust question",
+    login: "This account needs to sign in",
+    timeout: "No usage arrived in time",
+    "start-failed": "claude could not be started",
+  },
+  usageCheckNext: {
+    "not-wrapped":
+      "Turn on usage in Settings > Accounts > Usage, then press again.",
+    onboarding:
+      "Open claude once with this account and finish the first-run setup (theme) and the folder trust question, then press again.",
+    trust:
+      "Open claude once with this account in this project's folder and answer the trust question, then press again.",
+    login:
+      "Sign in with this account (Sign in on the card, or Settings > Accounts), then press again.",
+    timeout:
+      "claude may be waiting for something on its screen. Open claude with this account to see. Accounts without Pro or Max report no limits.",
+    "start-failed":
+      "Check the launch command in Settings > Accounts. The reason is under Details.",
+  },
+  usageCheckRequestFailed: "Could not check the usage",
+  usageCheckCloseFailed:
+    "The tmux session opened for the check could not be closed",
+  usageCheckMore: "Details",
+  usageCheckEvidence: "Last lines of the claude screen:",
   agentsCount: (count) => `${count} running`,
   hooksShort: (state) => `Hooks: ${state}`,
   registerUnregistered: "Register",
@@ -605,6 +667,10 @@ export const ACCOUNTS_JA: AccountsText = {
   usagePopoverManage: "アカウントを管理",
   usagePopoverOpen: "すべてのアカウントの使用量を見る",
   resetsIn: (duration) => `あと${duration}でリセット`,
+  resetsAt: (when) => `${when} に戻る`,
+  weekdays: ["日", "月", "火", "水", "木", "金", "土"],
+  resetDate: (month, day) => `${month}/${day}`,
+  cardNoEmail: "メールアドレスが分かりません",
   resetPassed: "リセット済み・新しい値を待っています",
   duration: durationFormatter({
     minute: "分",
@@ -634,6 +700,38 @@ export const ACCOUNTS_JA: AccountsText = {
     unreadable:
       "保存されたデータを読めません（公式に約束された書式ではありません）。",
   },
+  usageCheck: "使用量を確かめる",
+  usageCheckFor: (name) => `使用量を確かめる（${name}）`,
+  usageCheckTitle:
+    "このアカウントの claude を裏で起こして短い一言を送り、返ってきた使用量を読みます。わずかに使用量を使います。",
+  usageChecking: "確かめています…",
+  usageCheckFailed: {
+    "not-wrapped": "このアカウントの使用量を受け取っていません",
+    onboarding: "claude の初回の案内で止まりました",
+    trust: "フォルダの信頼の確認で止まりました",
+    login: "このアカウントはログインが必要です",
+    timeout: "時間内に使用量が届きませんでした",
+    "start-failed": "claude を起動できませんでした",
+  },
+  usageCheckNext: {
+    "not-wrapped":
+      "設定 > アカウント > 使用量 で有効にしてから、もう一度押してください。",
+    onboarding:
+      "このアカウントで一度 claude を開き、初回の案内（テーマの選択）と信頼の確認を済ませてから押してください。",
+    trust:
+      "このアカウントでこのプロジェクトのフォルダの claude を一度開き、信頼の確認に答えてから押してください。",
+    login:
+      "このアカウントでログインしてから押してください（カードの「ログイン」か、設定 > アカウント）。",
+    timeout:
+      "claude が画面で何かを待っているかもしれません。このアカウントで claude を開いて確かめてください。Pro / Max 以外のアカウントには上限の情報がありません。",
+    "start-failed":
+      "設定 > アカウント の起動コマンドを確かめてください。理由は「詳しく」にあります。",
+  },
+  usageCheckRequestFailed: "使用量を確かめられませんでした",
+  usageCheckCloseFailed:
+    "確認のために開いた tmux のセッションを閉じられませんでした",
+  usageCheckMore: "詳しく",
+  usageCheckEvidence: "claude の画面の最後の行:",
   agentsCount: (count) => `${count} 件実行中`,
   hooksShort: (state) => `フック: ${state}`,
   registerUnregistered: "登録",

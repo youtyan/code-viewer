@@ -11,6 +11,7 @@
 
 import type { AgentHookState, HookAgent } from "./agent-hooks";
 import { type AgentPane, abbreviateHome } from "./agent-overview";
+import { flattenTmuxPanes, type TmuxPane, type TmuxSession } from "./tmux";
 
 export type AccountAgent = HookAgent;
 
@@ -575,6 +576,53 @@ export type UsageUnavailableReason =
   | "no-token-count"
   | "unreadable";
 
+/**
+ * 「使用量を確かめる」(POST /_agent/accounts/usage-check。
+ * server/accounts/usage-check.ts) が止まった理由。
+ *
+ * - not-wrapped: statusLine を包んでいない (起こさずに断った)
+ * - onboarding / trust / login: claude が初回の案内・フォルダの信頼の確認・
+ *   ログインを求める画面で止まった (待たずに止めた)
+ * - timeout: 時間内に新しい使用量が届かなかった
+ * - start-failed: tmux のセッションを作れない・claude がすぐ終わった
+ */
+export type UsageCheckFailure =
+  | "not-wrapped"
+  | "onboarding"
+  | "trust"
+  | "login"
+  | "timeout"
+  | "start-failed";
+
+type UsageCheckBase = {
+  accountId: string;
+  /** この確認のために作った tmux のセッション。作らなかったら空。 */
+  session: string;
+  /** 作ったセッションを閉じられなかった理由。閉じた (作らなかった) なら空。 */
+  closeError: string;
+  /** 同じアカウントで走っていた確認を待った (起こさなかった)。 */
+  joined: boolean;
+  startedAt: number;
+  finishedAt: number;
+};
+
+export type UsageCheckResponse =
+  | (UsageCheckBase & {
+      status: "ok";
+      /** 起こした後に届いた使用量。 */
+      usage: Extract<AccountUsage, { status: "ok" }>;
+    })
+  | (UsageCheckBase & {
+      status: "failed";
+      reason: UsageCheckFailure;
+      /** 理由の詳細 (元のエラーの全文など。英語)。 */
+      detail: string;
+      /** 判定に使ったペインの画面の最後の行。見ていなければ空。 */
+      evidence: string[];
+      /** 終わったときに読めた使用量 (届いていない値の理由を含む)。 */
+      usage: AccountUsage | null;
+    });
+
 /** 注意の色にする使用率。 */
 export const USAGE_WARN_PERCENT = 80;
 
@@ -981,6 +1029,26 @@ export function codexAuthKeys(text: string): string[] {
 
 /** ログインのウィンドウを置く tmux のセッション。 */
 export const LOGIN_SESSION = "code-viewer-login";
+
+/**
+ * 「使用量を確かめる」(server/accounts/usage-check.ts) が確認のたびに作る
+ * tmux のセッションの名前の頭。
+ */
+export const USAGE_CHECK_SESSION_PREFIX = "code-viewer-usage-";
+
+/**
+ * エージェントとして見るペイン。使用量を確かめる裏のセッションの claude は
+ * 利用者の作業ではないので、一覧・全体ボード・最下段の件数・通知
+ * (terminal/overview.ts) と巡回 (terminal/activity.ts) から除く。判定は
+ * ここ 1 か所 (セッション名の頭)。ログインのウィンドウは除かない。
+ */
+export function agentTmuxPanes(sessions: readonly TmuxSession[]): TmuxPane[] {
+  return flattenTmuxPanes(
+    sessions.filter(
+      (session) => !session.name.startsWith(USAGE_CHECK_SESSION_PREFIX),
+    ),
+  );
+}
 
 /** 起動先の tmux セッションの既定。そのプロジェクトのペインがあるセッション。 */
 export function defaultLaunchSession(

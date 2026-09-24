@@ -21350,10 +21350,11 @@ button.agents-section-title:focus-visible {
 }
 .agents-accounts-cards {
   display: grid;
-  /* 1 行に最大 4 枚。狭い面 (2 面の左など) では 1 枚が使用量の行の入る幅
-     (--agents-account-card-min) を下回らないよう、行を折り返す。4 列固定だと
-     面 486px で 1 枚 101px になり、使用量の文字がカードの外へはみ出した。 */
-  --agents-account-card-min: calc(var(--space-unit) * 50);
+  /* 1 行に最大 4 枚。狭い面 (2 面の左など) では 1 枚が使用量の行 (名前・棒・
+     割合・「木 16:00 に戻る」) の入る幅 (--agents-account-card-min) を下回らない
+     よう、行を折り返す。4 列固定だと面 486px で 1 枚 101px になり、使用量の
+     文字がカードの外へはみ出した。 */
+  --agents-account-card-min: calc(var(--space-unit) * 80);
   grid-template-columns: repeat(
     auto-fill,
     minmax(
@@ -21373,38 +21374,50 @@ button.agents-section-title:focus-visible {
   border-radius: var(--radius-md);
   background: var(--color-doc);
 }
+/* 1 行目: 利用者が付けた名前 (太字・本文の色)・種類とプランの札・⋯。 */
 .agents-account-card-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-2);
   min-width: 0;
 }
-.agents-account-kind {
-  font-size: var(--ui-font-section);
-  font-weight: 600;
-  line-height: 1.2;
-}
 .agents-account-name {
-  margin-left: auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   padding: 0;
   border: 0;
   background: none;
-  color: var(--color-text-2);
+  color: var(--color-text);
   font: inherit;
+  font-size: var(--ui-font-section);
+  font-weight: 600;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
 }
 button.agents-account-name:hover {
-  color: var(--color-text);
+  text-decoration: underline;
+}
+.agents-account-card-head > .agents-chip {
+  flex: none;
+}
+/* 2 行目: ログイン中のメールアドレス (無ければログインの状態)。本文より一段小さく、
+   薄い灰色にはしない。 */
+.agents-account-who {
+  min-width: 0;
+  margin-top: calc(var(--space-2) * -1);
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* 登録したアカウントの ⋯ (名前の変更・外す)。名前の右。カードの見出しの
    高さを変えないよう、押せる領域は上下へはみ出させる。 */
 .agents-account-menu {
   flex: none;
-  align-self: center;
   margin-block: calc((var(--ui-control-sm) - var(--ui-font-section) * 1.2) / -2);
 }
 .agents-account-usage {
@@ -21452,6 +21465,51 @@ button.agents-account-name:hover {
 }
 .agents-account-running {
   flex: 0 0 auto;
+}
+/* 使用量を確かめる (カードと設定の使用量の行で共通。views/agents/usage-check.ts)。
+   理由と次の手順は本文の濃さで出し、薄い灰色にしない。根拠は畳む。 */
+.usage-check {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.usage-check > p {
+  margin: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.usage-check-status,
+.usage-check-next {
+  color: var(--color-text);
+}
+.usage-check-failed {
+  color: var(--color-failed);
+  font-weight: 600;
+}
+.usage-check-more {
+  align-self: stretch;
+  min-width: 0;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+}
+.usage-check-more > summary {
+  cursor: pointer;
+}
+/* 画面の行は罫線の形を保つため折り返さず、欄の中でスクロールする (カードを伸ばさない)。 */
+.usage-check-detail {
+  max-height: calc(var(--space-unit) * 60);
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2);
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--color-inset);
+  color: var(--color-text);
+  white-space: pre;
+}
+.agent-accounts-usage-row > .usage-check {
+  flex-basis: 100%;
 }
 /* 使用量の 1 枠 (カードとポップオーバー共通)。名前・割合・バーの列をそろえる。 */
 .usage-meter {
@@ -21504,6 +21562,21 @@ button.agents-account-name:hover {
   font-size: var(--ui-font-sm);
   text-align: right;
   white-space: nowrap;
+}
+/* 全体ボードのカード: 名前・棒・割合・戻る時刻 (右端)。戻る時刻は読む値なので薄くしない。
+   割合と戻る時刻の列は幅を決め、同じカードの 5 時間と週の棒の長さをそろえる
+   (行ごとの auto だと文字の長さで棒の長さが変わった)。 */
+.usage-meter.usage-meter-clock {
+  grid-template-columns: calc(var(--space-unit) * 10) minmax(0, 1fr) calc(var(--space-unit) * 16) calc(var(--space-unit) * 30);
+}
+.usage-meter-clock .usage-meter-value {
+  justify-content: flex-end;
+}
+.usage-meter-clock .usage-meter-reset {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-2);
+  text-overflow: ellipsis;
 }
 /* ---- すべてのエージェント (表) ---- */
 .agents-board {

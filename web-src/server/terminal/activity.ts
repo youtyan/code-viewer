@@ -16,6 +16,7 @@
 // 順に巡回する。ブラウザシェルは溜め置きを覗くだけでプロセスが要らないので、
 // 毎周すべて見る。
 
+import { agentTmuxPanes } from "../../core/agent-accounts";
 import {
   type AgentScreenRuleSet,
   detectAgentScreen,
@@ -28,7 +29,6 @@ import {
 import { formatErrorDetail } from "../../core/error-detail";
 // 画面とタイトルの同一性を見るだけなので、差分取得と同じハッシュで足りる。
 import { hashLine } from "../../core/terminal-capture";
-import { flattenTmuxPanes } from "../../core/tmux";
 import { listShellSessions, readShellBuffer } from "../shell/session";
 import { captureTmuxPane } from "../tmux/capture";
 import { readTmuxServerGeneration } from "../tmux/command";
@@ -380,7 +380,7 @@ async function sweepOnce(
     ]);
     activityErrors.delete(activityErrorKey("list_terminals", ""));
     const shells = listShellSessions();
-    const allPanes = panes.running ? flattenTmuxPanes(panes.sessions) : [];
+    const allPanes = panes.running ? agentTmuxPanes(panes.sessions) : [];
 
     if (
       generation.status === "error" ||

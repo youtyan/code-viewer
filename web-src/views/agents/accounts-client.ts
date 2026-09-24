@@ -16,6 +16,7 @@ import type {
   StatusLineApplyResponse,
   StatusLinePlanResponse,
   StoredAccount,
+  UsageCheckResponse,
 } from "../../core/agent-accounts";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { BACKGROUND_REQUEST_HEADER } from "../../core/network-activity";
@@ -28,6 +29,17 @@ const LOGIN_WATCH_MS = 5 * 60_000;
 export type AccountsClientDeps = {
   trackLoad<T>(promise: Promise<T>): Promise<T>;
   actionHeaders(): HeadersInit;
+};
+
+/**
+ * 「使用量を確かめる」のアカウントごとの状態。走っている間は running、
+ * 終われば応答 (止まった理由) か、要求そのものの失敗の全文。値が取れて
+ * セッションも閉じたら状態を消す (カードは普段の表示に戻る)。
+ */
+export type UsageCheckState = {
+  running: boolean;
+  response?: UsageCheckResponse;
+  error?: string;
 };
 
 export type AccountsSnapshot = {
@@ -75,6 +87,13 @@ export type AccountsClient = {
     account: string,
   ): Promise<StatusLineApplyResponse>;
   clearUsageFailures(): Promise<void>;
+  /** そのアカウントの「使用量を確かめる」の状態。無ければ null。 */
+  usageCheck(id: string): UsageCheckState | null;
+  /**
+   * 使用量を確かめる (確認の画面は出さない)。走っている間は何もしない。
+   * 結果は usageCheck に置き、失敗も投げずにそこへ残す。
+   */
+  checkUsage(id: string): Promise<void>;
 };
 
 /**
@@ -122,6 +141,7 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let loginWatchUntil = 0;
   const listeners = new Set<() => void>();
+  const checks = new Map<string, UsageCheckState>();
 
   function emit(): void {
     for (const listener of listeners) listener();
@@ -316,6 +336,29 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
         }),
       );
       if (!res.ok) throw await responseFailure(res, "clear the failures");
+      await load();
+    },
+    usageCheck: (id) => checks.get(id) ?? null,
+    async checkUsage(id) {
+      if (checks.get(id)?.running) return;
+      checks.set(id, { running: true });
+      emit();
+      let response: UsageCheckResponse;
+      try {
+        response = await post<UsageCheckResponse>(
+          apiUrl("agentAccountsUsageCheck"),
+          { id },
+          "check the usage",
+        );
+      } catch (cause) {
+        console.error("[code-viewer] usage check failed", cause);
+        checks.set(id, { running: false, error: formatErrorDetail(cause) });
+        emit();
+        return;
+      }
+      if (response.status === "ok" && !response.closeError) checks.delete(id);
+      else checks.set(id, { running: false, response });
+      // 新しい値 (または届いていない理由) を一覧に出す。load が知らせる。
       await load();
     },
   };

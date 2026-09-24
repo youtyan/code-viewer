@@ -33,8 +33,13 @@ export function interactiveShell(env: NodeJS.ProcessEnv = process.env): string {
   return env.SHELL || "/bin/sh";
 }
 
-async function sessionExists(session: string, cwd: string): Promise<boolean> {
-  const result = await runTmux(["has-session", "-t", `=${session}`], cwd);
+/** tmux のセッションがあるか。run は差し替え用 (テスト)。 */
+export async function sessionExists(
+  session: string,
+  cwd: string,
+  run: typeof runTmux = runTmux,
+): Promise<boolean> {
+  const result = await run(["has-session", "-t", `=${session}`], cwd);
   if (result.status === "ok") return true;
   if (result.status === "no-server" || result.status === "no-target")
     return false;

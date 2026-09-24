@@ -72,6 +72,7 @@ import {
   handleStatusLineApplyPost,
   handleStatusLineFailuresDelete,
   handleStatusLinePlanGet,
+  handleUsageCheckPost,
 } from "../accounts/handle";
 import {
   dispatchRoutes,
@@ -947,6 +948,12 @@ export function handleAgentRoute(
         methods: ["POST"],
         sideEffect: true,
         handler: () => handleLoginPost(req, cwd),
+      },
+      // 確認のためだけの tmux のセッションを作って閉じる。同一オリジンからしか通らない。
+      "/_agent/accounts/usage-check": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleUsageCheckPost(req, cwd),
       },
       "/_agent/launch": {
         methods: ["POST"],

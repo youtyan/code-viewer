@@ -305,6 +305,23 @@ describe("bounded activity sweep", () => {
   });
 });
 
+describe("the usage check's session", () => {
+  test("is not swept (its screen is never read)", async () => {
+    const listed = tmuxPanes(["%1"], { title: "sample activity" });
+    const check = tmuxPanes(["%9"], { title: "sample activity" }).sessions.map(
+      (session) => ({ ...session, name: "code-viewer-usage-claude-defau-x" }),
+    );
+    mocks.listPanes.mockResolvedValue({
+      ...listed,
+      sessions: [...listed.sessions, ...check],
+    });
+    startAgentActivityWatch("/work/sample");
+    await runNextSweep();
+    expect(mocks.capturePane.mock.calls.map((call) => call[0])).toEqual(["%1"]);
+    expect(getAgentState("%9")).toBeNull();
+  });
+});
+
 describe("tmux generation changes", () => {
   test("clears state and unread once before a reused pane id is observed", async () => {
     const logged = vi

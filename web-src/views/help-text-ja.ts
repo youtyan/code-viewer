@@ -1147,7 +1147,11 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 ],
               ],
             },
-            more("codex の使用量は、設定しなくても出ます。"),
+            more("codex の使用量は、設定しなくても出ます。", [
+              "claude のカードに値が無い・古いときは、",
+              ui(accounts.usageCheck),
+              " を押すと、裏で claude に短い一言を送って今の値を取りに行きます（わずかに使用量を使います）。",
+            ]),
           ],
         },
         {

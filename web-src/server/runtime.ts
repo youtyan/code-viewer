@@ -282,7 +282,12 @@ export function stopProcess(
 const liveProcessGroups = new Set<number>();
 let stopLiveProcessesOnExit = false;
 
-function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
+/**
+ * プロセスグループ pid に signal を送る。もう居なければ何もしない。送れな
+ * ければ投げる。使ってよいのは、自分が起こして pid を控えたものだけ
+ * (spawnProcess の子、「使用量を確かめる」が作ったペインのシェル)。
+ */
+export function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(-pid, signal);
     return;

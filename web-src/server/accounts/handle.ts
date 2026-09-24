@@ -5,6 +5,8 @@
 // - GET    /_agent/accounts/plan          作る・登録すると何が起きるか (書かない)
 // - POST   /_agent/accounts               作る・登録する・外す・起動コマンドを変える
 // - POST   /_agent/accounts/login         ログインを tmux の新しいウィンドウで始める
+// - POST   /_agent/accounts/usage-check   claude を裏で起こして使用量を確かめる
+//                                          (usage-check.ts。終わるまで待って結果を返す)
 // - POST   /_agent/launch                 エージェントを tmux の新しいウィンドウで起動する
 //                                          (handoff を付けると「別のアカウントで続ける」)
 // - GET    /_agent/statusline/plan        claude の statusLine を包む・戻すと何が変わるか
@@ -57,6 +59,7 @@ import {
   updateAccountRegistry,
 } from "./registry";
 import { sharedAccountService } from "./service";
+import { sharedUsageChecker } from "./usage-check";
 
 /** 本文の上限。名前・パス・コマンドとリンクの一覧だけが来る。 */
 const MAX_ACCOUNT_BODY_BYTES = 16 * 1024;
@@ -264,6 +267,29 @@ export async function handleLoginPost(
       account: account.builtin ? "" : account.name,
     });
     return json(pane);
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+/**
+ * 「使用量を確かめる」。確かめた結果 (取れた・止まった理由) は 200 で返し、
+ * 画面がカードに理由と次の手順を出す。要求そのものが誤りなら 4xx。
+ */
+export async function handleUsageCheckPost(
+  req: Request,
+  cwd: string,
+): Promise<Response> {
+  const body = await parseBoundedJsonBody(
+    req,
+    MAX_ACCOUNT_BODY_BYTES,
+    "usage check request too large",
+  );
+  if (body instanceof Response) return body;
+  const id = (body as Record<string, unknown> | null)?.id;
+  if (typeof id !== "string") return textError("invalid id", 400);
+  try {
+    return json(await sharedUsageChecker().check(findAccount(id), cwd));
   } catch (error) {
     return errorResponse(error);
   }

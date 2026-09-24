@@ -13,7 +13,11 @@
 
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAccountAgent, type PaneAccount } from "../../core/agent-accounts";
+import {
+  agentTmuxPanes,
+  isAccountAgent,
+  type PaneAccount,
+} from "../../core/agent-accounts";
 import {
   type AgentOverviewResponse,
   type AgentOverviewShell,
@@ -32,7 +36,6 @@ import type { ProjectRegistrySnapshot } from "../../core/projects";
 import type { ShellSession } from "../../core/shell";
 import { basenameOf, linkShellsAndPanes } from "../../core/terminal-board";
 import type { TmuxClient, TmuxPanesResponse } from "../../core/tmux";
-import { flattenTmuxPanes } from "../../core/tmux";
 import {
   type PaneAccountTarget,
   sharedAccountService,
@@ -136,7 +139,7 @@ export async function buildAgentOverview(
       shells: overviewShells(await deps.listShells(), []),
     };
   }
-  const tmuxPanes = panes.running ? flattenTmuxPanes(panes.sessions) : [];
+  const tmuxPanes = panes.running ? agentTmuxPanes(panes.sessions) : [];
   if (panes.running) {
     const listed = new Set(tmuxPanes.map((pane) => pane.id));
     for (const id of [...deps.firstListed.keys()]) {

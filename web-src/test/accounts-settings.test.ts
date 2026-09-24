@@ -197,6 +197,8 @@ function harness(language: "en" | "ja" = "en") {
     planStatusLine: unused("planStatusLine"),
     applyStatusLine: unused("applyStatusLine"),
     clearUsageFailures: unused("clearUsageFailures"),
+    usageCheck: () => null,
+    checkUsage: unused("checkUsage"),
   };
   const dialogs: AccountDialogs = {
     add: unused("add"),

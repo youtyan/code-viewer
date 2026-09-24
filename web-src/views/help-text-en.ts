@@ -1165,7 +1165,11 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 ],
               ],
             },
-            more("codex usage shows without any setup."),
+            more("codex usage shows without any setup.", [
+              "When a claude card has no value or an old one, ",
+              ui(accounts.usageCheck),
+              " starts claude in the background and sends one short message to get the current value (it uses a little usage).",
+            ]),
           ],
         },
         {

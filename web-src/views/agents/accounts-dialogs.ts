@@ -260,6 +260,11 @@ export function accountDisplayName(
   return account.builtin ? text.defaultName : account.name;
 }
 
+/** プランの表示 (max → Max)。無ければ空。 */
+export function planLabel(plan: string): string {
+  return plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : "";
+}
+
 /** そのアカウントで動いているペインの数。 */
 export function runningCount(
   overview: AgentOverviewResponse | null,
@@ -876,7 +881,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
         return box;
       }
       for (const view of usageWindowViews(usage, now)) {
-        box.appendChild(usageMeterRow(view, now, t, { showReset: true }));
+        box.appendChild(usageMeterRow(view, now, t, { reset: "remaining" }));
       }
       return box;
     }
