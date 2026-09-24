@@ -33,6 +33,7 @@
 | Data の表の足元 | `views/database/table-grid.ts` の `db-grid-status` (件数) と `db-grid-pager` (見えている行の範囲と 1 画面ずつのページ送り)。表の行の高さは表示密度の値 (`views/shell/row-height.ts` の `currentRowHeight`、CSS は `--ui-row-h`)、列幅は TS が持つので、CSS は色と線だけ |
 | 空の状態の案内 (何も無い場所で次にやること) | `views/empty-state.ts` の `renderEmptyState` (絵・一行・補足・操作 2 つまで・キー 3 つまでをキーキャップで)。形は既存の `.empty` (`.empty-icon`・`h2`・`p`・`.empty-actions` の `.empty-action` / `-primary`) に `.empty-keys` を足したもの。画面の一部に置くときは `compact`。文言は置き場の i18n。実例: 全体ボードのエージェント 0・Search の初期・Tools の入力が空 |
 | アイコン SVG | `core/icons.ts` の path 定数 + `iconSvg(className, paths)` |
+| ホバーで出る説明 (ツールチップ) | 要素に `title` を書くだけ。`views/title-tooltip.ts` の `installTitleTooltips` (`app.ts` が 1 回だけ取り付ける) が、マウスとペンで約 300ms 後に title の値をそのまま `.title-tooltip` に出す (指では出さない。出している間は title を外して既定の吹き出しと重ねない)。部品ごとに吹き出しを作らない。title に置いた文言がそのまま吹き出しの文言 |
 
 `alert` / `confirm` / `prompt` は `biome.jsonc` が **error で落とす**ので、そもそも書けない。
 `views/ui-dialog.ts` を使う。
@@ -68,7 +69,11 @@
 - 2 面のとき、開く面は**フォーカスのある面** (画面のタブは左の面だけ)。フォーカスは面の中を押す・
   タブを押すで移る。**フォーカスのある面の印は 2 つ**: 前面のタブの上端の線 (`.main-tab-focused`、タブの幅)
   と、その面のタブ列の下端の線 (`body.main-split .main-tabs-pane-focused::after`、面の幅いっぱい)。
-  どちらも `--color-accent` の 2px。1 面では下端の線を出さない。地・タブとの色の差はダーク / ライト、
+  どちらも `--color-accent` の 2px。1 面では下端の線を出さない。**選択中のタブの印**は寸法を変えない
+  (幅は中身で決まるので `font-weight` も使わない): 面 (`--color-tab-active`)・本来の文字色・上端の
+  2px の線 (もう一方の面の選択中は `--color-text-3` の `box-shadow: inset`、フォーカスのある面の選択中は
+  上の強調色の線・強調色の絵・`-webkit-text-stroke` で太い名前)。下端の線はグループの色なので使わない
+  (検査は `main-tabs-active-css.test.ts`)。地・タブとの色の差はダーク / ライト、
   3 つの色違い、密度 4 段で 4.95:1 以上 (実測)
 - **URL はフォーカスのある面の前面のタブ**に合わせる (右の面のファイルなら `pane=right`)。左の前面が
   替わって本文を裏で移すとき、フォーカスが右の面に残るなら履歴を積まず (`followRouteSide` の

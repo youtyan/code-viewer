@@ -1,15 +1,16 @@
 // タブ列の絵。種類ごとに core/icons.ts の既存の絵を当てるだけ。
 import {
-  APPS_16_PATH,
   BOOK_16_PATH,
+  DATABASE_16_PATH,
   FILE_16_PATH,
+  FILE_DIFF_16_PATH,
+  FILE_DIRECTORY_SYMLINK_16_PATHS,
   FOLDER_ICON_PATHS,
   GEAR_16_PATH,
-  GIT_BRANCH_16_PATH,
+  HISTORY_16_PATH,
   IMAGE_16_PATH,
   PENCIL_16_PATH,
   PLUS_16_PATH,
-  PULSE_16_PATH,
   SEARCH_16_PATH,
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
@@ -33,10 +34,12 @@ const ICONS: Record<
   PageIconPaths
 > = {
   repo: FOLDER_ICON_PATHS.closed,
-  diff: FILE_16_PATH,
-  history: PULSE_16_PATH,
-  worktree: GIT_BRANCH_16_PATH,
-  database: APPS_16_PATH,
+  // 素のファイルの絵 (file) と見分ける: ＋ と − の入ったファイル。
+  diff: FILE_DIFF_16_PATH,
+  history: HISTORY_16_PATH,
+  // 枝分かれの絵は使わない (エディタの「変更」の絵なので差分と取り違えられた)。
+  worktree: FILE_DIRECTORY_SYMLINK_16_PATHS,
+  database: DATABASE_16_PATH,
   journal: PENCIL_16_PATH,
   agents: TERMINAL_16_PATHS,
   // Markdown / Mermaid / JSON の変換 (道具の絵は無いので、文書の絵)。

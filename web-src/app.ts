@@ -79,6 +79,7 @@ import {
   FOLDER_ICON_PATHS,
   GEAR_16_PATH,
   GIT_BRANCH_16_PATH,
+  HISTORY_16_PATH,
   iconSvg,
   MARK_GITHUB_16_PATH,
   MOON_16_PATH,
@@ -363,6 +364,7 @@ import {
   createShellEndTracker,
 } from "./views/terminal/shell-ends";
 import { createTerminalView } from "./views/terminal/terminal-view";
+import { installTitleTooltips } from "./views/title-tooltip";
 import { toolsText } from "./views/tools/i18n";
 import { createToolsView } from "./views/tools/tools-view";
 import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
@@ -6463,8 +6465,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       historyLink.href = urlForRoute(route);
       setEmptyActionContent(
         historyLink,
-        "octicon-git-branch",
-        GIT_BRANCH_16_PATH,
+        "octicon-history",
+        HISTORY_16_PATH,
         text.noChangesHistory,
         text.noChangesHistoryTitle,
       );
@@ -7765,6 +7767,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   );
 
   relocalizeTerminal = () => TERMINAL_VIEW.localize();
+
+  // title を持つ要素に速く出る吹き出し (アプリ全体で 1 つ)。
+  installTitleTooltips();
 
   // 電話の幅の骨格 (引き出し・下からの面・下端の帯・端末の操作札)。2 面は
   // 無いので、端末は左の面のものに送る。

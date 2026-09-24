@@ -17484,8 +17484,9 @@ body.gdp-nav-resizing {
 
 /* ---- メインの面のタブ列 (最上段。views/main-tabs/main-tabs-view.ts) ----
    高さは --main-tabs-h。タブが収まらなければタブの並びだけが横に送られ、
-   右端の ＋ と分割は隠れない。選択の強さは面の明るさ + 上端の 2px の線 (線は
-   フォーカスのある面の選択中のタブだけ、そのタブの幅だけ)。 */
+   右端の ＋ と分割は隠れない。選択中のタブは面の明るさ + 上端の 2px の線 (強調色の
+   線と強調色の絵と太い名前はフォーカスのある面の選択中のタブだけ。もう一方の面の
+   選択中のタブは弱い線。線はそのタブの幅だけ)。 */
 #main-tabs {
   position: fixed;
   /* 左端は一覧の列の頭の右 (列を畳んでも頭の行は残るので動かない)、右端は窓の右端。 */
@@ -17570,9 +17571,16 @@ body.main-split .main-tabs-pane[data-side="left"] {
 .main-tab:hover {
   background: color-mix(in srgb, var(--color-nav) 50%, var(--color-tab-active));
 }
+/* 選択中のタブ: 面の明るさ・本来の文字色・上の辺の線。寸法は変えない (線は
+   box-shadow と ::before、名前の太さは -webkit-text-stroke。font-weight だと名前の
+   幅が変わり、中身の幅で決まるタブの幅が選ぶたびに動く)。上の辺の線は、
+   もう一方の面の選択中のタブは弱い線、フォーカスのある面の選択中のタブは下の
+   .main-tab-focused の強調色の線 (絵も強調色、名前を太く)。下の辺の線は
+   プロジェクトのグループの色なので使わない。 */
 .main-tab.main-tab-active {
   background: var(--color-tab-active);
   color: var(--color-text);
+  box-shadow: inset 0 2px 0 var(--color-text-3);
 }
 .main-tab.main-tab-focused::before {
   content: "";
@@ -17594,6 +17602,12 @@ body.main-split .main-tabs-pane[data-side="left"] {
 }
 .main-tab-active .main-tab-icon {
   color: var(--color-text-2);
+}
+.main-tab.main-tab-focused .main-tab-icon {
+  color: var(--color-accent);
+}
+.main-tab.main-tab-focused .main-tab-name {
+  -webkit-text-stroke: 0.4px currentColor;
 }
 .main-tab-icon svg {
   width: 100%;
@@ -17797,6 +17811,34 @@ body.main-split .main-tabs-pane[data-side="left"] {
 /* 最後のタブの右へ落とす印 (グループごとに並びがあるので、列の最後のタブに付ける)。 */
 .main-tab.main-tab-drop-after {
   box-shadow: inset -2px 0 0 var(--color-accent);
+}
+
+/* ---- title の吹き出し (views/title-tooltip.ts) ----
+   title を持つ要素にマウスを置くと約 300ms で出る。body 直下の fixed (親の
+   overflow で切れない)。置き場所は title-tooltip.ts が要素のすぐ下 (入らなければ
+   上) に、窓の端で切れないように書く。文言は title のまま (改行もそのまま)。
+   押せない・触れない (pointer-events: none)。いちばん上に重ねる。 */
+.title-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10001;
+  max-width: calc(var(--space-unit) * 90);   /* 360 */
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-overlay);
+  color: var(--color-text);
+  box-shadow: var(--shadow-md);
+  font-family: var(--font-ui);
+  font-size: var(--ui-font-sm);
+  line-height: 1.4;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.title-tooltip[hidden] {
+  display: none;
 }
 
 /* ---- メインの面の左右の箱 (.main-pane-host。app.ts の PANE_HOSTS) ----
