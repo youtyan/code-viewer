@@ -3,7 +3,13 @@
 // 値から組み立てる (文字を写さない。画面の文言を変えれば案内も変わる)。
 
 import { agentsText } from "./agents/i18n";
-import type { HelpBlock, HelpLanguage, HelpSectionContent } from "./help-page";
+import { type HelpFigure, helpFigure } from "./help-images";
+import type {
+  HelpBlock,
+  HelpLanguage,
+  HelpSectionContent,
+  HelpStep,
+} from "./help-page";
 import { mainTabsText } from "./main-tabs/i18n";
 
 export const GUIDE_SECTIONS = [
@@ -125,6 +131,12 @@ export function guideContent(
     href: "/settings",
     open: actions.openAccountsSettings,
   });
+  const figure = (name: string, alt: string): HelpFigure =>
+    helpFigure(lang, name, alt);
+  const step = (text: string, ...figures: HelpFigure[]): HelpStep => ({
+    text,
+    figures,
+  });
   if (lang === "ja")
     return {
       "add-account": {
@@ -139,11 +151,41 @@ export function guideContent(
               {
                 kind: "steps",
                 items: [
-                  `${l.settings} → ${l.accounts} を開きます。`,
-                  `［${l.add}］を押し、${l.addKind}と${l.addName}を決めて、［${l.addModeCreate}］(code-viewer が新しい設定ディレクトリを作り、既定のディレクトリの設定を共有します) か［${l.addModeRegister}］(持っているディレクトリをそのまま登録します) を選びます。`,
-                  `［${l.addNext}］で作るもの・リンクするものを確かめ、［${l.createRun}］か［${l.registerRun}］を押します。`,
-                  `増えた行の［${l.login}］を押します。tmux の新しいウィンドウに公式のログイン (claude auth login・codex login) が開くので、ブラウザで許可します。code-viewer は認証情報を受け取りません。`,
-                  `終わると、その行が「${l.signedIn}」になり、ログインしたメールアドレスが出ます。`,
+                  step(
+                    `${l.settings} → ${l.accounts} を開きます。`,
+                    figure(
+                      "accounts-list",
+                      `${l.settings} › ${l.accounts}。アカウントごとの行にログインの状態が出て、一覧の下に［${l.add}］があります。`,
+                    ),
+                  ),
+                  step(
+                    `［${l.add}］を押し、${l.addKind}と${l.addName}を決めて、［${l.addModeCreate}］(code-viewer が新しい設定ディレクトリを作り、既定のディレクトリの設定を共有します) か［${l.addModeRegister}］(持っているディレクトリをそのまま登録します) を選びます。`,
+                    figure(
+                      "accounts-add",
+                      `追加の画面。${l.addKind}に claude、${l.addName}に Personal を入れ、［${l.addModeCreate}］を選んでいます。`,
+                    ),
+                  ),
+                  step(
+                    `［${l.addNext}］で作るもの・リンクするものを確かめ、［${l.createRun}］か［${l.registerRun}］を押します。`,
+                    figure(
+                      "accounts-review",
+                      `作る前の確認。新しい設定ディレクトリと、既定のディレクトリからリンクする設定が並び、下に［${l.createRun}］があります。`,
+                    ),
+                  ),
+                  step(
+                    `増えた行の［${l.login}］を押します。tmux の新しいウィンドウに公式のログイン (claude auth login・codex login) が開くので、ブラウザで許可します。code-viewer は認証情報を受け取りません。`,
+                    figure(
+                      "accounts-sign-in",
+                      `一覧に増えた行と、その行の［${l.login}］。`,
+                    ),
+                  ),
+                  step(
+                    `終わると、その行が「${l.signedIn}」になり、ログインしたメールアドレスが出ます。`,
+                    figure(
+                      "accounts-signed-in",
+                      `ログインを終えた行。「${l.signedIn}」とメールアドレスが出ています。`,
+                    ),
+                  ),
                 ],
               },
               {
@@ -167,9 +209,32 @@ export function guideContent(
               {
                 kind: "steps",
                 items: [
-                  `左のサイドバーの下端の［${l.newAgent}］を押します。`,
-                  `${l.launchKind}・${l.launchAccount}・${l.launchProject}を選び、［${l.launchRun}］を押します。`,
+                  step(
+                    `左のサイドバーの下端の［${l.newAgent}］を押します。`,
+                    figure(
+                      "agent-new",
+                      `左のサイドバーの下端の［${l.newAgent}］。`,
+                    ),
+                  ),
+                  step(
+                    `${l.launchKind}・${l.launchAccount}・${l.launchProject}を選び、［${l.launchRun}］を押します。`,
+                    figure(
+                      "agent-launch",
+                      `${l.newAgent}の画面。${l.launchKind}・${l.launchAccount}・${l.launchProject}を選び、下の［${l.launchRun}］で起動します。`,
+                    ),
+                  ),
                 ],
+              },
+              {
+                kind: "paragraph",
+                text: "起動したエージェントはターミナルのタブで開き、左のサイドバーのプロジェクトの下に並びます。",
+              },
+              {
+                kind: "figure",
+                figure: figure(
+                  "agent-running",
+                  "起動した後の画面。左のサイドバーの sample-app の下にエージェントが並び、右にそのターミナルのタブが開いています。",
+                ),
               },
             ],
           },
@@ -204,7 +269,17 @@ export function guideContent(
               {
                 kind: "steps",
                 items: [
-                  `左のサイドバーの「${l.projects}」の横の ＋ (${l.addProject}) を押し、リポジトリのフォルダまでたどって［${l.addProjectSubmit}］を押します。`,
+                  step(
+                    `左のサイドバーの「${l.projects}」の横の ＋ (${l.addProject}) を押し、リポジトリのフォルダまでたどって［${l.addProjectSubmit}］を押します。`,
+                    figure(
+                      "project-add",
+                      `${l.addProject}の画面。フォルダが並び、git のリポジトリには git の札が付いています。`,
+                    ),
+                    figure(
+                      "project-register",
+                      `リポジトリのフォルダに入ったところ。下の［${l.addProjectSubmit}］で加わります。`,
+                    ),
+                  ),
                   `${l.paletteKey} で開くパレットの「${l.addProjectMenu}」からも同じ画面を開けます。`,
                   "別のリポジトリの中で code-viewer を実行しても加わります。",
                 ],
@@ -237,6 +312,13 @@ export function guideContent(
                 kind: "command",
                 title: "ホームディレクトリに入れ、どのプロジェクトでも使う",
                 command: "code-viewer skill install --agent all --global",
+              },
+              {
+                kind: "figure",
+                figure: figure(
+                  "skill-install",
+                  "ターミナルのタブで code-viewer skill install を実行したところ。入れたスキルが 1 行ずつ出ます。",
+                ),
               },
             ],
           },
@@ -304,11 +386,41 @@ export function guideContent(
             {
               kind: "steps",
               items: [
-                `Open ${l.settings} → ${l.accounts}.`,
-                `Select ${l.add}, choose the ${l.addKind} and a ${l.addName}, then pick ${l.addModeCreate} (code-viewer makes a new settings directory that shares your settings from the default one) or ${l.addModeRegister} (registers a directory you already have, as it is).`,
-                `Select ${l.addNext}, check what will be made and linked, then select ${l.createRun} or ${l.registerRun}.`,
-                `On the new row, select ${l.login}. The official sign-in (claude auth login / codex login) opens in a new tmux window; approve it in your browser. code-viewer never receives the credentials.`,
-                `When it is done, the row shows ${l.signedIn} and the email it signed in with.`,
+                step(
+                  `Open ${l.settings} → ${l.accounts}.`,
+                  figure(
+                    "accounts-list",
+                    `${l.settings} › ${l.accounts}: one row per account with its sign-in state, and ${l.add} below the list.`,
+                  ),
+                ),
+                step(
+                  `Select ${l.add}, choose the ${l.addKind} and a ${l.addName}, then pick ${l.addModeCreate} (code-viewer makes a new settings directory that shares your settings from the default one) or ${l.addModeRegister} (registers a directory you already have, as it is).`,
+                  figure(
+                    "accounts-add",
+                    `The add dialog with claude as the ${l.addKind}, Personal as the ${l.addName}, and ${l.addModeCreate} chosen.`,
+                  ),
+                ),
+                step(
+                  `Select ${l.addNext}, check what will be made and linked, then select ${l.createRun} or ${l.registerRun}.`,
+                  figure(
+                    "accounts-review",
+                    `The check before creating: the new settings directory and the settings it links from the default one, with ${l.createRun} at the bottom.`,
+                  ),
+                ),
+                step(
+                  `On the new row, select ${l.login}. The official sign-in (claude auth login / codex login) opens in a new tmux window; approve it in your browser. code-viewer never receives the credentials.`,
+                  figure(
+                    "accounts-sign-in",
+                    `The new row in the list, with its ${l.login} button.`,
+                  ),
+                ),
+                step(
+                  `When it is done, the row shows ${l.signedIn} and the email it signed in with.`,
+                  figure(
+                    "accounts-signed-in",
+                    `The row after signing in: ${l.signedIn} and the email.`,
+                  ),
+                ),
               ],
             },
             {
@@ -332,9 +444,32 @@ export function guideContent(
             {
               kind: "steps",
               items: [
-                `Select ${l.newAgent} at the bottom of the left sidebar.`,
-                `Choose the ${l.launchKind}, the ${l.launchAccount} and the ${l.launchProject}, then select ${l.launchRun}.`,
+                step(
+                  `Select ${l.newAgent} at the bottom of the left sidebar.`,
+                  figure(
+                    "agent-new",
+                    `${l.newAgent} at the bottom of the left sidebar.`,
+                  ),
+                ),
+                step(
+                  `Choose the ${l.launchKind}, the ${l.launchAccount} and the ${l.launchProject}, then select ${l.launchRun}.`,
+                  figure(
+                    "agent-launch",
+                    `The ${l.newAgent} dialog: choose the ${l.launchKind}, the ${l.launchAccount} and the ${l.launchProject}, then ${l.launchRun} at the bottom.`,
+                  ),
+                ),
               ],
+            },
+            {
+              kind: "paragraph",
+              text: "The agent opens in a terminal tab and is listed under its project in the left sidebar.",
+            },
+            {
+              kind: "figure",
+              figure: figure(
+                "agent-running",
+                "After the launch: the agent is listed under sample-app in the left sidebar, and its terminal tab is open on the right.",
+              ),
             },
           ],
         },
@@ -369,7 +504,17 @@ export function guideContent(
             {
               kind: "steps",
               items: [
-                `Select the + next to ${l.projects} in the left sidebar (${l.addProject}), go to the repository's folder and select ${l.addProjectSubmit}.`,
+                step(
+                  `Select the + next to ${l.projects} in the left sidebar (${l.addProject}), go to the repository's folder and select ${l.addProjectSubmit}.`,
+                  figure(
+                    "project-add",
+                    `The ${l.addProject} dialog listing folders; git repositories carry a git badge.`,
+                  ),
+                  figure(
+                    "project-register",
+                    `Inside the repository's folder, with ${l.addProjectSubmit} at the bottom.`,
+                  ),
+                ),
                 `${l.addProjectMenu} in the palette (${l.paletteKey}) opens the same dialog.`,
                 "Running code-viewer inside another repository adds it too.",
               ],
@@ -402,6 +547,13 @@ export function guideContent(
               kind: "command",
               title: "Into your home directory, for every project",
               command: "code-viewer skill install --agent all --global",
+            },
+            {
+              kind: "figure",
+              figure: figure(
+                "skill-install",
+                "code-viewer skill install run in a terminal tab, listing each skill it installed.",
+              ),
             },
           ],
         },

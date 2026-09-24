@@ -304,6 +304,10 @@ CLI のサブコマンド・フラグ・画面の操作が変わったら、**�
   `web-src/views/help-guides.ts`。ボタンや画面の名前は各画面の i18n の値を `guideLabels` で集めて
   組み立てる (文字を写さない。`help-page.test.ts` が、案内が使う名前を全部出していることを見る)。
   手順の順番やボタンが変わったら文も直す
+- 案内の画面のキャプチャ (`web/help-images/<名前>.<en|ja>.webp`、置く場所は `help-images.ts` の
+  `helpFigure`)。写っている画面が変わったら `node scripts/help-captures.mjs --window <窓の id>` で
+  撮り直す (砂場と偽の claude・codex で撮るので実データは写らない。撮った画像は 1 枚ずつ目で確かめる)。
+  節と画像の対応・幅 1600 px・1 枚 150KB / 合計 2MB は `help-page.test.ts` の「help page captures」が見る
 - リポジトリルートの `README.md`
 - 配布スキル `skills/code-viewer-*/SKILL.md`（CLI のサブコマンド / フラグを宣伝している場合）
 

@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
@@ -10,6 +12,7 @@ import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import type { InstallOffer, InstallOfferState } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
 import { parseQueryArgs } from "../server/query-cli";
+import { staticFileSpec, WEB_ROOT } from "../server/static-files";
 import { agentsText } from "../views/agents/i18n";
 import {
   GUIDE_SECTIONS,
@@ -912,5 +915,109 @@ describe("help page keybinding reference", () => {
         .flatMap((group) => group.rows.map(([keys]) => keys))
         .filter((keys) => keys === ""),
     ).toEqual([]);
+  });
+});
+
+describe("help page captures", () => {
+  /** 節ごとの画面のキャプチャ (出る順)。撮り直すのは scripts/help-captures.mjs。 */
+  const FIGURES: Array<[HelpSection, string[]]> = [
+    ["overview", ["overview"]],
+    [
+      "add-account",
+      [
+        "accounts-list",
+        "accounts-add",
+        "accounts-review",
+        "accounts-sign-in",
+        "accounts-signed-in",
+      ],
+    ],
+    ["start-agent", ["agent-new", "agent-launch", "agent-running"]],
+    ["add-project", ["project-add", "project-register"]],
+    ["ask-ai", ["skill-install"]],
+    ["keybindings", ["quick-help"]],
+    ["storage", []],
+    ["annotations", []],
+    ["database", []],
+    ["skills", []],
+    ["mcp", []],
+  ];
+  /** 1 枚と全部の大きさの上限、画像の幅 (800 CSS px を 2 倍の画素で撮る)。 */
+  const MAX_IMAGE_BYTES = 150 * 1024;
+  const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
+  const IMAGE_WIDTH = 1600;
+  const IMAGE_DIR = join(WEB_ROOT, "help-images");
+
+  function renderedFigures(lang: HelpLanguage, section: HelpSection) {
+    renderHelpPage(lang, section);
+    return [...document.querySelectorAll(".gdp-help-figure")].map((link) => {
+      const img = link.querySelector("img");
+      return {
+        href: link.getAttribute("href"),
+        src: img?.getAttribute("src"),
+        alt: img?.getAttribute("alt") ?? "",
+      };
+    });
+  }
+
+  /** WebP の幅 (可逆 VP8L・非可逆 VP8・拡張 VP8X の見出しから)。 */
+  function webpWidth(bytes: Buffer): number {
+    const chunk = bytes.toString("ascii", 12, 16);
+    if (chunk === "VP8L") return 1 + (bytes.readUInt16LE(21) & 0x3fff);
+    if (chunk === "VP8 ") return bytes.readUInt16LE(26) & 0x3fff;
+    if (chunk === "VP8X") return 1 + bytes.readUIntLE(24, 3);
+    throw new Error(`not a WebP image (chunk ${JSON.stringify(chunk)})`);
+  }
+
+  const CASES = (["en", "ja"] as const).flatMap((lang) =>
+    FIGURES.map(([section, names]) => [lang, section, names] as const),
+  );
+
+  test.each(
+    CASES,
+  )("in %s the %s section shows its captures, each with a description", (lang, section, names) => {
+    const figures = renderedFigures(lang, section);
+    expect(
+      figures.map(({ href, src, alt }) => [href === src, src, alt !== ""]),
+    ).toEqual(
+      names.map((name) => [true, `/help-images/${name}.${lang}.webp`, true]),
+    );
+  });
+
+  test("ships exactly the captures the help shows", () => {
+    const shown = CASES.flatMap(([lang, , names]) =>
+      names.map((name) => `${name}.${lang}.webp`),
+    ).sort();
+    expect(readdirSync(IMAGE_DIR).sort()).toEqual(shown);
+  });
+
+  test("the server hands out each capture as WebP from web/help-images", () => {
+    const files = readdirSync(IMAGE_DIR);
+    expect(files.map((file) => staticFileSpec(`/help-images/${file}`))).toEqual(
+      files.map((file) => [`help-images/${file}`, "image/webp"]),
+    );
+  });
+
+  test.each([
+    "/help-images/../package.json",
+    "/help-images/overview.en.png",
+    "/help-images/Overview.en.webp",
+    "/help-images/overview.fr.webp",
+    "/help-images/sub/overview.en.webp",
+  ])("the server does not map %s", (path) => {
+    expect(staticFileSpec(path)).toBeNull();
+  });
+
+  test("every capture is 1600 px wide and within the size budget", () => {
+    const files = readdirSync(IMAGE_DIR);
+    const sizes = files.map((file) => statSync(join(IMAGE_DIR, file)).size);
+    expect({
+      wide: files.filter(
+        (file) =>
+          webpWidth(readFileSync(join(IMAGE_DIR, file))) !== IMAGE_WIDTH,
+      ),
+      heavy: files.filter((_, index) => sizes[index] > MAX_IMAGE_BYTES),
+      total: sizes.reduce((sum, size) => sum + size, 0) <= MAX_TOTAL_BYTES,
+    }).toEqual({ wide: [], heavy: [], total: true });
   });
 });

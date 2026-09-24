@@ -12,6 +12,7 @@ import {
   type GuideSection,
   guideContent,
 } from "./help-guides";
+import { type HelpFigure, helpFigure } from "./help-images";
 import { buildHelpKeybindingGroups } from "./help-keybindings";
 import { createPageShell, type PageShellNavItem } from "./page-shell";
 import { quickHelpText } from "./quick-help-i18n";
@@ -68,16 +69,23 @@ export type HelpBlock =
       href: string;
       open(): void;
     }
-  | { kind: "steps"; items: string[] }
+  /** 手順。画像のある手順は、その番号の中に文の下へ画像を置く。 */
+  | { kind: "steps"; items: Array<string | HelpStep> }
+  /** 画面のキャプチャ (help-images.ts)。 */
+  | { kind: "figure"; figure: HelpFigure }
   /** インストールの案内 (PWA)。ボタンはブラウザが出せるときだけ。Chrome 以外では出さない */
   | { kind: "install"; button: string; steps: string[] }
   | { kind: "command"; title: string; command: string }
   | { kind: "table"; rows: Array<[string, string]> };
 
+export type HelpStep = { text: string; figures: HelpFigure[] };
+
 export type HelpSectionContent = {
   nav: string;
   title: string;
   intro: string;
+  /** 前置きのすぐ下 (節の見出しより前) に置くもの。画面のキャプチャなど。 */
+  lead?: Array<Exclude<HelpBlock, { kind: "install" }>>;
   groups: Array<{ title: string; blocks: HelpBlock[] }>;
 };
 
@@ -114,6 +122,16 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
         title: "Getting Started",
         intro:
           "code-viewer is a local browser UI for reading a repository, reviewing diffs, and letting AI agents attach explanations to exact code lines.",
+        lead: [
+          {
+            kind: "figure",
+            figure: helpFigure(
+              "en",
+              "overview",
+              "The code-viewer window: projects and their agents in the left sidebar, tabs along the top, and the changes of the open project in the main area.",
+            ),
+          },
+        ],
         groups: [
           {
             title: "Start the viewer",
@@ -988,6 +1006,20 @@ code-viewer annotate add-db --db app.db --tab query \\
         title: "Keyboard Shortcuts",
         intro:
           "Use these shortcuts to move between panels and navigate files without leaving the keyboard. The list shows the keys you set: in Settings › Shortcuts every action can take other keys or several keys, each key can be allowed in text fields, in terminals or only in the installed app window, and the changes can be exported, imported or edited as JSON.",
+        lead: [
+          {
+            kind: "paragraph",
+            text: "Press ? on any screen to see the common keys in a small window.",
+          },
+          {
+            kind: "figure",
+            figure: helpFigure(
+              "en",
+              "quick-help",
+              "The Keyboard shortcuts window: each key next to what it does, with links to Settings and to this full list at the bottom.",
+            ),
+          },
+        ],
         groups: [
           {
             title: "Line selection",
@@ -1029,6 +1061,16 @@ code-viewer annotate add-db --db app.db --tab query \\
         title: "はじめに",
         intro:
           "code-viewer は、ローカルのリポジトリをブラウザで読み、diff を確認し、AI エージェントにコード行へ説明を付けさせるためのツールです。",
+        lead: [
+          {
+            kind: "figure",
+            figure: helpFigure(
+              "ja",
+              "overview",
+              "code-viewer の画面。左のサイドバーにプロジェクトとそのエージェント、上にタブ、真ん中に開いているプロジェクトの変更が出ています。",
+            ),
+          },
+        ],
         groups: [
           {
             title: "ビューアを起動する",
@@ -1901,6 +1943,20 @@ code-viewer annotate add-db --db app.db --tab query \\
         title: "キーボードショートカット",
         intro:
           "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。一覧は設定したキーで出ます。設定 › ショートカット では、どの操作にも別のキーや複数のキーを割り当てられ、キーごとに入力欄の中・端末の中・PWA の窓だけのどこで効くかを選べ、変えた内容を JSON で書き出す・読み込む・直接編集できます。",
+        lead: [
+          {
+            kind: "paragraph",
+            text: "どの画面でも ? を押すと、よく使うキーが小さな窓に出ます。",
+          },
+          {
+            kind: "figure",
+            figure: helpFigure(
+              "ja",
+              "quick-help",
+              "キーボードショートカットの小窓。キーとその操作が並び、下に設定と、このページのキーの一覧へのリンクがあります。",
+            ),
+          },
+        ],
         groups: [
           {
             title: "行選択",
@@ -2051,15 +2107,33 @@ function renderHelpBlock(
   }
   if (block.kind === "steps") return renderHelpSteps(block.items);
   if (block.kind === "command") return renderHelpCommand(block);
+  if (block.kind === "figure") return renderHelpFigure(block.figure);
   return renderHelpTable(block.rows);
 }
 
-function renderHelpSteps(items: string[]): HTMLOListElement {
+/** 画像は縮めて出すので、押すと元の大きさで別のタブに開く。 */
+function renderHelpFigure(figure: HelpFigure): HTMLAnchorElement {
+  const link = document.createElement("a");
+  link.className = "gdp-help-figure";
+  link.href = figure.src;
+  link.target = "_blank";
+  link.rel = "noopener";
+  const img = document.createElement("img");
+  img.src = figure.src;
+  img.alt = figure.alt;
+  img.loading = "lazy";
+  img.decoding = "async";
+  link.appendChild(img);
+  return link;
+}
+
+function renderHelpSteps(items: Array<string | HelpStep>): HTMLOListElement {
   const ol = document.createElement("ol");
   ol.className = "gdp-help-steps";
   items.forEach((item) => {
     const li = document.createElement("li");
-    li.textContent = item;
+    if (typeof item === "string") li.textContent = item;
+    else li.append(item.text, ...item.figures.map(renderHelpFigure));
     ol.appendChild(li);
   });
   return ol;
@@ -2210,7 +2284,7 @@ export function createHelpPage(deps: HelpPageDeps) {
     h2.textContent = current.title;
     const intro = document.createElement("p");
     intro.textContent = current.intro;
-    article.append(h2, intro);
+    article.append(h2, intro, ...(current.lead ?? []).map(renderHelpBlock));
     if (section === "keybindings") article.append(shortcutSettingsLink(lang));
     sectionGroups.forEach((group) => {
       const groupSection = document.createElement("section");

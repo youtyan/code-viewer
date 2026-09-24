@@ -22724,6 +22724,24 @@ body.gdp-help-page #content {
   margin: 0 0 var(--space-5);
   color: var(--color-text-2);
 }
+/* ヘルプの画面のキャプチャ (views/help-images.ts)。800 px 幅で撮った 2 倍の画像を、
+   撮った幅より大きくしない。手順の中では文の下に置く。 */
+.gdp-help-figure {
+  display: block;
+  max-width: calc(var(--space-unit) * 200);
+  margin: var(--space-2) 0 var(--space-5);
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+.gdp-help-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.gdp-help-steps .gdp-help-figure {
+  margin-bottom: var(--space-4);
+}
 /* 設定のフォーム: 節は見出しと間隔で区切る。 */
 .scope-settings {
   max-width: calc(var(--space-unit) * 225);
