@@ -683,7 +683,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       const byPath = el(
         "button",
         "nav-note nav-note-link",
-        current.projects.switcherAddPath,
+        current.projects.addProjectMenu,
       );
       byPath.type = "button";
       byPath.setAttribute(FOCUS_ATTR, "register-path");

@@ -47,10 +47,23 @@ export type ProjectsText = {
   renameLabel: string;
   renameHint: (folder: string) => string;
   save: string;
-  addPathTitle: string;
-  addPathLabel: string;
-  addPathHint: string;
-  addPathSubmit: string;
+  /** 「プロジェクトを追加」(左のサイドバーの ＋ の title) と、メニュー・パレットの項目。 */
+  addProject: string;
+  addProjectMenu: string;
+  /** そのダイアログ (project-directory-dialog.ts)。 */
+  addProjectTitle: string;
+  addProjectDescription: string;
+  addProjectPathLabel: string;
+  addProjectPathHint: string;
+  addProjectShowHidden: string;
+  addProjectListLabel: string;
+  addProjectUp: (parent: string) => string;
+  addProjectGitMark: string;
+  addProjectLoading: string;
+  addProjectEmpty: string;
+  addProjectTruncated: (shown: number, total: number) => string;
+  addProjectNoPlace: string;
+  addProjectSubmit: string;
   registryProblem: (detail: string) => string;
   /** 入口のサーバの下で、このプロジェクトの裏のプロセスが止まった・起きなかった。 */
   backendStoppedTitle: (name: string) => string;
@@ -74,7 +87,6 @@ export type ProjectsText = {
   switcherNoMatch: string;
   switcherRegisterCurrent: (name: string) => string;
   switcherRegisterCurrentHint: string;
-  switcherAddPath: string;
   switcherCounts: (waiting: number, working: number) => string;
   switcherStopped: string;
   switcherButtonTitle: (key: string) => string;
@@ -139,11 +151,25 @@ export const PROJECTS_EN: ProjectsText = {
   renameLabel: "Name",
   renameHint: (folder) => `Leave empty to use the folder name (${folder}).`,
   save: "Save",
-  addPathTitle: "Register a project by path",
-  addPathLabel: "Path of the repository (or any folder inside it)",
-  addPathHint:
-    "An absolute path. A folder inside a repository or a worktree registers the repository.",
-  addPathSubmit: "Register",
+  addProject: "Add project",
+  addProjectMenu: "Add project…",
+  addProjectTitle: "Add a project",
+  addProjectDescription:
+    "Go to the folder of a repository and register it. A folder inside a repository or a worktree registers the repository.",
+  addProjectPathLabel: "Folder",
+  addProjectPathHint:
+    "An absolute path. ~ is your home folder. Press Enter to go there.",
+  addProjectShowHidden: "Show hidden folders",
+  addProjectListLabel: "Folders here",
+  addProjectUp: (parent) => `Up to ${parent}`,
+  addProjectGitMark: "The root of a git repository",
+  addProjectLoading: "Loading…",
+  addProjectEmpty: "No folders here.",
+  addProjectTruncated: (shown, total) =>
+    `Showing the first ${shown} of ${total} folders. Type a path to go to one further down.`,
+  addProjectNoPlace:
+    "There is no folder to register. Type a path and press Enter.",
+  addProjectSubmit: "Register this folder",
   registryProblem: (detail) =>
     `The registered projects cannot be read, so they are not shown and cannot be changed:\n${detail}`,
   backendStoppedTitle: (name) => `The process for ${name} stopped`,
@@ -168,7 +194,6 @@ export const PROJECTS_EN: ProjectsText = {
   switcherRegisterCurrent: (name) => `Register ${name}`,
   switcherRegisterCurrentHint:
     "Registered projects stay in the agents list and here, and open in this tab.",
-  switcherAddPath: "Register by path…",
   switcherCounts: (waiting, working) =>
     `Waiting ${waiting} · Working ${working}`,
   switcherStopped: "not running",
@@ -232,11 +257,25 @@ export const PROJECTS_JA: ProjectsText = {
   renameLabel: "名前",
   renameHint: (folder) => `空にするとフォルダ名 (${folder}) に戻ります。`,
   save: "保存",
-  addPathTitle: "パスを入力して登録",
-  addPathLabel: "リポジトリのパス (中のフォルダでも可)",
-  addPathHint:
-    "絶対パスで入力します。リポジトリの中のフォルダや作業ツリーを指定すると、そのリポジトリを登録します。",
-  addPathSubmit: "登録",
+  addProject: "プロジェクトを追加",
+  addProjectMenu: "プロジェクトを追加…",
+  addProjectTitle: "プロジェクトを追加",
+  addProjectDescription:
+    "リポジトリのディレクトリまでたどって登録します。リポジトリの中のディレクトリや作業ツリーを選ぶと、そのリポジトリを登録します。",
+  addProjectPathLabel: "場所",
+  addProjectPathHint:
+    "絶対パスで入力します。~ はホームです。Enter でその場所へ移ります。",
+  addProjectShowHidden: "隠しディレクトリを表示",
+  addProjectListLabel: "この場所のディレクトリ",
+  addProjectUp: (parent) => `${parent} へ上がる`,
+  addProjectGitMark: "git のリポジトリの根",
+  addProjectLoading: "読み込み中…",
+  addProjectEmpty: "ディレクトリはありません。",
+  addProjectTruncated: (shown, total) =>
+    `${total} 件のうち最初の ${shown} 件だけを出しています。その先はパスを入力して移ってください。`,
+  addProjectNoPlace:
+    "登録する場所がありません。パスを入力して Enter を押してください。",
+  addProjectSubmit: "このディレクトリを登録",
   registryProblem: (detail) =>
     `登録したプロジェクトを読めないため、表示も変更もできません:\n${detail}`,
   backendStoppedTitle: (name) => `${name} のプロセスが止まりました`,
@@ -261,7 +300,6 @@ export const PROJECTS_JA: ProjectsText = {
   switcherRegisterCurrent: (name) => `${name} を登録`,
   switcherRegisterCurrentHint:
     "登録したプロジェクトは、エージェント一覧とここに常に並び、このタブで開けます。",
-  switcherAddPath: "パスを入力して登録…",
   switcherCounts: (waiting, working) =>
     `入力待ち ${waiting} · 作業中 ${working}`,
   switcherStopped: "停止中",

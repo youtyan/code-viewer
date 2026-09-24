@@ -6,7 +6,7 @@
 //   │ AR another-repo  ~/work/another-repo  ◆1 ●2       │
 //   │ TR third-repo    ~/work/third-repo    停止中       │
 //   │ ───────────────────────────────────────────────── │
-//   │ パスを入力して登録…                               │
+//   │ プロジェクトを追加…                               │
 //   └────────────────────────────────────────────────────┘
 //
 // 並べるのは登録したプロジェクトだけ (利用者が決めた順)。件数とサーバの
@@ -248,7 +248,7 @@ export function mountProjectSwitcher(
     }
     if (overview) {
       actions.appendChild(
-        action(t.switcherAddPath, () => {
+        action(t.addProjectMenu, () => {
           close();
           return deps.actions.registerByPath();
         }),

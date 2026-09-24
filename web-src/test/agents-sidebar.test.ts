@@ -904,6 +904,7 @@ describe("project actions open", () => {
       actionHeaders: () => ({}),
       refresh: async () => undefined,
       navigate: (url) => navigated.push(url),
+      currentRoot: () => null,
     });
     await actions.open(info("/work/sample-tools", null), "/history", {
       confirmRegister: false,

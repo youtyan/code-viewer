@@ -484,6 +484,33 @@ export type ProjectOpenResponse = {
   started: boolean;
 };
 
+/**
+ * 「プロジェクトを追加」でたどるディレクトリの一覧 (ワイヤ形式。
+ * GET /_agent/projects/directories)。子のディレクトリの名前と「git の根か」
+ * だけで、ファイルの名前・中身は返さない。
+ */
+export type ProjectDirectoryListing = {
+  /** 正規化した絶対パス (`~` はホームに読み替えた後)。 */
+  path: string;
+  /** 1 つ上。`/` では null。 */
+  parent: string | null;
+  /** 名前の順。多すぎれば先頭の MAX_PROJECT_DIRECTORY_ENTRIES 件だけ。 */
+  entries: ProjectDirectoryEntry[];
+  /** 子のディレクトリの全件数 (entries より多ければ truncated)。 */
+  total: number;
+  truncated: boolean;
+};
+
+export type ProjectDirectoryEntry = {
+  name: string;
+  /** `.git` を持つ (git のリポジトリか作業ツリーの根)。 */
+  git: boolean;
+  /** 確かめられなかった理由 (読めない子など)。確かめられたら無い。 */
+  issue?: string;
+};
+
+export const MAX_PROJECT_DIRECTORY_ENTRIES = 500;
+
 /** 絞り込みの文字でプロジェクトを選ぶ (名前とパスの部分一致、大小無視)。 */
 export function matchesProjectQuery(
   project: { name: string; root: string },

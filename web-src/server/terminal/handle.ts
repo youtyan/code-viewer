@@ -15,6 +15,8 @@
 //   入口 (accounts/handle.ts)
 // - /_agent/projects・/_agent/projects/open・/_agent/projects/stop は
 //   プロジェクトの登録簿と、そのサーバを開く・止める入口 (projects/handle.ts)
+// - GET  /_agent/projects/directories  「プロジェクトを追加」がたどる子の
+//   ディレクトリの一覧 (projects/directories.ts。読むだけ)
 //
 // ルーティングと副作用リクエストの認可は tmux/handle.ts と同じ dispatchRoutes
 // に任せる。申告は状態を書き換えるので sideEffect: true。CLI からの POST は
@@ -66,6 +68,7 @@ import {
   parseBoundedJsonBody,
   textError,
 } from "../database/handle-shared";
+import { handleProjectDirectoriesGet } from "../projects/directories";
 import {
   handleProjectOpenPost,
   handleProjectStopPost,
@@ -740,6 +743,11 @@ export function handleAgentRoute(
         methods: ["POST"],
         sideEffect: true,
         handler: () => handleProjectsPost(req, cwd),
+      },
+      "/_agent/projects/directories": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handleProjectDirectoriesGet(url),
       },
       // サーバのプロセスを起こす・止める。同一オリジンからしか通らない。
       "/_agent/projects/open": {

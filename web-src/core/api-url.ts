@@ -39,6 +39,10 @@ const API_ENDPOINTS = {
   agentOverview: { path: "/_agent/overview", zone: "entry" },
   agentPaste: { path: "/_agent/paste", zone: "entry" },
   agentProjects: { path: "/_agent/projects", zone: "entry" },
+  agentProjectsDirectories: {
+    path: "/_agent/projects/directories",
+    zone: "entry",
+  },
   agentProjectsOpen: { path: "/_agent/projects/open", zone: "entry" },
   agentProjectsStop: { path: "/_agent/projects/stop", zone: "entry" },
   agentRules: { path: "/_agent/rules", zone: "entry" },

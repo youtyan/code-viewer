@@ -17,11 +17,13 @@ import type { ProjectColor } from "../../core/project-colors";
 import {
   decideProjectOpen,
   defaultProjectName,
+  type ProjectDirectoryListing,
   type ProjectOpenResponse,
   projectDestination,
 } from "../../core/projects";
 import { responseFailure } from "../agents/accounts-client";
 import { showConfirmDialog, showPromptDialog } from "../ui-dialog";
+import { showProjectDirectoryDialog } from "./project-directory-dialog";
 import type { ProjectsText } from "./projects-i18n";
 
 export type ProjectActionsDeps = {
@@ -32,6 +34,8 @@ export type ProjectActionsDeps = {
   refresh(): Promise<void>;
   /** 同じタブで移る (テストで差し替える)。 */
   navigate(url: string): void;
+  /** 今のプロジェクトの根 (「プロジェクトを追加」はその親から開く)。無ければ null。 */
+  currentRoot(): string | null;
 };
 
 /** 見出しに出す、そのプロジェクトで進んでいること。 */
@@ -58,6 +62,7 @@ export type ProjectActions = {
   ): Promise<void>;
   registerCurrent(): Promise<void>;
   registerRoot(root: string): Promise<void>;
+  /** 「プロジェクトを追加」: ディレクトリをたどって選び、登録する。 */
   registerByPath(): Promise<void>;
   unregister(info: AgentProjectInfo): Promise<void>;
   rename(info: AgentProjectInfo): Promise<void>;
@@ -191,20 +196,27 @@ export function createProjectActions(deps: ProjectActionsDeps): ProjectActions {
       await change(root, { action: "add", path: root });
     },
     async registerByPath() {
-      const text = deps.getText();
-      const path = await showPromptDialog({
-        title: text.addPathTitle,
-        body: `${text.addPathLabel}\n${text.addPathHint}`,
-        placeholder: "/",
-        ariaLabel: text.addPathLabel,
-        confirmLabel: text.addPathSubmit,
-        cancelLabel: text.cancel,
-        validate: (value) => {
-          const trimmed = value.trim();
-          return trimmed.startsWith("/") ? trimmed : null;
+      const root = deps.currentRoot();
+      const registered = await showProjectDirectoryDialog({
+        text: deps.getText(),
+        start: root ? `${root}/..` : "~",
+        async list(path, hidden) {
+          const query = new URLSearchParams({ path });
+          if (hidden) query.set("hidden", "1");
+          const url = `${apiUrl("agentProjectsDirectories")}?${query}`;
+          const res = await deps.trackLoad(fetch(url));
+          if (!res.ok) throw await responseFailure(res, `GET ${url}`);
+          return (await res.json()) as ProjectDirectoryListing;
+        },
+        // 失敗はダイアログの中に出す (見出しの失敗の欄には載せない)。
+        async register(path) {
+          await post(apiUrl("agentProjects"), { action: "add", path });
         },
       });
-      if (path) await change("", { action: "add", path });
+      if (registered !== null) {
+        set("", null);
+        await deps.refresh();
+      }
     },
     async unregister(info) {
       const text = deps.getText();

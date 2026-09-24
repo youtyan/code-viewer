@@ -5436,6 +5436,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       ["#nav-collapse", "octicon-sidebar-collapse", SIDEBAR_HIDE_16_PATHS],
       ["#nav-expand", "octicon-sidebar-expand", SIDEBAR_SHOW_16_PATHS],
       ["#nav-board-link", "octicon-apps", APPS_16_PATH],
+      ["#nav-add-project", "octicon-plus", PLUS_16_PATH],
       ["#nav-launch", "octicon-plus", PLUS_16_PATH],
       ["#nav-settings", "octicon-gear", GEAR_16_PATH],
     ];
@@ -8909,6 +8910,16 @@ window.GdpExpandLogic = GdpExpandLogic;
         },
       });
     }
+    // キーの割り当てが無い操作 (PALETTE_ACTIONS はキーの操作だけ)。
+    commands.push({
+      group: "actions",
+      id: "action:add-project",
+      title: agents.projects.addProjectMenu,
+      iconHtml: iconSvg("gdp-palette-icon", PLUS_16_PATH),
+      shortcut: "",
+      suggested: false,
+      run: () => void PROJECT_ACTIONS.registerByPath(),
+    });
     return commands;
   }
 
@@ -9027,6 +9038,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     actionHeaders,
     refresh: () => AGENT_MONITOR.refresh(),
     navigate: (url) => window.location.assign(url),
+    currentRoot: () => PROJECT_LOOKS.current()?.root ?? null,
   });
 
   const AGENT_PANE_OPENER = createAgentPaneOpener({
@@ -9169,6 +9181,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   document
     .querySelector<HTMLButtonElement>("#nav-launch")
     ?.addEventListener("click", () => launchAgent());
+  document
+    .querySelector<HTMLButtonElement>("#nav-add-project")
+    ?.addEventListener("click", () => void PROJECT_ACTIONS.registerByPath());
 
   const appNavElement = document.querySelector<HTMLElement>("#app-nav");
   const appNavResizer = document.querySelector<HTMLElement>("#app-nav-resizer");
@@ -9208,6 +9223,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       ["#nav-collapse", t.collapse],
       ["#nav-expand", t.expand],
       ["#nav-board-link", t.board],
+      ["#nav-add-project", agentsText(STATE.language).projects.addProject],
       ["#app-nav-resizer", t.resize],
     ] as const) {
       const el = document.querySelector<HTMLElement>(selector);

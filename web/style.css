@@ -20763,6 +20763,98 @@ button.agents-account-name:hover {
 .gdp-dialog-description + .gdp-dialog-body {
   margin-top: var(--space-5);
 }
+/* ---- 「プロジェクトを追加」(views/projects/project-directory-dialog.ts) ----
+   左のサイドバーの「プロジェクト」の見出しの ＋ (全体ボードのリンクの左) と、
+   ダイアログの中の子のディレクトリの一覧。一覧の箱は高さを決めておき、場所を
+   移っても登録のボタンが動かないようにする (画面中央の overlay なので上限は
+   viewport 基準でよい。ui-layout.md)。 */
+.nav-section-head > .nav-section-title {
+  margin-right: auto;
+}
+.nav-section-head > .nav-icon-action + .nav-icon-action {
+  margin-left: var(--space-1);
+}
+.project-directory {
+  display: flex;
+  flex-direction: column;
+}
+.project-directory-path {
+  font-family: var(--font-mono);
+}
+.project-directory-hidden {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  cursor: pointer;
+}
+.project-directory-list {
+  height: min(calc(var(--space-unit) * 90), 50vh);
+  margin-top: var(--space-3);
+  padding: var(--space-1);
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+}
+.project-directory-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: var(--ui-row-h);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  text-align: left;
+  cursor: pointer;
+}
+.project-directory-row:hover {
+  background: var(--color-raised);
+}
+.project-directory-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.project-directory-icon {
+  flex: none;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  fill: currentColor;
+  color: var(--color-text-3);
+}
+.project-directory-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 確かめられなかった子 (読めないなど)。理由は title。 */
+.project-directory-unchecked .project-directory-name {
+  color: var(--color-text-3);
+}
+.project-directory-git {
+  flex: none;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+  color: var(--color-text);
+  font-size: var(--ui-font-xs);
+}
+.project-directory-status {
+  min-height: 1.5em;
+  margin-top: var(--space-2);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
 /* 「新しいエージェント」(views/agents/accounts-dialogs.ts の launch)。
    左に見出し、右に選ぶもの。行の間は 4 単位。 */
 .agent-launch-form {

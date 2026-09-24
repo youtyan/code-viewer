@@ -394,10 +394,12 @@ Requires Node.js 20 or newer. Development uses
 1. From inside a git repository, run `npx @youtyan/code-viewer --open`. It
    prints a local URL (`http://127.0.0.1:<port>/p/<key>/`) and opens it. The
    repository is registered and listed under **Projects** at the top of the
-   left sidebar. A folder outside git is shown but not registered; use
-   **Register by path…** in the sidebar to add a repository.
-2. To add another repository, run `code-viewer` inside it: the running
-   code-viewer adds it and prints its URL instead of starting a second server.
+   left sidebar. A folder outside git is shown but not registered; use the
+   **+** next to **Projects** to add a repository.
+2. To add another repository, choose its folder with the **+** next to
+   **Projects** (or **Add project…** in ⌘K), or run `code-viewer` inside it:
+   the running code-viewer adds it and prints its URL instead of starting a
+   second server.
 3. Agents need [tmux](https://github.com/tmux/tmux). **New agent** at the
    bottom of the sidebar starts claude or codex in a new tmux session (tmux is
    started for you). Its state (Needs input, Working) shows in the sidebar, the
