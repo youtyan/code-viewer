@@ -5296,14 +5296,15 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
    actions are visually separated so their payloads are unambiguous. */
 #line-ref-pill {
   position: fixed;
-  left: 50%;
+  /* 選択のある面の真ん中と幅 (line-ref-pill.ts の place が書く)。 */
+  left: var(--lrp-center, 50%);
   bottom: calc(var(--chrome-bottom) + var(--space-5));
   transform: translateX(-50%);
   z-index: 400;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: min(1040px, calc(100vw - 48px));
+  max-width: min(1040px, calc(var(--lrp-room, 100vw) - 48px));
   white-space: nowrap;
   padding: 4px;
   border: 1px solid var(--border-strong);

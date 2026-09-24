@@ -194,6 +194,33 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
   let feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   let githubFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // 札は選択のある面の下の真ん中に出す。左右に分けたとき、画面の真ん中は
+  // 反対の面 (端末など) の上になり、どの面の行の札か分からなかった。
+  // 面の大きさが変わったら (掴みで幅を変えた・棚を畳んだ) 置き直す。
+  const scopeResize =
+    typeof ResizeObserver === "function" ? new ResizeObserver(place) : null;
+  let observed: Element | null = null;
+
+  function place() {
+    const root = currentScope();
+    const box = root instanceof Element ? root.getBoundingClientRect() : null;
+    if (!box || box.width === 0) {
+      pill.style.removeProperty("--lrp-center");
+      pill.style.removeProperty("--lrp-room");
+      return;
+    }
+    pill.style.setProperty("--lrp-center", `${box.left + box.width / 2}px`);
+    pill.style.setProperty("--lrp-room", `${box.width}px`);
+  }
+
+  function watchScope(root: ParentNode | null) {
+    const next = root instanceof Element ? root : null;
+    if (next === observed) return;
+    if (observed) scopeResize?.unobserve(observed);
+    observed = next;
+    if (observed) scopeResize?.observe(observed);
+  }
+
   function renderHistoryAction() {
     if (!deps.openLineHistory) return;
     const title = deps.lineHistoryTitle?.() ?? "Line history";
@@ -359,6 +386,8 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
         pill.classList.add("pop");
       }
       pill.hidden = false;
+      watchScope(currentScope());
+      place();
     },
     hide() {
       refText = "";
@@ -366,6 +395,7 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
       currentStart = 0;
       currentEnd = 0;
       currentScope = () => document;
+      watchScope(null);
       githubUrl = "";
       githubActions.hidden = true;
       pill.hidden = true;
