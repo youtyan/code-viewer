@@ -13,8 +13,10 @@ import {
   test,
   vi,
 } from "vitest";
+import { PROJECT_HEADER } from "../core/api-url";
 import type { ShellSession, ShellSessionId } from "../core/shell";
 import type { TerminalScreenDeps } from "../views/terminal/terminal-screen";
+import type { TerminalViewDeps } from "../views/terminal/terminal-view";
 
 const terminalScreenState = vi.hoisted(() => ({
   screens: [] as Array<{
@@ -84,12 +86,18 @@ function shell(id: string): ShellSession {
   };
 }
 
-function setup(responses: Array<() => Response | Promise<Response>>) {
+function setup(
+  responses: Array<() => Response | Promise<Response>>,
+  extra: Partial<TerminalViewDeps> = {},
+) {
   const requests: string[] = [];
+  /** 要求ごとの、プロジェクトの鍵のヘッダ (無ければ null)。 */
+  const projects: Array<string | null> = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
       requests.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
+      projects.push(new Headers(init?.headers).get(PROJECT_HEADER));
       const next = responses.shift();
       if (!next) throw new Error(`unexpected request ${url}`);
       return next();
@@ -114,8 +122,9 @@ function setup(responses: Array<() => Response | Promise<Response>>) {
     onOpenFailed: (message) => openFailures.push(message),
     tmuxWindow: () => null,
     onTmuxWindowStale: () => undefined,
+    ...extra,
   });
-  return { view, requests, opened, ended, openFailures };
+  return { view, requests, projects, opened, ended, openFailures };
 }
 
 const json = (body: unknown, status = 200) =>
@@ -151,6 +160,24 @@ describe("terminal view: シェルの作成と停止", () => {
       opened,
       view.knownShells()?.sessions.map((item) => item.id),
     ]).toEqual([["POST /_shell/create {}"], ["shell-a1:left"], ["shell-a1"]]);
+  });
+
+  // 入口はシェルの作業場所を X-Code-Viewer-Project の鍵で決める。鍵を渡さなければ
+  // 付けない (前置きの包みがこのページの鍵を付ける)。
+  test.each([
+    {
+      name: "鍵を渡す (グループの ▾)",
+      project: "0123456789abcdef",
+      expected: "0123456789abcdef",
+    },
+    { name: "鍵を渡さない (＋)", project: undefined, expected: null },
+  ])("新しいシェルのプロジェクト: $name", async ({ project, expected }) => {
+    const { view } = setup([() => json({ session: shell("shell-a1") })]);
+    await view.createShell("left", project);
+    const init = vi.mocked(fetch).mock.calls[0]?.[1];
+    expect(new Headers(init?.headers).get("X-Code-Viewer-Project")).toBe(
+      expected,
+    );
   });
 
   test("tmux ペインを開くとき、指定した面をタブへ引き継ぐ", async () => {
@@ -358,12 +385,13 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
   async function showing(
     id: string,
     responses: Parameters<typeof setup>[0],
+    extra: Parameters<typeof setup>[1] = {},
   ) {
     const session = shell(id);
-    const env = setup([
-      () => json({ available: true, sessions: [session] }),
-      ...responses,
-    ]);
+    const env = setup(
+      [() => json({ available: true, sessions: [session] }), ...responses],
+      extra,
+    );
     await env.view.loadShells();
     await env.view.showInTab(session.id, "left");
     return { ...env, session };
@@ -468,6 +496,50 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
       'POST /_shell/create {"id":"shell-p4","cols":80,"rows":24}',
       ["shell-p4:left"],
       null,
+    ]);
+  });
+
+  test.each([
+    {
+      name: "別のプロジェクトのグループ",
+      key: "sample-other-key",
+      sent: "sample-other-key",
+    },
+    { name: "このページのプロジェクトのグループ", key: undefined, sent: null },
+  ])("「新しいシェルで開き直す」はそのタブのグループのプロジェクトの鍵で開く: $name", async ({
+    key,
+    sent,
+  }) => {
+    const reopened = { ...shell("shell-p6"), tty: "/dev/sample-new" };
+    const asked: string[] = [];
+    const { view, session, requests, projects } = await showing(
+      "shell-p6",
+      [() => json({ session: reopened })],
+      {
+        reopenProject: async (id) => {
+          asked.push(id);
+          return key;
+        },
+      },
+    );
+    view.markEnded(session.id);
+
+    view
+      .tabPaneFor("left")
+      .querySelector<HTMLButtonElement>(".empty-action-primary")
+      ?.click();
+    await vi.waitFor(() =>
+      expect(terminalScreenState.screens[0]?.attached).toEqual(reopened),
+    );
+
+    expect([
+      asked,
+      requests[requests.length - 1],
+      projects[projects.length - 1],
+    ]).toEqual([
+      ["shell-p6"],
+      'POST /_shell/create {"id":"shell-p6","cols":80,"rows":24}',
+      sent,
     ]);
   });
 

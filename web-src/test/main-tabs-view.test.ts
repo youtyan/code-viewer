@@ -896,6 +896,9 @@ describe("main tabs view: プロジェクトのグループ", () => {
       [
         // 札には頭文字しか無いので、メニューの頭にプロジェクトの名前。
         "sample-app (disabled)",
+        // 新しいシェル・エージェントの口 (newShellIn・launchAgentIn) が無い。
+        "New shell (disabled)",
+        "New agent… (disabled)",
         "Switch to this project (disabled)",
         "Collapse",
         "Close this group",
@@ -903,6 +906,205 @@ describe("main tabs view: プロジェクトのグループ", () => {
       [`switch:${LIB}:-:sh`],
       ["[SA]", `${APP}(>app.ts README.md)`, "+", "-(agents)"],
     ]);
+  });
+
+  describe("▾ のメニューの新しいシェル・エージェント", () => {
+    /** 開いたメニューの並び (区切りは ---、押せない項目は (disabled)、title は [ ])。 */
+    const openGroupMenu = (mount: HTMLElement, root: string) => {
+      mount
+        .querySelector<HTMLElement>(
+          `.main-tab-group[data-group="${root}"] .main-tab-group-menu`,
+        )
+        ?.click();
+      return [
+        ...(document.querySelector(".gdp-context-menu")?.children ?? []),
+      ] as HTMLElement[];
+    };
+    const describeMenu = (items: HTMLElement[]) =>
+      items.map((item) =>
+        item.tagName === "HR"
+          ? "---"
+          : `${item.textContent}${(item as HTMLButtonElement).disabled ? " (disabled)" : ""}`,
+      );
+    const pick = (mount: HTMLElement, root: string, label: string) => {
+      const item = openGroupMenu(mount, root).find(
+        (el) => el.textContent === label,
+      );
+      if (!item) throw new Error(`no menu item ${label} for ${root}`);
+      item.click();
+    };
+    /**
+     * app.ts の口をまねる: newShellIn はそのプロジェクトのシェル (shell-new-<n>)
+     * を作って openTerminal でその面に置き、terminalProject はそのシェルの
+     * プロジェクトを返す。
+     */
+    const setupWithActions = async (
+      facts: ReturnType<NonNullable<MainTabsDeps["groupFacts"]>> = {
+        shellUnavailable: null,
+        git: true,
+      },
+      foreignInPlace = true,
+    ) => {
+      const calls: string[] = [];
+      const shells = new Map<string, string>([["shell-lib", LIB]]);
+      const ref: { handle?: MainTabsHandle } = {};
+      const ctx = setup(
+        async () => saved,
+        undefined,
+        undefined,
+        fileRoute("src/app.ts"),
+        APP,
+        groupDeps(calls, {
+          terminalProject: (session) => shells.get(session) ?? null,
+          foreignInPlace: () => foreignInPlace,
+          groupFacts: () => facts,
+          newShellIn: (root, side) => {
+            const session = `shell-new-${shells.size}`;
+            shells.set(session, root);
+            calls.push(`shell:${root}:${side}`);
+            ref.handle?.openTerminal(session, side);
+          },
+          launchAgentIn: (root) => calls.push(`agent:${root}`),
+        }),
+      );
+      ref.handle = ctx.handle;
+      await ctx.handle.restore();
+      return { ...ctx, calls };
+    };
+
+    test("既存の項目の上に、区切り線で分けて並ぶ", async () => {
+      const { mount } = await setupWithActions();
+      expect(describeMenu(openGroupMenu(mount, LIB))).toEqual([
+        "sample-lib (disabled)",
+        "---",
+        "New shell",
+        "New agent…",
+        "---",
+        "Switch to this project",
+        "Collapse",
+        "---",
+        "Close this group",
+      ]);
+    });
+
+    test.each([
+      {
+        name: "いま見ているプロジェクトのグループ",
+        root: APP,
+        expected: [
+          "[SL]",
+          `${LIB}(lib.ts diff Shell shell-lib)`,
+          "[SA]",
+          // 前面が同じグループなら、その右 (＋ と同じ)。
+          `${APP}(app.ts >Shell shell-new-1 README.md)`,
+          "+",
+          "-(agents)",
+        ],
+      },
+      {
+        name: "別のプロジェクトのグループ (前面は別のグループ)",
+        root: LIB,
+        expected: [
+          "[SL]",
+          `${LIB}(lib.ts diff Shell shell-lib >Shell shell-new-1)`,
+          "[SA]",
+          `${APP}(app.ts README.md)`,
+          "+",
+          "-(agents)",
+        ],
+      },
+    ])("新しいシェル: $name のプロジェクトで作り、できたタブはそのグループに入って前面になる", async ({
+      root,
+      expected,
+    }) => {
+      const { mount, calls } = await setupWithActions();
+      pick(mount, root, "New shell");
+      expect([calls, strip(mount)]).toEqual([[`shell:${root}:left`], expected]);
+    });
+
+    test.each([
+      { name: "いま見ているプロジェクト", root: APP },
+      { name: "別のプロジェクト", root: LIB },
+    ])("新しいエージェント…: $name を選んだ起動の画面を開く (移らない)", async ({
+      root,
+    }) => {
+      const { mount, calls } = await setupWithActions();
+      pick(mount, root, "New agent…");
+      expect(calls).toEqual([`agent:${root}`]);
+    });
+
+    test.each([
+      {
+        name: "シェルが使えない",
+        facts: { shellUnavailable: "node-pty is missing", git: true },
+        foreignInPlace: true,
+        root: LIB,
+        expected: [
+          "New shell (disabled) [node-pty is missing]",
+          "New agent… [Start an agent in sample-lib]",
+        ],
+      },
+      {
+        name: "1 つで完結するサーバの、別のプロジェクト",
+        facts: { shellUnavailable: null, git: true },
+        foreignInPlace: false,
+        root: LIB,
+        expected: [
+          "New shell (disabled) [Switch to this project to open a shell in it]",
+          "New agent… [Start an agent in sample-lib]",
+        ],
+      },
+      {
+        name: "1 つで完結するサーバの、いま見ているプロジェクト",
+        facts: { shellUnavailable: null, git: true },
+        foreignInPlace: false,
+        root: APP,
+        expected: [
+          "New shell [Open a new shell in sample-app]",
+          "New agent… [Start an agent in sample-app]",
+        ],
+      },
+      {
+        name: "git でない別のプロジェクト",
+        facts: { shellUnavailable: null, git: false },
+        foreignInPlace: true,
+        root: LIB,
+        expected: [
+          "New shell [Open a new shell in sample-lib]",
+          "New agent… (disabled) [Agents can only be started in a git repository]",
+        ],
+      },
+      {
+        name: "git でない、いま見ているプロジェクト (起動の画面はこのサーバの根を選べる)",
+        facts: { shellUnavailable: null, git: false },
+        foreignInPlace: true,
+        root: APP,
+        expected: [
+          "New shell [Open a new shell in sample-app]",
+          "New agent… [Start an agent in sample-app]",
+        ],
+      },
+    ])("押せないときは理由を title に出す: $name", async ({
+      facts,
+      foreignInPlace,
+      root,
+      expected,
+    }) => {
+      const { mount, calls } = await setupWithActions(facts, foreignInPlace);
+      const items = openGroupMenu(mount, root)
+        .filter((item) => /^New /.test(item.textContent ?? ""))
+        .map(
+          (item) =>
+            `${describeMenu([item])[0]} [${(item as HTMLButtonElement).title}]`,
+        );
+      // 押せない項目を押しても何も作らない。
+      for (const label of ["New shell", "New agent…"]) pick(mount, root, label);
+      closeContextMenu();
+      expect([items, calls.length]).toEqual([
+        expected,
+        expected.filter((item) => !item.includes("(disabled)")).length,
+      ]);
+    });
   });
 
   test("別のグループの間には落とせない (印も出さない)。同じグループの中は落とせる", async () => {

@@ -1778,6 +1778,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     terminalProject: (session) => terminalProjectOf(session),
     switchProject: (root, route, tab) =>
       openProjectAt(root, projectTabPath(route, tab)),
+    // グループの ▾ の新しいシェル・エージェント (押せるかは main-tabs-view の
+    // groupMenuFor が決める。ここは材料と作り方だけ)。
+    newShellIn: (root, side) => void openShellIn(root, side),
+    launchAgentIn: (root) => launchAgent(root),
+    groupFacts: (root) => {
+      const shells = TERMINAL_VIEW.knownShells();
+      return {
+        shellUnavailable:
+          shells && !shells.available
+            ? `${terminalText(STATE.language).shellUnavailable}\n${shells.reason ?? ""}`
+            : null,
+        git:
+          AGENT_MONITOR.snapshot().overview?.projects.find(
+            (item) => item.root === root,
+          )?.git ?? null,
+      };
+    },
     // 別のプロジェクトのファイルを /p/<鍵> から読めるのは入口のサーバの下だけ。
     foreignInPlace: () => projectKey() !== null,
     backupSaved: async () => {
@@ -7093,6 +7110,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     onShellEnded: (id) => closeEndedTerminal(id),
     onOpenFailed: (message) => TERMINAL_NOTICE.show(message),
+    // サーバが起き直して終わったシェルは、そのタブのグループのプロジェクトで開き直す。
+    // (グループは中身で決まるので、預けた右の面のタブでも引ける)。
+    reopenProject: (id) =>
+      shellProjectKey(
+        MAIN_TABS.groupOf({
+          id,
+          preview: false,
+          target: { kind: "terminal", session: id },
+        }),
+      ),
     tmuxWindow: (id) => TMUX_WINDOWS.get(id) ?? null,
     // 大きさを変えた後の取り直しは全画面共通の取り直しに相乗りする (重なれば
     // 走っているものを待つ)。
@@ -7832,6 +7859,43 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
   }
 
+  /**
+   * シェルをそのプロジェクトの根で開くときの鍵 (このページのプロジェクト・
+   * どのプロジェクトでもないなら undefined: このページのプロジェクトで開く)。
+   */
+  async function shellProjectKey(
+    root: string | null,
+  ): Promise<string | undefined> {
+    return root === null || root === MAIN_TABS.currentProject()
+      ? undefined
+      : await projectKeyFor(root);
+  }
+
+  /**
+   * 新しいシェルを side の面に開いて前面に出す (＋ とグループの ▾)。root を
+   * 渡せば、そのプロジェクトの根をカレントにする: 入口はシェルの作業場所を
+   * 要求の鍵で決める (server/entry/server.ts)。別のプロジェクトの鍵は
+   * projectKeyFor (動いていなければ起こして知る。別のプロジェクトのファイルと
+   * 同じ経路)。失敗は理由の全文を出す。
+   */
+  async function openShellIn(
+    root: string | null,
+    side: PaneSide,
+  ): Promise<void> {
+    try {
+      await TERMINAL_VIEW.createShell(side, await shellProjectKey(root));
+    } catch (error) {
+      console.error(
+        `[code-viewer] shell create failed${root === null ? "" : ` in ${root}`}`,
+        error,
+      );
+      void showAlertDialog({
+        title: terminalText(STATE.language).shellCreateFailed,
+        body: formatErrorDetail(error),
+      });
+    }
+  }
+
   function newTabMenuItems(
     side: PaneSide,
     list: ShellListResponse | Error,
@@ -7856,15 +7920,7 @@ window.GdpExpandLogic = GdpExpandLogic;
             ? t.newShellTitle
             : `${t.shellUnavailable}\n${list.reason ?? ""}`,
         disabled: !(list instanceof Error) && !list.available,
-        onSelect: () => {
-          TERMINAL_VIEW.createShell(side).catch((error: unknown) => {
-            console.error("[code-viewer] shell create failed", error);
-            void showAlertDialog({
-              title: t.shellCreateFailed,
-              body: formatErrorDetail(error),
-            });
-          });
-        },
+        onSelect: () => void openShellIn(null, side),
       },
       // Tools と Search は page のタブ (左の面にだけ開く)。
       { label: uiText().nav.tools, onSelect: () => openToolsPage() },

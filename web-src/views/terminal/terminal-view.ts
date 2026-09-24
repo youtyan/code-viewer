@@ -1,4 +1,4 @@
-import { apiUrl } from "../../core/api-url";
+import { apiUrl, PROJECT_HEADER } from "../../core/api-url";
 // メインの面 (左 / 右) のターミナルのタブの中身。映すのは PTY のシェルで、
 // tmux はその中で普通に動く。
 //
@@ -72,6 +72,12 @@ export type TerminalViewDeps = {
    * その端末でないと見えないので、常に見える場所にも出してもらう。
    */
   onOpenFailed(message: string): void;
+  /**
+   * 「新しいシェルで開き直す」でカレントにするプロジェクトの鍵 (そのタブの
+   * グループのプロジェクト。undefined ならこのページのプロジェクト)。無ければ
+   * このページのプロジェクトで開く。
+   */
+  reopenProject?(id: ShellSessionId): Promise<string | undefined>;
   /** そのシェルの中の tmux の端末とウインドウの大きさ。無ければ null。 */
   tmuxWindow(id: ShellSessionId): TmuxClientWindow | null;
   /** 端末の大きさを変えた。tmux の大きさを早めに取り直してもらう。 */
@@ -107,9 +113,14 @@ export type TerminalViewHandle = {
   openPaneInTab(pane: string, side: TabSide): Promise<void>;
   /**
    * 新しいシェルを開き、そのタブを前面に出してもらう。失敗は reject する。
+   * project はカレントにするプロジェクトの鍵 (無ければこのページのプロジェクト)。
    * id はそのタブのシェルの ID のまま開き直すとき (サーバが起き直して終わった)。
    */
-  createShell(side: TabSide, id?: ShellSessionId): Promise<void>;
+  createShell(
+    side: TabSide,
+    project?: string,
+    id?: ShellSessionId,
+  ): Promise<void>;
   /**
    * サーバが起き直して終わったシェルのタブを、同じ ID のシェルで保存した tmux の
    * 場所へ繋ぎ直す。そのシェルを映していた面は新しいシェルを映し直す。場所が
@@ -413,6 +424,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
 
   async function createShell(
     side: TabSide,
+    project?: string,
     id?: ShellSessionId,
   ): Promise<void> {
     const size = tabs[side]?.screen.measure();
@@ -422,6 +434,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
         headers: {
           ...deps.actionHeaders(),
           "Content-Type": "application/json",
+          // 入口はシェルの作業場所をこの鍵で決める (server/entry/server.ts)。
+          ...(project ? { [PROJECT_HEADER]: project } : {}),
         },
         body: JSON.stringify({ id, cols: size?.cols, rows: size?.rows }),
       }),
@@ -541,7 +555,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     // 開いたシェルのタブを前面に出す (onOpenInTab) と、すぐ映しに来る。その前に外す。
     ended.delete(id);
     try {
-      await createShell(side, id);
+      await createShell(side, await deps.reopenProject?.(id), id);
     } catch (error) {
       ended.add(id);
       console.error(`[code-viewer] could not reopen the shell ${id}`, error);

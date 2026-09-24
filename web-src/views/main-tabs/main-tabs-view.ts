@@ -230,6 +230,28 @@ export type MainTabsDeps = {
    */
   switchProject?(root: string, route: AppRoute | null, tab: Tab | null): void;
   /**
+   * グループの ▾ の「新しいシェル」: そのプロジェクトの根をカレントにした
+   * シェルを side の面に開く (＋ の新しいシェルと同じ作り方)。できたシェルは
+   * openTerminal でその面の前面に置いてもらい、terminalProject でそのグループに
+   * 入る。失敗を出すのは呼ばれた側。無ければ項目を押せない。
+   */
+  newShellIn?(root: string, side: PaneSide): void;
+  /**
+   * グループの ▾ の「新しいエージェント…」: そのプロジェクトを選んだ状態の
+   * 起動の画面を開く。無ければ項目を押せない。
+   */
+  launchAgentIn?(root: string): void;
+  /**
+   * グループの ▾ の新しいシェル・エージェントを押せるかの材料 (決めるのは
+   * groupMenuFor だけ)。shellUnavailable はシェルを開けない理由 (開ける・まだ
+   * 分からないなら null)、git はそのプロジェクトが git のリポジトリか (分から
+   * なければ null)。
+   */
+  groupFacts?(root: string): {
+    shellUnavailable: string | null;
+    git: boolean | null;
+  };
+  /**
    * 別のプロジェクトのファイルをその場で出せるか (入口のサーバの下だけ。1 つで
    * 完結するサーバでは、そのプロジェクトへ移って出す)。
    */
@@ -2174,7 +2196,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         ),
       );
       grouped.push(
-        renderGroupHead(key, look, isCollapsed, group.tabs.length),
+        renderGroupHead(side, key, look, isCollapsed, group.tabs.length),
         tabs,
       );
     }
@@ -2249,6 +2271,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
 
   /** グループの札。札を押すと畳む・開く、▾ はグループのメニュー。 */
   function renderGroupHead(
+    side: PaneSide,
     key: string,
     look: ProjectLook,
     isCollapsed: boolean,
@@ -2290,7 +2313,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     menu.innerHTML = iconSvg("main-tab-group-menu-icon", CHEVRON_DOWN_12_PATH);
     const openMenu = (at?: { x: number; y: number }) => {
       const rect = menu.getBoundingClientRect();
-      showContextMenu(menu, groupMenuFor(key, isCollapsed), {
+      showContextMenu(menu, groupMenuFor(side, key, isCollapsed), {
         at: at ?? { x: rect.left, y: rect.bottom + 4 },
       });
     };
@@ -2303,10 +2326,34 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     return head;
   }
 
-  function groupMenuFor(key: string, isCollapsed: boolean): ContextMenuItem[] {
+  /**
+   * グループの ▾ (と札の右クリック) のメニュー。項目の並びと押せるかは、ここ
+   * だけで決める (タブの右クリックの tabMenu と同じ考え方)。新しいシェル・
+   * エージェントは、その札の面とプロジェクトで作る。
+   */
+  function groupMenuFor(
+    side: PaneSide,
+    key: string,
+    isCollapsed: boolean,
+  ): ContextMenuItem[] {
     const current = text();
     const here = key === currentRoot;
     const look = lookOf(key);
+    const facts = deps.groupFacts?.(key) ?? {
+      shellUnavailable: null,
+      git: null,
+    };
+    // 押せない理由 (押せるなら null)。無い口の理由は出さない ("")。
+    const shellBlocker = !deps.newShellIn
+      ? ""
+      : (facts.shellUnavailable ??
+        // 1 つで完結するサーバは、別のプロジェクトのシェルを作れない。
+        (here || deps.foreignInPlace?.() ? null : current.shellNeedsSwitch));
+    const agentBlocker = !deps.launchAgentIn
+      ? ""
+      : facts.git === false && !here
+        ? current.notGitProject
+        : null;
     return [
       // メニューの頭はプロジェクトの名前 (札には頭文字しか無い)。押せない行。
       {
@@ -2314,6 +2361,19 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         title: key,
         disabled: true,
         onSelect: () => undefined,
+      },
+      { kind: "separator" },
+      {
+        label: current.newShellHere,
+        title: shellBlocker || current.newShellHereTitle(look.name),
+        disabled: shellBlocker !== null,
+        onSelect: () => deps.newShellIn?.(key, side),
+      },
+      {
+        label: current.newAgentHere,
+        title: agentBlocker || current.newAgentHereTitle(look.name),
+        disabled: agentBlocker !== null,
+        onSelect: () => deps.launchAgentIn?.(key),
       },
       { kind: "separator" },
       {

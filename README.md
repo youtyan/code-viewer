@@ -39,8 +39,9 @@ Requires Node.js 20 or newer. Development uses
   strip down the left edge under the project row. History's branch labels keep
   their whole name up to about 40% of the room they share with the subject. The tabs are
   shared by all projects and grouped by project: each group starts with a label in
-  the project's color (its initials and ▾ for Switch to this project / Collapse /
-  Close this group; the name is in the tooltip) and its tabs are underlined in that color, in the order of the
+  the project's color (its initials and ▾ for New shell / New agent… in that
+  project, Switch to this project / Collapse / Close this group; the name is in
+  the tooltip) and its tabs are underlined in that color, in the order of the
   sidebar; tabs of no project (agent board, Tools, Settings & Help) sit at the right
   end, and a terminal belongs to the project of its folder. Click a label to
   collapse a group. Files, terminals and images of another project open in place;
