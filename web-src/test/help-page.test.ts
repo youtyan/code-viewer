@@ -1073,21 +1073,26 @@ describe("help page captures", () => {
       "getting-started",
       [
         "overview",
+        "overview-marked",
         "project-register",
+        "sidebar-no-tmux",
         "accounts-sign-in",
+        "hooks-section",
         "agent-launch",
+        "notify-enable",
         "skill-install",
+        "doctor-sheet",
       ],
     ],
-    ["projects", ["project-add", "project-register"]],
-    ["read-files", []],
-    ["read-diffs", []],
-    ["search", []],
-    ["worktrees", []],
+    ["projects", ["project-add", "project-register", "projects-menu"]],
+    ["read-files", ["files-open", "files-line-select"]],
+    ["read-diffs", ["diff-screen"]],
+    ["search", ["search-palette", "history-screen"]],
+    ["worktrees", ["worktrees-screen"]],
     ["start-agent", ["agent-new", "agent-launch"]],
-    ["agent-state", ["agent-running"]],
-    ["notifications", []],
-    ["agent-hooks", []],
+    ["agent-state", ["agent-running", "agents-board"]],
+    ["notifications", ["notify-enable"]],
+    ["agent-hooks", ["hooks-section", "hooks-dialog"]],
     [
       "add-account",
       [
@@ -1098,23 +1103,23 @@ describe("help page captures", () => {
         "accounts-signed-in",
       ],
     ],
-    ["terminal", []],
-    ["tabs-layout", []],
+    ["terminal", ["terminal-tab"]],
+    ["tabs-layout", ["tabs-groups", "tabs-split"]],
     ["install-app", []],
-    ["phone", []],
-    ["datastores", []],
-    ["tools", []],
-    ["annotations", []],
+    ["phone", ["phone-screen"]],
+    ["datastores", ["datastore-grid"]],
+    ["tools", ["tools-markdown"]],
+    ["annotations", ["annotations-panel"]],
     ["ask-ai", ["skill-install"]],
     ["ai-cli-mcp", []],
     ["project-files", []],
-    ["doctor", []],
+    ["doctor", ["doctor-sheet"]],
     ["keybindings", ["quick-help"]],
   ];
-  /** 1 枚と全部の大きさの上限、画像の幅 (800 CSS px を 2 倍の画素で撮る)。 */
+  /** 1 枚と全部の大きさの上限、画像の幅 (800 CSS px を 1.5 倍の画素で撮る)。 */
   const MAX_IMAGE_BYTES = 150 * 1024;
   const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
-  const IMAGE_WIDTH = 1600;
+  const IMAGE_WIDTH = 1200;
   const IMAGE_DIR = join(WEB_ROOT, "help-images");
 
   function renderedFigures(lang: HelpLanguage, section: string) {
@@ -1220,7 +1225,7 @@ describe("help page captures", () => {
     expect(staticFileSpec(path)).toBeNull();
   });
 
-  test("every capture is 1600 px wide and within the size budget", () => {
+  test("every capture is 1200 px wide and within the size budget", () => {
     const files = readdirSync(IMAGE_DIR);
     const sizes = files.map((file) => statSync(join(IMAGE_DIR, file)).size);
     expect({

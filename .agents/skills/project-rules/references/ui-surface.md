@@ -315,7 +315,7 @@ CLI のサブコマンド・フラグ・画面の操作が変わったら、**�
   `helpFigure`)。本文は撮る予定の画面も名前で書き、撮ったものだけを `HELP_CAPTURES` に載せる (載って
   いないものは描かない)。写っている画面が変わったら `node scripts/help-captures.mjs` で撮り直す (砂場と
   偽の claude・codex で撮るので実データは写らない。撮った画像は 1 枚ずつ目で確かめる)。節と画像の
-  対応・`HELP_CAPTURES` と置いた画像の一致・幅 1600 px・1 枚 150KB / 合計 2MB は `help-page.test.ts` の
+  対応・`HELP_CAPTURES` と置いた画像の一致・幅 1200 px・1 枚 150KB / 合計 2MB は `help-page.test.ts` の
   「help page captures」が見る
 - リポジトリルートの `README.md`
 - 配布スキル `skills/code-viewer-*/SKILL.md`（CLI のサブコマンド / フラグを宣伝している場合）

@@ -210,6 +210,7 @@ import {
   type DiffMeta,
   type FileMeta,
   type HljsApi,
+  type RepoTreeEntry,
   type SettingsResponse,
   type SidebarItem,
   THEME_PALETTES,
@@ -2055,12 +2056,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     sidebarToggleTitle: fileListToggleTitle,
     onUserToggledSidebarHidden,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
-    omittedDirectoryBadge: (reason) => {
-      const text = uiText().sidebar;
-      return reason === "heavy"
-        ? { label: text.omittedHeavyLabel, title: text.omittedHeavyTitle }
-        : { label: text.omittedPrivateLabel, title: text.omittedPrivateTitle };
-    },
+    omittedDirectoryBadge,
     commitEntryBadge: (submodule) => {
       const text = uiText().sidebar;
       return submodule
@@ -3143,9 +3139,29 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (button) button.textContent = text;
   }
 
+  function omittedDirectoryBadge(
+    reason: RepoTreeEntry["children_omitted_reason"],
+  ): { label: string; title: string } {
+    const text = uiText().sidebar;
+    return reason === "heavy"
+      ? { label: text.omittedHeavyLabel, title: text.omittedHeavyTitle }
+      : { label: text.omittedPrivateLabel, title: text.omittedPrivateTitle };
+  }
+
   function localizeViewerChrome() {
     const text = uiText();
     document.documentElement.lang = STATE.language;
+    // ファイル一覧の札 (非公開・大きい) は、一覧を描いたときの言語のまま残る。
+    // 開いた直後は設定 (言語) より先に一覧が描かれることがあるので書き直す。
+    for (const badge of document.querySelectorAll<HTMLElement>(
+      ".dir-omitted",
+    )) {
+      const shown = omittedDirectoryBadge(
+        badge.classList.contains("dir-omitted-heavy") ? "heavy" : "internal",
+      );
+      badge.textContent = shown.label;
+      badge.title = shown.title;
+    }
     // 最下段の接続状態も今の言語で書き直す (状態は #status の class にある)。
     const status = $("#status").classList;
     setStatus(
