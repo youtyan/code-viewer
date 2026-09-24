@@ -280,6 +280,7 @@ import {
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
 import { createImageTabView, type ImageTabHandle } from "./views/image-tab";
+import { createImageTabReturn } from "./views/image-tab-return";
 import {
   createJournalView,
   type JournalView,
@@ -1840,6 +1841,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 言語の当て直し (起動の途中でも呼ばれる) が読むので、ここで宣言する。
   /** 面ごとの画像の部品 (使い回す。setImage で差し替える)。 */
   const IMAGE_VIEWS: Partial<Record<PaneSide, ImageTabHandle>> = {};
+  /** 端末から開いた画像のタブを閉じたら、開いたシェルへ戻す。 */
+  const IMAGE_TAB_RETURN = createImageTabReturn(MAIN_TABS);
   /** 画像のパス → 引いた画像と前後の並び (棚から開いたときは棚の並び)。 */
   const IMAGE_REFS = new Map<
     string,
@@ -7178,8 +7181,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     onOpenImage: (image, gallery, kept) => {
       IMAGE_REFS.set(image.path, { image, images: gallery });
       const open = () => MAIN_TABS.openImage(image.path, "other-if-split");
-      if (kept) MAIN_TABS.openingNewTab(open);
-      else open();
+      IMAGE_TAB_RETURN.open(() => {
+        if (kept) MAIN_TABS.openingNewTab(open);
+        else open();
+      });
     },
   });
 
@@ -7775,6 +7780,7 @@ window.GdpExpandLogic = GdpExpandLogic;
             copyPath: (target) =>
               navigator.clipboard.writeText(filePathClipboardText(target)),
             openPath: (target) => openPathInOs(target, "file-parent"),
+            close: () => IMAGE_TAB_RETURN.close(side),
             language: STATE.language,
           });
           IMAGE_VIEWS[side] = view;

@@ -19633,6 +19633,16 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 .image-tab-button[data-copied="true"] {
   color: var(--color-working);
 }
+/* 閉じる: パスの操作から離し、強い枠・本来の文字色・「閉じる」「Esc」で閉じると分かる形。 */
+.image-tab-button.image-tab-close {
+  margin-left: var(--space-2);
+  border-color: var(--color-line-strong);
+  color: var(--color-text);
+}
+/* hover の面 (--color-raised) はキーの面と同じ色なので、キーを上の段の地の色に替えて形を残す。 */
+.image-tab-close:hover:not(:disabled) kbd {
+  background: var(--color-code);
+}
 .image-tab-icon {
   width: var(--icon-md);
   height: var(--icon-md);
@@ -22821,7 +22831,8 @@ body.gdp-help-page #content {
 .gdp-palette-input-key,
 .gdp-palette-row-key,
 .gdp-palette-footer kbd,
-.empty-key kbd {
+.empty-key kbd,
+.image-tab-close kbd {
   padding: 0 var(--space-1);
   border-radius: var(--radius-sm);
   background: var(--color-raised);

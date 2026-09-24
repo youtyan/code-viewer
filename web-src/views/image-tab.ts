@@ -7,6 +7,7 @@ import {
   COPY_16_PATHS,
   FOLDER_ICON_PATHS,
   iconSvg,
+  X_16_PATH,
 } from "../core/icons";
 import type { TerminalImageRef } from "../core/terminal-images";
 import {
@@ -28,6 +29,8 @@ export type ImageTabDeps = {
   imageUrlFor(image: TerminalImageRef): string;
   copyPath(path: string): Promise<void>;
   openPath(path: string): Promise<void>;
+  /** この画像のタブを閉じる (タブ列は組み込む側が持つ)。閉じるボタンと Esc。 */
+  close(): void;
   language: ImageTabLanguage;
   /** 前へ・次へ回す並び。無ければ移動ボタンは無効。 */
   images?: readonly TerminalImageRef[];
@@ -130,7 +133,16 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
   open.classList.remove("icon-only");
   const openLabel = document.createElement("span");
   open.append(openLabel);
-  actions.append(copy, open);
+  // 閉じる: 本文いっぱいに開くと、タブ列の小さな × しか閉じ方が無かった。
+  // 「閉じる」「Esc」を添えて、ほかの操作から離して置く。
+  const close = button("close", () => deps.close(), X_16_PATH);
+  close.classList.remove("icon-only");
+  close.classList.add("image-tab-close");
+  const closeLabel = document.createElement("span");
+  const closeKey = document.createElement("kbd");
+  closeKey.textContent = "Esc";
+  close.append(closeLabel, closeKey);
+  actions.append(copy, open, close);
 
   primary.append(zoom, modes, navigation);
   secondary.append(meta, actions);
@@ -431,6 +443,9 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
     openLabel.textContent = text.openFolder;
     open.title = text.openFolder;
     open.setAttribute("aria-label", text.openFolder);
+    closeLabel.textContent = text.closeTab;
+    close.title = text.closeTab;
+    close.setAttribute("aria-label", text.closeTab);
     if (images.length > 0)
       el.setAttribute("aria-label", text.imageView(current().name));
     updateStatus();
@@ -458,6 +473,9 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
         break;
       case "ArrowRight":
         navigate(1);
+        break;
+      case "Escape":
+        deps.close();
         break;
       default:
         handled = false;
