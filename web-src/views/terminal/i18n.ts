@@ -82,7 +82,6 @@ export type TerminalText = {
   stopConfirm: string;
   cancel: string;
   /** 貼り付けた画像を帯から外す。 */
-  removeAttachment: string;
   /** 画像を大きく開く。 */
   openImage: string;
   /** 拡大表示の操作。 */
@@ -204,7 +203,6 @@ const EN: TerminalText = {
     `${name} will end, and whatever is running in it stops. Its tab closes too.`,
   stopConfirm: "Stop",
   cancel: "Cancel",
-  removeAttachment: "remove this image",
   openImage: "open larger",
   zoomIn: "zoom in",
   zoomOut: "zoom out",
@@ -304,7 +302,6 @@ const JA: TerminalText = {
     `${name} を終了します。中で動いているものも止まり、タブも閉じます。`,
   stopConfirm: "止める",
   cancel: "キャンセル",
-  removeAttachment: "この画像を外す",
   openImage: "大きく開く",
   zoomIn: "拡大",
   zoomOut: "縮小",

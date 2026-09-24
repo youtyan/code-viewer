@@ -13,6 +13,8 @@
 // - サムネイルはブラウザに縮小させる (依存を足さない)。loading="lazy" で、
 //   URL に更新時刻と大きさが入っているので、描き直しても取り直さない
 // - 読めなかった項目は理由を出す。押すと確かめ直す
+// - 項目にカーソルかフォーカスが載ったら、端末の中のそのパスを示してもらう
+//   (onLocate)。項目の説明 (title) には、端末に出た綴りと実体のパスを出す
 
 import { CHEVRON_DOWN_16_PATH, IMAGE_16_PATH, iconSvg } from "../../core/icons";
 import { elapsedBucket } from "../../core/terminal-board";
@@ -35,6 +37,11 @@ export type ImageShelfDeps = {
   onOpen(entry: ShelfEntry, mode: ShelfOpenMode): void;
   /** サムネイルが読めなかった (消された・壊れた)。理由を聞き直してもらう。 */
   onImageError(entry: ShelfEntry): void;
+  /**
+   * 項目にカーソルかフォーカスが載った (null で外れた)。端末の画面の中で
+   * そのパスが出ている所を示してもらう。
+   */
+  onLocate(entry: ShelfEntry | null): void;
   /** いまの時刻 (テストで差し替える)。 */
   now?(): number;
 };
@@ -110,6 +117,19 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
   /** 読み込めた画像の寸法。鍵は URL (上書きされれば URL が変わる)。 */
   const sizes = new Map<string, { width: number; height: number }>();
   let linkedKey: string | null = null;
+  /** カーソルが載っている項目と、フォーカスのある項目。 */
+  let pointedKey: string | null = null;
+  let focusedKey: string | null = null;
+  /** onLocate で最後に知らせた項目。 */
+  let locatedKey: string | null = null;
+
+  /** カーソルを優先し、変わったときだけ知らせる。 */
+  function locate(): void {
+    const key = pointedKey ?? focusedKey;
+    if (key === locatedKey) return;
+    locatedKey = key;
+    deps.onLocate(entries.find((item) => item.key === key) ?? null);
+  }
   const ageTimer = setInterval(() => {
     if (!el.hidden) refreshMeta();
   }, AGE_REFRESH_MS);
@@ -210,6 +230,22 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
     };
     open.addEventListener("click", openBy);
     open.addEventListener("auxclick", openBy);
+    open.addEventListener("pointerenter", () => {
+      pointedKey = li.dataset.key ?? null;
+      locate();
+    });
+    open.addEventListener("pointerleave", () => {
+      pointedKey = null;
+      locate();
+    });
+    open.addEventListener("focus", () => {
+      focusedKey = li.dataset.key ?? null;
+      locate();
+    });
+    open.addEventListener("blur", () => {
+      focusedKey = null;
+      locate();
+    });
     open.addEventListener("contextmenu", (event) => {
       const current = entries.find((item) => item.key === li.dataset.key);
       if (!current?.image) return;
@@ -239,9 +275,12 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
     parts.li.dataset.key = entry.key;
     parts.li.dataset.failed = entry.image ? "false" : "true";
     parts.name.textContent = entry.name;
-    parts.open.title = entry.detail
-      ? `${entry.path}\n${entry.detail}`
-      : entry.path;
+    // 端末に出た綴り (相対パスなど) を先に、違えば実体のパスを後に。
+    parts.open.title = [
+      ...entry.candidates,
+      ...(entry.candidates.includes(entry.path) ? [] : [entry.path]),
+      ...(entry.detail ? [entry.detail] : []),
+    ].join("\n");
     parts.open.setAttribute(
       "aria-label",
       entry.image
@@ -328,6 +367,10 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
       ordered.every((li, index) => list.children[index] === li);
     if (!same) list.replaceChildren(...ordered);
     if (linkedKey && !keep.has(linkedKey)) highlight(null);
+    // 消えた項目の出入りは届かないので、ここで外す。
+    if (pointedKey && !keep.has(pointedKey)) pointedKey = null;
+    if (focusedKey && !keep.has(focusedKey)) focusedKey = null;
+    locate();
     markOpened();
   }
 

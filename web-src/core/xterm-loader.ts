@@ -124,6 +124,14 @@ export type XtermTerminal = {
    * (preventDefault もしないので、外側のスクロール領域に流れる)。
    */
   attachCustomWheelEventHandler(handler: (event: WheelEvent) => boolean): void;
+  /** 利用者 (かこちら) が文字を選択しているか。 */
+  hasSelection(): boolean;
+  clearSelection(): void;
+  /**
+   * 文字を選択する。column・row は 0 始まりのバッファの位置 (row は画面ではなく
+   * バッファの行)。length はマス目の数で、桁数を超えた分は次の行へ続く。
+   */
+  select(column: number, row: number, length: number): void;
   /** 表示位置を行単位で動かす。負で上 (過去) へ。 */
   scrollLines(amount: number): void;
   /** 表示位置が変わった。引数は画面先頭の行番号 (buffer.viewportY と同じ)。 */

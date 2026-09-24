@@ -50,6 +50,8 @@ type FakeTerminalState = {
   linkProvider: XtermLinkProvider | null;
   /** proposeDimensions が返す寸法。見えていない箱は NaN を返す。 */
   proposed: { cols: number; rows: number } | undefined;
+  /** xterm の選択 (select の引数)。無ければ null。 */
+  selection: { column: number; row: number; length: number } | null;
 };
 const FAKE_STATE_KEY = "__terminalScreenFakeState";
 
@@ -68,6 +70,7 @@ vi.mock("../core/xterm-loader", () => {
     inputHandler: () => undefined,
     linkProvider: null,
     proposed: { cols: 80, rows: 24 },
+    selection: null,
   };
   (globalThis as Record<string, unknown>).__terminalScreenFakeState = state;
   /** 1 マス 1 字 (全角は 2 マス) の行を作る。本物の IBufferLine と同じ形。 */
@@ -120,6 +123,13 @@ vi.mock("../core/xterm-loader", () => {
     onRender = disposable;
     onScroll = disposable;
     scrollLines = noop;
+    select = (column: number, row: number, length: number) => {
+      state.selection = { column, row, length };
+    };
+    hasSelection = () => state.selection !== null;
+    clearSelection = () => {
+      state.selection = null;
+    };
     open = (parent: HTMLElement) => {
       const root = document.createElement("div");
       root.className = "xterm";
@@ -174,6 +184,16 @@ const IMAGE: TerminalImageRef = {
   url: "/_agent/image?path=%2Frepo%2Fdocs%2Fout.png&v=1000-3",
   bytes: 3,
   mtimeMs: 1000,
+};
+
+/** 貼り付けた画像。サーバはリポジトリの .code-viewer/pasted/ に保存する。 */
+const PASTED: TerminalImageRef = {
+  path: "/repo/.code-viewer/pasted/paste-1.png",
+  candidate: "/repo/.code-viewer/pasted/paste-1.png",
+  name: "paste-1.png",
+  url: "/_agent/image?path=%2Frepo%2F.code-viewer%2Fpasted%2Fpaste-1.png&v=2000-4",
+  bytes: 4,
+  mtimeMs: 2000,
 };
 
 const OTHER_IMAGE: TerminalImageRef = {
@@ -264,6 +284,12 @@ function installFakes(): void {
             status: 503,
             statusText: "Service Unavailable",
           }),
+        );
+      }
+      if (url === "/_agent/paste") {
+        const saved = { path: PASTED.path, name: PASTED.name, bytes: 4 };
+        return Promise.resolve(
+          new Response(JSON.stringify(saved), { status: 200 }),
         );
       }
       const base = { source: "pane", cwd: "/repo" };
@@ -369,6 +395,7 @@ beforeEach(() => {
   state.cursorY = 2;
   state.linkProvider = null;
   state.proposed = { cols: 80, rows: 24 };
+  state.selection = null;
   installFakes();
   handle = makeScreen();
 });
@@ -912,6 +939,130 @@ describe("文字の中の画像パス (リンク)", () => {
     const box = document.querySelector(".terminal-lightbox");
     expect(box?.querySelector("img")?.getAttribute("src")).toBe(IMAGE.url);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  });
+});
+
+describe("貼り付けた画像", () => {
+  /** クリップボードに PNG が 1 枚ある貼り付けを、端末の枠に起こす。 */
+  function pastePng(): void {
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    const file = new File([new Uint8Array([137, 80, 78, 71])], "image.png", {
+      type: "image/png",
+    });
+    Object.defineProperty(event, "clipboardData", {
+      value: {
+        items: [{ kind: "file", type: "image/png", getAsFile: () => file }],
+      },
+    });
+    handle.el.dispatchEvent(event);
+  }
+
+  beforeEach(() => {
+    // 問い合わせた綴りを candidate に返す (画面に出た綴りごとに聞かれる)。
+    respond = (url) => {
+      const candidate =
+        new URL(url, "http://localhost/").searchParams.get("path") ?? "";
+      return { images: [{ ...PASTED, candidate }], rejected: [] };
+    };
+  });
+
+  test("貼ったらすぐ棚に出て、パスを端末へ打ち込む", async () => {
+    await attachShell(SHELL);
+    pastePng();
+    await vi.waitFor(() => expect(shelfNames(handle)).toEqual(["paste-1.png"]));
+
+    expect(requestedBodies[requestedUrls.indexOf("/_shell/keys")]).toBe(
+      JSON.stringify({ id: SHELL.id, data: `'${PASTED.path}' ` }),
+    );
+  });
+
+  test("棚にだけ出て、ターミナルの上に帯を作らない (エージェントが別の綴りで出しても 1 枚)", async () => {
+    const source = await attachShell(SHELL);
+    pastePng();
+    await vi.waitFor(() => expect(requestedUrls).toContain("/_shell/keys"));
+    // エージェントは読んだファイルを作業場所からの相対パスで出す。
+    source.emitOutput("Read(.code-viewer/pasted/paste-1.png)\n");
+    await flush();
+
+    expect(shelfNames(handle)).toEqual(["paste-1.png"]);
+    expect(handle.el.querySelectorAll(".terminal-attachment")).toHaveLength(0);
+    expect(handle.el.querySelectorAll("img")).toHaveLength(1);
+  });
+});
+
+describe("棚のサムネイルと端末の文字", () => {
+  function shelfOpen(): HTMLButtonElement {
+    const open = shelfEl(handle).querySelector<HTMLButtonElement>(
+      ".terminal-image-shelf-open",
+    );
+    if (!open) throw new Error("no shelf item");
+    return open;
+  }
+
+  async function shelfWithOut(): Promise<void> {
+    const source = await attachShell(SHELL);
+    source.emitOutput("wrote docs/out.png\n");
+    await flush();
+  }
+
+  test.each([
+    { name: "カーソル", enter: "pointerenter", leave: "pointerleave" },
+    { name: "フォーカス", enter: "focus", leave: "blur" },
+  ])("$name が載ると端末の中のパスを選択で示し、離れると外す", async ({
+    enter,
+    leave,
+  }) => {
+    await shelfWithOut();
+    shelfOpen().dispatchEvent(new Event(enter));
+    // "wrote docs/out.png" はバッファの 1 行目 (0 始まり) の 6 桁目から 12 字。
+    expect(fakeState().selection).toEqual({ column: 6, row: 1, length: 12 });
+
+    shelfOpen().dispatchEvent(new Event(leave));
+    expect(fakeState().selection).toBeNull();
+  });
+
+  test.each([
+    {
+      name: "何度も出ていれば一番下 (新しい方)",
+      lines: ["wrote docs/out.png", "again docs/out.png", ""],
+      expected: { column: 6, row: 1, length: 12 },
+    },
+    {
+      name: "端末の幅で折り返したパスは 2 行にまたがって選ぶ",
+      lines: [`${"p".repeat(74)} docs/`, "out.png", ""],
+      expected: { column: 75, row: 0, length: 12 },
+    },
+    {
+      name: "全角の字の後ろはマス目の桁で選ぶ",
+      lines: ["保存 docs/out.png", ""],
+      expected: { column: 5, row: 0, length: 12 },
+    },
+    {
+      name: "画面に出ていなければ何もしない",
+      lines: ["$ clear", ""],
+      expected: null,
+    },
+  ])("$name", async ({ lines, expected }) => {
+    await shelfWithOut();
+    fakeState().lines = lines;
+    shelfOpen().dispatchEvent(new Event("pointerenter"));
+    expect(fakeState().selection).toEqual(expected);
+  });
+
+  test("利用者が選択していれば上書きせず、離れても消さない", async () => {
+    await shelfWithOut();
+    const mine = { column: 0, row: 0, length: 5 };
+    fakeState().selection = mine;
+
+    shelfOpen().dispatchEvent(new Event("pointerenter"));
+    expect(fakeState().selection).toEqual(mine);
+    shelfOpen().dispatchEvent(new Event("pointerleave"));
+    expect(fakeState().selection).toEqual(mine);
+  });
+
+  test("サムネイルの説明に、端末に出た綴りと実体のパスを出す", async () => {
+    await shelfWithOut();
+    expect(shelfOpen().title).toBe("docs/out.png\n/repo/docs/out.png");
   });
 });
 

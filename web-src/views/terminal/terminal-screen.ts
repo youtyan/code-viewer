@@ -28,6 +28,7 @@ import {
   findImagePathLinks,
   findImagePathsNewestFirst,
   MAX_TERMINAL_IMAGE_QUERY,
+  type PathLink,
   stripAnsi,
   type TerminalImageHistoryResponse,
   type TerminalImageRef,
@@ -201,33 +202,27 @@ export function createTerminalScreen(
   const el = document.createElement("div");
   el.className = "terminal-pane-body";
 
-  // 貼り付けた画像の帯。ターミナルの上に置く。
-  //
-  // xterm のマス目の中に描かないのは、スクロールで流れても残したいから。
-  // 出力から拾った画像は帯ではなく右の棚に並ぶ。
-  const attachments = document.createElement("div");
-  attachments.className = "terminal-attachments";
-  attachments.hidden = true;
-
   const screenEl = document.createElement("div");
   screenEl.className = "terminal-screen";
 
   // 画像の棚。ターミナルの画面の右に、別の列として場所を取る (文字の上に
-  // 重ねない)。棚が出る・畳まれると画面の幅が変わるので、screenEl を見ている
-  // ResizeObserver が桁数を測り直して PTY に伝える。
+  // 重ねない)。出力から拾った画像も、貼り付けた画像もここに並ぶ。棚が出る・
+  // 畳まれると画面の幅が変わるので、screenEl を見ている ResizeObserver が
+  // 桁数を測り直して PTY に伝える。
   const shelf = createImageShelf({
     getText: () => deps.getText(),
     isCollapsed: () => deps.isImageShelfCollapsed(),
     setCollapsed: (collapsed) => deps.setImageShelfCollapsed(collapsed),
     onOpen: (entry, mode) => openShelfEntry(entry, mode),
     onImageError: (entry) => recheckShelfEntry(entry),
+    onLocate: (entry) => markPathOnScreen(entry),
   });
 
   const screenRow = document.createElement("div");
   screenRow.className = "terminal-screen-row";
   screenRow.append(screenEl, shelf.el);
 
-  el.append(attachments, screenRow);
+  el.append(screenRow);
 
   let term: XtermTerminal | null = null;
   let fitAddon: XtermFitAddon | null = null;
@@ -257,9 +252,9 @@ export function createTerminalScreen(
   // (clear するのではなく作り直すのは、飛んでいる問い合わせが次の対象の
   // 表を触らないようにするため)。
   let queriedImagePaths = new Map<string, number>();
-  // 貼り付けたパス。この後端末に打ち込まれて出力に出るが、帯に出してあるので
-  // 棚には拾わない。
-  let pastedImagePaths = new Set<string>();
+  // 棚の項目に合わせて、端末の中のパスを選択で示している間 true。外すのは
+  // 自分が付けた選択だけ (利用者の選択は消さない)。
+  let markedPath = false;
   /** 棚の中身 (新しい順)。 */
   let shelfEntries: ShelfEntry[] = [];
   /** 見つけた順番の最後。新しく見つけたものほど大きい番号を振る。 */
@@ -414,51 +409,6 @@ export function createTerminalScreen(
       sending = false;
       if (pendingInput) void flushInput();
     }
-  }
-
-  /**
-   * 貼り付けた画像を 1 枚ぶん帯に足す。src はブラウザが既に持っている data URL
-   * (サーバへ取りに行き直す必要が無く、保存が終わる前でも出せる)。
-   */
-  function addAttachment(src: string, name: string, path: string): void {
-    const item = document.createElement("div");
-    item.className = "terminal-attachment";
-
-    // サムネイルは小さいので、押したら拡大して読めるようにする。
-    const open = document.createElement("button");
-    open.type = "button";
-    open.className = "terminal-attachment-open";
-    const openLabel = deps.getText().openImage;
-    open.title = path;
-    open.setAttribute("aria-label", `${openLabel}: ${name}`);
-    open.addEventListener("click", () => {
-      openImageLightbox({ url: src, name, path }, deps.getText());
-    });
-
-    const image = document.createElement("img");
-    image.src = src;
-    image.alt = name;
-    open.appendChild(image);
-
-    const label = document.createElement("span");
-    label.className = "terminal-attachment-name";
-    label.textContent = name;
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "terminal-attachment-close";
-    remove.textContent = "×";
-    const removeLabel = deps.getText().removeAttachment;
-    remove.title = removeLabel;
-    remove.setAttribute("aria-label", removeLabel);
-    remove.addEventListener("click", () => {
-      item.remove();
-      attachments.hidden = attachments.childElementCount === 0;
-    });
-
-    item.append(open, label, remove);
-    attachments.appendChild(item);
-    attachments.hidden = false;
   }
 
   /** 棚の中身を差し替えて描き直し、対象ごとの記憶にも残す。 */
@@ -665,7 +615,6 @@ export function createTerminalScreen(
     if (!attached) return;
     const now = Date.now();
     const fresh = paths
-      .filter((path) => !pastedImagePaths.has(path))
       .filter((path) => {
         const last = queriedImagePaths.get(path);
         return last === undefined || now - last >= IMAGE_REQUERY_MS;
@@ -758,20 +707,14 @@ export function createTerminalScreen(
       term.cols,
       (candidate) => known.has(candidate),
     )) {
-      const start = rows[link.start.row];
-      const end = rows[link.end.row];
-      if (!start || !end) continue;
-      if (start.index > y || end.index < y) continue;
-      const lastIndex = link.end.col - 1;
-      const startX = start.cells[link.start.col];
-      const endCell = end.cells[lastIndex];
-      if (startX === undefined || endCell === undefined) continue;
+      const cells = linkCells(rows, link);
+      if (!cells || cells.startY > y || cells.endY < y) continue;
       const entry = shelfEntryByCandidate(shelfEntries, link.candidate);
       if (!entry) continue;
       links.push({
         range: {
-          start: { x: startX + 1, y: start.index + 1 },
-          end: { x: endCell + (end.widths[lastIndex] ?? 1), y: end.index + 1 },
+          start: { x: cells.startX + 1, y: cells.startY + 1 },
+          end: { x: cells.endX + 1, y: cells.endY + 1 },
         },
         text: link.candidate,
         decorations: { pointerCursor: true, underline: true },
@@ -800,6 +743,81 @@ export function createTerminalScreen(
     callback(links.length > 0 ? links : undefined);
   }
 
+  /**
+   * 拾ったリンク (行の中の文字の添字) を、バッファのマス目の位置にする。
+   * x・y とも 0 始まりで、endX は最後の字が占める最後のマス (含む)。
+   */
+  function linkCells(
+    rows: Array<{ index: number; cells: number[]; widths: number[] }>,
+    link: PathLink,
+  ): { startX: number; startY: number; endX: number; endY: number } | null {
+    const start = rows[link.start.row];
+    const end = rows[link.end.row];
+    if (!start || !end) return null;
+    const lastIndex = link.end.col - 1;
+    const startX = start.cells[link.start.col];
+    const endCell = end.cells[lastIndex];
+    if (startX === undefined || endCell === undefined) return null;
+    return {
+      startX,
+      startY: start.index,
+      endX: endCell + (end.widths[lastIndex] ?? 1) - 1,
+      endY: end.index,
+    };
+  }
+
+  /**
+   * 棚のサムネイルにカーソルかフォーカスが載ったら、端末の画面の中でその画像の
+   * パスが出ている所を xterm の選択で示す (null で外す)。棚の 1 枚が画面の
+   * どの文字列に当たるかを見せるため。
+   *
+   * - 文字の上に何も重ねない。decoration は代替画面 (tmux が使う) では付かない
+   *   ので、xterm の標準の選択を使う
+   * - 画面に何度も出ていれば一番下 (新しい方)。画面に無ければ何もしない
+   *   (端末のスクロールは触らない)
+   * - 利用者が選択中なら上書きせず、外すときも自分が付けた選択だけを消す
+   */
+  function markPathOnScreen(entry: ShelfEntry | null): void {
+    if (!term) return;
+    if (markedPath) {
+      markedPath = false;
+      term.clearSelection();
+    }
+    if (!entry || term.hasSelection()) return;
+    const buffer = term.buffer.active;
+    const top = buffer.viewportY;
+    // 1 行上から読む (画面の頭で折り返しの続きになっているパス)。
+    const first = Math.max(0, top - 1);
+    const rows = Array.from({ length: top + term.rows - first }, (_, i) => ({
+      index: first + i,
+      ...readRow(buffer.getLine(first + i)),
+    }));
+    const known = new Set(entry.candidates);
+    let found: ReturnType<typeof linkCells> = null;
+    for (const link of findImagePathLinks(
+      rows.map((row) => row.text),
+      term.cols,
+      (candidate) => known.has(candidate),
+    )) {
+      const cells = linkCells(rows, link);
+      if (!cells || cells.endY < top) continue;
+      if (
+        !found ||
+        cells.startY > found.startY ||
+        (cells.startY === found.startY && cells.startX > found.startX)
+      ) {
+        found = cells;
+      }
+    }
+    if (!found) return;
+    term.select(
+      found.startX,
+      found.startY,
+      (found.endY - found.startY) * term.cols + found.endX - found.startX + 1,
+    );
+    markedPath = true;
+  }
+
   /** File を base64 にする。data URL の接頭辞は落として本体だけ返す。 */
   function readAsBase64(file: File): Promise<{ base64: string; url: string }> {
     return new Promise((resolve, reject) => {
@@ -823,7 +841,9 @@ export function createTerminalScreen(
    *
    * 1. サーバに保存してもらい、絶対パスを受け取る
    * 2. そのパスを端末へ打ち込む。CLI のエージェントはパスを読める
-   * 3. 帯にも出す。ちゃんと渡ったことが目で分かる
+   * 3. 棚にも出す。ちゃんと渡ったことが目で分かる。出力から拾った画像と
+   *    同じ棚に並べる (以前はターミナルの上に別の帯を出し、棚からは同じ綴り
+   *    だけを外していた。エージェントが相対パスで出し直すと両方に並んだ)
    *
    * 打ち込むのは改行を付けない。人が続けて文章を書いてから送れるようにする
    * (勝手に送ると、画像だけが単独で送信されてしまう)。
@@ -860,10 +880,9 @@ export function createTerminalScreen(
       }
       const saved = (await res.json()) as PasteImageResponse;
       if (disposed || !attached) return;
-      addAttachment(read.url, saved.name, saved.path);
-      // このパスはこの後端末へ打ち込まれ、画面に出る。帯に出してあるので、
-      // 棚には拾わない。
-      pastedImagePaths.add(saved.path);
+      // 打ち込んだパスは画面に出るが、ここで問い合わせ済みにしておくので
+      // 聞き直さない。別の綴りで出ても、同じ実体なら棚では 1 枚にまとまる。
+      queueImagePaths([saved.path]);
       // パスに空白は入らない命名にしてあるが、引用しておけば将来変えても壊れない。
       pendingInput += `'${saved.path}' `;
       void flushInput();
@@ -1101,7 +1120,7 @@ export function createTerminalScreen(
   async function attach(session: ShellSession): Promise<void> {
     if (disposed) return;
     const myGen = ++generation;
-    clearAttachments();
+    resetShelf();
     closeSource();
     pendingInput = "";
     attached = session;
@@ -1137,10 +1156,8 @@ export function createTerminalScreen(
     void loadImageHistory(session, myGen);
   }
 
-  function clearAttachments(): void {
-    attachments.replaceChildren();
-    attachments.hidden = true;
-    // 帯と棚を空にしたら、拾い直せる状態にも戻す。表は作り直す (飛んでいる
+  function resetShelf(): void {
+    // 棚を空にしたら、拾い直せる状態にも戻す。表は作り直す (飛んでいる
     // 問い合わせが持っているのは前の表なので、そちらを消しても影響しない)。
     // 棚の中身は対象ごとの記憶に残っている。
     shelfEntries = [];
@@ -1149,7 +1166,7 @@ export function createTerminalScreen(
     shelf.highlight(null);
     shelf.setOpened(null);
     queriedImagePaths = new Map<string, number>();
-    pastedImagePaths = new Set<string>();
+    markedPath = false;
     recheckedUrls = new Set<string>();
     baseErrorShown = false;
     shellScanTail = "";
@@ -1157,7 +1174,7 @@ export function createTerminalScreen(
 
   function detach(): void {
     generation += 1;
-    clearAttachments();
+    resetShelf();
     closeSource();
     attached = null;
     renderTmuxCover();
