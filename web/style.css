@@ -42,6 +42,15 @@
   --color-line-row:     var(--color-line-strong);
   /* 行の多い表の 1 行おきの面 (hover の面の半分ほど)。 */
   --color-row-alt:      color-mix(in srgb, var(--color-raised) 45%, transparent);
+  /* エージェントの行 (.agent-card。左のサイドバーと全体ボード) の面と、行の間の線。
+     ライトは地のまま線で区切る (白い面の箱を並べると重い)。ダークは地より一段明るい
+     面に置き、線は引かない。 */
+  --color-agent-row:      transparent;
+  --color-agent-row-rule: var(--color-line-row);
+  /* 札 (.agent-card-badge) の地。行に面が無いライトでは本文の面を敷く (サイドバーの
+     地の上では入力待ちの色の小さな字が 4.5:1 に届かない)。ダークは行の面の上に
+     透けさせる。 */
+  --color-agent-badge:    var(--color-doc);
   --color-text:         #282331;
   --color-text-2:       #655c72;
   --color-text-3:       #7a7287;
@@ -231,6 +240,9 @@
   --color-line-soft:    #211e28;
   --color-line-strong:  #3d3749;
   --color-line-row:     #4b4557;
+  --color-agent-row:      var(--color-doc);
+  --color-agent-row-rule: transparent;
+  --color-agent-badge:    transparent;
   --color-text:         #eeeaf4;
   --color-text-2:       #aba3b5;
   --color-text-3:       #857d91;
@@ -18212,14 +18224,13 @@ html[data-nav-collapsed] #app-nav {
 .nav-agents[hidden] {
   display: none;
 }
-/* エージェントの行は見出しより字下げした 2 行組のカード (.agent-card)。地より一段
-   明るい面。 */
+/* エージェントの行は見出しより字下げした 2 行組 (.agent-card)。面と区切りの線は
+   .agent-card が持つ (ライトは線、ダークは面)。 */
 .nav-agent {
   margin-left: calc(var(--pad-text) - var(--pad-face) + var(--indent-step));
   padding: var(--space-1) var(--space-2);
   border: 0;
   border-radius: var(--radius-md);
-  background: var(--color-doc);
   color: var(--color-text);
   font: inherit;
   cursor: pointer;
@@ -18253,6 +18264,21 @@ body[data-sidebar-font-size="compact"] .nav-agent {
   align-items: center;
   column-gap: var(--space-2);
   text-align: left;
+  /* 面 (--color-agent-row) と、行の下端の区切りの線 (--color-agent-row-rule)。
+     線は背景に描く: 枠線や影は角丸に沿って両端が曲がり、箱の寸法も変える。
+     hover と選択中は background ごと面の色に替わる (線はその行だけ消える)。 */
+  background-color: var(--color-agent-row);
+  background-image: linear-gradient(
+    var(--color-agent-row-rule),
+    var(--color-agent-row-rule)
+  );
+  background-position: bottom;
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+}
+/* 線は行の間だけ (最後の行の下はプロジェクトの間の余白で区切る)。 */
+.agent-card:last-child {
+  background-image: none;
 }
 .agent-card > .terminal-mark {
   grid-area: mark;
@@ -18280,6 +18306,7 @@ body[data-sidebar-font-size="compact"] .nav-agent {
   padding: 0 var(--space-1);
   border: 1px solid currentColor;
   border-radius: var(--radius-sm);
+  background: var(--color-agent-badge);
   font-size: var(--ui-font-xs);
   font-weight: 500;
   line-height: 1.5;
@@ -21262,8 +21289,8 @@ button.agents-account-name:hover {
 .agents-project-none[hidden] {
   display: none;
 }
-/* 行は左のサイドバーと同じ 2 行組のカード (.agent-card)。地より一段明るい面に
-   置き、行の間を少し空ける。 */
+/* 行は左のサイドバーと同じ 2 行組 (.agent-card。面と区切りの線もそちら)。行の間を
+   少し空ける。 */
 .agents-rows {
   display: flex;
   flex-direction: column;
@@ -21275,7 +21302,6 @@ button.agents-account-name:hover {
   padding: var(--space-2) var(--pad-text);
   border: 0;
   border-radius: var(--radius-md);
-  background: var(--color-doc);
   color: var(--color-text);
   font: inherit;
   cursor: pointer;
@@ -26152,6 +26178,10 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body,
   body[data-sidebar-font-size] {
     --statusbar-h: var(--sp-touch);
+  }
+  /* 検索の欄が 44px になり頭と同じ高さなので、頭の上下の余白は取らない。 */
+  .nav-head {
+    padding-block: 0;
   }
   .main-tabs-action,
   .global-icon-action,
