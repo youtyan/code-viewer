@@ -267,6 +267,7 @@ import {
   fileRouteKeepingActiveView,
   isBlobOrBlameFileRoute,
 } from "./views/file-shell";
+import { guideLabels } from "./views/help-guides";
 import { createShortcutSettings } from "./views/help-keybinding-editor";
 import { formatKeyBinding } from "./views/help-keybindings";
 import {
@@ -334,6 +335,7 @@ import {
   type PaletteCommand,
 } from "./views/search-palette-ui";
 import { createSearchResultsView } from "./views/search-results-view";
+import { createSettingsPage } from "./views/settings-page";
 import { type AppNav, mountAppNav } from "./views/shell/app-nav";
 import {
   readEarlyLook,
@@ -1617,7 +1619,7 @@ window.GdpExpandLogic = GdpExpandLogic;
               screen: "help",
               range,
               lang: STATE.language,
-              section: "settings",
+              section: "overview",
             };
           default:
             return { screen: target.page, range };
@@ -2389,7 +2391,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         | "agents"
         | "tools"
         | "search"
-        | "help",
+        | "help"
+        | "settings",
         string
       >;
       global: {
@@ -2525,13 +2528,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         refreshTitle: string;
       };
       journal: JournalViewText;
-      quickHelp: {
-        buttonTitle: string;
-        panelTitle: string;
-        close: string;
-        viewAll: string;
-        settings: string;
-      };
       // フォーム本体は views/viewer-settings.ts が持つので、文言の形も
       // あちらの型に合わせる。ここで二重に並べると片方だけ増えて崩れる。
       settings: ViewerSettingsText;
@@ -2556,7 +2552,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         agents: "Agents",
         tools: "Tools",
         search: "Search",
-        help: "Settings & Help",
+        help: "Help",
+        settings: "Settings",
       },
       global: {
         annotations: "code annotations",
@@ -2637,7 +2634,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         flatTitle: "flat list",
         filter: "Filter files…  /  ⌘K",
         filterTitle:
-          "Filter files. Plain text matches anywhere in the path; /pattern/ is a regex, ~text is a fuzzy match, *.ts or src/** is a glob. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help.",
+          "Filter files. Plain text matches anywhere in the path; /pattern/ is a regex, ~text is a fuzzy match, *.ts or src/** is a glob. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for keyboard shortcuts.",
         filterCountTitle: (visible, total) =>
           `${visible} of ${total} files match the filter`,
         filterClear: "Clear",
@@ -2799,13 +2796,6 @@ window.GdpExpandLogic = GdpExpandLogic;
           split: "split",
         },
       },
-      quickHelp: {
-        buttonTitle: "quick help (shortcuts)",
-        panelTitle: "Quick Help",
-        close: "close quick help",
-        viewAll: "View all keybindings →",
-        settings: "Settings →",
-      },
       settings: {
         display: "Display",
         theme: "Theme",
@@ -2960,7 +2950,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         agents: "エージェント",
         tools: "ツール",
         search: "検索",
-        help: "設定・ヘルプ",
+        help: "ヘルプ",
+        settings: "設定",
       },
       global: {
         annotations: "コード注釈",
@@ -3040,7 +3031,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         flatTitle: "一覧表示",
         filter: "ファイル絞り込み…  /  ⌘K",
         filterTitle:
-          "ファイルを絞り込みます。文字列はパスの部分一致、/pattern/ は正規表現、~text はあいまい一致、*.ts や src/** は glob。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でヘルプ。",
+          "ファイルを絞り込みます。文字列はパスの部分一致、/pattern/ は正規表現、~text はあいまい一致、*.ts や src/** は glob。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でキーボードショートカット。",
         filterCountTitle: (visible, total) =>
           `${total} ファイル中 ${visible} 件が一致`,
         filterClear: "解除",
@@ -3206,13 +3197,6 @@ window.GdpExpandLogic = GdpExpandLogic;
           preview: "プレビュー",
           split: "分割",
         },
-      },
-      quickHelp: {
-        buttonTitle: "クイックヘルプ(ショートカット)",
-        panelTitle: "クイックヘルプ",
-        close: "クイックヘルプを閉じる",
-        viewAll: "すべてのキーバインドを見る →",
-        settings: "設定 →",
       },
       settings: {
         display: "表示",
@@ -3446,12 +3430,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       theme.title = text.global.theme;
       theme.setAttribute("aria-label", text.global.theme);
     }
-    const quickHelpBtn =
-      document.querySelector<HTMLButtonElement>("#quick-help-btn");
-    if (quickHelpBtn) {
-      quickHelpBtn.title = text.quickHelp.buttonTitle;
-      quickHelpBtn.setAttribute("aria-label", text.quickHelp.buttonTitle);
-    }
     const searchBtn = document.querySelector<HTMLButtonElement>("#search-btn");
     if (searchBtn) {
       searchBtn.title = text.global.search;
@@ -3674,6 +3652,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         true,
       );
       renderHelpPage();
+    } else if (STATE.route.screen === "settings") {
+      renderSettingsPage();
     } else {
       syncHeaderMenu();
     }
@@ -4743,7 +4723,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         STATE.route.view === "blame" ||
         STATE.route.view === "history");
     const repoSidebarRoute = STATE.route.screen === "repo" || fileRepoBlobRoute;
-    if (STATE.route.screen !== "help") {
+    if (STATE.route.screen !== "help" && STATE.route.screen !== "settings") {
       document.querySelector(".gdp-help-shell")?.remove();
     }
     // The source view a diff-hosting page keeps open in place ("View File"
@@ -4905,13 +4885,14 @@ window.GdpExpandLogic = GdpExpandLogic;
                 STATE.route.screen === "help"
                   ? helpLanguageFromRoute(STATE.route)
                   : STATE.language,
-              // 左下の「設定」は、いつも設定の節を開く入口。
-              section:
-                link.id === "nav-settings"
-                  ? "settings"
-                  : helpSectionFromRoute(STATE.route),
+              section: helpSectionFromRoute(STATE.route),
               range: currentRange(),
             }),
+          );
+        }
+        if (link.dataset.route === "settings") {
+          link.href = withOverlayState(
+            buildRoute({ screen: "settings", range: currentRange() }),
           );
         }
       });
@@ -5172,7 +5153,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       await persistSettingsPatch({
         keybindings: Object.keys(next).length ? next : null,
       });
-      renderHelpPage();
+      // ヘルプのキーの一覧と、設定の「ショートカット」を今のキーで描き直す。
+      if (STATE.route.screen === "help") renderHelpPage();
+      else if (STATE.route.screen === "settings") renderSettingsPage();
     },
     getSharedTag: () => ({
       text: uiText().settings.sharedTag,
@@ -5263,6 +5246,37 @@ window.GdpExpandLogic = GdpExpandLogic;
     SHORTCUT_SETTINGS.localize();
   };
 
+  // ---------- Settings page: settings-page.ts ----------
+  const {
+    renderSettingsPage,
+    openSettingsPage,
+    openSettingsAt,
+    headingInHash: settingsHeadingInHash,
+  } = createSettingsPage({
+    $,
+    setRoute,
+    setPageMode,
+    setStatus,
+    currentRange,
+    cancelActiveSourceLoad,
+    removeStandaloneSource,
+    clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
+    getLanguage: () => STATE.language,
+    mountViewerSettings: (host) => VIEWER_SETTINGS.mount(host),
+    mountSettingsSearch: (host) => VIEWER_SETTINGS.mountSearch(host),
+    settingsCategories,
+    getSettingsCategory: () => VIEWER_SETTINGS.getCategory(),
+    setSettingsCategory: (category) => VIEWER_SETTINGS.setCategory(category),
+    revealHeading: (headingId) => VIEWER_SETTINGS.revealHeading(headingId),
+    hasHeading: (headingId) => VIEWER_SETTINGS.hasHeading(headingId),
+    openHelpSection: (section) => openHelpSection(helpSectionDeps(), section),
+  });
+
+  function settingsCategories() {
+    const labels = uiText().settings.categories;
+    return SETTINGS_CATEGORIES.map((id) => ({ id, ...labels[id] }));
+  }
+
   // ---------- Help page: extracted to help-page.ts ----------
   const { renderHelpPage } = createHelpPage({
     $,
@@ -5275,14 +5289,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     syncHeaderMenu,
     getLanguage: () => STATE.language,
-    mountViewerSettings: (host) => VIEWER_SETTINGS.mount(host),
-    mountSettingsSearch: (host) => VIEWER_SETTINGS.mountSearch(host),
-    settingsCategories: () => {
-      const labels = uiText().settings.categories;
-      return SETTINGS_CATEGORIES.map((id) => ({ id, ...labels[id] }));
+    // やり方の案内のボタン名は各画面の i18n から (views/help-guides.ts)。
+    guideLabels: (lang) => {
+      const palette = activeKeyBindings().find(
+        (binding) => binding.action === "open-file-palette",
+      );
+      return guideLabels(lang, {
+        accounts: UI_TEXT[lang].settings.categories.accounts.label,
+        paletteKey: palette ? formatKeyBinding(palette) : "",
+      });
     },
-    getSettingsCategory: () => VIEWER_SETTINGS.getCategory(),
-    setSettingsCategory: (category) => VIEWER_SETTINGS.setCategory(category),
+    openAccountsSettings: () => openSettingsAt(ACCOUNTS_SECTION_ID),
+    toggleKeyboardShortcuts: () => QUICK_HELP?.toggle(),
     // ヘルプの一覧は PWA の窓のキーも (PWA) を付けて出す (通常のタブでも案内する)。
     getKeyBindings: activeKeyBindings,
     openShortcutSettings: () => openSettingsAt("shortcut-settings-title"),
@@ -5426,12 +5444,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         MARK_GITHUB_16_PATH,
       );
     }
-    const quickHelpIcon = document.querySelector<HTMLElement>(
-      "#quick-help-btn .goi-icon",
-    );
-    if (quickHelpIcon) {
-      quickHelpIcon.innerHTML = iconSvg("octicon-question", QUESTION_16_PATH);
-    }
     const navIcons: [string, string, string | string[]][] = [
       ["#nav-collapse", "octicon-sidebar-collapse", SIDEBAR_HIDE_16_PATHS],
       ["#nav-expand", "octicon-sidebar-expand", SIDEBAR_SHOW_16_PATHS],
@@ -5439,6 +5451,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       ["#nav-add-project", "octicon-plus", PLUS_16_PATH],
       ["#nav-launch", "octicon-plus", PLUS_16_PATH],
       ["#nav-settings", "octicon-gear", GEAR_16_PATH],
+      ["#nav-help", "octicon-question", QUESTION_16_PATH],
     ];
     for (const [selector, className, paths] of navIcons) {
       const icon = document.querySelector<HTMLElement>(`${selector} .goi-icon`);
@@ -6263,7 +6276,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "open-settings") {
-      openHelpSection(helpSectionDeps(), "settings");
+      openSettingsPage();
+      return true;
+    }
+    if (action === "open-help-page") {
+      openHelpSection(helpSectionDeps(), helpSectionFromRoute(STATE.route));
       return true;
     }
     if (action === "switch-project") {
@@ -6500,9 +6517,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   function load(
     options: { force?: boolean; changedPaths?: Set<string> | null } = {},
   ): Promise<RenderResult | null> {
-    if (STATE.route.screen === "help") {
+    if (STATE.route.screen === "help" || STATE.route.screen === "settings") {
       setStatus("live");
-      renderHelpPage();
+      if (STATE.route.screen === "help") renderHelpPage();
+      else renderSettingsPage();
       syncHeaderMenu();
       return Promise.resolve(null);
     }
@@ -6652,6 +6670,15 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   loadInitialState().finally(() => {
+    // 設定とヘルプが 1 つのページだった頃の /help#<設定の見出し> は設定のページへ
+    // (ヘルプには無い見出しなので、ヘルプのまま開くと何も出ない)。
+    if (
+      STATE.route.screen === "help" &&
+      settingsHeadingInHash(window.location.hash)
+    ) {
+      STATE.route = { screen: "settings", range: STATE.route.range };
+      replaceUrlWithCurrentRoute();
+    }
     MAIN_TABS.syncRoute(STATE.route);
     // ?terminal= のタブが前面になるかは、読み戻したタブの並びで決まる。
     const restoring = MAIN_TABS.restore({
@@ -6694,6 +6721,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.route.screen === "help") {
       setStatus("live");
       renderHelpPage();
+    } else if (STATE.route.screen === "settings") {
+      const heading = settingsHeadingInHash(window.location.hash);
+      if (heading) openSettingsAt(heading, true);
+      else {
+        setStatus("live");
+        renderSettingsPage();
+      }
     } else if (STATE.route.screen === "repo") loadRepo();
     else if (STATE.route.screen === "file" && dispatchFileRoute(STATE.route)) {
       // handled by dispatchFileRoute
@@ -6755,6 +6789,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         true,
       );
       renderHelpPage();
+    } else if (STATE.route.screen === "settings") {
+      setRoute({ screen: "settings", range }, true);
+      renderSettingsPage();
     } else {
       // Data を離れる後片付けは setRoute (leaveScreen) がする。
       setRoute({ screen: "diff", range }, true);
@@ -6852,10 +6889,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   QUICK_HELP = createQuickHelp({
     $,
     getLanguage: () => STATE.language,
-    getText: () => uiText().quickHelp,
     getKeyBindings: activeKeyBindings,
     openFullKeybindings: () => openHelpKeybindings(helpSectionDeps()),
-    openSettings: () => openHelpSection(helpSectionDeps(), "settings"),
+    openSettings: () => openSettingsPage(),
   });
 
   const DOCTOR_VIEW = createDoctorView({
@@ -8814,6 +8850,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       suggested: false,
     },
     {
+      id: "open-help-page",
+      keymap: "open-help-page",
+      icon: QUESTION_16_PATH,
+      suggested: false,
+    },
+    {
       id: "open-help",
       keymap: "open-help",
       icon: QUESTION_16_PATH,
@@ -9005,15 +9047,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         openPane: openAgentPane,
       })
     : null;
-
-  /** 設定画面を開き、指定の見出しまで送る。 */
-  function openSettingsAt(headingId: string): void {
-    VIEWER_SETTINGS.revealHeading(headingId);
-    openHelpSection(helpSectionDeps(), "settings");
-    requestAnimationFrame(() =>
-      document.getElementById(headingId)?.scrollIntoView({ block: "start" }),
-    );
-  }
 
   let releaseAccounts: (() => void) | null = null;
   const ACCOUNTS_BAND = createAccountsBand({
@@ -9218,7 +9251,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     setElementText("#nav-launch .nav-foot-label", t.newAgent);
     setElementText("#nav-settings .nav-foot-label", t.settings);
-    setElementText("#quick-help-btn .nav-foot-label", t.help);
+    setElementText("#nav-help .nav-foot-label", t.help);
     for (const [selector, label] of [
       ["#nav-collapse", t.collapse],
       ["#nav-expand", t.expand],
@@ -9501,10 +9534,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       return;
     }
-    if (STATE.route.screen === "help") {
+    if (STATE.route.screen === "help" || STATE.route.screen === "settings") {
       cancelActiveSourceLoad("navigation");
       setPageMode();
-      renderHelpPage();
+      if (STATE.route.screen === "help") renderHelpPage();
+      else renderSettingsPage();
       setStatus("live");
       return;
     }

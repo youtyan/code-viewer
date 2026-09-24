@@ -26,8 +26,8 @@
 | 確認 / 入力ダイアログ | `views/ui-dialog.ts` の `showConfirmDialog` / `showAlertDialog` / `showPromptDialog` / `showFormDialog`。型は 1 つ (面は `--color-overlay`、内側 7 単位、右上の閉じる = 取り消し、ボタンは `gdp-dialog-cancel` / `gdp-dialog-confirm` / 危険は `danger`)。見出しの下の 1 文は `description`。本文の見出しつきの値・コードの枠・箇条書きは `agent-hooks-dialog-*` の部品 (`accounts-dialogs.ts` の `labeled`)。ボタンのクラスを呼び出し側で付け直さない |
 | 使用量 (5h / week の割合・バー・リセットまで・いつの値か) | `views/agents/usage-meter.ts` の `usageMeterRow` / `usageObservedText`。全体ボードのカードと最下段のポップオーバーが同じものを使う (場所で見え方を変えない) |
 | 全体ボードの操作 | 主の操作は `agents-primary`、枠つきの小さな操作は `agents-secondary`、文字だけは `agents-text-action`、アイコンは `agents-icon-action` (28px 角)。プロジェクトの見出しの開く・起動・⋯ は hover / フォーカスで出し、場所は最初から取る |
-| 設定の節 (Help ページの設定) | `views/viewer-settings.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: general / appearance / shortcuts / agents / accounts / advanced) を 1 つ付ける (付けないと全部の分類に出る)。右の列・検索欄・見出しは `help-page.ts` が描く。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (分類も切り替わる)。保存はページの下の「変更を保存」1 つ: 節が下書きを持つなら `SettingsDraft` を `drafts` に渡し、節の中に「保存」を置かない (アカウントの節で保存が 2 つになり、利用者が迷った)。保存できない間 (JSON の誤りなど) は `problem()` で理由を返し、ページはどの節も保存しない。節の中の「既定に戻す」も下書きを変えるだけで、保存はページの「変更を保存」(判定ルールの「組み込みルールに戻す」も)。未保存は保存の横の文言 (`data-state="unsaved"`) で示す。分類に節が 1 つだけのときは、その節の見出しを出さない (ページの見出しと同じ役。`scope-settings-section-sole`。検索中は出す) |
-| キーの割り当て (設定の「ショートカット」・ヘルプのキーの一覧・クイックヘルプ・パレットのキー) | 操作の名前と分類は `views/help-keybindings.ts` の `KEYMAP_ACTION_INFO` だけに書く (Record なので操作を足すと書き忘れが型で落ちる)。既定のキーは `core/keymap.ts` (`DEFAULT_KEY_BINDINGS` と、PWA の窓の `pwaKeyBindings`)、利用者の差分を重ねるのは `resolveKeyBindings`、画面に出すのは app の `activeKeyBindings` (ヘルプ) / `shownKeyBindings` (この窓で効くものだけ: title・パレット)。キーの効く所 (入力欄・端末・PWA の窓) は押し方ごと (`KeyChord` の inputs / terminal / pwa)。編集の画面は `views/help-keybinding-editor.ts` |
+| 設定の節 (設定のページ `/settings`) | `views/viewer-settings.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: general / appearance / shortcuts / agents / accounts / advanced) を 1 つ付ける (付けないと全部の分類に出る)。左の列・検索欄・見出しは `views/settings-page.ts` が描く (枠は `views/page-shell.ts`、ヘルプのページと共通)。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (設定のページを開き、分類も切り替わる。実体は `settings-page.ts`)。設定とヘルプが 1 つのページだった頃の `/help?section=settings` は `core/routes.ts` の `parseRoute` が、`/help#<設定の見出し>` は起動時に `headingInHash` が設定のページへ移す。分類の説明の下にヘルプの節への 1 行を置くなら `settings-page.ts` の `CATEGORY_HELP_LINKS` (文字はヘルプの節の名前 `helpSectionName`)。保存はページの下の「変更を保存」1 つ: 節が下書きを持つなら `SettingsDraft` を `drafts` に渡し、節の中に「保存」を置かない (アカウントの節で保存が 2 つになり、利用者が迷った)。保存できない間 (JSON の誤りなど) は `problem()` で理由を返し、ページはどの節も保存しない。節の中の「既定に戻す」も下書きを変えるだけで、保存はページの「変更を保存」(判定ルールの「組み込みルールに戻す」も)。未保存は保存の横の文言 (`data-state="unsaved"`) で示す。分類に節が 1 つだけのときは、その節の見出しを出さない (ページの見出しと同じ役。`scope-settings-section-sole`。検索中は出す) |
+| キーの割り当て (設定の「ショートカット」・ヘルプのキーの一覧・キーボードショートカットの小窓 (`?`、`views/quick-help.ts`)・パレットのキー) | 操作の名前と分類は `views/help-keybindings.ts` の `KEYMAP_ACTION_INFO` だけに書く (Record なので操作を足すと書き忘れが型で落ちる)。既定のキーは `core/keymap.ts` (`DEFAULT_KEY_BINDINGS` と、PWA の窓の `pwaKeyBindings`)、利用者の差分を重ねるのは `resolveKeyBindings`、画面に出すのは app の `activeKeyBindings` (ヘルプ) / `shownKeyBindings` (この窓で効くものだけ: title・パレット)。キーの効く所 (入力欄・端末・PWA の窓) は押し方ごと (`KeyChord` の inputs / terminal / pwa)。編集の画面は `views/help-keybinding-editor.ts` |
 | ⌘K のパレットの行き先 (ファイル以外) | `views/search-palette-ui.ts` の `PaletteCommand` (群 = projects / agents / sessions / actions。エージェントでないペインとシェルは sessions)。中身は `app.ts` の `paletteCommands()`、操作は `PALETTE_ACTIONS` (キー割り当てのある操作は `keymap` を書けばキーが右に出て、実行も同じ `dispatchKeymapAction`)。ファイルの絞り込み・grep の側には足さない |
 | 作業ツリーの一覧の行 | `views/worktree-view.ts`。何も選んでいないときは一覧だけの画面 (`body[data-worktree-overview]`、列は `--worktree-columns`)。行の「開く」はこのときだけ置き、選んだ後の狭い一覧は「…」だけ (選んだ瞬間にボタンを増やさない) |
 | Data の表の足元 | `views/database/table-grid.ts` の `db-grid-status` (件数) と `db-grid-pager` (見えている行の範囲と 1 画面ずつのページ送り)。表の行の高さは表示密度の値 (`views/shell/row-height.ts` の `currentRowHeight`、CSS は `--ui-row-h`)、列幅は TS が持つので、CSS は色と線だけ |
@@ -123,7 +123,7 @@
 利用者と決めた。設計: タブとプロジェクト)。タブは持ち物のプロジェクトを持つ (`core/main-tabs.ts` の
 target の `project`、判定は `isProjectKind`): ファイル・リポジトリの画像・Diff / History / 作業ツリー /
 Search / Data / Work log はそのプロジェクト、シェルはそのシェルが動いているフォルダのプロジェクト
-(`app.ts` の `terminalProjectOf`)、全体ボード・Tools・設定と案内・ターミナルに出た画像と、どの
+(`app.ts` の `terminalProjectOf`)、全体ボード・Tools・設定・ヘルプ・ターミナルに出た画像と、どの
 プロジェクトにも入らないシェルは「どのプロジェクトのものでもない」。
 
 - **グループ**: タブ列は面ごとに、プロジェクトのグループに分けて並ぶ (`regroup`・`tabGroups`)。
@@ -165,7 +165,7 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
 
 | 入口 | 例外 |
 |---|---|
-| 画面 (Diff・History・作業ツリー・Data・Search・Tools・Help・全体ボード) | 画面のタブは種類ごとに 1 つで常に固定 (仮にしない: 中身が route で変わるので置き換えると見ていた状態が消える)、左の面だけ (本文を描く場所が 1 つ)。1 回押す・Alt はそのタブを前面に出す。一覧の列の頭の画面の入口 (`.view-strip-item` はリンク) の中ボタン・⌘/Ctrl はブラウザに任せる (アプリの中では 1 回押すと同じになるので、別の窓で開ける意味を残す) |
+| 画面 (Diff・History・作業ツリー・Data・Search・Tools・設定・ヘルプ・全体ボード) | 画面のタブは種類ごとに 1 つで常に固定 (仮にしない: 中身が route で変わるので置き換えると見ていた状態が消える)、左の面だけ (本文を描く場所が 1 つ)。1 回押す・Alt はそのタブを前面に出す。一覧の列の頭の画面の入口 (`.view-strip-item` はリンク) の中ボタン・⌘/Ctrl はブラウザに任せる (アプリの中では 1 回押すと同じになるので、別の窓で開ける意味を残す) |
 | Diff の一覧・History のファイルの一覧 | 1 回押すは画面の中の移動 (その差分へ送る)。固定の押し方と Alt は、そのファイルをファイルのタブ (その差分の新しい側の版、消したファイルは古い側) で開く |
 | 木のフォルダの行 | フォルダ表示はタブにしない (左の面の本文の既定)。修飾キーはブラウザに任せる |
 | ターミナル (左のサイドバーのエージェントの行・全体ボードの行・パレットのセッション・＋) | 常に固定 (仮にしない: 置き換えるとシェルの画面と打ちかけの文字が消える)。1 つのシェルは 1 か所にしか置けない。1 回押す・中ボタン・⌘/Ctrl はどれも開くか前面に出す (固定の新しいタブを足す意味が無い)。Alt は反対の面 (1 面なら右に分けて)。右ボタンは開かない (右クリックのメニュー) |
@@ -291,6 +291,10 @@ disabled / updated のすべてで箱の寸法を保つ。**
 CLI のサブコマンド・フラグ・画面の操作が変わったら、**同じ変更で**次を更新する。
 
 - `web-src/views/help-page.ts` の `HELP_CONTENT` — **`en` と `ja` の両方**
+- ヘルプの「やり方」の案内 (アカウントの追加・エージェントの起動・プロジェクトの追加・AI に任せる) は
+  `web-src/views/help-guides.ts`。ボタンや画面の名前は各画面の i18n の値を `guideLabels` で集めて
+  組み立てる (文字を写さない。`help-page.test.ts` が、案内が使う名前を全部出していることを見る)。
+  手順の順番やボタンが変わったら文も直す
 - リポジトリルートの `README.md`
 - 配布スキル `skills/code-viewer-*/SKILL.md`（CLI のサブコマンド / フラグを宣伝している場合）
 

@@ -450,6 +450,23 @@ describe("viewer settings form", () => {
     ]);
   });
 
+  // URL の # (/help#<見出し>・/settings#<見出し>) を設定のページへ送るかの判断。
+  // # から来る値はセレクタに組まないので、セレクタとして読めない値でも落ちない。
+  test.each<[string, boolean]>([
+    ["sample-accounts-heading", true],
+    ["agent-notify-section-title", true],
+    ["upload-section-title", true],
+    ["missing-heading", false],
+    ["1-not-a-selector", false],
+    ["a.b c", false],
+  ])("hasHeading(%j) is %s and leaves the category alone", (id, expected) => {
+    const { settings } = setup();
+    expect([settings.hasHeading(id), settings.getCategory()]).toEqual([
+      expected,
+      "general",
+    ]);
+  });
+
   test("shows the saved values when it is mounted", () => {
     const { settings, host, values } = setup();
 

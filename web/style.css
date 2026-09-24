@@ -2832,7 +2832,7 @@ body.gdp-history-resizing * {
   user-select: none !important;
 }
 
-/* Help ページの設定セクションに置くフォーム。読みやすい行長で止める。 */
+/* 設定のページ (views/settings-page.ts) のフォーム。読みやすい行長で止める。 */
 .scope-settings {
   max-width: 760px;
 }
@@ -3356,7 +3356,7 @@ body.gdp-help-page #content {
   text-align: center;
 }
 
-/* ===== Shortcuts (Help > Settings > Shortcuts) =====
+/* ===== Shortcuts (Settings > Shortcuts) =====
    設定の「ショートカット」の節 (views/help-keybinding-editor.ts)。行は押すと開き、
    開いた行の下にキーごとの効く所を並べる。寸法は名前だけで書く。 */
 .gdp-help-shortcut-link {
@@ -22372,7 +22372,7 @@ body.gdp-history-page #history-commit-info:not([hidden]),
   padding: var(--space-4) var(--pad-doc);
 }
 
-/* ---- B-2: 設定・ヘルプ (views/help-page.ts・viewer-settings.ts) ----
+/* ---- B-2: 設定とヘルプのページ (枠は views/page-shell.ts。settings-page.ts・help-page.ts・viewer-settings.ts) ----
    絵 (round2/settings.png): 見出しの下に設定の検索、左に分類の列 (210px)、
    32px 空けて右に選んだ分類の中身。分類の行は --ui-control-md、選んでいる
    分類は強い選択。節は枠で囲まず、見出しと間隔で区切る。切り替えは面の色と
@@ -22472,7 +22472,7 @@ body.gdp-help-page #content {
   color: var(--color-text);
   font-weight: 600;
 }
-/* 目次を開閉する 1 行は狭い面だけで出す (help-page.ts)。 */
+/* 目次を開閉する 1 行は狭い面だけで出す (page-shell.ts)。 */
 .gdp-help-nav-toggle {
   display: none;
 }

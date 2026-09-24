@@ -10,6 +10,13 @@ import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import type { InstallOffer, InstallOfferState } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
 import { parseQueryArgs } from "../server/query-cli";
+import { agentsText } from "../views/agents/i18n";
+import {
+  GUIDE_SECTIONS,
+  type GuideLabels,
+  type GuideSection,
+  guideLabels,
+} from "../views/help-guides";
 import {
   buildHelpKeybindingGroups,
   collectHelpKeybindingCoverage,
@@ -18,11 +25,16 @@ import {
 } from "../views/help-keybindings";
 import {
   createHelpPage,
+  type HelpLanguage,
+  type HelpPageDeps,
   type HelpSection,
+  helpSectionName,
   openHelpKeybindings,
-  openHelpSection,
 } from "../views/help-page";
+import { mainTabsText } from "../views/main-tabs/i18n";
 import { mobileShellText } from "../views/mobile-shell-i18n";
+import { quickHelpText } from "../views/quick-help-i18n";
+import { createSettingsPage } from "../views/settings-page";
 import type { SettingsCategory } from "../views/viewer-settings";
 
 /** インストールの案内を出さないブラウザ (案内の中身は pwa.test.ts)。 */
@@ -130,99 +142,146 @@ describe("help page navigation", () => {
   });
 });
 
-describe("help page settings categories", () => {
-  function renderSettings(section: HelpSection) {
-    document.body.innerHTML = [
-      '<main id="diff"></main>',
-      '<div id="empty"></div>',
-      '<div id="meta"></div>',
-      '<div id="totals"></div>',
-      '<div id="filelist"></div>',
-    ].join("");
-    const range = { from: "HEAD", to: "worktree" };
-    let route: AppRoute = { screen: "help", lang: "en", section, range };
-    let category: SettingsCategory = "general";
-    const searchHosts: HTMLElement[] = [];
-    const page = createHelpPage({
-      $: <T extends Element = HTMLElement>(sel: string): T => {
-        const found = document.querySelector(sel);
-        if (!found) throw new Error(`missing fixture element: ${sel}`);
-        return found as T;
-      },
-      getRoute: () => route,
-      setRoute: (next) => {
-        route = next;
-      },
-      setPageMode: () => undefined,
-      cancelActiveSourceLoad: () => true,
-      removeStandaloneSource: () => undefined,
-      clearLoadQueue: () => undefined,
-      currentRange: () => range,
-      syncHeaderMenu: () => undefined,
-      getLanguage: () => "en",
-      mountViewerSettings: () => undefined,
-      mountSettingsSearch: (host) => {
-        searchHosts.push(host);
-      },
-      settingsCategories: () => [
-        { id: "general", label: "General", description: "General text." },
-        {
-          id: "shortcuts",
-          label: "Shortcuts",
-          description: "Shortcuts text.",
-        },
-        { id: "agents", label: "Agents", description: "Agents text." },
-        { id: "accounts", label: "Accounts", description: "Accounts text." },
-        { id: "advanced", label: "Advanced", description: "Advanced text." },
-      ],
-      getSettingsCategory: () => category,
-      setSettingsCategory: (next) => {
-        category = next;
-      },
-      getKeyBindings: () => DEFAULT_KEY_BINDINGS,
-      openShortcutSettings: () => undefined,
-      installOffer: HIDDEN_INSTALL_OFFER,
-    });
-    page.renderHelpPage();
-    const nav = () =>
-      Array.from(
-        document.querySelectorAll<HTMLElement>(".gdp-help-nav > *"),
-        (item) =>
-          `${item.tagName === "BUTTON" ? "" : "# "}${item.textContent}${item.classList.contains("active") ? " *" : ""}`,
-      );
-    const click = (label: string) => {
-      const button = Array.from(
-        document.querySelectorAll<HTMLButtonElement>(".gdp-help-nav button"),
-      ).find((item) => item.textContent === label);
-      if (!button) throw new Error(`missing nav button: ${label}`);
-      button.click();
-    };
-    return {
-      nav,
-      click,
-      route: () => route,
-      category: () => category,
-      searchHosts,
-      /** openHelpSection で節を指して開く (設定の見出しへ送る経路)。 */
-      openSection: (next: HelpSection) =>
-        openHelpSection(
-          {
-            getRoute: () => route,
-            getLanguage: () => "en",
-            currentRange: () => range,
-            setRoute: (value) => {
-              route = value;
-            },
-            setPageMode: () => undefined,
-            cancelActiveSourceLoad: () => true,
-            renderHelpPage: (options) => page.renderHelpPage(options),
-            setStatus: () => undefined,
-          },
-          next,
-        ),
-    };
-  }
+const FIXTURE_DOM = [
+  '<main id="diff"></main>',
+  '<div id="empty"></div>',
+  '<div id="meta"></div>',
+  '<div id="totals"></div>',
+  '<div id="filelist"></div>',
+].join("");
 
+function fixture$<T extends Element = HTMLElement>(sel: string): T {
+  const found = document.querySelector(sel);
+  if (!found) throw new Error(`missing fixture element: ${sel}`);
+  return found as T;
+}
+
+/** 左の列: 見出しは "# "、選択中は " *"。 */
+function navItems(): string[] {
+  return Array.from(
+    document.querySelectorAll<HTMLElement>(".gdp-help-nav > *"),
+    (item) =>
+      `${item.tagName === "BUTTON" ? "" : "# "}${item.textContent}${item.classList.contains("active") ? " *" : ""}`,
+  );
+}
+
+function clickNav(label: string): void {
+  const button = Array.from(
+    document.querySelectorAll<HTMLButtonElement>(".gdp-help-nav button"),
+  ).find((item) => item.textContent === label);
+  if (!button) throw new Error(`missing nav button: ${label}`);
+  button.click();
+}
+
+const SAMPLE_CATEGORIES: Array<{
+  id: SettingsCategory;
+  label: string;
+  description: string;
+}> = [
+  { id: "general", label: "General", description: "General text." },
+  { id: "shortcuts", label: "Shortcuts", description: "Shortcuts text." },
+  { id: "agents", label: "Agents", description: "Agents text." },
+  { id: "accounts", label: "Accounts", description: "Accounts text." },
+  { id: "advanced", label: "Advanced", description: "Advanced text." },
+];
+
+/** 見出しの id と、その見出しを含む分類 (viewer-settings.ts の代わり)。 */
+const SAMPLE_HEADINGS: Record<string, SettingsCategory> = {
+  "sample-accounts-title": "accounts",
+  "sample-shortcuts-title": "shortcuts",
+};
+
+/** keepDom: 前のページ (ヘルプ) を描いたまま開く (ページを移ったとき)。 */
+function renderSettings(lang: HelpLanguage = "en", keepDom = false) {
+  if (!keepDom) document.body.innerHTML = FIXTURE_DOM;
+  const range = { from: "HEAD", to: "worktree" };
+  let route: AppRoute = { screen: "repo", ref: "worktree", path: "", range };
+  let category: SettingsCategory = "general";
+  const searchHosts: HTMLElement[] = [];
+  const openedHelp: HelpSection[] = [];
+  const page = createSettingsPage({
+    $: fixture$,
+    setRoute: (next) => {
+      route = next;
+    },
+    setPageMode: () => undefined,
+    setStatus: () => undefined,
+    currentRange: () => range,
+    cancelActiveSourceLoad: () => true,
+    removeStandaloneSource: () => undefined,
+    clearLoadQueue: () => undefined,
+    getLanguage: () => lang,
+    mountViewerSettings: () => undefined,
+    mountSettingsSearch: (host) => {
+      searchHosts.push(host);
+    },
+    settingsCategories: () => SAMPLE_CATEGORIES,
+    getSettingsCategory: () => category,
+    setSettingsCategory: (next) => {
+      category = next;
+    },
+    revealHeading: (id) => {
+      const owner = SAMPLE_HEADINGS[id];
+      if (owner) category = owner;
+    },
+    hasHeading: (id) => id in SAMPLE_HEADINGS,
+    openHelpSection: (section) => {
+      openedHelp.push(section);
+    },
+  });
+  page.openSettingsPage();
+  return {
+    page,
+    route: () => route,
+    category: () => category,
+    searchHosts,
+    openedHelp,
+  };
+}
+
+function renderHelpPage(
+  lang: HelpLanguage,
+  section: HelpSection | string,
+  overrides: Partial<HelpPageDeps> = {},
+) {
+  document.body.innerHTML = FIXTURE_DOM;
+  let route: AppRoute = {
+    screen: "help",
+    lang,
+    section,
+    range: { from: "HEAD", to: "worktree" },
+  };
+  const calls: string[] = [];
+  const page = createHelpPage({
+    $: fixture$,
+    getRoute: () => route,
+    setRoute: (next) => {
+      route = next;
+    },
+    setPageMode: () => undefined,
+    cancelActiveSourceLoad: () => true,
+    removeStandaloneSource: () => undefined,
+    clearLoadQueue: () => undefined,
+    currentRange: () => ({ from: "HEAD", to: "worktree" }),
+    syncHeaderMenu: () => undefined,
+    getLanguage: () => lang,
+    guideLabels: (guideLang) =>
+      guideLabels(guideLang, {
+        accounts: guideLang === "ja" ? "アカウント" : "Accounts",
+        paletteKey: "⌘K",
+      }),
+    openAccountsSettings: () => calls.push("openAccountsSettings"),
+    toggleKeyboardShortcuts: () => calls.push("toggleKeyboardShortcuts"),
+    getKeyBindings: () => DEFAULT_KEY_BINDINGS,
+    openShortcutSettings: () => calls.push("openShortcutSettings"),
+    installOffer: HIDDEN_INSTALL_OFFER,
+    ...overrides,
+  });
+  page.renderHelpPage();
+  return { page, calls, route: () => route };
+}
+
+describe("settings page", () => {
   // 電話の段では 2 段の画面: ほかの画面から入ると目次 (1 段目)、節を選ぶと本文
   // (2 段目)、頭の「‹ 目次」で 1 段目へ戻る。節を指して開いたときは 2 段目から。
   describe("on a phone: contents, then a section", () => {
@@ -254,9 +313,9 @@ describe("help page settings categories", () => {
 
     test("entering shows the contents, a pick shows that section, the toggle row goes back", () => {
       phone = true;
-      const view = renderSettings("settings");
+      renderSettings();
       const entered = level();
-      view.click("Agents");
+      clickNav("Agents");
       const picked = [level(), heading()];
       document
         .querySelector<HTMLButtonElement>(".gdp-help-nav-toggle")
@@ -270,78 +329,388 @@ describe("help page settings categories", () => {
 
     test("typing in the settings search from the contents shows the section", () => {
       phone = true;
-      const view = renderSettings("settings");
+      const view = renderSettings();
       const input = document.createElement("input");
       view.searchHosts[0]?.append(input);
       input.dispatchEvent(new Event("input", { bubbles: true }));
       expect(level()).toBe("section");
     });
 
-    test("opening a section directly skips the contents", () => {
+    test("opening a heading directly skips the contents", () => {
       phone = true;
-      const view = renderSettings("settings");
-      view.openSection("settings");
+      const view = renderSettings();
+      view.page.openSettingsAt("sample-accounts-title");
+      expect([level(), heading()]).toEqual(["section", "Accounts"]);
+    });
+
+    test("coming from the help page shows the contents again", () => {
+      phone = true;
+      renderHelpPage("en", "overview");
+      document
+        .querySelector<HTMLButtonElement>(".gdp-help-nav-toggle")
+        ?.click();
+      clickNav("Getting Started");
       expect(level()).toBe("section");
+      const view = renderSettings("en", true);
+      expect(level()).toBe("contents");
+      expect(view.route().screen).toBe("settings");
     });
 
     test("off the phone the contents stay folded when entering", () => {
       phone = false;
-      renderSettings("settings");
+      renderSettings();
       expect(level()).toBe("section");
     });
   });
 
-  test("lists the settings categories, then key bindings, then the help sections", () => {
-    const view = renderSettings("settings");
-    expect(view.nav()).toEqual([
-      "# Settings",
-      "General *",
-      "Shortcuts",
-      "Keybindings",
-      "Agents",
-      "Accounts",
-      "Advanced",
-      "# Help",
-      "Getting Started",
-      "Project Files",
-      "AI Annotations",
-      "Datastores",
-      "Agent Skill",
-      "MCP Server",
-    ]);
-    expect(document.querySelector(".gdp-help-content h2")?.textContent).toBe(
-      "General",
-    );
-    expect(view.searchHosts).toHaveLength(1);
+  test("lists only the settings categories, under the Settings title", () => {
+    const view = renderSettings();
+    expect({
+      title: document.querySelector(".gdp-help-header h1")?.textContent,
+      nav: navItems(),
+      h2: document.querySelector(".gdp-help-content h2")?.textContent,
+      searchHosts: view.searchHosts.length,
+      route: view.route(),
+    }).toEqual({
+      title: "Settings",
+      nav: ["General *", "Shortcuts", "Agents", "Accounts", "Advanced"],
+      h2: "General",
+      searchHosts: 1,
+      route: { screen: "settings", range: { from: "HEAD", to: "worktree" } },
+    });
   });
 
-  test("typing in the settings search on a help section moves to the settings section", () => {
-    const view = renderSettings("storage");
-    expect(view.searchHosts).toHaveLength(1);
-    const input = document.createElement("input");
-    view.searchHosts[0]?.append(input);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    expect(view.route()).toMatchObject({ section: "settings" });
-    expect(view.searchHosts).toHaveLength(2);
-  });
-
-  test("picking a category from a help section goes back to ?section=settings", () => {
-    const view = renderSettings("storage");
-    // 右の列の Files の木は設定の画面でも出ている。節を変えても消さない。
+  test("picking a category keeps the Files tree and shows that category", () => {
+    const view = renderSettings();
+    // 右の列の Files の木は設定の画面でも出ている。分類を変えても消さない。
     const filelist = document.getElementById("filelist");
     filelist?.append(document.createElement("li"));
-    view.click("Agents");
-    expect(filelist?.childElementCount).toBe(1);
-    expect(view.category()).toBe("agents");
-    expect(view.route()).toMatchObject({ screen: "help", section: "settings" });
-    expect(view.nav()).toContain("Agents *");
-    expect(document.querySelector(".gdp-help-content h2")?.textContent).toBe(
-      "Agents",
+    clickNav("Agents");
+    expect({
+      files: filelist?.childElementCount,
+      category: view.category(),
+      nav: navItems(),
+      h2: document.querySelector(".gdp-help-content h2")?.textContent,
+    }).toEqual({
+      files: 1,
+      category: "agents",
+      nav: ["General", "Shortcuts", "Agents *", "Accounts", "Advanced"],
+      h2: "Agents",
+    });
+  });
+
+  // openSettingsAt: ほかの画面 (アカウントの帯・通知・ヘルプの案内) から見出しへ送る。
+  test.each<[string, SettingsCategory]>([
+    ["sample-accounts-title", "accounts"],
+    ["sample-shortcuts-title", "shortcuts"],
+  ])("openSettingsAt(%s) opens the settings page on the %s category", (id, expected) => {
+    const view = renderSettings();
+    view.page.openSettingsAt(id);
+    expect([
+      view.route().screen,
+      view.category(),
+      navItems().filter((item) => item.endsWith(" *")),
+    ]).toEqual([
+      "settings",
+      expected,
+      [
+        `${SAMPLE_CATEGORIES.find((category) => category.id === expected)?.label} *`,
+      ],
+    ]);
+  });
+
+  // 設定とヘルプが 1 つのページだった頃の /help#<設定の見出し> を設定へ移すかの判断。
+  test.each<[string, string | null]>([
+    ["#sample-accounts-title", "sample-accounts-title"],
+    ["#sample-shortcuts-title", "sample-shortcuts-title"],
+    ["#getting-started", null],
+    ["", null],
+    ["#", null],
+  ])("the hash %j is the settings heading %j", (hash, expected) => {
+    const view = renderSettings();
+    expect(view.page.headingInHash(hash)).toBe(expected);
+  });
+
+  test.each<[HelpLanguage, SettingsCategory, HelpSection, string]>([
+    ["en", "accounts", "add-account", "Help › Add an account"],
+    ["ja", "accounts", "add-account", "ヘルプ › アカウントを追加する"],
+    ["en", "shortcuts", "keybindings", "Help › Keyboard Shortcuts"],
+    ["ja", "shortcuts", "keybindings", "ヘルプ › キーボードショートカット"],
+  ])("in %s the %s category links to the help section %s", (lang, category, section, label) => {
+    const view = renderSettings(lang);
+    view.page.openSettingsAt(`sample-${category}-title`);
+    const link = document.querySelector<HTMLAnchorElement>(
+      ".gdp-help-content .gdp-help-shortcut-link a",
     );
-    view.click("Keybindings");
-    expect(view.route()).toMatchObject({ section: "keybindings" });
-    expect(view.nav()).toContain("Keybindings *");
-    expect(view.nav()).not.toContain("Agents *");
+    link?.click();
+    expect([
+      link?.textContent,
+      link?.getAttribute("href"),
+      view.openedHelp,
+    ]).toEqual([label, `/help?section=${section}`, [section]]);
+    // リンクの文字はヘルプの左の列の名前と同じ。
+    expect(label.endsWith(helpSectionName(lang, section))).toBe(true);
+  });
+
+  test("a category without a help note shows none", () => {
+    renderSettings();
+    expect(
+      document.querySelector(".gdp-help-content .gdp-help-shortcut-link"),
+    ).toBeNull();
+  });
+});
+
+describe("help page", () => {
+  test.each<[HelpLanguage, string, string[]]>([
+    [
+      "en",
+      "Help",
+      [
+        "Getting Started *",
+        "Add an account",
+        "Start an agent",
+        "Add a project",
+        "Let AI do it",
+        "Keyboard Shortcuts",
+        "Project Files",
+        "AI Annotations",
+        "Datastores",
+        "Agent Skill",
+        "MCP Server",
+      ],
+    ],
+    [
+      "ja",
+      "ヘルプ",
+      [
+        "はじめに *",
+        "アカウントを追加する",
+        "エージェントを起動する",
+        "プロジェクトを追加する",
+        "AI に任せる",
+        "キーボードショートカット",
+        "プロジェクトファイル",
+        "AI注釈",
+        "データストア",
+        "スキル登録",
+        "MCPサーバー",
+      ],
+    ],
+  ])("in %s lists the help sections only, under %s", (lang, title, nav) => {
+    renderHelpPage(lang, "overview");
+    expect({
+      title: document.querySelector(".gdp-help-header h1")?.textContent,
+      nav: navItems(),
+      search: document.querySelector(".gdp-help-search-row"),
+    }).toEqual({ title, nav, search: null });
+  });
+
+  // 設定の節だった値は route が設定のページへ移す (routes.test.ts)。ここに来たら
+  // はじめにを出す。
+  test("an unknown section shows Getting Started", () => {
+    renderHelpPage("en", "settings");
+    expect(navItems()[0]).toBe("Getting Started *");
+  });
+
+  test("picking a section moves ?section= and keeps the page", () => {
+    const view = renderHelpPage("en", "overview");
+    clickNav("Keyboard Shortcuts");
+    expect([
+      view.route(),
+      navItems().filter((item) => item.endsWith(" *")),
+    ]).toEqual([
+      {
+        screen: "help",
+        lang: "en",
+        section: "keybindings",
+        range: { from: "HEAD", to: "worktree" },
+      },
+      ["Keyboard Shortcuts *"],
+    ]);
+  });
+
+  test.each<HelpLanguage>([
+    "en",
+    "ja",
+  ])("in %s the header button opens the keyboard shortcuts window by its name", (lang) => {
+    const view = renderHelpPage(lang, "overview");
+    const button = document.querySelector<HTMLButtonElement>(
+      ".gdp-help-header button[data-quick-help-trigger]",
+    );
+    button?.click();
+    expect([button?.textContent, view.calls]).toEqual([
+      quickHelpText(lang).panelTitle,
+      ["toggleKeyboardShortcuts"],
+    ]);
+  });
+
+  test("the key list links to Settings › Shortcuts", () => {
+    const view = renderHelpPage("en", "keybindings");
+    const link = document.querySelector<HTMLAnchorElement>(
+      ".gdp-help-shortcut-link a",
+    );
+    link?.click();
+    expect([link?.getAttribute("href"), view.calls]).toEqual([
+      "/settings",
+      ["openShortcutSettings"],
+    ]);
+  });
+});
+
+describe("help page guides", () => {
+  const LABEL_SETS: Record<HelpLanguage, GuideLabels> = {
+    en: guideLabels("en", { accounts: "Accounts", paletteKey: "⌘K" }),
+    ja: guideLabels("ja", { accounts: "アカウント", paletteKey: "⌘K" }),
+  };
+
+  /** その案内で使う名前 (GuideLabels の欄)。 */
+  const USED: Record<GuideSection, Array<keyof GuideLabels>> = {
+    "add-account": [
+      "settings",
+      "accounts",
+      "add",
+      "addKind",
+      "addName",
+      "addModeCreate",
+      "addModeRegister",
+      "addNext",
+      "createRun",
+      "registerRun",
+      "login",
+      "signedIn",
+    ],
+    "start-agent": [
+      "newAgent",
+      "launchKind",
+      "launchAccount",
+      "launchProject",
+      "launchRun",
+      "groupNewAgent",
+    ],
+    "add-project": [
+      "projects",
+      "addProject",
+      "addProjectSubmit",
+      "addProjectMenu",
+      "paletteKey",
+    ],
+    "ask-ai": [],
+  };
+
+  // 名前は画面の i18n の値そのもの (写した文字ではない)。
+  test.each<HelpLanguage>([
+    "en",
+    "ja",
+  ])("in %s the labels are the values of each screen's i18n", (lang) => {
+    const agents = agentsText(lang);
+    expect(LABEL_SETS[lang]).toMatchObject({
+      settings: agents.sidebar.settings,
+      add: agents.accounts.add,
+      addModeCreate: agents.accounts.addModeCreate,
+      addModeRegister: agents.accounts.addModeRegister,
+      login: agents.accounts.loginButton,
+      newAgent: agents.sidebar.newAgent,
+      launchAccount: agents.accounts.launchAccount,
+      groupNewAgent: mainTabsText(lang).newAgentHere,
+      projects: agents.sidebar.projects,
+      addProject: agents.projects.addProject,
+      addProjectMenu: agents.projects.addProjectMenu,
+    });
+  });
+
+  const CASES = (["en", "ja"] as const).flatMap((lang) =>
+    GUIDE_SECTIONS.map((section) => [lang, section] as const),
+  );
+
+  test.each(
+    CASES,
+  )("in %s the %s guide shows every name it uses", (lang, section) => {
+    renderHelpPage(lang, section);
+    const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
+    const labels = LABEL_SETS[lang];
+    const missing = USED[section].filter((key) => !text.includes(labels[key]));
+    expect([navItems().filter((item) => item.endsWith(" *")), missing]).toEqual(
+      [[`${helpSectionName(lang, section)} *`], []],
+    );
+  });
+
+  // 画面の文言が変われば案内も変わる (案内に文字を写していない)。
+  test("a renamed button shows up in the guide", () => {
+    renderHelpPage("en", "add-account", {
+      guideLabels: () => ({
+        ...LABEL_SETS.en,
+        add: "Sample add button",
+        login: "Sample sign-in button",
+      }),
+    });
+    const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
+    expect([
+      text.includes("Sample add button"),
+      text.includes("Sample sign-in button"),
+      text.includes(LABEL_SETS.en.add),
+    ]).toEqual([true, true, false]);
+  });
+
+  test.each<HelpLanguage>([
+    "en",
+    "ja",
+  ])("in %s the account guide links to Settings › Accounts and warns about the browser account", (lang) => {
+    const view = renderHelpPage(lang, "add-account");
+    const link = document.querySelector<HTMLAnchorElement>(
+      ".gdp-help-content .gdp-help-shortcut-link a",
+    );
+    link?.click();
+    const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
+    expect([
+      link?.textContent,
+      view.calls,
+      text.includes(
+        lang === "en"
+          ? "second account of the same service"
+          : "同じサービスで 2 つ目",
+      ),
+    ]).toEqual([
+      `${LABEL_SETS[lang].settings} › ${LABEL_SETS[lang].accounts}`,
+      ["openAccountsSettings"],
+      true,
+    ]);
+  });
+
+  test.each<HelpLanguage>([
+    "en",
+    "ja",
+  ])("in %s the AI guide shows the skill install commands and every accounts command", (lang) => {
+    renderHelpPage(lang, "ask-ai");
+    const commands = Array.from(
+      document.querySelectorAll(".gdp-help-command code"),
+      (code) => code.textContent,
+    );
+    const rows = Array.from(
+      document.querySelectorAll(".gdp-help-content th"),
+      (th) => th.textContent,
+    );
+    expect([commands, rows]).toEqual([
+      [
+        "code-viewer skill install",
+        "code-viewer skill install --agent claude,codex",
+        "code-viewer skill install --agent all --global",
+      ],
+      [
+        "code-viewer-accounts",
+        "code-viewer-annotate",
+        "code-viewer-journal",
+        "code-viewer-query",
+        "code-viewer-snapshot",
+        "list",
+        "plan",
+        "create",
+        "register",
+        "login",
+        "wait",
+        "rename",
+        "remove",
+      ],
+    ]);
   });
 });
 
@@ -354,46 +723,7 @@ describe("help page CLI reference", () => {
     text: string;
     commands: string[];
   } {
-    document.body.innerHTML = [
-      '<main id="diff"></main>',
-      '<div id="empty"></div>',
-      '<div id="meta"></div>',
-      '<div id="totals"></div>',
-      '<div id="filelist"></div>',
-    ].join("");
-    let route: AppRoute = {
-      screen: "help",
-      lang,
-      section,
-      range: { from: "HEAD", to: "worktree" },
-    };
-    const page = createHelpPage({
-      $: <T extends Element = HTMLElement>(sel: string): T => {
-        const found = document.querySelector(sel);
-        if (!found) throw new Error(`missing fixture element: ${sel}`);
-        return found as T;
-      },
-      getRoute: () => route,
-      setRoute: (next) => {
-        route = next;
-      },
-      setPageMode: () => undefined,
-      cancelActiveSourceLoad: () => true,
-      removeStandaloneSource: () => undefined,
-      clearLoadQueue: () => undefined,
-      currentRange: () => ({ from: "HEAD", to: "worktree" }),
-      syncHeaderMenu: () => undefined,
-      getLanguage: () => lang,
-      mountViewerSettings: () => undefined,
-      mountSettingsSearch: () => undefined,
-      settingsCategories: () => [],
-      getSettingsCategory: () => "general",
-      setSettingsCategory: () => undefined,
-      getKeyBindings: () => DEFAULT_KEY_BINDINGS,
-      openShortcutSettings: () => undefined,
-      installOffer,
-    });
-    page.renderHelpPage();
+    renderHelpPage(lang, section, { installOffer });
     const root = document.querySelector("#diff");
     return {
       text: root?.textContent ?? "",

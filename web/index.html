@@ -67,11 +67,12 @@
   var q = new URLSearchParams(location.search);
   var screen = {
     "/": "repo", "/index.html": "repo", "/doctor": "repo", "/todif": "diff", "/todiff": "diff",
-    "/file": "file", "/help": "help", "/worktree": "worktree", "/history": "history",
+    "/file": "file", "/help": "help", "/settings": "help", "/worktree": "worktree", "/history": "history",
     "/agents": "agents", "/tools": "tools", "/search": "search", "/journal": "journal",
     "/database": "database"
   }[path];
   if (screen === "file" && !q.get("path")) screen = undefined;
+  // 設定とヘルプは同じ並び (core/page-mode.ts)。
   if (!screen) return;
   var view = q.get("view");
   var fileView = screen !== "file" ? "" :
@@ -142,8 +143,8 @@
     <div id="nav-projects" class="nav-projects"></div>
     <div class="nav-foot">
       <button id="nav-launch" class="nav-foot-item" type="button"><span class="goi-icon" aria-hidden="true"></span><span class="nav-foot-label">New agent</span></button>
-      <a id="nav-settings" class="nav-foot-item" data-route="help" href="/help?section=settings"><span class="goi-icon" aria-hidden="true"></span><span class="nav-foot-label">Settings</span></a>
-      <button id="quick-help-btn" class="nav-foot-item" type="button" title="quick help (shortcuts)" aria-label="quick help (shortcuts)"><span class="goi-icon" aria-hidden="true"></span><span class="nav-foot-label">Help</span></button>
+      <a id="nav-settings" class="nav-foot-item" data-route="settings" href="/settings"><span class="goi-icon" aria-hidden="true"></span><span class="nav-foot-label">Settings</span></a>
+      <a id="nav-help" class="nav-foot-item" data-route="help" href="/help"><span class="goi-icon" aria-hidden="true"></span><span class="nav-foot-label">Help</span></a>
     </div>
     <div id="app-nav-resizer" class="app-nav-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="resize sidebar"></div>
   </aside>
@@ -293,7 +294,7 @@
         <button id="file-list-collapse-all" class="sb-icon-action sb-tree-action" title="collapse all folders" aria-label="collapse all folders"></button>
       </div>
       <div class="sb-filter-wrap">
-        <input id="file-list-filter" class="sb-filter" type="search" placeholder="filter files…  /  ⌘K" title="Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help." autocomplete="off" />
+        <input id="file-list-filter" class="sb-filter" type="search" placeholder="filter files…  /  ⌘K" title="Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for keyboard shortcuts." autocomplete="off" />
         <button id="file-list-filter-clear" type="button" class="sb-filter-clear" title="Clear file filter" aria-label="Clear file filter" hidden>Clear</button>
       </div>
     </div>
@@ -322,21 +323,21 @@
       </div>
     </div>
     <div class="sb-filter-wrap">
-      <input id="sb-filter" class="sb-filter" type="search" placeholder="filter files…  /  ⌘K" title="Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help." autocomplete="off" />
+      <input id="sb-filter" class="sb-filter" type="search" placeholder="filter files…  /  ⌘K" title="Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for keyboard shortcuts." autocomplete="off" />
       <button id="sb-filter-clear" type="button" class="sb-filter-clear" title="Clear file filter" aria-label="Clear file filter" hidden>Clear</button>
     </div>
     <ul id="filelist"></ul>
     <div id="sidebar-resizer" aria-hidden="true"></div>
   </aside>
 
-  <div id="quick-help-popover" hidden role="dialog" aria-label="quick help" aria-modal="false">
+  <div id="quick-help-popover" hidden role="dialog" aria-label="Keyboard shortcuts" aria-modal="false">
     <div class="quick-help-head">
-      <strong id="quick-help-title">Quick Help</strong>
-      <button id="quick-help-close" type="button" aria-label="close quick help">×</button>
+      <strong id="quick-help-title">Keyboard shortcuts</strong>
+      <button id="quick-help-close" type="button" aria-label="Close keyboard shortcuts">×</button>
     </div>
     <div id="quick-help-groups"></div>
     <div class="quick-help-foot">
-      <a id="quick-help-settings-link" href="/help?section=settings">Settings →</a>
+      <a id="quick-help-settings-link" href="/settings">Settings →</a>
       <a id="quick-help-full-link" href="/help?section=keybindings">View all keybindings →</a>
     </div>
   </div>

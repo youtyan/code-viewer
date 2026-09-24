@@ -95,7 +95,7 @@ const TERMINAL_HOST = '.main-pane-host[data-side="left"][data-kind="terminal"]';
 
 /** 押したら引き出しを閉じるもの (移る・開く)。山形や行の操作では閉じない。 */
 const DRAWER_CLOSING_TARGETS =
-  ".nav-agent, .nav-project-toggle, a[href], #nav-launch, #search-btn, #quick-help-btn";
+  ".nav-agent, .nav-project-toggle, a[href], #nav-launch, #search-btn";
 
 /**
  * 押したら面を閉じるもの (ファイル・画面の入口)。フォルダの行では閉じない。

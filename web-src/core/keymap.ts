@@ -42,7 +42,10 @@ export const KEYMAP_ACTIONS = [
   "toggle-theme",
   "annotation-next",
   "annotation-previous",
+  // 名前はクイックヘルプの頃のまま (保存した割り当てを壊さない)。いまは
+  // キーボードショートカットの小窓を開く。ヘルプのページは open-help-page。
   "open-help",
+  "open-help-page",
   "copy-ai-context",
   "copy-ai-context-with-code",
   "next-unviewed-file",

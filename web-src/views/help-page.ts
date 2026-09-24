@@ -1,11 +1,20 @@
-// Help page (keybindings reference), extracted from app.ts.
+// ヘルプのページ (/help): 使い方の説明・やり方の案内・キーの一覧。設定は
+// 別のページ (views/settings-page.ts)。
 
 import type { KeyBinding } from "../core/keymap";
-import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import type { InstallOffer } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
+import { agentsText } from "./agents/i18n";
+import {
+  GUIDE_NAMES,
+  GUIDE_SECTIONS,
+  type GuideLabels,
+  type GuideSection,
+  guideContent,
+} from "./help-guides";
 import { buildHelpKeybindingGroups } from "./help-keybindings";
-import type { SettingsCategory } from "./viewer-settings";
+import { createPageShell, type PageShellNavItem } from "./page-shell";
+import { quickHelpText } from "./quick-help-i18n";
 
 export type HelpPageDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -18,18 +27,12 @@ export type HelpPageDeps = {
   currentRange(): { from: string; to: string };
   syncHeaderMenu(): void;
   getLanguage(): HelpLanguage;
-  /** 設定セクションの中身。フォームの実体は views/viewer-settings.ts が持つ */
-  mountViewerSettings(host: HTMLElement): void;
-  /** 設定の検索欄 (実体は viewer-settings.ts)。見出しの下に置く。 */
-  mountSettingsSearch(host: HTMLElement): void;
-  /** 左の列に並べる設定の分類 (並び順どおり)。 */
-  settingsCategories(): Array<{
-    id: SettingsCategory;
-    label: string;
-    description: string;
-  }>;
-  getSettingsCategory(): SettingsCategory;
-  setSettingsCategory(category: SettingsCategory): void;
+  /** やり方の案内に出す画面の名前とボタンの文言 (各画面の i18n の値)。 */
+  guideLabels(lang: HelpLanguage): GuideLabels;
+  /** 設定のアカウントの節を開く (案内のリンク)。 */
+  openAccountsSettings(): void;
+  /** キーボードショートカットの小窓を開閉する (views/quick-help.ts)。 */
+  toggleKeyboardShortcuts(): void;
   /** ユーザーの差分を反映した、いま実際に効くバインド一覧 */
   getKeyBindings(): KeyBinding[];
   /**
@@ -43,9 +46,10 @@ export type HelpPageDeps = {
 
 export type HelpLanguage = "en" | "ja";
 
+/** ヘルプの節。?section= の値。 */
 export type HelpSection =
-  | "settings"
   | "overview"
+  | GuideSection
   | "storage"
   | "annotations"
   | "database"
@@ -53,56 +57,58 @@ export type HelpSection =
   | "mcp"
   | "keybindings";
 
-type HelpBlock =
+export type HelpBlock =
   | { kind: "paragraph"; text: string }
+  /** 1 行の中のリンク (ほかの画面へ送る)。href は中ボタン・コピー用、押すと open。 */
+  | {
+      kind: "link";
+      before: string;
+      label: string;
+      after: string;
+      href: string;
+      open(): void;
+    }
   | { kind: "steps"; items: string[] }
   /** インストールの案内 (PWA)。ボタンはブラウザが出せるときだけ。Chrome 以外では出さない */
   | { kind: "install"; button: string; steps: string[] }
   | { kind: "command"; title: string; command: string }
   | { kind: "table"; rows: Array<[string, string]> };
 
+export type HelpSectionContent = {
+  nav: string;
+  title: string;
+  intro: string;
+  groups: Array<{ title: string; blocks: HelpBlock[] }>;
+};
+
 type HelpContent = {
   languageLabel: string;
-  title: string;
-  /** 左の列で、ヘルプの節の前に置く見出し。 */
-  helpNavGroup: string;
-  sections: Record<
-    HelpSection,
-    {
-      nav: string;
-      title: string;
-      intro: string;
-      groups: Array<{ title: string; blocks: HelpBlock[] }>;
-    }
-  >;
+  /** 見出しの右の、キーボードショートカットの小窓を開くボタンの説明。 */
+  keyboardShortcutsTitle: string;
+  /** やり方の案内 (help-guides.ts) はボタン名を画面の i18n から組むので、ここに無い。 */
+  sections: Record<Exclude<HelpSection, GuideSection>, HelpSectionContent>;
 };
 
 const HELP_LANGUAGES: HelpLanguage[] = ["en", "ja"];
 
+/** 左の列の並び。 */
 const HELP_SECTIONS: HelpSection[] = [
-  "settings",
   "overview",
+  ...GUIDE_SECTIONS,
+  "keybindings",
   "storage",
   "annotations",
   "database",
   "skills",
   "mcp",
-  "keybindings",
 ];
 
 const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
   en: {
     languageLabel: "Language",
-    title: "Settings & Help",
-    helpNavGroup: "Help",
+    keyboardShortcutsTitle:
+      "Show the keys for the common actions in a small window (? on any screen)",
     sections: {
-      settings: {
-        nav: "Settings",
-        title: "Settings",
-        intro:
-          "Viewer preferences. Sections marked All projects are shared by every project; the others apply to this repository. Edits remain a draft until you select Save changes.",
-        groups: [],
-      },
       overview: {
         nav: "Getting Started",
         title: "Getting Started",
@@ -171,7 +177,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "The row of tabs at the top keeps files and screens open; there is no header row above it. The head of the list column, at the left end of the top row, has two rows. The first, as tall as the tab row, shows the project you are looking at: a colored square with its initials, its name (click it or press p to switch projects) and its branch on the right; a long name is shortened, and hovering it shows the whole name. The second row holds the six view icons (Files, Diff, History, Worktrees, Data, Work log; hover for the name and key), with the button that folds the file list at its right end. The file list starts below the head, and the tab row starts to its right. The left sidebar holds the projects and agents; to its right, the list column shows the file list (the tree of the repository) on every screen, and next to it the list you pick the main area from: the changed files of Diff, the commits of History and the list of a selected worktree, where History and a selected worktree also show their changed files next to the list. The columns follow the tab in front: with a terminal or an image in front, only the file list stays. The list keeps the width you drag it to (320px at first) and the file list keeps its own. When the main area would be narrower than 480px, the list narrows to 240px first (History then shows only the subject and the branch labels), then the changed files fold to a strip, and then the file list folds away (its button carries a mark and says why). Every column folds by hand: the file list with the button at the head, the lists with the small handle in the middle of their right edge; a folded list becomes a strip whose button opens it again, and a column you open yourself is not folded for width again until you reload. In History a branch label keeps its whole name up to about 40% of the room it shares with the subject (more when the subject is short), and the subject is shortened into the rest. The tabs are shared by all projects and grouped by project: each group starts with a label in the project's color (its initials and ▾; the name is in the tooltip and at the top of the ▾ menu) and its tabs are underlined in that color; the groups follow the order of the projects in the left sidebar, and tabs that belong to no project (the agent board, Tools, Settings & Help, a terminal outside every project) sit at the right end. A terminal belongs to the project of the folder it runs in. Click a label to collapse or expand its group (a collapsed label shows how many tabs it holds); its ▾ offers New shell (a shell in that project's folder, in front in that group) and New agent… (the launch dialog with that project chosen), then Switch to this project, Collapse / Expand and Close this group. A tab cannot be dragged into another group. Files, terminals and images of another project open right where you are (the file is read from that project); Diff, History, Worktrees, Search, Data and Work log of another project switch to that project first, and the tabs stay. A terminal tab outside a group showing an agent from another project is named “project · title”; when the tab is narrow, the project name is shortened first. Switching tabs or screens, splitting into two sides, folding a column or showing the lists never moves or hides the head; folding only folds the column below the head, so the tab row and the split button stay put. While the file list is folded (by hand or for width), the second row of the head (the six view icons and the button that opens the list again) stands as a narrow strip down the left edge under the first row, and the main area starts to its right. When the head is narrow, the branch keeps its whole name up to about 40% of the width (more when the project name is short) and the project name is shortened to fit the rest. A file opened with one click (tree, palette, a line link, View File) opens in a preview tab with an italic name, and the next file replaces it; double-click the tree row or the tab, or choose Keep open, to keep it. To open a file in a tab of its own that stays, middle-click or ⌘/Ctrl+click it (tree, Diff and History file lists, Search results, palette rows), press Shift+Enter in the palette, or right-click a tree file → Open in new tab; if the file is already open, that tab comes to the front and is kept. Shift+click still opens the row in a new browser window. A file at another version (a commit opened from History, HEAD, a branch) is a tab of its own next to the working tree one, named like “a.ts @ 1a2b3c4”. Diff, History, Worktrees, Data and Work log each have one tab in each project: their icon brings that tab back as you left it. Files is not a tab: the folder view is what the left side shows when no tab is selected (the Files icon, g r, or a folder in the tree clears the selection), and closing the last tab shows it too. Right-click a tab (or press Shift+F10 on it) for Close / Close others / Close to the right / Keep open / Copy path, drag tabs to reorder, and use g t / g T (next / previous), g x (close) and g 1–9. On the tab row, ←/→, Home and End move between tabs, Enter brings one to the front, Delete closes it and Ctrl+Shift+PageUp / PageDown (or Ctrl+Shift+←/→, ⌘+Shift+←/→, or Move left / Move right in the tab's menu) moves it. With two sides, the tab row of the side that has the focus is underlined across its width. A tab is as wide as its icon, whole name and close button (up to 200px). When the tabs do not fit in the row, they all shrink by the same ratio, but never so far that less than about eight letters of a name show; past that the row scrolls sideways, always keeping the front tab in view. Collapsing or expanding a group never moves the tabs before it. The tabs are saved once for all projects; with two windows open, a tab opened, closed or moved in one appears in the other and neither window overwrites the other's changes (each window keeps its own front tab). Screens (Diff, History, Worktrees, Data, Work log, Agents, Settings & Help) have one place to be drawn, so they stay on the left side; the right side holds files, terminals and images. Each side draws its own file, so two files, or the same file twice, sit side by side, each with its own scroll, line selection and Code / Preview / Blame view; a file's History opens on the left. The split button at the right of the row (or Split right on a file, terminal or image tab, or dragging one onto the dashed area on the right half) shows two sides; when the button cannot split, its tooltip says why; drag the line between them to resize, drag files, terminals and images between the sides or use Move to other side, and press g o to move to the other side. The tree and the palette open a file on the side that has the focus; Alt+click a file in the tree, the Diff or History file list or the Search results (or right-click a tree file → Open to the right) to open it on the other side (with one side, it splits and opens it on the right). The URL follows the focused side: a file on the right adds pane=right, so a reload and Back / Forward come back to it. Image files open in an image tab with zoom, previous / next, Copy path and Open folder. The buttons that used to sit at the right of the header row (annotations, Copy AI context, auto update, cancel requests, theme, repository page) are at the right of the bottom bar.",
+                text: "The row of tabs at the top keeps files and screens open; there is no header row above it. The head of the list column, at the left end of the top row, has two rows. The first, as tall as the tab row, shows the project you are looking at: a colored square with its initials, its name (click it or press p to switch projects) and its branch on the right; a long name is shortened, and hovering it shows the whole name. The second row holds the six view icons (Files, Diff, History, Worktrees, Data, Work log; hover for the name and key), with the button that folds the file list at its right end. The file list starts below the head, and the tab row starts to its right. The left sidebar holds the projects and agents; to its right, the list column shows the file list (the tree of the repository) on every screen, and next to it the list you pick the main area from: the changed files of Diff, the commits of History and the list of a selected worktree, where History and a selected worktree also show their changed files next to the list. The columns follow the tab in front: with a terminal or an image in front, only the file list stays. The list keeps the width you drag it to (320px at first) and the file list keeps its own. When the main area would be narrower than 480px, the list narrows to 240px first (History then shows only the subject and the branch labels), then the changed files fold to a strip, and then the file list folds away (its button carries a mark and says why). Every column folds by hand: the file list with the button at the head, the lists with the small handle in the middle of their right edge; a folded list becomes a strip whose button opens it again, and a column you open yourself is not folded for width again until you reload. In History a branch label keeps its whole name up to about 40% of the room it shares with the subject (more when the subject is short), and the subject is shortened into the rest. The tabs are shared by all projects and grouped by project: each group starts with a label in the project's color (its initials and ▾; the name is in the tooltip and at the top of the ▾ menu) and its tabs are underlined in that color; the groups follow the order of the projects in the left sidebar, and tabs that belong to no project (the agent board, Tools, Settings, Help, a terminal outside every project) sit at the right end. A terminal belongs to the project of the folder it runs in. Click a label to collapse or expand its group (a collapsed label shows how many tabs it holds); its ▾ offers New shell (a shell in that project's folder, in front in that group) and New agent… (the launch dialog with that project chosen), then Switch to this project, Collapse / Expand and Close this group. A tab cannot be dragged into another group. Files, terminals and images of another project open right where you are (the file is read from that project); Diff, History, Worktrees, Search, Data and Work log of another project switch to that project first, and the tabs stay. A terminal tab outside a group showing an agent from another project is named “project · title”; when the tab is narrow, the project name is shortened first. Switching tabs or screens, splitting into two sides, folding a column or showing the lists never moves or hides the head; folding only folds the column below the head, so the tab row and the split button stay put. While the file list is folded (by hand or for width), the second row of the head (the six view icons and the button that opens the list again) stands as a narrow strip down the left edge under the first row, and the main area starts to its right. When the head is narrow, the branch keeps its whole name up to about 40% of the width (more when the project name is short) and the project name is shortened to fit the rest. A file opened with one click (tree, palette, a line link, View File) opens in a preview tab with an italic name, and the next file replaces it; double-click the tree row or the tab, or choose Keep open, to keep it. To open a file in a tab of its own that stays, middle-click or ⌘/Ctrl+click it (tree, Diff and History file lists, Search results, palette rows), press Shift+Enter in the palette, or right-click a tree file → Open in new tab; if the file is already open, that tab comes to the front and is kept. Shift+click still opens the row in a new browser window. A file at another version (a commit opened from History, HEAD, a branch) is a tab of its own next to the working tree one, named like “a.ts @ 1a2b3c4”. Diff, History, Worktrees, Data and Work log each have one tab in each project: their icon brings that tab back as you left it. Files is not a tab: the folder view is what the left side shows when no tab is selected (the Files icon, g r, or a folder in the tree clears the selection), and closing the last tab shows it too. Right-click a tab (or press Shift+F10 on it) for Close / Close others / Close to the right / Keep open / Copy path, drag tabs to reorder, and use g t / g T (next / previous), g x (close) and g 1–9. On the tab row, ←/→, Home and End move between tabs, Enter brings one to the front, Delete closes it and Ctrl+Shift+PageUp / PageDown (or Ctrl+Shift+←/→, ⌘+Shift+←/→, or Move left / Move right in the tab's menu) moves it. With two sides, the tab row of the side that has the focus is underlined across its width. A tab is as wide as its icon, whole name and close button (up to 200px). When the tabs do not fit in the row, they all shrink by the same ratio, but never so far that less than about eight letters of a name show; past that the row scrolls sideways, always keeping the front tab in view. Collapsing or expanding a group never moves the tabs before it. The tabs are saved once for all projects; with two windows open, a tab opened, closed or moved in one appears in the other and neither window overwrites the other's changes (each window keeps its own front tab). Screens (Diff, History, Worktrees, Data, Work log, Agents, Settings, Help) have one place to be drawn, so they stay on the left side; the right side holds files, terminals and images. Each side draws its own file, so two files, or the same file twice, sit side by side, each with its own scroll, line selection and Code / Preview / Blame view; a file's History opens on the left. The split button at the right of the row (or Split right on a file, terminal or image tab, or dragging one onto the dashed area on the right half) shows two sides; when the button cannot split, its tooltip says why; drag the line between them to resize, drag files, terminals and images between the sides or use Move to other side, and press g o to move to the other side. The tree and the palette open a file on the side that has the focus; Alt+click a file in the tree, the Diff or History file list or the Search results (or right-click a tree file → Open to the right) to open it on the other side (with one side, it splits and opens it on the right). The URL follows the focused side: a file on the right adds pane=right, so a reload and Back / Forward come back to it. Image files open in an image tab with zoom, previous / next, Copy path and Open folder. The buttons that used to sit at the right of the header row (annotations, Copy AI context, auto update, cancel requests, theme, repository page) are at the right of the bottom bar.",
               },
               {
                 kind: "paragraph",
@@ -291,7 +297,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Status first uses lifecycle reports when they are available. Otherwise it evaluates every enabled screen rule against the live terminal title and recent visible lines, then uses the highest-priority match. A terminal is tracked only after a report or a visible rule identifies it; screen motion then provides the working/idle fallback. Working matches expire when the title and screen stop changing, so stale status text does not stay active. Settings & Help → Settings contains the full JSON rule set, including regions, priorities, contains checks, regular expressions, and nested all/any/not conditions. Regular expressions use a bounded safe subset: groups, alternation, and backreferences are rejected, and AND/OR belongs in all/any. Edits to the rules are saved with Save changes at the bottom of the settings, like every other setting; saving validates the whole set and shows every error next to the rules without replacing the active rules. If the saved rules cannot be read again (for example, another code-viewer holds their lock), the rules in use stay and Settings shows why, instead of switching to the built-in rules. Use built-in rules fills in the built-in set; after Save changes the saved override is removed so updated defaults can arrive with later releases.",
+                text: "Status first uses lifecycle reports when they are available. Otherwise it evaluates every enabled screen rule against the live terminal title and recent visible lines, then uses the highest-priority match. A terminal is tracked only after a report or a visible rule identifies it; screen motion then provides the working/idle fallback. Working matches expire when the title and screen stop changing, so stale status text does not stay active. Settings → Advanced contains the full JSON rule set, including regions, priorities, contains checks, regular expressions, and nested all/any/not conditions. Regular expressions use a bounded safe subset: groups, alternation, and backreferences are rejected, and AND/OR belongs in all/any. Edits to the rules are saved with Save changes at the bottom of the settings, like every other setting; saving validates the whole set and shows every error next to the rules without replacing the active rules. If the saved rules cannot be read again (for example, another code-viewer holds their lock), the rules in use stay and Settings shows why, instead of switching to the built-in rules. Use built-in rules fills in the built-in set; after Save changes the saved override is removed so updated defaults can arrive with later releases.",
               },
               {
                 kind: "paragraph",
@@ -978,7 +984,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         ],
       },
       keybindings: {
-        nav: "Keybindings",
+        nav: "Keyboard Shortcuts",
         title: "Keyboard Shortcuts",
         intro:
           "Use these shortcuts to move between panels and navigate files without leaving the keyboard. The list shows the keys you set: in Settings › Shortcuts every action can take other keys or several keys, each key can be allowed in text fields, in terminals or only in the installed app window, and the changes can be exported, imported or edited as JSON.",
@@ -1015,16 +1021,9 @@ code-viewer annotate add-db --db app.db --tab query \\
   },
   ja: {
     languageLabel: "言語",
-    title: "設定・ヘルプ",
-    helpNavGroup: "ヘルプ",
+    keyboardShortcutsTitle:
+      "よく使う操作のキーを小さな窓に出します (どの画面でも ? で開けます)",
     sections: {
-      settings: {
-        nav: "設定",
-        title: "設定",
-        intro:
-          "ビューアの設定です。「全プロジェクト共通」の節はどのプロジェクトでも同じで、それ以外はこのリポジトリだけの設定です。「変更を保存」を押すまで編集内容は下書きのままです。",
-        groups: [],
-      },
       overview: {
         nav: "はじめに",
         title: "はじめに",
@@ -1093,7 +1092,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "最上段のタブ列に、開いたファイルと画面が並びます (その上に見出しの行はありません)。最上段の左端の一覧の列の頭は 2 段です。1 段目はタブ列と同じ高さで、いま見ているプロジェクトの色の四角と頭文字・名前 (押すか p でプロジェクトを切り替え) と、右寄せでブランチを出します。長い名前は省略し、カーソルを置くと全体が出ます。2 段目には 6 つの画面の絵柄 (Files・Diff・History・Worktrees・Data・Work log。カーソルを置くと名前とキー) と、右端にファイル一覧を畳むボタンがあります。ファイル一覧は頭の下から、タブ列は頭の右から始まります。左のサイドバーにはプロジェクトとエージェントが並び、その右の一覧の列には、どの画面でもファイル一覧 (リポジトリの木) が出ます。その右に本文を選ぶための一覧 (Diff の変更ファイルの一覧・History のコミット・選んでいる作業ツリーの一覧) が並び、History と選んでいる作業ツリーは一覧の右に変更ファイルの一覧も並びます。列は前面のタブに合わせるので、端末や画像のタブが前面のときはファイル一覧だけが残ります。一覧はドラッグした幅を覚え (最初は 320px)、ファイル一覧も自分の幅を覚えます。本文が 480px に足りないときは、まず一覧を 240px に詰め (History は件名と枝の札だけになります)、次に変更ファイルの一覧を細い帯に畳み、それでも足りなければファイル一覧を畳みます (畳むボタンに印と理由が出ます)。どの列も手で畳めます。ファイル一覧は頭のボタン、一覧と変更ファイルの一覧は右端の線の中ほどの小さなつまみで畳み、畳んだ一覧は帯になって、帯のボタンで開きます。自分で開いた列は、再読み込みまで幅のために畳みません。History の枝の札は、件名と分け合う幅の約 40% まで (件名が短ければそれ以上) 名前を省略せずに出し、件名を残りの幅に収まるよう省略します。タブは全プロジェクト共通で、プロジェクトごとのグループに並びます。グループの頭にそのプロジェクトの色の札 (頭文字と ▾。名前はカーソルを置くと出て、▾ のメニューの頭にもあります) があり、グループのタブの下にその色の線が付きます。グループの並びは左のサイドバーのプロジェクトの並びで、どのプロジェクトのものでもないタブ (エージェントの全体ボード・Tools・設定とヘルプ・どのプロジェクトにも入らないターミナル) は右端に並びます。ターミナルは、そのシェルが動いているフォルダのプロジェクトのものです。札を押すとグループを畳む・開くを切り替え (畳むと頭文字の横に枚数が出ます)、▾ のメニューで「新しいシェル」(そのプロジェクトのフォルダで開き、そのグループの前面に出します)・「新しいエージェント…」(そのプロジェクトを選んだ起動の画面)、「このプロジェクトに切り替える」「畳む / 開く」「このグループを閉じる」を選べます。タブを別のグループへドラッグで移すことはできません。別のプロジェクトのファイル・ターミナル・画像は、その場で開きます (ファイルはそのプロジェクトから読みます)。別のプロジェクトの Diff・History・Worktrees・Search・Data・Work log は、そのプロジェクトへ移ってから開きます (タブは残ります)。グループに入っていない、別のプロジェクトのエージェントを映すターミナルのタブは「プロジェクト名 · 題」になり、タブが狭いときはプロジェクト名から省略します。タブや画面の切り替え・左右 2 面・列の開閉・一覧の出入りのどれでも、一覧の列の頭は動かず消えません。畳むのは頭の下の列だけで、タブ列と分割のボタンは動きません。ファイル一覧を畳んでいる間 (手で畳んでも、幅が足りずに畳まれても)、頭の 2 段目 (画面の絵柄 6 つと、一覧を開き直すボタン) は 1 段目の下に細い縦の帯として並び、本文はその帯の右から始まります。頭が狭いときは、ブランチの名前を幅の約 40% まで (プロジェクト名が短ければそれ以上) 省略せずに出し、プロジェクト名を残りの幅に収まるよう省略します。1 回押して開いたファイル (木・パレット・行リンク・View File) は名前が斜体の仮のタブで、次に開いたファイルに置き換わります。木の行かタブをダブルクリックするか、「開いたままにする」で固定します。置き換わらない自分のタブで開くには、中ボタンか ⌘/Ctrl+クリック (木・Diff と History のファイルの一覧・Search の結果・パレットの行)、パレットで Shift+Enter、木のファイルの右クリックの「新しいタブで開く」を使います。そのファイルが開いていれば、そのタブを前面に出して固定します。Shift+クリックは今までどおりブラウザの新しいウィンドウで開きます。作業ツリー以外の版 (History から開いたコミット・HEAD・ブランチ) のファイルは、作業ツリーの版とは別のタブで、「a.ts @ 1a2b3c4」のように版の印が付きます。Diff・History・Worktrees・Data・Work log はプロジェクトごとにそれぞれタブが 1 つで、絵柄を押すとそのタブが前に見ていた状態で前面に出ます。Files はタブではありません。フォルダ表示は、左の面でタブを選んでいないときに出る既定の本文です (Files の絵柄・g r・木のフォルダで選択が外れます。最後のタブを閉じたときもこれが出ます)。タブの右クリック (タブの上で Shift+F10 でも) で閉じる・ほかを閉じる・右側を閉じる・開いたままにする・パスをコピー、ドラッグで並べ替え、g t / g T (次 / 前)、g x (閉じる)、g 1〜9 で移れます。タブ列の上では ←/→・Home・End でタブを移り、Enter で前面に、Delete で閉じ、Ctrl+Shift+PageUp / PageDown (Ctrl+Shift+←/→・⌘+Shift+←/→、タブのメニューの「左へ移す」「右へ移す」でも) で並べ替えます。左右 2 面のときは、フォーカスのある面のタブ列の下端に面の幅いっぱいの線が付きます。タブの幅は、絵・名前の全文・閉じるの幅です (200px まで)。列に入りきらないときは全部のタブを同じ割合で縮めますが、名前が 8 文字ほど読める幅より細くはしません。それでも入らなければ列を横に送り、前面のタブは必ず見える位置に出します。グループを畳む・開くで、その左のタブは動きません。タブは全プロジェクトで 1 つに保存します。窓を 2 つ開いていても、片方で開いた・閉じた・並べ替えたタブはもう一方に反映され、どちらの窓も相手の変更を消しません (前面のタブは窓ごとです)。画面 (Diff・History・Worktrees・Data・Work log・エージェント・設定とヘルプ) は描く場所が 1 つなので左の面にだけ置き、右の面にはファイル・ターミナル・画像を置きます。ファイルは面ごとに描くので、2 つのファイルや同じファイルを左右に並べられ、スクロール・行の選択・Code / Preview / Blame の切り替えは面ごとです (ファイルの History は左の面で開きます)。タブ列の右端の分割ボタン (ファイル・ターミナル・画像のタブの「右に分割」、それを右半分の破線の枠へドラッグでも) で左右 2 面になり (押せないときはボタンの説明に理由が出ます)、間の線をドラッグで幅を変え、ファイル・ターミナル・画像は面の間でドラッグするか「反対側へ移す」で移し、g o でもう一方の面へ移ります。木とパレットはフォーカスのある面にファイルを開き、木・Diff と History のファイルの一覧・Search の結果を Alt+クリック (木のファイルの右クリックの「右に分割して開く」でも) すると反対の面に開きます (1 面なら右に分けて右に開きます)。URL はフォーカスのある面に合わせ、右の面のファイルなら pane=right が付くので、再読み込みや戻る・進むでその面に戻ります。画像のファイルは、倍率・前後・パスのコピー・フォルダを開くが付いた画像のタブで開きます。以前の見出しの行の右端にあったボタン (注釈・AI 用コンテキストのコピー・自動更新・通信の中止・テーマ・リポジトリのページ) は最下段の右にあります。",
+                text: "最上段のタブ列に、開いたファイルと画面が並びます (その上に見出しの行はありません)。最上段の左端の一覧の列の頭は 2 段です。1 段目はタブ列と同じ高さで、いま見ているプロジェクトの色の四角と頭文字・名前 (押すか p でプロジェクトを切り替え) と、右寄せでブランチを出します。長い名前は省略し、カーソルを置くと全体が出ます。2 段目には 6 つの画面の絵柄 (Files・Diff・History・Worktrees・Data・Work log。カーソルを置くと名前とキー) と、右端にファイル一覧を畳むボタンがあります。ファイル一覧は頭の下から、タブ列は頭の右から始まります。左のサイドバーにはプロジェクトとエージェントが並び、その右の一覧の列には、どの画面でもファイル一覧 (リポジトリの木) が出ます。その右に本文を選ぶための一覧 (Diff の変更ファイルの一覧・History のコミット・選んでいる作業ツリーの一覧) が並び、History と選んでいる作業ツリーは一覧の右に変更ファイルの一覧も並びます。列は前面のタブに合わせるので、端末や画像のタブが前面のときはファイル一覧だけが残ります。一覧はドラッグした幅を覚え (最初は 320px)、ファイル一覧も自分の幅を覚えます。本文が 480px に足りないときは、まず一覧を 240px に詰め (History は件名と枝の札だけになります)、次に変更ファイルの一覧を細い帯に畳み、それでも足りなければファイル一覧を畳みます (畳むボタンに印と理由が出ます)。どの列も手で畳めます。ファイル一覧は頭のボタン、一覧と変更ファイルの一覧は右端の線の中ほどの小さなつまみで畳み、畳んだ一覧は帯になって、帯のボタンで開きます。自分で開いた列は、再読み込みまで幅のために畳みません。History の枝の札は、件名と分け合う幅の約 40% まで (件名が短ければそれ以上) 名前を省略せずに出し、件名を残りの幅に収まるよう省略します。タブは全プロジェクト共通で、プロジェクトごとのグループに並びます。グループの頭にそのプロジェクトの色の札 (頭文字と ▾。名前はカーソルを置くと出て、▾ のメニューの頭にもあります) があり、グループのタブの下にその色の線が付きます。グループの並びは左のサイドバーのプロジェクトの並びで、どのプロジェクトのものでもないタブ (エージェントの全体ボード・Tools・設定・ヘルプ・どのプロジェクトにも入らないターミナル) は右端に並びます。ターミナルは、そのシェルが動いているフォルダのプロジェクトのものです。札を押すとグループを畳む・開くを切り替え (畳むと頭文字の横に枚数が出ます)、▾ のメニューで「新しいシェル」(そのプロジェクトのフォルダで開き、そのグループの前面に出します)・「新しいエージェント…」(そのプロジェクトを選んだ起動の画面)、「このプロジェクトに切り替える」「畳む / 開く」「このグループを閉じる」を選べます。タブを別のグループへドラッグで移すことはできません。別のプロジェクトのファイル・ターミナル・画像は、その場で開きます (ファイルはそのプロジェクトから読みます)。別のプロジェクトの Diff・History・Worktrees・Search・Data・Work log は、そのプロジェクトへ移ってから開きます (タブは残ります)。グループに入っていない、別のプロジェクトのエージェントを映すターミナルのタブは「プロジェクト名 · 題」になり、タブが狭いときはプロジェクト名から省略します。タブや画面の切り替え・左右 2 面・列の開閉・一覧の出入りのどれでも、一覧の列の頭は動かず消えません。畳むのは頭の下の列だけで、タブ列と分割のボタンは動きません。ファイル一覧を畳んでいる間 (手で畳んでも、幅が足りずに畳まれても)、頭の 2 段目 (画面の絵柄 6 つと、一覧を開き直すボタン) は 1 段目の下に細い縦の帯として並び、本文はその帯の右から始まります。頭が狭いときは、ブランチの名前を幅の約 40% まで (プロジェクト名が短ければそれ以上) 省略せずに出し、プロジェクト名を残りの幅に収まるよう省略します。1 回押して開いたファイル (木・パレット・行リンク・View File) は名前が斜体の仮のタブで、次に開いたファイルに置き換わります。木の行かタブをダブルクリックするか、「開いたままにする」で固定します。置き換わらない自分のタブで開くには、中ボタンか ⌘/Ctrl+クリック (木・Diff と History のファイルの一覧・Search の結果・パレットの行)、パレットで Shift+Enter、木のファイルの右クリックの「新しいタブで開く」を使います。そのファイルが開いていれば、そのタブを前面に出して固定します。Shift+クリックは今までどおりブラウザの新しいウィンドウで開きます。作業ツリー以外の版 (History から開いたコミット・HEAD・ブランチ) のファイルは、作業ツリーの版とは別のタブで、「a.ts @ 1a2b3c4」のように版の印が付きます。Diff・History・Worktrees・Data・Work log はプロジェクトごとにそれぞれタブが 1 つで、絵柄を押すとそのタブが前に見ていた状態で前面に出ます。Files はタブではありません。フォルダ表示は、左の面でタブを選んでいないときに出る既定の本文です (Files の絵柄・g r・木のフォルダで選択が外れます。最後のタブを閉じたときもこれが出ます)。タブの右クリック (タブの上で Shift+F10 でも) で閉じる・ほかを閉じる・右側を閉じる・開いたままにする・パスをコピー、ドラッグで並べ替え、g t / g T (次 / 前)、g x (閉じる)、g 1〜9 で移れます。タブ列の上では ←/→・Home・End でタブを移り、Enter で前面に、Delete で閉じ、Ctrl+Shift+PageUp / PageDown (Ctrl+Shift+←/→・⌘+Shift+←/→、タブのメニューの「左へ移す」「右へ移す」でも) で並べ替えます。左右 2 面のときは、フォーカスのある面のタブ列の下端に面の幅いっぱいの線が付きます。タブの幅は、絵・名前の全文・閉じるの幅です (200px まで)。列に入りきらないときは全部のタブを同じ割合で縮めますが、名前が 8 文字ほど読める幅より細くはしません。それでも入らなければ列を横に送り、前面のタブは必ず見える位置に出します。グループを畳む・開くで、その左のタブは動きません。タブは全プロジェクトで 1 つに保存します。窓を 2 つ開いていても、片方で開いた・閉じた・並べ替えたタブはもう一方に反映され、どちらの窓も相手の変更を消しません (前面のタブは窓ごとです)。画面 (Diff・History・Worktrees・Data・Work log・エージェント・設定・ヘルプ) は描く場所が 1 つなので左の面にだけ置き、右の面にはファイル・ターミナル・画像を置きます。ファイルは面ごとに描くので、2 つのファイルや同じファイルを左右に並べられ、スクロール・行の選択・Code / Preview / Blame の切り替えは面ごとです (ファイルの History は左の面で開きます)。タブ列の右端の分割ボタン (ファイル・ターミナル・画像のタブの「右に分割」、それを右半分の破線の枠へドラッグでも) で左右 2 面になり (押せないときはボタンの説明に理由が出ます)、間の線をドラッグで幅を変え、ファイル・ターミナル・画像は面の間でドラッグするか「反対側へ移す」で移し、g o でもう一方の面へ移ります。木とパレットはフォーカスのある面にファイルを開き、木・Diff と History のファイルの一覧・Search の結果を Alt+クリック (木のファイルの右クリックの「右に分割して開く」でも) すると反対の面に開きます (1 面なら右に分けて右に開きます)。URL はフォーカスのある面に合わせ、右の面のファイルなら pane=right が付くので、再読み込みや戻る・進むでその面に戻ります。画像のファイルは、倍率・前後・パスのコピー・フォルダを開くが付いた画像のタブで開きます。以前の見出しの行の右端にあったボタン (注釈・AI 用コンテキストのコピー・自動更新・通信の中止・テーマ・リポジトリのページ) は最下段の右にあります。",
               },
               {
                 kind: "paragraph",
@@ -1213,7 +1212,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "状態変更の申告がある場合はそれを先に使います。申告が無い場合は、現在のターミナルタイトルと画面下端の表示に対して全ルールを評価し、優先度が最大の一致から「作業中」「入力待ち」「待機中」「直前の状態を維持」を決めます。申告か見えているルールで対象を識別した後だけ、画面の変化量を作業中・待機中の補助判定に使います。作業中ルールの文字が残っていても、タイトルと画面が変化しなくなれば待機中へ移ります。設定・ヘルプ → 設定では、見る範囲、優先度、contains、正規表現、入れ子の all/any/not を含むJSONルール集を編集できます。正規表現は処理時間を抑えた範囲だけを許可し、グループ・選択・後方参照は使えません。AND/OR は all/any で表します。ルールの編集は、ほかの設定と同じく設定の下の「変更を保存」で保存します。保存時は全ルールを検証し、エラーはすべてルールの欄の下に表示して、適用中のルールを置き換えません。保存したルールを読み直せないとき (別の code-viewer がロックを持ったままなど) は、組み込みのルールに戻さず、使っているルールのまま設定画面に理由を出します。「組み込みルールに戻す」は欄に組み込みのルールを入れ、「変更を保存」で保存済みの上書きを削除するため、以後の更新で新しい既定ルールを受け取れます。",
+                text: "状態変更の申告がある場合はそれを先に使います。申告が無い場合は、現在のターミナルタイトルと画面下端の表示に対して全ルールを評価し、優先度が最大の一致から「作業中」「入力待ち」「待機中」「直前の状態を維持」を決めます。申告か見えているルールで対象を識別した後だけ、画面の変化量を作業中・待機中の補助判定に使います。作業中ルールの文字が残っていても、タイトルと画面が変化しなくなれば待機中へ移ります。設定 → 詳細では、見る範囲、優先度、contains、正規表現、入れ子の all/any/not を含むJSONルール集を編集できます。正規表現は処理時間を抑えた範囲だけを許可し、グループ・選択・後方参照は使えません。AND/OR は all/any で表します。ルールの編集は、ほかの設定と同じく設定の下の「変更を保存」で保存します。保存時は全ルールを検証し、エラーはすべてルールの欄の下に表示して、適用中のルールを置き換えません。保存したルールを読み直せないとき (別の code-viewer がロックを持ったままなど) は、組み込みのルールに戻さず、使っているルールのまま設定画面に理由を出します。「組み込みルールに戻す」は欄に組み込みのルールを入れ、「変更を保存」で保存済みの上書きを削除するため、以後の更新で新しい既定ルールを受け取れます。",
               },
               {
                 kind: "paragraph",
@@ -1898,8 +1897,8 @@ code-viewer annotate add-db --db app.db --tab query \\
         ],
       },
       keybindings: {
-        nav: "キーバインド",
-        title: "キーバインド",
+        nav: "キーボードショートカット",
+        title: "キーボードショートカット",
         intro:
           "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。一覧は設定したキーで出ます。設定 › ショートカット では、どの操作にも別のキーや複数のキーを割り当てられ、キーごとに入力欄の中・端末の中・PWA の窓だけのどこで効くかを選べ、変えた内容を JSON で書き出す・読み込む・直接編集できます。",
         groups: [
@@ -2027,9 +2026,24 @@ export function renderHelpTable(rows: Array<[string, string]>) {
   return table;
 }
 
+function renderHelpLink(block: Extract<HelpBlock, { kind: "link" }>) {
+  const p = document.createElement("p");
+  p.className = "gdp-help-shortcut-link";
+  const link = document.createElement("a");
+  link.href = block.href;
+  link.textContent = block.label;
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    block.open();
+  });
+  p.append(block.before, link, block.after);
+  return p;
+}
+
 function renderHelpBlock(
   block: Exclude<HelpBlock, { kind: "install" }>,
 ): HTMLElement {
+  if (block.kind === "link") return renderHelpLink(block);
   if (block.kind === "paragraph") {
     const p = document.createElement("p");
     p.textContent = block.text;
@@ -2101,42 +2115,51 @@ const SHORTCUT_SETTINGS_LINK: Record<
   },
 };
 
+/** ヘルプの節の名前 (左の列の文言)。設定のページのリンクもこれを使う。 */
+export function helpSectionName(
+  lang: HelpLanguage,
+  section: HelpSection,
+): string {
+  return isGuideSection(section)
+    ? GUIDE_NAMES[lang][section]
+    : HELP_CONTENT[lang].sections[section].nav;
+}
+
+function isGuideSection(section: HelpSection): section is GuideSection {
+  return (GUIDE_SECTIONS as readonly HelpSection[]).includes(section);
+}
+
 export function createHelpPage(deps: HelpPageDeps) {
+  const shell = createPageShell();
+
   function shortcutSettingsLink(lang: HelpLanguage): HTMLElement {
     const text = SHORTCUT_SETTINGS_LINK[lang];
-    const note = document.createElement("p");
-    note.className = "gdp-help-shortcut-link";
-    const link = document.createElement("a");
-    link.href = "#shortcut-settings-title";
-    link.textContent = text.link;
-    link.addEventListener("click", (event) => {
-      event.preventDefault();
-      deps.openShortcutSettings();
+    return renderHelpLink({
+      kind: "link",
+      before: text.before,
+      label: text.link,
+      after: text.after,
+      href: "/settings",
+      open: deps.openShortcutSettings,
     });
-    note.append(text.before, link, text.after);
-    return note;
   }
 
-  // 狭い面 (style.css の @container help-shell) では目次を本文の上に畳む。既定は
-  // 畳み、節を選んだらまた畳む (描き直しても開いたままにはしない)。
-  // 電話の段では 2 段の画面: 目次を開いている間は目次だけ (1 段目)、節を選ぶと
-  // 本文だけ (2 段目。頭の「‹ 目次」で 1 段目へ戻る)。ほかの画面から入ったら
-  // 1 段目から (節を指して開いたときは 2 段目)。
-  let helpNavOpen = false;
-  const phoneQuery = window.matchMedia(PHONE_MEDIA_QUERY);
+  function sectionContent(
+    lang: HelpLanguage,
+    section: HelpSection,
+  ): HelpSectionContent {
+    if (isGuideSection(section))
+      return guideContent(lang, deps.guideLabels(lang), {
+        openAccountsSettings: deps.openAccountsSettings,
+      })[section];
+    return HELP_CONTENT[lang].sections[section];
+  }
 
   function renderHelpPage(options: { openedSection?: boolean } = {}) {
     deps.cancelActiveSourceLoad("navigation");
     deps.removeStandaloneSource();
     deps.clearLoadQueue();
-    const target = deps.$("#diff");
-    const entering =
-      !target.firstElementChild?.classList.contains("gdp-help-shell");
-    const openedSection = options.openedSection === true;
-    if (phoneQuery.matches && (entering || openedSection))
-      helpNavOpen = !openedSection;
-    const empty = deps.$("#empty");
-    empty.classList.add("hidden");
+    deps.$("#empty").classList.add("hidden");
     deps.$("#meta").textContent = "";
 
     const lang =
@@ -2146,39 +2169,22 @@ export function createHelpPage(deps: HelpPageDeps) {
         : deps.getLanguage();
     const section = helpSectionFromRoute(deps.getRoute());
     const content = HELP_CONTENT[lang];
-    const sectionContent = content.sections[section];
+    const current = sectionContent(lang, section);
     // ユーザーが割り当てを変えていれば、それを反映した一覧を出す。
-    const keybindingGroups =
-      section === "keybindings"
-        ? buildHelpKeybindingGroups(lang, deps.getKeyBindings())
-        : [];
     const sectionGroups =
       section === "keybindings"
         ? [
-            ...keybindingGroups.map((group) => ({
-              title: group.title,
-              blocks: [{ kind: "table" as const, rows: group.rows }],
-            })),
-            ...sectionContent.groups,
+            ...buildHelpKeybindingGroups(lang, deps.getKeyBindings()).map(
+              (group) => ({
+                title: group.title,
+                blocks: [{ kind: "table" as const, rows: group.rows }],
+              }),
+            ),
+            ...current.groups,
           ]
-        : sectionContent.groups;
+        : current.groups;
 
-    const shell = document.createElement("section");
-    shell.className = "gdp-help-shell";
-    const header = document.createElement("header");
-    header.className = "gdp-help-header";
-    const title = document.createElement("h1");
-    title.textContent = content.title;
-    // 表示言語の切り替えは設定セクションに一本化した。?lang= の URL は
-    // 引き続き効くので、別言語のヘルプへのリンクは共有したままで動く。
-    header.append(title);
-
-    const layout = document.createElement("div");
-    layout.className = "gdp-help-layout";
-    const helpNav = document.createElement("nav");
-    helpNav.className = "gdp-help-nav";
     const goToSection = (helpSection: HelpSection) => {
-      helpNavOpen = false;
       deps.setRoute({
         screen: "help",
         lang,
@@ -2188,51 +2194,12 @@ export function createHelpPage(deps: HelpPageDeps) {
       renderHelpPage();
       deps.syncHeaderMenu();
     };
-    const navButton = (label: string, active: boolean, onClick: () => void) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = active ? "active" : "";
-      button.textContent = label;
-      button.addEventListener("click", onClick);
-      helpNav.appendChild(button);
-    };
-    const navHeading = (label: string) => {
-      const heading = document.createElement("div");
-      heading.className = "gdp-help-nav-heading";
-      heading.textContent = label;
-      helpNav.appendChild(heading);
-    };
-    // 左の列: 設定の分類 (設定の節を分類ごとに出す) とキー割り当て、その下に
-    // ヘルプの節。?section= は今までどおり節を指す (分類は設定の節の中の状態)。
-    const categories = deps.settingsCategories();
-    const activeCategory = deps.getSettingsCategory();
-    navHeading(content.sections.settings.nav);
-    categories.forEach((category) => {
-      navButton(
-        category.label,
-        section === "settings" && category.id === activeCategory,
-        () => {
-          deps.setSettingsCategory(category.id);
-          goToSection("settings");
-        },
-      );
-      // キーの一覧は、キーを変える「ショートカット」のすぐ下 (行き来しやすく)。
-      if (category.id === "shortcuts")
-        navButton(
-          content.sections.keybindings.nav,
-          section === "keybindings",
-          () => goToSection("keybindings"),
-        );
-    });
-    navHeading(content.helpNavGroup);
-    HELP_SECTIONS.forEach((helpSection) => {
-      if (helpSection === "settings" || helpSection === "keybindings") return;
-      navButton(
-        content.sections[helpSection].nav,
-        helpSection === section,
-        () => goToSection(helpSection),
-      );
-    });
+    const nav: PageShellNavItem[] = HELP_SECTIONS.map((helpSection) => ({
+      kind: "item",
+      label: helpSectionName(lang, helpSection),
+      active: helpSection === section,
+      onSelect: () => goToSection(helpSection),
+    }));
 
     const article = document.createElement("article");
     article.className = "gdp-help-content";
@@ -2240,13 +2207,9 @@ export function createHelpPage(deps: HelpPageDeps) {
     // 案内だけ描き直す (この画面に案内が無ければ何もしない)。
     let installBlock: (() => void) | null = null;
     const h2 = document.createElement("h2");
+    h2.textContent = current.title;
     const intro = document.createElement("p");
-    const settingsCategory =
-      section === "settings"
-        ? categories.find((category) => category.id === activeCategory)
-        : undefined;
-    h2.textContent = settingsCategory?.label ?? sectionContent.title;
-    intro.textContent = settingsCategory?.description ?? sectionContent.intro;
+    intro.textContent = current.intro;
     article.append(h2, intro);
     if (section === "keybindings") article.append(shortcutSettingsLink(lang));
     sectionGroups.forEach((group) => {
@@ -2269,58 +2232,26 @@ export function createHelpPage(deps: HelpPageDeps) {
       });
       article.appendChild(groupSection);
     });
-    // フォーム部品は HelpBlock では表せないので、静的コンテンツを組んだ後で
-    // 差し込む。
-    if (section === "settings") deps.mountViewerSettings(article);
     deps.installOffer.onChange(installBlock);
 
-    // 狭い面だけで見える、目次を開閉する 1 行 (広い面では CSS が隠す)。
-    helpNav.id = "gdp-help-nav";
-    const activeLabel =
-      helpNav.querySelector<HTMLButtonElement>("button.active")?.textContent ??
-      "";
-    const navToggle = document.createElement("button");
-    navToggle.type = "button";
-    navToggle.className = "gdp-help-nav-toggle";
-    navToggle.setAttribute("aria-controls", helpNav.id);
-    const syncNavOpen = () => {
-      layout.classList.toggle("gdp-help-nav-open", helpNavOpen);
-      navToggle.setAttribute("aria-expanded", String(helpNavOpen));
-    };
-    const toggleLabel = document.createElement("span");
-    toggleLabel.className = "gdp-help-nav-toggle-label";
-    toggleLabel.textContent = HELP_NAV_TOGGLE_TEXT[lang];
-    const toggleCurrent = document.createElement("span");
-    toggleCurrent.className = "gdp-help-nav-toggle-current";
-    toggleCurrent.textContent = activeLabel;
-    navToggle.append(toggleLabel, toggleCurrent);
-    navToggle.addEventListener("click", () => {
-      helpNavOpen = !helpNavOpen;
-      syncNavOpen();
-    });
-    syncNavOpen();
+    // キーボードショートカットの小窓 (どの画面でも ? で開く) をここからも開く。
+    const shortcuts = document.createElement("button");
+    shortcuts.type = "button";
+    shortcuts.className = "gdp-btn";
+    shortcuts.dataset.quickHelpTrigger = "";
+    shortcuts.textContent = quickHelpText(lang).panelTitle;
+    shortcuts.title = content.keyboardShortcutsTitle;
+    shortcuts.addEventListener("click", deps.toggleKeyboardShortcuts);
 
-    layout.append(navToggle, helpNav, article);
-    // 設定の検索はどの節でも同じ場所に置く (節を移っても左の列が動かない)。
-    // ヘルプの節で打ち始めたら、結果を出す設定の節へ移る。
-    const searchRow = document.createElement("div");
-    searchRow.className = "gdp-help-search-row";
-    deps.mountSettingsSearch(searchRow);
-    if (section !== "settings")
-      searchRow.addEventListener("input", (event) => {
-        const field = event.target;
-        goToSection("settings");
-        if (field instanceof HTMLInputElement) field.focus();
-      });
-    // 電話の段の目次 (1 段目) で打ち始めたら、結果を出す設定の節 (2 段目) へ。
-    else
-      searchRow.addEventListener("input", () => {
-        if (!helpNavOpen) return;
-        helpNavOpen = false;
-        syncNavOpen();
-      });
-    shell.append(header, searchRow, layout);
-    target.replaceChildren(shell);
+    shell.render(deps.$("#diff"), {
+      page: "help",
+      title: agentsText(lang).sidebar.help,
+      headerActions: [shortcuts],
+      nav,
+      article,
+      toggleText: HELP_NAV_TOGGLE_TEXT[lang],
+      openedSection: options.openedSection === true,
+    });
   }
 
   return { renderHelpPage };

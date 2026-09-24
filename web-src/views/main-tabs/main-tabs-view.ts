@@ -553,6 +553,7 @@ function routeTargetBody(route: AppRoute): TabTarget | null {
     case "tools":
     case "search":
     case "help":
+    case "settings":
       return { kind: "page", page: route.screen };
     case "repo":
     case "unknown":

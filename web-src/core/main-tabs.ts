@@ -48,6 +48,10 @@ export const PAGE_KINDS = [
   "tools",
   "search",
   "help",
+  // 設定とヘルプが 1 つのページだった頃の help のタブはヘルプのまま読む (保存に
+  // 節は無い)。設定を知らない古いアプリは、このタブを種類の分からないタブとして
+  // 落とす (parseLayout の dropped。配置の版は上げない)。
+  "settings",
 ] as const;
 
 export type PageKind = (typeof PAGE_KINDS)[number];
@@ -82,6 +86,7 @@ const PROJECT_FREE_PAGES: ReadonlySet<PageKind> = new Set([
   "agents",
   "tools",
   "help",
+  "settings",
 ]);
 
 /** その種類のタブがプロジェクトの中身を見せるか (project を持つ種類)。 */

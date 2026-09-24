@@ -11,6 +11,7 @@ import {
   IMAGE_16_PATH,
   PENCIL_16_PATH,
   PLUS_16_PATH,
+  QUESTION_16_PATH,
   SEARCH_16_PATH,
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
@@ -45,7 +46,9 @@ const ICONS: Record<
   // Markdown / Mermaid / JSON の変換 (道具の絵は無いので、文書の絵)。
   tools: BOOK_16_PATH,
   search: SEARCH_16_PATH,
-  help: GEAR_16_PATH,
+  // 左下の入口と同じ絵 (設定 = 歯車、ヘルプ = ？)。
+  help: QUESTION_16_PATH,
+  settings: GEAR_16_PATH,
   file: FILE_16_PATH,
   image: IMAGE_16_PATH,
   terminal: TERMINAL_16_PATHS,

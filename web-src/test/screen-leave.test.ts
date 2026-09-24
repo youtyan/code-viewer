@@ -36,10 +36,15 @@ const PAGES: Array<{ name: string; route: AppRoute; leaves: string | null }> = [
     route: { screen: "agents", range: RANGE },
     leaves: "agents",
   },
-  // 設定 (help) は本文 (#diff) を描き直すだけで、自分の箱を持たない。
+  // 設定とヘルプは本文 (#diff) を描き直すだけで、自分の箱を持たない。
   {
-    name: "Settings & Help",
+    name: "Help",
     route: { screen: "help", lang: "en", section: "overview", range: RANGE },
+    leaves: null,
+  },
+  {
+    name: "Settings",
+    route: { screen: "settings", range: RANGE },
     leaves: null,
   },
 ];

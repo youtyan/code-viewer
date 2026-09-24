@@ -134,9 +134,11 @@ describe("the list of actions", () => {
       keysOf(root, "new-agent"),
       // 前・次のプロジェクトへ (タブのグループの作業で足した 2 つの操作)。
       keysOf(root, "project-next"),
+      // ヘルプのページを開く (設定とヘルプを分けたときに足した。既定のキーは無い)。
+      keysOf(root, "open-help-page"),
     ]).toEqual([
       ["Global", "Panels", "Screens", "Tabs", "File list", "Main Panel"],
-      82,
+      83,
       ["t"],
       [
         "g+Shift+T",
@@ -147,6 +149,7 @@ describe("the list of actions", () => {
       ],
       [],
       ["Meta+Shift+ArrowDown", "Ctrl+Shift+ArrowDown"],
+      [],
     ]);
   });
 

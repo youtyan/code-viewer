@@ -42,7 +42,7 @@ Requires Node.js 20 or newer. Development uses
   the project's color (its initials and ▾ for New shell / New agent… in that
   project, Switch to this project / Collapse / Close this group; the name is in
   the tooltip) and its tabs are underlined in that color, in the order of the
-  sidebar; tabs of no project (agent board, Tools, Settings & Help) sit at the right
+  sidebar; tabs of no project (agent board, Tools, Settings, Help) sit at the right
   end, and a terminal belongs to the project of its folder. Click a label to
   collapse a group. Files, terminals and images of another project open in place;
   its Diff / History / Worktrees / Search / Data / Work log switch to that project
@@ -88,7 +88,7 @@ Requires Node.js 20 or newer. Development uses
   repository-page buttons are at the right of the bottom bar.
 - Install it as an app from Chrome: the install icon at the right of the
   address bar, ⋮ → Cast, save, and share → Install page as app, or the
-  Install code-viewer button in Settings & Help → Getting Started → Install
+  Install code-viewer button in Help → Getting Started → Install
   as an app. It opens in its own window, whose title bar follows the app
   theme, and there the browser's tab keys work on these tabs: ⌘W / Ctrl+W
   closes the front tab (never the window; ⌘⇧W / Ctrl+Shift+W still closes
@@ -278,7 +278,7 @@ Requires Node.js 20 or newer. Development uses
   definition with `Cmd/Ctrl+click` or `g .`; choose from ranked candidates when
   several definitions match — a code preview of the highlighted candidate
   appears beside the menu — with references available as a fallback.
-- Switch the viewer UI between English and Japanese from Settings & Help —
+- Switch the viewer UI between English and Japanese from Settings —
   the language toggle live-updates every screen including the datastore
   viewer.
 - Browse SQLite, PostgreSQL, MySQL, Cloudflare D1, Redis, Elasticsearch,
@@ -288,9 +288,14 @@ Requires Node.js 20 or newer. Development uses
   too, without needing a `docker-compose.yml`.
   Table descriptions appear inside expanded table entries and in the Schema
   tab header when the database provides them.
-- Read the built-in Settings & Help page (Settings and Help at the bottom of the left sidebar) for getting
-  started, the `.code-viewer/` project files, AI annotations, datastores,
-  the agent skill, and keybindings.
+- Settings and Help are two pages, both at the bottom of the left sidebar
+  (`/settings` and `/help`; an old `/help?section=settings` link opens
+  Settings). Help covers getting started, step-by-step guides (add an
+  account, start an agent, add a project, let your AI agent do it with the
+  bundled skills and `code-viewer accounts`), the `.code-viewer/` project
+  files, AI annotations, datastores, the agent skill, MCP, and every key.
+  Press `?` anywhere, or Keyboard shortcuts at the top of Help, for a small
+  window with the keys for the common actions.
 - Change any shortcut in Settings → Shortcuts: every action of the app is
   listed with a filter; open one, press Add key and then the key. An action
   can have several keys, a key another action uses asks before it is moved,
@@ -332,7 +337,7 @@ Requires Node.js 20 or newer. Development uses
   after a lifecycle report or a visible rule identifies it; screen motion is
   then used as a fallback. A working match expires when its title and screen
   stop changing, so a stale status line does not stay active. Edit the complete
-  JSON rule set under Settings & Help → Settings → Advanced; the rules are
+  JSON rule set under Settings → Advanced; the rules are
   saved with the page's Save changes, like every other setting. Its regular
   expressions use a bounded safe subset; combine conditions with `all` /
   `any`. Invalid changes list every validation error and do not replace the
@@ -384,7 +389,7 @@ Requires Node.js 20 or newer. Development uses
   manager, create folders, and trash/restore files from localhost-only
   actions.
 - Upload files into worktree folders. Uploads are enabled by default for
-  worktree targets; toggle them off from Settings & Help.
+  worktree targets; toggle them off from Settings.
 - Expose a local, read-only MCP endpoint (`/_mcp`) on the running server so
   AI agents can call status, file, search, and datastore tools directly
   over JSON-RPC instead of spawning CLI subprocesses.
@@ -576,7 +581,7 @@ under about 510px the breadcrumb takes the whole first row with the buttons
 beside it (copy path, open in the OS, info, previous / next, delete) on the
 second. The Blame tab reuses the source
 view's row component, so line numbers, drag-selection of `line=` ranges,
-syntax highlighting and the code font size from Settings & Help all match the
+syntax highlighting and the code font size from Settings all match the
 Code tab.
 
 When the repository remote is hosted on GitHub, repository and file headers
@@ -591,7 +596,7 @@ the full non-virtual view.
 
 The worktree is watched and changes are pushed to every open tab over SSE so
 files reload as you edit. The directory watcher is capped at 1024 directories
-by default and can be tuned from Settings & Help → **File change watcher**
+by default and can be tuned from Settings → **File change watcher**
 (range slider + numeric input, 16–65536); when the cap is hit the viewer
 shows a banner so reloads are not silently missed.
 
@@ -1362,7 +1367,7 @@ to target a specific one. When `--before` or `--after` is used, the target
 session is inferred from that anchor annotation; a conflicting `--session`
 is rejected.
 
-The in-app Settings & Help page includes a dedicated annotations guide for AI agents,
+The in-app Help page includes a dedicated annotations guide for AI agents,
 covering when to start a session, how to choose focused line ranges, how to
 write concise Markdown explanations, and how to install the bundled agent skill.
 

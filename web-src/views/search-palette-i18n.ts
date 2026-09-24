@@ -113,7 +113,8 @@ export type PaletteActionId =
   | "toggle-terminal-panel"
   | "toggle-sidebar"
   | "switch-project"
-  | "open-help";
+  | "open-help"
+  | "open-help-page";
 
 const EN: SearchPaletteText = {
   ...codePreviewText("en"),
@@ -232,7 +233,8 @@ const EN: SearchPaletteText = {
     "toggle-terminal-panel": "Open a terminal (new shell or session)",
     "toggle-sidebar": "Show / hide the file list",
     "switch-project": "Switch project",
-    "open-help": "Quick help",
+    "open-help": "Keyboard shortcuts",
+    "open-help-page": "Help",
   },
 };
 
@@ -353,7 +355,8 @@ const JA: SearchPaletteText = {
     "toggle-terminal-panel": "ターミナルを開く (新しいシェル・セッション)",
     "toggle-sidebar": "ファイル一覧を出す・隠す",
     "switch-project": "プロジェクトを切り替える",
-    "open-help": "クイックヘルプ",
+    "open-help": "キーボードショートカット",
+    "open-help-page": "ヘルプ",
   },
 };
 

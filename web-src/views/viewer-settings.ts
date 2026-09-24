@@ -109,7 +109,7 @@ export type ViewerSettingsValues = ViewerSettingsDraft & {
 };
 
 /**
- * 設定の分類。Help ページの左の列に並べ、選んだ分類の節だけを出す。
+ * 設定の分類。設定のページの左の列に並べ、選んだ分類の節だけを出す。
  * フォームは 1 つのまま (下書きと「変更を保存」は分類をまたいで効く)。
  */
 export const SETTINGS_CATEGORIES = [
@@ -1092,23 +1092,37 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     applyCategory();
   }
 
-  /**
-   * ほかの画面から設定の見出しへ送るとき、その見出しを含む分類に切り替える。
-   * 見つからない (まだ組み立てていない) ときは分類を変えない。
-   */
-  function revealHeading(headingId: string): void {
+  /** その id の見出しを含む節の分類 (無ければ null)。 */
+  function categoryOfHeading(headingId: string): SettingsCategory | null {
     if (!root) root = build();
+    // id は URL の # からも来るので、セレクタに組まずに比べる。
     const owner = categorized.find(
       ([element]) =>
-        element.id === headingId || element.querySelector(`#${headingId}`),
+        element.id === headingId ||
+        Array.from(element.querySelectorAll("[id]")).some(
+          (child) => child.id === headingId,
+        ),
     );
-    if (owner) setCategory(owner[1]);
+    return owner ? owner[1] : null;
   }
 
-  /** 設定の検索欄。Help ページが見出しの下に置く。 */
+  /** 設定の見出しの id か (URL の # を設定のページへ移すかの判断)。 */
+  function hasHeading(headingId: string): boolean {
+    return categoryOfHeading(headingId) !== null;
+  }
+
   /**
-   * 検索欄の文言。検索欄は設定の節を組む前 (ヘルプの節から開いたとき) にも
-   * 出すので、設定の節の文言 (applyText) とは別に当てる。以前は設定の節を一度
+   * ほかの画面から設定の見出しへ送るとき、その見出しを含む分類に切り替える。
+   * 見つからないときは分類を変えない。
+   */
+  function revealHeading(headingId: string): void {
+    const owner = categoryOfHeading(headingId);
+    if (owner) setCategory(owner);
+  }
+
+  /**
+   * 検索欄の文言。設定のページが見出しの下に置く。検索欄は節を組む前にも出し
+   * うるので、設定の節の文言 (applyText) とは別に当てる。以前は設定の節を一度
    * 開くまで placeholder が空だった。
    */
   function applySearchText(): void {
@@ -1138,5 +1152,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     getCategory,
     setCategory,
     revealHeading,
+    hasHeading,
   };
 }

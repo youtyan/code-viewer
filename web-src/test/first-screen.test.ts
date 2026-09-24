@@ -233,6 +233,8 @@ const URLS = [
   "/journal",
   "/agents",
   "/help",
+  "/settings",
+  "/help?section=settings",
   "/tools",
   "/search?q=sample",
   "/file?path=src%2Fa.ts",

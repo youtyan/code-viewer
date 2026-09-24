@@ -17,6 +17,7 @@ export function shouldAutoLoadForRoute(
     route.screen === "database" ||
     route.screen === "journal" ||
     route.screen === "help" ||
+    route.screen === "settings" ||
     route.screen === "unknown"
   )
     return false;
