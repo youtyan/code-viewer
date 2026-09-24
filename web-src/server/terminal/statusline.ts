@@ -25,7 +25,13 @@
 // 包むスクリプトの約束: 元のコマンドを遅くしない・失敗させない。保存に
 // 失敗しても元の出力と終了コードを返し、失敗は failures.log に残す。
 
-import { mkdirSync, readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import type {
   StatusLineAction,
@@ -46,10 +52,10 @@ import {
   errno,
   type JsonFileRead,
   readJsonSettingsFile,
-  settingsFileIdentity,
-  settingsRevisionConflicts,
   type SettingsWriteOps,
   type ShapeIssue,
+  settingsFileIdentity,
+  settingsRevisionConflicts,
   writeBlockedReason,
   writeFileAtomic,
 } from "./settings-file";
@@ -233,6 +239,9 @@ export function statusLineStateOf(root: JsonObject | null): StatusLineState {
  * - 保存に失敗しても元のコマンドには必ず入力が届く (tee はファイルに
  *   書けなくても標準出力へ流し続ける)。失敗の stderr は failures.log へ
  * - 保存先のディレクトリが作れないときは tee を使わず、そのまま渡す
+ * - Claude Code は、走っている statusLine を次の更新が来ると打ち切る。打ち切られても
+ *   一時ファイルを残さないよう trap で消す (強制終了で残ったものは
+ *   maintainStatusLineWrapper が消す)。以前は打ち切りのたびに 1 つずつ溜まっていた
  * - 元のコマンドが無い (statusLine が無かった) ときは、使用量を 1 行で出す
  */
 export function statusLineWrapperScript(usageDir: string): string {
@@ -246,6 +255,10 @@ log="$dir/failures.log"
 key=$(printf '%s' "\${CLAUDE_CONFIG_DIR-}" | cksum)
 key=\${key%% *}
 tmp="$dir/.claude-$key.$$"
+trap 'rm -f "$tmp"' EXIT
+trap 'rm -f "$tmp"; exit 129' HUP
+trap 'rm -f "$tmp"; exit 130' INT
+trap 'rm -f "$tmp"; exit 143' TERM
 save=1
 [ -d "$dir" ] || mkdir -p "$dir" || save=0
 [ -w "$dir" ] || save=0
@@ -303,6 +316,50 @@ export function statusLineWrapperHealth(
     throw error;
   }
   return text === statusLineWrapperScript(usageDir) ? "ok" : "outdated";
+}
+
+/** 打ち切りで残った一時ファイルとみなす古さ。statusLine は数秒で終わる。 */
+export const STATUSLINE_TEMP_STALE_MS = 10 * 60 * 1000;
+
+/**
+ * 包むスクリプトの手入れ。code-viewer が新しくした中身 (outdated) なら書き直す
+ * (code-viewer 自身のファイルで、利用者の設定には触らない。無いものは作らない)。
+ * 打ち切り・強制終了で残った一時ファイル (`.claude-<key>.<pid>`) のうち古いものを
+ * 消す。できなかったことは理由の文で返す (投げない。一覧の表示は止めない)。
+ */
+export function maintainStatusLineWrapper(
+  usageDir: string,
+  now: number,
+): string[] {
+  const problems: string[] = [];
+  try {
+    if (statusLineWrapperHealth(usageDir) === "outdated")
+      writeStatusLineWrapper(usageDir);
+  } catch (error) {
+    problems.push(
+      `could not update ${statusLineWrapperPath(usageDir)}: ${formatErrorDetail(error)}`,
+    );
+  }
+  let names: string[];
+  try {
+    names = readdirSync(usageDir);
+  } catch (error) {
+    if (errno(error) === "ENOENT") return problems;
+    problems.push(`could not list ${usageDir}: ${formatErrorDetail(error)}`);
+    return problems;
+  }
+  for (const name of names) {
+    if (!/^\.claude-\d+\.\d+$/.test(name)) continue;
+    const path = join(usageDir, name);
+    try {
+      if (now - statSync(path).mtimeMs < STATUSLINE_TEMP_STALE_MS) continue;
+      unlinkSync(path);
+    } catch (error) {
+      if (errno(error) === "ENOENT") continue;
+      problems.push(`could not remove ${path}: ${formatErrorDetail(error)}`);
+    }
+  }
+  return problems;
 }
 
 /** 包むスクリプトを書く (同じなら書かない)。書いたら true。 */

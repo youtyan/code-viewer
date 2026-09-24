@@ -26,7 +26,9 @@ import {
 } from "../terminal/hooks";
 import { errno } from "../terminal/settings-file";
 import {
+  maintainStatusLineWrapper,
   readStatusLineFailures,
+  STATUSLINE_TEMP_STALE_MS,
   statusLineStatus,
 } from "../terminal/statusline";
 import { createLoginChecker, type LoginChecker } from "./login";
@@ -92,6 +94,9 @@ export function createAccountService(
   prober: ProcessEnvProber = createProcessEnvProber(),
   login: LoginChecker = createLoginChecker(),
 ): AccountService {
+  /** 包むスクリプトの手入れを最後にした時刻 (一覧のたびには回さない)。 */
+  let maintainedAt = Number.NEGATIVE_INFINITY;
+
   function entries() {
     const read = readAccountRegistryCached(paths.registry);
     const registry = read.ok ? read.registry : emptyAccountRegistry();
@@ -181,6 +186,20 @@ export function createAccountService(
           recent: [`cannot read the failure log: ${formatErrorDetail(error)}`],
           log: paths.usageDir,
         };
+      }
+      const now = Date.now();
+      if (now - maintainedAt >= STATUSLINE_TEMP_STALE_MS) {
+        maintainedAt = now;
+        const problems = maintainStatusLineWrapper(paths.usageDir, now);
+        if (problems.length > 0) {
+          for (const problem of problems)
+            console.error(`[code-viewer] statusLine upkeep: ${problem}`);
+          usageFailures = {
+            ...usageFailures,
+            total: usageFailures.total + problems.length,
+            recent: [...usageFailures.recent, ...problems],
+          };
+        }
       }
       return {
         home: paths.home,
