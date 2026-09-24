@@ -225,6 +225,7 @@ import {
   createAccountsSettings,
 } from "./views/agents/accounts-settings";
 import {
+  AGENT_HOOKS_HELP_SECTION,
   AGENT_HOOKS_SECTION_ID,
   createAgentHooksSettings,
 } from "./views/agents/agent-hooks-settings";
@@ -274,6 +275,7 @@ import {
   createHelpPage,
   helpLanguageFromRoute,
   helpSectionFromRoute,
+  helpSectionName,
   openHelpKeybindings,
   openHelpSection,
 } from "./views/help-page";
@@ -377,6 +379,7 @@ import {
   type ViewerSettingsDraft,
   type ViewerSettingsText,
 } from "./views/viewer-settings";
+import { VIEWER_SETTINGS_TEXT } from "./views/viewer-settings-i18n";
 import { worktreeText } from "./views/worktree-i18n";
 import { createWorktreeView, type WorktreeView } from "./views/worktree-view";
 
@@ -446,6 +449,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   let SERVER_SCOPE_WATCH_LIMIT_DEFAULT = 1024;
   let SERVER_SCOPE_WATCH_LIMIT_MIN = 16;
   let SERVER_SCOPE_WATCH_LIMIT_MAX = 65536;
+  // macOS と Windows は木全体を OS のハンドル 1 つで見るので、ディレクトリ数の
+  // 上限は効かない (設定の節を出さない。viewer-settings.ts の watchLimitApplies)。
+  let SERVER_SCOPE_WATCH_RECURSIVE = false;
   const UNDO_STACK: UndoActionResponse[] = [];
   let PENDING_G_SCOPE: KeymapScope | null = null;
   let PENDING_G_UNTIL = 0;
@@ -1271,15 +1277,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       SERVER_SCOPE_WATCH_LIMIT_MIN = settings.scope.watch_limit_min;
     if (typeof settings.scope.watch_limit_max === "number")
       SERVER_SCOPE_WATCH_LIMIT_MAX = settings.scope.watch_limit_max;
-    if (typeof settings.scope.watch_recursive === "boolean") {
-      // macOS and Windows watch the whole tree through one OS handle, so
-      // there are no per-directory watchers for this limit to cap. Hide the
-      // control rather than offer a setting that changes nothing.
-      const watchSection = document.querySelector<HTMLElement>(
-        "#watch-settings-section",
-      );
-      if (watchSection) watchSection.hidden = settings.scope.watch_recursive;
-    }
+    if (typeof settings.scope.watch_recursive === "boolean")
+      SERVER_SCOPE_WATCH_RECURSIVE = settings.scope.watch_recursive;
     return settings;
   }
 
@@ -2817,140 +2816,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           split: "split",
         },
       },
-      settings: {
-        display: "Display",
-        theme: "Theme",
-        themeHelp:
-          "Applies right away. The T key switches between light and the dark theme you picked.",
-        themeNames: {
-          dark: "Dark (violet)",
-          graphite: "Dark (graphite)",
-          warm: "Dark (warm gray)",
-          light: "Light",
-        },
-        language: "Language",
-        fileListFontSize: "UI font size",
-        fileListFontSizeHelp: "Applies to all UI except code content.",
-        codeFontSize: "Code font size",
-        sizeSmall: "Small",
-        sizeRegular: "Regular",
-        sizeLarge: "Large",
-        sizeExtraLarge: "Extra Large",
-        displaySource:
-          "Theme, language, font sizes, key bindings, notifications and dismissed hints are shared by all projects. Excluded directories and the settings below them apply to this repository only.",
-        sharedTag: "All projects",
-        sharedTagTitle:
-          "Shared by all projects: changing it here changes it everywhere, and it stays the same when you switch projects.",
-        userSettingsError: (detail) =>
-          `The settings shared by all projects cannot be used, so this repository's settings are shown. Changes to them are not saved until this is fixed:\n${detail}`,
-        excludedDirectories: "Excluded directories",
-        omitDirs: "Skip these directory names while browsing and searching",
-        omitDirsHelp:
-          "Reads no contents inside these directories. Applies to the sidebar (Files), Ctrl+K (file search), Ctrl+G (grep), Datastores, and the file change watcher. Supports gitignore-style wildcards (*, ?, [abc], [!abc]).",
-        excludeNames: "Hide these file or directory names completely",
-        excludeNamesHelp:
-          "Removes matching files or directories from the sidebar, search, and grep results entirely. Unlike Skip, the names themselves disappear from the UI. Supports gitignore-style wildcards (*, ?, [abc], [!abc]).",
-        reset: "Restore defaults",
-        save: "Save changes",
-        saving: "Saving…",
-        saved: "Saved.",
-        unsaved: "Unsaved changes.",
-        saveNote: "Edits are not applied until you select Save changes.",
-        watchLimitInvalid: (min, max) =>
-          `Enter a whole number from ${min} to ${max}.`,
-        scopeSource: (project, source) =>
-          `Saved for project "${project}" in this browser. Source: ${source}. Used by the sidebar, Ctrl+K, Ctrl+G, Datastores, and the file change watcher. Restore defaults removes the browser override.`,
-        browserOverride: "Browser override",
-        serverDefault: "Server default",
-        uploadsTitle: "Uploads",
-        uploadEnabledLabel: "Allow file uploads into worktree folders",
-        uploadEnabledHelp:
-          "Disable to make the worktree read-only for everyone using this server.",
-        agentNotifyTitle: "Agent notifications",
-        agentNotifyWaitingLabel:
-          "Notify when an agent starts waiting for input",
-        agentNotifyDoneLabel: "Notify when an agent finishes working",
-        agentNotifyHelp:
-          "Desktop notifications from the Agents screen. The browser asks for permission once, from the Enable notifications button there. Nothing is shown while you are looking at that pane.",
-        datastoreTitle: "Datastores",
-        datastoreInferFkLabel:
-          "Infer FK from Rails-style naming (<name>_id → <names>.id)",
-        datastoreInferFkHelp:
-          "Show inferred foreign-key links in the related-data panel for SQL tables.",
-        datastoreS3TooltipLabel: "Show S3 object preview tooltip on hover",
-        datastoreS3TooltipHelp:
-          "Hovering an S3 object row shows the full key path and a content preview.",
-        watchTitle: "File change watcher",
-        watchLimit: "Maximum directories to watch",
-        watchLimitHelp: (defaultLimit) =>
-          `Higher values reduce missed updates in deep trees at the cost of file handles. Combine with the Skip list above to keep heavy folders (node_modules, .git, dist...) out of the watch budget. Default: ${defaultLimit}.`,
-        agentRulesTitle: "Terminal status detection",
-        agentRulesLabel: "Screen matching rules (JSON)",
-        agentRulesHelp:
-          "Rules can report working, waiting, idle, or skip. Configure priority, region, contains, regex, lineRegex, and nested all/any/not conditions. contains ignores letter case; regex accepts a leading (?i) for case-insensitive matching. To keep matching responsive, regex allows at most one variable-length repetition and rejects groups, alternation, and backreferences; express AND/OR with all/any. The highest-priority match wins; equal priorities keep the earlier rule. Save validates every rule before replacing the active set.",
-        agentRulesGuideTitle: "JSON format and example",
-        agentRulesGuideIntro:
-          "Enter one object with version 1 and a rules array. Each rule needs the required fields listed below plus at least one matcher.",
-        agentRulesGuideFields:
-          "Required fields: id (unique name), state (working, waiting, idle, or skip), priority (higher wins), and region. lines is also required when region is bottom_non_empty.",
-        agentRulesGuideMatchers:
-          "Matchers: contains and regex test the selected region; lineRegex tests each line. Combine matcher objects with all, any, and not.",
-        agentRulesGuideRegions:
-          "Regions: osc_title checks the terminal title, whole_recent checks the recent screen, bottom_non_empty checks the last non-empty lines, and last_non_empty checks only the final non-empty line.",
-        agentRulesGuideExample: `{
-  "version": 1,
-  "rules": [
-    {
-      "id": "waiting_for_confirmation",
-      "state": "waiting",
-      "priority": 900,
-      "region": "bottom_non_empty",
-      "lines": 12,
-      "contains": ["enter to confirm"],
-      "not": [{ "contains": ["finished"] }]
-    }
-  ]
-}`,
-        agentRulesReset: "Use built-in rules",
-        agentRulesSourceDefault: "Source: built-in rules",
-        agentRulesSourceSaved: "Source: saved rules",
-        agentRulesSourceEdited:
-          "Edited: Save changes validates these rules and uses them right away.",
-        agentRulesSourceRestore:
-          "Built-in rules: Save changes removes the saved rules and uses the built-in ones.",
-        categories: {
-          general: {
-            label: "General",
-            description:
-              "Uploads and the directories this repository skips or hides.",
-          },
-          appearance: {
-            label: "Appearance",
-            description: "Theme, language, and font sizes.",
-          },
-          agents: {
-            label: "Agents",
-            description: "Notifications and hooks.",
-          },
-          shortcuts: {
-            label: "Shortcuts",
-            description:
-              "Keys for every action, where each key works, and JSON export and import.",
-          },
-          accounts: {
-            label: "Accounts",
-            description:
-              "Sign-in per settings directory, usage, and launch commands.",
-          },
-          advanced: {
-            label: "Advanced",
-            description:
-              "Datastores, file watching, and terminal status detection.",
-          },
-        },
-        searchPlaceholder: "Search settings",
-        searchNoMatch: (query) => `No settings match "${query}".`,
-      },
+      settings: VIEWER_SETTINGS_TEXT.en,
       annotations: {
         title: "Annotations",
         follow: "Follow new notes",
@@ -3219,138 +3085,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           split: "分割",
         },
       },
-      settings: {
-        display: "表示",
-        theme: "テーマ",
-        themeHelp:
-          "選ぶとすぐに変わります。T キーでライトと、選んだダークを切り替えます。",
-        themeNames: {
-          dark: "ダーク (紫)",
-          graphite: "ダーク (無彩色)",
-          warm: "ダーク (暖かい灰色)",
-          light: "ライト",
-        },
-        language: "言語",
-        fileListFontSize: "UIの文字サイズ",
-        fileListFontSizeHelp: "コード本文を除くUI全体に適用されます。",
-        codeFontSize: "コード表示の文字サイズ",
-        sizeSmall: "小",
-        sizeRegular: "標準",
-        sizeLarge: "大",
-        sizeExtraLarge: "特大",
-        displaySource:
-          "テーマ・言語・文字サイズ・キー割り当て・通知・閉じた案内は、全プロジェクト共通です。除外ディレクトリから下の設定は、このリポジトリだけの設定です。",
-        sharedTag: "全プロジェクト共通",
-        sharedTagTitle:
-          "全プロジェクト共通: ここで変えるとどのプロジェクトでも変わり、プロジェクトを移っても同じです。",
-        userSettingsError: (detail) =>
-          `全プロジェクト共通の設定を使えないため、このリポジトリの設定で表示しています。直るまで、この節の変更は保存されません:\n${detail}`,
-        excludedDirectories: "除外ディレクトリ",
-        omitDirs: "閲覧と検索でスキップするディレクトリ名",
-        omitDirsHelp:
-          "これらのディレクトリの中身は読み込みません。サイドバー（Files）・Ctrl+K（ファイル検索）・Ctrl+G（grep）・Datastores・File change watcher の5機能すべてに適用されます。gitignore方式のワイルドカード（*, ?, [abc], [!abc]）に対応しています。",
-        excludeNames: "完全に非表示にするファイル名またはディレクトリ名",
-        excludeNamesHelp:
-          "リスト中の名前に一致するファイル/ディレクトリを、サイドバー・検索結果・grep 結果から完全に消します。Skip と違い、名前自体が UI に出なくなります。gitignore方式のワイルドカード（*, ?, [abc], [!abc]）に対応しています。",
-        reset: "デフォルトに戻す",
-        save: "変更を保存",
-        saving: "保存しています…",
-        saved: "保存しました。",
-        unsaved: "未保存の変更があります。",
-        saveNote: "「変更を保存」を押すまで、編集内容は適用されません。",
-        watchLimitInvalid: (min, max) =>
-          `${min}〜${max}の整数を入力してください。`,
-        scopeSource: (project, source) =>
-          `このブラウザのプロジェクト "${project}" に保存されます。ソース: ${source}。サイドバー、Ctrl+K、Ctrl+G、Datastores、File change watcher で使われます。「デフォルトに戻す」でブラウザ側の上書きを削除します。`,
-        browserOverride: "ブラウザ側の上書き",
-        serverDefault: "サーバ既定値",
-        uploadsTitle: "アップロード",
-        uploadEnabledLabel: "ワークツリーへのファイルアップロードを許可する",
-        uploadEnabledHelp:
-          "オフにすると、このサーバを使う全員に対してワークツリーは読み取り専用になります。",
-        agentNotifyTitle: "エージェントの通知",
-        agentNotifyWaitingLabel: "エージェントが入力待ちになったら通知する",
-        agentNotifyDoneLabel: "エージェントの作業が終わったら通知する",
-        agentNotifyHelp:
-          "エージェント画面からデスクトップ通知を出します。ブラウザの許可は、その画面の「通知を有効にする」から 1 度だけ求めます。そのペインをいま見ているときは通知しません。",
-        datastoreTitle: "データストア",
-        datastoreInferFkLabel:
-          "Rails 命名規約 (<name>_id → <names>.id) から FK を推測",
-        datastoreInferFkHelp:
-          "SQL テーブルの関連データパネルに Rails 命名規約由来の仮想 FK リンクを表示します。",
-        datastoreS3TooltipLabel: "S3 オブジェクトの hover プレビューを表示",
-        datastoreS3TooltipHelp:
-          "S3 オブジェクト行にホバーすると、完全な key とコンテンツプレビューを表示します。",
-        watchTitle: "ファイル変更の監視",
-        watchLimit: "監視するディレクトリ数の上限",
-        watchLimitHelp: (defaultLimit) =>
-          `値を大きくすると深いツリーの変更を取りこぼしにくくなりますが、ファイルハンドル数を消費します。上の Skip リストと併用すると、重いフォルダ（node_modules, .git, dist など）を監視枠から外せます。既定値: ${defaultLimit}。`,
-        agentRulesTitle: "ターミナルのAI状態判定",
-        agentRulesLabel: "画面の一致ルール（JSON）",
-        agentRulesHelp:
-          "各ルールで working（作業中）・waiting（入力待ち）・idle（待機中）・skip（状態を維持）を指定できます。priority、region、contains、regex、lineRegex、入れ子の all/any/not を編集できます。contains は大文字小文字を区別せず、regex は先頭の (?i) による大小無視に対応します。判定処理を止めないため、regex の可変長の繰返しは1個までで、グループ・選択・後方参照は使えません。AND/OR は all/any で表します。優先度が最大の一致が採用され、同点は上にあるルールが優先されます。保存前に全ルールを検証します。",
-        agentRulesGuideTitle: "JSONの書式と入力例",
-        agentRulesGuideIntro:
-          "version が 1、rules が配列のJSONオブジェクトを入力します。各ルールには下記の必須項目と、1個以上の一致条件が必要です。",
-        agentRulesGuideFields:
-          "必須項目: id（一意の名前）、state（working / waiting / idle / skip）、priority（大きい値を優先）、region。region が bottom_non_empty の場合は lines も必要です。",
-        agentRulesGuideMatchers:
-          "一致条件: contains と regex は選択した領域全体、lineRegex は各行を調べます。一致条件のオブジェクトは all / any / not で組み合わせられます。",
-        agentRulesGuideRegions:
-          "region: osc_title はターミナルタイトル、whole_recent は直近の画面全体、bottom_non_empty は末尾の非空行、last_non_empty は最後の非空行だけを調べます。",
-        agentRulesGuideExample: `{
-  "version": 1,
-  "rules": [
-    {
-      "id": "waiting_for_confirmation",
-      "state": "waiting",
-      "priority": 900,
-      "region": "bottom_non_empty",
-      "lines": 12,
-      "contains": ["enter to confirm"],
-      "not": [{ "contains": ["finished"] }]
-    }
-  ]
-}`,
-        agentRulesReset: "組み込みルールに戻す",
-        agentRulesSourceDefault: "適用中: 組み込みルール",
-        agentRulesSourceSaved: "適用中: 保存したルール",
-        agentRulesSourceEdited:
-          "編集中: 「変更を保存」で検証し、すぐに使います。",
-        agentRulesSourceRestore:
-          "組み込みルール: 「変更を保存」で保存したルールを消し、組み込みのルールを使います。",
-        categories: {
-          general: {
-            label: "一般",
-            description:
-              "アップロードと、このリポジトリで読まない・隠すディレクトリ。",
-          },
-          appearance: {
-            label: "表示",
-            description: "テーマ、言語、文字の大きさ。",
-          },
-          agents: {
-            label: "エージェント",
-            description: "通知とフック。",
-          },
-          shortcuts: {
-            label: "ショートカット",
-            description:
-              "操作ごとのキーと、キーの効く所。JSON の書き出し・読み込み。",
-          },
-          accounts: {
-            label: "アカウント",
-            description:
-              "設定ディレクトリごとのログイン、使用量、起動コマンド。",
-          },
-          advanced: {
-            label: "詳細",
-            description: "データストア、ファイルの監視、端末の状態判定。",
-          },
-        },
-        searchPlaceholder: "設定を検索",
-        searchNoMatch: (query) => `「${query}」に当てはまる設定はありません。`,
-      },
+      settings: VIEWER_SETTINGS_TEXT.ja,
       annotations: {
         title: "注釈",
         follow: "新しい注釈へ自動移動",
@@ -3868,8 +3603,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function scopeOmitSourceLabel(): string {
     return savedScopeOmitDirs() != null || savedScopeExcludeNames() != null
-      ? uiText().settings.browserOverride
-      : uiText().settings.serverDefault;
+      ? uiText().settings.scopeSaved
+      : uiText().settings.scopeDefault;
   }
 
   function refreshRepositoryTreeAfterSettings() {
@@ -5141,6 +4876,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       AGENT_HOOK_STATUS = status;
       AGENTS_VIEW?.localize();
     },
+    helpLink: () => ({
+      label: `${agentsText(STATE.language).sidebar.help} › ${helpSectionName(STATE.language, AGENT_HOOKS_HELP_SECTION)}`,
+      href: `/help?section=${AGENT_HOOKS_HELP_SECTION}`,
+    }),
+    openHelp: () =>
+      openHelpSection(helpSectionDeps(), AGENT_HOOKS_HELP_SECTION),
   });
 
   // ---------- Accounts: views/agents/accounts-*.ts ----------
@@ -5225,6 +4966,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       watchLimitMin: SERVER_SCOPE_WATCH_LIMIT_MIN,
       watchLimitMax: SERVER_SCOPE_WATCH_LIMIT_MAX,
       watchLimitDefault: SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
+      watchLimitApplies: !SERVER_SCOPE_WATCH_RECURSIVE,
       uploadEnabled: APP_SETTINGS.uploadEnabled !== false,
       agentNotifyWaiting: APP_SETTINGS.agentNotifyWaiting !== false,
       agentNotifyDone: APP_SETTINGS.agentNotifyDone !== false,

@@ -54,7 +54,7 @@ export type ShortcutSettingsDeps = {
   download(fileName: string, text: string): void;
 };
 
-type ShortcutText = {
+export type ShortcutText = {
   title: string;
   intro: string;
   filterPlaceholder: string;
@@ -67,7 +67,8 @@ type ShortcutText = {
   resetAllBody: string;
   resetAllConfirm: string;
   jsonLabel: string;
-  jsonHelp: string;
+  /** 1 つが 1 段落。 */
+  jsonHelp: readonly string[];
   jsonIssue: (issue: KeymapJsonIssue, message: string) => string;
   issue: Record<KeymapJsonIssueCode, (detail: string) => string>;
   importFailed: (detail: string) => string;
@@ -91,7 +92,10 @@ type ShortcutText = {
   alreadyAssigned: (key: string) => string;
 };
 
-const TEXT: Record<HelpKeybindingLanguage, ShortcutText> = {
+export const SHORTCUT_SETTINGS_TEXT: Record<
+  HelpKeybindingLanguage,
+  ShortcutText
+> = {
   en: {
     title: "Shortcuts",
     intro:
@@ -107,8 +111,10 @@ const TEXT: Record<HelpKeybindingLanguage, ShortcutText> = {
       "Every key you changed goes back to its default when you save the settings.",
     resetAllConfirm: "Restore all",
     jsonLabel: "Changed shortcuts (JSON)",
-    jsonHelp:
-      'Only the actions you changed are listed, each with its keys, for example "toggle-theme": [{ "key": "t", "ctrl": true }]. An empty list turns the action off. "inputs", "terminal" and "pwa" (true or false) set where a key works. Nothing is saved while the JSON has a mistake.',
+    jsonHelp: [
+      'Only the actions you changed are listed, each with its keys, for example "toggle-theme": [{ "key": "t", "ctrl": true }]. An empty list turns the action off.',
+      '"inputs", "terminal" and "pwa" (true or false) set where a key works. Nothing is saved while the JSON has a mistake.',
+    ],
     jsonIssue: (issue, message) =>
       `Line ${issue.line}, column ${issue.column}${issue.path === "$" ? "" : ` (${issue.path})`}: ${message}`,
     issue: {
@@ -172,8 +178,10 @@ const TEXT: Record<HelpKeybindingLanguage, ShortcutText> = {
     resetAllBody: "変えたキーは、設定を保存したときにすべて既定に戻ります。",
     resetAllConfirm: "すべて戻す",
     jsonLabel: "変えたショートカット (JSON)",
-    jsonHelp:
-      '変えた操作だけが、キーのリストと一緒に並びます (例: "toggle-theme": [{ "key": "t", "ctrl": true }])。空のリストはその操作を止めます。"inputs"・"terminal"・"pwa" (true か false) でキーの効く所を決めます。JSON に誤りがある間は保存しません。',
+    jsonHelp: [
+      '変えた操作だけが、キーのリストと一緒に並びます (例: "toggle-theme": [{ "key": "t", "ctrl": true }])。空のリストはその操作を止めます。',
+      '"inputs"・"terminal"・"pwa" (true か false) でキーの効く所を決めます。JSON に誤りがある間は保存しません。',
+    ],
     jsonIssue: (issue, message) =>
       `${issue.line} 行 ${issue.column} 文字目${issue.path === "$" ? "" : ` (${issue.path})`}: ${message}`,
     issue: {
@@ -342,8 +350,7 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
   jsonBox.hidden = true;
   const jsonLabel = document.createElement("label");
   jsonLabel.htmlFor = "shortcut-json";
-  const jsonHelp = document.createElement("p");
-  jsonHelp.className = "scope-settings-help";
+  const jsonHelp = document.createElement("div");
   const jsonArea = document.createElement("textarea");
   jsonArea.id = "shortcut-json";
   jsonArea.rows = 12;
@@ -362,7 +369,7 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
   element.append(titleRow, intro, toolbar, jsonBox, filterEmpty, list);
 
   function text(): ShortcutText {
-    return TEXT[deps.getLanguage()];
+    return SHORTCUT_SETTINGS_TEXT[deps.getLanguage()];
   }
 
   function notify(): void {
@@ -818,7 +825,14 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
     jsonButton.textContent = t.editJson;
     resetAllButton.textContent = t.resetAll;
     jsonLabel.textContent = t.jsonLabel;
-    jsonHelp.textContent = t.jsonHelp;
+    jsonHelp.replaceChildren(
+      ...t.jsonHelp.map((paragraph) => {
+        const p = document.createElement("p");
+        p.className = "scope-settings-help";
+        p.textContent = paragraph;
+        return p;
+      }),
+    );
   }
 
   filter.addEventListener("input", render);

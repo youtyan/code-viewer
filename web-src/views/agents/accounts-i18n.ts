@@ -150,7 +150,8 @@ export type AccountsText = {
   // 使用量 (statusLine)
   usageTitle: string;
   /** 仕組みの説明 (開いたときだけ見える欄)。 */
-  usageIntro: string;
+  /** 使用量の「仕組み」の中。1 つが 1 段落。 */
+  usageIntro: readonly string[];
   usageHow: string;
   usageReceiving: (when: string) => string;
   usageWaiting: string;
@@ -427,8 +428,10 @@ export const ACCOUNTS_EN: AccountsText = {
   registerRun: "Register",
   added: (name) => `Added ${name}.`,
   usageTitle: "Usage",
-  usageIntro:
-    "claude reports its 5-hour and weekly usage only to the status line. code-viewer can wrap the status line command: it keeps the data it receives, runs your command with the same input and returns its output unchanged. codex usage is read from its session logs and needs no setting.",
+  usageIntro: [
+    "claude reports its 5-hour and weekly usage only to the status line. code-viewer can wrap the status line command: it keeps the data it receives, runs your command with the same input and returns its output unchanged.",
+    "codex usage is read from its session logs and needs no setting.",
+  ],
   usageHow: "How it works",
   usageReceiving: (when) =>
     `Receiving the 5-hour and weekly usage (last received: ${when})`,
@@ -709,8 +712,10 @@ export const ACCOUNTS_JA: AccountsText = {
   registerRun: "登録する",
   added: (name) => `${name} を追加しました。`,
   usageTitle: "使用量",
-  usageIntro:
-    "claude は 5時間枠と週枠の使用量をステータスラインにだけ渡します。code-viewer はステータスラインのコマンドを包み、受け取ったデータを保存してから、あなたのコマンドに同じ入力を渡し、その出力をそのまま返します。codex の使用量はセッションの記録から読むので、設定は要りません。",
+  usageIntro: [
+    "claude は 5時間枠と週枠の使用量をステータスラインにだけ渡します。code-viewer はステータスラインのコマンドを包み、受け取ったデータを保存してから、あなたのコマンドに同じ入力を渡し、その出力をそのまま返します。",
+    "codex の使用量はセッションの記録から読むので、設定は要りません。",
+  ],
   usageHow: "仕組み",
   usageReceiving: (when) =>
     `5 時間と週の使用量を受け取っています（最後に受け取った時刻: ${when}）`,

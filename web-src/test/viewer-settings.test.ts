@@ -9,8 +9,12 @@ import {
   test,
   vi,
 } from "vitest";
+import { ACCOUNTS_SECTION_ID } from "../views/agents/accounts-settings";
+import { AGENT_HOOKS_SECTION_ID } from "../views/agents/agent-hooks-settings";
 import {
   createViewerSettings,
+  SETTINGS_CATEGORIES,
+  type SettingsCategory,
   type SettingsDraft,
   type ThemeChoice,
   type ViewerSettingsDraft,
@@ -62,7 +66,6 @@ const EN_TEXT: ViewerSettingsText = {
   sharedTag: "All projects",
   sharedTagTitle: "Shared by all projects",
   userSettingsError: (detail) => `Shared settings cannot be used: ${detail}`,
-  displaySource: "Applies to all projects in this browser.",
   excludedDirectories: "Excluded directories",
   omitDirs: "Skip these directory names",
   omitDirsHelp: "Contents are never read.",
@@ -76,8 +79,8 @@ const EN_TEXT: ViewerSettingsText = {
   saveNote: "Edits are not applied until you save.",
   watchLimitInvalid: (min, max) => `Use an integer from ${min} to ${max}.`,
   scopeSource: (project, source) => `${project} / ${source}`,
-  browserOverride: "browser override",
-  serverDefault: "server default",
+  scopeSaved: "saved value",
+  scopeDefault: "default",
   uploadsTitle: "Uploads",
   uploadEnabledLabel: "Allow uploads",
   uploadEnabledHelp: "Off means read-only.",
@@ -94,8 +97,10 @@ const EN_TEXT: ViewerSettingsText = {
   watchLimit: "Maximum directories to watch",
   watchLimitHelp: (limit) => `Default is ${limit}.`,
   agentRulesTitle: "Terminal state detection",
+  agentRulesPurpose: "Fix these when states are read wrong.",
+  agentRulesEdit: "Edit the rules",
   agentRulesLabel: "Rules",
-  agentRulesHelp: "Edit JSON rules.",
+  agentRulesHelp: ["Edit JSON rules.", "Keep regex simple."],
   agentRulesGuideTitle: "JSON format and example",
   agentRulesGuideIntro: "Use version 1 and a rules array.",
   agentRulesGuideFields: "Rule fields: id, state, priority, region, lines.",
@@ -110,11 +115,11 @@ const EN_TEXT: ViewerSettingsText = {
   agentRulesSourceEdited: "Edited rules",
   agentRulesSourceRestore: "Built-in rules after saving",
   categories: {
-    general: { label: "General", description: "General settings." },
     appearance: { label: "Appearance", description: "Look." },
-    shortcuts: { label: "Shortcuts", description: "Keys." },
     agents: { label: "Agents", description: "Agent settings." },
     accounts: { label: "Accounts", description: "Sign-in." },
+    shortcuts: { label: "Shortcuts", description: "Keys." },
+    files: { label: "Files", description: "This project only." },
     advanced: { label: "Advanced", description: "Rarely changed." },
   },
   searchPlaceholder: "Search settings",
@@ -142,6 +147,7 @@ function defaultValues(): ViewerSettingsValues {
     watchLimitMin: 16,
     watchLimitMax: 65536,
     watchLimitDefault: 4096,
+    watchLimitApplies: true,
     uploadEnabled: true,
     agentNotifyWaiting: true,
     agentNotifyDone: true,
@@ -248,15 +254,13 @@ function setup(
           '{\n  "version": 1,\n  "rules": ["default"]\n}\n';
         values.agentRulesSource = "default";
       }),
-    agentHooksSection: sectionWithHeading("sample-hooks-heading", "Hooks"),
+    // 見出しの id はほかの画面が openSettingsAt で使う本物 (移し先のテスト)。
+    agentHooksSection: sectionWithHeading(AGENT_HOOKS_SECTION_ID, "Hooks"),
     agentAccountsSection: sectionWithHeading(
-      "sample-accounts-heading",
+      ACCOUNTS_SECTION_ID,
       "Accounts list",
     ),
-    shortcutsSection: sectionWithHeading(
-      "sample-shortcuts-heading",
-      "Shortcut list",
-    ),
+    shortcutsSection: sectionWithHeading(SHORTCUT_SECTION_ID, "Shortcut list"),
     drafts: options.draft ? [options.draft] : [],
   });
 
@@ -270,6 +274,9 @@ function setup(
     },
   };
 }
+
+/** ショートカットの節の見出しの id (help-keybinding-editor.ts)。 */
+const SHORTCUT_SECTION_ID = "shortcut-settings-title";
 
 function sectionWithHeading(id: string, title: string): HTMLElement {
   const section = document.createElement("div");
@@ -310,11 +317,11 @@ describe("viewer settings form", () => {
   });
 
   test.each([
-    ["general", ["Uploads", "Excluded directories"]],
     ["appearance", ["Display"]],
-    ["shortcuts", ["Shortcut list"]],
     ["agents", ["Agent notifications", "Hooks"]],
     ["accounts", ["Accounts list"]],
+    ["shortcuts", ["Shortcut list"]],
+    ["files", ["Excluded directories", "Uploads"]],
     [
       "advanced",
       ["Datastores", "File change watcher", "Terminal state detection"],
@@ -344,11 +351,11 @@ describe("viewer settings form", () => {
     expect(
       host.querySelector("#scope-settings-search-empty")?.textContent,
     ).toBe('No settings match "no such setting".');
-    settings.setCategory("general");
+    settings.setCategory("files");
     expect(input.value).toBe("");
     expect(visibleSectionTitles(host)).toEqual([
-      "Uploads",
       "Excluded directories",
+      "Uploads",
     ]);
   });
 
@@ -381,7 +388,7 @@ describe("viewer settings form", () => {
     test.each([
       { category: "appearance", expected: { Display: false } },
       {
-        category: "general",
+        category: "files",
         expected: { Uploads: true, "Excluded directories": true },
       },
       {
@@ -437,7 +444,7 @@ describe("viewer settings form", () => {
 
   test("revealing a heading switches to the category that holds it", () => {
     const { settings, host } = setup();
-    settings.revealHeading("sample-accounts-heading");
+    settings.revealHeading(ACCOUNTS_SECTION_ID);
     expect(settings.getCategory()).toBe("accounts");
     settings.revealHeading("agent-notify-section-title");
     expect(settings.getCategory()).toBe("agents");
@@ -453,7 +460,7 @@ describe("viewer settings form", () => {
   // URL の # (/help#<見出し>・/settings#<見出し>) を設定のページへ送るかの判断。
   // # から来る値はセレクタに組まないので、セレクタとして読めない値でも落ちない。
   test.each<[string, boolean]>([
-    ["sample-accounts-heading", true],
+    [ACCOUNTS_SECTION_ID, true],
     ["agent-notify-section-title", true],
     ["upload-section-title", true],
     ["missing-heading", false],
@@ -463,8 +470,112 @@ describe("viewer settings form", () => {
     const { settings } = setup();
     expect([settings.hasHeading(id), settings.getCategory()]).toEqual([
       expected,
-      "general",
+      "appearance",
     ]);
+  });
+
+  // 分類を見直して節を移した (一般 → ファイル、並びの入れ替え)。見出しの id は
+  // 変えていないので、ほかの画面・URL の # からの送り先は移った先の分類になる。
+  test.each<[string, SettingsCategory]>([
+    ["display-section-title", "appearance"],
+    ["viewer-theme", "appearance"],
+    ["agent-notify-section-title", "agents"],
+    [AGENT_HOOKS_SECTION_ID, "agents"],
+    [ACCOUNTS_SECTION_ID, "accounts"],
+    [SHORTCUT_SECTION_ID, "shortcuts"],
+    ["excluded-section-title", "files"],
+    ["upload-section-title", "files"],
+    ["datastore-section-title", "advanced"],
+    ["watch-section-title", "advanced"],
+    ["agent-screen-rules-title", "advanced"],
+  ])("the heading %s leads to the %s category", (id, expected) => {
+    const { settings } = setup();
+    settings.revealHeading(id);
+    expect(settings.getCategory()).toBe(expected);
+  });
+
+  // macOS と Windows は木全体を 1 つのハンドルで見るので、ディレクトリ数の上限の
+  // 節は出さない。以前は app が節の hidden を直接書き、分類を切り替えるたびに
+  // 分類の側が書き戻していた (どちらが勝つかが開き方で変わった)。
+  test.each([
+    [true, ["Datastores", "File change watcher", "Terminal state detection"]],
+    [false, ["Datastores", "Terminal state detection"]],
+  ])("with watchLimitApplies %s, advanced shows %j", (applies, titles) => {
+    const { settings, host, values } = setup();
+    values.watchLimitApplies = applies;
+    settings.mount(host);
+    settings.setCategory("advanced");
+    settings.setCategory("files");
+    settings.setCategory("advanced");
+    expect(visibleSectionTitles(host)).toEqual(titles);
+  });
+
+  test("the categories are ordered with the common ones first", () => {
+    expect(SETTINGS_CATEGORIES).toEqual([
+      "appearance",
+      "agents",
+      "accounts",
+      "shortcuts",
+      "files",
+      "advanced",
+    ]);
+  });
+
+  // 画面の文言の判定ルールは普段触らないので、JSON の欄は既定で畳む。何のための
+  // ものかの 1 文・どのルールが効いているか・誤りは、畳んだままでも読める。
+  describe("the screen-text rules", () => {
+    function rulesParts() {
+      const details = q<HTMLDetailsElement>(
+        document,
+        "#agent-screen-rules-details",
+      );
+      const outside = (selector: string) =>
+        !details.contains(q<HTMLElement>(document, selector));
+      return { details, outside };
+    }
+
+    test("keep the JSON folded and the purpose, source and errors outside", () => {
+      const { settings, host } = setup();
+      settings.mount(host);
+      settings.setCategory("advanced");
+      const { details, outside } = rulesParts();
+      expect({
+        open: details.open,
+        summary: details.querySelector("summary")?.textContent,
+        purpose: q<HTMLElement>(document, "#agent-screen-rules-purpose")
+          .textContent,
+        editorInside: !outside("#agent-screen-rules"),
+        guideInside: !outside("#agent-screen-rules-guide"),
+        purposeOutside: outside("#agent-screen-rules-purpose"),
+        sourceOutside: outside("#agent-screen-rules-source"),
+        errorOutside: outside("#agent-screen-rules-error"),
+        help: Array.from(
+          document.querySelectorAll("#agent-screen-rules-help p"),
+          (p) => p.textContent,
+        ),
+      }).toEqual({
+        open: false,
+        summary: "Edit the rules",
+        purpose: "Fix these when states are read wrong.",
+        editorInside: true,
+        guideInside: true,
+        purposeOutside: true,
+        sourceOutside: true,
+        errorOutside: true,
+        help: ["Edit JSON rules.", "Keep regex simple."],
+      });
+    });
+
+    test.each([
+      ["agent-screen-rules", true],
+      ["agent-screen-rules-guide", true],
+      ["agent-screen-rules-title", false],
+    ])("are opened when %s is revealed: %s", (id, opened) => {
+      const { settings, host } = setup();
+      settings.mount(host);
+      settings.revealHeading(id);
+      expect(rulesParts().details.open).toBe(opened);
+    });
   });
 
   test("shows the saved values when it is mounted", () => {

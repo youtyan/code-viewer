@@ -16720,12 +16720,15 @@ body.gdp-search-page {
   flex-basis: 100%;
   margin: 0;
 }
-.agent-accounts-how {
+/* 畳んだ「仕組み」と、設定の判定ルールの編集の欄 (既定で畳む)。 */
+.agent-accounts-how,
+.agent-screen-rules-details {
   margin-top: var(--space-2);
   color: var(--color-text-2);
   font-size: var(--ui-font-sm);
 }
-.agent-accounts-how > summary {
+.agent-accounts-how > summary,
+.agent-screen-rules-details > summary {
   cursor: pointer;
 }
 .agent-accounts-how-body > p {

@@ -178,7 +178,7 @@ const SAMPLE_CATEGORIES: Array<{
   label: string;
   description: string;
 }> = [
-  { id: "general", label: "General", description: "General text." },
+  { id: "files", label: "Files", description: "Files text." },
   { id: "shortcuts", label: "Shortcuts", description: "Shortcuts text." },
   { id: "agents", label: "Agents", description: "Agents text." },
   { id: "accounts", label: "Accounts", description: "Accounts text." },
@@ -196,7 +196,7 @@ function renderSettings(lang: HelpLanguage = "en", keepDom = false) {
   if (!keepDom) document.body.innerHTML = FIXTURE_DOM;
   const range = { from: "HEAD", to: "worktree" };
   let route: AppRoute = { screen: "repo", ref: "worktree", path: "", range };
-  let category: SettingsCategory = "general";
+  let category: SettingsCategory = "files";
   const searchHosts: HTMLElement[] = [];
   const openedHelp: HelpSection[] = [];
   const page = createSettingsPage({
@@ -373,8 +373,8 @@ describe("settings page", () => {
       route: view.route(),
     }).toEqual({
       title: "Settings",
-      nav: ["General *", "Shortcuts", "Agents", "Accounts", "Advanced"],
-      h2: "General",
+      nav: ["Files *", "Shortcuts", "Agents", "Accounts", "Advanced"],
+      h2: "Files",
       searchHosts: 1,
       route: { screen: "settings", range: { from: "HEAD", to: "worktree" } },
     });
@@ -394,7 +394,7 @@ describe("settings page", () => {
     }).toEqual({
       files: 1,
       category: "agents",
-      nav: ["General", "Shortcuts", "Agents *", "Accounts", "Advanced"],
+      nav: ["Files", "Shortcuts", "Agents *", "Accounts", "Advanced"],
       h2: "Agents",
     });
   });

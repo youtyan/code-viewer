@@ -525,7 +525,9 @@ export function createAccountsSettings(
   function renderUsage(accounts: AccountStatus[], home: string): void {
     const t = text();
     usageRows.replaceChildren();
-    const how: HTMLElement[] = [el("p", "scope-settings-help", t.usageIntro)];
+    const how: HTMLElement[] = t.usageIntro.map((paragraph) =>
+      el("p", "scope-settings-help", paragraph),
+    );
     const groups = new Map<string, AccountStatus[]>();
     for (const account of accounts) {
       if (account.agent !== "claude" || !account.statusLine) continue;

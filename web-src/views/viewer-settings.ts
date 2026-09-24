@@ -23,7 +23,6 @@ export type ViewerSettingsText = {
   sizeRegular: string;
   sizeLarge: string;
   sizeExtraLarge: string;
-  displaySource: string;
   /** 全プロジェクト共通の項目を持つ節の見出しに添える札。 */
   sharedTag: string;
   sharedTagTitle: string;
@@ -41,8 +40,9 @@ export type ViewerSettingsText = {
   saveNote: string;
   watchLimitInvalid: (min: number, max: number) => string;
   scopeSource: (project: string, source: string) => string;
-  browserOverride: string;
-  serverDefault: string;
+  /** scopeSource の source: このプロジェクトに保存した値か、既定の値か。 */
+  scopeSaved: string;
+  scopeDefault: string;
   uploadsTitle: string;
   uploadEnabledLabel: string;
   uploadEnabledHelp: string;
@@ -59,8 +59,13 @@ export type ViewerSettingsText = {
   watchLimit: string;
   watchLimitHelp: (defaultLimit: number) => string;
   agentRulesTitle: string;
+  /** 何のための設定か (節の見出しの下に畳まずに出す 1 文)。 */
+  agentRulesPurpose: string;
+  /** 編集の欄を畳んだ details の summary。 */
+  agentRulesEdit: string;
   agentRulesLabel: string;
-  agentRulesHelp: string;
+  /** 書き方の説明。1 つが 1 段落。 */
+  agentRulesHelp: readonly string[];
   agentRulesGuideTitle: string;
   agentRulesGuideIntro: string;
   agentRulesGuideFields: string;
@@ -100,6 +105,11 @@ export type ViewerSettingsValues = ViewerSettingsDraft & {
   watchLimitMin: number;
   watchLimitMax: number;
   watchLimitDefault: number;
+  /**
+   * 監視するディレクトリ数の上限が効くか。木全体を OS のハンドル 1 つで見る
+   * OS (macOS・Windows) では効かないので、節を出さない。
+   */
+  watchLimitApplies: boolean;
   scopeSource: string;
   agentRulesJson: string;
   /** 組み込みの規則を agentRulesJson と同じ形で書いたもの (戻すときに欄へ入れる) */
@@ -111,13 +121,15 @@ export type ViewerSettingsValues = ViewerSettingsDraft & {
 /**
  * 設定の分類。設定のページの左の列に並べ、選んだ分類の節だけを出す。
  * フォームは 1 つのまま (下書きと「変更を保存」は分類をまたいで効く)。
+ * よく使うものを先に、めったに変えないものは advanced へ。最初のものが
+ * ページを開いたときの分類。
  */
 export const SETTINGS_CATEGORIES = [
-  "general",
   "appearance",
-  "shortcuts",
   "agents",
   "accounts",
+  "shortcuts",
+  "files",
   "advanced",
 ] as const;
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
@@ -270,7 +282,7 @@ function setFieldValue(
 
 export function createViewerSettings(deps: ViewerSettingsDeps) {
   let root: HTMLElement | null = null;
-  let category: SettingsCategory = "general";
+  let category: SettingsCategory = SETTINGS_CATEGORIES[0];
   /** 節と、その節が属する分類。build() が埋める。 */
   const categorized: Array<[HTMLElement, SettingsCategory]> = [];
   /**
@@ -297,7 +309,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   const sidebarFontSize = fontSizeSelect("sidebar-font-size");
   const codeFontSize = fontSizeSelect("code-font-size");
   const uiFontSizeHelp = helpText("ui-font-size-help");
-  const displaySource = document.createElement("p");
   const userSettingsError = helpText("user-settings-error");
   userSettingsError.classList.add("scope-settings-refresh-error");
   userSettingsError.hidden = true;
@@ -320,9 +331,19 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   const watchLimitNumber = document.createElement("input");
   const watchLimitRange = document.createElement("input");
   const watchLimitHelp = helpText("scope-watch-limit-help");
+  const watch = section();
 
   const agentRules = document.createElement("textarea");
-  const agentRulesHelp = helpText("agent-screen-rules-help");
+  const agentRulesPurpose = helpText("agent-screen-rules-purpose");
+  // 書き方の説明 (段落の数は文言が決める)。
+  const agentRulesHelp = document.createElement("div");
+  agentRulesHelp.id = "agent-screen-rules-help";
+  // 編集の欄は既定で畳む。普段は触らないもので、開いたままだと長い JSON が
+  // 分類の大半を占めていた。
+  const agentRulesDetails = document.createElement("details");
+  agentRulesDetails.id = "agent-screen-rules-details";
+  agentRulesDetails.className = "agent-screen-rules-details";
+  const agentRulesEdit = document.createElement("summary");
   const agentRulesSource = helpText("agent-screen-rules-source");
   const agentRulesError = helpText("agent-screen-rules-error");
   agentRulesError.classList.add("scope-settings-refresh-error");
@@ -411,7 +432,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       option.textContent = item.label;
       language.appendChild(option);
     }
-    displaySource.id = "display-settings-source";
+    displayTitle.id = "display-section-title";
     const display = section();
     display.append(
       titleRow(displayTitle, displayShared),
@@ -425,7 +446,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       uiFontSizeHelp,
       codeFontSizeLabel,
       codeFontSize,
-      displaySource,
       userSettingsError,
     );
 
@@ -450,6 +470,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     excludeNames.rows = 4;
     excludeNames.spellcheck = false;
     scopeSource.id = "scope-omit-source";
+    excludedTitle.id = "excluded-section-title";
     const excluded = section();
     excluded.append(
       excludedTitle,
@@ -482,7 +503,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     const watchRow = document.createElement("div");
     watchRow.className = "scope-watch-limit-row";
     watchRow.append(watchLimitRange, watchLimitNumber);
-    const watch = section();
     watch.id = "watch-settings-section";
     watch.append(watchTitle, watchLimitLabel, watchRow, watchLimitHelp);
 
@@ -515,18 +535,24 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     const agentRuleActions = document.createElement("div");
     agentRuleActions.className = "scope-settings-actions";
     agentRuleActions.append(agentRulesReset);
-    const ruleSettings = section();
-    ruleSettings.classList.add("agent-screen-rules-section");
-    ruleSettings.append(
-      agentRulesTitle,
+    agentRulesDetails.append(
+      agentRulesEdit,
       agentRulesLabel,
       agentRulesHelp,
       agentRulesGuide,
       agentRulesEditor,
+      agentRuleActions,
+    );
+    const ruleSettings = section();
+    ruleSettings.classList.add("agent-screen-rules-section");
+    // 誤りは畳んだ中に入れない (閉じたままでも読めるように)。
+    ruleSettings.append(
+      agentRulesTitle,
+      agentRulesPurpose,
       agentRulesSource,
       agentRulesError,
       agentRulesHighlightError,
-      agentRuleActions,
+      agentRulesDetails,
     );
 
     resetButton.id = "scope-omit-reset";
@@ -555,30 +581,22 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       datastores,
       watch,
     );
+    // 並びは分類の並び (検索の結果もこの順に出る)。
     categorized.push(
       [display, "appearance"],
-      [deps.shortcutsSection, "shortcuts"],
-      [uploads, "general"],
       [agentNotify, "agents"],
-      [deps.agentAccountsSection, "accounts"],
       [deps.agentHooksSection, "agents"],
-      [excluded, "general"],
+      [deps.agentAccountsSection, "accounts"],
+      [deps.shortcutsSection, "shortcuts"],
+      [excluded, "files"],
+      [uploads, "files"],
       [datastores, "advanced"],
       [watch, "advanced"],
       [ruleSettings, "advanced"],
     );
     wrap.append(
       searchEmpty,
-      display,
-      deps.shortcutsSection,
-      uploads,
-      agentNotify,
-      deps.agentAccountsSection,
-      deps.agentHooksSection,
-      excluded,
-      datastores,
-      watch,
-      ruleSettings,
+      ...categorized.map(([element]) => element),
       footer,
     );
     search.addEventListener("input", applyCategory);
@@ -943,7 +961,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     watchLimitRange.setAttribute("aria-label", text.watchLimit);
     agentRulesLabel.textContent = text.agentRulesLabel;
     uiFontSizeHelp.textContent = text.fileListFontSizeHelp;
-    displaySource.textContent = text.displaySource;
     for (const tag of [displayShared, agentNotifyShared]) {
       tag.textContent = text.sharedTag;
       tag.title = text.sharedTagTitle;
@@ -964,7 +981,15 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     s3Tooltip.text.textContent = text.datastoreS3TooltipLabel;
     s3TooltipHelp.textContent = text.datastoreS3TooltipHelp;
     watchLimitHelp.textContent = text.watchLimitHelp(values.watchLimitDefault);
-    agentRulesHelp.textContent = text.agentRulesHelp;
+    agentRulesPurpose.textContent = text.agentRulesPurpose;
+    agentRulesEdit.textContent = text.agentRulesEdit;
+    agentRulesHelp.replaceChildren(
+      ...text.agentRulesHelp.map((paragraph) => {
+        const p = helpText();
+        p.textContent = paragraph;
+        return p;
+      }),
+    );
     agentRulesGuideTitle.textContent = text.agentRulesGuideTitle;
     agentRulesGuideIntro.textContent = text.agentRulesGuideIntro;
     agentRulesGuideFields.textContent = text.agentRulesGuideFields;
@@ -1011,6 +1036,8 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       agentRulesError.hidden = !values.agentRulesErrors;
     }
     renderAgentRulesSource();
+    // 取り直しで監視の上限が効くかが分かる (watchLimitApplies)。
+    applyCategory();
   }
 
   function mount(host: HTMLElement): void {
@@ -1060,10 +1087,13 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   function applyCategory(): void {
     const query = search.value.trim().toLocaleLowerCase();
     let shown = 0;
+    const watchApplies = deps.getValues().watchLimitApplies;
     for (const [element, owner] of categorized) {
-      const visible = query
-        ? (element.textContent ?? "").toLocaleLowerCase().includes(query)
-        : owner === category;
+      const visible =
+        (element !== watch || watchApplies) &&
+        (query
+          ? (element.textContent ?? "").toLocaleLowerCase().includes(query)
+          : owner === category);
       element.hidden = !visible;
       if (visible) shown += 1;
     }
@@ -1117,7 +1147,17 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
    */
   function revealHeading(headingId: string): void {
     const owner = categoryOfHeading(headingId);
-    if (owner) setCategory(owner);
+    if (!owner) return;
+    setCategory(owner);
+    // 畳んだ中 (判定ルールの欄) へ送られたら開く。
+    const target = Array.from(root?.querySelectorAll("[id]") ?? []).find(
+      (element) => element.id === headingId,
+    );
+    let folded = target?.parentElement?.closest("details");
+    while (folded) {
+      folded.open = true;
+      folded = folded.parentElement?.closest("details");
+    }
   }
 
   /**

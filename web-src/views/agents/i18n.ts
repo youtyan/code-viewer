@@ -172,7 +172,11 @@ export type AgentsSidebarText = {
 
 export type AgentHooksText = {
   title: string;
+  /** 入れると何が良くなるか (節の見出しの下の 1〜2 文)。 */
   intro: string;
+  /** その下の 1 行。リンクの文字 (ヘルプの節の名前) を挟む。 */
+  helpBefore: string;
+  helpAfter: string;
   state: Record<AgentHookState, string>;
   action: Record<HookRowAction["kind"], string>;
   actionTitle: (agent: HookAgent, action: string) => string;
@@ -222,7 +226,9 @@ export type AgentHooksText = {
 const HOOKS_EN: AgentHooksText = {
   title: "Agent integration",
   intro:
-    "Adds hooks to claude and codex that tell code-viewer what they are doing. With them, the agent list shows reliably when an agent finishes or asks for permission, and also lists agents it cannot recognize by process name. Other hooks in the file are kept as they are.",
+    "With these hooks, claude and codex tell code-viewer themselves when they are working, waiting for input or done, so the states shown are reliable. Other hooks in the file stay as they are.",
+  helpBefore: "How to set them up and what they change: ",
+  helpAfter: ".",
   state: {
     "no-config-dir": "Not used",
     unreadable: "File unreadable",
@@ -325,7 +331,9 @@ const HOOKS_EN: AgentHooksText = {
 const HOOKS_JA: AgentHooksText = {
   title: "エージェント連携",
   intro:
-    "claude と codex に、いまの状態を code-viewer へ知らせるフックを入れます。入れると、エージェントが終わったこと・許可を求めていることを一覧で確実に出せます。プロセス名では見分けられないエージェントも一覧に出ます。ファイルにあるほかのフックはそのまま残ります。",
+    "入れると、claude と codex が作業中・入力待ち・完了を自分で知らせるので、状態の表示が確かになります。ファイルにあるほかのフックはそのまま残ります。",
+  helpBefore: "入れ方と、入れると何が変わるかは ",
+  helpAfter: " にあります。",
   state: {
     "no-config-dir": "使っていません",
     unreadable: "ファイルが読めません",
@@ -408,7 +416,7 @@ const HOOKS_JA: AgentHooksText = {
     },
     codex: {
       install:
-        "codex は、フックを信頼するまで実行しません。codex で /hooks を開き、code-viewer のフックを信頼してください。動いている codex に効くかは公式の説明に書かれていないため、確実なのはこれから起動するものです。",
+        "codex は、信頼するまでフックを実行しません。codex で /hooks を開き、code-viewer のフックを信頼してください。動いている codex に効くかは公式の説明に無いため、確実なのはこれから起動するものです。",
       uninstall:
         "これから起動する codex では呼ばれません。動いているものには、起動し直すまで残ることがあります。",
     },
