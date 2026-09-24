@@ -92,6 +92,7 @@ import {
   splitBlocker,
   splitRight,
   type Tab,
+  type TabGroup,
   type TabTarget,
   tabGroups,
   tabMenu,
@@ -695,11 +696,32 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
    * どのプロジェクトのものでもないタブは右端。
    */
   function rankOf(tab: Tab): number {
-    const key = keyOf(tab);
+    return rankOfKey(keyOf(tab));
+  }
+
+  function rankOfKey(key: string | null): number {
     if (key === null) return Number.MAX_SAFE_INTEGER;
     const order = deps.projectOrder?.() ?? [];
     const index = order.indexOf(key);
     return index >= 0 ? index : order.length;
+  }
+
+  /**
+   * 面のグループ。左の面 (本文の面) には、いま見ているプロジェクトのグループを
+   * タブが 0 枚でも並びの位置に入れる: フォルダ表示はタブにしないので、タブの無い
+   * プロジェクトを開くと札が出ず、どのプロジェクトを見ているか分からなかった。
+   */
+  function groupsOf(side: PaneSide, pane: Pane): TabGroup[] {
+    const groups = tabGroups(pane.tabs, keyOf);
+    const root = currentRoot;
+    if (side !== "left" || root === null) return groups;
+    if (groups.some((group) => group.key === root)) return groups;
+    const rank = rankOfKey(root);
+    const at = groups.findIndex((group) => rankOfKey(group.key) > rank);
+    const empty = { key: root, tabs: [] };
+    return at < 0
+      ? [...groups, empty]
+      : [...groups.slice(0, at), empty, ...groups.slice(at)];
   }
 
   /** 本文に描くタブか (このプロジェクトのファイル・画面)。 */
@@ -2206,14 +2228,15 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const collapsed = new Set(layout.collapsed ?? []);
     const loose: HTMLElement[] = [];
     const grouped: HTMLElement[] = [];
-    for (const group of tabGroups(pane.tabs, keyOf)) {
+    for (const group of groupsOf(side, pane)) {
       if (group.key === null) {
         for (const tab of group.tabs)
           loose.push(renderTab(tab, tab.id === pane.activeId, side, false));
         continue;
       }
       const key = group.key;
-      const isCollapsed = collapsed.has(key);
+      // 空のグループは畳めない (畳んだ控えが残っていても開いて描く)。
+      const isCollapsed = group.tabs.length > 0 && collapsed.has(key);
       const visible = isCollapsed
         ? group.tabs.filter((tab) => tab.id === pane.activeId)
         : group.tabs;
@@ -2322,7 +2345,10 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     toggle.type = "button";
     toggle.className = "main-tab-group-toggle";
     toggle.setAttribute("aria-expanded", String(!isCollapsed));
-    const label = current.groupToggle(look.name, isCollapsed, count);
+    const label =
+      count === 0
+        ? `${look.name}: ${current.groupEmpty}`
+        : current.groupToggle(look.name, isCollapsed, count);
     toggle.title = `${label}\n${key}`;
     toggle.setAttribute("aria-label", label);
     // 札は色の四角と頭文字と ▾ だけ (名前は一覧の列の頭と同じものが並んで 2 回出て、
@@ -2335,9 +2361,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     badge.hidden = !isCollapsed;
     badge.setAttribute("aria-hidden", "true");
     toggle.append(projectMark(look, "main-tab-group-mark"), badge);
-    toggle.addEventListener("click", () =>
-      commit(setCollapsed(layout, key, !isCollapsed)),
-    );
+    toggle.addEventListener("click", () => {
+      if (count > 0) commit(setCollapsed(layout, key, !isCollapsed));
+    });
     const menu = document.createElement("button");
     menu.type = "button";
     menu.className = "main-tab-group-menu";
@@ -2347,7 +2373,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     menu.innerHTML = iconSvg("main-tab-group-menu-icon", CHEVRON_DOWN_12_PATH);
     const openMenu = (at?: { x: number; y: number }) => {
       const rect = menu.getBoundingClientRect();
-      showContextMenu(menu, groupMenuFor(side, key, isCollapsed), {
+      showContextMenu(menu, groupMenuFor(side, key, isCollapsed, count), {
         at: at ?? { x: rect.left, y: rect.bottom + 4 },
       });
     };
@@ -2369,9 +2395,12 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     side: PaneSide,
     key: string,
     isCollapsed: boolean,
+    count: number,
   ): ContextMenuItem[] {
     const current = text();
     const here = key === currentRoot;
+    // タブが 0 枚のグループ (いま見ているプロジェクト) は、畳む・閉じるものが無い。
+    const empty = count === 0;
     const look = lookOf(key);
     const facts = deps.groupFacts?.(key) ?? {
       shellUnavailable: null,
@@ -2418,11 +2447,15 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       },
       {
         label: isCollapsed ? current.expandGroup : current.collapseGroup,
+        disabled: empty,
+        ...(empty ? { title: current.groupEmpty } : {}),
         onSelect: () => commit(setCollapsed(layout, key, !isCollapsed)),
       },
       { kind: "separator" },
       {
         label: current.closeGroup,
+        disabled: empty,
+        ...(empty ? { title: current.groupEmpty } : {}),
         onSelect: () => closeByUser((l) => closeGroup(l, key, keyOf)),
       },
     ];

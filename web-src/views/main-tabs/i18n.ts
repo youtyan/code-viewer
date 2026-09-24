@@ -45,6 +45,8 @@ type MainTabsText = {
   /** グループのタブ列の名前 (読み上げ)。 */
   groupTabs: (name: string) => string;
   closeGroup: string;
+  /** タブが 0 枚のグループ (いま見ているプロジェクト) の札・畳めない理由。 */
+  groupEmpty: string;
   /** グループの ▾ の、そのプロジェクトで開く新しいシェル・エージェント。 */
   newShellHere: string;
   newShellHereTitle: (name: string) => string;
@@ -104,6 +106,7 @@ const EN: MainTabsText = {
   groupMenu: (name) => `${name}: group menu`,
   groupTabs: (name) => `Open tabs of ${name}`,
   closeGroup: "Close this group",
+  groupEmpty: "No tabs are open in this project",
   newShellHere: "New shell",
   newShellHereTitle: (name) => `Open a new shell in ${name}`,
   newAgentHere: "New agent…",
@@ -162,6 +165,7 @@ const JA: MainTabsText = {
   groupMenu: (name) => `${name}: グループのメニュー`,
   groupTabs: (name) => `${name} の開いているタブ`,
   closeGroup: "このグループを閉じる",
+  groupEmpty: "このプロジェクトのタブはありません",
   newShellHere: "新しいシェル",
   newShellHereTitle: (name) => `${name} で新しいシェルを開きます`,
   newAgentHere: "新しいエージェント…",
