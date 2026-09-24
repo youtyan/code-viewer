@@ -2570,6 +2570,10 @@ body.gdp-history-page #history-commit-info:not([hidden]),
   flex: 0 0 auto;
   display: inline-grid;
   grid-template-columns: 16px;
+  /* 16px の列そのものを枠の中央に置く (place-items だけでは列の中で中央になり、
+     列は左端に残るので絵が左へずれた)。 */
+  justify-content: center;
+  align-content: center;
   place-items: center;
   width: 28px;
   height: 28px;
