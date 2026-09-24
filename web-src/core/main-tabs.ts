@@ -705,20 +705,70 @@ export function close(layout: Layout, id: string): Layout {
   return removeIds(layout, found.side, new Set([id]));
 }
 
-export function closeOthers(layout: Layout, id: string): Layout {
+/**
+ * 面の中で見えているタブ。畳んだグループのタブは前面の 1 枚だけ (タブ列の描画と
+ * 同じ)。keyOf が無ければ全部。
+ */
+export function visibleTabs(
+  layout: Layout,
+  pane: Pane,
+  keyOf?: (tab: Tab) => string | null,
+): Tab[] {
+  const collapsed = layout.collapsed ?? [];
+  if (!keyOf || collapsed.length === 0) return pane.tabs;
+  return pane.tabs.filter((tab) => {
+    const key = keyOf(tab);
+    return key === null || !collapsed.includes(key) || tab.id === pane.activeId;
+  });
+}
+
+/**
+ * 「ほかを閉じる」「右を閉じる」で閉じるタブ: そのタブのグループの中 (グループの
+ * 外のタブならグループの外) の、見えているタブだけ。畳んだグループの見えていない
+ * タブは閉じない。keyOf が無ければ面の全部が 1 つのグループ。
+ */
+function closeTargets(
+  layout: Layout,
+  found: { side: PaneSide; index: number; tab: Tab },
+  which: "others" | "right",
+  keyOf?: (tab: Tab) => string | null,
+): Set<string> {
+  const pane = paneOf(layout, found.side) as Pane;
+  const key = keyOf ? keyOf(found.tab) : null;
+  const ids = visibleTabs(layout, pane, keyOf)
+    .filter(
+      (tab) =>
+        tab.id !== found.tab.id &&
+        (keyOf ? keyOf(tab) : null) === key &&
+        (which === "others" || pane.tabs.indexOf(tab) > found.index),
+    )
+    .map((tab) => tab.id);
+  return new Set(ids);
+}
+
+export function closeOthers(
+  layout: Layout,
+  id: string,
+  keyOf?: (tab: Tab) => string | null,
+): Layout {
   const found = findTab(layout, id);
   if (!found) return layout;
-  const pane = paneOf(layout, found.side) as Pane;
-  const ids = new Set(pane.tabs.filter((t) => t.id !== id).map((t) => t.id));
+  const ids = closeTargets(layout, found, "others", keyOf);
   return activate(removeIds(layout, found.side, ids), id);
 }
 
-export function closeToRight(layout: Layout, id: string): Layout {
+export function closeToRight(
+  layout: Layout,
+  id: string,
+  keyOf?: (tab: Tab) => string | null,
+): Layout {
   const found = findTab(layout, id);
   if (!found) return layout;
-  const pane = paneOf(layout, found.side) as Pane;
-  const ids = new Set(pane.tabs.slice(found.index + 1).map((t) => t.id));
-  return removeIds(layout, found.side, ids);
+  return removeIds(
+    layout,
+    found.side,
+    closeTargets(layout, found, "right", keyOf),
+  );
 }
 
 /**
@@ -795,15 +845,17 @@ export function closedTabs(before: Layout, after: Layout): ClosedTab[] {
 }
 
 /**
- * 閉じたタブを履歴の先頭に積む (closed の後ろほど新しい扱い)。同じ中身の
- * 古い項は落とし、CLOSED_HISTORY_LIMIT 件で切る。
+ * 閉じたタブを履歴の先頭に積む。まとめて閉じたタブ (closed は面ごとに並びの順)
+ * は先頭のものから開き直す: 閉じる前の位置へ左から戻すと、元の並びになる (右から
+ * 戻すと、まだ戻っていない左のタブの分だけ位置がずれていた)。同じ中身の古い項は
+ * 落とし、CLOSED_HISTORY_LIMIT 件で切る。
  */
 export function pushClosed(
   history: readonly ClosedTab[],
   closed: readonly ClosedTab[],
 ): ClosedTab[] {
   let next = [...history];
-  for (const item of closed)
+  for (const item of [...closed].reverse())
     next = [
       item,
       ...next.filter((old) => !sameTarget(old.target, item.target)),
@@ -929,28 +981,44 @@ export function unsplit(layout: Layout): Layout {
   };
 }
 
-function stepTab(layout: Layout, delta: number): Layout {
+/** 見えているタブ (visibleTabs) の中で delta だけ移る。 */
+function stepTab(
+  layout: Layout,
+  delta: number,
+  keyOf?: (tab: Tab) => string | null,
+): Layout {
   const pane = paneOf(layout, layout.focused) as Pane;
-  if (pane.tabs.length === 0) return layout;
-  const index = pane.tabs.findIndex((tab) => tab.id === pane.activeId);
+  const tabs = visibleTabs(layout, pane, keyOf);
+  if (tabs.length === 0) return layout;
+  const index = tabs.findIndex((tab) => tab.id === pane.activeId);
   const next =
-    (((index < 0 ? 0 : index + delta) % pane.tabs.length) + pane.tabs.length) %
-    pane.tabs.length;
-  return activate(layout, pane.tabs[next].id);
+    (((index < 0 ? 0 : index + delta) % tabs.length) + tabs.length) %
+    tabs.length;
+  return activate(layout, tabs[next].id);
 }
 
-export function nextTab(layout: Layout): Layout {
-  return stepTab(layout, 1);
+export function nextTab(
+  layout: Layout,
+  keyOf?: (tab: Tab) => string | null,
+): Layout {
+  return stepTab(layout, 1, keyOf);
 }
 
-export function prevTab(layout: Layout): Layout {
-  return stepTab(layout, -1);
+export function prevTab(
+  layout: Layout,
+  keyOf?: (tab: Tab) => string | null,
+): Layout {
+  return stepTab(layout, -1, keyOf);
 }
 
-/** フォーカスのある面の n 番目 (1 始まり)。無ければ何もしない。 */
-export function activateIndex(layout: Layout, n: number): Layout {
+/** フォーカスのある面の、見えているタブの n 番目 (1 始まり)。無ければ何もしない。 */
+export function activateIndex(
+  layout: Layout,
+  n: number,
+  keyOf?: (tab: Tab) => string | null,
+): Layout {
   const pane = paneOf(layout, layout.focused) as Pane;
-  const tab = pane.tabs[n - 1];
+  const tab = visibleTabs(layout, pane, keyOf)[n - 1];
   return tab ? activate(layout, tab.id) : layout;
 }
 
@@ -980,8 +1048,8 @@ export function tabMenu(
   const other: PaneSide = found.side === "left" ? "right" : "left";
   return {
     close: true,
-    closeOthers: pane.tabs.length > 1,
-    closeToRight: found.index < pane.tabs.length - 1,
+    closeOthers: closeTargets(layout, found, "others", keyOf).size > 0,
+    closeToRight: closeTargets(layout, found, "right", keyOf).size > 0,
     keepOpen: found.tab.preview,
     splitRight: canSplit(layout) && canPlace(found.tab.target, "right"),
     moveToOtherSide:

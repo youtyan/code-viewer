@@ -100,6 +100,7 @@ import {
   targetProject,
   unparkRight,
   unsplit,
+  visibleTabs,
   WORKTREE_REF,
   withProject,
 } from "../../core/main-tabs";
@@ -1148,10 +1149,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       renderActions();
       return;
     }
-    // 右の面を隠した・戻した: 描き直して、面の変化を画面へ知らせる。
+    // 右の面を隠した・戻した: 並べ直して (預けていた間にグループの並びが変わって
+    // いることがある) 描き直し、面の変化を画面へ知らせる。
     pruneRoutes();
     applyGeometry();
-    render();
+    relayout();
     scheduleSave();
     const after = panesView(layout, currentRoot);
     if (!sameView(before, after)) deps.onPanes(after, "stay");
@@ -1675,12 +1677,12 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       {
         label: current.closeOthers,
         disabled: !state.closeOthers,
-        onSelect: () => closeByUser((l) => closeOthers(l, tab.id)),
+        onSelect: () => closeByUser((l) => closeOthers(l, tab.id, keyOf)),
       },
       {
         label: current.closeToRight,
         disabled: !state.closeToRight,
-        onSelect: () => closeByUser((l) => closeToRight(l, tab.id)),
+        onSelect: () => closeByUser((l) => closeToRight(l, tab.id, keyOf)),
       },
       { kind: "separator" },
       {
@@ -2226,6 +2228,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     ))
       old.remove();
     const collapsed = new Set(layout.collapsed ?? []);
+    const shown = new Set(visibleTabs(layout, pane, keyOf));
     const loose: HTMLElement[] = [];
     const grouped: HTMLElement[] = [];
     for (const group of groupsOf(side, pane)) {
@@ -2237,9 +2240,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       const key = group.key;
       // 空のグループは畳めない (畳んだ控えが残っていても開いて描く)。
       const isCollapsed = group.tabs.length > 0 && collapsed.has(key);
-      const visible = isCollapsed
-        ? group.tabs.filter((tab) => tab.id === pane.activeId)
-        : group.tabs;
+      const visible = group.tabs.filter((tab) => shown.has(tab));
       const look = lookOf(key);
       const tabs = document.createElement("div");
       tabs.className = "main-tabs-list main-tabs-group-list";
@@ -2869,8 +2870,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       });
       return true;
     },
-    next: () => activateBy(nextTab),
-    previous: () => activateBy(prevTab),
+    next: () => activateBy((l) => nextTab(l, keyOf)),
+    previous: () => activateBy((l) => prevTab(l, keyOf)),
     reopenClosed() {
       let reopened = false;
       changeAndGo((current) => {
@@ -2887,7 +2888,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       const tab = activeTab(layout);
       if (tab) closeByUser((l) => close(l, tab.id));
     },
-    activateNth: (n) => activateBy((l) => activateIndex(l, n)),
+    activateNth: (n) => activateBy((l) => activateIndex(l, n, keyOf)),
     restore,
     flush,
     // 名前・シェルのプロジェクト・グループの並びが変わったときも呼ばれる (並べ直す)。

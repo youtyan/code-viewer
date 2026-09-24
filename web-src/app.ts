@@ -6254,7 +6254,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "main-tab-last") {
-      MAIN_TABS.activateNth(lastTabNumber(MAIN_TABS.layout()));
+      MAIN_TABS.activateNth(
+        lastTabNumber(MAIN_TABS.layout(), MAIN_TABS.groupOf),
+      );
       focusActiveMainTabSurface();
       return true;
     }
