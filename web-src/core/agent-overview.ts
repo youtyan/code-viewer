@@ -393,18 +393,29 @@ function comparePanePlace(a: AgentPane, b: AgentPane): number {
   return windowA - windowB || paneA - paneB || (a.id < b.id ? -1 : 1);
 }
 
+/**
+ * プロジェクトの並び (左のサイドバー・全体ボード・タブのグループで共通):
+ * 登録した順 → 登録していないもの (名前の順、同じ名前はパスの順)。
+ */
+export function compareProjectsByRegistry(
+  a: Pick<AgentProjectInfo, "registered" | "name" | "root">,
+  b: Pick<AgentProjectInfo, "registered" | "name" | "root">,
+): number {
+  const regA = a.registered;
+  const regB = b.registered;
+  if (regA && regB) return regA.order - regB.order;
+  if (regA) return -1;
+  if (regB) return 1;
+  const byName = a.name.localeCompare(b.name);
+  if (byName !== 0) return byName;
+  return a.root < b.root ? -1 : a.root > b.root ? 1 : 0;
+}
+
 function compareGroupsByRegistry(
   a: AgentProjectGroup,
   b: AgentProjectGroup,
 ): number {
-  const regA = a.info.registered;
-  const regB = b.info.registered;
-  if (regA && regB) return regA.order - regB.order;
-  if (regA) return -1;
-  if (regB) return 1;
-  const byName = a.info.name.localeCompare(b.info.name);
-  if (byName !== 0) return byName;
-  return a.info.root < b.info.root ? -1 : a.info.root > b.info.root ? 1 : 0;
+  return compareProjectsByRegistry(a.info, b.info);
 }
 
 /**

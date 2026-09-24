@@ -11,14 +11,14 @@ import {
   vi,
 } from "vitest";
 import { listColumnLayout } from "../core/list-column";
-import { TAB_FLOOR_UNITS } from "../core/tab-widths";
-import type { SavedBase } from "../views/main-tabs/main-tabs-view";
 import type { SerializedLayout, TabTarget } from "../core/main-tabs";
 import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import { HISTORY_WIDTH } from "../core/panel-sizes";
 import { lastTabNumber } from "../core/pwa";
 import { type AppRoute, urlKeepsSavedFront } from "../core/routes";
+import { TAB_FLOOR_UNITS } from "../core/tab-widths";
 import { closeContextMenu } from "../views/context-menu";
+import type { SavedBase } from "../views/main-tabs/main-tabs-view";
 import {
   COMFORTABLE_PANE_WIDTH,
   createMainTabsView,
@@ -1457,21 +1457,19 @@ describe("main tabs view: ターミナルのタブ", () => {
     await handle.restore();
     handle.openTerminal("shell-a1");
     handle.openTerminal("shell-b2");
+    const before = handle.terminalSessions();
     handle.closeTerminal("shell-a1");
-    expect([terminals[terminals.length - 1], names()]).toEqual([
+    expect([
+      before,
+      handle.terminalSessions(),
+      terminals[terminals.length - 1],
+      names(),
+    ]).toEqual([
+      ["shell-a1", "shell-b2"],
+      ["shell-b2"],
       { open: ["shell-b2"], closed: ["shell-a1"] },
       ["app.ts (preview)", ">Shell shell-b2"],
     ]);
-  });
-
-  test("指定したシェルのタブだけを閉じる (入口を起こし直した後の消えたシェル)", async () => {
-    const { handle, names } = setup(async () => null);
-    await handle.restore();
-    handle.openTerminal("shell-a1");
-    handle.openTerminal("shell-b2");
-    expect(handle.terminalSessions()).toEqual(["shell-a1", "shell-b2"]);
-    handle.closeTerminals(["shell-a1"]);
-    expect(names()).toEqual(["app.ts (preview)", ">Shell shell-b2"]);
   });
 
   test("URL のシェル (?terminal=) のタブがあれば、それを前面に出せる", async () => {

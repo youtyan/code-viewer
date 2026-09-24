@@ -15714,6 +15714,12 @@ html[data-theme="dark"] .tools-code span[style] {
   display: flex;
   flex-direction: column;
 }
+/* サーバが起き直して終わったシェルの案内 (views/terminal/terminal-view.ts の
+   showEnded)。面の高さいっぱいに広げ、.empty の中央寄せで上下の真ん中に出す
+   (広げないと中身の高さのまま面の上に寄った)。 */
+.terminal-pane > .empty {
+  flex: 1 1 auto;
+}
 /* xterm 1 つと状態の行の組 (views/terminal/terminal-view.ts の ScreenSlot)。
    パネルとメインのタブの間で、この箱ごと付け替える。 */
 .terminal-slot {

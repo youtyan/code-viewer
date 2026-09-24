@@ -30,10 +30,13 @@
 // 窓の変更は SSE (tabs) で知り、refreshFromServer で取り直して重ねる
 // (core/main-tabs-merge.ts)。
 
+import type {
+  AgentOverviewResponse,
+  AgentPane,
+} from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
 import { attachDragResizer } from "../../core/drag-resizer";
 import { CHEVRON_DOWN_12_PATH, iconSvg } from "../../core/icons";
-import { fitTabWidths, TAB_FLOOR_UNITS } from "../../core/tab-widths";
 import { isImeComposing } from "../../core/keyboard";
 import {
   activate,
@@ -65,11 +68,11 @@ import {
   noteGroupFronts,
   type OpenOptions,
   open,
-  type Pane,
   openRight,
   openSide,
   PAGE_KINDS,
   type PageKind,
+  type Pane,
   type PaneSide,
   type ParkedRight,
   parkRight,
@@ -101,10 +104,14 @@ import {
 } from "../../core/main-tabs";
 import { mergeLayouts } from "../../core/main-tabs-merge";
 import { PHONE_MEDIA_QUERY } from "../../core/mobile-layout";
+import { projectInitials } from "../../core/project-colors";
 import type { AppRoute } from "../../core/routes";
+import type { ShellSession } from "../../core/shell";
+import { fitTabWidths, TAB_FLOOR_UNITS } from "../../core/tab-widths";
 import { basenameOf } from "../../core/terminal-board";
 import { terminalImageExtension } from "../../core/terminal-images";
 import {
+  projectRootOfPath,
   TAB_PROJECT_SEPARATOR,
   type TerminalTabName,
   type TerminalTabProject,
@@ -113,7 +120,6 @@ import {
 import { isToolId } from "../../core/tools";
 import type { ContextMenuItem } from "../context-menu";
 import { showContextMenu } from "../context-menu";
-import { projectInitials } from "../../core/project-colors";
 import {
   type ProjectLook,
   paintProjectColor,
@@ -214,7 +220,7 @@ export type MainTabsDeps = {
   /** グループの並び (左の一覧のプロジェクトの並び)。 */
   projectOrder?(): readonly string[];
   /**
-   * そのシェルが動いているフォルダのプロジェクト (どれでもなければ null、まだ
+   * そのシェルのグループ (shellGroupOf。どれでもなければ null、まだ・一時的に
    * 分からなければ undefined: 保存した控えを使う)。
    */
   terminalProject?(session: string): string | null | undefined;
@@ -316,12 +322,6 @@ export type MainTabsHandle = {
   closeTerminal(session: string): void;
   /** 端末のタブが映しているシェル。 */
   terminalSessions(): string[];
-  /**
-   * それらのシェルの端末のタブを閉じる。入口のサーバを起こし直すと、保存した
-   * 配置のシェルは全部消えて付き直せない (シェルは入口のプロセスの子)。残すと
-   * 番号の無い「Shell」のタブが並んだ (app.ts の closeTabsOfGoneShells)。
-   */
-  closeTerminals(sessions: readonly string[]): void;
   /** 画像のタブを開いて前面に出す。 */
   openImage(path: string, pane?: OpenOptions["pane"]): void;
   /** フォーカスのある面の＋のメニューを開く (キー操作・パレットから)。 */
@@ -435,6 +435,43 @@ export type MainTabsHandle = {
 };
 
 type FileRoute = Extract<AppRoute, { screen: "file" }>;
+
+/**
+ * シェルのタブのグループ (プロジェクトの根)。映しているペインのプロジェクト、
+ * 無ければシェルを起こしたフォルダを含むプロジェクト (roots の前方一致の
+ * いちばん深いもの)。どれでもなければ null (タブ列の右端)。
+ *
+ * 分からない間は undefined (画面は前の値の控えで描く)。一覧がまだ無い、に加えて
+ * 一時的に分からないとき: tmux の一覧が取れなかった応答 (ペインもプロジェクトも
+ * 空で届く)・tmux のクライアントの一覧が取れなかった・ペインを映していたシェルの
+ * 結び付きが外れている・シェルの端末名がまだ引けていない・シェルの一覧に無い
+ * (サーバが起き直して終わったシェルのタブは、開き直すまで残る)。ここで null や
+ * 起こしたフォルダに落とすと、タブが一瞬右端や別のグループへ飛び、並びが変わって
+ * いた。
+ */
+export function shellGroupOf(input: {
+  overview: Pick<AgentOverviewResponse, "tmux" | "errors"> | null;
+  /** 映しているペイン (見つからなければ undefined)。 */
+  pane: AgentPane | undefined;
+  /** シェルの一覧のそのシェル (一覧に無い・一覧がまだ無ければ undefined か null)。 */
+  shell: ShellSession | undefined | null;
+  /** この画面で、そのシェルがペインを映していたことがあるか。 */
+  showedPane: boolean;
+  roots: readonly string[];
+}): string | null | undefined {
+  const { overview, pane, shell } = input;
+  if (!overview) return undefined;
+  if (pane) return pane.project || null;
+  if (
+    overview.tmux.error ||
+    overview.errors.some((item) => item.operation === "list_clients") ||
+    input.showedPane ||
+    !shell ||
+    shell.tty === ""
+  )
+    return undefined;
+  return projectRootOfPath(shell.cwd, input.roots);
+}
 
 export function isPageKind(value: string | undefined): value is PageKind {
   return (PAGE_KINDS as readonly (string | undefined)[]).includes(value);
@@ -665,11 +702,79 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     });
   }
 
+  /**
+   * 並べ直しでグループの外へ出たタブの元の場所 (タブの id → 元のグループ・
+   * 左にあった同じグループのタブ (近い順)・グループの中の位置)。シェルのグループは一瞬
+   * 外れて戻ることがある (cd で出て戻った・一時的に分からない間の控えが無かった)。
+   * regroup は今の位置で並べ直すので、戻ったタブがグループの末尾に入っていた。
+   */
+  const homes = new Map<
+    string,
+    { key: string; left: string[]; index: number }
+  >();
+  /** 前に並べ直したときの各タブのグループ (外へ出た・戻ったを知る)。 */
+  let lastKeys = new Map<string, string | null>();
+
+  /** 外へ出たタブの元の場所を覚え、元のグループへ戻ったタブを元の場所へ入れる。 */
+  function returnHome(next: Layout): Layout {
+    let out = next;
+    for (const side of SIDES) {
+      const pane = side === "left" ? out.panes.left : out.panes.right;
+      if (!pane) continue;
+      // 並びは外へ出る前のまま (前に並べ直した並び) なので、元の左隣が引ける。
+      pane.tabs.forEach((tab, at) => {
+        const was = lastKeys.get(tab.id);
+        if (was == null || keyOf(tab) === was || homes.has(tab.id)) return;
+        const before = pane.tabs
+          .slice(0, at)
+          .filter((item) => lastKeys.get(item.id) === was);
+        homes.set(tab.id, {
+          key: was,
+          left: before.map((item) => item.id).reverse(),
+          index: before.length,
+        });
+      });
+      const back = pane.tabs
+        .flatMap((tab) => {
+          const home = homes.get(tab.id);
+          return home && home.key === keyOf(tab) ? [{ tab, home }] : [];
+        })
+        .sort((a, b) => a.home.index - b.home.index);
+      if (back.length === 0) continue;
+      const moving = new Set(back.map((item) => item.tab.id));
+      let tabs = pane.tabs.filter((tab) => !moving.has(tab.id));
+      // 元の左隣の右へ。左隣が閉じられていれば、残っているうちでいちばん近い
+      // 左のタブの右 (どれも無ければグループの先頭)。一緒に出たタブは元の位置の
+      // 順に戻すので、互いの左隣が先に戻っている。
+      for (const { tab, home } of back) {
+        homes.delete(tab.id);
+        const inGroup = (item: Tab) => keyOf(item) === home.key;
+        const left = home.left
+          .map((id) =>
+            tabs.findIndex((item) => item.id === id && inGroup(item)),
+          )
+          .find((at) => at >= 0);
+        const first = tabs.findIndex(inGroup);
+        const at =
+          left !== undefined ? left + 1 : first >= 0 ? first : tabs.length;
+        tabs = [...tabs.slice(0, at), tab, ...tabs.slice(at)];
+      }
+      out = { ...out, panes: { ...out.panes, [side]: { ...pane, tabs } } };
+    }
+    return out;
+  }
+
   /** グループの順に並べ直し、前面をそのグループの前面として覚える。 */
   function normalize(next: Layout): Layout {
     // groupOfTarget は layout の控えを読むので、控えを先に今の値にする。
     layout = withTerminalGroups(next);
-    return regroup(noteGroupFronts(layout, keyOf), rankOf);
+    const result = regroup(noteGroupFronts(returnHome(layout), keyOf), rankOf);
+    const open = new Set(
+      [...allTabs(result), ...(parked?.pane.tabs ?? [])].map((tab) => tab.id),
+    );
+    for (const id of homes.keys()) if (!open.has(id)) homes.delete(id);
+    lastKeys = new Map(allTabs(result).map((tab) => [tab.id, keyOf(tab)]));
+    return result;
   }
 
   // 面ごとのタブ列。strip は横に送る箱 (タブの幅の入れ物) で、中にタブの並び
@@ -1376,7 +1481,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   /**
    * 利用者が閉じた (×・中ボタン・Delete・右クリック・g x)。閉じたタブを履歴に
    * 積む (reopenClosed で開き直せる)。シェルが消えて閉じたタブは積まない
-   * (closeTerminal / closeTerminals はこれを通らない)。
+   * (closeTerminal はこれを通らない)。
    */
   function closeByUser(change: (current: Layout) => Layout): void {
     const before = layout;
@@ -1884,7 +1989,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const el = document.createElement("div");
     el.className = "main-tab";
     el.classList.toggle("main-tab-active", active);
-    // 上端の線はフォーカスのある面の選択タブだけ (もう一方は面の明るさ)。
+    // 選択タブの上端の線: フォーカスのある面は強調色 (.main-tab-focused)、
+    // もう一方の面は灰色 (.main-tab-active)。
     el.classList.toggle(
       "main-tab-focused",
       active && (!layout.panes.right || layout.focused === side),
@@ -2550,12 +2656,6 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       if (tab) changeAndGo((l) => close(l, tab.id));
     },
     terminalSessions: () => [...terminalsOf(layout)],
-    closeTerminals(sessions) {
-      for (const session of sessions) {
-        const tab = findTerminal(session);
-        if (tab) changeAndGo((l) => close(l, tab.id));
-      }
-    },
     openImage(path, pane = "focused") {
       rememberRoute();
       commit(

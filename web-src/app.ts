@@ -196,10 +196,7 @@ import {
   terminalImageExtension,
   validateTerminalImageResponseUrls,
 } from "./core/terminal-images";
-import {
-  projectRootOfPath,
-  type TerminalTabProject,
-} from "./core/terminal-tab-name";
+import type { TerminalTabProject } from "./core/terminal-tab-name";
 import {
   clampTerminalFontSize,
   type TmuxClientWindow,
@@ -298,6 +295,7 @@ import {
   createListTreeOpen,
   localizeListTreeOpen as setListTreeOpenLabel,
 } from "./views/list-tree-open";
+import { mainTabsText } from "./views/main-tabs/i18n";
 import {
   COMFORTABLE_PANE_WIDTH,
   createMainTabsView,
@@ -308,8 +306,8 @@ import {
   type SavedTabs,
   type SavedWrite,
   SPLIT_DIVIDER_WIDTH,
+  shellGroupOf,
 } from "./views/main-tabs/main-tabs-view";
-import { mainTabsText } from "./views/main-tabs/i18n";
 import { pageIconPaths } from "./views/main-tabs/tab-icons";
 import { installMobileShell } from "./views/mobile-shell";
 import { createProjectActions } from "./views/projects/project-actions";
@@ -8470,6 +8468,7 @@ window.GdpExpandLogic = GdpExpandLogic;
    */
   function closeEndedTerminal(session: string): void {
     TAB_SHELL_PANES.delete(session);
+    SHELLS_SHOWING_PANE.delete(session);
     TAB_TMUX_PLACES.delete(session);
     if (!MAIN_TABS.hasTerminal(session)) {
       TAB_LAST_LABELS.delete(session);
@@ -8493,21 +8492,26 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * シェルのタブのグループ (プロジェクトの根)。映しているペインのプロジェクト、
-   * 無ければシェルを起こしたフォルダを含むプロジェクト (一覧の根の前方一致の
-   * いちばん深いもの)。どれでもなければ null (タブ列の右端)、一覧がまだ届いて
-   * いなければ undefined。
+   * この画面でペインを映していたことのあるシェル。結び付きが外れている間
+   * (tmux のクライアントが繋がり直す間など) は、起こしたフォルダでグループを
+   * 決め直さない (shellGroupOf)。
    */
+  const SHELLS_SHOWING_PANE = new Set<string>();
+
+  /** シェルのタブのグループ (決め方は views/main-tabs の shellGroupOf)。 */
   function terminalProjectOf(session: string): string | null | undefined {
-    // 一覧とシェルの一覧が届くまでは分からない (保存した控えで描く)。
-    if (!AGENT_MONITOR.snapshot().overview) return undefined;
     const pane = paneForShell(session);
-    if (pane) return pane.project || null;
+    if (pane) SHELLS_SHOWING_PANE.add(session);
     const shells = TERMINAL_VIEW.knownShells();
-    if (!shells) return undefined;
-    const cwd = shells.sessions.find((item) => item.id === session)?.cwd;
-    if (!cwd) return null;
-    return projectRootOfPath(cwd, PROJECT_LOOKS.order());
+    return shellGroupOf({
+      overview: AGENT_MONITOR.snapshot().overview,
+      pane,
+      shell: shells
+        ? shells.sessions.find((item) => item.id === session)
+        : null,
+      showedPane: SHELLS_SHOWING_PANE.has(session),
+      roots: PROJECT_LOOKS.order(),
+    });
   }
 
   /**
@@ -8571,7 +8575,10 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** 左の一覧の並びで前 (-1) / 次 (+1) のプロジェクトへ (端では回る)。 */
   function switchToAdjacentProject(delta: -1 | 1): void {
-    const order = PROJECT_LOOKS.order();
+    // 一覧から消えた根 (並びの位置だけ残している) には移らない。
+    const order = PROJECT_LOOKS.order().filter((root) =>
+      PROJECT_LOOKS.get(root),
+    );
     const here = MAIN_TABS.currentProject() ?? PROJECT_LOOKS.current()?.root;
     if (order.length < 2 || !here) return;
     const index = order.indexOf(here);

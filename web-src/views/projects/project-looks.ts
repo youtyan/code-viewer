@@ -5,7 +5,8 @@
 //
 //   PROJECT_LOOKS.get(root)     そのプロジェクトの色と頭文字 (知らなければ null)
 //   PROJECT_LOOKS.current()     いま見ているプロジェクト
-//   PROJECT_LOOKS.order()       一覧の並び (根。左の一覧と同じ順。タブのグループの並び)
+//   PROJECT_LOOKS.order()       一覧の並び (根。左の一覧と同じ順 = compareProjectsByRegistry。
+//                               タブのグループの並び。一覧から消えた根も前の位置に残す)
 //   PROJECT_LOOKS.subscribe(fn) 色・名前・いま見ているものが変わったら呼ぶ
 //   projectMark(look)           色の四角と頭文字の要素 (.project-mark)
 //   paintProjectColor(el, c)    要素に色を付ける。子孫の CSS は var(--project-color)
@@ -16,9 +17,10 @@
 // 取り直すたびに update へ渡す。色の値そのものは web/style.css の名前の層にある
 // (core/project-colors.ts の先頭)。
 
-import type {
-  AgentOverviewResponse,
-  AgentProjectInfo,
+import {
+  type AgentOverviewResponse,
+  type AgentProjectInfo,
+  compareProjectsByRegistry,
 } from "../../core/agent-overview";
 import { type ProjectColor, projectInitials } from "../../core/project-colors";
 
@@ -83,30 +85,66 @@ export type ProjectLooks = {
   subscribe(listener: () => void): () => void;
 };
 
+/**
+ * 一覧から消えた根を、前の並びのすぐ左にあったもの (今も並びにあるもの) の
+ * 右へ残す。消えたプロジェクトのタブのグループが、一覧に無いもの全部と同じ
+ * 位置 (末尾) へ飛ばないように。
+ */
+function keepGone(previous: readonly string[], present: string[]): string[] {
+  const out = [...present];
+  previous.forEach((root, at) => {
+    if (out.includes(root)) return;
+    let place = 0;
+    for (let left = at - 1; left >= 0; left -= 1) {
+      const found = out.indexOf(previous[left]);
+      if (found >= 0) {
+        place = found + 1;
+        break;
+      }
+    }
+    out.splice(place, 0, root);
+  });
+  return out;
+}
+
 export function createProjectLooks(): ProjectLooks {
   let looks = new Map<string, ProjectLook>();
   let current: string | null = null;
+  let order: string[] = [];
   let signature = "";
   const listeners = new Set<() => void>();
   return {
     update(overview) {
       if (!overview) return;
+      // tmux の一覧が取れなかった応答はプロジェクトが空で届く。前の並びと色を
+      // 保つ (空にすると、グループの札の色と頭文字が一瞬消え、並びも崩れた)。
+      if (overview.tmux.error) return;
+      const sorted = [...overview.projects].sort(compareProjectsByRegistry);
       const next = new Map(
-        overview.projects.map((info) => [info.root, projectLook(info)]),
+        sorted.map((info) => [info.root, projectLook(info)]),
       );
       const here =
         overview.projects.find((info) => info.server.status === "current")
           ?.root ?? null;
-      const nextSignature = JSON.stringify([here, [...next.values()]]);
+      const nextOrder = keepGone(
+        order,
+        sorted.map((info) => info.root),
+      );
+      const nextSignature = JSON.stringify([
+        here,
+        [...next.values()],
+        nextOrder,
+      ]);
       if (nextSignature === signature) return;
       signature = nextSignature;
       looks = next;
       current = here;
+      order = nextOrder;
       for (const listener of listeners) listener();
     },
     get: (root) => looks.get(root) ?? null,
     current: () => (current === null ? null : (looks.get(current) ?? null)),
-    order: () => [...looks.keys()],
+    order: () => order,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
