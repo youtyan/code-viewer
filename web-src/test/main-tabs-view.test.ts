@@ -1,15 +1,6 @@
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { listColumnLayout } from "../core/list-column";
 import type { SerializedLayout, TabTarget } from "../core/main-tabs";
 import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
@@ -28,17 +19,17 @@ import {
   SPLIT_DIVIDER_WIDTH,
 } from "../views/main-tabs/main-tabs-view";
 
-beforeAll(() => {
+// 窓 (happy-dom) はテストごとに作り直す。画面の部品は片付けの口を持たず、
+// document.body の class を見張る MutationObserver を残す。同じ窓を使い回すと、
+// 前のテストの部品がすべて次のテストの body の変化にも反応し、後ろのテストほど
+// 遅くなっていた (131 件で最初の 15ms が最後は 800ms)。
+beforeEach(() => {
   GlobalRegistrator.register();
 });
 
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
-
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
-  document.body.replaceChildren();
+  await GlobalRegistrator.unregister();
 });
 
 const range = { from: "HEAD", to: "worktree" };

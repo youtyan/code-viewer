@@ -6,6 +6,7 @@
 // worktree-open.test.ts が registry だけで確かめる)。
 
 import {
+  cpSync,
   existsSync,
   mkdtempSync,
   renameSync,
@@ -16,7 +17,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "vitest";
 import type { WorktreesResponse } from "../core/types";
 import { handleWorktreeRoute } from "../server/worktree/handle";
 import { mapWithConcurrency } from "../server/worktree/list";
@@ -75,15 +84,33 @@ async function listedPath(
   return found.path;
 }
 
+/**
+ * 最初のコミットまで済んだリポジトリ。ファイルの頭で 1 回だけ作り、テストごとに
+ * 写す (git を 5 回起こすより速い。commit は git の呼び出しを見張る環境で特に重い)。
+ */
+let template = "";
+
+beforeAll(() => {
+  template = mkdtempSync(join(tmpdir(), "code-viewer-worktree-template-"));
+  runGit(template, ["init", "-q", "-b", "main", "."]);
+  runGit(template, ["config", "user.email", "test@example.com"]);
+  runGit(template, ["config", "user.name", "test"]);
+  writeFileSync(join(template, "sample.txt"), "sample\n");
+  writeFileSync(join(template, "sample.png"), BASE_MEDIA_BYTES);
+  runGit(template, ["add", "sample.txt", "sample.png"]);
+  runGit(template, ["commit", "-qm", "initial commit"]);
+});
+
+afterAll(() => {
+  rmSync(template, { recursive: true, force: true });
+});
+
 beforeEach(() => {
   repo = mkdtempSync(join(tmpdir(), "code-viewer-worktree-"));
-  runGit(repo, ["init", "-q", "-b", "main", "."]);
-  runGit(repo, ["config", "user.email", "test@example.com"]);
-  runGit(repo, ["config", "user.name", "test"]);
-  writeFileSync(join(repo, "sample.txt"), "sample\n");
-  writeFileSync(join(repo, "sample.png"), BASE_MEDIA_BYTES);
-  runGit(repo, ["add", "sample.txt", "sample.png"]);
-  runGit(repo, ["commit", "-qm", "initial commit"]);
+  cpSync(template, repo, { recursive: true });
+  // 写したファイルは inode と ctime が変わり、index の記録と食い違う (中身は
+  // 同じ)。記録を今のファイルに合わせ、作りたてと同じ状態にそろえる。
+  runGit(repo, ["update-index", "-q", "--refresh"]);
 });
 
 afterEach(() => {
