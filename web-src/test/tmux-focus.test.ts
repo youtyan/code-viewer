@@ -62,13 +62,43 @@ describe("tmuxAttachCommandLine", () => {
 });
 
 describe("resolvePaneSession", () => {
-  test("returns the resolved session", async () => {
-    runTmux.mockResolvedValue({ status: "ok", stdout: "sample-session\n" });
+  // 区切りは tmux の書式の区切り文字 (U+001F)。
+  test.each([
+    {
+      name: "セッション名とウインドウの番号",
+      stdout: "sample-session\u001f3\n",
+      expected: { status: "ok", session: "sample-session", window: 3 },
+    },
+    {
+      name: "区切りの文字を含むセッション名は最後の区切りで分ける",
+      stdout: "sample\u001fsession\u001f0\n",
+      expected: { status: "ok", session: "sample\u001fsession", window: 0 },
+    },
+    {
+      name: "空の答えは gone",
+      stdout: "\n",
+      expected: { status: "gone" },
+    },
+  ])("$name", async ({ stdout, expected }) => {
+    runTmux.mockResolvedValue({ status: "ok", stdout });
 
-    await expect(resolvePaneSession("%1", process.cwd())).resolves.toEqual({
-      status: "ok",
-      session: "sample-session",
-    });
+    await expect(resolvePaneSession("%1", process.cwd())).resolves.toEqual(
+      expected,
+    );
+  });
+
+  test.each([
+    { name: "ウインドウの番号が無い", stdout: "sample-session\n" },
+    { name: "ウインドウの番号が数でない", stdout: "sample-session\u001fx\n" },
+    { name: "セッション名が空", stdout: "\u001f1\n" },
+  ])("$name なら、答えを添えたエラー", async ({ stdout }) => {
+    runTmux.mockResolvedValue({ status: "ok", stdout });
+
+    const result = await resolvePaneSession("%1", process.cwd());
+
+    expect(result.status === "error" && result.error.message).toBe(
+      `tmux answered an unreadable session and window for %1: ${JSON.stringify(stdout)}`,
+    );
   });
 
   test.each([

@@ -156,6 +156,31 @@ export function isTmuxPaneId(value: unknown): value is TmuxPaneId {
 }
 
 /**
+ * ターミナルのタブが映していた tmux の場所。サーバが起き直した後に同じ場所へ
+ * 繋ぎ直すために保存する (core/main-tabs.ts の terminalTmux)。ペイン ID は tmux が
+ * 起き直すと別のペインに付く (`%0` が振り直される) ので、ID だけで照合せず、
+ * セッション名とウインドウの番号も一致したときだけ繋ぐ (server/terminal/open.ts)。
+ */
+export type TmuxPlace = {
+  pane: TmuxPaneId;
+  session: string;
+  /** ウインドウの番号 (`#{window_index}`)。 */
+  window: number;
+};
+
+export function isTmuxPlace(value: unknown): value is TmuxPlace {
+  if (!value || typeof value !== "object") return false;
+  const place = value as Record<string, unknown>;
+  return (
+    isTmuxPaneId(place.pane) &&
+    typeof place.session === "string" &&
+    place.session.length > 0 &&
+    Number.isInteger(place.window) &&
+    (place.window as number) >= 0
+  );
+}
+
+/**
  * パスがどれかの作業ツリーの中にあるか。
  *
  * ドロワーは既定で「このリポジトリのペイン」だけを出す。エージェントは

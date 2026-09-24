@@ -9,6 +9,7 @@ import { formatErrorDetail } from "../../core/error-detail";
 //   ▾ SL sample-lib
 //       ○ claude  Idle              12m
 //   ▸ SD sample-docs                         ← エージェントの居ないプロジェクトは 1 行
+//   ▸ 停止中 (3)                              ← 起動中でない登録プロジェクト (既定は畳む)
 //   (SA などはプロジェクトの色の四角と頭文字。views/projects/project-looks.ts)
 //
 // 並び・登録プロジェクトと tmux から見つかったプロジェクトの合流・未読は
@@ -31,6 +32,10 @@ import {
   PLUS_16_PATH,
 } from "../../core/icons";
 import { SOFT_KEYS_MEDIA_QUERY } from "../../core/mobile-layout";
+import {
+  partitionProjectsByRunning,
+  runningProjectRoots,
+} from "../../core/project-running";
 import { projectDropBefore } from "../../core/projects";
 import { showContextMenu } from "../context-menu";
 import type { ProjectActions } from "../projects/project-actions";
@@ -42,6 +47,7 @@ import {
 import { showProjectMenu } from "../projects/project-menu";
 import { agentStateMark, fillAgentCard } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
+import { type HandoffMenuActions, handoffMenuItems } from "./handoff";
 import type { AgentsText } from "./i18n";
 import { markPreviewRow, PANE_PREVIEW, type PanePreview } from "./pane-preview";
 import { paneText } from "./pane-text";
@@ -57,6 +63,8 @@ export type AgentsSidebarDeps = {
   viewingPane(): string | null;
   /** 「新しいエージェント」の画面。project は選んでおくプロジェクト。 */
   launch(project?: string): void;
+  /** 行の右クリックのメニューの「別のアカウントで続ける…」(handoff.ts)。 */
+  handoff: HandoffMenuActions;
   /** エージェントの全体ボードへ。 */
   openBoard(): void;
   /**
@@ -67,6 +75,12 @@ export type AgentsSidebarDeps = {
   /** いま見ているリポジトリの名前 (登録が 1 つも無いときの案内に出す)。 */
   currentName(): string;
   saveCollapsed(roots: string[]): void;
+  /**
+   * 停止中のプロジェクトの節を開いているか・開く / 畳む。畳んだプロジェクトと
+   * 同じく全プロジェクト共通の設定に置く。既定は畳む。
+   */
+  isStoppedOpen(): boolean;
+  setStoppedOpen(open: boolean): void;
   /** 最初の入力待ちの「通知を許可すると…」を閉じたか・閉じる。 */
   notifyHintDismissed(): boolean;
   dismissNotifyHint(): void;
@@ -196,6 +210,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
             label: current.openPaneOpposite,
             onSelect: () => openHere("opposite"),
           },
+          ...handoffMenuItems(pane, current, deps.handoff),
         ],
         { at: { x: event.clientX, y: event.clientY } },
       );
@@ -513,6 +528,56 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     { passive: true },
   );
 
+  function setStoppedOpen(open: boolean): void {
+    if (deps.isStoppedOpen() === open) return;
+    deps.setStoppedOpen(open);
+    render(true);
+  }
+
+  /**
+   * 停止中 (エージェントもシェルも無く、裏のプロセスも動いていない) の登録
+   * プロジェクトを、一覧の下の畳める節にまとめる。中の行は 1 行ずつで、押せば
+   * 今までどおり開く (開けば起動中へ移る)。畳んでいても、中に問題があれば見出しに
+   * 印を出す (隠さない)。
+   */
+  function stoppedSection(
+    groups: AgentProjectGroup[],
+    viewing: string | null,
+  ): HTMLElement {
+    const current = text();
+    const open = deps.isStoppedOpen();
+    const section = el("div", "nav-stopped");
+    section.role = "group";
+    const toggle = el("button", "nav-section-title nav-stopped-toggle");
+    toggle.type = "button";
+    toggle.id = "nav-stopped-title";
+    toggle.role = "treeitem";
+    toggle.tabIndex = -1;
+    toggle.setAttribute(NAV_ATTR, "stopped");
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.title = current.sidebar.stoppedTitle;
+    toggle.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
+    toggle.append(current.sidebar.stopped(groups.length));
+    const errors = groups
+      .map((group) => group.info.error)
+      .filter((error) => error !== "");
+    if (errors.length > 0) {
+      const problem = el("span", "nav-project-problem", "!");
+      problem.title = errors
+        .map((error) => current.projectError(error))
+        .join("\n");
+      problem.setAttribute("aria-label", problem.title);
+      toggle.appendChild(problem);
+    }
+    toggle.addEventListener("click", () => setStoppedOpen(!open));
+    section.setAttribute("aria-labelledby", toggle.id);
+    const list = el("div", "nav-stopped-list");
+    list.hidden = !open;
+    for (const group of groups) list.appendChild(createProject(group, viewing));
+    section.append(toggle, list);
+    return section;
+  }
+
   function toggleCollapsed(root: string): void {
     if (collapsed.has(root)) collapsed.delete(root);
     else collapsed.add(root);
@@ -543,6 +608,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       [...snapshot.unread],
       snapshot.error,
       deps.viewingPane(),
+      deps.isStoppedOpen(),
       deps.projects.signature(),
       // 巡回を終えた時刻は描かない。含めると取り直しのたびに描き直す。
       snapshot.overview && { ...snapshot.overview, observedAt: 0 },
@@ -659,7 +725,18 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     registeredInfos = new Map(
       registered.map((group) => [group.info.root, group.info]),
     );
-    for (const group of registered) {
+    // 登録したものは起動中と停止中に分ける。起動中は今までどおり直下に (見出しは
+    // 出さない。「起動中…」は見出しの中で「起こしている最中」の意味で使っている)、
+    // 停止中は一覧の下の畳める節へ。どちらの中も登録の順。
+    const starting = overview.projects
+      .filter((info) => deps.projects.activity(info.root)?.kind === "starting")
+      .map((info) => info.root);
+    const split = partitionProjectsByRunning(
+      registered,
+      (group) => group.info.root,
+      runningProjectRoots(overview, starting),
+    );
+    for (const group of split.running) {
       root.appendChild(createProject(group, viewing));
     }
     if (registered.length === 0) {
@@ -683,7 +760,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       const byPath = el(
         "button",
         "nav-note nav-note-link",
-        current.projects.switcherAddPath,
+        current.projects.addProjectMenu,
       );
       byPath.type = "button";
       byPath.setAttribute(FOCUS_ATTR, "register-path");
@@ -714,6 +791,9 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         section.appendChild(createProject(group, viewing));
       }
       root.appendChild(section);
+    }
+    if (split.stopped.length > 0) {
+      root.appendChild(stoppedSection(split.stopped, viewing));
     }
     const problems =
       (error ? 1 : 0) +
@@ -841,6 +921,11 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     }
     if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
       const key = target.getAttribute(NAV_ATTR) ?? "";
+      if (key === "stopped") {
+        event.preventDefault();
+        setStoppedOpen(event.key === "ArrowRight");
+        return;
+      }
       if (!key.startsWith("project:")) return;
       const rootKey = key.slice("project:".length);
       const wantCollapsed = event.key === "ArrowLeft";

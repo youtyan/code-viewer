@@ -23,9 +23,8 @@ import {
 import { shellSingleQuote } from "./cli-helpers";
 import {
   commandForExternal,
-  commandNotFoundDetail,
+  commandRunFailure,
   type ExternalCommandName,
-  isCommandNotFoundResult,
 } from "./command-resolver";
 import {
   openDockerAdapterAsync,
@@ -195,9 +194,8 @@ function commandVersionFailureDetail(
   result: RunResult,
 ): string {
   return [
-    isCommandNotFoundResult(command, result)
-      ? commandNotFoundDetail(command)
-      : `${command} ${args.join(" ")} exited with ${result.code}`,
+    commandRunFailure(command, result)?.detail ??
+      `${command} ${args.join(" ")} exited with ${result.code}`,
     result.stderr.trim() ? `stderr: ${result.stderr.trim()}` : "",
     result.stdout.trim() ? `stdout: ${result.stdout.trim()}` : "",
   ]

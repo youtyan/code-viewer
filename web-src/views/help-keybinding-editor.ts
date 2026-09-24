@@ -1,4 +1,4 @@
-// 設定 (Help ページの設定) の「ショートカット」の節。アプリの操作を全部並べ、
+// 設定のページの「ショートカット」の節。アプリの操作を全部並べ、
 // 操作ごとにキーを足す・外す・効く所 (入力欄・端末・PWA の窓) を選ぶ・既定に
 // 戻す。JSON の書き出し・読み込み・直接編集もここ。保存はページの「変更を保存」
 // 1 つ (SettingsDraft。節の中に「保存」を置かない。ui-surface.md の設定の節)。
@@ -54,7 +54,7 @@ export type ShortcutSettingsDeps = {
   download(fileName: string, text: string): void;
 };
 
-type ShortcutText = {
+export type ShortcutText = {
   title: string;
   intro: string;
   filterPlaceholder: string;
@@ -67,13 +67,16 @@ type ShortcutText = {
   resetAllBody: string;
   resetAllConfirm: string;
   jsonLabel: string;
-  jsonHelp: string;
+  /** 1 つが 1 段落。 */
+  jsonHelp: readonly string[];
   jsonIssue: (issue: KeymapJsonIssue, message: string) => string;
   issue: Record<KeymapJsonIssueCode, (detail: string) => string>;
   importFailed: (detail: string) => string;
   problem: string;
   changed: string;
   noKey: string;
+  /** 分類ごとの見出しの行の、キーの列の名前。 */
+  keysColumn: string;
   addKey: string;
   pressKey: string;
   gFirst: string;
@@ -91,7 +94,10 @@ type ShortcutText = {
   alreadyAssigned: (key: string) => string;
 };
 
-const TEXT: Record<HelpKeybindingLanguage, ShortcutText> = {
+export const SHORTCUT_SETTINGS_TEXT: Record<
+  HelpKeybindingLanguage,
+  ShortcutText
+> = {
   en: {
     title: "Shortcuts",
     intro:
@@ -107,8 +113,10 @@ const TEXT: Record<HelpKeybindingLanguage, ShortcutText> = {
       "Every key you changed goes back to its default when you save the settings.",
     resetAllConfirm: "Restore all",
     jsonLabel: "Changed shortcuts (JSON)",
-    jsonHelp:
-      'Only the actions you changed are listed, each with its keys, for example "toggle-theme": [{ "key": "t", "ctrl": true }]. An empty list turns the action off. "inputs", "terminal" and "pwa" (true or false) set where a key works. Nothing is saved while the JSON has a mistake.',
+    jsonHelp: [
+      'Only the actions you changed are listed, each with its keys, for example "toggle-theme": [{ "key": "t", "ctrl": true }]. An empty list turns the action off.',
+      '"inputs", "terminal" and "pwa" (true or false) set where a key works. Nothing is saved while the JSON has a mistake.',
+    ],
     jsonIssue: (issue, message) =>
       `Line ${issue.line}, column ${issue.column}${issue.path === "$" ? "" : ` (${issue.path})`}: ${message}`,
     issue: {
@@ -138,6 +146,7 @@ const TEXT: Record<HelpKeybindingLanguage, ShortcutText> = {
     problem: "Fix the shortcut JSON before saving.",
     changed: "Changed",
     noKey: "No key",
+    keysColumn: "Keys",
     addKey: "Add key",
     pressKey: "Press a key…",
     gFirst: "Press g first",
@@ -172,8 +181,10 @@ const TEXT: Record<HelpKeybindingLanguage, ShortcutText> = {
     resetAllBody: "変えたキーは、設定を保存したときにすべて既定に戻ります。",
     resetAllConfirm: "すべて戻す",
     jsonLabel: "変えたショートカット (JSON)",
-    jsonHelp:
-      '変えた操作だけが、キーのリストと一緒に並びます (例: "toggle-theme": [{ "key": "t", "ctrl": true }])。空のリストはその操作を止めます。"inputs"・"terminal"・"pwa" (true か false) でキーの効く所を決めます。JSON に誤りがある間は保存しません。',
+    jsonHelp: [
+      '変えた操作だけが、キーのリストと一緒に並びます (例: "toggle-theme": [{ "key": "t", "ctrl": true }])。空のリストはその操作を止めます。',
+      '"inputs"・"terminal"・"pwa" (true か false) でキーの効く所を決めます。JSON に誤りがある間は保存しません。',
+    ],
     jsonIssue: (issue, message) =>
       `${issue.line} 行 ${issue.column} 文字目${issue.path === "$" ? "" : ` (${issue.path})`}: ${message}`,
     issue: {
@@ -206,6 +217,7 @@ const TEXT: Record<HelpKeybindingLanguage, ShortcutText> = {
     problem: "ショートカットの JSON を直してから保存してください。",
     changed: "変更済み",
     noKey: "キーなし",
+    keysColumn: "キー",
     addKey: "キーを追加",
     pressKey: "キーを押してください…",
     gFirst: "先に g を押す",
@@ -342,8 +354,7 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
   jsonBox.hidden = true;
   const jsonLabel = document.createElement("label");
   jsonLabel.htmlFor = "shortcut-json";
-  const jsonHelp = document.createElement("p");
-  jsonHelp.className = "scope-settings-help";
+  const jsonHelp = document.createElement("div");
   const jsonArea = document.createElement("textarea");
   jsonArea.id = "shortcut-json";
   jsonArea.rows = 12;
@@ -362,7 +373,7 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
   element.append(titleRow, intro, toolbar, jsonBox, filterEmpty, list);
 
   function text(): ShortcutText {
-    return TEXT[deps.getLanguage()];
+    return SHORTCUT_SETTINGS_TEXT[deps.getLanguage()];
   }
 
   function notify(): void {
@@ -656,7 +667,7 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
   function renderRow(action: KeymapAction, keys: KeyLabel[]): HTMLElement {
     const t = text();
     const row = document.createElement("div");
-    row.className = "shortcut-row";
+    row.className = "shortcut-row ui-table-row";
     row.dataset.action = action;
     if (draft[action] !== undefined) row.dataset.changed = "true";
     const head = button("shortcut-row-head", `${action}:head`);
@@ -743,10 +754,17 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
       shown += rows.length;
       const section = document.createElement("section");
       section.className = "shortcut-group";
+      // 見出しの行: 分類の名前と、キーの列の名前 (行と同じ列の組み)。
+      const head = document.createElement("div");
+      head.className = "shortcut-group-head ui-table-head";
       const heading = document.createElement("h4");
       heading.className = "shortcut-group-title";
       heading.textContent = keymapGroupTitle(group, deps.getLanguage());
-      section.append(heading, ...rows);
+      const keysColumn = document.createElement("span");
+      keysColumn.className = "shortcut-group-keys";
+      keysColumn.textContent = t.keysColumn;
+      head.append(heading, document.createElement("span"), keysColumn);
+      section.append(head, ...rows);
       groups.push(section);
     }
     list.replaceChildren(...groups);
@@ -818,7 +836,14 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
     jsonButton.textContent = t.editJson;
     resetAllButton.textContent = t.resetAll;
     jsonLabel.textContent = t.jsonLabel;
-    jsonHelp.textContent = t.jsonHelp;
+    jsonHelp.replaceChildren(
+      ...t.jsonHelp.map((paragraph) => {
+        const p = document.createElement("p");
+        p.className = "scope-settings-help";
+        p.textContent = paragraph;
+        return p;
+      }),
+    );
   }
 
   filter.addEventListener("input", render);

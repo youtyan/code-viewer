@@ -814,10 +814,12 @@ describe("user settings", () => {
   // 移るたびに戻るので、全部ユーザー単位の項目でなければならない。
   test.each([
     "theme",
-    "palette",
+    "colorTheme",
+    "terminalTone",
     "navCollapsed",
     "navWidth",
     "navCollapsedProjects",
+    "navStoppedProjectsOpen",
   ])("the workspace look %s is a per-person item", (key) => {
     expect(isUserSettingKey(key)).toBe(true);
   });

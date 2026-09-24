@@ -141,6 +141,7 @@ global の `my-reuse-first` に従う。ここに置くのは**このリポジ�
 | 入口のサーバの取り次ぎ・裏の管理・鍵の解決・`entry.json` | `server/entry/proxy.ts` / `backends.ts` / `projects.ts` / `entry-file.ts` |
 | 画面の URL の前置き (`/p/<鍵>`) を付ける・外す | `core/api-url.ts` の `apiUrl` / `pageUrl` / `routePathname` / `withoutProjectPrefix`。`location.pathname` を経路として読むなら `routePathname()` |
 | 画面のファイルを配る | `server/static-files.ts` `staticFile` |
+| 左に目次・右に本文のページ (設定とヘルプ) の枠と、狭い面・SP の目次の畳み方 | `views/page-shell.ts` `createPageShell`（設定は `views/settings-page.ts`、ヘルプは `views/help-page.ts`。ヘルプのやり方の案内は `views/help-guides.ts`） |
 | テストの共有ヘルパ | `web-src/test/_test-helpers.ts` / `_fake-dom.ts` / `_git-fixture.ts` / `_io-fixture.ts` / `_dialog-helpers.ts` |
 
 `alert` / `confirm` / `prompt` は `biome.jsonc` が error で落とすので書けない。

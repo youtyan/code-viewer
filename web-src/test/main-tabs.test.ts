@@ -40,7 +40,9 @@ import {
   unparkRight,
   unsplit,
   withProject,
+  withTerminalTmux,
 } from "../core/main-tabs";
+import type { TmuxPlace } from "../core/tmux";
 
 // 配置を短く書くための準備。"a" はファイル a、"~a" は画像 a、"$s" はシェル s
 // (id も s。表示では id だけ)、
@@ -1882,6 +1884,98 @@ describe("persistence of projects and groups", () => {
       JSON.parse(JSON.stringify(serializeLayout(layout))),
     );
     expect(parsed.layout).toEqual(layout);
+  });
+
+  // シェルのタブが映していた tmux の場所 (入口が起き直した後に繋ぎ直す先)。
+  const savedWithTmux = (terminalTmux: unknown) => ({
+    version: 5,
+    focused: "left",
+    terminalTmux,
+    panes: [
+      {
+        side: "left",
+        activeId: "s",
+        tabs: [
+          {
+            id: "s",
+            preview: false,
+            target: { kind: "terminal", session: "s1" },
+          },
+        ],
+      },
+    ],
+  });
+
+  test("映していた tmux の場所は保存して読み戻せ、閉じたシェルの場所は読まない", () => {
+    const parsed = parseLayout(
+      savedWithTmux({
+        s1: { pane: "%3", session: "sample", window: 2 },
+        gone: { pane: "%4", session: "sample", window: 0 },
+      }),
+    );
+    expect([
+      parsed.layout.terminalTmux,
+      serializeLayout(parsed.layout).terminalTmux,
+    ]).toEqual([
+      { s1: { pane: "%3", session: "sample", window: 2 } },
+      { s1: { pane: "%3", session: "sample", window: 2 } },
+    ]);
+  });
+
+  test.each([
+    {
+      name: "画面が覚えた場所を載せ、閉じたシェルの場所は落とす",
+      known: { s1: { pane: "%7", session: "sample", window: 4 } },
+      saved: {
+        s1: { pane: "%3", session: "sample", window: 2 },
+        closed: { pane: "%4", session: "sample", window: 0 },
+      },
+      expected: { s1: { pane: "%7", session: "sample", window: 4 } },
+    },
+    {
+      name: "画面が知らなければ保存済みの場所を残す",
+      known: {},
+      saved: { s1: { pane: "%3", session: "sample", window: 2 } },
+      expected: { s1: { pane: "%3", session: "sample", window: 2 } },
+    },
+    {
+      name: "どちらも知らなければ欄ごと書かない",
+      known: {},
+      saved: undefined,
+      expected: undefined,
+    },
+  ])("保存する tmux の場所: $name", ({ known, saved, expected }) => {
+    const layout = {
+      ...serializeLayout(parseLayout(savedWithTmux(undefined)).layout),
+      ...(saved ? { terminalTmux: saved } : {}),
+    };
+    const places: Record<string, TmuxPlace> = known;
+    expect(
+      withTerminalTmux(layout, (session) => places[session]).terminalTmux,
+    ).toEqual(expected);
+  });
+
+  test.each([
+    { name: "場所が文字列", place: "%3" },
+    {
+      name: "ペイン ID の形でない",
+      place: { pane: "3", session: "sample", window: 0 },
+    },
+    { name: "セッション名が空", place: { pane: "%3", session: "", window: 0 } },
+    {
+      name: "ウインドウの番号が負",
+      place: { pane: "%3", session: "sample", window: -1 },
+    },
+    {
+      name: "ウインドウの番号が小数",
+      place: { pane: "%3", session: "sample", window: 0.5 },
+    },
+  ])("壊れた場所 ($name) は壊れた配置として場所と値を添えて投げる", ({
+    place,
+  }) => {
+    expect(() => parseLayout(savedWithTmux({ s1: place }))).toThrow(
+      `terminalTmux["s1"] is ${JSON.stringify(place)}`,
+    );
   });
 
   test("4 までの (プロジェクトごとの) 配置は、渡したプロジェクトの持ち物として読む", () => {

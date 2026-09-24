@@ -45,6 +45,19 @@ type MainTabsText = {
   /** グループのタブ列の名前 (読み上げ)。 */
   groupTabs: (name: string) => string;
   closeGroup: string;
+  /** タブが 0 枚のグループ (いま見ているプロジェクト) の札・畳めない理由。 */
+  groupEmpty: string;
+  /** グループの ▾ の、そのプロジェクトで開く新しいシェル・エージェント。 */
+  newShellHere: string;
+  newShellHereTitle: (name: string) => string;
+  newAgentHere: string;
+  newAgentHereTitle: (name: string) => string;
+  /** 1 つで完結するサーバで、別のプロジェクトのシェルを作れない理由。 */
+  shellNeedsSwitch: string;
+  /** git のリポジトリでないプロジェクトでエージェントを起動できない理由。 */
+  notGitProject: string;
+  /** グループの ▾ の画面の行 (別のプロジェクト): 移ってから開くこと。 */
+  openScreenInTitle: (name: string) => string;
   switchToProject: string;
   /** 今見ているプロジェクトのグループの「切り替える」が押せない理由。 */
   currentProject: string;
@@ -95,6 +108,14 @@ const EN: MainTabsText = {
   groupMenu: (name) => `${name}: group menu`,
   groupTabs: (name) => `Open tabs of ${name}`,
   closeGroup: "Close this group",
+  groupEmpty: "No tabs are open in this project",
+  newShellHere: "New shell",
+  newShellHereTitle: (name) => `Open a new shell in ${name}`,
+  newAgentHere: "New agent…",
+  newAgentHereTitle: (name) => `Start an agent in ${name}`,
+  shellNeedsSwitch: "Switch to this project to open a shell in it",
+  notGitProject: "Agents can only be started in a git repository",
+  openScreenInTitle: (name) => `Switch to ${name} and open this screen`,
   switchToProject: "Switch to this project",
   currentProject: "This project is already open",
   collapseGroup: "Collapse",
@@ -147,6 +168,14 @@ const JA: MainTabsText = {
   groupMenu: (name) => `${name}: グループのメニュー`,
   groupTabs: (name) => `${name} の開いているタブ`,
   closeGroup: "このグループを閉じる",
+  groupEmpty: "このプロジェクトのタブはありません",
+  newShellHere: "新しいシェル",
+  newShellHereTitle: (name) => `${name} で新しいシェルを開きます`,
+  newAgentHere: "新しいエージェント…",
+  newAgentHereTitle: (name) => `${name} でエージェントを起動します`,
+  shellNeedsSwitch: "このプロジェクトに切り替えるとシェルを開けます",
+  notGitProject: "エージェントを起動できるのは git のリポジトリだけです",
+  openScreenInTitle: (name) => `${name} に切り替えて、この画面を開きます`,
   switchToProject: "このプロジェクトに切り替える",
   currentProject: "いま見ているプロジェクトです",
   collapseGroup: "畳む",

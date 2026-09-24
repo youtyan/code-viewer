@@ -23,16 +23,18 @@
 | 補助の情報 (大きさ・日時など) | 行にしない。情報のボタン (`.gdp-file-detail-meta` の形: 押せる領域は固定、hover / フォーカスで小さな面) に入れる |
 | topbar のトグルボタン | `.controls > button` パターン（`#ignore-ws` `#hide-tests` が実例） |
 | セグメント（排他選択） | `.seg` パターン |
+| 表・表のような一覧 (列があり、目で行を横に追うもの) | 本物の `<table>` は `.ui-table` (ヘルプは `views/help-blocks.ts` の `uiTable` で組む)、div の一覧は行に `.ui-table-row`・見出しの行に `.ui-table-head`。行の区切りは `--color-line-row` (どの面にも 1.5:1 以上。部品ごとに `--color-line-soft` などの薄い線で区切らない)、見出しの行を置き (補足の色・小さく・太く、下の線は 1 段太い)、行の多い表 (`UI_TABLE_STRIPE_MIN_ROWS` 行から) は `.ui-table-striped` で 1 行おきに `--color-row-alt`、行に hover の面。数値の列は `.ui-num` で右寄せ、キーの列 (`.ui-table-keys`) は幅をそろえる。キーはキーキャップの共有の規則 (`.gdp-help-key`・`.empty-key kbd` などの並び。縁が `--color-line-row`) に選択子を足す。独自の作りの表 (Data の `table-grid.ts`・CSV・Markdown) は構造を変えず、行の区切りの線だけを `--color-line-row` に合わせる。`web-src/test/table-rules-css.test.ts` が線のコントラストと各所の線を見る |
 | 確認 / 入力ダイアログ | `views/ui-dialog.ts` の `showConfirmDialog` / `showAlertDialog` / `showPromptDialog` / `showFormDialog`。型は 1 つ (面は `--color-overlay`、内側 7 単位、右上の閉じる = 取り消し、ボタンは `gdp-dialog-cancel` / `gdp-dialog-confirm` / 危険は `danger`)。見出しの下の 1 文は `description`。本文の見出しつきの値・コードの枠・箇条書きは `agent-hooks-dialog-*` の部品 (`accounts-dialogs.ts` の `labeled`)。ボタンのクラスを呼び出し側で付け直さない |
 | 使用量 (5h / week の割合・バー・リセットまで・いつの値か) | `views/agents/usage-meter.ts` の `usageMeterRow` / `usageObservedText`。全体ボードのカードと最下段のポップオーバーが同じものを使う (場所で見え方を変えない) |
 | 全体ボードの操作 | 主の操作は `agents-primary`、枠つきの小さな操作は `agents-secondary`、文字だけは `agents-text-action`、アイコンは `agents-icon-action` (28px 角)。プロジェクトの見出しの開く・起動・⋯ は hover / フォーカスで出し、場所は最初から取る |
-| 設定の節 (Help ページの設定) | `views/viewer-settings.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: general / appearance / shortcuts / agents / accounts / advanced) を 1 つ付ける (付けないと全部の分類に出る)。右の列・検索欄・見出しは `help-page.ts` が描く。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (分類も切り替わる)。保存はページの下の「変更を保存」1 つ: 節が下書きを持つなら `SettingsDraft` を `drafts` に渡し、節の中に「保存」を置かない (アカウントの節で保存が 2 つになり、利用者が迷った)。保存できない間 (JSON の誤りなど) は `problem()` で理由を返し、ページはどの節も保存しない。節の中の「既定に戻す」も下書きを変えるだけで、保存はページの「変更を保存」(判定ルールの「組み込みルールに戻す」も)。未保存は保存の横の文言 (`data-state="unsaved"`) で示す。分類に節が 1 つだけのときは、その節の見出しを出さない (ページの見出しと同じ役。`scope-settings-section-sole`。検索中は出す) |
-| キーの割り当て (設定の「ショートカット」・ヘルプのキーの一覧・クイックヘルプ・パレットのキー) | 操作の名前と分類は `views/help-keybindings.ts` の `KEYMAP_ACTION_INFO` だけに書く (Record なので操作を足すと書き忘れが型で落ちる)。既定のキーは `core/keymap.ts` (`DEFAULT_KEY_BINDINGS` と、PWA の窓の `pwaKeyBindings`)、利用者の差分を重ねるのは `resolveKeyBindings`、画面に出すのは app の `activeKeyBindings` (ヘルプ) / `shownKeyBindings` (この窓で効くものだけ: title・パレット)。キーの効く所 (入力欄・端末・PWA の窓) は押し方ごと (`KeyChord` の inputs / terminal / pwa)。編集の画面は `views/help-keybinding-editor.ts` |
+| 設定の節 (設定のページ `/settings`) | `views/viewer-settings.ts`、文言は `views/viewer-settings-i18n.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: appearance / agents / accounts / shortcuts / files / advanced。よく使うものが先、最初のものが開いたときの分類) を 1 つ付ける (付けないと全部の分類に出る。並びは分類の並びに合わせる。検索の結果もこの順)。読む人は使う人: 節は見出し → 何のための設定かを 1 文 → 操作。内部の仕組み・ファイルの場所・判定の細部は畳んだ `details` かヘルプへのリンクに回す (判定ルールの JSON は畳み、誤りと「適用中」は畳んだ外に置く)。説明文の 1 段落は日本語 120 文字・英語 240 文字まで (`settings-text-length.test.ts` が設定・フック・アカウント・ショートカットの文言の表をすべて測る。長くなるなら段落を配列で分ける。例外は理由つきでそのテストの `EXCEPTIONS` に)。めったに触らないものは advanced へ。見出しの id は変えずに分類を移す (送り先は見出しを含む分類になる。`viewer-settings.test.ts` の見出しの移し先の表)。左の列・検索欄・見出しは `views/settings-page.ts` が描く (枠は `views/page-shell.ts`、ヘルプのページと共通)。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (設定のページを開き、分類も切り替わる。畳んだ `details` の中の id なら開く。実体は `settings-page.ts`)。設定とヘルプが 1 つのページだった頃の `/help?section=settings` は `core/routes.ts` の `parseRoute` が、`/help#<設定の見出し>` は起動時に `headingInHash` が設定のページへ移す。分類の説明の下にヘルプの節への 1 行を置くなら `settings-page.ts` の `CATEGORY_HELP_LINKS` (文字はヘルプの節の名前 `helpSectionName`)。選ぶ欄 (選択の欄・トグル・テーマの見本) は選んだ時点で当てて保存する (`onChoose`。明暗・テーマは `setTheme` / `setColorTheme`。全プロジェクト共通の項目は別の窓にも当てる: app の `refreshLookFromServer` の `SHARED_CHOICE_KEYS`)。説明は「選ぶとすぐ効きます」にそろえる (テーマを選んだのに「変更を保存」が押せず、帯の「押すまで適用されません」と食い違った)。保存が要るのは打ち込む欄 (途中の値がありうるもの: 除外の一覧・監視の上限・判定ルールの JSON・起動コマンド・ショートカット) だけで、保存はページの下の「変更を保存」1 つ: 節が下書きを持つなら `SettingsDraft` を `drafts` に渡し、節の中に「保存」を置かない (アカウントの節で保存が 2 つになり、利用者が迷った)。保存の帯は、保存する欄のある節 (`viewer-settings.ts` の `savedSections`) が出ている間と、未保存の変更が残っている間だけ出す (表示・エージェントの分類には出さない)。未保存が無い間は保存の横に「保存の要る変更はありません」(`data-state="clean"`) を出す (押せないボタンだけを置かない)。保存できない間 (JSON の誤りなど) は `problem()` で理由を返し、ページはどの節も保存しない。節の中の「既定に戻す」も下書きを変えるだけで、保存はページの「変更を保存」(判定ルールの「組み込みルールに戻す」も)。未保存は保存の横の文言 (`data-state="unsaved"`) で示す。分類に節が 1 つだけのときは、その節の見出しを出さない (ページの見出しと同じ役。`scope-settings-section-sole`。検索中は出す) |
+| キーの割り当て (設定の「ショートカット」・ヘルプのキーの一覧・キーボードショートカットの小窓 (`?`、`views/quick-help.ts`)・パレットのキー) | 操作の名前と分類は `views/help-keybindings.ts` の `KEYMAP_ACTION_INFO` だけに書く (Record なので操作を足すと書き忘れが型で落ちる)。既定のキーは `core/keymap.ts` (`DEFAULT_KEY_BINDINGS` と、PWA の窓の `pwaKeyBindings`)、利用者の差分を重ねるのは `resolveKeyBindings`、画面に出すのは app の `activeKeyBindings` (ヘルプ) / `shownKeyBindings` (この窓で効くものだけ: title・パレット)。キーの効く所 (入力欄・端末・PWA の窓) は押し方ごと (`KeyChord` の inputs / terminal / pwa)。編集の画面は `views/help-keybinding-editor.ts` |
 | ⌘K のパレットの行き先 (ファイル以外) | `views/search-palette-ui.ts` の `PaletteCommand` (群 = projects / agents / sessions / actions。エージェントでないペインとシェルは sessions)。中身は `app.ts` の `paletteCommands()`、操作は `PALETTE_ACTIONS` (キー割り当てのある操作は `keymap` を書けばキーが右に出て、実行も同じ `dispatchKeymapAction`)。ファイルの絞り込み・grep の側には足さない |
 | 作業ツリーの一覧の行 | `views/worktree-view.ts`。何も選んでいないときは一覧だけの画面 (`body[data-worktree-overview]`、列は `--worktree-columns`)。行の「開く」はこのときだけ置き、選んだ後の狭い一覧は「…」だけ (選んだ瞬間にボタンを増やさない) |
 | Data の表の足元 | `views/database/table-grid.ts` の `db-grid-status` (件数) と `db-grid-pager` (見えている行の範囲と 1 画面ずつのページ送り)。表の行の高さは表示密度の値 (`views/shell/row-height.ts` の `currentRowHeight`、CSS は `--ui-row-h`)、列幅は TS が持つので、CSS は色と線だけ |
 | 空の状態の案内 (何も無い場所で次にやること) | `views/empty-state.ts` の `renderEmptyState` (絵・一行・補足・操作 2 つまで・キー 3 つまでをキーキャップで)。形は既存の `.empty` (`.empty-icon`・`h2`・`p`・`.empty-actions` の `.empty-action` / `-primary`) に `.empty-keys` を足したもの。画面の一部に置くときは `compact`。文言は置き場の i18n。実例: 全体ボードのエージェント 0・Search の初期・Tools の入力が空 |
 | アイコン SVG | `core/icons.ts` の path 定数 + `iconSvg(className, paths)` |
+| ホバーで出る説明 (ツールチップ) | 要素に `title` を書くだけ。`views/title-tooltip.ts` の `installTitleTooltips` (`app.ts` が 1 回だけ取り付ける) が、マウスとペンで約 300ms 後に title の値をそのまま `.title-tooltip` に出す (指では出さない。出している間は title を外して既定の吹き出しと重ねない)。部品ごとに吹き出しを作らない。title に置いた文言がそのまま吹き出しの文言 |
 
 `alert` / `confirm` / `prompt` は `biome.jsonc` が **error で落とす**ので、そもそも書けない。
 `views/ui-dialog.ts` を使う。
@@ -68,13 +70,20 @@
 - 2 面のとき、開く面は**フォーカスのある面** (画面のタブは左の面だけ)。フォーカスは面の中を押す・
   タブを押すで移る。**フォーカスのある面の印は 2 つ**: 前面のタブの上端の線 (`.main-tab-focused`、タブの幅)
   と、その面のタブ列の下端の線 (`body.main-split .main-tabs-pane-focused::after`、面の幅いっぱい)。
-  どちらも `--color-accent` の 2px。1 面では下端の線を出さない。地・タブとの色の差はダーク / ライト、
-  3 つの色違い、密度 4 段で 4.95:1 以上 (実測)
+  どちらも `--color-accent` の 2px。1 面では下端の線を出さない。**選択中のタブの印**は寸法を変えない
+  (幅は中身で決まるので `font-weight` も使わない): 面 (`--color-tab-active`)・本来の文字色・上端の
+  2px の線 (もう一方の面の選択中は `--color-text-3` の `box-shadow: inset`、フォーカスのある面の選択中は
+  上の強調色の線・強調色の絵・`-webkit-text-stroke` で太い名前)。下端の線はグループの色なので使わない
+  (検査は `main-tabs-active-css.test.ts`)。地・タブとの色の差はダーク / ライト、
+  当時の 3 つの色違い、密度 4 段で 4.95:1 以上 (実測。10 テーマにしてからは測っていない)
 - **URL はフォーカスのある面の前面のタブ**に合わせる (右の面のファイルなら `pane=right`)。左の前面が
   替わって本文を裏で移すとき、フォーカスが右の面に残るなら履歴を積まず (`followRouteSide` の
   replace)、移した後に `syncFocusedPaneUrl` で右の面の URL へ戻す (app の `navigate`。分割のボタンで
   右に出した直後に、URL が左の面のファイルのまま残っていた)
 - **閉じる**: タブの ×・中ボタン・`g x`・タブ列の Delete。閉じたら同じ面の最近使った順で次を前面に。
+  画像のタブは上の段の右端の「閉じる」(X・文字・`Esc`) と、フォーカスがある間の Esc でも閉じる (本文いっぱいに
+  開くとタブ列の小さな × しか閉じ方が無かった)。端末から開いた画像を閉じたら開いたシェルへ戻す
+  (2 面では画像は反対の面に開くので、上の規則だけではフォーカスが画像の面に残る。`views/image-tab-return.ts`)
   ブラウザのタブの中では ⌘W / Ctrl+W はブラウザのタブを閉じる (取らない。`core/keymap.ts` のコメント)
 - **閉じたタブを開き直す**: 利用者が閉じたタブ (上の閉じ方) を全体で 1 本の履歴に新しい順で 10 件まで
   積み (`core/main-tabs.ts` の `pushClosed`)、`reopenClosed` が固定のタブで**閉じた面の元の位置**に
@@ -118,7 +127,7 @@
 利用者と決めた。設計: タブとプロジェクト)。タブは持ち物のプロジェクトを持つ (`core/main-tabs.ts` の
 target の `project`、判定は `isProjectKind`): ファイル・リポジトリの画像・Diff / History / 作業ツリー /
 Search / Data / Work log はそのプロジェクト、シェルはそのシェルが動いているフォルダのプロジェクト
-(`app.ts` の `terminalProjectOf`)、全体ボード・Tools・設定と案内・ターミナルに出た画像と、どの
+(`app.ts` の `terminalProjectOf`)、全体ボード・Tools・設定・ヘルプ・ターミナルに出た画像と、どの
 プロジェクトにも入らないシェルは「どのプロジェクトのものでもない」。
 
 - **グループ**: タブ列は面ごとに、プロジェクトのグループに分けて並ぶ (`regroup`・`tabGroups`)。
@@ -128,8 +137,22 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
 - **札**: グループの頭に、色の四角と頭文字 (`projectMark`) と ▾ だけ。名前は title・aria-label と
   ▾ のメニューの頭 (一覧の列の頭の 1 段目に同じ名前が出ているので、札に並べると 2 回出て、タブの幅を
   食った)。札を押すと畳む / 開く (畳むと頭文字の横に枚数。札の右が伸びる。前面のタブは畳んでも見せる)。
-  ▾ (と札の右クリック) のメニューは「このプロジェクトに切り替える」「畳む / 開く」「このグループを
-  閉じる」。グループのタブと札の下端に、その色の 2px の線
+  ▾ (と札の右クリック) のメニューは、頭にプロジェクトの名前、区切って「新しいシェル」「新しい
+  エージェント…」、区切って画面の行 (左の縦の列と同じ並び・絵・名前。`main-tabs-view.ts` の
+  `VIEW_SCREENS` で、並びは `web/index.html` とテストで突き合わせる。右端にキー、いま本文に出ている
+  画面に ✓。押すとそのプロジェクトのその画面をそのグループのタブで前面に。別のプロジェクトはタブを
+  前面に出すときと同じく移ってから。ファイルはフォルダ表示)、区切って「このプロジェクトに切り替える」
+  「畳む / 開く」、区切って「このグループを閉じる」。並びと押せるかは `main-tabs-view.ts` の `groupMenuFor` だけが決める (app は材料の
+  `groupFacts` と作り方だけを渡す)。「新しいシェル」は ＋ と同じ `app.ts` の `openShellIn` に
+  そのプロジェクトを渡し、その札の面に開いて前面に出す (カレントは入口が要求の鍵で決める。別の
+  プロジェクトの鍵は `projectKeyFor` で、動いていなければ起こして知る)。「新しいエージェント…」は
+  そのプロジェクトを選んだ起動の画面。グループごとの ＋ は置かない。グループのタブと札の下端に、
+  その色の 2px の線
+- **いま見ているプロジェクトの札は必ず出す**: 左の面にそのプロジェクトのタブが 0 枚でも、並びの
+  位置に空のグループ (札と空の並び) を描く (`main-tabs-view.ts` の `groupsOf`。描画だけで、配置と
+  保存には入れない)。フォルダ表示はタブにしないので、エージェントの居ないプロジェクトを開くと札が
+  出ず、tmux が無いと出ないように見えた。空の札は押しても畳まず、▾ の「畳む」「このグループを閉じる」
+  は押せない (`groupMenuFor`)。幅は `fitTabs` が札として数える
 - **並び**: グループがあるときの列は [グループ…][＋][どのプロジェクトのものでもないタブ (右端に寄せる)]。
   グループが無ければ今までどおり [タブ][＋]
 - **＋**・木・パレットで開くファイルは、いま見ているプロジェクトのグループに入る (前面が同じグループ
@@ -154,7 +177,7 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
 
 | 入口 | 例外 |
 |---|---|
-| 画面 (Diff・History・作業ツリー・Data・Search・Tools・Help・全体ボード) | 画面のタブは種類ごとに 1 つで常に固定 (仮にしない: 中身が route で変わるので置き換えると見ていた状態が消える)、左の面だけ (本文を描く場所が 1 つ)。1 回押す・Alt はそのタブを前面に出す。一覧の列の頭の画面の入口 (`.view-strip-item` はリンク) の中ボタン・⌘/Ctrl はブラウザに任せる (アプリの中では 1 回押すと同じになるので、別の窓で開ける意味を残す) |
+| 画面 (Diff・History・作業ツリー・Data・Search・Tools・設定・ヘルプ・全体ボード) | 画面のタブは種類ごとに 1 つで常に固定 (仮にしない: 中身が route で変わるので置き換えると見ていた状態が消える)、左の面だけ (本文を描く場所が 1 つ)。1 回押す・Alt はそのタブを前面に出す。一覧の列の頭の画面の入口 (`.view-strip-item` はリンク) の中ボタン・⌘/Ctrl はブラウザに任せる (アプリの中では 1 回押すと同じになるので、別の窓で開ける意味を残す) |
 | Diff の一覧・History のファイルの一覧 | 1 回押すは画面の中の移動 (その差分へ送る)。固定の押し方と Alt は、そのファイルをファイルのタブ (その差分の新しい側の版、消したファイルは古い側) で開く |
 | 木のフォルダの行 | フォルダ表示はタブにしない (左の面の本文の既定)。修飾キーはブラウザに任せる |
 | ターミナル (左のサイドバーのエージェントの行・全体ボードの行・パレットのセッション・＋) | 常に固定 (仮にしない: 置き換えるとシェルの画面と打ちかけの文字が消える)。1 つのシェルは 1 か所にしか置けない。1 回押す・中ボタン・⌘/Ctrl はどれも開くか前面に出す (固定の新しいタブを足す意味が無い)。Alt は反対の面 (1 面なら右に分けて)。右ボタンは開かない (右クリックのメニュー) |
@@ -169,27 +192,44 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
 | 何 | 名前 |
 |---|---|
 | 面の段階 | `--color-ground` (窓の地・上の行・最下段) / `--color-nav` (サイドバー) / `--color-tree` (ファイルのツリー) / `--color-doc` (本文) / `--color-code` (コードの面: ソース表示・差分) / `--color-inset` (本文の中の沈んだ面) / `--color-raised` (hover) / `--color-select` (選んでいる行) / `--color-term` |
-| 構文の色 | `--syntax-text` / `--syntax-keyword` / `--syntax-string` / `--syntax-type` / `--syntax-function` / `--syntax-comment`。shiki の github テーマの色と highlight.js のクラスは `style.css` の B-1 の節と diff2html の節で名前へ差し替える。コメントもコードの面と差分の面で 4.5:1 以上 |
-| 差分の文字 / 履歴のグラフ | `--diff-add-fg` / `--diff-del-fg` (面は `--diff-*-bg`)。`--graph-main` (主線) / `--graph-branch` (分かれた線)。状態の色と混ぜない |
+| 構文の色 | `--syntax-text` / `--syntax-keyword` / `--syntax-string` / `--syntax-type` / `--syntax-function` / `--syntax-comment`、行番号は `--syntax-gutter`。shiki はこのアプリのテーマ (`core/shiki-theme.ts`。色はこの名前の var()) で描き、highlight.js のクラスは `style.css` の diff2html の節で名前へ差し替える。同じ種類は同じ名前にする。下限 (本文 7:1・構文の色 6.5:1・コメントと行番号 4.5:1) と 2 系統の対応は `diff-code-contrast.test.ts`・`shiki-theme.test.ts` |
+| 差分の文字 / 履歴のグラフ | `--diff-add-fg` / `--diff-del-fg` (面は `--diff-*-bg`)、@@ の行の文字は `--diff-hunk-fg`。`--graph-main` (主線) / `--graph-branch` (分かれた線)。状態の色と混ぜない |
 | 文字の段階 | `--color-text` / `--color-text-2` / `--color-text-3` / `--color-on-accent` |
-| 線 | `--color-line` / `--color-line-soft` / `--color-line-strong`。**線は最後の手段。** 面の明るさの差で分けられるなら線を引かない |
+| 線 | `--color-line` / `--color-line-soft` / `--color-line-strong`。**線は最後の手段。** 面の明るさの差で分けられるなら線を引かない。表の行の区切りだけは `--color-line-row` (上の「表」) |
 | アクセントと状態 | `--color-accent` / `--color-accent-strong`、`--color-waiting` `--color-working` `--color-done` `--color-failed` `--color-idle` |
-| プロジェクトの色 | `--project-<色>` (`core/project-colors.ts` の `PROJECT_COLORS` と `none`)・頭文字の `--project-ink`。部品は `data-project-color` の下で `--project-color` を読む。色違いのダーク (graphite / warm) もダークの 1 組を使う |
+| プロジェクトの色 | `--project-<色>` (`core/project-colors.ts` の `PROJECT_COLORS` と `none`)・頭文字の `--project-ink`。部品は `data-project-color` の下で `--project-color` を読む。どのテーマでもライト・ダークの 1 組ずつ (テーマで変えない) |
 | 選んでいる行の光 | `--glow-select` (内側の box-shadow。箱の寸法を変えない) |
 | 余白 / 角丸 | `--space-1`〜`--space-6` (4〜32px) / `--radius-sm` `--radius-md` `--radius-lg` |
 | 文字の大きさ・行の高さ | 密度の段階 (T0): `--ui-font-*`・`--ui-control-*`・`--ui-row-h`・`--ui-table-row-h` (`ui-layout.md`、下の決まり 7) |
 | 文字の家族 | `--font-ui` / `--font-mono` |
 
-- テーマは同じ名前の値を差し替えるだけ: `html[data-theme="light"|"dark"]` × `html[data-palette]`
-  (`graphite` / `warm`、無し = 既定の紫)。**テーマごとに部品の規則を書き分けない。**
+- 明暗とテーマは同じ名前の値を差し替えるだけ: `html[data-theme="light"|"dark"]` × `html[data-color-theme]`
+  (id と表示名は `core/color-themes.ts`、無し = 既定)。**テーマごとに部品の規則を書き分けない。**
+  テーマの塊は 16 進で持つ色の名前を全部書き、下限は全部のテーマ × 明暗で確かめる
+  (`web-src/test/_color-themes.ts` を回すテスト。新しい色の下限のテストもこれで回す)
   古い `[data-theme="dark"] .x { color: #... }` を見つけたら、名前へ寄せる (触ったら直す)
 - 古い名前 (`--bg` `--fg` `--accent` `--border` …) は互換の層で、中身は名前の層への参照だけ。
   新しい部品は名前の層を読む。互換の層に 16 進を書き戻さない
-- 差分の色 (`--diff-*`) は色違いに引きずられない (追加・削除の意味を保つ)。ライトとダークで 1 組ずつ
+- 差分の色 (`--diff-*`) は追加 = 緑・削除 = 赤の色相をどのテーマでも保つ (意味を保つ)
 - 状態の印は形で区別する: ひし形 = 入力待ち、回る弧 = 作業中、チェック = 完了、白抜きの丸 = 待機
   (`.terminal-mark-*`)。色だけで伝えない。`prefers-reduced-motion` で回転を止めても形で読める
 - xterm は CSS 変数を読めないので、端末の色は `views/terminal/terminal-screen.ts` の
   `terminalTheme()` が `--color-term*` と状態の色から読み (ANSI の赤・緑・黄・紫・白も差し替えて、ライトの地でも読めるようにする)、テーマが変わったら当て直す。端末の色を足すなら名前の層に足す
+- **ターミナルの中は、既定で画面がライトでもダーク** (設定 → 表示の「ターミナルの明暗」。
+  `core/color-themes.ts` の `TerminalTone`、既定 `dark`、もう 1 つは `match`)。claude・codex の画面・
+  tmux の状態の行・シェルのプロンプトは暗い地を前提に色を決めていて、明るい地では読めない。
+  仕組みは style.css の名前の層だけ: `dark` のとき html に `data-terminal-tone="dark"` が付き、
+  ダークの塊とテーマの塊 (と `:root` の色の塊) が **ターミナルの面** (`[data-terminal-surface]`) にも
+  当たる。面は端末のタブの箱 (`app.ts` の `showPanes`)・ペインの見本 (`pane-preview.ts`)。端末の
+  中に見える部品を足すなら面の中に置き、面の外に端末の色の箱を作らない。`terminalTheme()` は面の
+  見本の箱から読む (裏のタブの端末は文書から外れていて、その箱の計算値は空になる)。
+  塊のセレクタに面を足し忘れると、そのテーマだけ面の中にライトの色が残る
+  (`terminal-tone-css.test.ts` が全部のテーマ × 画面の明暗で、面の中の値 = そのテーマのダークを確かめる)。
+  **寸法の名前は面に当てない** (`:root` の寸法の塊は面を含まない。含めると body や html の style で
+  変えた値が面の中だけ既定に戻る)
+- 端末の文字は xterm の `minimumContrastRatio` (`TERMINAL_MINIMUM_CONTRAST_RATIO` = 4.5、淡色はその半分) で
+  地に対して下限まで明るさを動かす。配色そのものも ANSI の色 4:1・カーソル 3:1 を
+  `color-themes-contrast.test.ts` で守る (下限の補正に頼って配色を崩さない)
 
 ## 余白と基準線は色と同じ重さの仕様
 
@@ -268,6 +308,7 @@ disabled / updated のすべてで箱の寸法を保つ。**
 | terminal | `views/terminal/i18n.ts` |
 | tools | `views/tools/i18n.ts` |
 | 検索パレット | `views/search-palette-i18n.ts` |
+| 設定のページ | `views/viewer-settings-i18n.ts` (フック・アカウントの節は `views/agents/i18n.ts`・`accounts-i18n.ts`、ショートカットは `help-keybinding-editor.ts`) |
 | Files のフォルダ表示 | `views/repo-view-i18n.ts` |
 
 - 言語はアプリ全体の設定（`app.ts` の `STATE.language`、`en` / `ja`）
@@ -279,9 +320,38 @@ disabled / updated のすべてで箱の寸法を保つ。**
 
 CLI のサブコマンド・フラグ・画面の操作が変わったら、**同じ変更で**次を更新する。
 
-- `web-src/views/help-page.ts` の `HELP_CONTENT` — **`en` と `ja` の両方**
+- ヘルプの本文は `web-src/views/help-text-en.ts` と `help-text-ja.ts` — **`en` と `ja` の両方**。
+  節の並び・名前・古い `?section=` の読み替え (`HELP_SECTION_ALIASES`) は `help-guides.ts`。読む人は
+  使う人: 節は見出し → 1〜2 文の要約 → 手順か箇条書き (1 項目 1〜2 文) → 細部は畳んだ「詳しく」。
+  内部の仕組み・寸法・判定の細部・キーの一覧は書かない (キーは小窓 `?` とキーの節が持つ)。1 段落・
+  1 項目は日本語 120 文字・英語 240 文字、1 節の本文は 600 / 1200 文字まで、導入手順は 1 手順に
+  動作 1 行・画像 1 枚・説明 1 文 (`help-text-length.test.ts` が本物の i18n の値で組んで測る)。
+  節を足す・名前を変えるなら、古い値を `HELP_SECTION_ALIASES` に残す (保存したリンク・タブの並び)
+- ボタンや画面の名前は各画面の i18n の表を `helpLabels` で集めて `{ ui: … }` で組み立てる (文字を
+  写さない。`help-page.test.ts` が、本文の名前が画面の値そのものであることを見る)。app だけが持つ
+  名前 (一覧の列の頭の画面の名前・差分の帯のボタン) は `AppHelpLabels` で app から渡す。手順の順番や
+  ボタンが変わったら文も直す
+- 画面のキャプチャ (`web/help-images/<名前>.<en|ja>.webp`、置く場所は `help-images.ts` の
+  `helpFigure`)。本文は撮る予定の画面も名前で書き、撮ったものだけを `HELP_CAPTURES` に載せる (載って
+  いないものは描かない)。写っている画面が変わったら `node scripts/help-captures.mjs` で撮り直す (砂場と
+  偽の claude・codex で撮るので実データは写らない。撮った画像は 1 枚ずつ目で確かめる)。節と画像の
+  対応・`HELP_CAPTURES` と置いた画像の一致・幅 1200 px・1 枚 150KB / 合計 2MB は `help-page.test.ts` の
+  「help page captures」が見る
 - リポジトリルートの `README.md`
 - 配布スキル `skills/code-viewer-*/SKILL.md`（CLI のサブコマンド / フラグを宣伝している場合）
+
+本文の部品 (段落・箇条書き・番号つきの手順・画像・注意 / 補足・コマンド・キー・「詳しく」・表) は
+`web-src/views/help-blocks.ts` の `helpBlocks(lang)` だけで作る。本文を書く側はクラスも CSS も書かない。
+見た目の決まりは `style.css` の「設定とヘルプのページの文字と部品」の節 (設定のページも同じ):
+
+- 階層は ページの見出し (`--ui-font-page`) > 節 (`--ui-font-heading`) > 群・設定の節 (`--ui-font-section`) >
+  手順の動作 (`--ui-font-step`) > 本文 (`--ui-font-read`、一覧の文字より一段大きい)。見出しは太字
+- 本文は `--color-text`。`--color-text-2` は要約・設定の説明・コマンドの題などの補足だけ。本文を薄くしない
+- 1 行の長さは `--doc-measure` (枠の `lang` で日本語 40em・英語 68ch)。行間は `--doc-line-height`
+- まとまりは余白で分ける (群・設定の節の間は `--space-7`、中は詰める)。枠や面で囲まない
+- 強調色は押せるもの (リンク・ボタン) と目次の選択だけ。注意は `--color-waiting` の線、補足は無彩色の線
+- 設定の「変更を保存」は本文の箱の下端に貼り付ける (短い分類でも同じ場所)。帯は後ろの面と同じ `--content-face` (本文の箱が決める: フォーカスがあれば本文の面、無ければ地) で塗り、`--color-ground` / `--color-doc` を決め打ちしない (本文の面と地が違うテーマで帯だけ浮いた。`settings-save-bar-css.test.ts` が 10 テーマ × 明暗 × フォーカスで見る)。左右の内側の余白を取り、その分だけ外へ出して、文言とボタンの端をほかの節の欄の端にそろえる
+- `web-src/test/help-typography-css.test.ts` (計算値) と `help-blocks.test.ts` (DOM) が見る
 
 リリース時の詳細な照合手順は `.agents/skills/project-npm-publish-procedure/SKILL.md` にある。
 
@@ -315,5 +385,5 @@ DOM 構造と CSS を合わせる。並行する別レイアウトを発明し�
 - [ ] ユーザーに見える文字列を `i18n.ts` に置き、`en` / `ja` 両方を書いた
 - [ ] CLI / 操作が変わったなら Help ページ（en + ja）と README を同じ変更で直した
 - [ ] 色・余白・角丸を名前の層から読んだ（16 進・生の px を部品に足していない）
-- [ ] 実画面を見た（→ `diagnose.md`）。ライトと、ダークの色違い 3 つ
+- [ ] 実画面を見た（→ `diagnose.md`）。ライトとダーク、色を足したならテーマをいくつか
 - [ ] `pnpm run verify` が通る

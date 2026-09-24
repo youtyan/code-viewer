@@ -21,6 +21,7 @@ import {
   refsResultAsync,
   repoRootResult,
   untrackedMetaAsync,
+  verifyCommitAsync,
   verifyTreeRefResultAsync,
   worktreeCommitDatesAsync,
   worktreeListResultAsync,
@@ -264,7 +265,34 @@ describe("git command failures", () => {
     });
     expect(configured).toEqual({ ok: true });
     const timedOut = await worktreeListResultAsync(cwd, { timeout: 10 });
-    expect(timedOut.error).toMatch(/ETIMEDOUT/);
+    // 時間切れを「git が無い」にせず、コマンド・上限・かかった時間を出す。
+    expect(timedOut.error).toMatch(
+      /^\S+\/git worktree list --porcelain -z timed out after 10 ms \(ETIMEDOUT; stopped at \d+ ms\)$/,
+    );
+    expect(timedOut.status).toBe(503);
+  });
+
+  // git を使えなかった (無い) ときは 503、git が答えて失敗したときは状態を付けない
+  // (preview の blame はこれで 503 と 400 を分ける)。
+  test.each([
+    { name: "missing", configure: configureMissingGit, status: 503 },
+    { name: "failing", configure: configureFailingGit, status: undefined },
+  ])("verifyCommitAsync reports whether $name git could run", async ({
+    configure,
+    status,
+  }) => {
+    const cwd = tempRoot("code-viewer-verify-commit-cwd-");
+    configure(cwd);
+    const originalError = console.error;
+    console.error = () => {
+      // gitFailureMessage のログはここでは見ない
+    };
+    try {
+      const result = await verifyCommitAsync("HEAD", cwd);
+      expect(result.ok === false ? result.status : "ok").toBe(status);
+    } finally {
+      console.error = originalError;
+    }
   });
 
   test("preserves and logs stderr from an ordinary git failure", async () => {

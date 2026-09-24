@@ -62,7 +62,8 @@ export type PaletteCommandGroup =
   | "projects"
   | "agents"
   | "sessions"
-  | "actions";
+  | "actions"
+  | "themes";
 export type PaletteCommand = {
   group: PaletteCommandGroup;
   /** 並べ替えても同じ行を指す値。 */
@@ -1145,6 +1146,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       agents: [],
       sessions: [],
       actions: [],
+      themes: [],
     };
     const trimmed = query.trim();
     const scored: Array<{ item: PaletteCommandItem; score: number }> = [];
@@ -1176,6 +1178,8 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       ...cap(groups.sessions),
       ...files,
       ...cap(groups.actions),
+      // テーマは全部並べる (「テーマ」と打って見比べて選ぶ)。
+      ...groups.themes,
     ];
     const firstFile = state.items.findIndex((item) => item.kind === "file");
     state.selected = firstFile >= 0 ? firstFile : state.items.length ? 0 : -1;

@@ -15,7 +15,11 @@
 import { formatErrorDetail } from "../../core/error-detail";
 import type { ShellSessionId } from "../../core/shell";
 import type { TerminalImageBase } from "../../core/terminal-images";
-import { isTmuxPaneId, type TmuxPaneId } from "../../core/tmux";
+import {
+  isTmuxPaneId,
+  type TmuxClient,
+  type TmuxPaneId,
+} from "../../core/tmux";
 import { getShellSession } from "../shell/session";
 import { findClientByTty, listTmuxClients } from "../tmux/clients";
 import { runTmux } from "../tmux/command";
@@ -24,6 +28,8 @@ export type TerminalImageBaseResult = {
   base: TerminalImageBase;
   /** シェルが映している tmux のペイン。tmux を映していなければ null。 */
   pane: TmuxPaneId | null;
+  /** そのペインを映している tmux のクライアント (ウインドウのペインを引く宛先)。 */
+  client: TmuxClient | null;
 };
 
 function logBaseError(shell: string, error: Error): string {
@@ -45,6 +51,7 @@ export async function terminalImageBase(
   const repo: TerminalImageBaseResult = {
     base: { source: "repo", cwd: repoCwd },
     pane: null,
+    client: null,
   };
   if (!shell) return repo;
   const session = getShellSession(shell);
@@ -54,6 +61,7 @@ export async function terminalImageBase(
       ? { source: "shell", cwd: session.cwd, ...(error ? { error } : {}) }
       : { source: "repo", cwd: repoCwd, ...(error ? { error } : {}) },
     pane: null,
+    client: null,
   });
 
   const clients = await listTmuxClients(repoCwd);
@@ -73,6 +81,7 @@ export async function terminalImageBase(
     return {
       ...fallback(logBaseError(shell, result.error)),
       pane: client.pane,
+      client,
     };
   }
   // 引く間にペインが閉じられた・tmux が止まった。
@@ -80,6 +89,6 @@ export async function terminalImageBase(
   const cwd = result.stdout.trim();
   // 作業場所を持たないペイン (tmux が引けない環境) は、ペインは分かるので
   // 履歴は拾えるが、起点はシェルに戻す。
-  if (!cwd) return { ...fallback(), pane: client.pane };
-  return { base: { source: "pane", cwd }, pane: client.pane };
+  if (!cwd) return { ...fallback(), pane: client.pane, client };
+  return { base: { source: "pane", cwd }, pane: client.pane, client };
 }

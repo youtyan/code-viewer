@@ -8,6 +8,7 @@
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { themeVariants } from "./_color-themes";
 import {
   baseRules,
   cascadedDeclarations,
@@ -67,21 +68,11 @@ function contrast(a: Rgba, b: Rgba): number {
 const rules = baseRules(loadStyleSheet());
 const block = (selector: string) =>
   cascadedDeclarations(rules, (s) => s === selector);
-// テーマは同じ名前の値を差し替えるだけ (ui-surface.md)。後ろほど強い。
+// テーマは同じ名前の値を差し替えるだけ (ui-surface.md)。全部のテーマ × 明暗。
 const light = block(":root");
-const dark = new Map([...light, ...block('[data-theme="dark"]')]);
-const themes = {
-  light,
-  dark,
-  "dark graphite": new Map([
-    ...dark,
-    ...block('[data-theme="dark"][data-palette="graphite"]'),
-  ]),
-  "dark warm": new Map([
-    ...dark,
-    ...block('[data-theme="dark"][data-palette="warm"]'),
-  ]),
-};
+const themes = Object.fromEntries(
+  themeVariants(rules).map((variant) => [variant.name, variant.vars]),
+);
 // 輪が乗る面: 窓の地・サイドバー・木・本文・コード・hover・選んでいる行・前面のタブ・
 // 一段沈んだ面 (検索の入口・Diff の上の段と木の切替の地。内側の輪はこの上に乗る)。
 const SURFACES = [

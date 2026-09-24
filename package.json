@@ -1,6 +1,6 @@
 {
   "name": "@youtyan/code-viewer",
-  "version": "0.21.1",
+  "version": "0.22.0",
   "description": "Local browser-based code and git diff viewer",
   "type": "module",
   "bin": {
@@ -37,6 +37,8 @@
     "dev": "tsx web-src/server/dev.ts",
     "preview": "tsx web-src/server/dev.ts",
     "preview:raw": "tsx web-src/server/preview.ts",
+    "sandbox": "node scripts/help-captures.mjs --setup-only",
+    "ui-check": "node scripts/ui-check.mjs",
     "test:docker:up": "pnpm run test:redis:up && pnpm run test:redis:seed && pnpm run test:elasticsearch:up && pnpm run test:elasticsearch:seed && pnpm run test:postgres:up",
     "test:docker:down": "sh -c 'status=0; pnpm run test:redis:down || status=$?; pnpm run test:elasticsearch:down || status=$?; pnpm run test:postgres:down || status=$?; exit $status'",
     "test:redis:up": "docker compose -f data/test/redis/docker-compose.yml up -d --wait",
@@ -65,12 +67,13 @@
   "license": "MIT",
   "devDependencies": {
     "@biomejs/biome": "2.4.14",
-    "@happy-dom/global-registrator": "^20.10.6",
+    "@happy-dom/global-registrator": "^20.11.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/d3-dsv": "3.0.7",
     "@types/markdown-it": "14.1.2",
     "@types/pg": "8.20.0",
     "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
     "d3-dsv": "3.0.1",
     "esbuild": "^0.28.1",

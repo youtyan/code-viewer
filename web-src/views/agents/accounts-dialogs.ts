@@ -14,13 +14,20 @@ import {
   type CreateAccountPlan,
   defaultLaunchSession,
   emptyAccountRegistry,
+  handoffArgs,
+  handoffPrompt,
+  isAccountAgent,
   launchCommandLine,
   type RegisterAccountPlan,
   renameAccount,
   type ShareEntry,
   tmuxSessionName,
+  usageWindowViews,
 } from "../../core/agent-accounts";
-import type { AgentOverviewResponse } from "../../core/agent-overview";
+import type {
+  AgentOverviewResponse,
+  AgentPane,
+} from "../../core/agent-overview";
 import { abbreviateHome } from "../../core/agent-overview";
 import { showCopyFailure } from "../../core/copy-failure";
 import { formatErrorDetail } from "../../core/error-detail";
@@ -28,6 +35,7 @@ import { CHEVRON_DOWN_16_PATH, COPY_16_PATHS, iconSvg } from "../../core/icons";
 import { showFormDialog } from "../ui-dialog";
 import type { AccountsClient } from "./accounts-client";
 import type { AccountsText } from "./accounts-i18n";
+import { usageMeterRow, usageObservedText } from "./usage-meter";
 
 export type AccountDialogDeps = {
   client: AccountsClient;
@@ -61,13 +69,19 @@ function field(label: string, control: HTMLElement, hint = ""): HTMLElement {
   return wrap;
 }
 
-/** 起動の画面の 1 行: 左に見出し、右に選ぶもの (下に補足)。 */
+/**
+ * 起動の画面の 1 行: 左に見出し、右に選ぶもの (下に補足)。選ぶものが 1 つの
+ * 入力なら label で包む。ボタンを並べたもの (種類・アカウント) は div にする。
+ * label が指せるのは先頭のボタンだけで、happy-dom では押したボタンの代わりに
+ * 先頭のボタンが押されていた。
+ */
 function launchRow(
   label: string,
   control: HTMLElement,
   hint?: HTMLElement,
+  tag: "label" | "div" = "label",
 ): HTMLElement {
-  const row = el("label", "agent-launch-row");
+  const row = el(tag, "agent-launch-row");
   const value = el("span", "agent-launch-value");
   value.appendChild(control);
   if (hint) value.appendChild(hint);
@@ -217,6 +231,28 @@ function launchLoginHint(
   }
 }
 
+/**
+ * ペインのエージェントが使っているアカウントの名前 (全体ボードの行と、
+ * 引き継ぎの指示文の「前の担当」)。
+ */
+export function paneAccountName(
+  pane: Pick<AgentPane, "account">,
+  data: AccountsResponse | null,
+  text: AccountsText,
+): string {
+  const account = pane.account;
+  if (!account) return "";
+  if (account.kind === "default") return text.defaultName;
+  if (account.kind === "registered") {
+    return (
+      data?.accounts.find((item) => item.id === account.id)?.name ?? account.id
+    );
+  }
+  return account.kind === "unregistered"
+    ? text.unregistered
+    : text.unknownAccount;
+}
+
 export function accountDisplayName(
   account: Pick<AccountEntry, "builtin" | "name">,
   text: AccountsText,
@@ -242,7 +278,17 @@ export type AccountDialogs = {
   remove(account: AccountStatus): Promise<string | null>;
   rename(account: AccountStatus): Promise<string | null>;
   login(account: AccountEntry): Promise<string>;
-  launch(options?: { project?: string }): Promise<string | null>;
+  launch(options?: LaunchOptions): Promise<string | null>;
+};
+
+export type LaunchOptions = {
+  /** 選んでおくプロジェクト。 */
+  project?: string;
+  /**
+   * 「別のアカウントで続ける」: 前の担当のペイン。会話記録の場所
+   * (conversation.transcriptPath) を持つものだけを渡す (views/agents/handoff.ts)。
+   */
+  handoff?: AgentPane;
 };
 
 export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
@@ -261,8 +307,14 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
   ): { body: HTMLElement; selected(): string[] } {
     const t = text();
     const body = el("div", "agent-hooks-dialog");
+    const source = abbreviateHome(plan.defaultDir, home);
     body.appendChild(
       labeled(t.createDir, abbreviateHome(plan.configDir, home)),
+    );
+    body.appendChild(labeled(t.createSource, source));
+    // 一覧の名前 (.cc-writes/ など) がどこの何かを、一覧の前に 1 回だけ言う。
+    body.appendChild(
+      el("p", "agent-accounts-share-intro", t.shareIntro(source)),
     );
     const boxes = new Map<string, HTMLInputElement>();
     const preview = el("pre", "agent-hooks-dialog-code terminal-mono");
@@ -272,10 +324,12 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     function group(
       title: string,
       entries: ShareEntry[],
-      why: (entry: ShareEntry) => string,
+      why = "",
     ): HTMLElement {
       const box = el("div", "agent-accounts-share");
       box.appendChild(el("span", "agent-hooks-dialog-label", title));
+      // 理由はまとまりに 1 回だけ (行ごとに同じ文を繰り返すと、名前が読めない)。
+      if (why) box.appendChild(el("p", "agent-accounts-share-why", why));
       const list = el("div", "agent-accounts-share-list");
       for (const entry of entries) {
         const item = el("label", "agent-accounts-share-item");
@@ -285,11 +339,8 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
         input.addEventListener("change", syncPreview);
         boxes.set(entry.name, input);
         const name = el("span", "terminal-mono", displayName(entry));
-        name.title = entry.target;
+        name.title = abbreviateHome(entry.target, home);
         item.append(input, name);
-        const reason = why(entry);
-        if (reason)
-          item.appendChild(el("span", "agent-accounts-share-why", reason));
         list.appendChild(item);
       }
       box.appendChild(list);
@@ -304,12 +355,10 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       (entry) => entry.category === "blocked",
     );
     if (shared.length > 0) {
-      body.appendChild(group(t.shareShared, shared, () => ""));
+      body.appendChild(group(t.shareShared, shared));
     }
     if (optional.length > 0) {
-      body.appendChild(
-        group(t.shareOptional, optional, () => t.shareOptionalWhy),
-      );
+      body.appendChild(group(t.shareOptional, optional, t.shareOptionalWhy));
     }
     if (blocked.length > 0) {
       // 選べないものは畳んでおく (多くても画面を埋めない)。
@@ -590,42 +639,69 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     return [...out].map(([value, label]) => ({ value, label }));
   }
 
-  async function launch(options: { project?: string } = {}) {
+  async function launch(options: LaunchOptions = {}) {
     const t = text();
-    const data: AccountsResponse | null = deps.client.snapshot().data;
-    const accounts = data?.accounts ?? [];
-    const last = data?.lastLaunch ?? null;
+    const initialData: AccountsResponse | null = deps.client.snapshot().data;
+    /** 開いている間に届いた一覧 (使用量・ログインの取り直し) を読む。 */
+    const currentData = () => deps.client.snapshot().data ?? initialData;
+    const last = initialData?.lastLaunch ?? null;
+    const handoff = options.handoff ?? null;
+    const transcriptPath = handoff?.conversation?.transcriptPath ?? "";
+    if (handoff && !transcriptPath) {
+      throw new Error(
+        `launch dialog: ${handoff.id} has no conversation log to hand over`,
+      );
+    }
+    const fromAgent =
+      handoff && isAccountAgent(handoff.kind) ? handoff.kind : null;
+    const fromAccountId =
+      handoff?.account &&
+      (handoff.account.kind === "default" ||
+        handoff.account.kind === "registered")
+        ? handoff.account.id
+        : null;
+    const fromAccountName = handoff
+      ? paneAccountName(handoff, initialData, t)
+      : "";
     const projects = projectChoices();
+    // 引き継ぎは前の担当のフォルダで起動する (一覧に無ければ候補に足す)。
+    const handoffProject = handoff
+      ? handoff.conversation?.cwd || handoff.path
+      : "";
+    if (handoffProject && !projects.some((p) => p.value === handoffProject)) {
+      projects.unshift({
+        value: handoffProject,
+        label: abbreviateHome(handoffProject, initialData?.home ?? ""),
+      });
+    }
     const body = el("div", "agent-launch-form");
     if (projects.length === 0) {
       body.appendChild(el("p", "worktree-hint", t.launchNoProjects));
     }
-    const initialAgent: AccountAgent = last?.agent ?? "claude";
-    const accountSelect = select([], "");
+    const initialAgent: AccountAgent = fromAgent ?? last?.agent ?? "claude";
+    let selectedAccount = "";
+    const accountList = el("div", "agent-launch-accounts");
+    accountList.role = "radiogroup";
+    accountList.setAttribute("aria-label", t.launchAccount);
     const projectSelect = select(
       projects,
-      options.project ??
+      handoffProject ||
+        options.project ||
         (last && projects.some((p) => p.value === last.project)
           ? last.project
           : (projects[0]?.value ?? "")),
     );
-    const accountChoice = twoLineChoice(accountSelect);
     const projectChoice = twoLineChoice(projectSelect);
-    const home = data?.home ?? "";
-    /** 選んでいるアカウントとプロジェクトを、欄の 2 段 (名前・場所) に出す。 */
-    function syncChoices() {
-      const account = accounts.find((item) => item.id === accountSelect.value);
-      accountChoice.show(
-        account ? accountDisplayName(account, t) : "",
-        account ? abbreviateHome(account.configDir, home) : "",
-      );
+    const home = initialData?.home ?? "";
+    /** 選んでいるプロジェクトを、欄の 2 段 (名前・場所) に出す。 */
+    function syncProjectChoice() {
       const project = projects.find((p) => p.value === projectSelect.value);
       projectChoice.show(
         project?.label ?? "",
         project ? abbreviateHome(project.value, home) : "",
       );
     }
-    const session = input();
+    const session = input(handoff?.session ?? "");
     const sessionHint = el("span", "worktree-hint");
     const loginHint = el("span", "worktree-hint");
     // 実行するコマンド。途中を隠さず、長ければ枠の中で横にスクロールする。
@@ -665,32 +741,156 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       ],
       initialAgent,
       () => {
-        fillAccounts();
+        chooseAccount();
         syncPreview();
       },
     );
-    let sessionTouched = false;
+    // 引き継ぎのときは前の担当と同じセッション (新しいウィンドウ)。
+    let sessionTouched = handoff !== null;
 
-    function fillAccounts() {
+    /** 選んでいる種類のアカウント。 */
+    function accountsOfKind(): AccountStatus[] {
+      return (currentData()?.accounts ?? []).filter(
+        (account) => account.agent === kind.value(),
+      );
+    }
+
+    /**
+     * 種類を変えたときの既定の選択。引き継ぎなら前の担当と違うアカウント、
+     * そうでなければ前回の起動のアカウント、無ければ先頭。
+     */
+    function chooseAccount() {
       const agent = kind.value();
-      const choices = accounts
-        .filter((account) => account.agent === agent)
-        .map((account) => ({
-          value: account.id,
-          label: `${accountDisplayName(account, t)}  ${abbreviateHome(account.configDir, data?.home ?? "")}`,
-        }));
-      accountSelect.replaceChildren();
-      for (const choice of choices) {
-        const option = el("option", "", choice.label);
-        option.value = choice.value;
-        accountSelect.appendChild(option);
-      }
+      const choices = accountsOfKind();
+      const other = handoff
+        ? choices.find((account) => account.id !== fromAccountId)
+        : undefined;
       const remembered =
         last?.agent === agent &&
-        choices.some((choice) => choice.value === last.accountId)
+        choices.some((account) => account.id === last.accountId)
           ? last.accountId
-          : (choices[0]?.value ?? "");
-      accountSelect.value = remembered;
+          : "";
+      selectedAccount = other?.id || remembered || (choices[0]?.id ?? "");
+    }
+
+    /**
+     * アカウントの一覧。各行に 5 時間・週の使用量と「いつの値か」を並べ、
+     * 空いているアカウントを選びやすくする (部品は全体ボードの帯と同じ
+     * usage-meter.ts)。行は radio で、上下の矢印で選び直せる。
+     */
+    function renderAccounts() {
+      const now = Date.now();
+      const choices = accountsOfKind();
+      if (choices.length === 0) {
+        accountList.replaceChildren(
+          el("span", "worktree-hint", t.launchNoAccounts),
+        );
+        return;
+      }
+      const focused = accountList.contains(document.activeElement);
+      const items = choices.map((account) => {
+        const on = account.id === selectedAccount;
+        const item = el("button", "agent-launch-account");
+        item.type = "button";
+        item.role = "radio";
+        item.dataset.account = account.id;
+        item.setAttribute("aria-checked", String(on));
+        item.tabIndex = on ? 0 : -1;
+        item.classList.toggle("active", on);
+        const head = el("span", "agent-launch-account-head");
+        head.appendChild(
+          el(
+            "span",
+            "agent-launch-account-name",
+            accountDisplayName(account, t),
+          ),
+        );
+        if (handoff && account.id === fromAccountId) {
+          head.appendChild(
+            el("span", "agent-launch-account-current", t.handoffCurrent),
+          );
+        }
+        const observed = usageObservedText(
+          account.usage,
+          account.login,
+          now,
+          t,
+        );
+        const when = el(
+          "span",
+          `agent-launch-account-observed${observed.stale ? " stale" : ""}`,
+          observed.text,
+        );
+        if (observed.title) when.title = observed.title;
+        head.appendChild(when);
+        item.append(
+          head,
+          el(
+            "span",
+            "agent-launch-account-dir",
+            abbreviateHome(account.configDir, currentData()?.home ?? ""),
+          ),
+          accountUsage(account, now),
+        );
+        item.addEventListener("click", () => pickAccount(account.id));
+        item.addEventListener("keydown", (event) => {
+          const step =
+            event.key === "ArrowDown" || event.key === "ArrowRight"
+              ? 1
+              : event.key === "ArrowUp" || event.key === "ArrowLeft"
+                ? -1
+                : 0;
+          if (step === 0) return;
+          event.preventDefault();
+          const index = choices.findIndex((c) => c.id === account.id);
+          const next =
+            choices[(index + step + choices.length) % choices.length];
+          if (next) pickAccount(next.id, true);
+        });
+        return item;
+      });
+      accountList.replaceChildren(...items);
+      if (focused) selectedAccountItem()?.focus();
+    }
+
+    /** 1 アカウントの使用量 (未ログイン・取れないときは理由の 1 行)。 */
+    function accountUsage(account: AccountStatus, now: number): HTMLElement {
+      const box = el("span", "agent-launch-account-usage");
+      if (account.login.state === "logged-out") {
+        box.appendChild(
+          el("span", "agent-launch-account-status", t.login["logged-out"]),
+        );
+        return box;
+      }
+      const usage = account.usage;
+      if (usage.status !== "ok") {
+        const line = el(
+          "span",
+          "agent-launch-account-status",
+          `${t.usageUnavailable} · ${t.usageReasonShort[usage.reason]}`,
+        );
+        line.title = [t.usageReason[usage.reason], usage.detail]
+          .filter(Boolean)
+          .join("\n");
+        box.appendChild(line);
+        return box;
+      }
+      for (const view of usageWindowViews(usage, now)) {
+        box.appendChild(usageMeterRow(view, now, t, { showReset: true }));
+      }
+      return box;
+    }
+
+    function selectedAccountItem(): HTMLElement | null {
+      return accountList.querySelector<HTMLElement>(
+        '.agent-launch-account[aria-checked="true"]',
+      );
+    }
+
+    function pickAccount(id: string, focus = false) {
+      selectedAccount = id;
+      syncPreview();
+      if (focus) selectedAccountItem()?.focus();
     }
 
     function syncSession() {
@@ -705,20 +905,34 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       session.value = defaultLaunchSession(project, panes, fallback).session;
     }
 
+    /** 引き継ぎのときに起動コマンドの後ろに足す引数 (最初の指示など)。 */
+    function handoffArgsFor(agent: AccountAgent): string[] {
+      if (!fromAgent) return [];
+      const prompt = handoffPrompt(t.language, {
+        agent: fromAgent,
+        account: fromAccountName,
+        transcriptPath,
+      });
+      return handoffArgs(agent, prompt, transcriptPath);
+    }
+
     /**
      * 表示するコマンドだけを描く。起動コマンドは開いた時点の写しではなく今の値
      * (別の画面で保存したものが、開き直すまで古いまま出ていた)。
      */
     function renderCommandPreview() {
-      const account = accounts.find((item) => item.id === accountSelect.value);
+      const current = currentData();
+      const account = current?.accounts.find(
+        (item) => item.id === selectedAccount,
+      );
       const agent = kind.value();
-      const current = deps.client.snapshot().data ?? data;
       const command = current?.launchCommands[agent] ?? agent;
       preview.textContent = launchCommandLine(
         agent,
         !account || account.builtin ? null : account.configDir,
         command,
         current?.home ?? "",
+        handoffArgsFor(agent),
       );
     }
 
@@ -730,18 +944,20 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       sessionHint.textContent = exists
         ? t.launchSessionExisting
         : t.launchSessionNew;
-      const account = accounts.find((item) => item.id === accountSelect.value);
+      const account = currentData()?.accounts.find(
+        (item) => item.id === selectedAccount,
+      );
+      renderAccounts();
       renderCommandPreview();
       copyResult.textContent = "";
-      syncChoices();
+      syncProjectChoice();
       loginHint.textContent = launchLoginHint(account, t);
       loginHint.hidden = loginHint.textContent === "";
     }
 
-    fillAccounts();
+    chooseAccount();
     syncSession();
     syncPreview();
-    accountSelect.addEventListener("change", syncPreview);
     projectSelect.addEventListener("change", () => {
       syncSession();
       syncPreview();
@@ -750,38 +966,63 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       sessionTouched = true;
       syncPreview();
     });
+    if (handoff) {
+      const log = el("span", "agent-launch-log terminal-mono");
+      log.textContent = abbreviateHome(transcriptPath, home);
+      log.title = transcriptPath;
+      body.appendChild(
+        launchRow(
+          t.handoffLog,
+          log,
+          el("span", "worktree-hint", t.handoffLogHint),
+        ),
+      );
+    }
     body.append(
-      launchRow(t.launchKind, kind.element),
-      launchRow(t.launchAccount, accountChoice.element, loginHint),
+      launchRow(t.launchKind, kind.element, undefined, "div"),
+      launchRow(t.launchAccount, accountList, loginHint, "div"),
       launchRow(t.launchProject, projectChoice.element),
       launchRow(t.launchSession, session, sessionHint),
       launchPreviewBlock(t.launchPreviewLabel, previewFrame, copyResult),
     );
 
-    // 開いている間に届いた一覧 (周期の取り直し) で、表示するコマンドを合わせ直す
-    // (コピーの結果の表示は消さない)。開いた時点でも 1 回取り直す (別の画面での
-    // 保存を待たずに拾う)。
-    const unsubscribe = deps.client.subscribe(renderCommandPreview);
+    // 開いている間に届いた一覧 (周期の取り直し) で、表示するコマンドと
+    // 使用量を合わせ直す (コピーの結果の表示は消さない)。開いた時点でも 1 回
+    // 取り直す (別の画面での保存を待たずに拾う)。
+    const unsubscribe = deps.client.subscribe(() => {
+      renderAccounts();
+      renderCommandPreview();
+    });
     void deps.client.load({ background: true });
     return showFormDialog({
-      title: t.launchTitle,
-      description: t.launchIntro,
+      title: handoff ? t.handoffDialogTitle : t.launchTitle,
+      description: handoff
+        ? t.handoffIntro(`${fromAgent} · ${fromAccountName}`)
+        : t.launchIntro,
       body,
       wide: true,
-      submitLabel: t.launchRun,
+      submitLabel: handoff ? t.handoffRun : t.launchRun,
       cancelLabel: t.cancel,
-      focusTarget: accountSelect,
+      focusTarget: selectedAccountItem(),
       validate: () => {
-        if (!accountSelect.value || !projectSelect.value) {
-          return t.launchNoProjects;
-        }
+        if (!selectedAccount) return t.launchNoAccounts;
+        if (!projectSelect.value) return t.launchNoProjects;
         return session.value.trim() ? null : t.launchSession;
       },
       submit: async () => {
         const result = await deps.client.launch({
-          accountId: accountSelect.value,
+          accountId: selectedAccount,
           project: projectSelect.value,
           session: session.value.trim(),
+          ...(handoff
+            ? {
+                handoff: {
+                  pane: handoff.id,
+                  language: t.language,
+                  fromAccount: fromAccountName,
+                },
+              }
+            : {}),
         });
         deps.openPane(result.paneId);
         await Promise.all([deps.refreshOverview(), deps.client.load()]);

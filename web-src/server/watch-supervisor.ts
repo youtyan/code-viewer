@@ -5,10 +5,10 @@
 // inside libuv's `uv__fsevents_close` (see watch-child.ts) will not answer
 // SIGTERM and will not exit, so every wait here is bounded and ends in SIGKILL.
 // The parent abandons it and starts a replacement.
-import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { errorWithCause } from "../core/error-detail";
+import { type SpawnedProcess, spawnProcess } from "./runtime";
 import type { WatchChildConfig, WatchChildMessage } from "./watch-child";
 
 export type WatchSupervisorOptions = {
@@ -23,7 +23,7 @@ export type WatchSupervisorOptions = {
   onWatchLimit?: (limit: number) => void;
   onError?: (error: unknown) => void;
   onPollOnly?: () => void;
-  spawnFn?: typeof spawn;
+  spawnFn?: typeof spawnProcess;
   command?: string[];
   nowFn?: () => number;
   setTimeoutFn?: typeof setTimeout;
@@ -69,7 +69,7 @@ export function watchChildCommand(): string[] {
 export function startWatchSupervisor(
   options: WatchSupervisorOptions,
 ): WatchSupervisor {
-  const spawnChild = options.spawnFn || spawn;
+  const spawnChild = options.spawnFn || spawnProcess;
   const now = options.nowFn || Date.now;
   const setTimer = options.setTimeoutFn || setTimeout;
   const setRepeating = options.setIntervalFn || setInterval;
@@ -78,7 +78,7 @@ export function startWatchSupervisor(
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_MS;
   const command = options.command ?? watchChildCommand();
 
-  let child: ChildProcess | null = null;
+  let child: SpawnedProcess | null = null;
   let closed = false;
   let watchFailures = 0;
   let pollOnly = false;
@@ -90,7 +90,7 @@ export function startWatchSupervisor(
 
   // Abandon, do not await. A child stuck in a native semaphore wait cannot run
   // its signal handler, so the only thing that reliably ends it is SIGKILL.
-  const abandon = (victim: ChildProcess) => {
+  const abandon = (victim: SpawnedProcess) => {
     victim.removeAllListeners?.();
     victim.stdout?.removeAllListeners?.();
     victim.stderr?.removeAllListeners?.();
@@ -178,7 +178,7 @@ export function startWatchSupervisor(
       pollOnly,
     };
 
-    let spawned: ChildProcess;
+    let spawned: SpawnedProcess;
     try {
       spawned = spawnChild(command[0], command.slice(1), {
         cwd: options.root,

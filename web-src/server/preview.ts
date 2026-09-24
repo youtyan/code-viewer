@@ -60,7 +60,6 @@ import {
   type TimedCacheEntry,
 } from "./cache";
 import {
-  commandNotFoundDetail,
   configureExternalCommands,
   type ExternalCommandOverride,
   parseExternalCommandOverride,
@@ -84,7 +83,6 @@ import {
 import { processAlive } from "./file-lock";
 import { writeUploadedFiles } from "./file-upload";
 import * as git from "./git";
-import { mainTabsPath } from "./main-tabs-store";
 import {
   GithubIssueListError,
   normalizeGithubIssueListLimit,
@@ -109,6 +107,7 @@ import {
   updateJournalTask,
   updateJournalTaskState,
 } from "./journal";
+import { mainTabsPath } from "./main-tabs-store";
 import {
   buildMcpInstructions,
   defaultMcpTools,
@@ -140,9 +139,9 @@ import {
   fileByteRangeResponseBody,
   fileReadableStream,
   readFileTextRange,
+  type SpawnStreamExit,
   SSE_HEARTBEAT_INTERVAL_MS,
   SSE_RETRY_MS,
-  type SpawnStreamExit,
   startServer,
 } from "./runtime";
 import { DEFAULT_EXCLUDE_NAMES, normalizeGrepMax } from "./search";
@@ -166,6 +165,7 @@ import { loadAppSettingsState } from "./state-store";
 import { staticFile, WEB_ROOT } from "./static-files";
 import { errno } from "./terminal/settings-file";
 import type { ListTmuxPanesOptions } from "./tmux/panes";
+import { userSettingsPath } from "./user-settings";
 import { startWatchSupervisor, type WatchSupervisor } from "./watch-supervisor";
 import { LAUNCHED_BY_ENV } from "./worktree/open";
 import {
@@ -314,13 +314,14 @@ Usage:
   code-viewer search code --term <text> [--ref <ref>] [--path <p>...] [--regex] [--max <n>] [--json] [--bin git=<path>]
   code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json] [--bin git=<path>]
   code-viewer file <blame|history|show|diff> --path <p> [--ref <ref>] [...subcommand options] [--json] [--bin git=<path>]
+  code-viewer accounts <list|plan|create|register|login|wait|rename|remove> [options]
   code-viewer skill install [--agent <list>] [--global]
   code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|rg|docker|gh|tmux>=<path>]
   code-viewer agent-help
   code-viewer help
 
 AI-agent index (start here):  code-viewer agent-help
-Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search|file|terminal|skill|doctor> agent-help
+Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search|file|terminal|accounts|skill|doctor> agent-help
 
 One code-viewer serves every project on one port. Running it again in another
 repository adds that repository to the running one and prints its URL.
@@ -1741,9 +1742,7 @@ async function handleFileBlame(url: URL) {
   } else {
     const resolved = await git.verifyCommitAsync(normalized.ref, cwd);
     if (resolved.ok === false) {
-      const status =
-        resolved.error === commandNotFoundDetail("git") ? 503 : 400;
-      return text(resolved.error || "unknown ref", status);
+      return text(resolved.error || "unknown ref", resolved.status ?? 400);
     }
     cacheKey = `HEAD|${path}|${resolved.sha}`;
   }
@@ -3521,6 +3520,10 @@ const shutdown = createProcessShutdown([
     label: "code-viewer main tabs watch stop",
     run: () => unwatchFile(mainTabsWatched),
   },
+  {
+    label: "code-viewer user settings watch stop",
+    run: () => unwatchFile(userSettingsWatched),
+  },
   { label: "code-viewer server close", run: () => server.close() },
 ]);
 
@@ -3635,6 +3638,18 @@ watchFile(
   { interval: MAIN_TABS_WATCH_INTERVAL_MS, persistent: false },
   (now, before) => {
     if (now.mtimeMs !== before.mtimeMs) sendSse("tabs", String(now.mtimeMs));
+  },
+);
+
+// 全プロジェクト共通の設定 (明暗・テーマなど) も別の窓が書く。書き換わったら
+// 画面へ知らせ、画面が取り直して明暗とテーマを当てる (app.ts の refreshLook)。
+const userSettingsWatched = userSettingsPath();
+watchFile(
+  userSettingsWatched,
+  { interval: MAIN_TABS_WATCH_INTERVAL_MS, persistent: false },
+  (now, before) => {
+    if (now.mtimeMs !== before.mtimeMs)
+      sendSse("user-settings", String(now.mtimeMs));
   },
 );
 

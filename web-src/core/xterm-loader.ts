@@ -23,6 +23,17 @@ export type XtermOptions = {
   letterSpacing?: number;
   scrollback?: number;
   cursorBlink?: boolean;
+  /**
+   * 枠の線 (─│┼) とブロックの字を、フォントの字ではなく xterm が升目いっぱいに
+   * 描く。効くのは WebGL の描画だけ (DOM の描画はフォントの字をそのまま並べる)。
+   */
+  customGlyphs?: boolean;
+  /**
+   * 文字と地のコントラスト比の下限 (1〜21。1 で補正しない)。下回る文字は、
+   * xterm が色相を保ったまま明るさだけ動かして下限まで上げる (DOM・WebGL の
+   * どちらの描画でも効く。淡色 (SGR 2) はこの半分)。
+   */
+  minimumContrastRatio?: number;
   /** 画面に出さない書き込み専用にするとき (読み取り専用ペイン)。 */
   disableStdin?: boolean;
   /** capture-pane の出力は行末に改行しか持たないので CR を補う。 */
@@ -93,6 +104,8 @@ export type XtermBuffer = {
   /** スクロールバックを除いた画面先頭の行番号。 */
   readonly baseY: number;
   readonly cursorY: number;
+  /** バッファの行数 (スクロールバック + 画面)。 */
+  readonly length: number;
   getLine(y: number): XtermBufferLine | undefined;
 };
 
@@ -124,8 +137,18 @@ export type XtermTerminal = {
    * (preventDefault もしないので、外側のスクロール領域に流れる)。
    */
   attachCustomWheelEventHandler(handler: (event: WheelEvent) => boolean): void;
+  /** 利用者 (かこちら) が文字を選択しているか。 */
+  hasSelection(): boolean;
+  clearSelection(): void;
+  /**
+   * 文字を選択する。column・row は 0 始まりのバッファの位置 (row は画面ではなく
+   * バッファの行)。length はマス目の数で、桁数を超えた分は次の行へ続く。
+   */
+  select(column: number, row: number, length: number): void;
   /** 表示位置を行単位で動かす。負で上 (過去) へ。 */
   scrollLines(amount: number): void;
+  /** 表示位置をバッファのその行 (0 始まり) が画面の先頭に来る所へ動かす。 */
+  scrollToLine(line: number): void;
   /** 表示位置が変わった。引数は画面先頭の行番号 (buffer.viewportY と同じ)。 */
   onScroll(handler: (viewportY: number) => void): XtermDisposable;
   /**
@@ -150,9 +173,16 @@ export type XtermFitAddon = XtermAddon & {
   proposeDimensions(): { cols: number; rows: number } | undefined;
 };
 
+/** WebGL の描画。読み込むと DOM の描画と入れ替わり、dispose で DOM に戻る。 */
+export type XtermWebglAddon = XtermAddon & {
+  /** GPU が context を取り上げた (ドライバの再起動・context の上限など)。 */
+  onContextLoss(handler: () => void): XtermDisposable;
+};
+
 export type XtermApi = {
   Terminal: new (options?: XtermOptions) => XtermTerminal;
   FitAddon: new () => XtermFitAddon;
+  WebglAddon: new () => XtermWebglAddon;
 };
 
 export const loadXterm = createBundleLoader<XtermApi>("xterm.js");

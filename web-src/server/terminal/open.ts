@@ -18,7 +18,11 @@
 
 import { LOGIN_SESSION } from "../../core/agent-accounts";
 import { errorWithCauses } from "../../core/error-detail";
-import type { ShellPurpose, ShellSession } from "../../core/shell";
+import type {
+  ShellPurpose,
+  ShellSession,
+  ShellSessionId,
+} from "../../core/shell";
 import type { TmuxPaneId } from "../../core/tmux";
 import {
   closeShellSession,
@@ -89,11 +93,24 @@ export async function openTmuxPaneInShell(
   cwd: string,
   /** 新しく開くときの寸法。ブラウザが測った表示領域。 */
   size: { cols?: number; rows?: number } = {},
+  /**
+   * サーバが起き直して終わったシェルのタブを、同じ ID のシェルで同じ場所へ
+   * 繋ぎ直す (タブの配置はシェルの ID で指すので、ID を保てばタブの位置も
+   * グループも変わらない)。ペイン ID は tmux が起き直すと別のペインに付くので、
+   * セッション名とウインドウの番号も保存した場所と一致したときだけ繋ぐ。
+   * 繋ぎ直しでは、同じセッションを映している別のシェルを使い回さない。
+   */
+  revive?: { shell: ShellSessionId; session: string; window: number },
 ): Promise<OpenTmuxPaneResult> {
   const resolved = await resolvePaneSession(paneId, cwd);
   if (resolved.status === "gone") return { status: "gone" };
   if (resolved.status === "error") return resolved;
   const session = resolved.session;
+  if (
+    revive &&
+    (session !== revive.session || resolved.window !== revive.window)
+  )
+    return { status: "gone" };
   // ペイン ID は tmux が起き直すと振り直されるので、ログインのセッションの
   // ペインのときだけ覚えた用途を使う。
   const purpose =
@@ -108,22 +125,27 @@ export async function openTmuxPaneInShell(
     return selected;
   }
 
-  const remembered = findShellSessionForTmuxSession(session);
+  const remembered = revive ? null : findShellSessionForTmuxSession(session);
   if (remembered) {
     rememberShellTmuxAttachment(remembered.id, session, paneId, purpose);
     return { status: "ok", session: remembered, action: "switched" };
   }
 
-  const listed = await listTmuxClients(cwd);
-  if (listed.status === "gone") return { status: "gone" };
-  if (listed.status === "error") return listed;
-  const existing = await findShellForSession(session, listed.clients);
-  if (existing) {
-    rememberShellTmuxAttachment(existing.id, session, paneId, purpose);
-    return { status: "ok", session: existing, action: "switched" };
+  if (!revive) {
+    const listed = await listTmuxClients(cwd);
+    if (listed.status === "gone") return { status: "gone" };
+    if (listed.status === "error") return listed;
+    const existing = await findShellForSession(session, listed.clients);
+    if (existing) {
+      rememberShellTmuxAttachment(existing.id, session, paneId, purpose);
+      return { status: "ok", session: existing, action: "switched" };
+    }
   }
 
-  const created = await createShellSession(cwd, size);
+  const created = await createShellSession(cwd, size, revive?.shell);
+  // 別の窓が先に同じタブを繋ぎ直した。そのシェルを映す (attach を打ち直さない)。
+  if (created.status === "in-use")
+    return { status: "ok", session: created.session, action: "switched" };
   if (created.status !== "ok") return created;
   // シェルが端末を整え終わるまで待ってから流す。作った直後に書くと捨てられる。
   const written = await writeToShellWhenReady(

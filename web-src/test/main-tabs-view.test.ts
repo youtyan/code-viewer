@@ -1,24 +1,15 @@
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { listColumnLayout } from "../core/list-column";
-import { TAB_FLOOR_UNITS } from "../core/tab-widths";
-import type { SavedBase } from "../views/main-tabs/main-tabs-view";
 import type { SerializedLayout, TabTarget } from "../core/main-tabs";
 import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import { HISTORY_WIDTH } from "../core/panel-sizes";
 import { lastTabNumber } from "../core/pwa";
 import { type AppRoute, urlKeepsSavedFront } from "../core/routes";
+import { TAB_FLOOR_UNITS } from "../core/tab-widths";
 import { closeContextMenu } from "../views/context-menu";
+import type { SavedBase } from "../views/main-tabs/main-tabs-view";
 import {
   COMFORTABLE_PANE_WIDTH,
   createMainTabsView,
@@ -26,19 +17,21 @@ import {
   type MainTabsHandle,
   routeTarget,
   SPLIT_DIVIDER_WIDTH,
+  VIEW_SCREENS,
 } from "../views/main-tabs/main-tabs-view";
+import { pageIconPaths } from "../views/main-tabs/tab-icons";
 
-beforeAll(() => {
+// 窓 (happy-dom) はテストごとに作り直す。画面の部品は片付けの口を持たず、
+// document.body の class を見張る MutationObserver を残す。同じ窓を使い回すと、
+// 前のテストの部品がすべて次のテストの body の変化にも反応し、後ろのテストほど
+// 遅くなっていた (131 件で最初の 15ms が最後は 800ms)。
+beforeEach(() => {
   GlobalRegistrator.register();
 });
 
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
-
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
-  document.body.replaceChildren();
+  await GlobalRegistrator.unregister();
 });
 
 const range = { from: "HEAD", to: "worktree" };
@@ -100,9 +93,13 @@ function setup(
     onNewTab: (side, anchor) =>
       calls.push(`new:${side}:${anchor.getAttribute("aria-label")}`),
     stopTerminal: (session) => calls.push(`stop:${session}`),
-    terminalMenuItems: () => [
-      { label: "Larger text (13)", onSelect: () => calls.push("larger") },
-    ],
+    // session: そのタブのシェル (映しているエージェントの項目を足すため)。
+    terminalMenuItems: (session) => {
+      calls.push(`menu:${session}`);
+      return [
+        { label: "Larger text (13)", onSelect: () => calls.push("larger") },
+      ];
+    },
     loadSaved: async () => ({
       layout: await loadSaved(),
       rev: 1,
@@ -896,6 +893,9 @@ describe("main tabs view: プロジェクトのグループ", () => {
       [
         // 札には頭文字しか無いので、メニューの頭にプロジェクトの名前。
         "sample-app (disabled)",
+        // 新しいシェル・エージェントの口 (newShellIn・launchAgentIn) が無い。
+        "New shell (disabled)",
+        "New agent… (disabled)",
         "Switch to this project (disabled)",
         "Collapse",
         "Close this group",
@@ -903,6 +903,468 @@ describe("main tabs view: プロジェクトのグループ", () => {
       [`switch:${LIB}:-:sh`],
       ["[SA]", `${APP}(>app.ts README.md)`, "+", "-(agents)"],
     ]);
+  });
+
+  describe("▾ のメニューの画面の行", () => {
+    /** 画面の入口と同じキー (worktree は割り当てが無い)。 */
+    const KEYS = {
+      repo: "gf",
+      diff: "gd",
+      history: "gh",
+      worktree: "",
+      database: "gb",
+      journal: "gj",
+    } as const;
+    const setupScreens = async (
+      initial: AppRoute = fileRoute("src/app.ts"),
+      extra: Partial<MainTabsDeps> = {},
+    ) => {
+      const calls: string[] = [];
+      const ctx = setup(
+        async () => saved,
+        undefined,
+        undefined,
+        initial,
+        APP,
+        groupDeps(calls, { screenKey: (screen) => KEYS[screen], ...extra }),
+      );
+      await ctx.handle.restore();
+      return { ...ctx, calls };
+    };
+    const openMenu = (mount: HTMLElement, root: string) => {
+      mount
+        .querySelector<HTMLElement>(
+          `.main-tab-group[data-group="${root}"] .main-tab-group-menu`,
+        )
+        ?.click();
+      return [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          ".gdp-context-menu button",
+        ),
+      ];
+    };
+    /**
+     * 画面の行 (menuitemradio) を短く書く: 絵があれば ◆、名前、[キー]、選択の印 ✓、
+     * 押せなければ (disabled)、title があれば {title}。
+     */
+    const screenRows = (mount: HTMLElement, root: string) => {
+      const rows = openMenu(mount, root)
+        .filter((item) => item.getAttribute("role") === "menuitemradio")
+        .map((item) => {
+          const label = [...item.childNodes]
+            .filter((node) => node.nodeType === Node.TEXT_NODE)
+            .map((node) => node.textContent)
+            .join("");
+          const key = item.querySelector(".gdp-context-menu-key")?.textContent;
+          return [
+            item.querySelector(".gdp-context-menu-icon svg") ? "◆ " : "",
+            label,
+            key ? ` [${key}]` : "",
+            item.getAttribute("aria-checked") === "true" ? " ✓" : "",
+            item.disabled ? " (disabled)" : "",
+            item.title ? ` {${item.title}}` : "",
+          ].join("");
+        });
+      closeContextMenu();
+      return rows;
+    };
+
+    test("並びは左の縦の列 (web/index.html の画面の入口) と同じ", () => {
+      const html = readFileSync("web/index.html", "utf8");
+      const strip = [
+        ...html.matchAll(
+          /class="[^"]*view-strip-item[^"]*" data-route="(\w+)"/g,
+        ),
+      ].map((match) => match[1]);
+      expect([...VIEW_SCREENS]).toEqual(strip);
+    });
+
+    test("行の絵は左の縦の列と同じ絵", async () => {
+      const { mount } = await setupScreens();
+      const icons = openMenu(mount, APP)
+        .filter((item) => item.getAttribute("role") === "menuitemradio")
+        .map((item) =>
+          [...item.querySelectorAll(".gdp-context-menu-icon path")].map(
+            (path) => path.getAttribute("d"),
+          ),
+        );
+      closeContextMenu();
+      expect(icons).toEqual(
+        VIEW_SCREENS.map((screen) => [pageIconPaths(screen)].flat()),
+      );
+    });
+
+    test.each([
+      {
+        name: "いま見ているプロジェクト (ファイルを開いている)",
+        root: APP,
+        expected: [
+          "◆ repo [gf] ✓",
+          "◆ diff [gd]",
+          "◆ history [gh]",
+          "◆ worktree",
+          "◆ database [gb]",
+          "◆ journal [gj]",
+        ],
+      },
+      {
+        name: "別のプロジェクト (印は無く、移ってから開くと title で知らせる)",
+        root: LIB,
+        expected: [
+          "◆ repo [gf] {Switch to sample-lib and open this screen}",
+          "◆ diff [gd] {Switch to sample-lib and open this screen}",
+          "◆ history [gh] {Switch to sample-lib and open this screen}",
+          "◆ worktree {Switch to sample-lib and open this screen}",
+          "◆ database [gb] {Switch to sample-lib and open this screen}",
+          "◆ journal [gj] {Switch to sample-lib and open this screen}",
+        ],
+      },
+    ])("$name: 絵・名前・キー・選択の印", async ({ root, expected }) => {
+      const { mount } = await setupScreens();
+      expect(screenRows(mount, root)).toEqual(expected);
+    });
+
+    test.each([
+      {
+        name: "フォルダ表示",
+        initial: {
+          screen: "repo",
+          ref: "worktree",
+          path: "",
+          range,
+        } as AppRoute,
+        expected: "repo",
+      },
+      { name: "ファイル", initial: fileRoute("README.md"), expected: "repo" },
+      {
+        name: "Diff",
+        initial: { screen: "diff", range } as AppRoute,
+        expected: "diff",
+      },
+      {
+        name: "History",
+        initial: { screen: "history", ref: "HEAD", range } as AppRoute,
+        expected: "history",
+      },
+      {
+        name: "Data",
+        initial: { screen: "database", range } as AppRoute,
+        expected: "database",
+      },
+      // 画面の入口に無い画面 (全体ボード) は、どの行にも印を付けない。
+      {
+        name: "全体ボード",
+        initial: { screen: "agents", range } as AppRoute,
+        expected: null,
+      },
+    ])("本文が $name なら、いま見ているプロジェクトの印はその行", async ({
+      initial,
+      expected,
+    }) => {
+      const { mount } = await setupScreens(initial);
+      const checked = openMenu(mount, APP)
+        .filter((item) => item.getAttribute("aria-checked") === "true")
+        .map((item) => item.firstChild?.nextSibling?.textContent);
+      closeContextMenu();
+      expect(checked).toEqual(expected === null ? [] : [expected]);
+    });
+
+    test("左の面の前面がターミナル (本文が隠れている) なら印は無い", async () => {
+      const { mount, handle } = await setupScreens();
+      handle.openTerminal("shell-app", "left");
+      expect(screenRows(mount, APP).filter((row) => row.includes("✓"))).toEqual(
+        [],
+      );
+    });
+
+    test.each([
+      {
+        name: "いま見ているプロジェクトの、タブの無い画面: その画面へ移り、このグループのタブになる",
+        root: APP,
+        row: "history",
+        calls: [],
+        navigations: ["history"],
+        strip: [
+          `${LIB}(lib.ts diff Shell shell-lib)`,
+          `${APP}(app.ts >history README.md)`,
+        ],
+      },
+      {
+        name: "いま見ているプロジェクトのファイル: フォルダ表示 (タブにしない)",
+        root: APP,
+        row: "repo",
+        calls: [],
+        navigations: ["repo"],
+        strip: [
+          `${LIB}(lib.ts diff Shell shell-lib)`,
+          `${APP}(app.ts README.md)`,
+        ],
+      },
+      {
+        name: "別のプロジェクトの、開いている画面のタブ: そのタブを前面にして移る",
+        root: LIB,
+        row: "diff",
+        calls: [`switch:${LIB}:diff:ld`],
+        navigations: [],
+        strip: [
+          // 前面にしてから移る (移った先の読み戻しがこのタブを前面に出す)。
+          `${LIB}(lib.ts >diff Shell shell-lib)`,
+          `${APP}(app.ts README.md)`,
+        ],
+      },
+      {
+        name: "別のプロジェクトの、タブの無い画面: その画面の route で移る (タブは移った先で開く)",
+        root: LIB,
+        row: "history",
+        calls: [`switch:${LIB}:history:-`],
+        navigations: [],
+        strip: [
+          `${LIB}(lib.ts diff Shell shell-lib)`,
+          `${APP}(>app.ts README.md)`,
+        ],
+      },
+      {
+        name: "別のプロジェクトのファイル: そのプロジェクトのフォルダ表示へ移る",
+        root: LIB,
+        row: "repo",
+        calls: [`switch:${LIB}:-:-`],
+        navigations: [],
+        strip: [
+          `${LIB}(lib.ts diff Shell shell-lib)`,
+          `${APP}(>app.ts README.md)`,
+        ],
+      },
+    ])("$name", async ({ name: _name, root, row, ...expected }) => {
+      const { mount, calls, navigations } = await setupScreens();
+      openMenu(mount, root)
+        .find(
+          (item) =>
+            item.getAttribute("role") === "menuitemradio" &&
+            item.firstChild?.nextSibling?.textContent === row,
+        )
+        ?.click();
+      expect({
+        calls,
+        navigations: navigations.map((item) => item.to),
+        strip: strip(mount).filter((item) => item.startsWith("/work/")),
+      }).toEqual(expected);
+    });
+
+    test("別のプロジェクトへ移れない (switchProject が無い) なら、その画面の行は押せない", async () => {
+      const { mount } = await setupScreens(undefined, {
+        switchProject: undefined,
+      });
+      expect([
+        screenRows(mount, LIB).every((row) => row.includes("(disabled)")),
+        screenRows(mount, APP).some((row) => row.includes("(disabled)")),
+      ]).toEqual([true, false]);
+    });
+  });
+
+  describe("▾ のメニューの新しいシェル・エージェント", () => {
+    /** 開いたメニューの並び (区切りは ---、押せない項目は (disabled)、title は [ ])。 */
+    const openGroupMenu = (mount: HTMLElement, root: string) => {
+      mount
+        .querySelector<HTMLElement>(
+          `.main-tab-group[data-group="${root}"] .main-tab-group-menu`,
+        )
+        ?.click();
+      return [
+        ...(document.querySelector(".gdp-context-menu")?.children ?? []),
+      ] as HTMLElement[];
+    };
+    const describeMenu = (items: HTMLElement[]) =>
+      items.map((item) =>
+        item.tagName === "HR"
+          ? "---"
+          : `${item.textContent}${(item as HTMLButtonElement).disabled ? " (disabled)" : ""}`,
+      );
+    const pick = (mount: HTMLElement, root: string, label: string) => {
+      const item = openGroupMenu(mount, root).find(
+        (el) => el.textContent === label,
+      );
+      if (!item) throw new Error(`no menu item ${label} for ${root}`);
+      item.click();
+    };
+    /**
+     * app.ts の口をまねる: newShellIn はそのプロジェクトのシェル (shell-new-<n>)
+     * を作って openTerminal でその面に置き、terminalProject はそのシェルの
+     * プロジェクトを返す。
+     */
+    const setupWithActions = async (
+      facts: ReturnType<NonNullable<MainTabsDeps["groupFacts"]>> = {
+        shellUnavailable: null,
+        git: true,
+      },
+      foreignInPlace = true,
+    ) => {
+      const calls: string[] = [];
+      const shells = new Map<string, string>([["shell-lib", LIB]]);
+      const ref: { handle?: MainTabsHandle } = {};
+      const ctx = setup(
+        async () => saved,
+        undefined,
+        undefined,
+        fileRoute("src/app.ts"),
+        APP,
+        groupDeps(calls, {
+          terminalProject: (session) => shells.get(session) ?? null,
+          foreignInPlace: () => foreignInPlace,
+          groupFacts: () => facts,
+          newShellIn: (root, side) => {
+            const session = `shell-new-${shells.size}`;
+            shells.set(session, root);
+            calls.push(`shell:${root}:${side}`);
+            ref.handle?.openTerminal(session, side);
+          },
+          launchAgentIn: (root) => calls.push(`agent:${root}`),
+        }),
+      );
+      ref.handle = ctx.handle;
+      await ctx.handle.restore();
+      return { ...ctx, calls };
+    };
+
+    test("既存の項目の上に、区切り線で分けて並ぶ (その下に区切って画面の行)", async () => {
+      const { mount } = await setupWithActions();
+      expect(describeMenu(openGroupMenu(mount, LIB))).toEqual([
+        "sample-lib (disabled)",
+        "---",
+        "New shell",
+        "New agent…",
+        "---",
+        "repo",
+        "diff",
+        "history",
+        "worktree",
+        "database",
+        "journal",
+        "---",
+        "Switch to this project",
+        "Collapse",
+        "---",
+        "Close this group",
+      ]);
+    });
+
+    test.each([
+      {
+        name: "いま見ているプロジェクトのグループ",
+        root: APP,
+        expected: [
+          "[SL]",
+          `${LIB}(lib.ts diff Shell shell-lib)`,
+          "[SA]",
+          // 前面が同じグループなら、その右 (＋ と同じ)。
+          `${APP}(app.ts >Shell shell-new-1 README.md)`,
+          "+",
+          "-(agents)",
+        ],
+      },
+      {
+        name: "別のプロジェクトのグループ (前面は別のグループ)",
+        root: LIB,
+        expected: [
+          "[SL]",
+          `${LIB}(lib.ts diff Shell shell-lib >Shell shell-new-1)`,
+          "[SA]",
+          `${APP}(app.ts README.md)`,
+          "+",
+          "-(agents)",
+        ],
+      },
+    ])("新しいシェル: $name のプロジェクトで作り、できたタブはそのグループに入って前面になる", async ({
+      root,
+      expected,
+    }) => {
+      const { mount, calls } = await setupWithActions();
+      pick(mount, root, "New shell");
+      expect([calls, strip(mount)]).toEqual([[`shell:${root}:left`], expected]);
+    });
+
+    test.each([
+      { name: "いま見ているプロジェクト", root: APP },
+      { name: "別のプロジェクト", root: LIB },
+    ])("新しいエージェント…: $name を選んだ起動の画面を開く (移らない)", async ({
+      root,
+    }) => {
+      const { mount, calls } = await setupWithActions();
+      pick(mount, root, "New agent…");
+      expect(calls).toEqual([`agent:${root}`]);
+    });
+
+    test.each([
+      {
+        name: "シェルが使えない",
+        facts: { shellUnavailable: "node-pty is missing", git: true },
+        foreignInPlace: true,
+        root: LIB,
+        expected: [
+          "New shell (disabled) [node-pty is missing]",
+          "New agent… [Start an agent in sample-lib]",
+        ],
+      },
+      {
+        name: "1 つで完結するサーバの、別のプロジェクト",
+        facts: { shellUnavailable: null, git: true },
+        foreignInPlace: false,
+        root: LIB,
+        expected: [
+          "New shell (disabled) [Switch to this project to open a shell in it]",
+          "New agent… [Start an agent in sample-lib]",
+        ],
+      },
+      {
+        name: "1 つで完結するサーバの、いま見ているプロジェクト",
+        facts: { shellUnavailable: null, git: true },
+        foreignInPlace: false,
+        root: APP,
+        expected: [
+          "New shell [Open a new shell in sample-app]",
+          "New agent… [Start an agent in sample-app]",
+        ],
+      },
+      {
+        name: "git でない別のプロジェクト",
+        facts: { shellUnavailable: null, git: false },
+        foreignInPlace: true,
+        root: LIB,
+        expected: [
+          "New shell [Open a new shell in sample-lib]",
+          "New agent… (disabled) [Agents can only be started in a git repository]",
+        ],
+      },
+      {
+        name: "git でない、いま見ているプロジェクト (起動の画面はこのサーバの根を選べる)",
+        facts: { shellUnavailable: null, git: false },
+        foreignInPlace: true,
+        root: APP,
+        expected: [
+          "New shell [Open a new shell in sample-app]",
+          "New agent… [Start an agent in sample-app]",
+        ],
+      },
+    ])("押せないときは理由を title に出す: $name", async ({
+      facts,
+      foreignInPlace,
+      root,
+      expected,
+    }) => {
+      const { mount, calls } = await setupWithActions(facts, foreignInPlace);
+      const items = openGroupMenu(mount, root)
+        .filter((item) => /^New /.test(item.textContent ?? ""))
+        .map(
+          (item) =>
+            `${describeMenu([item])[0]} [${(item as HTMLButtonElement).title}]`,
+        );
+      // 押せない項目を押しても何も作らない。
+      for (const label of ["New shell", "New agent…"]) pick(mount, root, label);
+      closeContextMenu();
+      expect([items, calls.length]).toEqual([
+        expected,
+        expected.filter((item) => !item.includes("(disabled)")).length,
+      ]);
+    });
   });
 
   test("別のグループの間には落とせない (印も出さない)。同じグループの中は落とせる", async () => {
@@ -1364,7 +1826,7 @@ function menuLabels(): string[] {
 }
 
 describe("main tabs view: ターミナルのタブ", () => {
-  test("右クリックに端末の操作と「セッションを止める」が並び、止めるはそのシェルで呼ぶ", async () => {
+  test("右クリックに端末の操作と「セッションを止める」が並び、どちらもそのシェルで呼ぶ", async () => {
     const { handle, mount, calls } = setup(async () => null);
     await handle.restore();
     handle.openTerminal("shell-a1");
@@ -1393,7 +1855,7 @@ describe("main tabs view: ターミナルのタブ", () => {
         "Copy path (disabled)",
       ],
       true,
-      ["stop:shell-a1"],
+      ["menu:shell-a1", "stop:shell-a1"],
     ]);
   });
 
@@ -1457,21 +1919,19 @@ describe("main tabs view: ターミナルのタブ", () => {
     await handle.restore();
     handle.openTerminal("shell-a1");
     handle.openTerminal("shell-b2");
+    const before = handle.terminalSessions();
     handle.closeTerminal("shell-a1");
-    expect([terminals[terminals.length - 1], names()]).toEqual([
+    expect([
+      before,
+      handle.terminalSessions(),
+      terminals[terminals.length - 1],
+      names(),
+    ]).toEqual([
+      ["shell-a1", "shell-b2"],
+      ["shell-b2"],
       { open: ["shell-b2"], closed: ["shell-a1"] },
       ["app.ts (preview)", ">Shell shell-b2"],
     ]);
-  });
-
-  test("指定したシェルのタブだけを閉じる (入口を起こし直した後の消えたシェル)", async () => {
-    const { handle, names } = setup(async () => null);
-    await handle.restore();
-    handle.openTerminal("shell-a1");
-    handle.openTerminal("shell-b2");
-    expect(handle.terminalSessions()).toEqual(["shell-a1", "shell-b2"]);
-    handle.closeTerminals(["shell-a1"]);
-    expect(names()).toEqual(["app.ts (preview)", ">Shell shell-b2"]);
   });
 
   test("URL のシェル (?terminal=) のタブがあれば、それを前面に出せる", async () => {

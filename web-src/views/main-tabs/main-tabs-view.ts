@@ -30,10 +30,13 @@
 // 窓の変更は SSE (tabs) で知り、refreshFromServer で取り直して重ねる
 // (core/main-tabs-merge.ts)。
 
+import type {
+  AgentOverviewResponse,
+  AgentPane,
+} from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
 import { attachDragResizer } from "../../core/drag-resizer";
 import { CHEVRON_DOWN_12_PATH, iconSvg } from "../../core/icons";
-import { fitTabWidths, TAB_FLOOR_UNITS } from "../../core/tab-widths";
 import { isImeComposing } from "../../core/keyboard";
 import {
   activate,
@@ -65,11 +68,11 @@ import {
   noteGroupFronts,
   type OpenOptions,
   open,
-  type Pane,
   openRight,
   openSide,
   PAGE_KINDS,
   type PageKind,
+  type Pane,
   type PaneSide,
   type ParkedRight,
   parkRight,
@@ -89,6 +92,7 @@ import {
   splitBlocker,
   splitRight,
   type Tab,
+  type TabGroup,
   type TabTarget,
   tabGroups,
   tabMenu,
@@ -96,15 +100,20 @@ import {
   targetProject,
   unparkRight,
   unsplit,
+  visibleTabs,
   WORKTREE_REF,
   withProject,
 } from "../../core/main-tabs";
 import { mergeLayouts } from "../../core/main-tabs-merge";
 import { PHONE_MEDIA_QUERY } from "../../core/mobile-layout";
+import { projectInitials } from "../../core/project-colors";
 import type { AppRoute } from "../../core/routes";
+import type { ShellSession } from "../../core/shell";
+import { fitTabWidths, TAB_FLOOR_UNITS } from "../../core/tab-widths";
 import { basenameOf } from "../../core/terminal-board";
 import { terminalImageExtension } from "../../core/terminal-images";
 import {
+  projectRootOfPath,
   TAB_PROJECT_SEPARATOR,
   type TerminalTabName,
   type TerminalTabProject,
@@ -113,7 +122,6 @@ import {
 import { isToolId } from "../../core/tools";
 import type { ContextMenuItem } from "../context-menu";
 import { showContextMenu } from "../context-menu";
-import { projectInitials } from "../../core/project-colors";
 import {
   type ProjectLook,
   paintProjectColor,
@@ -125,6 +133,20 @@ import {
   type PageIconPaths,
   pageIconPaths,
 } from "./tab-icons";
+
+/**
+ * 画面の入口 (左の縦の列。web/index.html の .view-strip-item) の並び。グループの
+ * ▾ にも同じ順で出す。repo はフォルダ表示 (タブにしない)。
+ */
+export const VIEW_SCREENS = [
+  "repo",
+  "diff",
+  "history",
+  "worktree",
+  "database",
+  "journal",
+] as const;
+export type ViewScreen = (typeof VIEW_SCREENS)[number];
 
 /** 保存をまとめる間隔。並べ替えや連続した移動を 1 回の書き込みにする。 */
 const SAVE_DELAY_MS = 300;
@@ -172,10 +194,28 @@ export type MainTabsDeps = {
    */
   columnHead?: HTMLElement;
   getLanguage(): MainTabsLang;
-  /** page のタブの名前 (画面の入口と同じ文言)。 */
-  pageLabel(page: PageKind): string;
+  /** page のタブの名前 (画面の入口と同じ文言)。repo はフォルダ表示の入口の名前。 */
+  pageLabel(page: PageKind | "repo"): string;
+  /**
+   * その画面へ移るキーの表記 (画面の入口の title と同じ。割り当てが無ければ "")。
+   * グループの ▾ の画面の行の右端に出す。無ければ出さない。
+   */
+  screenKey?(screen: ViewScreen): string;
   /** その route を開く (replace なら履歴を積まない)。 */
   navigate(route: AppRoute, replace?: boolean): void;
+  /**
+   * 前面 (ターミナル・画像) を変えずに、その下の本文の route だけを置き換える
+   * (履歴は積まない。URL の ?terminal= などの重ね書きは残す)。本文の route の
+   * タブが閉じられたときに使う (followClosedBody)。
+   */
+  replaceBody?(route: AppRoute): void;
+  /**
+   * この窓だけに残り、読み直しでは消えない保存 (app は sessionStorage)。窓ごとの
+   * 前面を覚え、読み直し (restore の keepSavedFront) ではそれを保存した配置の
+   * 前面より優先する (保存した配置の前面は、最後に書いた別の窓のものでありうる)。
+   * 無ければ覚えない。
+   */
+  windowStorage?: Pick<Storage, "getItem" | "setItem">;
   /** 今の画面の route (URL の最新)。タブを離れるときに覚える。 */
   currentRoute(): AppRoute;
   /** 覚えた route が無いタブ (読み戻したタブ) を開くときの route。 */
@@ -190,8 +230,11 @@ export type MainTabsDeps = {
   onNewTab(side: PaneSide, anchor: HTMLElement): void;
   /** ターミナルのタブの右クリックの「セッションを止める」。 */
   stopTerminal(session: string): void;
-  /** ターミナルのタブの右クリックに足す、端末の操作 (文字の大きさなど)。 */
-  terminalMenuItems(): ContextMenuItem[];
+  /**
+   * ターミナルのタブの右クリックに足す、端末の操作 (文字の大きさなど) と、
+   * そのシェルが映しているエージェントへの操作。session はそのタブのシェル。
+   */
+  terminalMenuItems(session: string): ContextMenuItem[];
   /**
    * 保存した配置 (全プロジェクト共通)。layout が無ければ null。rev は保存の版の
    * 番号、root はこのページのプロジェクトの根 (タブの持ち物)、newer はこの
@@ -214,7 +257,7 @@ export type MainTabsDeps = {
   /** グループの並び (左の一覧のプロジェクトの並び)。 */
   projectOrder?(): readonly string[];
   /**
-   * そのシェルが動いているフォルダのプロジェクト (どれでもなければ null、まだ
+   * そのシェルのグループ (shellGroupOf。どれでもなければ null、まだ・一時的に
    * 分からなければ undefined: 保存した控えを使う)。
    */
   terminalProject?(session: string): string | null | undefined;
@@ -223,6 +266,28 @@ export type MainTabsDeps = {
    * 画面のパス (前置きなし)。移れなければ理由を出すのは呼ばれた側。
    */
   switchProject?(root: string, route: AppRoute | null, tab: Tab | null): void;
+  /**
+   * グループの ▾ の「新しいシェル」: そのプロジェクトの根をカレントにした
+   * シェルを side の面に開く (＋ の新しいシェルと同じ作り方)。できたシェルは
+   * openTerminal でその面の前面に置いてもらい、terminalProject でそのグループに
+   * 入る。失敗を出すのは呼ばれた側。無ければ項目を押せない。
+   */
+  newShellIn?(root: string, side: PaneSide): void;
+  /**
+   * グループの ▾ の「新しいエージェント…」: そのプロジェクトを選んだ状態の
+   * 起動の画面を開く。無ければ項目を押せない。
+   */
+  launchAgentIn?(root: string): void;
+  /**
+   * グループの ▾ の新しいシェル・エージェントを押せるかの材料 (決めるのは
+   * groupMenuFor だけ)。shellUnavailable はシェルを開けない理由 (開ける・まだ
+   * 分からないなら null)、git はそのプロジェクトが git のリポジトリか (分から
+   * なければ null)。
+   */
+  groupFacts?(root: string): {
+    shellUnavailable: string | null;
+    git: boolean | null;
+  };
   /**
    * 別のプロジェクトのファイルをその場で出せるか (入口のサーバの下だけ。1 つで
    * 完結するサーバでは、そのプロジェクトへ移って出す)。
@@ -316,12 +381,6 @@ export type MainTabsHandle = {
   closeTerminal(session: string): void;
   /** 端末のタブが映しているシェル。 */
   terminalSessions(): string[];
-  /**
-   * それらのシェルの端末のタブを閉じる。入口のサーバを起こし直すと、保存した
-   * 配置のシェルは全部消えて付き直せない (シェルは入口のプロセスの子)。残すと
-   * 番号の無い「Shell」のタブが並んだ (app.ts の closeTabsOfGoneShells)。
-   */
-  closeTerminals(sessions: readonly string[]): void;
   /** 画像のタブを開いて前面に出す。 */
   openImage(path: string, pane?: OpenOptions["pane"]): void;
   /** フォーカスのある面の＋のメニューを開く (キー操作・パレットから)。 */
@@ -436,6 +495,43 @@ export type MainTabsHandle = {
 
 type FileRoute = Extract<AppRoute, { screen: "file" }>;
 
+/**
+ * シェルのタブのグループ (プロジェクトの根)。映しているペインのプロジェクト、
+ * 無ければシェルを起こしたフォルダを含むプロジェクト (roots の前方一致の
+ * いちばん深いもの)。どれでもなければ null (タブ列の右端)。
+ *
+ * 分からない間は undefined (画面は前の値の控えで描く)。一覧がまだ無い、に加えて
+ * 一時的に分からないとき: tmux の一覧が取れなかった応答 (ペインもプロジェクトも
+ * 空で届く)・tmux のクライアントの一覧が取れなかった・ペインを映していたシェルの
+ * 結び付きが外れている・シェルの端末名がまだ引けていない・シェルの一覧に無い
+ * (サーバが起き直して終わったシェルのタブは、開き直すまで残る)。ここで null や
+ * 起こしたフォルダに落とすと、タブが一瞬右端や別のグループへ飛び、並びが変わって
+ * いた。
+ */
+export function shellGroupOf(input: {
+  overview: Pick<AgentOverviewResponse, "tmux" | "errors"> | null;
+  /** 映しているペイン (見つからなければ undefined)。 */
+  pane: AgentPane | undefined;
+  /** シェルの一覧のそのシェル (一覧に無い・一覧がまだ無ければ undefined か null)。 */
+  shell: ShellSession | undefined | null;
+  /** この画面で、そのシェルがペインを映していたことがあるか。 */
+  showedPane: boolean;
+  roots: readonly string[];
+}): string | null | undefined {
+  const { overview, pane, shell } = input;
+  if (!overview) return undefined;
+  if (pane) return pane.project || null;
+  if (
+    overview.tmux.error ||
+    overview.errors.some((item) => item.operation === "list_clients") ||
+    input.showedPane ||
+    !shell ||
+    shell.tty === ""
+  )
+    return undefined;
+  return projectRootOfPath(shell.cwd, input.roots);
+}
+
 export function isPageKind(value: string | undefined): value is PageKind {
   return (PAGE_KINDS as readonly (string | undefined)[]).includes(value);
 }
@@ -494,6 +590,7 @@ function routeTargetBody(route: AppRoute): TabTarget | null {
     case "tools":
     case "search":
     case "help":
+    case "settings":
       return { kind: "page", page: route.screen };
     case "repo":
     case "unknown":
@@ -625,15 +722,59 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   }
 
   /**
-   * グループの並びの位置: 左の一覧の並び、一覧に無いプロジェクトはその後ろ、
-   * どのプロジェクトのものでもないタブは右端。
+   * グループの並びの位置 (小さい順): 左の一覧の並び、どのプロジェクトのもので
+   * もないタブは右端。一覧に無いプロジェクト (登録を外した・一覧から消えた) は、
+   * layouts の中でその面のすぐ左にある一覧のプロジェクトのすぐ後ろ (無ければ
+   * 先頭)。末尾へ潰すと、読み直した窓 (消えた根を知らない) でグループが末尾へ
+   * 飛んだ。前の layouts ほど優先する。
    */
-  function rankOf(tab: Tab): number {
-    const key = keyOf(tab);
-    if (key === null) return Number.MAX_SAFE_INTEGER;
+  function ranksIn(...layouts: Layout[]): (key: string | null) => number {
     const order = deps.projectOrder?.() ?? [];
-    const index = order.indexOf(key);
-    return index >= 0 ? index : order.length;
+    const unknown = new Map<string, number>();
+    for (const target of layouts)
+      for (const side of SIDES) {
+        let left = -1;
+        for (const tab of (side === "left"
+          ? target.panes.left
+          : target.panes.right
+        )?.tabs ?? []) {
+          const key = keyOf(tab);
+          if (key === null) continue;
+          const index = order.indexOf(key);
+          if (index >= 0) left = index;
+          else if (!unknown.has(key)) unknown.set(key, left + 0.5);
+        }
+      }
+    return (key) => {
+      if (key === null) return Number.MAX_SAFE_INTEGER;
+      const index = order.indexOf(key);
+      return index >= 0 ? index : (unknown.get(key) ?? order.length);
+    };
+  }
+
+  /** layouts の並びでグループの順に並べ直す (ranksIn)。 */
+  function regroupIn(target: Layout, ...layouts: Layout[]): Layout {
+    const rank = ranksIn(...layouts);
+    return regroup(target, (tab) => rank(keyOf(tab)));
+  }
+
+  /**
+   * 面のグループ。左の面 (本文の面) には、いま見ているプロジェクトのグループを
+   * タブが 0 枚でも並びの位置に入れる: フォルダ表示はタブにしないので、タブの無い
+   * プロジェクトを開くと札が出ず、どのプロジェクトを見ているか分からなかった。
+   */
+  function groupsOf(side: PaneSide, pane: Pane): TabGroup[] {
+    const groups = tabGroups(pane.tabs, keyOf);
+    const root = currentRoot;
+    if (side !== "left" || root === null) return groups;
+    if (groups.some((group) => group.key === root)) return groups;
+    const rankOf = ranksIn(layout);
+    const rank = rankOf(root);
+    const at = groups.findIndex((group) => rankOf(group.key) > rank);
+    const empty = { key: root, tabs: [] };
+    return at < 0
+      ? [...groups, empty]
+      : [...groups.slice(0, at), empty, ...groups.slice(at)];
   }
 
   /** 本文に描くタブか (このプロジェクトのファイル・画面)。 */
@@ -665,11 +806,80 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     });
   }
 
+  /**
+   * 並べ直しでグループの外へ出たタブの元の場所 (タブの id → 元のグループ・
+   * 左にあった同じグループのタブ (近い順)・グループの中の位置)。シェルのグループは一瞬
+   * 外れて戻ることがある (cd で出て戻った・一時的に分からない間の控えが無かった)。
+   * regroup は今の位置で並べ直すので、戻ったタブがグループの末尾に入っていた。
+   */
+  const homes = new Map<
+    string,
+    { key: string; left: string[]; index: number }
+  >();
+  /** 前に並べ直したときの各タブのグループ (外へ出た・戻ったを知る)。 */
+  let lastKeys = new Map<string, string | null>();
+
+  /** 外へ出たタブの元の場所を覚え、元のグループへ戻ったタブを元の場所へ入れる。 */
+  function returnHome(next: Layout): Layout {
+    let out = next;
+    for (const side of SIDES) {
+      const pane = side === "left" ? out.panes.left : out.panes.right;
+      if (!pane) continue;
+      // 並びは外へ出る前のまま (前に並べ直した並び) なので、元の左隣が引ける。
+      pane.tabs.forEach((tab, at) => {
+        const was = lastKeys.get(tab.id);
+        if (was == null || keyOf(tab) === was || homes.has(tab.id)) return;
+        const before = pane.tabs
+          .slice(0, at)
+          .filter((item) => lastKeys.get(item.id) === was);
+        homes.set(tab.id, {
+          key: was,
+          left: before.map((item) => item.id).reverse(),
+          index: before.length,
+        });
+      });
+      const back = pane.tabs
+        .flatMap((tab) => {
+          const home = homes.get(tab.id);
+          return home && home.key === keyOf(tab) ? [{ tab, home }] : [];
+        })
+        .sort((a, b) => a.home.index - b.home.index);
+      if (back.length === 0) continue;
+      const moving = new Set(back.map((item) => item.tab.id));
+      let tabs = pane.tabs.filter((tab) => !moving.has(tab.id));
+      // 元の左隣の右へ。左隣が閉じられていれば、残っているうちでいちばん近い
+      // 左のタブの右 (どれも無ければグループの先頭)。一緒に出たタブは元の位置の
+      // 順に戻すので、互いの左隣が先に戻っている。
+      for (const { tab, home } of back) {
+        homes.delete(tab.id);
+        const inGroup = (item: Tab) => keyOf(item) === home.key;
+        const left = home.left
+          .map((id) =>
+            tabs.findIndex((item) => item.id === id && inGroup(item)),
+          )
+          .find((at) => at >= 0);
+        const first = tabs.findIndex(inGroup);
+        const at =
+          left !== undefined ? left + 1 : first >= 0 ? first : tabs.length;
+        tabs = [...tabs.slice(0, at), tab, ...tabs.slice(at)];
+      }
+      out = { ...out, panes: { ...out.panes, [side]: { ...pane, tabs } } };
+    }
+    return out;
+  }
+
   /** グループの順に並べ直し、前面をそのグループの前面として覚える。 */
   function normalize(next: Layout): Layout {
     // groupOfTarget は layout の控えを読むので、控えを先に今の値にする。
     layout = withTerminalGroups(next);
-    return regroup(noteGroupFronts(layout, keyOf), rankOf);
+    const placed = noteGroupFronts(returnHome(layout), keyOf);
+    const result = regroupIn(placed, placed);
+    const open = new Set(
+      [...allTabs(result), ...(parked?.pane.tabs ?? [])].map((tab) => tab.id),
+    );
+    for (const id of homes.keys()) if (!open.has(id)) homes.delete(id);
+    lastKeys = new Map(allTabs(result).map((tab) => [tab.id, keyOf(tab)]));
+    return result;
   }
 
   // 面ごとのタブ列。strip は横に送る箱 (タブの幅の入れ物) で、中にタブの並び
@@ -992,10 +1202,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       renderActions();
       return;
     }
-    // 右の面を隠した・戻した: 描き直して、面の変化を画面へ知らせる。
+    // 右の面を隠した・戻した: 並べ直して (預けていた間にグループの並びが変わって
+    // いることがある) 描き直し、面の変化を画面へ知らせる。
     pruneRoutes();
     applyGeometry();
-    render();
+    relayout();
     scheduleSave();
     const after = panesView(layout, currentRoot);
     if (!sameView(before, after)) deps.onPanes(after, "stay");
@@ -1071,9 +1282,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
    * タブを「この窓で動かした」と数え、別の窓が右へ移したタブを古い場所へ戻していた。
    */
   function baseLayout(): Layout | null {
-    return base.layout
-      ? regroup(parseLayout(base.layout).layout, rankOf)
-      : null;
+    if (!base.layout) return null;
+    const saved = parseLayout(base.layout).layout;
+    return regroupIn(saved, layout, saved);
   }
 
   /** 書くときに添える base (並べ直した値。サーバはこれと比べて重ねる)。 */
@@ -1236,6 +1447,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     if (nextParked !== undefined) parked = nextParked;
     layout = normalize(next);
     fitToWidth();
+    writeWindowFronts();
     pruneRoutes();
     applyGeometry();
     render();
@@ -1250,6 +1462,33 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const after = panesView(layout, currentRoot);
     if (!sameView(before, after)) deps.onPanes(after, how);
     followRouteSide(how);
+    followClosedBody(how);
+  }
+
+  /**
+   * 本文の route のタブが配置から消えた (前面がターミナル・画像の間に閉じた・
+   * 別の窓で閉じたのが届いた) ら、本文を左の面に残った route のタブ (最近前面
+   * だった順。無ければフォルダ表示) へ置き換える。前面が route のタブなら
+   * followRouteSide が移すので、ここは前面が route のタブでないときだけ。
+   * 残すと本文と URL が閉じたタブの route のままで、次の読み直しで restore が
+   * そのタブを作り直していた (閉じたタブが戻る)。
+   */
+  function followClosedBody(how: FrontChange): void {
+    if (how === "navigate" || routeSideOf(layout, currentRoot) !== null) return;
+    const current = deps.currentRoute();
+    if (current.screen === "repo") return;
+    const target = targetOf(current);
+    if (
+      !target ||
+      allTabs(fullLayout()).some((tab) => sameTarget(tab.target, target))
+    )
+      return;
+    const pane = layout.panes.left;
+    const recent = [...pane.recent]
+      .reverse()
+      .flatMap((id) => pane.tabs.filter((tab) => tab.id === id));
+    const next = [...recent, ...pane.tabs].find((tab) => routeTab(tab));
+    deps.replaceBody?.(next ? routeOf(next) : homeRoute());
   }
 
   /**
@@ -1352,6 +1591,58 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     deps.switchProject?.(root, isRouteTab(tab) ? routeOf(tab) : null, tab);
   }
 
+  /**
+   * グループの ▾ の画面の行: そのプロジェクトのその画面を、そのグループのタブ
+   * として前面に出す (開いていればそのタブ、無ければ開く)。別のプロジェクトなら
+   * そのプロジェクトへ移ってから (タブの前面に出すときと同じ)。repo (ファイル) は
+   * タブにしないので、そのプロジェクトのフォルダ表示。
+   */
+  function openScreenIn(root: string, screen: ViewScreen): void {
+    const here = root === currentRoot;
+    if (screen === "repo") {
+      if (here) changeAndGo(showHome);
+      else switchWithout(root, null);
+      return;
+    }
+    const tab = allTabs(layout).find(
+      (item) =>
+        item.target.kind === "page" &&
+        item.target.page === screen &&
+        keyOf(item) === root,
+    );
+    if (tab) {
+      activateTab(tab.id);
+      return;
+    }
+    const route = deps.defaultRoute({ kind: "page", page: screen });
+    if (here) deps.navigate(route);
+    else switchWithout(root, route);
+  }
+
+  /** そのプロジェクトのタブを前面にせずに、route (無ければフォルダ表示) へ移る。 */
+  function switchWithout(root: string, route: AppRoute | null): void {
+    rememberRoute();
+    flush(true);
+    deps.switchProject?.(root, route, null);
+  }
+
+  /**
+   * いま本文に出ている画面の入口 (グループの ▾ の選択の印)。本文が前面に無い
+   * (左の前面がターミナル・画像・別のプロジェクトのタブ) なら無し。ファイルは
+   * ファイル (repo)、ファイルの差分の route は差分 (app.ts の headerRouteForFront と同じ)。
+   */
+  function shownScreen(): ViewScreen | null {
+    if (routeSideOf(layout, currentRoot) === null) return null;
+    const route = deps.currentRoute();
+    if (route.screen === "file")
+      return route.view === "blob" ||
+        route.view === "blame" ||
+        route.view === "history"
+        ? "repo"
+        : "diff";
+    return VIEW_SCREENS.find((screen) => screen === route.screen) ?? null;
+  }
+
   /** グループの ▾ の「このプロジェクトに切り替える」。 */
   function switchToProject(root: string): void {
     const tab = prepareProjectSwitch(root);
@@ -1376,7 +1667,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   /**
    * 利用者が閉じた (×・中ボタン・Delete・右クリック・g x)。閉じたタブを履歴に
    * 積む (reopenClosed で開き直せる)。シェルが消えて閉じたタブは積まない
-   * (closeTerminal / closeTerminals はこれを通らない)。
+   * (closeTerminal はこれを通らない)。
    */
   function closeByUser(change: (current: Layout) => Layout): void {
     const before = layout;
@@ -1492,12 +1783,12 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       {
         label: current.closeOthers,
         disabled: !state.closeOthers,
-        onSelect: () => closeByUser((l) => closeOthers(l, tab.id)),
+        onSelect: () => closeByUser((l) => closeOthers(l, tab.id, keyOf)),
       },
       {
         label: current.closeToRight,
         disabled: !state.closeToRight,
-        onSelect: () => closeByUser((l) => closeToRight(l, tab.id)),
+        onSelect: () => closeByUser((l) => closeToRight(l, tab.id, keyOf)),
       },
       { kind: "separator" },
       {
@@ -1530,7 +1821,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       // ターミナルのタブ: 端末の操作と、シェルそのものを止める (閉じるはタブだけ)。
       ...(tab.target.kind === "terminal"
         ? [
-            ...deps.terminalMenuItems(),
+            ...deps.terminalMenuItems(tab.target.session),
             { kind: "separator" as const },
             {
               label: current.stopSession,
@@ -1884,7 +2175,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const el = document.createElement("div");
     el.className = "main-tab";
     el.classList.toggle("main-tab-active", active);
-    // 上端の線はフォーカスのある面の選択タブだけ (もう一方は面の明るさ)。
+    // 選択タブの上端の線: フォーカスのある面は強調色 (.main-tab-focused)、
+    // もう一方の面は灰色 (.main-tab-active)。
     el.classList.toggle(
       "main-tab-focused",
       active && (!layout.panes.right || layout.focused === side),
@@ -2042,19 +2334,19 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     ))
       old.remove();
     const collapsed = new Set(layout.collapsed ?? []);
+    const shown = new Set(visibleTabs(layout, pane, keyOf));
     const loose: HTMLElement[] = [];
     const grouped: HTMLElement[] = [];
-    for (const group of tabGroups(pane.tabs, keyOf)) {
+    for (const group of groupsOf(side, pane)) {
       if (group.key === null) {
         for (const tab of group.tabs)
           loose.push(renderTab(tab, tab.id === pane.activeId, side, false));
         continue;
       }
       const key = group.key;
-      const isCollapsed = collapsed.has(key);
-      const visible = isCollapsed
-        ? group.tabs.filter((tab) => tab.id === pane.activeId)
-        : group.tabs;
+      // 空のグループは畳めない (畳んだ控えが残っていても開いて描く)。
+      const isCollapsed = group.tabs.length > 0 && collapsed.has(key);
+      const visible = group.tabs.filter((tab) => shown.has(tab));
       const look = lookOf(key);
       const tabs = document.createElement("div");
       tabs.className = "main-tabs-list main-tabs-group-list";
@@ -2068,7 +2360,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         ),
       );
       grouped.push(
-        renderGroupHead(key, look, isCollapsed, group.tabs.length),
+        renderGroupHead(side, key, look, isCollapsed, group.tabs.length),
         tabs,
       );
     }
@@ -2143,6 +2435,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
 
   /** グループの札。札を押すと畳む・開く、▾ はグループのメニュー。 */
   function renderGroupHead(
+    side: PaneSide,
     key: string,
     look: ProjectLook,
     isCollapsed: boolean,
@@ -2159,7 +2452,10 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     toggle.type = "button";
     toggle.className = "main-tab-group-toggle";
     toggle.setAttribute("aria-expanded", String(!isCollapsed));
-    const label = current.groupToggle(look.name, isCollapsed, count);
+    const label =
+      count === 0
+        ? `${look.name}: ${current.groupEmpty}`
+        : current.groupToggle(look.name, isCollapsed, count);
     toggle.title = `${label}\n${key}`;
     toggle.setAttribute("aria-label", label);
     // 札は色の四角と頭文字と ▾ だけ (名前は一覧の列の頭と同じものが並んで 2 回出て、
@@ -2172,9 +2468,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     badge.hidden = !isCollapsed;
     badge.setAttribute("aria-hidden", "true");
     toggle.append(projectMark(look, "main-tab-group-mark"), badge);
-    toggle.addEventListener("click", () =>
-      commit(setCollapsed(layout, key, !isCollapsed)),
-    );
+    toggle.addEventListener("click", () => {
+      if (count > 0) commit(setCollapsed(layout, key, !isCollapsed));
+    });
     const menu = document.createElement("button");
     menu.type = "button";
     menu.className = "main-tab-group-menu";
@@ -2184,7 +2480,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     menu.innerHTML = iconSvg("main-tab-group-menu-icon", CHEVRON_DOWN_12_PATH);
     const openMenu = (at?: { x: number; y: number }) => {
       const rect = menu.getBoundingClientRect();
-      showContextMenu(menu, groupMenuFor(key, isCollapsed), {
+      showContextMenu(menu, groupMenuFor(side, key, isCollapsed, count), {
         at: at ?? { x: rect.left, y: rect.bottom + 4 },
       });
     };
@@ -2197,10 +2493,58 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     return head;
   }
 
-  function groupMenuFor(key: string, isCollapsed: boolean): ContextMenuItem[] {
+  /**
+   * グループの ▾ (と札の右クリック) のメニュー。項目の並びと押せるかは、ここ
+   * だけで決める (タブの右クリックの tabMenu と同じ考え方)。新しいシェル・
+   * エージェントは、その札の面とプロジェクトで作る。
+   */
+  function groupMenuFor(
+    side: PaneSide,
+    key: string,
+    isCollapsed: boolean,
+    count: number,
+  ): ContextMenuItem[] {
     const current = text();
     const here = key === currentRoot;
+    // タブが 0 枚のグループ (いま見ているプロジェクト) は、畳む・閉じるものが無い。
+    const empty = count === 0;
     const look = lookOf(key);
+    const facts = deps.groupFacts?.(key) ?? {
+      shellUnavailable: null,
+      git: null,
+    };
+    // 押せない理由 (押せるなら null)。無い口の理由は出さない ("")。
+    const shellBlocker = !deps.newShellIn
+      ? ""
+      : (facts.shellUnavailable ??
+        // 1 つで完結するサーバは、別のプロジェクトのシェルを作れない。
+        (here || deps.foreignInPlace?.() ? null : current.shellNeedsSwitch));
+    const agentBlocker = !deps.launchAgentIn
+      ? ""
+      : facts.git === false && !here
+        ? current.notGitProject
+        : null;
+    // 画面の行。別のプロジェクトは移って開く (移れなければ押せない)。印は
+    // いま見ているプロジェクトの、本文に出ている画面だけ。
+    const shown = here ? shownScreen() : null;
+    const screens: ContextMenuItem[] = VIEW_SCREENS.map((screen) => {
+      const icon = document.createElement("span");
+      icon.className = "gdp-context-menu-icon";
+      icon.innerHTML = iconSvg(
+        "gdp-context-menu-icon-svg",
+        pageIconPaths(screen),
+      );
+      const hint = deps.screenKey?.(screen) ?? "";
+      return {
+        label: deps.pageLabel(screen),
+        leading: icon,
+        ...(hint ? { hint } : {}),
+        checked: screen === shown,
+        disabled: !here && !deps.switchProject,
+        ...(here ? {} : { title: current.openScreenInTitle(look.name) }),
+        onSelect: () => openScreenIn(key, screen),
+      };
+    });
     return [
       // メニューの頭はプロジェクトの名前 (札には頭文字しか無い)。押せない行。
       {
@@ -2211,6 +2555,21 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       },
       { kind: "separator" },
       {
+        label: current.newShellHere,
+        title: shellBlocker || current.newShellHereTitle(look.name),
+        disabled: shellBlocker !== null,
+        onSelect: () => deps.newShellIn?.(key, side),
+      },
+      {
+        label: current.newAgentHere,
+        title: agentBlocker || current.newAgentHereTitle(look.name),
+        disabled: agentBlocker !== null,
+        onSelect: () => deps.launchAgentIn?.(key),
+      },
+      { kind: "separator" },
+      ...screens,
+      { kind: "separator" },
+      {
         label: current.switchToProject,
         disabled: here || !deps.switchProject,
         ...(here ? { title: current.currentProject } : {}),
@@ -2218,11 +2577,15 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       },
       {
         label: isCollapsed ? current.expandGroup : current.collapseGroup,
+        disabled: empty,
+        ...(empty ? { title: current.groupEmpty } : {}),
         onSelect: () => commit(setCollapsed(layout, key, !isCollapsed)),
       },
       { kind: "separator" },
       {
         label: current.closeGroup,
+        disabled: empty,
+        ...(empty ? { title: current.groupEmpty } : {}),
         onSelect: () => closeByUser((l) => closeGroup(l, key, keyOf)),
       },
     ];
@@ -2305,6 +2668,99 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
    * そのプロジェクトへ移る途中で読み直した)、読み戻しでは移らずに外す: 左の面は
    * 本文の既定、右の面はほかのタブ。
    */
+  // ---- 窓ごとの前面 (deps.windowStorage) ----
+
+  type WindowFronts = {
+    left: string | null;
+    right: string | null;
+    focused: PaneSide;
+  };
+  const WINDOW_FRONTS_KEY = "code-viewer:main-tabs:fronts";
+  /** 窓の保存を読めない・書けないと 1 度知らせた (書くのは変えるたびなので 1 度だけ)。 */
+  let windowStorageReported = false;
+
+  function reportWindowStorage(what: string, error: unknown): void {
+    if (windowStorageReported) return;
+    windowStorageReported = true;
+    console.error(
+      `[code-viewer] main tabs: this window's front tabs could not be ${what} in the window storage (sessionStorage); a reload shows the front saved by the last window that wrote the tabs instead`,
+      error,
+    );
+  }
+
+  function isWindowFronts(value: unknown): value is WindowFronts {
+    if (!value || typeof value !== "object") return false;
+    const { left, right, focused } = value as Record<string, unknown>;
+    const id = (item: unknown) => item === null || typeof item === "string";
+    return id(left) && id(right) && (focused === "left" || focused === "right");
+  }
+
+  /** この窓が前に覚えた前面 (無い・読めなければ null。読めない理由は出す)。 */
+  function readWindowFronts(): WindowFronts | null {
+    const storage = deps.windowStorage;
+    if (!storage) return null;
+    let raw: string | null;
+    try {
+      raw = storage.getItem(WINDOW_FRONTS_KEY);
+    } catch (error) {
+      reportWindowStorage("read", error);
+      return null;
+    }
+    if (raw === null) return null;
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch (error) {
+      console.error(
+        `[code-viewer] main tabs: this window's remembered front tabs are broken and are ignored: ${raw}`,
+        error,
+      );
+      return null;
+    }
+    if (isWindowFronts(value)) return value;
+    console.error(
+      `[code-viewer] main tabs: this window's remembered front tabs have an unknown shape and are ignored: ${raw}`,
+    );
+    return null;
+  }
+
+  /** この窓の前面を覚える (読み戻しを始めてから。その前の 1 枚だけの配置で上書きしない)。 */
+  function writeWindowFronts(): void {
+    const storage = deps.windowStorage;
+    if (!storage || !restored) return;
+    const full = fullLayout();
+    const value: WindowFronts = {
+      left: full.panes.left.activeId,
+      right: full.panes.right?.activeId ?? null,
+      focused: full.focused,
+    };
+    try {
+      storage.setItem(WINDOW_FRONTS_KEY, JSON.stringify(value));
+    } catch (error) {
+      reportWindowStorage("written", error);
+    }
+  }
+
+  /** 覚えた前面を当てる (その面にまだそのタブがあるものだけ。左が null ならフォルダ表示)。 */
+  function withWindowFronts(
+    target: Layout,
+    fronts: WindowFronts | null,
+  ): Layout {
+    if (!fronts) return target;
+    let next = target;
+    if (fronts.left === null) next = showHome(next);
+    for (const side of SIDES) {
+      const id = fronts[side];
+      const pane = side === "left" ? next.panes.left : next.panes.right;
+      if (id !== null && pane?.tabs.some((tab) => tab.id === id))
+        next = activate(next, id);
+    }
+    return focusPane(
+      next,
+      fronts.focused === "right" && next.panes.right ? "right" : "left",
+    );
+  }
+
   function withoutSwitchFronts(target: Layout): Layout {
     let next = target;
     if (needsSwitch(frontTab(next, "left"))) {
@@ -2355,6 +2811,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     options: { rightRoute?: FileRoute; keepSavedFront?: boolean } = {},
   ): Promise<void> {
     if (restored) return;
+    // 書き込み (commit) より先に、この窓が前に覚えた前面を読む。
+    const windowFronts = options.keepSavedFront ? readWindowFronts() : null;
     restored = true;
     // 保存した配置を使えないときも、URL が指す右の面のファイルは開く。
     const openUrlRight = () => {
@@ -2468,7 +2926,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const urlRoute = deps.currentRoute();
     const target = targetOf(urlRoute);
     routes.clear();
-    const restoredLayout = withoutSwitchFronts(parsed.layout);
+    // 読み直しでは、この窓が覚えた前面を先に当てる (保存した配置の前面は、
+    // 最後に書いた別の窓のものでありうる)。
+    const restoredLayout = withoutSwitchFronts(
+      withWindowFronts(parsed.layout, windowFronts),
+    );
     seedPageRoutes(restoredLayout, parsed.pageRoutes);
     if (options.rightRoute) {
       // URL は右の面のファイル: 左の面 (本文) は保存した前面のまま。
@@ -2550,12 +3012,6 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       if (tab) changeAndGo((l) => close(l, tab.id));
     },
     terminalSessions: () => [...terminalsOf(layout)],
-    closeTerminals(sessions) {
-      for (const session of sessions) {
-        const tab = findTerminal(session);
-        if (tab) changeAndGo((l) => close(l, tab.id));
-      }
-    },
     openImage(path, pane = "focused") {
       rememberRoute();
       commit(
@@ -2642,8 +3098,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       });
       return true;
     },
-    next: () => activateBy(nextTab),
-    previous: () => activateBy(prevTab),
+    next: () => activateBy((l) => nextTab(l, keyOf)),
+    previous: () => activateBy((l) => prevTab(l, keyOf)),
     reopenClosed() {
       let reopened = false;
       changeAndGo((current) => {
@@ -2660,7 +3116,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       const tab = activeTab(layout);
       if (tab) closeByUser((l) => close(l, tab.id));
     },
-    activateNth: (n) => activateBy((l) => activateIndex(l, n)),
+    activateNth: (n) => activateBy((l) => activateIndex(l, n, keyOf)),
     restore,
     flush,
     // 名前・シェルのプロジェクト・グループの並びが変わったときも呼ばれる (並べ直す)。

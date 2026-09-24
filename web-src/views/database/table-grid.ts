@@ -1714,7 +1714,6 @@ export function createTableGrid(
     if (jsonHighlighterRequested) return;
     jsonHighlighterRequested = true;
     void loadShikiHighlighter({
-      themes: ["github-light", "github-dark"],
       langs: ["json"],
     }).then((highlighter) => {
       jsonHighlighter = highlighter;

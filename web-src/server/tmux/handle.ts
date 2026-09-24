@@ -15,7 +15,8 @@
 // リクエストしか通らない。
 
 import { formatErrorDetail } from "../../core/error-detail";
-import { isTmuxPaneId } from "../../core/tmux";
+import { isShellSessionId } from "../../core/shell";
+import { isTmuxPaneId, isTmuxPlace } from "../../core/tmux";
 import {
   dispatchRoutes,
   handleError,
@@ -69,13 +70,36 @@ async function handleOpenPost(req: Request, cwd: string): Promise<Response> {
     pane?: unknown;
     cols?: unknown;
     rows?: unknown;
+    revive?: { shell?: unknown; session?: unknown; window?: unknown } | null;
   }>(req);
   if (body instanceof Response) return body;
   if (!isTmuxPaneId(body.pane)) return textError("invalid pane id", 400);
-  const result = await openTmuxPaneInShell(body.pane, cwd, {
-    cols: typeof body.cols === "number" ? body.cols : undefined,
-    rows: typeof body.rows === "number" ? body.rows : undefined,
-  });
+  // revive = { shell, session, window }: サーバが起き直して終わったシェルの
+  // タブを、同じ ID のシェルで保存した場所へ繋ぎ直す (terminal/open.ts)。
+  let revive: { shell: string; session: string; window: number } | undefined;
+  if (body.revive !== undefined) {
+    const shell = body.revive?.shell;
+    const place = {
+      pane: body.pane,
+      session: body.revive?.session,
+      window: body.revive?.window,
+    };
+    if (!isShellSessionId(shell) || !isTmuxPlace(place))
+      return textError(
+        `invalid revive: ${JSON.stringify(body.revive)} (expected { shell, session, window })`,
+        400,
+      );
+    revive = { shell, session: place.session, window: place.window };
+  }
+  const result = await openTmuxPaneInShell(
+    body.pane,
+    cwd,
+    {
+      cols: typeof body.cols === "number" ? body.cols : undefined,
+      rows: typeof body.rows === "number" ? body.rows : undefined,
+    },
+    revive,
+  );
   if (result.status === "gone") return textError("pane is gone", 410);
   if (result.status === "unavailable") return textError(result.reason, 501);
   if (result.status === "error") {

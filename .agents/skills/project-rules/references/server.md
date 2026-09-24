@@ -243,6 +243,10 @@ grep -rlnP '[\x00-\x08\x0b\x0c\x0e-\x1f]' web-src/ --include=*.ts
 - 戻り値は状態型（`ok` / `missing` / `no-server` / `no-target` / `error`）。
   **握り潰さず、状態ごとに UI の出し分けを決める**
 - git は `server/git.ts` の関数経由。docker は `server/database/adapters/docker*.ts` 経由
+- **子プロセスは `server/runtime.ts` の `spawnProcess` / `runSync` / `runAsync` / `spawnStream` だけで
+  起こす**（`biome.jsonc` の `noRestrictedImports` が `node:child_process` を塞ぐ）。ここで detached に
+  して端末を持たせない。持たせると対話シェル（`$SHELL -i -c`）が端末の前面を奪ったまま終わり、
+  `pnpm dev` の Ctrl+C が効かなくなった。止めるときは `stopProcess`（グループごと）
 
 ## 外部状態を変える機能には、戻す経路と検出を付ける
 

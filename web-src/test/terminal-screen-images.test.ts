@@ -33,8 +33,9 @@ import type {
   TerminalImageRef,
   TerminalImageRejection,
 } from "../core/terminal-images";
-import type { XtermLink, XtermLinkProvider } from "../core/xterm-loader";
+import type { XtermLinkProvider } from "../core/xterm-loader";
 import { terminalText } from "../views/terminal/i18n";
+import { LINK_BAR_HIDE_MS } from "../views/terminal/terminal-links-layer";
 import {
   createTerminalScreen,
   type TerminalScreenHandle,
@@ -50,6 +51,8 @@ type FakeTerminalState = {
   linkProvider: XtermLinkProvider | null;
   /** proposeDimensions が返す寸法。見えていない箱は NaN を返す。 */
   proposed: { cols: number; rows: number } | undefined;
+  /** xterm の選択 (select の引数)。無ければ null。 */
+  selection: { column: number; row: number; length: number } | null;
 };
 const FAKE_STATE_KEY = "__terminalScreenFakeState";
 
@@ -68,6 +71,7 @@ vi.mock("../core/xterm-loader", () => {
     inputHandler: () => undefined,
     linkProvider: null,
     proposed: { cols: 80, rows: 24 },
+    selection: null,
   };
   (globalThis as Record<string, unknown>).__terminalScreenFakeState = state;
   /** 1 マス 1 字 (全角は 2 マス) の行を作る。本物の IBufferLine と同じ形。 */
@@ -104,6 +108,9 @@ vi.mock("../core/xterm-loader", () => {
         get cursorY() {
           return state.cursorY;
         },
+        get length() {
+          return state.lines.length;
+        },
         getLine: (y: number) =>
           y >= 0 && y < state.lines.length
             ? bufferLine(state.lines[y] ?? "", 80)
@@ -117,19 +124,36 @@ vi.mock("../core/xterm-loader", () => {
       state.linkProvider = provider;
       return { dispose: noop };
     };
-    onRender = disposable;
+    /** 本物と同じく、書き込むたびに描画を知らせる。 */
+    private renderHandlers: Array<() => void> = [];
+    onRender = (handler: () => void) => {
+      this.renderHandlers.push(handler);
+      return { dispose: noop };
+    };
     onScroll = disposable;
     scrollLines = noop;
+    select = (column: number, row: number, length: number) => {
+      state.selection = { column, row, length };
+    };
+    hasSelection = () => state.selection !== null;
+    clearSelection = () => {
+      state.selection = null;
+    };
     open = (parent: HTMLElement) => {
       const root = document.createElement("div");
       root.className = "xterm";
       const screen = document.createElement("div");
       screen.className = "xterm-screen";
+      // マス目は 8×16 px (画面の位置から桁と行を決めるのに使う)。
+      Object.defineProperty(screen, "clientWidth", { get: () => 80 * 8 });
+      Object.defineProperty(screen, "clientHeight", { get: () => 24 * 16 });
       root.appendChild(screen);
       parent.appendChild(root);
       this.element = root;
     };
-    write = noop;
+    write = () => {
+      for (const handler of this.renderHandlers) handler();
+    };
     resize = (cols: number, rows: number) => {
       this.cols = cols;
       this.rows = rows;
@@ -174,6 +198,16 @@ const IMAGE: TerminalImageRef = {
   url: "/_agent/image?path=%2Frepo%2Fdocs%2Fout.png&v=1000-3",
   bytes: 3,
   mtimeMs: 1000,
+};
+
+/** 貼り付けた画像。サーバはリポジトリの .code-viewer/pasted/ に保存する。 */
+const PASTED: TerminalImageRef = {
+  path: "/repo/.code-viewer/pasted/pasted-image-20260925-143201.png",
+  candidate: "/repo/.code-viewer/pasted/pasted-image-20260925-143201.png",
+  name: "pasted-image-20260925-143201.png",
+  url: "/_agent/image?path=%2Frepo%2F.code-viewer%2Fpasted%2Fpasted-image-20260925-143201.png&v=2000-4",
+  bytes: 4,
+  mtimeMs: 2000,
 };
 
 const OTHER_IMAGE: TerminalImageRef = {
@@ -266,6 +300,22 @@ function installFakes(): void {
           }),
         );
       }
+      if (url === "/_agent/paste") {
+        const saved = {
+          path: PASTED.path,
+          relativePath: ".code-viewer/pasted/pasted-image-20260925-143201.png",
+          name: PASTED.name,
+          bytes: 4,
+        };
+        return Promise.resolve(
+          new Response(JSON.stringify(saved), { status: 200 }),
+        );
+      }
+      if (url.startsWith("/_agent/paths")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ files: [] }), { status: 200 }),
+        );
+      }
       const base = { source: "pane", cwd: "/repo" };
       const body = url.startsWith("/_agent/images/history")
         ? {
@@ -330,15 +380,41 @@ function historyRequests(): string[] {
   );
 }
 
-/** xterm に渡したリンクを、その行 (1 始まり) について聞く。 */
-function linksAt(line: number): XtermLink[] {
-  const provider = fakeState().linkProvider;
-  if (!provider) throw new Error("no link provider registered");
-  let links: XtermLink[] | undefined;
-  provider.provideLinks(line, (value) => {
-    links = value;
-  });
-  return links ?? [];
+/** 画面の描き直し (リンクの印は次の描画の前に読み直す)。 */
+const nextFrame = () =>
+  new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+/** 画面の行と桁 (0 始まり) のマスの真ん中に、マウスの出来事を送る (マス目は 8×16)。 */
+function mouseAt(
+  type: string,
+  row: number,
+  col: number,
+  init: MouseEventInit = {},
+): void {
+  const screen = handle.el.querySelector(".xterm-screen");
+  if (!screen) throw new Error("no xterm screen");
+  screen.dispatchEvent(
+    new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      clientX: col * 8 + 4,
+      clientY: row * 16 + 8,
+      ...init,
+    }),
+  );
+}
+
+/** 層に描いた印 (画面の行・桁・桁数)。 */
+function marks(selector: string): Array<{
+  row: number;
+  col: number;
+  cols: number;
+}> {
+  return [...handle.el.querySelectorAll<HTMLElement>(selector)].map((el) => ({
+    row: Number(el.style.getPropertyValue("--link-row")),
+    col: Number(el.style.getPropertyValue("--link-col")),
+    cols: Number(el.style.getPropertyValue("--link-cols")),
+  }));
 }
 
 beforeAll(() => {
@@ -369,6 +445,7 @@ beforeEach(() => {
   state.cursorY = 2;
   state.linkProvider = null;
   state.proposed = { cols: 80, rows: 24 };
+  state.selection = null;
   installFakes();
   handle = makeScreen();
 });
@@ -765,11 +842,15 @@ describe("画像の開き方 (棚と端末のリンク)", () => {
       cancelable: true,
       ...init,
     });
-    if (where === "shelf")
+    if (where === "shelf") {
       shelfEl(handle)
         .querySelector<HTMLButtonElement>(".terminal-image-shelf-open")
         ?.dispatchEvent(event);
-    else linksAt(2)[0]?.activate(event, "docs/out.png");
+    } else {
+      // "wrote docs/out.png" は画面の 1 行目 (0 始まり) の 6 桁目から。
+      await nextFrame();
+      mouseAt(type, 1, 8, init);
+    }
     const overlay = document.querySelector(".terminal-lightbox") !== null;
     expect(overlay ? "overlay" : (opened[0] ?? "none")).toBe(expected);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
@@ -811,7 +892,7 @@ describe("棚の操作", () => {
   test("畳むと件数のボタンだけになり、設定に覚えてもらう", async () => {
     await shelfWithTwo();
     shelfEl(handle)
-      .querySelector<HTMLButtonElement>(".terminal-image-shelf-toggle")
+      .querySelector<HTMLButtonElement>(".terminal-image-shelf-collapse")
       ?.click();
 
     expect(collapsedChanges).toEqual([true]);
@@ -840,53 +921,55 @@ describe("棚の操作", () => {
 });
 
 describe("文字の中の画像パス (リンク)", () => {
-  test("棚にある画像のパスだけをリンクにする", async () => {
+  test("棚にある画像のパスだけに、常に薄い下線を引く", async () => {
     const source = await attachShell(SHELL);
     source.emitOutput("wrote docs/out.png\n");
     await flush();
+    await nextFrame();
 
-    // バッファの 2 行目 (1 始まり) に "wrote docs/out.png"。
-    const [link] = linksAt(2);
-    expect(link?.text).toBe("docs/out.png");
-    expect(link?.range).toEqual({
-      start: { x: 7, y: 2 },
-      end: { x: 18, y: 2 },
-    });
-    expect(link?.decorations).toEqual({ pointerCursor: true, underline: true });
-    // パスの無い行と、棚に無い画像のパスはリンクにしない。
-    expect(linksAt(1)).toEqual([]);
+    // 画面の 1 行目 (0 始まり) の 6 桁目から 12 桁。
+    expect(marks(".terminal-link-mark")).toEqual([
+      { row: 1, col: 6, cols: 12 },
+    ]);
+    // 棚に無い画像のパスには引かない。
     fakeState().lines = ["wrote docs/unknown.png"];
-    expect(linksAt(1)).toEqual([]);
+    source.emitOutput("\n");
+    await flush();
+    await nextFrame();
+    expect(marks(".terminal-link-mark")).toEqual([]);
   });
 
-  test("全角の字が前にあってもマス目の位置で範囲を返す", async () => {
+  test("全角の字が前にあってもマス目の位置に引く", async () => {
     fakeState().lines = ["保存 docs/out.png"];
     const source = await attachShell(SHELL);
     source.emitOutput("保存 docs/out.png\n");
     await flush();
+    await nextFrame();
 
-    // "保存" は 2 字で 4 マス。パスは 6 マス目 (1 始まり) から。
-    expect(linksAt(1)[0]?.range).toEqual({
-      start: { x: 6, y: 1 },
-      end: { x: 17, y: 1 },
-    });
+    // "保存" は 2 字で 4 マス。パスは 5 桁目 (0 始まり) から。
+    expect(marks(".terminal-link-mark")).toEqual([
+      { row: 0, col: 5, cols: 12 },
+    ]);
   });
 
-  test("カーソルが載ると棚の同じ画像を強調し、離れると外す", async () => {
+  test("カーソルが載ると強く強調して棚の同じ画像も強調し、離れると外す", async () => {
     const source = await attachShell(SHELL);
     source.emitOutput("wrote docs/out.png\n");
     await flush();
-    const [link] = linksAt(2);
+    await nextFrame();
     const item = () =>
       shelfEl(handle).querySelector<HTMLElement>(".terminal-image-shelf-item");
 
-    link?.hover?.(new MouseEvent("mousemove"), "docs/out.png");
+    mouseAt("mousemove", 1, 8);
     expect(item()?.dataset.linked).toBe("true");
-    // 文字の上にはツールチップも画像も出さない。
-    expect(handle.el.querySelectorAll(".terminal-screen img")).toHaveLength(0);
+    expect(marks(".terminal-link-hover")).toEqual([
+      { row: 1, col: 6, cols: 12 },
+    ]);
 
-    link?.leave?.(new MouseEvent("mouseleave"), "docs/out.png");
+    mouseAt("mousemove", 5, 0);
+    await new Promise((resolve) => setTimeout(resolve, LINK_BAR_HIDE_MS + 20));
     expect(item()?.dataset.linked).toBeUndefined();
+    expect(marks(".terminal-link-hover")).toEqual([]);
   });
 
   test("畳んでいる間はボタンだけで応える", async () => {
@@ -894,7 +977,8 @@ describe("文字の中の画像パス (リンク)", () => {
     const source = await attachShell(SHELL);
     source.emitOutput("wrote docs/out.png\n");
     await flush();
-    linksAt(2)[0]?.hover?.(new MouseEvent("mousemove"), "docs/out.png");
+    await nextFrame();
+    mouseAt("mousemove", 1, 8);
 
     expect(shelfEl(handle).dataset.collapsed).toBe("true");
     expect(
@@ -907,11 +991,181 @@ describe("文字の中の画像パス (リンク)", () => {
     const source = await attachShell(SHELL);
     source.emitOutput("wrote docs/out.png\n");
     await flush();
-    linksAt(2)[0]?.activate(new MouseEvent("click"), "docs/out.png");
+    await nextFrame();
+    mouseAt("click", 1, 8);
 
     const box = document.querySelector(".terminal-lightbox");
     expect(box?.querySelector("img")?.getAttribute("src")).toBe(IMAGE.url);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  });
+});
+
+describe("貼り付けた画像", () => {
+  /** クリップボードに PNG が 1 枚ある貼り付けを、端末の枠に起こす。 */
+  function pastePng(): void {
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    const file = new File([new Uint8Array([137, 80, 78, 71])], "image.png", {
+      type: "image/png",
+    });
+    Object.defineProperty(event, "clipboardData", {
+      value: {
+        items: [{ kind: "file", type: "image/png", getAsFile: () => file }],
+      },
+    });
+    handle.el.dispatchEvent(event);
+  }
+
+  beforeEach(() => {
+    // 問い合わせた綴りを candidate に返す (画面に出た綴りごとに聞かれる)。
+    respond = (url) => {
+      const candidate =
+        new URL(url, "http://localhost/").searchParams.get("path") ?? "";
+      return { images: [{ ...PASTED, candidate }], rejected: [] };
+    };
+  });
+
+  test("貼ったらすぐ棚に出て、パスを端末へ打ち込む", async () => {
+    await attachShell(SHELL);
+    pastePng();
+    await vi.waitFor(() =>
+      expect(shelfNames(handle)).toEqual(["pasted-image-20260925-143201.png"]),
+    );
+
+    expect(requestedBodies[requestedUrls.indexOf("/_shell/keys")]).toBe(
+      JSON.stringify({ id: SHELL.id, data: `'${PASTED.path}' ` }),
+    );
+  });
+
+  test("保存した場所 (プロジェクトからの相対パス) を状態の行で知らせる", async () => {
+    const source = await attachShell(SHELL);
+    pastePng();
+    await vi.waitFor(() =>
+      expect(statusMessages[statusMessages.length - 1]).toContain(
+        ".code-viewer/pasted/pasted-image-20260925-143201.png",
+      ),
+    );
+    expect(statusMessages[statusMessages.length - 1]).toContain("git");
+    // 打ち込んだパスの反響 (出力) が来ても知らせは消えない。
+    source.emitOutput(
+      "'/repo/.code-viewer/pasted/pasted-image-20260925-143201.png' ",
+    );
+    await flush();
+    expect(statusMessages[statusMessages.length - 1]).toContain(
+      ".code-viewer/pasted/",
+    );
+  });
+
+  test("棚にだけ出て、ターミナルの上に帯を作らない (エージェントが別の綴りで出しても 1 枚)", async () => {
+    const source = await attachShell(SHELL);
+    pastePng();
+    await vi.waitFor(() => expect(requestedUrls).toContain("/_shell/keys"));
+    // エージェントは読んだファイルを作業場所からの相対パスで出す。
+    source.emitOutput(
+      "Read(.code-viewer/pasted/pasted-image-20260925-143201.png)\n",
+    );
+    await flush();
+
+    expect(shelfNames(handle)).toEqual(["pasted-image-20260925-143201.png"]);
+    expect(handle.el.querySelectorAll(".terminal-attachment")).toHaveLength(0);
+    expect(handle.el.querySelectorAll("img")).toHaveLength(1);
+  });
+});
+
+describe("棚のサムネイルと端末の文字", () => {
+  function shelfOpen(): HTMLButtonElement {
+    const open = shelfEl(handle).querySelector<HTMLButtonElement>(
+      ".terminal-image-shelf-open",
+    );
+    if (!open) throw new Error("no shelf item");
+    return open;
+  }
+
+  async function shelfWithOut(): Promise<void> {
+    const source = await attachShell(SHELL);
+    source.emitOutput("wrote docs/out.png\n");
+    await flush();
+  }
+
+  test.each([
+    { name: "カーソル", enter: "pointerenter", leave: "pointerleave" },
+    { name: "フォーカス", enter: "focus", leave: "blur" },
+  ])("$name が載ると端末の中のパスを強く強調し、離れると外す", async ({
+    enter,
+    leave,
+  }) => {
+    await shelfWithOut();
+    shelfOpen().dispatchEvent(new Event(enter));
+    // "wrote docs/out.png" はバッファの 1 行目 (0 始まり) の 6 桁目から 12 桁。
+    expect(marks(".terminal-link-hover")).toEqual([
+      { row: 1, col: 6, cols: 12 },
+    ]);
+
+    shelfOpen().dispatchEvent(new Event(leave));
+    expect(marks(".terminal-link-hover")).toEqual([]);
+  });
+
+  test.each([
+    {
+      name: "何度も出ていれば一番下 (新しい方)",
+      lines: ["wrote docs/out.png", "again docs/out.png", ""],
+      expected: [{ row: 1, col: 6, cols: 12 }],
+    },
+    {
+      name: "端末の幅で折り返したパスは 2 行にまたがって示す",
+      lines: [`${"p".repeat(74)} docs/`, "out.png", ""],
+      expected: [
+        { row: 0, col: 75, cols: 5 },
+        { row: 1, col: 0, cols: 7 },
+      ],
+    },
+    {
+      name: "全角の字の後ろはマス目の桁で示す",
+      lines: ["保存 docs/out.png", ""],
+      expected: [{ row: 0, col: 5, cols: 12 }],
+    },
+    {
+      name: "画面に出ていなければ何もしない",
+      lines: ["$ clear", ""],
+      expected: [],
+    },
+  ])("$name", async ({ lines, expected }) => {
+    await shelfWithOut();
+    fakeState().lines = lines;
+    shelfOpen().dispatchEvent(new Event("pointerenter"));
+    expect(marks(".terminal-link-hover")).toEqual(expected);
+  });
+
+  test("利用者の選択には触らない (示すのは選択でなく強調)", async () => {
+    await shelfWithOut();
+    const mine = { column: 0, row: 0, length: 5 };
+    fakeState().selection = mine;
+
+    shelfOpen().dispatchEvent(new Event("pointerenter"));
+    expect(fakeState().selection).toEqual(mine);
+    expect(marks(".terminal-link-hover")).toHaveLength(1);
+    shelfOpen().dispatchEvent(new Event("pointerleave"));
+    expect(fakeState().selection).toEqual(mine);
+  });
+
+  test("カーソルが載っている間、棚の見出しの行に実体のパスを出す (浮く札は作らない)", async () => {
+    await shelfWithOut();
+    // 既定の吹き出し (title) も付けない。
+    expect(shelfOpen().hasAttribute("title")).toBe(false);
+    const head = shelfEl(handle).querySelector<HTMLElement>(
+      ".terminal-image-shelf-head",
+    );
+    shelfOpen().dispatchEvent(
+      new PointerEvent("pointerenter", { pointerType: "mouse" }),
+    );
+    expect(
+      head?.querySelector(".terminal-image-shelf-detail")?.textContent,
+    ).toBe("/repo/docs/out.png");
+    expect(head?.title).toBe("/repo/docs/out.png");
+    expect(document.querySelector("[role=tooltip]")).toBeNull();
+    shelfOpen().dispatchEvent(new PointerEvent("pointerleave"));
+    expect(
+      head?.querySelector<HTMLElement>(".terminal-image-shelf-detail")?.hidden,
+    ).toBe(true);
   });
 });
 
@@ -943,10 +1197,10 @@ describe("ターミナル入力", () => {
     fakeState().inputHandler("ls\n");
     await flush();
 
-    expect(requestedUrls[requestedUrls.length - 1]).toBe("/_shell/keys");
-    expect(
-      JSON.parse(requestedBodies[requestedBodies.length - 1] ?? "null"),
-    ).toEqual({
+    // 画面のパスの問い合わせ (/_agent/paths) も並ぶので、打鍵の送信を探す。
+    const sent = requestedUrls.lastIndexOf("/_shell/keys");
+    expect(sent).toBeGreaterThanOrEqual(0);
+    expect(JSON.parse(requestedBodies[sent] ?? "null")).toEqual({
       id: "shell-abc123",
       data: "ls\n",
     });

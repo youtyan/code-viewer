@@ -190,10 +190,12 @@ describe("state-changing request bodies", () => {
     expect(res?.status).toBe(415);
   });
 
+  // 申告は指示文と会話の場所 (conversation) を載せるので 32 KiB
+  // (handle.ts の MAX_AGENT_STATE_BODY_BYTES)。
   test.each([
-    { name: "one byte below the limit", bytes: 16_383, expected: 200 },
-    { name: "exactly at the limit", bytes: 16_384, expected: 200 },
-    { name: "one byte above the limit", bytes: 16_385, expected: 413 },
+    { name: "one byte below the limit", bytes: 32_767, expected: 200 },
+    { name: "exactly at the limit", bytes: 32_768, expected: 200 },
+    { name: "one byte above the limit", bytes: 32_769, expected: 413 },
   ])("limits state JSON bodies ($name)", async ({ bytes, expected }) => {
     const prefix = '{"target":"%3","event":"stop","padding":"';
     const suffix = '"}';

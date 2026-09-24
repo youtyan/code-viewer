@@ -1,5 +1,6 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { COLOR_THEMES } from "../core/color-themes";
 import type { FileRangeResponse, FileSearchListResponse } from "../core/types";
 import type { PaletteCommand } from "../views/search-palette-ui";
 import { q, waitFor } from "./_test-helpers";
@@ -402,6 +403,34 @@ describe("palette projects, agents and actions", () => {
       expect(input().placeholder).toBe(
         "Search projects, agents, sessions, files, actions…",
       );
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+
+  // テーマは全部 (core/color-themes.ts) 並べる。ほかの種類は 5 件まで。
+  test("choosing a theme lists every theme under its own heading, after the actions", async () => {
+    const ran: string[] = [];
+    const themes = COLOR_THEMES.map((_, index) =>
+      command("themes", `Choose theme: sample ${index + 1}`, "", false, ran),
+    );
+    const { palette } = await setup({
+      files: ["src/lib.ts"],
+      commands: [...commands(ran), ...themes],
+    });
+    try {
+      palette.openSearchPalette("file");
+      typeQuery("choose theme");
+      await waitFor(() => listing().length === themes.length + 1);
+      expect(listing()).toEqual([
+        "# Themes",
+        ...themes.map(
+          (theme, index) => `${theme.title}|${index === 0 ? " *" : ""}`,
+        ),
+      ]);
+      key("ArrowDown");
+      key("Enter");
+      expect(ran).toEqual(["Choose theme: sample 2"]);
     } finally {
       palette.closeSearchPalette();
     }

@@ -134,9 +134,11 @@ describe("the list of actions", () => {
       keysOf(root, "new-agent"),
       // 前・次のプロジェクトへ (タブのグループの作業で足した 2 つの操作)。
       keysOf(root, "project-next"),
+      // ヘルプのページを開く (設定とヘルプを分けたときに足した。既定のキーは無い)。
+      keysOf(root, "open-help-page"),
     ]).toEqual([
       ["Global", "Panels", "Screens", "Tabs", "File list", "Main Panel"],
-      82,
+      83,
       ["t"],
       [
         "g+Shift+T",
@@ -147,6 +149,7 @@ describe("the list of actions", () => {
       ],
       [],
       ["Meta+Shift+ArrowDown", "Ctrl+Shift+ArrowDown"],
+      [],
     ]);
   });
 
@@ -753,5 +756,39 @@ describe("the key cells of a row", () => {
       "end",
       "end",
     ]);
+  });
+});
+
+// 表の決まり (ui-surface.md の「表」): 分類ごとに見出しの行があり、行は区切り線の行。
+describe("the table look of the list", () => {
+  test("each group starts with a head row naming the group and the key column", () => {
+    const { root } = setup();
+    const groups = Array.from(root.querySelectorAll(".shortcut-group"));
+    const heads = groups.map((group) => group.firstElementChild);
+    expect({
+      someGroups: groups.length > 0,
+      headsFirst: heads.every((head) =>
+        head?.classList.contains("ui-table-head"),
+      ),
+      titled: heads.every(
+        (head) =>
+          (head?.querySelector(".shortcut-group-title")?.textContent ?? "") !==
+          "",
+      ),
+      keyColumn: heads[0]?.querySelector(".shortcut-group-keys")?.textContent,
+    }).toEqual({
+      someGroups: true,
+      headsFirst: true,
+      titled: true,
+      keyColumn: "Keys",
+    });
+  });
+
+  test("every row is a table row", () => {
+    const { root } = setup();
+    const rows = root.querySelectorAll(".shortcut-row");
+    expect(
+      Array.from(rows).every((item) => item.classList.contains("ui-table-row")),
+    ).toBe(true);
   });
 });

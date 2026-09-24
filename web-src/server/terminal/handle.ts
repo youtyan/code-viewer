@@ -6,6 +6,9 @@
 // - GET  /_agent/capture  ターミナル本文を前回の続きから取る
 // - GET  /_agent/images   出力から拾った画像パスを配信できる形に直す
 // - GET  /_agent/images/history  繋いだとき、ペインの履歴から画像パスを拾う
+// - GET  /_agent/images/layout   シェルが映している tmux のペインの並び (棚の枠)
+// - POST /_agent/images/reveal   「ターミナルで見る」: ペインを tmux に遡らせる
+// - GET  /_agent/paths    画面に出たファイルのパスが、このプロジェクトの中で実在するか
 // - GET  /_agent/image    その 1 枚を配る (/_file は worktree 限定なので別口)
 // - GET  /_agent/hooks          claude / codex のフックの状態と直近の失敗
 // - GET  /_agent/hooks/plan     入れる・外すと何が変わるか (書かない)
@@ -15,6 +18,8 @@
 //   入口 (accounts/handle.ts)
 // - /_agent/projects・/_agent/projects/open・/_agent/projects/stop は
 //   プロジェクトの登録簿と、そのサーバを開く・止める入口 (projects/handle.ts)
+// - GET  /_agent/projects/directories  「プロジェクトを追加」がたどる子の
+//   ディレクトリの一覧 (projects/directories.ts。読むだけ)
 //
 // ルーティングと副作用リクエストの認可は tmux/handle.ts と同じ dispatchRoutes
 // に任せる。申告は状態を書き換えるので sideEffect: true。CLI からの POST は
@@ -34,9 +39,11 @@ import type { AgentOverviewResponse } from "../../core/agent-overview";
 import type { AgentScreenRuleIssue } from "../../core/agent-screen";
 import {
   type AgentStatesResponse,
+  isAgentConversation,
   isAgentEvent,
   isReportedAgent,
 } from "../../core/agent-state";
+import { hasControlCharacter } from "../../core/control-chars";
 import { formatErrorDetail } from "../../core/error-detail";
 import type { ProjectOpenResponse } from "../../core/projects";
 import { isShellSessionId } from "../../core/shell";
@@ -44,11 +51,18 @@ import type { TerminalCaptureResponse } from "../../core/terminal-capture";
 import {
   findImagePathsNewestFirst,
   MAX_TERMINAL_IMAGE_PATHS,
+  MAX_TERMINAL_REVEAL_TEXT,
   stripAnsi,
   type TerminalImageHistoryResponse,
   type TerminalImagesResponse,
+  type TerminalPaneLayoutResponse,
 } from "../../core/terminal-images";
+import {
+  MAX_TERMINAL_PATH_QUERY,
+  type TerminalPathsResponse,
+} from "../../core/terminal-links";
 import { MAX_PASTE_BODY_BYTES } from "../../core/terminal-paste";
+import { isTmuxPaneId } from "../../core/tmux";
 import {
   handleAccountsGet,
   handleAccountsPlanGet,
@@ -66,6 +80,7 @@ import {
   parseBoundedJsonBody,
   textError,
 } from "../database/handle-shared";
+import { handleProjectDirectoriesGet } from "../projects/directories";
 import {
   handleProjectOpenPost,
   handleProjectStopPost,
@@ -74,6 +89,7 @@ import {
 import { rawFileHeaders } from "../raw-file-headers";
 import { fileReadableStream } from "../runtime";
 import { captureTmuxPane, MAX_TMUX_HISTORY_LINES } from "../tmux/capture";
+import { runTmux } from "../tmux/command";
 import { getAgentActivityErrors, noteAgentListWatched } from "./activity";
 import {
   getAgentState,
@@ -95,6 +111,13 @@ import {
 } from "./hooks";
 import { terminalImageBase } from "./image-base";
 import {
+  findSightings,
+  type ImageOrigins,
+  paneText,
+  readImageOrigins,
+  readPaneLayout,
+} from "./image-origins";
+import {
   resolveTerminalImage,
   resolveTerminalImages,
   terminalImageVersion,
@@ -105,6 +128,7 @@ import {
   defaultAgentOverviewDeps,
 } from "./overview";
 import { savePastedImage } from "./paste";
+import { resolveTerminalPaths } from "./paths";
 import { relayAgentRead } from "./read-relay";
 import {
   MAX_AGENT_SCREEN_RULES_BYTES,
@@ -117,6 +141,12 @@ import { clearAgentUnread, noteAgentUnread } from "./unread";
 /** 申告 1 件の本文上限。指示文が丸ごと来ても収まる程度。 */
 const MAX_STATE_TEXT = 2000;
 const MAX_AGENT_ACTION_BODY_BYTES = 16 * 1024;
+/**
+ * 申告 (/_agent/state) の本文の上限。指示文 (MAX_STATE_TEXT 文字。制御文字は
+ * JSON で 6 バイトになる) と会話の場所の 3 つの欄 (MAX_CONVERSATION_FIELD
+ * 文字、1 文字 3 バイトまで) が最悪の文字でも収まる大きさ。
+ */
+const MAX_AGENT_STATE_BODY_BYTES = 32 * 1024;
 
 function textField(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -145,7 +175,7 @@ async function handleStatePost(
 ): Promise<Response> {
   const parsed = await parseBoundedJsonBody(
     req,
-    MAX_AGENT_ACTION_BODY_BYTES,
+    MAX_AGENT_STATE_BODY_BYTES,
     "agent state request too large",
   );
   if (parsed instanceof Response) return parsed;
@@ -160,6 +190,7 @@ async function handleStatePost(
     note?: unknown;
     agent?: unknown;
     relay?: unknown;
+    conversation?: unknown;
   };
 
   const target = body.target;
@@ -176,6 +207,12 @@ async function handleStatePost(
 
   if (body.relay !== undefined && body.relay !== true) {
     return textError("invalid relay", 400);
+  }
+  if (
+    body.conversation !== undefined &&
+    !isAgentConversation(body.conversation)
+  ) {
+    return textError("invalid conversation", 400);
   }
   const now = Date.now();
   if (
@@ -195,6 +232,9 @@ async function handleStatePost(
     lastPrompt: textField(body.lastPrompt),
     note: textField(body.note),
     agent: isReportedAgent(body.agent) ? body.agent : undefined,
+    conversation: isAgentConversation(body.conversation)
+      ? body.conversation
+      : undefined,
   });
   if (!record) return textError("invalid event", 400);
   // 画面で「読んだ」ときは、ほかのサーバにも伝える (read-relay.ts)。送り先
@@ -320,13 +360,49 @@ function shellParam(url: URL): string | null | Response {
 async function handleImagesGet(url: URL, cwd: string): Promise<Response> {
   const shell = shellParam(url);
   if (shell instanceof Response) return shell;
-  const { base } = await terminalImageBase(cwd, shell);
+  const { base, client } = await terminalImageBase(cwd, shell);
   const candidates = url.searchParams.getAll("path");
+  // どのペインのどの行に出たか (棚の出どころ)。tmux を映していなければ無い。
+  const origins = client
+    ? await readImageOrigins(cwd, client, candidates)
+    : null;
   const body: TerminalImagesResponse = {
-    ...resolveTerminalImages(base.cwd, candidates),
+    ...resolveWhereSeen(base.cwd, candidates, origins),
     base,
+    ...(origins
+      ? { layout: origins.layout, sightings: origins.sightings }
+      : {}),
+    ...(origins?.error ? { originError: origins.error } : {}),
   };
   return json(body);
+}
+
+/**
+ * 相対パスは、それが出ていたペインの作業場所から解く (tmux で分けた隣の
+ * ペインは別の場所で動いていることがある)。出どころの分からない候補は base。
+ */
+function resolveWhereSeen(
+  baseCwd: string,
+  candidates: string[],
+  origins: ImageOrigins | null,
+  limit?: number,
+): Pick<TerminalImagesResponse, "images" | "rejected"> {
+  const groups = new Map<string, string[]>();
+  for (const candidate of candidates.slice(0, limit)) {
+    const pane = origins?.sightings.find(
+      (sighting) => sighting.candidate === candidate,
+    )?.pane;
+    const cwd = (pane && origins?.paths.get(pane)) || baseCwd;
+    groups.set(cwd, [...(groups.get(cwd) ?? []), candidate]);
+  }
+  const images: TerminalImagesResponse["images"] = [];
+  const rejected: TerminalImagesResponse["rejected"] = [];
+  for (const [cwd, group] of groups) {
+    const resolved = resolveTerminalImages(cwd, group, group.length);
+    images.push(...resolved.images);
+    rejected.push(...resolved.rejected);
+  }
+  return { images, rejected };
 }
 
 /**
@@ -344,7 +420,7 @@ async function handleImagesHistoryGet(
   const shell = shellParam(url);
   if (shell instanceof Response) return shell;
   if (shell === null) return textError("shell is required", 400);
-  const { base, pane } = await terminalImageBase(cwd, shell);
+  const { base, pane, client } = await terminalImageBase(cwd, shell);
   const empty: TerminalImageHistoryResponse = {
     images: [],
     rejected: [],
@@ -373,14 +449,154 @@ async function handleImagesHistoryGet(
     stripAnsi(screen.content),
     screen.width,
   );
+  // 出どころ: 履歴はこのペインだけを読むので、行はこのペインから探す。
+  // 並び (枠の材料) は読み直す。
+  const layout = client ? await readPaneLayout(cwd, client) : null;
+  if (layout?.status === "error") {
+    console.error(
+      `[code-viewer] terminal image history layout failed (pane ${pane})`,
+      layout.error,
+    );
+  }
   const body: TerminalImageHistoryResponse = {
     ...resolveTerminalImages(base.cwd, candidates, MAX_TERMINAL_IMAGE_PATHS),
     base,
     pane,
     candidates,
     lines: screen.historyLines + screen.height,
+    layout: layout?.status === "ok" ? layout.read.layout : null,
+    sightings: findSightings([paneText(screen)], candidates),
+    ...(layout?.status === "error"
+      ? { originError: formatErrorDetail(layout.error) }
+      : {}),
   };
   return json(body);
+}
+
+/**
+ * 画面に出たファイルのパスのうち、このプロジェクトの中で実在するファイルを返す
+ * (開く・コピーのできるリンクにする)。相対パスはシェルが映しているペインの
+ * 作業場所、次にプロジェクトの根から解く。読むのは stat だけなので GET。
+ */
+async function handlePathsGet(url: URL, cwd: string): Promise<Response> {
+  const shell = shellParam(url);
+  if (shell instanceof Response) return shell;
+  const candidates = url.searchParams.getAll("path");
+  if (candidates.length > MAX_TERMINAL_PATH_QUERY) {
+    return textError(
+      `too many paths (${candidates.length} > ${MAX_TERMINAL_PATH_QUERY})`,
+      400,
+    );
+  }
+  const { base } = await terminalImageBase(cwd, shell);
+  const result = resolveTerminalPaths(cwd, [base.cwd, cwd], candidates);
+  if (result.errors.length > 0) {
+    console.error(
+      `[code-viewer] terminal paths: ${result.errors.length} path(s) could not be checked`,
+      result.errors,
+    );
+  }
+  return json({ files: result.files } satisfies TerminalPathsResponse);
+}
+
+/**
+ * シェルが映している tmux のウインドウのペインの並び。棚の項目にカーソルが
+ * 載ったとき、今の並びで枠を描き直すため (ペインは後から動かせる)。
+ */
+async function handleImagesLayoutGet(url: URL, cwd: string): Promise<Response> {
+  const shell = shellParam(url);
+  if (shell instanceof Response) return shell;
+  if (shell === null) return textError("shell is required", 400);
+  const { client } = await terminalImageBase(cwd, shell);
+  const empty: TerminalPaneLayoutResponse = { layout: null };
+  if (!client) return json(empty);
+  const listed = await readPaneLayout(cwd, client);
+  if (listed.status === "gone") return json(empty);
+  if (listed.status === "error") {
+    console.error(
+      `[code-viewer] terminal pane layout failed (shell ${shell})`,
+      listed.error,
+    );
+    return textError(formatErrorDetail(listed.error), 500);
+  }
+  return json({
+    layout: listed.read.layout,
+  } satisfies TerminalPaneLayoutResponse);
+}
+
+/**
+ * 「ターミナルで見る」: そのペインを tmux のコピーモードにし、文字列を後ろ向きに
+ * 探させる (見つかった行まで遡り、tmux がその文字を強調する)。
+ *
+ * 利用者の tmux に対する操作なので、押されたときだけ行う。変えるのはその
+ * ペインの表示位置だけで、設定やオプションは書かない (コピーモードは q で
+ * 抜ける)。宛先は、そのシェルが映しているウインドウのペインに限る。
+ */
+async function handleImagesRevealPost(
+  req: Request,
+  cwd: string,
+): Promise<Response> {
+  const parsed = await parseBoundedJsonBody(
+    req,
+    MAX_AGENT_ACTION_BODY_BYTES,
+    "reveal request too large",
+  );
+  if (parsed instanceof Response) return parsed;
+  const { shell, pane, text } = (parsed ?? {}) as Record<string, unknown>;
+  if (typeof shell !== "string" || !isShellSessionId(shell)) {
+    return textError("invalid shell", 400);
+  }
+  if (typeof pane !== "string" || !isTmuxPaneId(pane)) {
+    return textError("invalid pane", 400);
+  }
+  if (
+    typeof text !== "string" ||
+    text.trim() === "" ||
+    text.length > MAX_TERMINAL_REVEAL_TEXT ||
+    hasControlCharacter(text)
+  ) {
+    return textError("invalid text", 400);
+  }
+  const { client } = await terminalImageBase(cwd, shell);
+  if (!client) return textError("the shell is not showing tmux", 409);
+  const listed = await readPaneLayout(cwd, client);
+  if (listed.status === "error") {
+    console.error(
+      `[code-viewer] terminal reveal: list-panes failed (shell ${shell})`,
+      listed.error,
+    );
+    return textError(formatErrorDetail(listed.error), 500);
+  }
+  if (
+    listed.status === "gone" ||
+    !listed.read.layout.panes.some((item) => item.id === pane)
+  ) {
+    return textError(`pane ${pane} is not in the window of the shell`, 409);
+  }
+  const result = await runTmux(
+    [
+      "copy-mode",
+      "-t",
+      pane,
+      ";",
+      "send-keys",
+      "-t",
+      pane,
+      "-X",
+      "search-backward-text",
+      text,
+    ],
+    cwd,
+  );
+  if (result.status === "ok") return json({ ok: true });
+  if (result.status === "error") {
+    console.error(
+      `[code-viewer] terminal reveal failed (pane ${pane})`,
+      result.error,
+    );
+    return textError(formatErrorDetail(result.error), 500);
+  }
+  return textError(`pane ${pane} is gone (${result.status})`, 409);
 }
 
 /**
@@ -437,6 +653,7 @@ async function handlePastePost(req: Request, cwd: string): Promise<Response> {
   }
   return json({
     path: result.path,
+    relativePath: result.relativePath,
     name: result.name,
     bytes: result.bytes,
   });
@@ -670,6 +887,22 @@ export function handleAgentRoute(
         sideEffect: false,
         handler: () => handleImagesHistoryGet(url, cwd),
       },
+      "/_agent/paths": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handlePathsGet(url, cwd),
+      },
+      "/_agent/images/layout": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handleImagesLayoutGet(url, cwd),
+      },
+      // 利用者の tmux のペインをコピーモードにする。同一オリジンからしか通らない。
+      "/_agent/images/reveal": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleImagesRevealPost(req, cwd),
+      },
       "/_agent/image": {
         methods: ["GET"],
         sideEffect: false,
@@ -740,6 +973,11 @@ export function handleAgentRoute(
         methods: ["POST"],
         sideEffect: true,
         handler: () => handleProjectsPost(req, cwd),
+      },
+      "/_agent/projects/directories": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handleProjectDirectoriesGet(url),
       },
       // サーバのプロセスを起こす・止める。同一オリジンからしか通らない。
       "/_agent/projects/open": {

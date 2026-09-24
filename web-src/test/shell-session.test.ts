@@ -74,6 +74,50 @@ afterEach(async () => {
   mocks.spawn.mockReset();
 });
 
+// 頼まれた ID で開く: 入口が起き直して終わったシェルのタブを、同じ ID のまま
+// 開き直す (タブの配置は ID で指す)。2 つの窓が同時に開き直すこともある。
+describe("createShellSession with a requested id", () => {
+  test("使われている ID なら開かずに、そのシェルを in-use で返す", async () => {
+    const first = await createShellSession(process.cwd(), {}, "shell-same01");
+    const second = await createShellSession(process.cwd(), {}, "shell-same01");
+
+    expect([first, second, mocks.spawn.mock.calls.length]).toMatchObject([
+      { status: "ok", session: { id: "shell-same01" } },
+      { status: "in-use", session: { id: "shell-same01" } },
+      1,
+    ]);
+  });
+
+  test("同時に開いたら後から来た方を止めて先の方を返し、止めた方が終わっても先の方は残る", async () => {
+    const winner = fakePty();
+    const loser = fakePty();
+    mocks.spawn.mockReturnValueOnce(winner).mockReturnValueOnce(loser);
+
+    const results = await Promise.all([
+      createShellSession(process.cwd(), {}, "shell-same02"),
+      createShellSession(process.cwd(), {}, "shell-same02"),
+    ]);
+    loser.emitExit(0);
+    const listed = (await listShellSessionsForMatching()).map((s) => s.id);
+    winner.emitExit(0);
+
+    expect([
+      results,
+      winner.kill.mock.calls.length,
+      loser.kill.mock.calls.length,
+      listed,
+    ]).toMatchObject([
+      [
+        { status: "ok", session: { id: "shell-same02" } },
+        { status: "in-use", session: { id: "shell-same02" } },
+      ],
+      0,
+      1,
+      ["shell-same02"],
+    ]);
+  });
+});
+
 describe("createShellSession PTY terminal resolution", () => {
   test("retries a temporarily missing tty and links the shell to its tmux pane", async () => {
     mocks.runAsync

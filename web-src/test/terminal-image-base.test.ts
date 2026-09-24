@@ -93,6 +93,7 @@ describe("terminalImageBase", () => {
     expect(await terminalImageBase(REPO, SHELL_ID)).toEqual({
       base: { source: "pane", cwd: "/work/sample-app/packages/web" },
       pane: "%7",
+      client: CLIENT,
     });
     // 聞くのは、端末の名前で突き合わせたクライアントが見ているペイン。
     expect(fake().tmuxCalls).toEqual([
@@ -105,7 +106,11 @@ describe("terminalImageBase", () => {
       name: "shell を渡さない",
       shell: null,
       setup: () => undefined,
-      expected: { base: { source: "repo", cwd: REPO }, pane: null },
+      expected: {
+        base: { source: "repo", cwd: REPO },
+        pane: null,
+        client: null,
+      },
     },
     {
       name: "もう無いシェル",
@@ -113,7 +118,11 @@ describe("terminalImageBase", () => {
       setup: () => {
         fake().session = null;
       },
-      expected: { base: { source: "repo", cwd: REPO }, pane: null },
+      expected: {
+        base: { source: "repo", cwd: REPO },
+        pane: null,
+        client: null,
+      },
     },
     {
       name: "tmux が動いていない",
@@ -121,7 +130,11 @@ describe("terminalImageBase", () => {
       setup: () => {
         fake().clients = { status: "gone" };
       },
-      expected: { base: { source: "shell", cwd: SESSION.cwd }, pane: null },
+      expected: {
+        base: { source: "shell", cwd: SESSION.cwd },
+        pane: null,
+        client: null,
+      },
     },
     {
       name: "このシェルは tmux を映していない",
@@ -132,7 +145,11 @@ describe("terminalImageBase", () => {
           clients: [{ ...CLIENT, tty: "/dev/ttys009" }],
         };
       },
-      expected: { base: { source: "shell", cwd: SESSION.cwd }, pane: null },
+      expected: {
+        base: { source: "shell", cwd: SESSION.cwd },
+        pane: null,
+        client: null,
+      },
     },
     {
       name: "端末の名前が引けなかったシェルは誰にも当てない",
@@ -141,7 +158,11 @@ describe("terminalImageBase", () => {
         fake().session = { ...SESSION, tty: "" };
         fake().clients = { status: "ok", clients: [{ ...CLIENT, tty: "" }] };
       },
-      expected: { base: { source: "shell", cwd: SESSION.cwd }, pane: null },
+      expected: {
+        base: { source: "shell", cwd: SESSION.cwd },
+        pane: null,
+        client: null,
+      },
     },
     {
       name: "ペインが引く間に閉じられた",
@@ -149,7 +170,11 @@ describe("terminalImageBase", () => {
       setup: () => {
         fake().paneCwd = { status: "no-target" };
       },
-      expected: { base: { source: "shell", cwd: SESSION.cwd }, pane: null },
+      expected: {
+        base: { source: "shell", cwd: SESSION.cwd },
+        pane: null,
+        client: null,
+      },
     },
     {
       name: "作業場所が空 (引けない環境)",
@@ -157,7 +182,11 @@ describe("terminalImageBase", () => {
       setup: () => {
         fake().paneCwd = { status: "ok", stdout: "\n" };
       },
-      expected: { base: { source: "shell", cwd: SESSION.cwd }, pane: "%7" },
+      expected: {
+        base: { source: "shell", cwd: SESSION.cwd },
+        pane: "%7",
+        client: CLIENT,
+      },
     },
     {
       name: "シェルの場所も無ければリポジトリの根",
@@ -166,7 +195,11 @@ describe("terminalImageBase", () => {
         fake().session = { ...SESSION, cwd: "" };
         fake().clients = { status: "gone" };
       },
-      expected: { base: { source: "repo", cwd: REPO }, pane: null },
+      expected: {
+        base: { source: "repo", cwd: REPO },
+        pane: null,
+        client: null,
+      },
     },
   ])("$name", async ({ shell, setup, expected }) => {
     setup();

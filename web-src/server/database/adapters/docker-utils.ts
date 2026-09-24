@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
+import { formatErrorDetail } from "../../../core/error-detail";
 import {
   commandForExternal,
   commandNotFoundDetail,
-  isCommandNotFoundResult,
+  commandRunFailure,
 } from "../../command-resolver";
-import { formatErrorDetail } from "../../../core/error-detail";
+import type { RunFailure } from "../../runtime";
 import { isAbortLikeError, throwIfAborted } from "./abort";
 import { spawnTextAsync } from "./spawn-runner";
 
@@ -22,7 +23,11 @@ type ComposePsCacheEntry = {
 };
 
 type ComposeContainerNameByService = Map<string, string>;
-type DockerCommandResult = { code: number; stderr?: string };
+type DockerCommandResult = {
+  code: number;
+  stderr?: string;
+  failure?: RunFailure;
+};
 
 // ai-dup-check: allow -- ok: compose ps cache と supabase container cache は
 // 別ソース種別 (docker-compose vs supabase CLI) 向けの独立した TTL で、
@@ -104,7 +109,8 @@ export function dockerCommand(): string {
 export function isDockerCommandUnavailableResult(
   result: DockerCommandResult,
 ): boolean {
-  return isCommandNotFoundResult("docker", result);
+  // 無い (ENOENT) ときだけ。時間切れ・起動の失敗は stderr の理由のまま失敗にする。
+  return commandRunFailure("docker", result)?.kind === "not-found";
 }
 
 export function throwIfDockerCommandUnavailableResult(

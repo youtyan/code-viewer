@@ -522,23 +522,27 @@ describe("repository tree helpers", () => {
       git(dir, ["config", "user.email", "tester@example.com"]);
       git(dir, ["config", "user.name", "Test User"]);
       git(dir, ["symbolic-ref", "HEAD", "refs/heads/main"]);
-      let parent = git(dir, [
-        "commit-tree",
-        "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
-        "-m",
+      // 空の木のコミット 61 個の一列 (いちばん古いのが needle)。git を 61 回
+      // 起こすと、git の呼び出しを見張る環境では 1 回ごとに重く、このテストだけで
+      // 10 秒を超えていたので、fast-import 1 回で作る。
+      const messages = [
         "needle oldest commit",
-      ]).stdout.trim();
-      for (let index = 1; index <= 60; index++) {
-        parent = git(dir, [
-          "commit-tree",
-          "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
-          "-m",
-          `recent commit ${index}`,
-          "-p",
-          parent,
-        ]).stdout.trim();
-      }
-      git(dir, ["update-ref", "refs/heads/main", parent]);
+        ...Array.from({ length: 60 }, (_, i) => `recent commit ${i + 1}`),
+      ];
+      gitInput(
+        dir,
+        ["fast-import", "--quiet"],
+        messages
+          .map(
+            (message, i) =>
+              `commit refs/heads/main\nmark :${i + 1}\ncommitter Test User <tester@example.com> ${1_700_000_000 + i} +0000\ndata ${message.length + 1}\n${message}\n${i === 0 ? "" : `from :${i}\n`}\n`,
+          )
+          .join(""),
+      );
+      // needle が最初の窓 (max 5) の外にあることの前提。
+      expect(git(dir, ["rev-list", "--count", "main"]).stdout.trim()).toBe(
+        "61",
+      );
 
       const result = (
         await refCommitPageResultAsync(dir, { query: "needle oldest", max: 5 })

@@ -759,4 +759,42 @@ describe("routes", () => {
       "/_file?path=src%2Fa.ts&ref=worktree",
     );
   });
+
+  // 設定とヘルプは別のページ。1 つのページだった頃の設定の節の URL (保存した
+  // リンク・履歴) は設定のページへ移す。
+  test.each<[string, string, AppRoute, string]>([
+    ["/settings", "", { screen: "settings", range: defaultRange }, "/settings"],
+    [
+      "/help",
+      "?section=settings",
+      { screen: "settings", range: defaultRange },
+      "/settings",
+    ],
+    [
+      "/help",
+      "?lang=ja&section=settings",
+      { screen: "settings", range: defaultRange },
+      "/settings",
+    ],
+    [
+      "/help",
+      "",
+      { screen: "help", lang: "en", section: "overview", range: defaultRange },
+      "/help",
+    ],
+    [
+      "/help",
+      "?section=add-account",
+      {
+        screen: "help",
+        lang: "en",
+        section: "add-account",
+        range: defaultRange,
+      },
+      "/help?section=add-account",
+    ],
+  ])("parseRoute(%s%s) is %j and builds back to %s", (path, search, route, url) => {
+    const parsed = parseRoute(path, search, defaultRange);
+    expect([parsed, buildRoute(parsed)]).toEqual([route, url]);
+  });
 });

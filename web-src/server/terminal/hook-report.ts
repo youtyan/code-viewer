@@ -20,7 +20,11 @@ import {
   agentEventForHook,
   type HookAgent,
 } from "../../core/agent-hooks";
-import type { AgentEvent } from "../../core/agent-state";
+import {
+  type AgentEvent,
+  conversationFromHookInput,
+  MAX_CONVERSATION_FIELD,
+} from "../../core/agent-state";
 import { formatErrorDetail } from "../../core/error-detail";
 import { extractErrorDetail } from "../cli-helpers";
 import {
@@ -217,12 +221,30 @@ export async function reportAgentHook(
     event === "prompt" && typeof input.prompt === "string"
       ? input.prompt.slice(0, MAX_PROMPT_LENGTH)
       : undefined;
+  // 会話の場所 (session_id・transcript_path・cwd)。「別のアカウントで続ける」が
+  // 次の担当に記録の場所を渡すのに使う。記録の中身は読まない。受け取れない
+  // 欄は空にして申告は続け、欄の名前だけを失敗の記録に残す (値はパスや
+  // 長い文字列なので載せない)。申告の結果は失敗にしない。
+  const { conversation, rejected } = conversationFromHookInput(input);
+  if (rejected.length > 0) {
+    deps.recordFailure({
+      at,
+      agent,
+      hookEvent,
+      event,
+      target,
+      server: "",
+      stage: "input",
+      detail: `the hook input has conversation fields that are not reported (not a string, not an absolute path, control characters, or longer than ${MAX_CONVERSATION_FIELD} characters): ${rejected.join(", ")}`,
+    });
+  }
   const body = {
     target,
     event,
     at,
     agent,
     ...(prompt === undefined ? {} : { lastPrompt: prompt }),
+    ...(conversation === null ? {} : { conversation }),
   };
   const reached: string[] = [];
   const refused: string[] = [];

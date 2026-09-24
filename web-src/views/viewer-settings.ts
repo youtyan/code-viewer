@@ -2,6 +2,13 @@
 // ここで作った root を使い回して入力中の下書きを保持する。値の保存や、
 // フォント適用などの副作用は deps 経由で app.ts に任せる。
 
+import {
+  applyColorTheme,
+  COLOR_THEMES,
+  type ColorTheme,
+  TERMINAL_TONES,
+  type TerminalTone,
+} from "../core/color-themes";
 import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import { iconSvg, SEARCH_16_PATH } from "../core/icons";
 import {
@@ -9,12 +16,27 @@ import {
   loadShikiHighlighter,
   type ShikiHighlighter,
 } from "../core/shiki-loader";
+import {
+  TERMINAL_IMAGE_SHELF_PLACEMENTS,
+  type TerminalImageShelfPlacement,
+} from "../core/terminal-images";
 
 export type ViewerSettingsText = {
   display: string;
   theme: string;
   themeHelp: string;
   themeNames: Record<ThemeChoice, string>;
+  colorTheme: string;
+  colorThemeHelp: string;
+  colorThemeNames: Record<ColorTheme, string>;
+  /** ターミナルの中の明暗 (常にダーク / 画面に合わせる)。 */
+  terminalTone: string;
+  terminalToneHelp: string;
+  terminalToneNames: Record<TerminalTone, string>;
+  /** ターミナルの画像の棚の置き場所。 */
+  imageShelfPlacement: string;
+  imageShelfPlacementHelp: string;
+  imageShelfPlacementNames: Record<TerminalImageShelfPlacement, string>;
   language: string;
   fileListFontSize: string;
   fileListFontSizeHelp: string;
@@ -23,7 +45,6 @@ export type ViewerSettingsText = {
   sizeRegular: string;
   sizeLarge: string;
   sizeExtraLarge: string;
-  displaySource: string;
   /** 全プロジェクト共通の項目を持つ節の見出しに添える札。 */
   sharedTag: string;
   sharedTagTitle: string;
@@ -38,11 +59,14 @@ export type ViewerSettingsText = {
   saving: string;
   saved: string;
   unsaved: string;
+  /** 保存の帯に、保存の要る変更が無い間に出す文。 */
+  noChanges: string;
   saveNote: string;
   watchLimitInvalid: (min: number, max: number) => string;
   scopeSource: (project: string, source: string) => string;
-  browserOverride: string;
-  serverDefault: string;
+  /** scopeSource の source: このプロジェクトに保存した値か、既定の値か。 */
+  scopeSaved: string;
+  scopeDefault: string;
   uploadsTitle: string;
   uploadEnabledLabel: string;
   uploadEnabledHelp: string;
@@ -59,8 +83,13 @@ export type ViewerSettingsText = {
   watchLimit: string;
   watchLimitHelp: (defaultLimit: number) => string;
   agentRulesTitle: string;
+  /** 何のための設定か (節の見出しの下に畳まずに出す 1 文)。 */
+  agentRulesPurpose: string;
+  /** 編集の欄を畳んだ details の summary。 */
+  agentRulesEdit: string;
   agentRulesLabel: string;
-  agentRulesHelp: string;
+  /** 書き方の説明。1 つが 1 段落。 */
+  agentRulesHelp: readonly string[];
   agentRulesGuideTitle: string;
   agentRulesGuideIntro: string;
   agentRulesGuideFields: string;
@@ -80,13 +109,24 @@ export type ViewerSettingsText = {
   searchNoMatch: (query: string) => string;
 };
 
+/**
+ * 打ち込む欄 (途中の値がありうる)。ページの「変更を保存」で保存する。
+ */
 export type ViewerSettingsDraft = {
-  language: string;
-  sidebarFontSize: string;
-  codeFontSize: string;
   omitDirs: string;
   excludeNames: string;
   watchLimit: number;
+};
+
+/**
+ * 選ぶ欄 (選択の欄・トグル)。選んだ時点で当てて保存する (保存の帯を通らない)。
+ */
+export type ViewerSettingsChoices = {
+  language: string;
+  sidebarFontSize: string;
+  codeFontSize: string;
+  terminalTone: string;
+  terminalImageShelfPlacement: string;
   uploadEnabled: boolean;
   agentNotifyWaiting: boolean;
   agentNotifyDone: boolean;
@@ -94,36 +134,46 @@ export type ViewerSettingsDraft = {
   s3TooltipEnabled: boolean;
 };
 
-export type ViewerSettingsValues = ViewerSettingsDraft & {
-  /** 全プロジェクト共通の設定を読めなかった理由。空なら読めた。 */
-  userSettingsError: string;
-  watchLimitMin: number;
-  watchLimitMax: number;
-  watchLimitDefault: number;
-  scopeSource: string;
-  agentRulesJson: string;
-  /** 組み込みの規則を agentRulesJson と同じ形で書いたもの (戻すときに欄へ入れる) */
-  agentRulesDefaultJson: string;
-  agentRulesSource: "default" | "saved";
-  agentRulesErrors: string;
-};
+export type ViewerSettingsValues = ViewerSettingsDraft &
+  ViewerSettingsChoices & {
+    /** 全プロジェクト共通の設定を読めなかった理由。空なら読めた。 */
+    userSettingsError: string;
+    watchLimitMin: number;
+    watchLimitMax: number;
+    watchLimitDefault: number;
+    /**
+     * 監視するディレクトリ数の上限が効くか。木全体を OS のハンドル 1 つで見る
+     * OS (macOS・Windows) では効かないので、節を出さない。
+     */
+    watchLimitApplies: boolean;
+    scopeSource: string;
+    agentRulesJson: string;
+    /** 組み込みの規則を agentRulesJson と同じ形で書いたもの (戻すときに欄へ入れる) */
+    agentRulesDefaultJson: string;
+    agentRulesSource: "default" | "saved";
+    agentRulesErrors: string;
+  };
 
 /**
- * 設定の分類。Help ページの左の列に並べ、選んだ分類の節だけを出す。
- * フォームは 1 つのまま (下書きと「変更を保存」は分類をまたいで効く)。
+ * 設定の分類。設定のページの左の列に並べ、選んだ分類の節だけを出す。
+ * フォームは 1 つのまま (下書きと「変更を保存」は分類をまたいで効く。保存の帯は
+ * 打ち込む欄のある分類と、未保存の変更がある間だけ出す)。
+ * よく使うものを先に、めったに変えないものは advanced へ。最初のものが
+ * ページを開いたときの分類。
  */
 export const SETTINGS_CATEGORIES = [
-  "general",
   "appearance",
-  "shortcuts",
   "agents",
   "accounts",
+  "shortcuts",
+  "files",
   "advanced",
 ] as const;
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
 
 /** 設定の「テーマ」の選択肢 (ライト 1 つとダークの色違い 3 つ)。 */
-export const THEME_CHOICES = ["dark", "graphite", "warm", "light"] as const;
+/** 明暗。テーマ (配色) は別に選ぶ (colorTheme)。 */
+export const THEME_CHOICES = ["dark", "light"] as const;
 export type ThemeChoice = (typeof THEME_CHOICES)[number];
 
 /**
@@ -145,14 +195,17 @@ export type SettingsDraft = {
 export type ViewerSettingsDeps = {
   getText(): ViewerSettingsText;
   /**
-   * テーマ。ほかの項目と違い、選んだ時点で当てて保存する (見比べて選ぶもの
-   * なので、保存ボタンを待たせない)。
+   * 明暗とテーマ。選ぶ欄 (onChoose) と同じく、選んだ時点で当てて保存する。
    */
   getTheme(): ThemeChoice;
   setTheme(choice: ThemeChoice): void;
+  getColorTheme(): ColorTheme;
+  setColorTheme(theme: ColorTheme): void;
   getValues(): ViewerSettingsValues;
   getDefaultValues(): ViewerSettingsDraft;
   refresh(): Promise<void>;
+  /** 選ぶ欄を選んだ。その場で当てて保存する (失敗は持ち主が知らせる)。 */
+  onChoose(choice: Partial<ViewerSettingsChoices>): void;
   onSave(
     draft: ViewerSettingsDraft,
     options: {
@@ -171,9 +224,24 @@ export type ViewerSettingsDeps = {
   agentAccountsSection: HTMLElement;
   /** ショートカットの節。持ち主は help-keybinding-editor.ts。 */
   shortcutsSection: HTMLElement;
-  /** ページの「変更を保存」で一緒に保存する節の下書き。 */
+  /**
+   * ページの「変更を保存」で一緒に保存する節の下書き。下書きを持つ節は
+   * accounts と shortcuts (保存の帯をその分類に出す)。
+   */
   drafts: readonly SettingsDraft[];
 };
+
+/**
+ * テーマの見本の中身 (固定の信頼できる HTML)。コードの 1 行・削除と追加の行
+ * (語の強調つき)・コメント。色は見本の箱が持つそのテーマの名前の層から読む
+ * (style.css の .theme-swatch)。
+ */
+const THEME_SWATCH_HTML = [
+  '<span class="theme-swatch-line"><span class="theme-swatch-keyword">const</span> <span class="theme-swatch-function">total</span> = <span class="theme-swatch-string">"a"</span></span>',
+  '<span class="theme-swatch-line theme-swatch-del">− <span class="theme-swatch-type">1</span><span class="theme-swatch-word">0</span></span>',
+  '<span class="theme-swatch-line theme-swatch-add">+ <span class="theme-swatch-type">1</span><span class="theme-swatch-word">5</span></span>',
+  '<span class="theme-swatch-line theme-swatch-comment">// sum</span>',
+].join("");
 
 const FONT_SIZE_VALUES = ["compact", "regular", "large", "xlarge"] as const;
 const LANGUAGE_VALUES = [
@@ -181,17 +249,9 @@ const LANGUAGE_VALUES = [
   { value: "ja", label: "日本語" },
 ] as const;
 const GENERAL_SETTING_FIELDS: readonly (keyof ViewerSettingsDraft)[] = [
-  "language",
-  "sidebarFontSize",
-  "codeFontSize",
   "omitDirs",
   "excludeNames",
   "watchLimit",
-  "uploadEnabled",
-  "agentNotifyWaiting",
-  "agentNotifyDone",
-  "inferFkRails",
-  "s3TooltipEnabled",
 ];
 
 function section(): HTMLDivElement {
@@ -270,14 +330,19 @@ function setFieldValue(
 
 export function createViewerSettings(deps: ViewerSettingsDeps) {
   let root: HTMLElement | null = null;
-  let category: SettingsCategory = "general";
+  let category: SettingsCategory = SETTINGS_CATEGORIES[0];
   /** 節と、その節が属する分類。build() が埋める。 */
   const categorized: Array<[HTMLElement, SettingsCategory]> = [];
   /**
-   * 「デフォルトに戻す」が戻す項目を持つ節。どれも出ていない分類 (アカウント)
+   * 「デフォルトに戻す」が戻す項目 (打ち込む欄) を持つ節。どれも出ていない分類
    * では、ページの下の「デフォルトに戻す」を出さない (戻すものが無い)。
    */
   const generalSections: HTMLElement[] = [];
+  /**
+   * 「変更を保存」で保存する欄を持つ節。どれも出ていない分類 (表示・エージェント)
+   * では保存の帯を出さない (選ぶ欄はすぐ効くので、押すものが無い)。
+   */
+  const savedSections: HTMLElement[] = [];
   const search = document.createElement("input");
   search.type = "search";
   search.id = "scope-settings-search";
@@ -293,11 +358,16 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
 
   const theme = document.createElement("select");
   const themeHelp = helpText("viewer-theme-help");
+  const terminalTone = document.createElement("select");
+  const terminalToneHelp = helpText("viewer-terminal-tone-help");
+  const shelfPlacement = document.createElement("select");
+  const shelfPlacementHelp = helpText("viewer-image-shelf-placement-help");
+  const colorThemes = colorThemePicker();
+  const colorThemeHelp = helpText("viewer-color-theme-help");
   const language = document.createElement("select");
   const sidebarFontSize = fontSizeSelect("sidebar-font-size");
   const codeFontSize = fontSizeSelect("code-font-size");
   const uiFontSizeHelp = helpText("ui-font-size-help");
-  const displaySource = document.createElement("p");
   const userSettingsError = helpText("user-settings-error");
   userSettingsError.classList.add("scope-settings-refresh-error");
   userSettingsError.hidden = true;
@@ -320,9 +390,19 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   const watchLimitNumber = document.createElement("input");
   const watchLimitRange = document.createElement("input");
   const watchLimitHelp = helpText("scope-watch-limit-help");
+  const watch = section();
 
   const agentRules = document.createElement("textarea");
-  const agentRulesHelp = helpText("agent-screen-rules-help");
+  const agentRulesPurpose = helpText("agent-screen-rules-purpose");
+  // 書き方の説明 (段落の数は文言が決める)。
+  const agentRulesHelp = document.createElement("div");
+  agentRulesHelp.id = "agent-screen-rules-help";
+  // 編集の欄は既定で畳む。普段は触らないもので、開いたままだと長い JSON が
+  // 分類の大半を占めていた。
+  const agentRulesDetails = document.createElement("details");
+  agentRulesDetails.id = "agent-screen-rules-details";
+  agentRulesDetails.className = "agent-screen-rules-details";
+  const agentRulesEdit = document.createElement("summary");
   const agentRulesSource = helpText("agent-screen-rules-source");
   const agentRulesError = helpText("agent-screen-rules-error");
   agentRulesError.classList.add("scope-settings-refresh-error");
@@ -359,6 +439,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   refreshError.hidden = true;
   const resetButton = document.createElement("button");
   const saveButton = document.createElement("button");
+  const footer = document.createElement("div");
 
   const displayTitle = sectionTitle();
   const uploadsTitle = sectionTitle();
@@ -368,6 +449,11 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   const watchTitle = sectionTitle();
   const agentRulesTitle = sectionTitle();
   const themeLabel = fieldLabel("viewer-theme");
+  const terminalToneLabel = fieldLabel("viewer-terminal-tone");
+  const shelfPlacementLabel = fieldLabel("viewer-image-shelf-placement");
+  // 見本の並びは 1 つの入力欄ではないので、for を持たない見出し (群の名前)。
+  const colorThemeLabel = document.createElement("label");
+  colorThemeLabel.id = "viewer-color-theme-label";
   const languageLabel = fieldLabel("viewer-language");
   const sidebarFontSizeLabel = fieldLabel("sidebar-font-size");
   const codeFontSizeLabel = fieldLabel("code-font-size");
@@ -404,6 +490,18 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       const choice = THEME_CHOICES.find((value) => value === theme.value);
       if (choice) deps.setTheme(choice);
     });
+    terminalTone.id = "viewer-terminal-tone";
+    for (const value of TERMINAL_TONES) {
+      const option = document.createElement("option");
+      option.value = value;
+      terminalTone.appendChild(option);
+    }
+    shelfPlacement.id = "viewer-image-shelf-placement";
+    for (const value of TERMINAL_IMAGE_SHELF_PLACEMENTS) {
+      const option = document.createElement("option");
+      option.value = value;
+      shelfPlacement.appendChild(option);
+    }
     language.id = "viewer-language";
     for (const item of LANGUAGE_VALUES) {
       const option = document.createElement("option");
@@ -411,13 +509,22 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       option.textContent = item.label;
       language.appendChild(option);
     }
-    displaySource.id = "display-settings-source";
+    displayTitle.id = "display-section-title";
     const display = section();
     display.append(
       titleRow(displayTitle, displayShared),
+      colorThemeLabel,
+      colorThemes.root,
+      colorThemeHelp,
       themeLabel,
       theme,
       themeHelp,
+      terminalToneLabel,
+      terminalTone,
+      terminalToneHelp,
+      shelfPlacementLabel,
+      shelfPlacement,
+      shelfPlacementHelp,
       languageLabel,
       language,
       sidebarFontSizeLabel,
@@ -425,7 +532,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       uiFontSizeHelp,
       codeFontSizeLabel,
       codeFontSize,
-      displaySource,
       userSettingsError,
     );
 
@@ -436,11 +542,12 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     // エージェント一覧の「通知は有効です」から、この見出しへ飛んでくる。
     agentNotifyTitle.id = "agent-notify-section-title";
     const agentNotify = section();
+    // 節は見出し → 何のための設定かの 1 文 → 操作 (この説明は 2 つのスイッチの両方に掛かる)。
     agentNotify.append(
       titleRow(agentNotifyTitle, agentNotifyShared),
+      agentNotifyHelp,
       agentNotifyWaiting.wrap,
       agentNotifyDone.wrap,
-      agentNotifyHelp,
     );
 
     omitDirs.id = "scope-omit-dirs";
@@ -450,6 +557,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     excludeNames.rows = 4;
     excludeNames.spellcheck = false;
     scopeSource.id = "scope-omit-source";
+    excludedTitle.id = "excluded-section-title";
     const excluded = section();
     excluded.append(
       excludedTitle,
@@ -482,7 +590,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     const watchRow = document.createElement("div");
     watchRow.className = "scope-watch-limit-row";
     watchRow.append(watchLimitRange, watchLimitNumber);
-    const watch = section();
     watch.id = "watch-settings-section";
     watch.append(watchTitle, watchLimitLabel, watchRow, watchLimitHelp);
 
@@ -515,18 +622,24 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     const agentRuleActions = document.createElement("div");
     agentRuleActions.className = "scope-settings-actions";
     agentRuleActions.append(agentRulesReset);
-    const ruleSettings = section();
-    ruleSettings.classList.add("agent-screen-rules-section");
-    ruleSettings.append(
-      agentRulesTitle,
+    agentRulesDetails.append(
+      agentRulesEdit,
       agentRulesLabel,
       agentRulesHelp,
       agentRulesGuide,
       agentRulesEditor,
+      agentRuleActions,
+    );
+    const ruleSettings = section();
+    ruleSettings.classList.add("agent-screen-rules-section");
+    // 誤りは畳んだ中に入れない (閉じたままでも読めるように)。
+    ruleSettings.append(
+      agentRulesTitle,
+      agentRulesPurpose,
       agentRulesSource,
       agentRulesError,
       agentRulesHighlightError,
-      agentRuleActions,
+      agentRulesDetails,
     );
 
     resetButton.id = "scope-omit-reset";
@@ -537,7 +650,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     const generalActions = document.createElement("div");
     generalActions.className = "scope-settings-actions";
     generalActions.append(resetButton, saveButton);
-    const footer = document.createElement("div");
     footer.className = "scope-settings-footer";
     footer.append(
       saveNote,
@@ -547,38 +659,30 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       generalActions,
     );
 
-    generalSections.push(
-      display,
-      uploads,
-      agentNotify,
+    generalSections.push(excluded, watch);
+    savedSections.push(
       excluded,
-      datastores,
       watch,
+      ruleSettings,
+      deps.agentAccountsSection,
+      deps.shortcutsSection,
     );
+    // 並びは分類の並び (検索の結果もこの順に出る)。
     categorized.push(
       [display, "appearance"],
-      [deps.shortcutsSection, "shortcuts"],
-      [uploads, "general"],
       [agentNotify, "agents"],
-      [deps.agentAccountsSection, "accounts"],
       [deps.agentHooksSection, "agents"],
-      [excluded, "general"],
+      [deps.agentAccountsSection, "accounts"],
+      [deps.shortcutsSection, "shortcuts"],
+      [excluded, "files"],
+      [uploads, "files"],
       [datastores, "advanced"],
       [watch, "advanced"],
       [ruleSettings, "advanced"],
     );
     wrap.append(
       searchEmpty,
-      display,
-      deps.shortcutsSection,
-      uploads,
-      agentNotify,
-      deps.agentAccountsSection,
-      deps.agentHooksSection,
-      excluded,
-      datastores,
-      watch,
-      ruleSettings,
+      ...categorized.map(([element]) => element),
       footer,
     );
     search.addEventListener("input", applyCategory);
@@ -589,28 +693,27 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   }
 
   function wire(): void {
-    language.addEventListener("change", () => markGeneralDirty("language"));
-    sidebarFontSize.addEventListener("change", () =>
-      markGeneralDirty("sidebarFontSize"),
-    );
-    codeFontSize.addEventListener("change", () =>
-      markGeneralDirty("codeFontSize"),
-    );
-    upload.input.addEventListener("change", () =>
-      markGeneralDirty("uploadEnabled"),
-    );
-    agentNotifyWaiting.input.addEventListener("change", () =>
-      markGeneralDirty("agentNotifyWaiting"),
-    );
-    agentNotifyDone.input.addEventListener("change", () =>
-      markGeneralDirty("agentNotifyDone"),
-    );
-    inferFk.input.addEventListener("change", () =>
-      markGeneralDirty("inferFkRails"),
-    );
-    s3Tooltip.input.addEventListener("change", () =>
-      markGeneralDirty("s3TooltipEnabled"),
-    );
+    // 選ぶ欄は選んだ時点で当てて保存する (下書きにしない)。
+    for (const [field, select] of [
+      ["language", language],
+      ["sidebarFontSize", sidebarFontSize],
+      ["codeFontSize", codeFontSize],
+      ["terminalTone", terminalTone],
+      ["terminalImageShelfPlacement", shelfPlacement],
+    ] as const)
+      select.addEventListener("change", () =>
+        deps.onChoose({ [field]: select.value }),
+      );
+    for (const [field, toggle] of [
+      ["uploadEnabled", upload],
+      ["agentNotifyWaiting", agentNotifyWaiting],
+      ["agentNotifyDone", agentNotifyDone],
+      ["inferFkRails", inferFk],
+      ["s3TooltipEnabled", s3Tooltip],
+    ] as const)
+      toggle.input.addEventListener("change", () =>
+        deps.onChoose({ [field]: toggle.input.checked }),
+      );
     omitDirs.addEventListener("input", () => markGeneralDirty("omitDirs"));
     excludeNames.addEventListener("input", () =>
       markGeneralDirty("excludeNames"),
@@ -730,7 +833,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
           ? "unsaved"
           : generalStatus === "saved"
             ? "saved"
-            : "";
+            : "clean";
     saveStatus.dataset.state = state;
     saveStatus.textContent =
       state === "saving"
@@ -739,21 +842,25 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
           ? text.unsaved
           : state === "saved"
             ? text.saved
-            : "";
+            : text.noChanges;
+    syncFooter();
+  }
+
+  /**
+   * 保存の帯は、保存する欄のある節が出ている間と、ほかの分類に未保存の変更が
+   * 残っている間 (保存の口をなくさない) だけ出す。
+   */
+  function syncFooter(): void {
+    footer.hidden =
+      !savedSections.some((section) => !section.hidden) &&
+      !anyDirty() &&
+      !generalSavePending;
   }
 
   function setGeneralControlsDisabled(disabled: boolean): void {
     for (const field of [
-      language,
-      sidebarFontSize,
-      codeFontSize,
-      upload.input,
-      agentNotifyWaiting.input,
-      agentNotifyDone.input,
       omitDirs,
       excludeNames,
-      inferFk.input,
-      s3Tooltip.input,
       watchLimitNumber,
       watchLimitRange,
       agentRules,
@@ -767,13 +874,19 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     values: ViewerSettingsDraft,
     force = false,
   ): void {
-    setFieldValue(language, values.language, force);
-    setFieldValue(sidebarFontSize, values.sidebarFontSize, force);
-    setFieldValue(codeFontSize, values.codeFontSize, force);
     setFieldValue(omitDirs, values.omitDirs, force);
     setFieldValue(excludeNames, values.excludeNames, force);
     setFieldValue(watchLimitNumber, String(values.watchLimit), force);
     setFieldValue(watchLimitRange, String(values.watchLimit), force);
+  }
+
+  /** 選ぶ欄に保存してある値を映す (下書きが無いので、いつでも今の値)。 */
+  function applyChoices(values: ViewerSettingsChoices): void {
+    setFieldValue(language, values.language);
+    setFieldValue(sidebarFontSize, values.sidebarFontSize);
+    setFieldValue(codeFontSize, values.codeFontSize);
+    setFieldValue(terminalTone, values.terminalTone);
+    setFieldValue(shelfPlacement, values.terminalImageShelfPlacement);
     upload.input.checked = values.uploadEnabled;
     agentNotifyWaiting.input.checked = values.agentNotifyWaiting;
     agentNotifyDone.input.checked = values.agentNotifyDone;
@@ -801,17 +914,9 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     }
     watchLimitNumber.setCustomValidity("");
     return {
-      language: language.value,
-      sidebarFontSize: sidebarFontSize.value,
-      codeFontSize: codeFontSize.value,
       omitDirs: omitDirs.value,
       excludeNames: excludeNames.value,
       watchLimit,
-      uploadEnabled: upload.input.checked,
-      agentNotifyWaiting: agentNotifyWaiting.input.checked,
-      agentNotifyDone: agentNotifyDone.input.checked,
-      inferFkRails: inferFk.input.checked,
-      s3TooltipEnabled: s3Tooltip.input.checked,
     };
   }
 
@@ -871,7 +976,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   async function initializeJsonHighlighting(): Promise<void> {
     try {
       jsonHighlighter = await loadShikiHighlighter({
-        themes: ["github-light", "github-dark"],
         langs: ["json"],
         failureMode: "throw",
       });
@@ -929,9 +1033,26 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     agentRulesTitle.textContent = text.agentRulesTitle;
     themeLabel.textContent = text.theme;
     themeHelp.textContent = text.themeHelp;
+    colorThemeLabel.textContent = text.colorTheme;
+    colorThemeHelp.textContent = text.colorThemeHelp;
+    colorThemes.localize(text.colorThemeNames);
     for (const option of Array.from(theme.options)) {
       option.textContent =
         text.themeNames[option.value as ThemeChoice] ?? option.value;
+    }
+    terminalToneLabel.textContent = text.terminalTone;
+    terminalToneHelp.textContent = text.terminalToneHelp;
+    for (const option of Array.from(terminalTone.options)) {
+      option.textContent =
+        text.terminalToneNames[option.value as TerminalTone] ?? option.value;
+    }
+    shelfPlacementLabel.textContent = text.imageShelfPlacement;
+    shelfPlacementHelp.textContent = text.imageShelfPlacementHelp;
+    for (const option of Array.from(shelfPlacement.options)) {
+      option.textContent =
+        text.imageShelfPlacementNames[
+          option.value as TerminalImageShelfPlacement
+        ] ?? option.value;
     }
     languageLabel.textContent = text.language;
     sidebarFontSizeLabel.textContent = text.fileListFontSize;
@@ -943,7 +1064,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     watchLimitRange.setAttribute("aria-label", text.watchLimit);
     agentRulesLabel.textContent = text.agentRulesLabel;
     uiFontSizeHelp.textContent = text.fileListFontSizeHelp;
-    displaySource.textContent = text.displaySource;
     for (const tag of [displayShared, agentNotifyShared]) {
       tag.textContent = text.sharedTag;
       tag.title = text.sharedTagTitle;
@@ -964,7 +1084,15 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     s3Tooltip.text.textContent = text.datastoreS3TooltipLabel;
     s3TooltipHelp.textContent = text.datastoreS3TooltipHelp;
     watchLimitHelp.textContent = text.watchLimitHelp(values.watchLimitDefault);
-    agentRulesHelp.textContent = text.agentRulesHelp;
+    agentRulesPurpose.textContent = text.agentRulesPurpose;
+    agentRulesEdit.textContent = text.agentRulesEdit;
+    agentRulesHelp.replaceChildren(
+      ...text.agentRulesHelp.map((paragraph) => {
+        const p = helpText();
+        p.textContent = paragraph;
+        return p;
+      }),
+    );
     agentRulesGuideTitle.textContent = text.agentRulesGuideTitle;
     agentRulesGuideIntro.textContent = text.agentRulesGuideIntro;
     agentRulesGuideFields.textContent = text.agentRulesGuideFields;
@@ -1001,7 +1129,8 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     watchLimitRange.min = String(values.watchLimitMin);
     watchLimitRange.max = String(values.watchLimitMax);
     if (!generalDirty && !generalSavePending) applyGeneralFields(values);
-    setFieldValue(theme, deps.getTheme());
+    applyChoices(values);
+    syncTheme();
     scopeSource.textContent = values.scopeSource;
     // 書きかけの規則 (と、保存に失敗した誤りの表示) は保存するまで残す。
     if (!agentRulesDirty && !generalSavePending) {
@@ -1011,6 +1140,8 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       agentRulesError.hidden = !values.agentRulesErrors;
     }
     renderAgentRulesSource();
+    // 取り直しで監視の上限が効くかが分かる (watchLimitApplies)。
+    applyCategory();
   }
 
   function mount(host: HTMLElement): void {
@@ -1060,10 +1191,13 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   function applyCategory(): void {
     const query = search.value.trim().toLocaleLowerCase();
     let shown = 0;
+    const watchApplies = deps.getValues().watchLimitApplies;
     for (const [element, owner] of categorized) {
-      const visible = query
-        ? (element.textContent ?? "").toLocaleLowerCase().includes(query)
-        : owner === category;
+      const visible =
+        (element !== watch || watchApplies) &&
+        (query
+          ? (element.textContent ?? "").toLocaleLowerCase().includes(query)
+          : owner === category);
       element.hidden = !visible;
       if (visible) shown += 1;
     }
@@ -1077,6 +1211,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       );
     searchEmpty.hidden = !query || shown > 0;
     resetButton.hidden = !generalSections.some((section) => !section.hidden);
+    syncFooter();
     searchEmpty.textContent = query
       ? deps.getText().searchNoMatch(search.value.trim())
       : "";
@@ -1092,23 +1227,47 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     applyCategory();
   }
 
-  /**
-   * ほかの画面から設定の見出しへ送るとき、その見出しを含む分類に切り替える。
-   * 見つからない (まだ組み立てていない) ときは分類を変えない。
-   */
-  function revealHeading(headingId: string): void {
+  /** その id の見出しを含む節の分類 (無ければ null)。 */
+  function categoryOfHeading(headingId: string): SettingsCategory | null {
     if (!root) root = build();
+    // id は URL の # からも来るので、セレクタに組まずに比べる。
     const owner = categorized.find(
       ([element]) =>
-        element.id === headingId || element.querySelector(`#${headingId}`),
+        element.id === headingId ||
+        Array.from(element.querySelectorAll("[id]")).some(
+          (child) => child.id === headingId,
+        ),
     );
-    if (owner) setCategory(owner[1]);
+    return owner ? owner[1] : null;
   }
 
-  /** 設定の検索欄。Help ページが見出しの下に置く。 */
+  /** 設定の見出しの id か (URL の # を設定のページへ移すかの判断)。 */
+  function hasHeading(headingId: string): boolean {
+    return categoryOfHeading(headingId) !== null;
+  }
+
   /**
-   * 検索欄の文言。検索欄は設定の節を組む前 (ヘルプの節から開いたとき) にも
-   * 出すので、設定の節の文言 (applyText) とは別に当てる。以前は設定の節を一度
+   * ほかの画面から設定の見出しへ送るとき、その見出しを含む分類に切り替える。
+   * 見つからないときは分類を変えない。
+   */
+  function revealHeading(headingId: string): void {
+    const owner = categoryOfHeading(headingId);
+    if (!owner) return;
+    setCategory(owner);
+    // 畳んだ中 (判定ルールの欄) へ送られたら開く。
+    const target = Array.from(root?.querySelectorAll("[id]") ?? []).find(
+      (element) => element.id === headingId,
+    );
+    let folded = target?.parentElement?.closest("details");
+    while (folded) {
+      folded.open = true;
+      folded = folded.parentElement?.closest("details");
+    }
+  }
+
+  /**
+   * 検索欄の文言。設定のページが見出しの下に置く。検索欄は節を組む前にも出し
+   * うるので、設定の節の文言 (applyText) とは別に当てる。以前は設定の節を一度
    * 開くまで placeholder が空だった。
    */
   function applySearchText(): void {
@@ -1130,13 +1289,71 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     applyText();
   }
 
+  /** 明暗とテーマの今の値を映す (別の窓や ⌘K・T のキーで変わったとき)。 */
+  function syncTheme(): void {
+    setFieldValue(theme, deps.getTheme());
+    colorThemes.select(deps.getColorTheme());
+  }
+
+  /**
+   * テーマの見本 (全部のテーマ)。各見本はライトとダークの小さなコードと差分を並べ、
+   * そのテーマの名前の層の色 (html と同じ data-color-theme / data-theme) で描く。
+   * 押すとすぐに当てる (明暗はそのまま)。
+   */
+  function colorThemePicker() {
+    const root = document.createElement("div");
+    root.id = "viewer-color-theme";
+    root.className = "theme-picker";
+    root.setAttribute("role", "group");
+    root.setAttribute("aria-labelledby", "viewer-color-theme-label");
+    const names = new Map<ColorTheme, HTMLElement>();
+    const buttons = new Map<ColorTheme, HTMLButtonElement>();
+    for (const id of COLOR_THEMES) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "theme-choice";
+      button.dataset.colorThemeChoice = id;
+      button.setAttribute("aria-pressed", "false");
+      const swatch = document.createElement("span");
+      swatch.className = "theme-swatch";
+      swatch.setAttribute("aria-hidden", "true");
+      for (const mode of THEME_CHOICES.slice().reverse()) {
+        const pane = document.createElement("span");
+        pane.className = "theme-swatch-pane";
+        pane.dataset.theme = mode;
+        applyColorTheme(pane, id);
+        pane.innerHTML = THEME_SWATCH_HTML;
+        swatch.append(pane);
+      }
+      const name = document.createElement("span");
+      name.className = "theme-choice-name";
+      button.append(swatch, name);
+      button.addEventListener("click", () => deps.setColorTheme(id));
+      names.set(id, name);
+      buttons.set(id, button);
+      root.append(button);
+    }
+    return {
+      root,
+      localize(labels: Record<ColorTheme, string>): void {
+        for (const [id, name] of names) name.textContent = labels[id];
+      },
+      select(current: ColorTheme): void {
+        for (const [id, button] of buttons)
+          button.setAttribute("aria-pressed", String(id === current));
+      },
+    };
+  }
+
   return {
     mount,
     mountSearch,
     sync,
+    syncTheme,
     localize,
     getCategory,
     setCategory,
     revealHeading,
+    hasHeading,
   };
 }

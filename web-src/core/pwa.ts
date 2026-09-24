@@ -7,7 +7,7 @@
 // ここは「どのキーがそうか」だけを持つ。
 
 import type { KeyChord, KeyEventLike } from "./keymap";
-import type { Layout } from "./main-tabs";
+import { type Layout, type Tab, visibleTabs } from "./main-tabs";
 
 export const STANDALONE_MEDIA_QUERY = "(display-mode: standalone)";
 
@@ -134,14 +134,20 @@ export function unassignableChord(
   return null;
 }
 
-/** ⌘9 の行き先: フォーカスのある面の最後のタブの番号 (1 始まり。空の面は 0)。 */
-export function lastTabNumber(layout: Layout): number {
+/**
+ * ⌘9 の行き先: フォーカスのある面の、見えている最後のタブの番号 (1 始まり。空の
+ * 面は 0。数え方は activateIndex と同じ visibleTabs)。
+ */
+export function lastTabNumber(
+  layout: Layout,
+  keyOf?: (tab: Tab) => string | null,
+): number {
   const pane = layout.panes[layout.focused];
   if (!pane)
     throw new Error(
       `pwa: the focused pane ${layout.focused} is missing from the layout`,
     );
-  return pane.tabs.length;
+  return visibleTabs(layout, pane, keyOf).length;
 }
 
 /**
@@ -159,7 +165,7 @@ export function syncThemeColor(
     .trim();
   if (!value)
     throw new Error(
-      `pwa: ${variable} is empty on <html data-theme="${doc.documentElement.dataset.theme}" data-palette="${doc.documentElement.dataset.palette ?? ""}">`,
+      `pwa: ${variable} is empty on <html data-theme="${doc.documentElement.dataset.theme}" data-color-theme="${doc.documentElement.dataset.colorTheme ?? ""}">`,
     );
   for (const meta of doc.querySelectorAll<HTMLMetaElement>(
     'meta[name="theme-color"]',

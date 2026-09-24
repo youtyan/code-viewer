@@ -530,6 +530,60 @@ describe("the entry server", () => {
     );
   }, 30_000);
 
+  // 明暗・テーマは全プロジェクト共通の設定。あるプロジェクトの窓で変えると、別の
+  // プロジェクトの窓 (別の裏のサーバ) の SSE に user-settings が届き、画面が取り直して
+  // 当てる (app.ts の refreshLook)。取り直した値も新しいテーマ。
+  test("a theme picked in one project's window is announced to another project's window", async () => {
+    const box = sandbox();
+    const first = repo(box, "sample-app");
+    const second = repo(box, "sample-api");
+    const { url } = await startEntry(box, first);
+    expect((await runCli(box, second)).status).toBe(0);
+    const [firstKey, secondKey] = [rootFileKey(first), rootFileKey(second)];
+    const origin = new URL(url).origin;
+
+    const leave = new AbortController();
+    const events = await fetch(`${url}p/${secondKey}/events`, {
+      signal: leave.signal,
+    });
+    const reader = events.body?.getReader();
+    if (!reader) throw new Error("the event stream has no body");
+    let received = "";
+    const announced = (async () => {
+      while (!received.includes("event: user-settings\n")) {
+        const { value, done } = await reader.read();
+        if (done) return false;
+        received += new TextDecoder().decode(value);
+      }
+      return true;
+    })();
+
+    const patch = await fetch(`${url}p/${firstKey}/_state/settings`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: origin,
+        "X-Code-Viewer-Action": "1",
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: JSON.stringify({ colorTheme: "forest", theme: "light" }),
+    });
+    expect(patch.status).toBe(200);
+    const timeout = new Promise<boolean>((resolve) =>
+      setTimeout(() => resolve(false), 10_000),
+    );
+    const heard = await Promise.race([announced, timeout]);
+    leave.abort();
+    const reread = (await (
+      await fetch(`${url}p/${secondKey}/_state/settings`)
+    ).json()) as { colorTheme?: string; theme?: string };
+    expect({
+      heard,
+      colorTheme: reread.colorTheme,
+      theme: reread.theme,
+    }).toEqual({ heard: true, colorTheme: "forest", theme: "light" });
+  }, 30_000);
+
   test("a project process nobody uses is stopped after --idle-stop, not treated as stopped, and started again by the next request", async () => {
     const box = sandbox();
     const root = repo(box, "sample-app");

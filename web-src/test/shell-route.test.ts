@@ -3,8 +3,8 @@
 // (プロセスの生成と入出力は手動のエンドツーエンド検証でカバーしている)。
 
 import { describe, expect, test, vi } from "vitest";
-import * as shellSession from "../server/shell/session";
 import { handleShellRoute } from "../server/shell/handle";
+import * as shellSession from "../server/shell/session";
 import { callRoute, postRoute } from "./_test-helpers";
 
 const DENY_SIDE_EFFECTS = () => false;
@@ -97,6 +97,16 @@ describe("shell input validation", () => {
     { name: "refuses non-string data", body: { id: "shell-abc123", data: 1 } },
   ])("$name", async ({ body }) => {
     const res = await post("/_shell/keys", body);
+    expect(res?.status).toBe(400);
+  });
+
+  // id は起き直したサーバで、終わったシェルのタブを同じ ID のまま開き直すとき。
+  test.each([
+    { name: "refuses a tmux pane id to reopen as", body: { id: "%12" } },
+    { name: "refuses a numeric id to reopen as", body: { id: 1 } },
+    { name: "refuses a null id to reopen as", body: { id: null } },
+  ])("$name", async ({ body }) => {
+    const res = await post("/_shell/create", body);
     expect(res?.status).toBe(400);
   });
 

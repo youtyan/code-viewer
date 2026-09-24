@@ -16,7 +16,7 @@
 
 import type { TmuxPaneId } from "../../core/tmux";
 import { commandForExternal } from "../command-resolver";
-import { runTmux, type TmuxRunResult } from "./command";
+import { runTmux, TMUX_FIELD_SEP, type TmuxRunResult } from "./command";
 
 export type TmuxFocusResult =
   | { status: "ok" }
@@ -25,7 +25,7 @@ export type TmuxFocusResult =
   | { status: "error"; error: Error };
 
 export type TmuxPaneSessionResult =
-  | { status: "ok"; session: string }
+  | { status: "ok"; session: string; window: number }
   | { status: "gone" }
   | { status: "error"; error: Error };
 
@@ -61,24 +61,44 @@ export async function focusTmuxPane(
 }
 
 /**
- * そのペインが属するセッション名を引く。見つからなければ null。
+ * そのペインが属するセッション名とウインドウの番号を引く。見つからなければ gone。
  *
  * 「このペインを既に開いているシェルがあるか」はセッション単位で決まるので、
  * ペイン ID からセッションへ辿る必要がある。一覧を丸ごと引いて探すより、
- * tmux に 1 回聞くほうが軽い。
+ * tmux に 1 回聞くほうが軽い。ウインドウの番号は、保存した場所 (TmuxPlace) へ
+ * 繋ぎ直すときの照合に使う。
  */
 export async function resolvePaneSession(
   paneId: TmuxPaneId,
   cwd: string,
 ): Promise<TmuxPaneSessionResult> {
   const result = await runTmux(
-    ["display-message", "-p", "-t", paneId, "-F", "#{session_name}"],
+    [
+      "display-message",
+      "-p",
+      "-t",
+      paneId,
+      "-F",
+      `#{session_name}${TMUX_FIELD_SEP}#{window_index}`,
+    ],
     cwd,
   );
   if (result.status === "error") return result;
   if (result.status !== "ok") return { status: "gone" };
-  const session = result.stdout.trim();
-  return session ? { status: "ok", session } : { status: "gone" };
+  const line = result.stdout.replace(/\n$/, "");
+  if (!line) return { status: "gone" };
+  // セッション名は区切りの文字を含みうるので、最後の区切りで分ける。
+  const at = line.lastIndexOf(TMUX_FIELD_SEP);
+  const session = line.slice(0, at);
+  const window = at < 0 ? Number.NaN : Number(line.slice(at + 1));
+  if (!session || !Number.isInteger(window) || window < 0)
+    return {
+      status: "error",
+      error: new Error(
+        `tmux answered an unreadable session and window for ${paneId}: ${JSON.stringify(result.stdout)}`,
+      ),
+    };
+  return { status: "ok", session, window };
 }
 
 /**

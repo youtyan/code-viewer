@@ -49,6 +49,8 @@ export function pageModeClasses(
     repo: "gdp-repo-page",
     diff: "gdp-diff-page",
     help: "gdp-help-page",
+    // 設定はヘルプと同じ並び (左の目次と本文)。
+    settings: "gdp-help-page",
     history: "gdp-history-page",
     database: "gdp-database-page",
     journal: "gdp-journal-page",

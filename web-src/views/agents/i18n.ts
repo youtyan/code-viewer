@@ -63,6 +63,12 @@ export type AgentsText = {
   openPaneOpposite: string;
   /** サイドバーの行の説明に添える、修飾キーの案内。 */
   openPaneOppositeHint: string;
+  /** 行・タブの右クリックのメニュー: 別のアカウントで続ける (views/agents/handoff.ts)。 */
+  handoff: string;
+  handoffTitle: string;
+  /** 会話記録の場所が分からないとき。押せない項目の下に出す、フックの案内。 */
+  handoffNeedsHooks: string;
+  handoffNeedsHooksTitle: string;
   openServer: string;
   openServerTitle: (url: string) => string;
   currentServer: string;
@@ -150,6 +156,9 @@ export type AgentsSidebarText = {
   /** 下の区画 (登録していないが tmux にエージェントが居るプロジェクト)。 */
   detected: string;
   detectedTitle: string;
+  /** 一覧の下の、起動中でない登録プロジェクトの節の見出し (件数つき)。 */
+  stopped: (count: number) => string;
+  stoppedTitle: string;
   /** プロジェクトのサーバを起こしている最中 (見出しの中)。 */
   starting: string;
   /** 登録したプロジェクトの見出しのツールチップ (並べ替えの仕方)。 */
@@ -169,7 +178,11 @@ export type AgentsSidebarText = {
 
 export type AgentHooksText = {
   title: string;
+  /** 入れると何が良くなるか (節の見出しの下の 1〜2 文)。 */
   intro: string;
+  /** その下の 1 行。リンクの文字 (ヘルプの節の名前) を挟む。 */
+  helpBefore: string;
+  helpAfter: string;
   state: Record<AgentHookState, string>;
   action: Record<HookRowAction["kind"], string>;
   actionTitle: (agent: HookAgent, action: string) => string;
@@ -219,7 +232,9 @@ export type AgentHooksText = {
 const HOOKS_EN: AgentHooksText = {
   title: "Agent integration",
   intro:
-    "Adds hooks to claude and codex that tell code-viewer what they are doing. With them, the agent list shows reliably when an agent finishes or asks for permission, and also lists agents it cannot recognize by process name. Other hooks in the file are kept as they are.",
+    "With these hooks, claude and codex tell code-viewer themselves when they are working, waiting for input or done, so the states shown are reliable. Other hooks in the file stay as they are.",
+  helpBefore: "How to set them up and what they change: ",
+  helpAfter: ".",
   state: {
     "no-config-dir": "Not used",
     unreadable: "File unreadable",
@@ -322,7 +337,9 @@ const HOOKS_EN: AgentHooksText = {
 const HOOKS_JA: AgentHooksText = {
   title: "エージェント連携",
   intro:
-    "claude と codex に、いまの状態を code-viewer へ知らせるフックを入れます。入れると、エージェントが終わったこと・許可を求めていることを一覧で確実に出せます。プロセス名では見分けられないエージェントも一覧に出ます。ファイルにあるほかのフックはそのまま残ります。",
+    "入れると、claude と codex が作業中・入力待ち・完了を自分で知らせるので、状態の表示が確かになります。ファイルにあるほかのフックはそのまま残ります。",
+  helpBefore: "入れ方と、入れると何が変わるかは ",
+  helpAfter: " にあります。",
   state: {
     "no-config-dir": "使っていません",
     unreadable: "ファイルが読めません",
@@ -405,7 +422,7 @@ const HOOKS_JA: AgentHooksText = {
     },
     codex: {
       install:
-        "codex は、フックを信頼するまで実行しません。codex で /hooks を開き、code-viewer のフックを信頼してください。動いている codex に効くかは公式の説明に書かれていないため、確実なのはこれから起動するものです。",
+        "codex は、信頼するまでフックを実行しません。codex で /hooks を開き、code-viewer のフックを信頼してください。動いている codex に効くかは公式の説明に無いため、確実なのはこれから起動するものです。",
       uninstall:
         "これから起動する codex では呼ばれません。動いているものには、起動し直すまで残ることがあります。",
     },
@@ -454,6 +471,12 @@ const EN: AgentsText = {
   openPane: "Open in a tab",
   openPaneOpposite: "Open in the opposite pane",
   openPaneOppositeHint: "Alt+click: open in the opposite pane",
+  handoff: "Continue with another account…",
+  handoffTitle:
+    "Start claude or codex with another account in a new window of the same tmux session, and have it read this agent's conversation log and continue",
+  handoffNeedsHooks: "Needs the agent hooks — show how to install",
+  handoffNeedsHooksTitle:
+    "The hooks tell code-viewer where the conversation log is. After installing them, send the agent one message.",
   openServer: "Open",
   openServerTitle: (url) =>
     `Open the code-viewer running for this project (${url})`,
@@ -535,6 +558,9 @@ const EN: AgentsText = {
     starting: "Starting…",
     detectedTitle:
       "Projects with agents in tmux that are not registered. Opening one registers it.",
+    stopped: (count) => `Not running (${count})`,
+    stoppedTitle:
+      "Registered projects with no agent, no shell and no running process. Opening one starts it.",
     noProjectsTitle: "No projects yet",
     noProjectsBody: "Register a repository and it is listed here.",
     reorderHint: "Drag, or Alt+↑ / Alt+↓, to reorder",
@@ -587,6 +613,12 @@ const JA: AgentsText = {
   openPane: "タブで開く",
   openPaneOpposite: "反対の面で開く",
   openPaneOppositeHint: "Alt+クリック: 反対の面で開く",
+  handoff: "別のアカウントで続ける…",
+  handoffTitle:
+    "同じ tmux のセッションの新しいウィンドウで、別のアカウントの claude か codex を起動し、このエージェントの会話記録を読んで続きをやらせます",
+  handoffNeedsHooks: "フックを入れると使えます（入れ方を見る）",
+  handoffNeedsHooksTitle:
+    "会話記録の場所はフックから受け取ります。入れた後、そのエージェントに一度話しかけると使えます。",
   openServer: "開く",
   openServerTitle: (url) =>
     `このプロジェクトを開いている code-viewer へ移動 (${url})`,
@@ -666,6 +698,9 @@ const JA: AgentsText = {
     starting: "起動中…",
     detectedTitle:
       "登録していないが tmux でエージェントが動いているプロジェクト。開くと登録されます。",
+    stopped: (count) => `停止中 (${count})`,
+    stoppedTitle:
+      "エージェントもシェルも無く、プロセスも動いていない登録済みのプロジェクト。開くと起動します。",
     noProjectsTitle: "プロジェクトはまだありません",
     noProjectsBody: "リポジトリを登録すると、ここに並びます。",
     reorderHint: "ドラッグか Alt+↑ / Alt+↓ で並べ替え",

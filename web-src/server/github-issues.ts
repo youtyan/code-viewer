@@ -1,10 +1,6 @@
 import { formatErrorDetail } from "../core/error-detail";
-import {
-  commandForExternal,
-  commandNotFoundDetail,
-  isCommandNotFoundResult,
-} from "./command-resolver";
-import { runAsync } from "./runtime";
+import { commandForExternal, commandRunFailure } from "./command-resolver";
+import { type RunResult, runAsync } from "./runtime";
 
 export type GithubIssueListState = "open" | "closed" | "all";
 
@@ -189,12 +185,9 @@ export function buildGithubIssueViewArgs(
   return args;
 }
 
-function ghFailure(
-  command: string,
-  proc: { code: number; stderr: string },
-): GithubIssueListError {
-  if (isCommandNotFoundResult("gh", proc))
-    return new GithubIssueListError(commandNotFoundDetail("gh"));
+function ghFailure(command: string, proc: RunResult): GithubIssueListError {
+  const failure = commandRunFailure("gh", proc);
+  if (failure) return new GithubIssueListError(failure.detail);
   const stderr = proc.stderr.trim();
   return new GithubIssueListError(
     `${command} exited with code ${proc.code}${stderr ? `: ${stderr}` : ""}`,

@@ -87,6 +87,11 @@ if (process.argv[2] === "agent-help") {
   // CLI hooks call this on every lifecycle event, so it must stay cheap.
   const { runTerminalCli } = await import("./terminal-cli");
   await runTerminalCli(process.argv.slice(3));
+} else if (process.argv[2] === "accounts") {
+  // `accounts` talks to the running entry server (the account registry and the
+  // sign-in windows live there). No SQLite of its own, so no preflight.
+  const { runAccountsCli } = await import("./accounts-cli");
+  await runAccountsCli(process.argv.slice(3));
 } else if (process.argv[2] === "skill") {
   const { runSkillCli } = await import("./skill-cli");
   runSkillCli(process.argv.slice(3));

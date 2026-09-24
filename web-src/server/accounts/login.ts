@@ -24,11 +24,16 @@
 //
 // コマンドの起動は 1〜3 秒かかるので、LOGIN_CACHE_MS の間は覚えておく。
 
-import { spawn } from "node:child_process";
 import type { AccountEntry, AccountLogin } from "../../core/agent-accounts";
 import { ACCOUNT_ENV } from "../../core/agent-accounts";
 import { formatErrorDetail } from "../../core/error-detail";
-import { type RunResult, runAsync } from "../runtime";
+import {
+  onStdinWriteFailure,
+  type RunResult,
+  runAsync,
+  spawnProcess,
+  stopProcess,
+} from "../runtime";
 import { accountReadArgv, loginStatusArgv } from "./launch";
 
 export const LOGIN_CACHE_MS = 60_000;
@@ -52,7 +57,10 @@ export const ACCOUNT_READ_REQUESTS = [
   }),
 ];
 
-/** 行ごとに読む対話の結果。timedOut・tooMuchOutput なら code は null。 */
+/**
+ * 行ごとに読む対話の結果。timedOut・tooMuchOutput なら code は null。入力が
+ * 子に届かなかった (EPIPE 以外の書き込みの失敗) なら、子の終わり方によらず 1。
+ */
 export type RpcResult = {
   code: number | null;
   lines: string[];
@@ -84,7 +92,7 @@ function runRpc(
   done: (line: string) => boolean,
 ): Promise<RpcResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(args[0] as string, args.slice(1), {
+    const child = spawnProcess(args[0] as string, args.slice(1), {
       cwd: "/",
       env,
       stdio: ["pipe", "pipe", "pipe"],
@@ -97,14 +105,14 @@ function runRpc(
     let tooMuchOutput = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      stopProcess(child, "SIGKILL");
     }, LOGIN_TIMEOUT_MS);
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       bytes += chunk.length;
       if (bytes > RPC_MAX_BYTES) {
         tooMuchOutput = true;
-        child.kill("SIGKILL");
+        stopProcess(child, "SIGKILL");
         return;
       }
       pending += chunk;
@@ -121,10 +129,14 @@ function runRpc(
     child.stderr.on("data", (chunk: string) => {
       if (stderr.length < 4096) stderr += chunk;
     });
-    // 先に終わったプロセスへ書くと EPIPE になる。終わった理由は close の
-    // 終了コードと stderr で分かるので、ここでは書き込みの失敗だけを添える。
-    child.stdin.on("error", (error) => {
-      stderr += `\n[stdin] ${formatErrorDetail(error)}`;
+    // 入力が届かなかったら子を止め、子が 0 で終わっても失敗 (exit 1) にして
+    // 理由を stderr に添える。先に終わった子への EPIPE は失敗にしない
+    // (runtime.ts の onStdinWriteFailure。規則はそこ 1 か所)。
+    let stdinFailed = false;
+    onStdinWriteFailure(child, (error) => {
+      stdinFailed = true;
+      stderr += `${stderr ? "\n" : ""}[stdin] ${formatErrorDetail(error)}`;
+      stopProcess(child, "SIGKILL");
     });
     child.on("error", (error) => {
       clearTimeout(timer);
@@ -134,7 +146,7 @@ function runRpc(
       clearTimeout(timer);
       if (pending) lines.push(pending);
       resolve({
-        code: timedOut || tooMuchOutput ? null : code,
+        code: timedOut || tooMuchOutput ? null : stdinFailed ? 1 : code,
         lines,
         stderr,
         timedOut,

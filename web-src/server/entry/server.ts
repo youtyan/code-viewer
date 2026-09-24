@@ -121,7 +121,7 @@ function resolveLaunchRoot(cwd: string | null): string {
   const result = git.repoRootResult(dir);
   if (result.kind === "outside") {
     console.warn(
-      `code-viewer: ${dir} is not a git repository, so it is not added to the projects (its files are still shown). Run code-viewer inside a repository, or use "Register by path…" in the left sidebar.`,
+      `code-viewer: ${dir} is not a git repository, so it is not added to the projects (its files are still shown). Run code-viewer inside a repository, or use "Add project" (the + next to Projects) in the left sidebar.`,
     );
   }
   if (result.kind === "error") {

@@ -8,6 +8,7 @@ import {
   buildAgentHelpIndex,
   parseAgentHelpArgs,
 } from "../server/agent-help";
+import { ACCOUNTS_AGENT_HELP } from "../server/accounts-cli";
 import { ANNOTATE_AGENT_HELP } from "../server/annotate-cli";
 import { DOCTOR_AGENT_HELP } from "../server/doctor-agent-help";
 import { FILE_AGENT_HELP } from "../server/file-cli";
@@ -34,6 +35,7 @@ const SUBCOMMANDS = [
   "search",
   "file",
   "terminal",
+  "accounts",
   "skill",
   "doctor",
 ] as const;
@@ -85,6 +87,7 @@ describe("buildAgentHelpIndex", () => {
     expect(text.includes(signatureOf(JOURNAL_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(SEARCH_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(FILE_AGENT_HELP))).toBe(true);
+    expect(text.includes(signatureOf(ACCOUNTS_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(SKILL_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(DOCTOR_AGENT_HELP))).toBe(true);
   });
@@ -99,7 +102,7 @@ describe("buildAgentHelpIndex", () => {
 });
 
 describe("AGENT_GUIDES order is stable", () => {
-  test("matches the documented status / query / annotate / journal / search / file / terminal / skill / doctor sequence", () => {
+  test("matches the documented status / query / annotate / journal / search / file / terminal / accounts / skill / doctor sequence", () => {
     expect(AGENT_GUIDES.map((g) => g.name)).toEqual([...SUBCOMMANDS]);
   });
 });

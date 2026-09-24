@@ -344,7 +344,10 @@ export function createAccountsSettings(
 
   function headRow(): HTMLElement {
     const t = text();
-    const row = el("div", "agent-accounts-row agent-accounts-head");
+    const row = el(
+      "div",
+      "agent-accounts-row agent-accounts-head ui-table-head",
+    );
     row.setAttribute("role", "row");
     for (const label of [
       t.columns.account,
@@ -362,7 +365,7 @@ export function createAccountsSettings(
   function accountRow(account: AccountStatus, home: string): HTMLElement {
     const t = text();
     const shown = shownLoginState(account.login);
-    const row = el("div", "agent-accounts-row");
+    const row = el("div", "agent-accounts-row ui-table-row");
     row.setAttribute("role", "row");
     row.dataset.account = account.id;
     row.dataset.login = shown;
@@ -525,7 +528,9 @@ export function createAccountsSettings(
   function renderUsage(accounts: AccountStatus[], home: string): void {
     const t = text();
     usageRows.replaceChildren();
-    const how: HTMLElement[] = [el("p", "scope-settings-help", t.usageIntro)];
+    const how: HTMLElement[] = t.usageIntro.map((paragraph) =>
+      el("p", "scope-settings-help", paragraph),
+    );
     const groups = new Map<string, AccountStatus[]>();
     for (const account of accounts) {
       if (account.agent !== "claude" || !account.statusLine) continue;
@@ -551,7 +556,7 @@ export function createAccountsSettings(
               ? "on"
               : "waiting"
             : "off";
-      const box = el("div", "agent-accounts-usage-row");
+      const box = el("div", "agent-accounts-usage-row ui-table-row");
       box.dataset.usage = tone;
       const names = el(
         "span",

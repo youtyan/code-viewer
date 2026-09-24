@@ -20,7 +20,8 @@ import type { AppSettingsState } from "./types";
 // のサーバもそれぞれ別のポート)。決まりの本体は project-rules の ui-layout.md。
 export const USER_SETTING_KEYS = [
   "theme",
-  "palette",
+  "colorTheme",
+  "terminalTone",
   "language",
   /** 文字の大きさと、それに連動する表示の密度 (body[data-sidebar-font-size])。 */
   "sidebarFontSize",
@@ -32,10 +33,14 @@ export const USER_SETTING_KEYS = [
   "agentNotifyHintDismissed",
   "agentAccountsCollapsed",
   "terminalImageShelfCollapsed",
+  "terminalImageShelfPlacement",
+  "terminalImageShelfWidth",
+  "terminalImageShelfHeight",
   "terminalPanelOpen",
   "navCollapsed",
   "navWidth",
   "navCollapsedProjects",
+  "navStoppedProjectsOpen",
   "lastProjectRoot",
 ] as const satisfies readonly (keyof AppSettingsState)[];
 

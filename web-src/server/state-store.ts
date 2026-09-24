@@ -1,7 +1,18 @@
 import { join } from "node:path";
+import {
+  colorThemeFromPalette,
+  isColorTheme,
+  isTerminalTone,
+} from "../core/color-themes";
 import { hasControlCharacter } from "../core/control-chars";
 import { sanitizeKeymapOverrides } from "../core/keymap";
-import { HISTORY_WIDTH, NAV_WIDTH, SIDEBAR_WIDTH } from "../core/panel-sizes";
+import {
+  HISTORY_WIDTH,
+  NAV_WIDTH,
+  SIDEBAR_WIDTH,
+  TERMINAL_IMAGE_SHELF_HEIGHT,
+  TERMINAL_IMAGE_SHELF_WIDTH,
+} from "../core/panel-sizes";
 import { MAX_PROJECTS } from "../core/projects";
 import {
   MAX_GREP_PALETTE_HEIGHT,
@@ -9,6 +20,7 @@ import {
   MIN_GREP_PALETTE_HEIGHT,
   MIN_GREP_PALETTE_WIDTH,
 } from "../core/search-palette";
+import { isTerminalImageShelfPlacement } from "../core/terminal-images";
 import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from "../core/tmux";
 import {
   isToolId,
@@ -17,14 +29,13 @@ import {
   TOOL_IDS,
   type ToolId,
 } from "../core/tools";
-import {
-  type AppSettingsState,
-  type DbUiPrefs,
-  type DbUiState,
-  THEME_PALETTES,
-  type ToolsState,
-  type ViewerFontSizeSetting,
-  type ViewState,
+import type {
+  AppSettingsState,
+  DbUiPrefs,
+  DbUiState,
+  ToolsState,
+  ViewerFontSizeSetting,
+  ViewState,
 } from "../core/types";
 import { createJsonFileStore, type JsonFileStore } from "./json-store";
 import {
@@ -172,8 +183,13 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   if (raw.layout === "side-by-side" || raw.layout === "line-by-line")
     out.layout = raw.layout;
   if (raw.theme === "light" || raw.theme === "dark") out.theme = raw.theme;
-  const palette = THEME_PALETTES.find((value) => value === raw.palette);
-  if (palette) out.palette = palette;
+  // 以前の「ダークの色違い」(palette) は近いテーマへ読み替える。書き戻すときは
+  // colorTheme だけが残る。
+  const colorTheme = isColorTheme(raw.colorTheme)
+    ? raw.colorTheme
+    : colorThemeFromPalette(raw.palette);
+  if (colorTheme) out.colorTheme = colorTheme;
+  if (isTerminalTone(raw.terminalTone)) out.terminalTone = raw.terminalTone;
   if (raw.language === "en" || raw.language === "ja")
     out.language = raw.language;
   if (raw.sidebarView === "tree" || raw.sidebarView === "flat")
@@ -318,6 +334,22 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   );
   if (terminalImageShelfCollapsed !== undefined)
     out.terminalImageShelfCollapsed = terminalImageShelfCollapsed;
+  if (isTerminalImageShelfPlacement(raw.terminalImageShelfPlacement))
+    out.terminalImageShelfPlacement = raw.terminalImageShelfPlacement;
+  const terminalImageShelfWidth = optionalNumber(
+    raw.terminalImageShelfWidth,
+    TERMINAL_IMAGE_SHELF_WIDTH.min,
+    TERMINAL_IMAGE_SHELF_WIDTH.max,
+  );
+  if (terminalImageShelfWidth !== undefined)
+    out.terminalImageShelfWidth = terminalImageShelfWidth;
+  const terminalImageShelfHeight = optionalNumber(
+    raw.terminalImageShelfHeight,
+    TERMINAL_IMAGE_SHELF_HEIGHT.min,
+    TERMINAL_IMAGE_SHELF_HEIGHT.max,
+  );
+  if (terminalImageShelfHeight !== undefined)
+    out.terminalImageShelfHeight = terminalImageShelfHeight;
   const terminalPanelOpen = optionalBoolean(raw.terminalPanelOpen);
   if (terminalPanelOpen !== undefined)
     out.terminalPanelOpen = terminalPanelOpen;
@@ -330,6 +362,9 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     maxLen: 4096,
   });
   if (navCollapsedProjects) out.navCollapsedProjects = navCollapsedProjects;
+  const navStoppedProjectsOpen = optionalBoolean(raw.navStoppedProjectsOpen);
+  if (navStoppedProjectsOpen !== undefined)
+    out.navStoppedProjectsOpen = navStoppedProjectsOpen;
   const lastProjectRoot = optionalString(raw.lastProjectRoot, 4096);
   if (
     lastProjectRoot?.startsWith("/") &&

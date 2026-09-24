@@ -63,12 +63,20 @@ const STATIC_FILES: Record<string, readonly [string, string]> = {
 
 const STATIC_FILE_MAP = new Map(Object.entries(STATIC_FILES));
 
+/**
+ * ヘルプのページの画面のキャプチャ (views/help-images.ts の helpFigure が作る
+ * 経路)。名前は英小文字・数字・- だけなので、web/help-images/ の外は指せない。
+ */
+const HELP_IMAGE_PATH = /^\/help-images\/([a-z0-9-]+\.(?:en|ja)\.webp)$/;
+
 /** その経路で配るファイル (`web/` からの相対) と Content-Type。無ければ null。 */
 export function staticFileSpec(
   pathname: string,
 ): readonly [string, string] | null {
   if (isAppEntryPath(pathname))
     return ["index.html", "text/html; charset=utf-8"];
+  const helpImage = HELP_IMAGE_PATH.exec(pathname);
+  if (helpImage) return [`help-images/${helpImage[1]}`, "image/webp"];
   return STATIC_FILE_MAP.get(pathname) ?? null;
 }
 

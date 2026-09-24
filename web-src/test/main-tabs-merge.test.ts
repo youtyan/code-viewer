@@ -61,6 +61,24 @@ function show(layout: Layout): string {
     : one(layout.panes.left);
 }
 
+describe("mergeLayouts: シェルのタブが映していた tmux の場所", () => {
+  test("両方の窓の場所を合わせ (同じシェルはこの窓の値)、閉じたシェルの場所は落とす", () => {
+    const place = (pane: string) => ({ pane, session: "sample", window: 0 });
+    const merged = mergeLayouts(
+      layoutOf("[x] $s $t $u"),
+      {
+        ...layoutOf("[x] $s $t"),
+        terminalTmux: { s: place("%1"), u: place("%9") },
+      },
+      {
+        ...layoutOf("[x] $s $t"),
+        terminalTmux: { s: place("%2"), t: place("%3"), u: place("%8") },
+      },
+    ).layout;
+    expect(merged.terminalTmux).toEqual({ s: place("%1"), t: place("%3") });
+  });
+});
+
 describe("mergeLayouts", () => {
   test.each([
     {
@@ -250,5 +268,83 @@ describe("mergeLayouts", () => {
       theirs,
     );
     expect(show(merged.layout)).toBe(expected);
+  });
+});
+
+// 2 つの窓がそれぞれ閉じる・開く・動かすを 1〜3 手ずつした後に重ねても、
+// 動かしていないタブどうしの前後は崩れない。前は「すぐ左のタブが変わった」
+// タブを全部「動かした」と数えていたので、3000 例のうち 76 例で、どちらの窓も
+// 動かしていないタブが端へ飛んだ。種は固定 (落ちたら種と並びが再現手順になる)。
+describe("mergeLayouts: 乱数の列で、動かしていないタブの前後を保つ", () => {
+  // ai-dup-check: allow -- ok:main-tabs-random.test.ts の rng と同じ線形合同法。種から同じ列を作るためだけの数行で、テストどうしで共有する部品にはしない
+  function rng(seed: number) {
+    let state = seed >>> 0;
+    return (n: number) => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return state % n;
+    };
+  }
+  /** 1〜3 手の閉じる・開く・動かす。動かしたタブを moved に足す。 */
+  function edit(
+    ids: string[],
+    next: (n: number) => number,
+    who: string,
+    moved: Set<string>,
+  ): string[] {
+    let list = [...ids];
+    const steps = 1 + next(3);
+    for (let step = 0; step < steps; step += 1) {
+      const op = next(3);
+      if (op === 0 && list.length > 1) {
+        const id = list[next(list.length)];
+        list = list.filter((item) => item !== id);
+      } else if (op === 1) {
+        const at = next(list.length + 1);
+        list = [...list.slice(0, at), `${who}${step}`, ...list.slice(at)];
+      } else if (list.length > 1) {
+        const id = list[next(list.length)];
+        const rest = list.filter((item) => item !== id);
+        const at = next(rest.length + 1);
+        list = [...rest.slice(0, at), id, ...rest.slice(at)];
+        moved.add(id);
+      }
+    }
+    return list;
+  }
+
+  test("3000 例で、どちらの窓も動かしていないタブ・3 つとも同じ前後の 2 つは前後を保つ", () => {
+    const broken: string[] = [];
+    for (let seed = 1; seed <= 3000; seed += 1) {
+      const next = rng(seed);
+      const base = Array.from({ length: 3 + next(5) }, (_, i) => `b${i}`);
+      const moved = new Set<string>();
+      const mine = edit(base, next, "m", moved);
+      const theirs = edit(base, next, "t", moved);
+      const merged = mergeLayouts(
+        layoutOf(base.join(" ")),
+        layoutOf(mine.join(" ")),
+        layoutOf(theirs.join(" ")),
+      ).layout.panes.left.tabs.map((tab) => tab.id);
+      const precedes = (list: string[], a: string, b: string) =>
+        list.includes(a) &&
+        list.includes(b) &&
+        list.indexOf(a) < list.indexOf(b);
+      for (const a of base)
+        for (const b of base) {
+          if (
+            !precedes(base, a, b) ||
+            !merged.includes(a) ||
+            !merged.includes(b)
+          )
+            continue;
+          const untouched = !moved.has(a) && !moved.has(b);
+          const agreed = precedes(mine, a, b) && precedes(theirs, a, b);
+          if ((untouched || agreed) && !precedes(merged, a, b))
+            broken.push(
+              `seed ${seed}: ${a}/${b} base ${base.join(" ")} | mine ${mine.join(" ")} | theirs ${theirs.join(" ")} -> ${merged.join(" ")}`,
+            );
+        }
+    }
+    expect(broken).toEqual([]);
   });
 });

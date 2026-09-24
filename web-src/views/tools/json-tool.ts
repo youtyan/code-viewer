@@ -120,7 +120,6 @@ export function createJsonTool(
         }
         lastOutput = formatted;
         const highlighter = await loadShikiHighlighter({
-          themes: ["github-light", "github-dark"],
           langs: ["json", "yaml"],
         });
         if (signal.aborted) return;

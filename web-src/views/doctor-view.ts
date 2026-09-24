@@ -88,7 +88,7 @@ function renderRow(
       : "") +
     (row.hint ? `<div class="doctor-row-hint">${esc(row.hint)}</div>` : "") +
     `</div>`;
-  return `<div class="doctor-row" data-status="${esc(row.status)}">${pill}${body}</div>`;
+  return `<div class="doctor-row ui-table-row" data-status="${esc(row.status)}">${pill}${body}</div>`;
 }
 
 function renderGroup(

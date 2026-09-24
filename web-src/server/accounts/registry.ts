@@ -245,6 +245,7 @@ export function planCreateAccount(
     name: name.trim(),
     configDir,
     parent: paths.managedRoot,
+    defaultDir,
     entries,
     missingShared: SHARED_CONFIG_ENTRIES[agent].filter(
       (entry) => !present.has(entry),

@@ -11,7 +11,7 @@
 //   `terminal capture` で他のセッションの本文を前回の続きから受け取る。
 //
 // 構成は status-cli / search-cli と同じ「parse して run」。サーバへの往復は
-// cli-helpers の ensureServerUrl と requestJson をそのまま使う。
+// cli-helpers の ensureAgentServerUrl と requestJson をそのまま使う。
 
 import { HOOK_AGENTS, type HookAgent, isHookAgent } from "../core/agent-hooks";
 import {
@@ -24,15 +24,13 @@ import {
 } from "../core/agent-state";
 import { formatErrorDetail } from "../core/error-detail";
 import {
-  ensureServerUrl,
-  probeServer,
+  ensureAgentServerUrl,
   readStdin,
   requestJson,
   resolveRepoRoot,
   takeGlobalCliOption,
   takeValue,
 } from "./cli-helpers";
-import { liveEntryUrl } from "./entry/entry-file";
 import { defaultHookReportDeps, reportAgentHook } from "./terminal/hook-report";
 import { appendHookFailure, currentHookLauncher } from "./terminal/hooks";
 
@@ -382,22 +380,12 @@ export async function runTerminalCli(argv: string[]): Promise<void> {
     return;
   }
 
-  const root = resolveRepoRoot(cwd);
-  // 状態とターミナルを持つのは入口のサーバ。入口が居なければ、このリポジトリの
-  // 1 つで完結するサーバ (`--standalone`・古い版) を探す。
-  const entry = server ? null : liveEntryUrl();
-  const entryProbe = entry ? await probeServer(entry, HEALTH_PATH) : null;
-  if (entry && entryProbe && entryProbe.status !== "ok") {
-    // 入口の記録 (entry.json) の pid は生きているのに答えない。1 つで完結する
-    // サーバを探しに行く前に、入口がなぜ使えなかったかを出す。
-    console.error(
-      `the code-viewer entry server at ${entry} ${entryProbe.status === "unreachable" ? "could not be reached" : "answered with an error"}; looking for this repository's server instead:\n${formatErrorDetail(entryProbe.error)}`,
-    );
-  }
-  const serverUrl =
-    entry && entryProbe?.status === "ok"
-      ? entry
-      : await ensureServerUrl(root, server, HEALTH_PATH);
+  // 状態とターミナルを持つのは入口のサーバ。
+  const serverUrl = await ensureAgentServerUrl(
+    resolveRepoRoot(cwd),
+    server,
+    HEALTH_PATH,
+  );
 
   if (command.mode === "state") {
     // フックは別プロセスなので、送った順に着くとは限らない。呼ばれた時刻を

@@ -288,13 +288,23 @@ export function getShellSession(id: ShellSessionId): ShellSession | null {
 
 export type CreateShellResult =
   | { status: "ok"; session: ShellSession }
+  /** 頼まれた ID のシェルがもうある (別の窓が先に開き直した)。開かずにそれを返す。 */
+  | { status: "in-use"; session: ShellSession }
   | { status: "unavailable"; reason: string }
   | { status: "error"; error: Error };
 
 export async function createShellSession(
   cwd: string,
   size: { cols?: number; rows?: number } = {},
+  /**
+   * この ID で開く。サーバが起き直して終わったシェルのタブを、同じ ID のまま
+   * 開き直すときに使う (タブの配置は ID で指すので、ID が変わるとタブを差し替える
+   * ことになる)。使われている ID なら開かずに in-use を返す。
+   */
+  requestedId?: ShellSessionId,
 ): Promise<CreateShellResult> {
+  const existing = requestedId ? sessions.get(requestedId) : undefined;
+  if (existing) return { status: "in-use", session: existing.meta };
   const pty = await loadPty();
   if (!pty) {
     return {
@@ -310,7 +320,7 @@ export async function createShellSession(
   const command = resolveShellCommand();
   // makeTimedId は `<prefix>-<base36>` を返す。SHELL_ID_PREFIX の末尾の
   // ハイフンがそこに当たるので、prefix はハイフンを外して渡す。
-  const id = makeTimedId(SHELL_ID_PREFIX.replace(/-$/, ""));
+  const id = requestedId ?? makeTimedId(SHELL_ID_PREFIX.replace(/-$/, ""));
 
   let child: PtyProcess;
   try {
@@ -414,7 +424,8 @@ export async function createShellSession(
     entry.listeners.clear();
     entry.exitListeners.clear();
     entry.outputWatchers.clear();
-    sessions.delete(id);
+    // 同じ ID で先に開いた方に負けて止めたシェルは、勝った方を消さない。
+    if (sessions.get(id) === entry) sessions.delete(id);
   });
 
   // プロンプトを出さないシェルで待ちっぱなしにしない。出力が先に来れば
@@ -425,6 +436,24 @@ export async function createShellSession(
   );
   readyTimer.unref?.();
 
+  // 待っている間に同じ ID で開かれた (2 つの窓が同時に開き直した)。後から来た
+  // こちらを止め、先に開いた方を返す (上書きすると先の PTY が迷子になる)。
+  const raced = sessions.get(id);
+  if (raced) {
+    clearTimeout(readyTimer);
+    try {
+      child.kill();
+    } catch (error) {
+      return {
+        status: "error",
+        error: errorWithCause(
+          `failed to stop the duplicate shell opened as ${id}`,
+          error,
+        ),
+      };
+    }
+    return { status: "in-use", session: raced.meta };
+  }
   sessions.set(id, entry);
   return { status: "ok", session: entry.meta };
 }

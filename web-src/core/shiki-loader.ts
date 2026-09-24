@@ -11,6 +11,12 @@
 // failureMode: "throw" を使い、元の失敗を呼び出し側で保持する。
 
 import { createBundleLoader } from "./lazy-bundle";
+import {
+  codeViewerShikiTheme,
+  SHIKI_THEMES,
+  type ShikiTheme,
+  type ShikiThemeSource,
+} from "./shiki-theme";
 
 export type ShikiHighlighter = {
   codeToHtml: (
@@ -24,14 +30,17 @@ export type ShikiHighlighter = {
 };
 
 export type ShikiLoaderOptions = {
-  themes: string[];
   langs: string[];
   /** fallback は従来どおり null、throw は呼び出し側へ元の失敗を返す。 */
   failureMode?: "fallback" | "throw";
 };
 
 type ShikiModule = {
-  createHighlighter: (options: ShikiLoaderOptions) => Promise<ShikiHighlighter>;
+  createHighlighter: (options: {
+    themes: ShikiTheme[];
+    langs: string[];
+  }) => Promise<ShikiHighlighter>;
+  bundledThemes: Record<string, () => Promise<{ default: ShikiThemeSource }>>;
 };
 
 /** shiki の `<pre><code>…</code></pre>` 出力から、呼び出し側の自前 `<pre>` に
@@ -45,7 +54,7 @@ export function highlightToInnerHtml(
   if (!highlighter || !code) return "";
   const html = highlighter.codeToHtml(code, {
     lang,
-    themes: { light: "github-light", dark: "github-dark" },
+    themes: SHIKI_THEMES,
     defaultColor: false,
   });
   const template = document.createElement("template");
@@ -63,18 +72,21 @@ export function loadShikiHighlighter(
   // langs は順序差を消した上で key 化する (["sql","bash"] と ["bash","sql"]
   // を同じキャッシュエントリと見なす)。
   const key = JSON.stringify({
-    themes: [...options.themes].sort(),
     langs: [...options.langs].sort(),
     failureMode: options.failureMode ?? "fallback",
   });
   const cached = cache.get(key);
   if (cached) return cached;
-  const load = loadShikiModule().then((mod) =>
-    mod.createHighlighter({
-      themes: options.themes,
+  // テーマは 1 つだけ (core/shiki-theme.ts。色は CSS 変数なので明暗・テーマで
+  // 読み直さない)。割り当ては同梱の github-dark から借りる。
+  const load = loadShikiModule().then(async (mod) => {
+    const source = mod.bundledThemes["github-dark"];
+    if (!source) throw new Error("shiki: the bundle has no github-dark theme");
+    return mod.createHighlighter({
+      themes: [codeViewerShikiTheme((await source()).default)],
       langs: options.langs,
-    }),
-  );
+    });
+  });
   // fallback の呼び出し側は色なしの文字で出し続ける。失敗は 1 度だけ記録する
   // (同じ組み合わせの null を覚えるので、2 度目以降は読み直さない)。
   const promise =

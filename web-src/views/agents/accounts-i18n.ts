@@ -4,12 +4,15 @@
 import type {
   AccountLogin,
   BlockedReason,
+  HandoffLanguage,
   StatusLineState,
   UsageUnavailableReason,
   UsageWindow,
 } from "../../core/agent-accounts";
 
 export type AccountsText = {
+  /** この文言の言語。引き継ぎの指示文 (core/agent-accounts.ts の handoffPrompt) を合わせる。 */
+  language: HandoffLanguage;
   /** 既定のアカウントの表示名。 */
   defaultName: string;
   unregistered: string;
@@ -127,6 +130,10 @@ export type AccountsText = {
   addPathRequired: string;
   createTitle: (name: string) => string;
   createDir: string;
+  /** リンク元 (既定の設定ディレクトリ) の欄の名前。 */
+  createSource: string;
+  /** 下の一覧が何か (どのディレクトリの中身で、選ぶと何が起きるか)。 */
+  shareIntro: (dir: string) => string;
   createLinks: string;
   createLinkMissing: (names: string) => string;
   usageReasonShort: Record<UsageUnavailableReason, string>;
@@ -134,7 +141,7 @@ export type AccountsText = {
   shareShared: string;
   shareOptional: string;
   shareBlocked: (count: number) => string;
-  /** 「選べば共有できる」の各項目に添える、既定でオフの理由。 */
+  /** 「選べば共有できる」の見出しの下に 1 回だけ添える、既定でオフの理由。 */
   shareOptionalWhy: string;
   blockedWhy: Record<BlockedReason, string>;
   shareNone: string;
@@ -150,7 +157,8 @@ export type AccountsText = {
   // 使用量 (statusLine)
   usageTitle: string;
   /** 仕組みの説明 (開いたときだけ見える欄)。 */
-  usageIntro: string;
+  /** 使用量の「仕組み」の中。1 つが 1 段落。 */
+  usageIntro: readonly string[];
   usageHow: string;
   usageReceiving: (when: string) => string;
   usageWaiting: string;
@@ -213,7 +221,17 @@ export type AccountsText = {
   launchNotSetUp: string;
   launchLoginUnknown: (detail: string) => string;
   launchNoProjects: string;
+  /** 選んだ種類のアカウントが 1 つも無い。 */
+  launchNoAccounts: string;
   currentServerProject: (name: string) => string;
+  // 別のアカウントで続ける (起動の画面を使い回す)
+  handoffDialogTitle: string;
+  handoffIntro: (from: string) => string;
+  handoffLog: string;
+  handoffLogHint: string;
+  /** アカウントの一覧で、前の担当が使っているアカウントに付ける札。 */
+  handoffCurrent: string;
+  handoffRun: string;
 };
 
 /** 残り時間を「時間と分」「日と時間」の 2 段で書く。 */
@@ -244,6 +262,7 @@ function windowName(
 }
 
 export const ACCOUNTS_EN: AccountsText = {
+  language: "en",
   defaultName: "Default",
   unregistered: "Unregistered",
   unregisteredTitle: (path) =>
@@ -388,6 +407,9 @@ export const ACCOUNTS_EN: AccountsText = {
   addPathRequired: "Enter an absolute path.",
   createTitle: (name) => `Create the account "${name}"`,
   createDir: "New settings directory",
+  createSource: "Linked from (default settings directory)",
+  shareIntro: (dir) =>
+    `The items below are the files and folders in ${dir}. Each checked one becomes a link from the new directory to the one in ${dir}, so both accounts use the same thing (nothing is copied).`,
   createLinks: "Links that will be created",
   createLinkMissing: (names) =>
     `Not in the default directory, so not linked: ${names}`,
@@ -427,8 +449,10 @@ export const ACCOUNTS_EN: AccountsText = {
   registerRun: "Register",
   added: (name) => `Added ${name}.`,
   usageTitle: "Usage",
-  usageIntro:
-    "claude reports its 5-hour and weekly usage only to the status line. code-viewer can wrap the status line command: it keeps the data it receives, runs your command with the same input and returns its output unchanged. codex usage is read from its session logs and needs no setting.",
+  usageIntro: [
+    "claude reports its 5-hour and weekly usage only to the status line. code-viewer can wrap the status line command: it keeps the data it receives, runs your command with the same input and returns its output unchanged.",
+    "codex usage is read from its session logs and needs no setting.",
+  ],
   usageHow: "How it works",
   usageReceiving: (when) =>
     `Receiving the 5-hour and weekly usage (last received: ${when})`,
@@ -512,10 +536,20 @@ export const ACCOUNTS_EN: AccountsText = {
     "This account has not been used yet (no settings directory). The agent sets it up and asks you to sign in.",
   launchLoginUnknown: (detail) => `Sign-in could not be checked: ${detail}`,
   launchNoProjects: "No project to choose.",
+  launchNoAccounts: "No account of this kind.",
   currentServerProject: (name) => `${name} (this server)`,
+  handoffDialogTitle: "Continue with another account",
+  handoffIntro: (from) =>
+    `Start an agent with another account. It reads the conversation log of ${from} and continues the work.`,
+  handoffLog: "Conversation log",
+  handoffLogHint:
+    "code-viewer does not read it. The new agent reads it, and asks before it starts if anything is unclear.",
+  handoffCurrent: "in use now",
+  handoffRun: "Start and hand over",
 };
 
 export const ACCOUNTS_JA: AccountsText = {
+  language: "ja",
   defaultName: "既定",
   unregistered: "未登録",
   unregisteredTitle: (path) =>
@@ -670,6 +704,9 @@ export const ACCOUNTS_JA: AccountsText = {
   addPathRequired: "絶対パスを入れてください。",
   createTitle: (name) => `アカウント「${name}」を作る`,
   createDir: "新しい設定ディレクトリ",
+  createSource: "リンク元（既定の設定ディレクトリ）",
+  shareIntro: (dir) =>
+    `下の項目は ${dir} の中にあるファイルとフォルダです。チェックしたものは、新しいディレクトリから ${dir} の同じ項目へのリンクになり、両方のアカウントで同じものを使います（コピーはしません）。`,
   createLinks: "作るリンク",
   createLinkMissing: (names) =>
     `既定のディレクトリに無いためリンクしないもの: ${names}`,
@@ -709,8 +746,10 @@ export const ACCOUNTS_JA: AccountsText = {
   registerRun: "登録する",
   added: (name) => `${name} を追加しました。`,
   usageTitle: "使用量",
-  usageIntro:
-    "claude は 5時間枠と週枠の使用量をステータスラインにだけ渡します。code-viewer はステータスラインのコマンドを包み、受け取ったデータを保存してから、あなたのコマンドに同じ入力を渡し、その出力をそのまま返します。codex の使用量はセッションの記録から読むので、設定は要りません。",
+  usageIntro: [
+    "claude は 5時間枠と週枠の使用量をステータスラインにだけ渡します。code-viewer はステータスラインのコマンドを包み、受け取ったデータを保存してから、あなたのコマンドに同じ入力を渡し、その出力をそのまま返します。",
+    "codex の使用量はセッションの記録から読むので、設定は要りません。",
+  ],
   usageHow: "仕組み",
   usageReceiving: (when) =>
     `5 時間と週の使用量を受け取っています（最後に受け取った時刻: ${when}）`,
@@ -796,5 +835,14 @@ export const ACCOUNTS_JA: AccountsText = {
   launchLoginUnknown: (detail) =>
     `ログイン状態を確かめられませんでした: ${detail}`,
   launchNoProjects: "選べるプロジェクトがありません。",
+  launchNoAccounts: "この種類のアカウントがありません。",
   currentServerProject: (name) => `${name}（このサーバ）`,
+  handoffDialogTitle: "別のアカウントで続ける",
+  handoffIntro: (from) =>
+    `別のアカウントでエージェントを起動し、${from} の会話記録を読んで続きをやらせます。`,
+  handoffLog: "引き継ぐ会話記録",
+  handoffLogHint:
+    "中身は code-viewer では読みません。起動したエージェントが読み、わからないことは始める前に聞きます。",
+  handoffCurrent: "いまの担当",
+  handoffRun: "起動して引き継ぐ",
 };

@@ -121,11 +121,13 @@ describe("reportAgentHook", () => {
       "http://127.0.0.1:1/_agent/state",
       "http://127.0.0.1:2/_agent/state",
     ]);
+    // フックの入力の session_id は会話の場所として載る (無い欄は空)。
     expect(posted[0]?.body).toEqual({
       target: "%7",
       event: "stop",
       at: 1_000,
       agent: "claude",
+      conversation: { sessionId: "s1", transcriptPath: "", cwd: "" },
     });
     expect(failures).toEqual([]);
   });

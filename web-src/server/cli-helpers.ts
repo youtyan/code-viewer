@@ -496,6 +496,30 @@ export async function ensureServerUrl(
 }
 
 /**
+ * プロジェクトに依らないもの (エージェントの状態・ターミナル・アカウント) を
+ * 持つサーバの URL。入口のサーバが答えればそれ、居なければこのリポジトリの
+ * 1 つで完結するサーバ (`--standalone`・古い版) を探す。`--server` が
+ * 指定されていればそれだけを使う。決まらなければ理由を出して exit 1。
+ */
+export async function ensureAgentServerUrl(
+  root: string,
+  override: string | undefined,
+  healthPath: string,
+): Promise<string> {
+  const entry = override ? null : liveEntryUrl();
+  const entryProbe = entry ? await probeServer(entry, healthPath) : null;
+  if (entry && entryProbe) {
+    if (entryProbe.status === "ok") return entry;
+    // 入口の記録 (entry.json) の pid は生きているのに答えない。1 つで完結する
+    // サーバを探しに行く前に、入口がなぜ使えなかったかを出す。
+    console.error(
+      `the code-viewer entry server at ${entry} ${entryProbe.status === "unreachable" ? "could not be reached" : "answered with an error"}; looking for this repository's server instead:\n${formatErrorDetail(entryProbe.error)}`,
+    );
+  }
+  return ensureServerUrl(root, override, healthPath);
+}
+
+/**
  * CLI が出す画面の URL の根 (末尾の `/` なし)。
  *
  * 入口のサーバの下では、登録簿にあるのはプロジェクトの裏のプロセス

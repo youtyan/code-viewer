@@ -10,6 +10,14 @@ import {
 } from "vitest";
 import type { TerminalImageRef } from "../core/terminal-images";
 import { createImageTabView, type ImageTabHandle } from "../views/image-tab";
+import { contrastRatio } from "./_color-contrast";
+import { themeVariants } from "./_color-themes";
+import {
+  baseRules,
+  cascadedDeclarations,
+  loadStyleSheet,
+  resolveVar,
+} from "./_css-fixture";
 
 const FIRST: TerminalImageRef = {
   path: "/tmp/sample-image.png",
@@ -59,6 +67,8 @@ function createView(options?: {
   images?: readonly TerminalImageRef[];
   copyPath?: (path: string) => Promise<void>;
   openPath?: (path: string) => Promise<void>;
+  close?: () => void;
+  language?: "en" | "ja";
 }): ImageTabHandle {
   const view = createImageTabView({
     image: options?.image ?? FIRST,
@@ -66,7 +76,8 @@ function createView(options?: {
     imageUrlFor: (image) => image.url,
     copyPath: options?.copyPath ?? (() => Promise.resolve()),
     openPath: options?.openPath ?? (() => Promise.resolve()),
-    language: "en",
+    close: options?.close ?? (() => undefined),
+    language: options?.language ?? "en",
   });
   handles.push(view);
   document.body.append(view.el);
@@ -106,9 +117,18 @@ function loadImage(
   return picture;
 }
 
-function press(view: ImageTabHandle, key: string): void {
+function press(
+  view: ImageTabHandle,
+  key: string,
+  modifiers: KeyboardEventInit = {},
+): void {
   view.el.dispatchEvent(
-    new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key }),
+    new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key,
+      ...modifiers,
+    }),
   );
 }
 
@@ -381,5 +401,134 @@ describe("image tab layout and failures", () => {
     view.dispose();
 
     expect(resize.disconnected).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("image tab close", () => {
+  test.each([
+    { name: "English", language: "en" as const, label: "Close" },
+    { name: "Japanese", language: "ja" as const, label: "閉じる" },
+  ])("the close button shows the X, the word and Esc ($name)", ({
+    language,
+    label,
+  }) => {
+    const view = createView({ language });
+
+    const close = view.el.querySelector<HTMLButtonElement>(
+      '.image-tab-actions [data-action="close"]',
+    );
+
+    expect({
+      icon: close?.querySelector("svg.image-tab-icon") !== null,
+      label: close?.querySelector("span")?.textContent,
+      key: close?.querySelector("kbd")?.textContent,
+      name: close?.getAttribute("aria-label"),
+      last: close?.parentElement?.lastElementChild === close,
+    }).toEqual({ icon: true, label, key: "Esc", name: label, last: true });
+  });
+
+  test("switching the language relabels the close button", () => {
+    const view = createView();
+
+    view.setLanguage("ja");
+
+    expect(
+      view.el.querySelector('[data-action="close"] span')?.textContent,
+    ).toBe("閉じる");
+  });
+
+  test("pressing the close button asks the embedder to close the tab", () => {
+    const close = vi.fn();
+    const view = createView({ close });
+
+    view.el.querySelector<HTMLButtonElement>('[data-action="close"]')?.click();
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    { name: "Esc closes", key: "Escape", modifiers: {}, calls: 1 },
+    {
+      name: "Shift+Esc closes",
+      key: "Escape",
+      modifiers: { shiftKey: true },
+      calls: 1,
+    },
+    {
+      name: "Ctrl+Esc is left alone",
+      key: "Escape",
+      modifiers: { ctrlKey: true },
+      calls: 0,
+    },
+    {
+      name: "Cmd+Esc is left alone",
+      key: "Escape",
+      modifiers: { metaKey: true },
+      calls: 0,
+    },
+    {
+      name: "Alt+Esc is left alone",
+      key: "Escape",
+      modifiers: { altKey: true },
+      calls: 0,
+    },
+    { name: "Enter does not close", key: "Enter", modifiers: {}, calls: 0 },
+    { name: "Delete does not close", key: "Delete", modifiers: {}, calls: 0 },
+    { name: "x does not close", key: "x", modifiers: {}, calls: 0 },
+    {
+      name: "Backspace does not close",
+      key: "Backspace",
+      modifiers: {},
+      calls: 0,
+    },
+  ])("$name while the image tab has focus", ({ key, modifiers, calls }) => {
+    const close = vi.fn();
+    const view = createView({ close });
+    view.focus();
+
+    press(view, key, modifiers);
+
+    expect(close).toHaveBeenCalledTimes(calls);
+  });
+
+  test("Esc does nothing while focus is outside the image tab", () => {
+    const close = vi.fn();
+    const view = createView({ close });
+
+    press(view, "Escape");
+
+    expect(close).toHaveBeenCalledTimes(0);
+  });
+});
+
+describe("image tab close look", () => {
+  const rules = baseRules(loadStyleSheet());
+  const plain = cascadedDeclarations(rules, (s) => s === ".image-tab-button");
+  const close = cascadedDeclarations(
+    rules,
+    (s) => s === ".image-tab-button.image-tab-close",
+  );
+  const toolbar = cascadedDeclarations(
+    rules,
+    (s) => s === ".image-tab-toolbar",
+  );
+
+  // 枠の色だけを比べる (ほかのボタンの枠は border の一括指定の最後の語)。
+  // 全部のテーマ × 明暗。
+  test.each(
+    themeVariants(rules),
+  )("the close border stands out more than the other buttons' ($name)", ({
+    vars,
+  }) => {
+    const ground = resolveVar(toolbar.get("background") ?? "", vars);
+    const plainBorder = resolveVar(
+      (plain.get("border") ?? "").split(" ").pop() ?? "",
+      vars,
+    );
+    const closeBorder = resolveVar(close.get("border-color") ?? "", vars);
+
+    expect(contrastRatio(closeBorder, ground)).toBeGreaterThan(
+      contrastRatio(plainBorder, ground),
+    );
   });
 });

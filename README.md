@@ -39,9 +39,11 @@ Requires Node.js 20 or newer. Development uses
   strip down the left edge under the project row. History's branch labels keep
   their whole name up to about 40% of the room they share with the subject. The tabs are
   shared by all projects and grouped by project: each group starts with a label in
-  the project's color (its initials and ▾ for Switch to this project / Collapse /
-  Close this group; the name is in the tooltip) and its tabs are underlined in that color, in the order of the
-  sidebar; tabs of no project (agent board, Tools, Settings & Help) sit at the right
+  the project's color (its initials and ▾ for New shell / New agent… in that
+  project, its Files / Diff / History / Worktrees / Data / Work log screens,
+  Switch to this project / Collapse / Close this group; the name is in the
+  tooltip) and its tabs are underlined in that color, in the order of the
+  sidebar; tabs of no project (agent board, Tools, Settings, Help) sit at the right
   end, and a terminal belongs to the project of its folder. Click a label to
   collapse a group. Files, terminals and images of another project open in place;
   its Diff / History / Worktrees / Search / Data / Work log switch to that project
@@ -87,7 +89,7 @@ Requires Node.js 20 or newer. Development uses
   repository-page buttons are at the right of the bottom bar.
 - Install it as an app from Chrome: the install icon at the right of the
   address bar, ⋮ → Cast, save, and share → Install page as app, or the
-  Install code-viewer button in Settings & Help → Getting Started → Install
+  Install code-viewer button in Help → Getting Started → Install
   as an app. It opens in its own window, whose title bar follows the app
   theme, and there the browser's tab keys work on these tabs: ⌘W / Ctrl+W
   closes the front tab (never the window; ⌘⇧W / Ctrl+Shift+W still closes
@@ -217,6 +219,18 @@ Requires Node.js 20 or newer. Development uses
   with a copy button. Missing windows are not
   invented; when one config directory holds records from two accounts, the card
   keeps the newest values and adds a Mixed note that says how to separate them.
+  New agent lists each account with its 5-hour and weekly usage and how old
+  the values are, so you can pick one with room left. To move an agent's work
+  to another account without signing in again, right-click the agent (or its
+  tab) → Continue with another account…: it starts claude or codex with the
+  account you pick in a new window of the same tmux session, and its first
+  message says where the previous agent's conversation log is (the hooks
+  report the location; code-viewer does not read the log). The previous agent
+  keeps running.
+  The same steps run from the terminal with `code-viewer accounts`
+  (`list`, `plan`, `create`, `register`, `login`, `wait`, `rename`, `remove`),
+  so an AI agent with the bundled `code-viewer-accounts` skill can add accounts
+  for you; you still approve each sign-in in your browser.
 - Register your projects so they stay in the Agents list (in your order) even
   with no agent running, and switch between them from the project name at
   the head of the list column (`p`) or from the left sidebar on any screen. One
@@ -273,7 +287,7 @@ Requires Node.js 20 or newer. Development uses
   definition with `Cmd/Ctrl+click` or `g .`; choose from ranked candidates when
   several definitions match — a code preview of the highlighted candidate
   appears beside the menu — with references available as a fallback.
-- Switch the viewer UI between English and Japanese from Settings & Help —
+- Switch the viewer UI between English and Japanese from Settings —
   the language toggle live-updates every screen including the datastore
   viewer.
 - Browse SQLite, PostgreSQL, MySQL, Cloudflare D1, Redis, Elasticsearch,
@@ -283,9 +297,14 @@ Requires Node.js 20 or newer. Development uses
   too, without needing a `docker-compose.yml`.
   Table descriptions appear inside expanded table entries and in the Schema
   tab header when the database provides them.
-- Read the built-in Settings & Help page (Settings and Help at the bottom of the left sidebar) for getting
-  started, the `.code-viewer/` project files, AI annotations, datastores,
-  the agent skill, and keybindings.
+- Settings and Help are two pages, both at the bottom of the left sidebar
+  (`/settings` and `/help`; an old `/help?section=settings` link opens
+  Settings). Help covers getting started, step-by-step guides (add an
+  account, start an agent, add a project, let your AI agent do it with the
+  bundled skills and `code-viewer accounts`), the `.code-viewer/` project
+  files, AI annotations, datastores, the agent skill, MCP, and every key.
+  Press `?` anywhere, or Keyboard shortcuts at the top of Help, for a small
+  window with the keys for the common actions.
 - Change any shortcut in Settings → Shortcuts: every action of the app is
   listed with a filter; open one, press Add key and then the key. An action
   can have several keys, a key another action uses asks before it is moved,
@@ -318,8 +337,19 @@ Requires Node.js 20 or newer. Development uses
   which ends the shell after asking; closing the tab never stops the shell or
   the agent. The same terminal moves to the other side with its screen and
   half-typed input. Images the agent writes are listed on a shelf beside the
-  terminal; a click opens them in an image tab (on the other side when split),
-  a middle-click or ⌘/Ctrl+click in a kept one, Alt+click in the full-screen viewer. The palette (`Ctrl+K`) lists agents
+  terminal (right, left, below or above; move it from the shelf's ⋯), grouped by
+  the pane they came from; hovering one shows its path and size in the shelf's
+  header and highlights where it appears on the screen. A click opens them in an
+  image tab (on the other side when split), a middle-click or ⌘/Ctrl+click in a
+  kept one, Alt+click in the full-screen viewer. Pasting an image (⌘V /
+  Ctrl+V) hands it to the agent: it is saved in the project as
+  `.code-viewer/pasted/pasted-image-<date>-<time>.png` (not tracked by git), its
+  path is typed at the prompt without sending, and a note says where it went.
+  URLs, image paths and paths of
+  files in the project on the terminal screen are links: hovering one
+  highlights it with Open and Copy buttons, and a click opens it (a file opens
+  at its line on the other side). With tmux mouse mode on, a plain click still
+  opens it; hold ⌘/Ctrl to keep the click from tmux. The palette (`Ctrl+K`) lists agents
   under Agents, and shells and plain tmux panes under Sessions.
 - Terminal status combines lifecycle reports with priority-based matching of
   the live terminal title and recent visible lines. Matching rules can report
@@ -327,7 +357,7 @@ Requires Node.js 20 or newer. Development uses
   after a lifecycle report or a visible rule identifies it; screen motion is
   then used as a fallback. A working match expires when its title and screen
   stop changing, so a stale status line does not stay active. Edit the complete
-  JSON rule set under Settings & Help → Settings → Advanced; the rules are
+  JSON rule set under Settings → Advanced; the rules are
   saved with the page's Save changes, like every other setting. Its regular
   expressions use a bounded safe subset; combine conditions with `all` /
   `any`. Invalid changes list every validation error and do not replace the
@@ -379,7 +409,7 @@ Requires Node.js 20 or newer. Development uses
   manager, create folders, and trash/restore files from localhost-only
   actions.
 - Upload files into worktree folders. Uploads are enabled by default for
-  worktree targets; toggle them off from Settings & Help.
+  worktree targets; toggle them off from Settings.
 - Expose a local, read-only MCP endpoint (`/_mcp`) on the running server so
   AI agents can call status, file, search, and datastore tools directly
   over JSON-RPC instead of spawning CLI subprocesses.
@@ -389,17 +419,21 @@ Requires Node.js 20 or newer. Development uses
 1. From inside a git repository, run `npx @youtyan/code-viewer --open`. It
    prints a local URL (`http://127.0.0.1:<port>/p/<key>/`) and opens it. The
    repository is registered and listed under **Projects** at the top of the
-   left sidebar. A folder outside git is shown but not registered; use
-   **Register by path…** in the sidebar to add a repository.
-2. To add another repository, run `code-viewer` inside it: the running
-   code-viewer adds it and prints its URL instead of starting a second server.
+   left sidebar. A folder outside git is shown but not registered; use the
+   **+** next to **Projects** to add a repository.
+2. To add another repository, choose its folder with the **+** next to
+   **Projects** (or **Add project…** in ⌘K), or run `code-viewer` inside it:
+   the running code-viewer adds it and prints its URL instead of starting a
+   second server.
 3. Agents need [tmux](https://github.com/tmux/tmux). **New agent** at the
    bottom of the sidebar starts claude or codex in a new tmux session (tmux is
    started for you). Its state (Needs input, Working) shows in the sidebar, the
    bottom bar and the tab title; **Enable notifications** on the Agents screen
    turns on desktop notifications.
 4. **Settings → Accounts** signs in (the default `~/.claude` and `~/.codex`
-   are created on the first sign-in or start) and adds more accounts.
+   are created on the first sign-in or start) and adds more accounts. Or ask
+   your AI agent to add them (`code-viewer skill install`, then "add a claude
+   account"); it runs `code-viewer accounts` and you approve each sign-in.
 5. When something does not work, `code-viewer doctor` lists what is missing
    (git, tmux, an old code-viewer still running, …) and how to fix it.
 
@@ -517,7 +551,10 @@ PATH differs from the environment that starts code-viewer. Override paths must
 be absolute executable files outside the opened repository.
 
 Open **Settings** at the bottom of the left sidebar to change display options such
-as theme (dark in violet, graphite or warm gray, or light), font sizes (file list and code), and UI language. The language
+as light or dark, the color theme (Default, Night sea, Forest, Sand, Ink wash,
+Blossom, Moss, Mist, Amber, Indigo or GitHub, each in light and dark), terminal
+colors (always dark, or matching the page), font sizes (file list and code), and
+UI language. The language
 setting translates the viewer chrome itself, including that page, settings labels,
 sidebars, history controls, datastore viewer, and annotation panel labels.
 
@@ -567,7 +604,7 @@ under about 510px the breadcrumb takes the whole first row with the buttons
 beside it (copy path, open in the OS, info, previous / next, delete) on the
 second. The Blame tab reuses the source
 view's row component, so line numbers, drag-selection of `line=` ranges,
-syntax highlighting and the code font size from Settings & Help all match the
+syntax highlighting and the code font size from Settings all match the
 Code tab.
 
 When the repository remote is hosted on GitHub, repository and file headers
@@ -582,7 +619,7 @@ the full non-virtual view.
 
 The worktree is watched and changes are pushed to every open tab over SSE so
 files reload as you edit. The directory watcher is capped at 1024 directories
-by default and can be tuned from Settings & Help → **File change watcher**
+by default and can be tuned from Settings → **File change watcher**
 (range slider + numeric input, 16–65536); when the cap is hit the viewer
 shows a banner so reloads are not silently missed.
 
@@ -1074,9 +1111,9 @@ stdout and adds `text truncated` to stderr when the server flagged
 truncation. `--json` always emits the full server response envelope.
 
 AI agents who don't yet know which subcommand they need can run
-`code-viewer agent-help` once. It prints a short index of the eight
+`code-viewer agent-help` once. It prints a short index of the ten
 AI-facing entry points (`status`, `query`, `annotate`, `journal`, `search`,
-`file`, `skill`, `doctor`) with the exact `code-viewer <name>
+`file`, `terminal`, `accounts`, `skill`, `doctor`) with the exact `code-viewer <name>
 agent-help` command for each full guide. The index runs without any
 preflight, so it works even before SQLite or a running server is set
 up.
@@ -1353,18 +1390,19 @@ to target a specific one. When `--before` or `--after` is used, the target
 session is inferred from that anchor annotation; a conflicting `--session`
 is rejected.
 
-The in-app Settings & Help page includes a dedicated annotations guide for AI agents,
+The in-app Help page includes a dedicated annotations guide for AI agents,
 covering when to start a session, how to choose focused line ranges, how to
 write concise Markdown explanations, and how to install the bundled agent skill.
 
 ### Agent Skill
 
-The package bundles four [Agent Skills](https://agentskills.io)
-(the SKILL.md open standard) — `code-viewer-annotate`,
+The package bundles five [Agent Skills](https://agentskills.io)
+(the SKILL.md open standard) — `code-viewer-accounts`, `code-viewer-annotate`,
 `code-viewer-journal`, `code-viewer-query`, and `code-viewer-snapshot` —
-that teach AI coding agents when and how to use `annotate`, Work Log task
-queues, read-only `query`, and snapshot / diff workflows. A single
-`skill install` copies all four into the selected agent directories:
+that teach AI coding agents when and how to add and sign in claude / codex
+accounts, use `annotate`, Work Log task queues, read-only `query`, and
+snapshot / diff workflows. A single `skill install` copies all five into the
+selected agent directories:
 
 ```sh
 npx -y @youtyan/code-viewer skill install                       # Claude Code (.claude/skills/)
@@ -1427,6 +1465,14 @@ rebuilds the browser bundle when browser source files change, restarts the
 preview server when `web-src/server/*.ts` changes, and keeps the URL stable on
 `http://127.0.0.1:64160/` unless you pass `--port <port>`. Use
 `pnpm run preview:raw` to launch `preview.ts` directly without the dev watcher.
+
+To check the UI without touching your own data, run `pnpm run build`, then
+`pnpm run sandbox`: it starts a server on a free port against sample
+repositories, with stand-in claude and codex agents, and its home, state and
+tmux under `/tmp/cvdemo`. `pnpm run ui-check <project URL> <steps.json> <out dir>`
+drives a throwaway headless Chrome through the steps (open, change settings,
+click, hover, type, screenshot) and exits non-zero on a failed step or a page
+error; the step list is at the top of `scripts/ui-check.mjs`.
 
 TypeScript runs through [tsx](https://tsx.is/), bundles are built with
 [esbuild](https://esbuild.github.io/), and tests run on

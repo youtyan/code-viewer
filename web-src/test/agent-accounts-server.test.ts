@@ -1098,18 +1098,88 @@ describe("login status (asked from the CLI itself)", () => {
     );
   });
 
-  test("a failed write to the app-server's stdin keeps the whole reason", async () => {
-    // 子は stdin をすぐ閉じる。書き込みが pipe の容量を超えると EPIPE になる。
-    const fake = "process.stdin.destroy(); setTimeout(() => {}, 300);";
+  // 先に終わった app-server への書き込みは EPIPE になる (よく起きる)。これは
+  // runtime.ts の onStdinWriteFailure が許す側なので失敗にしない: 終了コードは
+  // 子のまま、先に届いた答えも読める。29d までは stderr に `[stdin] … EPIPE` を
+  // 足していたが、結果の扱いは同じ。
+  test("an app-server that closes stdin early (EPIPE) is not a failure", async () => {
+    const fake = [
+      "process.stdin.destroy();",
+      `process.stdout.write(JSON.stringify({ id: ${ACCOUNT_READ_ID}, result: { account: { type: 'chatgpt', email: 'sample@example.invalid', planType: 'pro' } } }) + '\\n');`,
+      "setTimeout(() => process.exit(0), 300);",
+    ].join("\n");
     const result = await DEFAULT_LOGIN_DEPS.rpc(
       [process.execPath, "-e", fake],
       process.env,
       ["x".repeat(1024 * 1024)],
       () => false,
     );
-    expect(result.stderr).toMatch(
-      /\[stdin\] Error: write E[A-Z]+\nDetails: \{.*"syscall":"write".*\}/,
-    );
+    expect(result).toMatchObject({
+      code: 0,
+      stderr: "",
+      timedOut: false,
+      tooMuchOutput: false,
+    });
+    expect(parseCodexAccountRead(result)).toEqual({
+      who: "sample@example.invalid",
+      plan: "pro",
+      whoDetail: "",
+    });
+  });
+
+  // EPIPE 以外の書き込みの失敗は、入力が届いていないので失敗 (exit 1) にし、
+  // 理由を残す。子は 0 で終わっても 1。
+  test("a stdin write failure that is not EPIPE fails the exchange with its reason", async () => {
+    vi.resetModules();
+    const { EventEmitter } = await import("node:events");
+    const { PassThrough, Writable } = await import("node:stream");
+    const child = new EventEmitter() as InstanceType<typeof EventEmitter> & {
+      stdin: InstanceType<typeof Writable>;
+      stdout: InstanceType<typeof PassThrough>;
+      stderr: InstanceType<typeof PassThrough>;
+      kill(signal?: string): void;
+    };
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.stdin = new Writable({
+      write(_chunk, _encoding, callback) {
+        callback(Object.assign(new Error("write EACCES"), { code: "EACCES" }));
+      },
+    });
+    child.kill = () => {
+      // 偽の子には送る先が無い (pid も無いので stopProcess は送らない)。
+    };
+    vi.doMock("node:child_process", async () => ({
+      ...(await vi.importActual<typeof import("node:child_process")>(
+        "node:child_process",
+      )),
+      spawn: () => child,
+    }));
+    try {
+      const login = await import("../server/accounts/login");
+      const pending = login.DEFAULT_LOGIN_DEPS.rpc(
+        ["anything"],
+        process.env,
+        login.ACCOUNT_READ_REQUESTS,
+        () => false,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      child.stdout.end();
+      child.stderr.end();
+      child.emit("close", 0);
+
+      const result = await pending;
+      expect(result).toMatchObject({
+        code: 1,
+        stderr: '[stdin] Error: write EACCES\nDetails: {"code":"EACCES"}',
+      });
+      expect(login.parseCodexAccountRead(result).whoDetail).toBe(
+        "codex app-server (account/read) exited with 1 without answering: [stdin] Error: write EACCES (0 lines on stdout, not shown)",
+      );
+    } finally {
+      vi.doUnmock("node:child_process");
+      vi.resetModules();
+    }
   });
 
   test("the app-server exchange keeps stdin open until the answer, then closes it", async () => {

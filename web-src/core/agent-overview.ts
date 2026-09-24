@@ -10,6 +10,7 @@
 
 import type { PaneAccount } from "./agent-accounts";
 import type {
+  AgentConversation,
   AgentState,
   AgentStateObservationError,
   AgentStateRecord,
@@ -65,6 +66,8 @@ export type AgentPane = {
   /** tmux 上の場所 (`session:window.pane`)。 */
   label: string;
   session: string;
+  /** ウインドウの番号 (`#{window_index}`)。タブが映していた場所として保存する (TmuxPlace)。 */
+  window: number;
   /** ペインのタイトル。AI CLI は作業内容をここに出す。 */
   title: string;
   command: string;
@@ -101,6 +104,12 @@ export type AgentPane = {
    * プロセスの CLAUDE_CONFIG_DIR / CODEX_HOME から)。それ以外の行は null。
    */
   account: PaneAccount | null;
+  /**
+   * フックが渡した会話の場所 (core/agent-state.ts の AgentConversation)。
+   * フックが無い・まだ申告が来ていない・セッションが終わったペインと、
+   * この欄を持たない古い版のサーバでは無い。
+   */
+  conversation?: AgentConversation;
 };
 
 /**
@@ -220,6 +229,11 @@ export type AgentOverviewResponse = {
 
 export type AgentOverviewShell = {
   id: string;
+  /**
+   * シェルを起こした場所。どのプロジェクトのシェルかを決める (起動中の判定。
+   * core/project-running.ts)。この欄を持たない古い版のサーバでは無い。
+   */
+  cwd?: string;
   /** tmux のクライアントとして繋がっていなければ (大きさが読めなければ) null。 */
   window: TmuxClientWindow | null;
 };
@@ -391,18 +405,29 @@ function comparePanePlace(a: AgentPane, b: AgentPane): number {
   return windowA - windowB || paneA - paneB || (a.id < b.id ? -1 : 1);
 }
 
+/**
+ * プロジェクトの並び (左のサイドバー・全体ボード・タブのグループで共通):
+ * 登録した順 → 登録していないもの (名前の順、同じ名前はパスの順)。
+ */
+export function compareProjectsByRegistry(
+  a: Pick<AgentProjectInfo, "registered" | "name" | "root">,
+  b: Pick<AgentProjectInfo, "registered" | "name" | "root">,
+): number {
+  const regA = a.registered;
+  const regB = b.registered;
+  if (regA && regB) return regA.order - regB.order;
+  if (regA) return -1;
+  if (regB) return 1;
+  const byName = a.name.localeCompare(b.name);
+  if (byName !== 0) return byName;
+  return a.root < b.root ? -1 : a.root > b.root ? 1 : 0;
+}
+
 function compareGroupsByRegistry(
   a: AgentProjectGroup,
   b: AgentProjectGroup,
 ): number {
-  const regA = a.info.registered;
-  const regB = b.info.registered;
-  if (regA && regB) return regA.order - regB.order;
-  if (regA) return -1;
-  if (regB) return 1;
-  const byName = a.info.name.localeCompare(b.info.name);
-  if (byName !== 0) return byName;
-  return a.info.root < b.info.root ? -1 : a.info.root > b.info.root ? 1 : 0;
+  return compareProjectsByRegistry(a.info, b.info);
 }
 
 /**

@@ -6,16 +6,23 @@
 // - POST   /_agent/accounts               作る・登録する・外す・起動コマンドを変える
 // - POST   /_agent/accounts/login         ログインを tmux の新しいウィンドウで始める
 // - POST   /_agent/launch                 エージェントを tmux の新しいウィンドウで起動する
+//                                          (handoff を付けると「別のアカウントで続ける」)
 // - GET    /_agent/statusline/plan        claude の statusLine を包む・戻すと何が変わるか
 // - POST   /_agent/statusline/apply       確認した計画を実行する
 // - DELETE /_agent/statusline/failures    包むスクリプトの失敗の記録を消す
 
 import { realpathSync, statSync, unlinkSync } from "node:fs";
 import {
+  type AccountAgent,
   type AccountEntry,
+  handoffArgs,
+  handoffPrompt,
   isAccountAgent,
+  isHandoffLanguage,
   LOGIN_SESSION,
+  MAX_HANDOFF_ACCOUNT_LABEL,
   MAX_LAUNCH_COMMAND,
+  transcriptDir,
 } from "../../core/agent-accounts";
 import { hasControlCharacter } from "../../core/control-chars";
 import { formatErrorDetail } from "../../core/error-detail";
@@ -24,6 +31,8 @@ import {
   parseBoundedJsonBody,
   textError,
 } from "../database/handle-shared";
+import { getAgentState } from "../terminal/agent-state";
+import { terminalKindOf } from "../terminal/capture";
 import { rememberSignInPane } from "../terminal/open";
 import {
   applyStatusLine,
@@ -270,7 +279,10 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
   if (!body || typeof body !== "object") {
     return textError("invalid launch request", 400);
   }
-  const { accountId, project, session } = body as Record<string, unknown>;
+  const { accountId, project, session, handoff } = body as Record<
+    string,
+    unknown
+  >;
   const cwd = text(project, 4096);
   const sessionName = text(session, 80);
   if (!cwd?.startsWith("/")) return textError("invalid project", 400);
@@ -292,7 +304,10 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
       cwd,
       session: sessionName,
       windowName: accountWindowName(account.agent, account),
-      argv: agentCommandArgv(command),
+      argv: agentCommandArgv(
+        command,
+        handoffLaunchArgs(handoff, account.agent),
+      ),
     });
     // 次に開いたときの既定。覚えられなくても起動は済んでいるので、理由を
     // 添えて返す (画面に出す)。
@@ -321,6 +336,60 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+/**
+ * 「別のアカウントで続ける」で起動コマンドに足す引数 (最初の指示など)。
+ * 前の担当の会話記録の場所は画面から受け取らず、フックの申告の記録
+ * (terminal/agent-state.ts) から引く。画面から来るのは、どのペインか・
+ * 指示文の言語・前の担当のアカウントの表示名だけ。handoff が無ければ空。
+ */
+function handoffLaunchArgs(value: unknown, agent: AccountAgent): string[] {
+  if (value === undefined) return [];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new AccountError("invalid handoff", "invalid");
+  }
+  const { pane, language, fromAccount } = value as Record<string, unknown>;
+  if (typeof pane !== "string" || !terminalKindOf(pane)) {
+    throw new AccountError("invalid handoff pane", "invalid");
+  }
+  if (!isHandoffLanguage(language)) {
+    throw new AccountError("invalid handoff language", "invalid");
+  }
+  if (
+    typeof fromAccount !== "string" ||
+    !fromAccount.trim() ||
+    fromAccount.length > MAX_HANDOFF_ACCOUNT_LABEL ||
+    hasControlCharacter(fromAccount)
+  ) {
+    throw new AccountError("invalid handoff account name", "invalid");
+  }
+  const record = getAgentState(pane);
+  const transcriptPath = record?.conversation?.transcriptPath ?? "";
+  if (!record?.agent || !transcriptPath) {
+    throw new AccountError(
+      `${pane} has no conversation log reported by a hook (install the agent hooks, then use the agent once)`,
+      "conflict",
+    );
+  }
+  const dir = transcriptDir(transcriptPath);
+  try {
+    if (!statSync(dir).isDirectory()) {
+      throw new Error(`${dir} is not a directory`);
+    }
+  } catch (error) {
+    throw new AccountError(
+      `cannot open the folder of the conversation log of ${pane}: ${dir}`,
+      "unreadable",
+      { cause: error },
+    );
+  }
+  const prompt = handoffPrompt(language, {
+    agent: record.agent,
+    account: fromAccount,
+    transcriptPath,
+  });
+  return handoffArgs(agent, prompt, transcriptPath);
 }
 
 function claudeAccount(id: unknown): AccountEntry {

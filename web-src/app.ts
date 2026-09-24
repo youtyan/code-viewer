@@ -27,7 +27,6 @@ import {
   routePathname,
   withoutProjectPrefix,
 } from "./core/api-url";
-import { renderMarkdownPreview } from "./core/markdown-preview";
 import {
   type CatchUpReason,
   catchUpKind,
@@ -36,8 +35,19 @@ import {
 } from "./core/catch-up";
 import { changedPathsCoverPath } from "./core/changed-paths";
 import {
+  applyColorTheme,
+  applyTerminalTone,
+  COLOR_THEME_NAMES,
+  COLOR_THEMES,
+  type ColorTheme,
+  DEFAULT_COLOR_THEME,
+  DEFAULT_TERMINAL_TONE,
+  isColorTheme,
+  isTerminalTone,
+  type TerminalTone,
+} from "./core/color-themes";
+import {
   errorWithCause,
-  errorWithCauses,
   formatErrorDetail,
   responseErrorMessage,
 } from "./core/error-detail";
@@ -80,6 +90,7 @@ import {
   FOLDER_ICON_PATHS,
   GEAR_16_PATH,
   GIT_BRANCH_16_PATH,
+  HISTORY_16_PATH,
   iconSvg,
   MARK_GITHUB_16_PATH,
   MOON_16_PATH,
@@ -116,7 +127,13 @@ import {
   listColumnLayout,
   restoredListWidth,
 } from "./core/list-column";
-import type { PaneSide, Tab, TabTarget } from "./core/main-tabs";
+import {
+  type PaneSide,
+  type Tab,
+  type TabTarget,
+  withTerminalTmux,
+} from "./core/main-tabs";
+import { renderMarkdownPreview } from "./core/markdown-preview";
 import {
   diffLayoutFor,
   PHONE_MEDIA_QUERY,
@@ -137,6 +154,8 @@ import {
   clampPanelSize,
   HISTORY_WIDTH,
   SIDEBAR_WIDTH,
+  TERMINAL_IMAGE_SHELF_HEIGHT,
+  TERMINAL_IMAGE_SHELF_WIDTH,
 } from "./core/panel-sizes";
 import { isProjectColor, projectInitials } from "./core/project-colors";
 import {
@@ -186,29 +205,30 @@ import {
   writeStoredSize,
 } from "./core/stored-size";
 import {
+  isTerminalImageShelfPlacement,
   type TerminalImageRef,
   type TerminalImagesResponse,
   terminalImageExtension,
   validateTerminalImageResponseUrls,
 } from "./core/terminal-images";
+import type { TerminalTabProject } from "./core/terminal-tab-name";
 import {
-  projectRootOfPath,
-  type TerminalTabProject,
-} from "./core/terminal-tab-name";
-import { clampTerminalFontSize, type TmuxClientWindow } from "./core/tmux";
+  clampTerminalFontSize,
+  type TmuxClientWindow,
+  type TmuxPlace,
+} from "./core/tmux";
 import { isToolId, type ToolId } from "./core/tools";
-import {
-  type AppSettingsState,
-  type DiffCardElement,
-  type DiffMeta,
-  type FileMeta,
-  type HljsApi,
-  type SettingsResponse,
-  type SidebarItem,
-  THEME_PALETTES,
-  type ThemePalette,
-  type UndoActionResponse,
-  type ViewState,
+import type {
+  AppSettingsState,
+  DiffCardElement,
+  DiffMeta,
+  FileMeta,
+  HljsApi,
+  RepoTreeEntry,
+  SettingsResponse,
+  SidebarItem,
+  UndoActionResponse,
+  ViewState,
 } from "./core/types";
 import { createAccountsBand } from "./views/agents/accounts-band";
 import { createAccountsClient } from "./views/agents/accounts-client";
@@ -218,6 +238,7 @@ import {
   createAccountsSettings,
 } from "./views/agents/accounts-settings";
 import {
+  AGENT_HOOKS_HELP_SECTION,
   AGENT_HOOKS_SECTION_ID,
   createAgentHooksSettings,
 } from "./views/agents/agent-hooks-settings";
@@ -229,6 +250,10 @@ import {
   mountAgentsSidebar,
 } from "./views/agents/agents-sidebar";
 import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
+import {
+  type HandoffMenuActions,
+  handoffMenuItems,
+} from "./views/agents/handoff";
 import { agentsText } from "./views/agents/i18n";
 import { paneText, shellName } from "./views/agents/pane-text";
 import { mountUsageStatus } from "./views/agents/usage-status";
@@ -260,18 +285,21 @@ import {
   fileRouteKeepingActiveView,
   isBlobOrBlameFileRoute,
 } from "./views/file-shell";
+import { helpLabels } from "./views/help-guides";
 import { createShortcutSettings } from "./views/help-keybinding-editor";
 import { formatKeyBinding } from "./views/help-keybindings";
 import {
   createHelpPage,
   helpLanguageFromRoute,
   helpSectionFromRoute,
+  helpSectionName,
   openHelpKeybindings,
   openHelpSection,
 } from "./views/help-page";
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
 import { createImageTabView, type ImageTabHandle } from "./views/image-tab";
+import { createImageTabReturn } from "./views/image-tab-return";
 import {
   createJournalView,
   type JournalView,
@@ -289,6 +317,7 @@ import {
   createListTreeOpen,
   localizeListTreeOpen as setListTreeOpenLabel,
 } from "./views/list-tree-open";
+import { mainTabsText } from "./views/main-tabs/i18n";
 import {
   COMFORTABLE_PANE_WIDTH,
   createMainTabsView,
@@ -299,8 +328,9 @@ import {
   type SavedTabs,
   type SavedWrite,
   SPLIT_DIVIDER_WIDTH,
+  shellGroupOf,
+  type ViewScreen,
 } from "./views/main-tabs/main-tabs-view";
-import { mainTabsText } from "./views/main-tabs/i18n";
 import { pageIconPaths } from "./views/main-tabs/tab-icons";
 import { installMobileShell } from "./views/mobile-shell";
 import { createProjectActions } from "./views/projects/project-actions";
@@ -326,6 +356,7 @@ import {
   type PaletteCommand,
 } from "./views/search-palette-ui";
 import { createSearchResultsView } from "./views/search-results-view";
+import { createSettingsPage } from "./views/settings-page";
 import { type AppNav, mountAppNav } from "./views/shell/app-nav";
 import {
   readEarlyLook,
@@ -352,27 +383,31 @@ import {
 } from "./views/status-label";
 import { terminalText } from "./views/terminal/i18n";
 import {
+  DEFAULT_IMAGE_SHELF_LAYOUT,
+  type ImageShelfLayout,
+} from "./views/terminal/image-shelf";
+import {
   createShellEndNotice,
   createShellEndTracker,
 } from "./views/terminal/shell-ends";
 import { createTerminalView } from "./views/terminal/terminal-view";
+import { installTitleTooltips } from "./views/title-tooltip";
 import { toolsText } from "./views/tools/i18n";
 import { createToolsView } from "./views/tools/tools-view";
 import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
   createViewerSettings,
   SETTINGS_CATEGORIES,
+  type ViewerSettingsChoices,
   type ViewerSettingsDraft,
   type ViewerSettingsText,
 } from "./views/viewer-settings";
+import { VIEWER_SETTINGS_TEXT } from "./views/viewer-settings-i18n";
 import { worktreeText } from "./views/worktree-i18n";
 import { createWorktreeView, type WorktreeView } from "./views/worktree-view";
 
 /** 画面の入口の絵柄と、その画面へ移るキー (Worktrees にはキーが無い)。 */
-const VIEW_STRIP_KEYS: Record<
-  "repo" | "diff" | "history" | "worktree" | "database" | "journal",
-  KeymapAction | null
-> = {
+const VIEW_STRIP_KEYS: Record<ViewScreen, KeymapAction | null> = {
   repo: "goto-repo",
   diff: "goto-diff",
   history: "goto-history",
@@ -434,6 +469,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   let SERVER_SCOPE_WATCH_LIMIT_DEFAULT = 1024;
   let SERVER_SCOPE_WATCH_LIMIT_MIN = 16;
   let SERVER_SCOPE_WATCH_LIMIT_MAX = 65536;
+  // macOS と Windows は木全体を OS のハンドル 1 つで見るので、ディレクトリ数の
+  // 上限は効かない (設定の節を出さない。viewer-settings.ts の watchLimitApplies)。
+  let SERVER_SCOPE_WATCH_RECURSIVE = false;
   const UNDO_STACK: UndoActionResponse[] = [];
   let PENDING_G_SCOPE: KeymapScope | null = null;
   let PENDING_G_UNTIL = 0;
@@ -808,6 +846,15 @@ window.GdpExpandLogic = GdpExpandLogic;
   function shownKeyBindings(): KeyBinding[] {
     const standalone = isStandaloneWindow();
     return activeKeyBindings().filter((binding) => standalone || !binding.pwa);
+  }
+
+  /** 画面の入口 (とグループの ▾ の画面の行) に添えるキーの表記。無ければ ""。 */
+  function viewScreenKey(screen: ViewScreen): string {
+    const action = VIEW_STRIP_KEYS[screen];
+    const binding = action
+      ? shownKeyBindings().find((item) => item.action === action)
+      : undefined;
+    return binding ? formatKeyBinding(binding) : "";
   }
 
   let pendingSettingsPatch: SettingsPatch | null = null;
@@ -1194,10 +1241,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     return APP_SETTINGS.theme === "light" ? "light" : "dark";
   }
 
-  function savedPalette(): ThemePalette {
-    return (
-      THEME_PALETTES.find((value) => value === APP_SETTINGS.palette) ?? "violet"
-    );
+  function savedColorTheme(): ColorTheme {
+    return isColorTheme(APP_SETTINGS.colorTheme)
+      ? APP_SETTINGS.colorTheme
+      : DEFAULT_COLOR_THEME;
+  }
+
+  function savedTerminalTone(): TerminalTone {
+    return isTerminalTone(APP_SETTINGS.terminalTone)
+      ? APP_SETTINGS.terminalTone
+      : DEFAULT_TERMINAL_TONE;
   }
 
   function savedSidebarView(): SidebarView {
@@ -1259,15 +1312,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       SERVER_SCOPE_WATCH_LIMIT_MIN = settings.scope.watch_limit_min;
     if (typeof settings.scope.watch_limit_max === "number")
       SERVER_SCOPE_WATCH_LIMIT_MAX = settings.scope.watch_limit_max;
-    if (typeof settings.scope.watch_recursive === "boolean") {
-      // macOS and Windows watch the whole tree through one OS handle, so
-      // there are no per-directory watchers for this limit to cap. Hide the
-      // control rather than offer a setting that changes nothing.
-      const watchSection = document.querySelector<HTMLElement>(
-        "#watch-settings-section",
-      );
-      if (watchSection) watchSection.hidden = settings.scope.watch_recursive;
-    }
+    if (typeof settings.scope.watch_recursive === "boolean")
+      SERVER_SCOPE_WATCH_RECURSIVE = settings.scope.watch_recursive;
     return settings;
   }
 
@@ -1608,7 +1654,7 @@ window.GdpExpandLogic = GdpExpandLogic;
               screen: "help",
               range,
               lang: STATE.language,
-              section: "settings",
+              section: "overview",
             };
           default:
             return { screen: target.page, range };
@@ -1706,6 +1752,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     splitListColumnWidth: () => splitListColumnWidth(),
     getLanguage: () => STATE.language,
     pageLabel: (page) => uiText().nav[page],
+    screenKey: (screen) => viewScreenKey(screen),
     navigate: (route, replace) => {
       if (replace) replaceWithRoute(route);
       else navigateToRoute(route);
@@ -1713,6 +1760,24 @@ window.GdpExpandLogic = GdpExpandLogic;
       // もの (setRoute の後と同じ)。分割のボタンで右に出した直後に、URL が
       // 左の面のファイルのまま残っていた。
       syncFocusedPaneUrl("replace");
+    },
+    // 前面 (ターミナル・画像) の下の本文だけを置き換える (閉じた画面のタブの
+    // route を本文と URL に残さない)。setRoute の置き換えは syncRoute(route,
+    // false) なので前面は変えない。URL の ?terminal= は setRoute が組み直すので戻す。
+    replaceBody: (route) => {
+      const terminal = parseTerminalOverlay(window.location.search);
+      setRoute(route, true);
+      if (terminal === null) return;
+      const path = window.location.pathname + window.location.search;
+      const next = withTerminalOverlay(path, terminal);
+      if (next !== path)
+        history.replaceState(history.state, "", next + window.location.hash);
+    },
+    // 窓ごとの前面。sessionStorage は取り出すだけで例外になる環境があるので、
+    // 取り出しも呼ばれたときにする (例外は読む・書く側が理由ごと出す)。
+    windowStorage: {
+      getItem: (key) => window.sessionStorage.getItem(key),
+      setItem: (key, value) => window.sessionStorage.setItem(key, value),
     },
     currentRoute: () => STATE.route,
     defaultRoute: defaultRouteForTab,
@@ -1732,7 +1797,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     onNewTab: (side, anchor) => void openNewTabMenu(side, anchor),
     stopTerminal: (session) => void stopTerminal(session as ShellSessionId),
-    terminalMenuItems: () => TERMINAL_VIEW.menuItems(),
+    // タブのシェルがエージェントのペインを映していれば、行と同じ
+    // 「別のアカウントで続ける…」も出す (views/agents/handoff.ts)。
+    terminalMenuItems: (session) => {
+      const pane = paneForShell(session);
+      return [
+        ...TERMINAL_VIEW.menuItems(),
+        ...(pane
+          ? handoffMenuItems(pane, agentsText(STATE.language), HANDOFF_ACTIONS)
+          : []),
+      ];
+    },
     // 全プロジェクト共通の配置 (server/main-tabs-store.ts)。root はこの裏の根で、
     // タブの持ち物のプロジェクトになる。
     loadSaved: () =>
@@ -1748,7 +1823,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         body: JSON.stringify({
           baseRev: base.rev,
           base: base.layout,
-          layout,
+          layout: withTerminalTmux(layout, (session) =>
+            TAB_TMUX_PLACES.get(session),
+          ),
         }),
       });
       if (!response.ok)
@@ -1769,6 +1846,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     terminalProject: (session) => terminalProjectOf(session),
     switchProject: (root, route, tab) =>
       openProjectAt(root, projectTabPath(route, tab)),
+    // グループの ▾ の新しいシェル・エージェント (押せるかは main-tabs-view の
+    // groupMenuFor が決める。ここは材料と作り方だけ)。
+    newShellIn: (root, side) => void openShellIn(root, side),
+    launchAgentIn: (root) => launchAgent(root),
+    groupFacts: (root) => {
+      const shells = TERMINAL_VIEW.knownShells();
+      return {
+        shellUnavailable:
+          shells && !shells.available
+            ? `${terminalText(STATE.language).shellUnavailable}\n${shells.reason ?? ""}`
+            : null,
+        git:
+          AGENT_MONITOR.snapshot().overview?.projects.find(
+            (item) => item.root === root,
+          )?.git ?? null,
+      };
+    },
     // 別のプロジェクトのファイルを /p/<鍵> から読めるのは入口のサーバの下だけ。
     foreignInPlace: () => projectKey() !== null,
     backupSaved: async () => {
@@ -1798,6 +1892,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 言語の当て直し (起動の途中でも呼ばれる) が読むので、ここで宣言する。
   /** 面ごとの画像の部品 (使い回す。setImage で差し替える)。 */
   const IMAGE_VIEWS: Partial<Record<PaneSide, ImageTabHandle>> = {};
+  /** 端末から開いた画像のタブを閉じたら、開いたシェルへ戻す。 */
+  const IMAGE_TAB_RETURN = createImageTabReturn(MAIN_TABS);
   /** 画像のパス → 引いた画像と前後の並び (棚から開いたときは棚の並び)。 */
   const IMAGE_REFS = new Map<
     string,
@@ -1991,12 +2087,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     sidebarToggleTitle: fileListToggleTitle,
     onUserToggledSidebarHidden,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
-    omittedDirectoryBadge: (reason) => {
-      const text = uiText().sidebar;
-      return reason === "heavy"
-        ? { label: text.omittedHeavyLabel, title: text.omittedHeavyTitle }
-        : { label: text.omittedPrivateLabel, title: text.omittedPrivateTitle };
-    },
+    omittedDirectoryBadge,
     commitEntryBadge: (submodule) => {
       const text = uiText().sidebar;
       return submodule
@@ -2361,7 +2452,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         | "agents"
         | "tools"
         | "search"
-        | "help",
+        | "help"
+        | "settings",
         string
       >;
       global: {
@@ -2497,13 +2589,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         refreshTitle: string;
       };
       journal: JournalViewText;
-      quickHelp: {
-        buttonTitle: string;
-        panelTitle: string;
-        close: string;
-        viewAll: string;
-        settings: string;
-      };
       // フォーム本体は views/viewer-settings.ts が持つので、文言の形も
       // あちらの型に合わせる。ここで二重に並べると片方だけ増えて崩れる。
       settings: ViewerSettingsText;
@@ -2528,13 +2613,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         agents: "Agents",
         tools: "Tools",
         search: "Search",
-        help: "Settings & Help",
+        help: "Help",
+        settings: "Settings",
       },
       global: {
         annotations: "code annotations",
         queryHistory: "query history",
         settings: "viewer settings",
-        theme: "toggle theme",
+        theme: "toggle light / dark",
         search:
           "Search projects, agents, sessions and files (Ctrl+K) · Shift+click: grep (Ctrl+G)",
         lineHistory: "Line history",
@@ -2609,7 +2695,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         flatTitle: "flat list",
         filter: "Filter files…  /  ⌘K",
         filterTitle:
-          "Filter files. Plain text matches anywhere in the path; /pattern/ is a regex, ~text is a fuzzy match, *.ts or src/** is a glob. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help.",
+          "Filter files. Plain text matches anywhere in the path; /pattern/ is a regex, ~text is a fuzzy match, *.ts or src/** is a glob. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for keyboard shortcuts.",
         filterCountTitle: (visible, total) =>
           `${visible} of ${total} files match the filter`,
         filterClear: "Clear",
@@ -2771,147 +2857,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           split: "split",
         },
       },
-      quickHelp: {
-        buttonTitle: "quick help (shortcuts)",
-        panelTitle: "Quick Help",
-        close: "close quick help",
-        viewAll: "View all keybindings →",
-        settings: "Settings →",
-      },
-      settings: {
-        display: "Display",
-        theme: "Theme",
-        themeHelp:
-          "Applies right away. The T key switches between light and the dark theme you picked.",
-        themeNames: {
-          dark: "Dark (violet)",
-          graphite: "Dark (graphite)",
-          warm: "Dark (warm gray)",
-          light: "Light",
-        },
-        language: "Language",
-        fileListFontSize: "UI font size",
-        fileListFontSizeHelp: "Applies to all UI except code content.",
-        codeFontSize: "Code font size",
-        sizeSmall: "Small",
-        sizeRegular: "Regular",
-        sizeLarge: "Large",
-        sizeExtraLarge: "Extra Large",
-        displaySource:
-          "Theme, language, font sizes, key bindings, notifications and dismissed hints are shared by all projects. Excluded directories and the settings below them apply to this repository only.",
-        sharedTag: "All projects",
-        sharedTagTitle:
-          "Shared by all projects: changing it here changes it everywhere, and it stays the same when you switch projects.",
-        userSettingsError: (detail) =>
-          `The settings shared by all projects cannot be used, so this repository's settings are shown. Changes to them are not saved until this is fixed:\n${detail}`,
-        excludedDirectories: "Excluded directories",
-        omitDirs: "Skip these directory names while browsing and searching",
-        omitDirsHelp:
-          "Reads no contents inside these directories. Applies to the sidebar (Files), Ctrl+K (file search), Ctrl+G (grep), Datastores, and the file change watcher. Supports gitignore-style wildcards (*, ?, [abc], [!abc]).",
-        excludeNames: "Hide these file or directory names completely",
-        excludeNamesHelp:
-          "Removes matching files or directories from the sidebar, search, and grep results entirely. Unlike Skip, the names themselves disappear from the UI. Supports gitignore-style wildcards (*, ?, [abc], [!abc]).",
-        reset: "Restore defaults",
-        save: "Save changes",
-        saving: "Saving…",
-        saved: "Saved.",
-        unsaved: "Unsaved changes.",
-        saveNote: "Edits are not applied until you select Save changes.",
-        watchLimitInvalid: (min, max) =>
-          `Enter a whole number from ${min} to ${max}.`,
-        scopeSource: (project, source) =>
-          `Saved for project "${project}" in this browser. Source: ${source}. Used by the sidebar, Ctrl+K, Ctrl+G, Datastores, and the file change watcher. Restore defaults removes the browser override.`,
-        browserOverride: "Browser override",
-        serverDefault: "Server default",
-        uploadsTitle: "Uploads",
-        uploadEnabledLabel: "Allow file uploads into worktree folders",
-        uploadEnabledHelp:
-          "Disable to make the worktree read-only for everyone using this server.",
-        agentNotifyTitle: "Agent notifications",
-        agentNotifyWaitingLabel:
-          "Notify when an agent starts waiting for input",
-        agentNotifyDoneLabel: "Notify when an agent finishes working",
-        agentNotifyHelp:
-          "Desktop notifications from the Agents screen. The browser asks for permission once, from the Enable notifications button there. Nothing is shown while you are looking at that pane.",
-        datastoreTitle: "Datastores",
-        datastoreInferFkLabel:
-          "Infer FK from Rails-style naming (<name>_id → <names>.id)",
-        datastoreInferFkHelp:
-          "Show inferred foreign-key links in the related-data panel for SQL tables.",
-        datastoreS3TooltipLabel: "Show S3 object preview tooltip on hover",
-        datastoreS3TooltipHelp:
-          "Hovering an S3 object row shows the full key path and a content preview.",
-        watchTitle: "File change watcher",
-        watchLimit: "Maximum directories to watch",
-        watchLimitHelp: (defaultLimit) =>
-          `Higher values reduce missed updates in deep trees at the cost of file handles. Combine with the Skip list above to keep heavy folders (node_modules, .git, dist...) out of the watch budget. Default: ${defaultLimit}.`,
-        agentRulesTitle: "Terminal status detection",
-        agentRulesLabel: "Screen matching rules (JSON)",
-        agentRulesHelp:
-          "Rules can report working, waiting, idle, or skip. Configure priority, region, contains, regex, lineRegex, and nested all/any/not conditions. contains ignores letter case; regex accepts a leading (?i) for case-insensitive matching. To keep matching responsive, regex allows at most one variable-length repetition and rejects groups, alternation, and backreferences; express AND/OR with all/any. The highest-priority match wins; equal priorities keep the earlier rule. Save validates every rule before replacing the active set.",
-        agentRulesGuideTitle: "JSON format and example",
-        agentRulesGuideIntro:
-          "Enter one object with version 1 and a rules array. Each rule needs the required fields listed below plus at least one matcher.",
-        agentRulesGuideFields:
-          "Required fields: id (unique name), state (working, waiting, idle, or skip), priority (higher wins), and region. lines is also required when region is bottom_non_empty.",
-        agentRulesGuideMatchers:
-          "Matchers: contains and regex test the selected region; lineRegex tests each line. Combine matcher objects with all, any, and not.",
-        agentRulesGuideRegions:
-          "Regions: osc_title checks the terminal title, whole_recent checks the recent screen, bottom_non_empty checks the last non-empty lines, and last_non_empty checks only the final non-empty line.",
-        agentRulesGuideExample: `{
-  "version": 1,
-  "rules": [
-    {
-      "id": "waiting_for_confirmation",
-      "state": "waiting",
-      "priority": 900,
-      "region": "bottom_non_empty",
-      "lines": 12,
-      "contains": ["enter to confirm"],
-      "not": [{ "contains": ["finished"] }]
-    }
-  ]
-}`,
-        agentRulesReset: "Use built-in rules",
-        agentRulesSourceDefault: "Source: built-in rules",
-        agentRulesSourceSaved: "Source: saved rules",
-        agentRulesSourceEdited:
-          "Edited: Save changes validates these rules and uses them right away.",
-        agentRulesSourceRestore:
-          "Built-in rules: Save changes removes the saved rules and uses the built-in ones.",
-        categories: {
-          general: {
-            label: "General",
-            description:
-              "Uploads and the directories this repository skips or hides.",
-          },
-          appearance: {
-            label: "Appearance",
-            description: "Theme, language, and font sizes.",
-          },
-          agents: {
-            label: "Agents",
-            description: "Notifications and hooks.",
-          },
-          shortcuts: {
-            label: "Shortcuts",
-            description:
-              "Keys for every action, where each key works, and JSON export and import.",
-          },
-          accounts: {
-            label: "Accounts",
-            description:
-              "Sign-in per settings directory, usage, and launch commands.",
-          },
-          advanced: {
-            label: "Advanced",
-            description:
-              "Datastores, file watching, and terminal status detection.",
-          },
-        },
-        searchPlaceholder: "Search settings",
-        searchNoMatch: (query) => `No settings match "${query}".`,
-      },
+      settings: VIEWER_SETTINGS_TEXT.en,
       annotations: {
         title: "Annotations",
         follow: "Follow new notes",
@@ -2932,13 +2878,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         agents: "エージェント",
         tools: "ツール",
         search: "検索",
-        help: "設定・ヘルプ",
+        help: "ヘルプ",
+        settings: "設定",
       },
       global: {
         annotations: "コード注釈",
         queryHistory: "クエリ履歴",
         settings: "ビューア設定",
-        theme: "テーマ切り替え",
+        theme: "明暗の切り替え",
         search:
           "プロジェクト・エージェント・セッション・ファイルを検索 (Ctrl+K)・Shift+クリックで grep (Ctrl+G)",
         lineHistory: "この行の履歴",
@@ -3012,7 +2959,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         flatTitle: "一覧表示",
         filter: "ファイル絞り込み…  /  ⌘K",
         filterTitle:
-          "ファイルを絞り込みます。文字列はパスの部分一致、/pattern/ は正規表現、~text はあいまい一致、*.ts や src/** は glob。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でヘルプ。",
+          "ファイルを絞り込みます。文字列はパスの部分一致、/pattern/ は正規表現、~text はあいまい一致、*.ts や src/** は glob。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でキーボードショートカット。",
         filterCountTitle: (visible, total) =>
           `${total} ファイル中 ${visible} 件が一致`,
         filterClear: "解除",
@@ -3179,145 +3126,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           split: "分割",
         },
       },
-      quickHelp: {
-        buttonTitle: "クイックヘルプ(ショートカット)",
-        panelTitle: "クイックヘルプ",
-        close: "クイックヘルプを閉じる",
-        viewAll: "すべてのキーバインドを見る →",
-        settings: "設定 →",
-      },
-      settings: {
-        display: "表示",
-        theme: "テーマ",
-        themeHelp:
-          "選ぶとすぐに変わります。T キーでライトと、選んだダークを切り替えます。",
-        themeNames: {
-          dark: "ダーク (紫)",
-          graphite: "ダーク (無彩色)",
-          warm: "ダーク (暖かい灰色)",
-          light: "ライト",
-        },
-        language: "言語",
-        fileListFontSize: "UIの文字サイズ",
-        fileListFontSizeHelp: "コード本文を除くUI全体に適用されます。",
-        codeFontSize: "コード表示の文字サイズ",
-        sizeSmall: "小",
-        sizeRegular: "標準",
-        sizeLarge: "大",
-        sizeExtraLarge: "特大",
-        displaySource:
-          "テーマ・言語・文字サイズ・キー割り当て・通知・閉じた案内は、全プロジェクト共通です。除外ディレクトリから下の設定は、このリポジトリだけの設定です。",
-        sharedTag: "全プロジェクト共通",
-        sharedTagTitle:
-          "全プロジェクト共通: ここで変えるとどのプロジェクトでも変わり、プロジェクトを移っても同じです。",
-        userSettingsError: (detail) =>
-          `全プロジェクト共通の設定を使えないため、このリポジトリの設定で表示しています。直るまで、この節の変更は保存されません:\n${detail}`,
-        excludedDirectories: "除外ディレクトリ",
-        omitDirs: "閲覧と検索でスキップするディレクトリ名",
-        omitDirsHelp:
-          "これらのディレクトリの中身は読み込みません。サイドバー（Files）・Ctrl+K（ファイル検索）・Ctrl+G（grep）・Datastores・File change watcher の5機能すべてに適用されます。gitignore方式のワイルドカード（*, ?, [abc], [!abc]）に対応しています。",
-        excludeNames: "完全に非表示にするファイル名またはディレクトリ名",
-        excludeNamesHelp:
-          "リスト中の名前に一致するファイル/ディレクトリを、サイドバー・検索結果・grep 結果から完全に消します。Skip と違い、名前自体が UI に出なくなります。gitignore方式のワイルドカード（*, ?, [abc], [!abc]）に対応しています。",
-        reset: "デフォルトに戻す",
-        save: "変更を保存",
-        saving: "保存しています…",
-        saved: "保存しました。",
-        unsaved: "未保存の変更があります。",
-        saveNote: "「変更を保存」を押すまで、編集内容は適用されません。",
-        watchLimitInvalid: (min, max) =>
-          `${min}〜${max}の整数を入力してください。`,
-        scopeSource: (project, source) =>
-          `このブラウザのプロジェクト "${project}" に保存されます。ソース: ${source}。サイドバー、Ctrl+K、Ctrl+G、Datastores、File change watcher で使われます。「デフォルトに戻す」でブラウザ側の上書きを削除します。`,
-        browserOverride: "ブラウザ側の上書き",
-        serverDefault: "サーバ既定値",
-        uploadsTitle: "アップロード",
-        uploadEnabledLabel: "ワークツリーへのファイルアップロードを許可する",
-        uploadEnabledHelp:
-          "オフにすると、このサーバを使う全員に対してワークツリーは読み取り専用になります。",
-        agentNotifyTitle: "エージェントの通知",
-        agentNotifyWaitingLabel: "エージェントが入力待ちになったら通知する",
-        agentNotifyDoneLabel: "エージェントの作業が終わったら通知する",
-        agentNotifyHelp:
-          "エージェント画面からデスクトップ通知を出します。ブラウザの許可は、その画面の「通知を有効にする」から 1 度だけ求めます。そのペインをいま見ているときは通知しません。",
-        datastoreTitle: "データストア",
-        datastoreInferFkLabel:
-          "Rails 命名規約 (<name>_id → <names>.id) から FK を推測",
-        datastoreInferFkHelp:
-          "SQL テーブルの関連データパネルに Rails 命名規約由来の仮想 FK リンクを表示します。",
-        datastoreS3TooltipLabel: "S3 オブジェクトの hover プレビューを表示",
-        datastoreS3TooltipHelp:
-          "S3 オブジェクト行にホバーすると、完全な key とコンテンツプレビューを表示します。",
-        watchTitle: "ファイル変更の監視",
-        watchLimit: "監視するディレクトリ数の上限",
-        watchLimitHelp: (defaultLimit) =>
-          `値を大きくすると深いツリーの変更を取りこぼしにくくなりますが、ファイルハンドル数を消費します。上の Skip リストと併用すると、重いフォルダ（node_modules, .git, dist など）を監視枠から外せます。既定値: ${defaultLimit}。`,
-        agentRulesTitle: "ターミナルのAI状態判定",
-        agentRulesLabel: "画面の一致ルール（JSON）",
-        agentRulesHelp:
-          "各ルールで working（作業中）・waiting（入力待ち）・idle（待機中）・skip（状態を維持）を指定できます。priority、region、contains、regex、lineRegex、入れ子の all/any/not を編集できます。contains は大文字小文字を区別せず、regex は先頭の (?i) による大小無視に対応します。判定処理を止めないため、regex の可変長の繰返しは1個までで、グループ・選択・後方参照は使えません。AND/OR は all/any で表します。優先度が最大の一致が採用され、同点は上にあるルールが優先されます。保存前に全ルールを検証します。",
-        agentRulesGuideTitle: "JSONの書式と入力例",
-        agentRulesGuideIntro:
-          "version が 1、rules が配列のJSONオブジェクトを入力します。各ルールには下記の必須項目と、1個以上の一致条件が必要です。",
-        agentRulesGuideFields:
-          "必須項目: id（一意の名前）、state（working / waiting / idle / skip）、priority（大きい値を優先）、region。region が bottom_non_empty の場合は lines も必要です。",
-        agentRulesGuideMatchers:
-          "一致条件: contains と regex は選択した領域全体、lineRegex は各行を調べます。一致条件のオブジェクトは all / any / not で組み合わせられます。",
-        agentRulesGuideRegions:
-          "region: osc_title はターミナルタイトル、whole_recent は直近の画面全体、bottom_non_empty は末尾の非空行、last_non_empty は最後の非空行だけを調べます。",
-        agentRulesGuideExample: `{
-  "version": 1,
-  "rules": [
-    {
-      "id": "waiting_for_confirmation",
-      "state": "waiting",
-      "priority": 900,
-      "region": "bottom_non_empty",
-      "lines": 12,
-      "contains": ["enter to confirm"],
-      "not": [{ "contains": ["finished"] }]
-    }
-  ]
-}`,
-        agentRulesReset: "組み込みルールに戻す",
-        agentRulesSourceDefault: "適用中: 組み込みルール",
-        agentRulesSourceSaved: "適用中: 保存したルール",
-        agentRulesSourceEdited:
-          "編集中: 「変更を保存」で検証し、すぐに使います。",
-        agentRulesSourceRestore:
-          "組み込みルール: 「変更を保存」で保存したルールを消し、組み込みのルールを使います。",
-        categories: {
-          general: {
-            label: "一般",
-            description:
-              "アップロードと、このリポジトリで読まない・隠すディレクトリ。",
-          },
-          appearance: {
-            label: "表示",
-            description: "テーマ、言語、文字の大きさ。",
-          },
-          agents: {
-            label: "エージェント",
-            description: "通知とフック。",
-          },
-          shortcuts: {
-            label: "ショートカット",
-            description:
-              "操作ごとのキーと、キーの効く所。JSON の書き出し・読み込み。",
-          },
-          accounts: {
-            label: "アカウント",
-            description:
-              "設定ディレクトリごとのログイン、使用量、起動コマンド。",
-          },
-          advanced: {
-            label: "詳細",
-            description: "データストア、ファイルの監視、端末の状態判定。",
-          },
-        },
-        searchPlaceholder: "設定を検索",
-        searchNoMatch: (query) => `「${query}」に当てはまる設定はありません。`,
-      },
+      settings: VIEWER_SETTINGS_TEXT.ja,
       annotations: {
         title: "注釈",
         follow: "新しい注釈へ自動移動",
@@ -3361,9 +3170,29 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (button) button.textContent = text;
   }
 
+  function omittedDirectoryBadge(
+    reason: RepoTreeEntry["children_omitted_reason"],
+  ): { label: string; title: string } {
+    const text = uiText().sidebar;
+    return reason === "heavy"
+      ? { label: text.omittedHeavyLabel, title: text.omittedHeavyTitle }
+      : { label: text.omittedPrivateLabel, title: text.omittedPrivateTitle };
+  }
+
   function localizeViewerChrome() {
     const text = uiText();
     document.documentElement.lang = STATE.language;
+    // ファイル一覧の札 (非公開・大きい) は、一覧を描いたときの言語のまま残る。
+    // 開いた直後は設定 (言語) より先に一覧が描かれることがあるので書き直す。
+    for (const badge of document.querySelectorAll<HTMLElement>(
+      ".dir-omitted",
+    )) {
+      const shown = omittedDirectoryBadge(
+        badge.classList.contains("dir-omitted-heavy") ? "heavy" : "internal",
+      );
+      badge.textContent = shown.label;
+      badge.title = shown.title;
+    }
     // 最下段の接続状態も今の言語で書き直す (状態は #status の class にある)。
     const status = $("#status").classList;
     setStatus(
@@ -3373,18 +3202,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     // 画面の入口 (木の見出しの絵柄の列)。絵だけなので、名前とキーは
     // title / aria-label に出す。
-    const bindings = shownKeyBindings();
     document
       .querySelectorAll<HTMLElement>(".view-strip-item")
       .forEach((link) => {
-        const route = link.dataset.route as keyof typeof VIEW_STRIP_KEYS;
+        const route = link.dataset.route as ViewScreen;
         const name = text.nav[route];
         if (!name) throw new Error(`view strip: no label for route ${route}`);
-        const action = VIEW_STRIP_KEYS[route];
-        const binding = action
-          ? bindings.find((item) => item.action === action)
-          : undefined;
-        const label = binding ? `${name} (${formatKeyBinding(binding)})` : name;
+        const key = viewScreenKey(route);
+        const label = key ? `${name} (${key})` : name;
         link.title = label;
         link.setAttribute("aria-label", label);
         const icon = link.querySelector<HTMLElement>(".goi-icon");
@@ -3417,12 +3242,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (theme) {
       theme.title = text.global.theme;
       theme.setAttribute("aria-label", text.global.theme);
-    }
-    const quickHelpBtn =
-      document.querySelector<HTMLButtonElement>("#quick-help-btn");
-    if (quickHelpBtn) {
-      quickHelpBtn.title = text.quickHelp.buttonTitle;
-      quickHelpBtn.setAttribute("aria-label", text.quickHelp.buttonTitle);
     }
     const searchBtn = document.querySelector<HTMLButtonElement>("#search-btn");
     if (searchBtn) {
@@ -3646,6 +3465,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         true,
       );
       renderHelpPage();
+    } else if (STATE.route.screen === "settings") {
+      renderSettingsPage();
     } else {
       syncHeaderMenu();
     }
@@ -3682,17 +3503,87 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function applyTheme() {
     document.documentElement.dataset.theme = STATE.theme;
-    // 既定の紫は属性なし。色違いはダークのときだけ効く (style.css 先頭)。
-    const palette = savedPalette();
-    if (palette === "violet") delete document.documentElement.dataset.palette;
-    else document.documentElement.dataset.palette = palette;
+    // テーマ (配色) は明暗と別に選ぶ。既定は属性なし (style.css 先頭)。
+    const colorTheme = savedColorTheme();
+    applyColorTheme(document.documentElement, colorTheme);
+    // ターミナルの中の明暗 (既定はダーク)。端末の色は terminal-screen.ts が
+    // この属性の変化を見て当て直す。
+    applyTerminalTone(document.documentElement, savedTerminalTone());
     rememberEarlyLook({
       theme: STATE.theme,
-      palette: palette === "violet" ? undefined : palette,
+      colorTheme: colorTheme === DEFAULT_COLOR_THEME ? undefined : colorTheme,
     });
     $<HTMLLinkElement>("#hljs-light").disabled = STATE.theme === "dark";
     $<HTMLLinkElement>("#hljs-dark").disabled = STATE.theme !== "dark";
     syncWindowFrameColor();
+  }
+
+  /** テーマ (配色) を選ぶ (設定の見本・⌘K)。明暗はそのまま。 */
+  function setColorTheme(theme: ColorTheme): void {
+    patchSettings({ colorTheme: theme });
+    applyTheme();
+    VIEWER_SETTINGS.syncTheme();
+  }
+
+  /**
+   * 設定のページで選ぶとすぐ効く、全プロジェクト共通の項目。別の窓で変えたら
+   * この窓にも当てる (refreshLookFromServer)。
+   */
+  const SHARED_CHOICE_KEYS = [
+    "theme",
+    "colorTheme",
+    "terminalTone",
+    "terminalImageShelfPlacement",
+    "terminalImageShelfWidth",
+    "terminalImageShelfHeight",
+    "language",
+    "sidebarFontSize",
+    "codeFontSize",
+    "agentNotifyWaiting",
+    "agentNotifyDone",
+  ] as const;
+
+  /**
+   * 別の窓で変えた明暗・テーマ・言語・文字の大きさ・通知 (全プロジェクト共通の
+   * 設定) をこの窓にも当てる。サーバがユーザー単位の設定の書き換えを SSE
+   * (user-settings) で知らせる。裏にあった間は SSE を切っているので、前面に
+   * 戻ったときにも取り直す。自分の書き込みがまだ終わっていなければ、それが
+   * 済むまで待つ (古い値で戻さない)。
+   */
+  async function refreshLookFromServer(): Promise<void> {
+    if (pendingSettingsPatch || settingsPatchInFlight) return;
+    const settings = await loadStateResponse<AppSettingsState>(
+      apiUrl("stateSettings"),
+      "settings state request failed",
+    );
+    if (pendingSettingsPatch || settingsPatchInFlight) return;
+    if (SHARED_CHOICE_KEYS.every((key) => settings[key] === APP_SETTINGS[key]))
+      return;
+    const languageChanged = settings.language !== APP_SETTINGS.language;
+    mergeLocalSettings(
+      Object.fromEntries(
+        SHARED_CHOICE_KEYS.map((key) => [key, settings[key] ?? null]),
+      ),
+    );
+    STATE.theme = savedTheme();
+    applyTheme();
+    applySidebarFontSize();
+    applyCodeFontSize();
+    TERMINAL_VIEW.applyImageShelfLayout();
+    if (languageChanged) setViewerLanguage(savedViewerLanguage(), false);
+    VIEWER_SETTINGS.sync();
+    VIEWER_SETTINGS.syncTheme();
+  }
+
+  function refreshLook(): void {
+    void refreshLookFromServer().catch((error: unknown) => {
+      console.error(
+        errorWithCause(
+          "could not apply the theme changed in another window",
+          error,
+        ),
+      );
+    });
   }
 
   /**
@@ -3839,8 +3730,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function scopeOmitSourceLabel(): string {
     return savedScopeOmitDirs() != null || savedScopeExcludeNames() != null
-      ? uiText().settings.browserOverride
-      : uiText().settings.serverDefault;
+      ? uiText().settings.scopeSaved
+      : uiText().settings.scopeDefault;
   }
 
   function refreshRepositoryTreeAfterSettings() {
@@ -3922,18 +3813,99 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function defaultViewerSettingsDraft(): ViewerSettingsDraft {
     return {
-      language: "en",
-      sidebarFontSize: "regular",
-      codeFontSize: "regular",
       omitDirs: serverScopeOmitDirsDefault().join("\n"),
       excludeNames: serverScopeExcludeNamesDefault().join("\n"),
       watchLimit: SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
-      uploadEnabled: true,
-      agentNotifyWaiting: true,
-      agentNotifyDone: true,
-      inferFkRails: false,
-      s3TooltipEnabled: true,
     };
+  }
+
+  /** 画像の棚の置き場所と大きさ (保存値。範囲外・未保存は既定)。 */
+  function imageShelfLayout(): ImageShelfLayout {
+    return {
+      placement: isTerminalImageShelfPlacement(
+        APP_SETTINGS.terminalImageShelfPlacement,
+      )
+        ? APP_SETTINGS.terminalImageShelfPlacement
+        : DEFAULT_IMAGE_SHELF_LAYOUT.placement,
+      width: clampPanelSize(
+        TERMINAL_IMAGE_SHELF_WIDTH,
+        APP_SETTINGS.terminalImageShelfWidth ??
+          TERMINAL_IMAGE_SHELF_WIDTH.default,
+      ),
+      height: clampPanelSize(
+        TERMINAL_IMAGE_SHELF_HEIGHT,
+        APP_SETTINGS.terminalImageShelfHeight ??
+          TERMINAL_IMAGE_SHELF_HEIGHT.default,
+      ),
+    };
+  }
+
+  function setImageShelfLayout(patch: Partial<ImageShelfLayout>): void {
+    const settings: SettingsPatch = {
+      ...(patch.placement !== undefined
+        ? { terminalImageShelfPlacement: patch.placement }
+        : {}),
+      ...(patch.width !== undefined
+        ? { terminalImageShelfWidth: patch.width }
+        : {}),
+      ...(patch.height !== undefined
+        ? { terminalImageShelfHeight: patch.height }
+        : {}),
+    };
+    mergeLocalSettings(settings);
+    patchSettings(settings);
+  }
+
+  /**
+   * 設定のページの選ぶ欄。テーマ (setColorTheme) と同じく、その場で当てて保存
+   * する。書き込みの失敗は reportPersistenceError が最下段に出す。
+   */
+  function chooseViewerSetting(choice: Partial<ViewerSettingsChoices>): void {
+    if (choice.language !== undefined)
+      setViewerLanguage(normalizeViewerLanguage(choice.language));
+    if (choice.sidebarFontSize !== undefined) {
+      patchSettings({
+        sidebarFontSize: normalizeViewerFontSize(choice.sidebarFontSize),
+      });
+      applySidebarFontSize();
+    }
+    if (choice.codeFontSize !== undefined)
+      saveCodeFontSize(choice.codeFontSize);
+    if (
+      choice.terminalTone !== undefined &&
+      isTerminalTone(choice.terminalTone)
+    ) {
+      patchSettings({ terminalTone: choice.terminalTone });
+      applyTheme();
+    }
+    if (
+      choice.terminalImageShelfPlacement !== undefined &&
+      isTerminalImageShelfPlacement(choice.terminalImageShelfPlacement)
+    ) {
+      setImageShelfLayout({ placement: choice.terminalImageShelfPlacement });
+      TERMINAL_VIEW.applyImageShelfLayout();
+    }
+    const appPatch: SettingsPatch = {};
+    for (const key of [
+      "uploadEnabled",
+      "agentNotifyWaiting",
+      "agentNotifyDone",
+    ] as const)
+      if (choice[key] !== undefined) appPatch[key] = choice[key];
+    if (Object.keys(appPatch).length > 0) patchSettings(appPatch);
+    const dbPrefsPatch: { inferFkRails?: boolean; s3TooltipEnabled?: boolean } =
+      {};
+    if (choice.inferFkRails !== undefined)
+      dbPrefsPatch.inferFkRails = choice.inferFkRails;
+    if (choice.s3TooltipEnabled !== undefined)
+      dbPrefsPatch.s3TooltipEnabled = choice.s3TooltipEnabled;
+    if (Object.keys(dbPrefsPatch).length > 0)
+      // 保存してある値は応答で決まるので、成否どちらでも欄を映し直す (失敗なら元に戻る)。
+      void DATABASE_VIEW.saveDbUiPrefs(dbPrefsPatch)
+        .catch((error: unknown) => {
+          reportPersistenceError("save datastore settings", error);
+        })
+        .then(() => VIEWER_SETTINGS.sync());
   }
 
   async function saveViewerSettings(
@@ -3943,91 +3915,27 @@ window.GdpExpandLogic = GdpExpandLogic;
       changedFields: readonly (keyof ViewerSettingsDraft)[];
     },
   ): Promise<void> {
-    const normalizedLanguage = normalizeViewerLanguage(draft.language);
-    const normalizedSidebarFontSize = normalizeViewerFontSize(
-      draft.sidebarFontSize,
-    );
-    const normalizedCodeFontSize = normalizeViewerFontSize(draft.codeFontSize);
-    const normalizedOmitDirs = normalizeScopeOmitDirs(draft.omitDirs);
-    const normalizedExcludeNames = normalizeScopeExcludeNames(
-      draft.excludeNames,
-    );
-    const normalized: ViewerSettingsDraft = {
-      language: normalizedLanguage,
-      sidebarFontSize: normalizedSidebarFontSize,
-      codeFontSize: normalizedCodeFontSize,
-      omitDirs: normalizedOmitDirs.join("\n"),
-      excludeNames: normalizedExcludeNames.join("\n"),
-      watchLimit:
-        normalizeScopeWatchLimit(draft.watchLimit) ??
-        SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
-      uploadEnabled: draft.uploadEnabled,
-      agentNotifyWaiting: draft.agentNotifyWaiting,
-      agentNotifyDone: draft.agentNotifyDone,
-      inferFkRails: draft.inferFkRails,
-      s3TooltipEnabled: draft.s3TooltipEnabled,
-    };
     const changed = new Set(options.changedFields);
     const appPatch: SettingsPatch = {};
-    const dbPrefsPatch: {
-      inferFkRails?: boolean | null;
-      s3TooltipEnabled?: boolean | null;
-    } = {};
     if (options.restoreDefaults) {
       Object.assign(appPatch, {
-        language: "en",
-        sidebarFontSize: null,
-        codeFontSize: null,
         scopeOmitDirs: null,
         scopeExcludeNames: null,
         scopeWatchLimit: null,
-        uploadEnabled: null,
-        agentNotifyWaiting: null,
-        agentNotifyDone: null,
       });
-      dbPrefsPatch.inferFkRails = null;
-      dbPrefsPatch.s3TooltipEnabled = null;
     } else {
-      if (changed.has("language")) appPatch.language = normalizedLanguage;
-      if (changed.has("sidebarFontSize"))
-        appPatch.sidebarFontSize = normalizedSidebarFontSize;
-      if (changed.has("codeFontSize"))
-        appPatch.codeFontSize = normalizedCodeFontSize;
-      if (changed.has("omitDirs")) appPatch.scopeOmitDirs = normalizedOmitDirs;
+      if (changed.has("omitDirs"))
+        appPatch.scopeOmitDirs = normalizeScopeOmitDirs(draft.omitDirs);
       if (changed.has("excludeNames"))
-        appPatch.scopeExcludeNames = normalizedExcludeNames;
+        appPatch.scopeExcludeNames = normalizeScopeExcludeNames(
+          draft.excludeNames,
+        );
       if (changed.has("watchLimit"))
-        appPatch.scopeWatchLimit = normalized.watchLimit;
-      if (changed.has("uploadEnabled"))
-        appPatch.uploadEnabled = normalized.uploadEnabled;
-      if (changed.has("agentNotifyWaiting"))
-        appPatch.agentNotifyWaiting = normalized.agentNotifyWaiting;
-      if (changed.has("agentNotifyDone"))
-        appPatch.agentNotifyDone = normalized.agentNotifyDone;
-      if (changed.has("inferFkRails"))
-        dbPrefsPatch.inferFkRails = normalized.inferFkRails;
-      if (changed.has("s3TooltipEnabled"))
-        dbPrefsPatch.s3TooltipEnabled = normalized.s3TooltipEnabled;
+        appPatch.scopeWatchLimit =
+          normalizeScopeWatchLimit(draft.watchLimit) ??
+          SERVER_SCOPE_WATCH_LIMIT_DEFAULT;
     }
-    const operations: Promise<void>[] = [];
-    if (Object.keys(appPatch).length > 0)
-      operations.push(persistSettingsPatch(appPatch));
-    if (Object.keys(dbPrefsPatch).length > 0)
-      operations.push(DATABASE_VIEW.saveDbUiPrefs(dbPrefsPatch));
-    const results = await Promise.allSettled(operations);
-    const errors = results.flatMap((result) =>
-      result.status === "rejected" ? [result.reason] : [],
-    );
-    if (errors.length > 0) {
-      throw errorWithCauses("save viewer settings failed", errors);
-    }
-
-    if (options.restoreDefaults || changed.has("language"))
-      setViewerLanguage(normalizedLanguage, false);
-    if (options.restoreDefaults || changed.has("sidebarFontSize"))
-      applySidebarFontSize();
-    if (options.restoreDefaults || changed.has("codeFontSize"))
-      applyCodeFontSize();
+    if (Object.keys(appPatch).length > 0) await persistSettingsPatch(appPatch);
     if (
       options.restoreDefaults ||
       changed.has("omitDirs") ||
@@ -4715,7 +4623,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         STATE.route.view === "blame" ||
         STATE.route.view === "history");
     const repoSidebarRoute = STATE.route.screen === "repo" || fileRepoBlobRoute;
-    if (STATE.route.screen !== "help") {
+    if (STATE.route.screen !== "help" && STATE.route.screen !== "settings") {
       document.querySelector(".gdp-help-shell")?.remove();
     }
     // The source view a diff-hosting page keeps open in place ("View File"
@@ -4877,13 +4785,14 @@ window.GdpExpandLogic = GdpExpandLogic;
                 STATE.route.screen === "help"
                   ? helpLanguageFromRoute(STATE.route)
                   : STATE.language,
-              // 左下の「設定」は、いつも設定の節を開く入口。
-              section:
-                link.id === "nav-settings"
-                  ? "settings"
-                  : helpSectionFromRoute(STATE.route),
+              section: helpSectionFromRoute(STATE.route),
               range: currentRange(),
             }),
+          );
+        }
+        if (link.dataset.route === "settings") {
+          link.href = withOverlayState(
+            buildRoute({ screen: "settings", range: currentRange() }),
           );
         }
       });
@@ -5111,6 +5020,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       AGENT_HOOK_STATUS = status;
       AGENTS_VIEW?.localize();
     },
+    helpLink: () => ({
+      label: `${agentsText(STATE.language).sidebar.help} › ${helpSectionName(STATE.language, AGENT_HOOKS_HELP_SECTION)}`,
+      href: `/help?section=${AGENT_HOOKS_HELP_SECTION}`,
+    }),
+    openHelp: () =>
+      openHelpSection(helpSectionDeps(), AGENT_HOOKS_HELP_SECTION),
   });
 
   // ---------- Accounts: views/agents/accounts-*.ts ----------
@@ -5126,6 +5041,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     serverRoot: () => ACCOUNTS_CLIENT.snapshot().data?.serverRoot ?? "",
     refreshOverview: () => AGENT_MONITOR.refresh(),
   });
+  // 「別のアカウントで続ける…」(行・タブの右クリック)。起動の画面を引き継ぎの
+  // 形で開く。フックが無いときの案内は、ヘルプのフックの節 (入れ方と、入れると
+  // 何が変わるか) へ。
+  const HANDOFF_ACTIONS: HandoffMenuActions = {
+    handoff: (pane) => {
+      ACCOUNT_DIALOGS.launch({ handoff: pane }).then(
+        () => AGENTS_VIEW?.localize(),
+        (error: unknown) =>
+          console.error("[code-viewer] handoff dialog failed", error),
+      );
+    },
+    openHookHelp: () =>
+      openHelpSection(helpSectionDeps(), AGENT_HOOKS_HELP_SECTION),
+  };
   const ACCOUNTS_SETTINGS = createAccountsSettings({
     client: ACCOUNTS_CLIENT,
     dialogs: ACCOUNT_DIALOGS,
@@ -5144,7 +5073,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       await persistSettingsPatch({
         keybindings: Object.keys(next).length ? next : null,
       });
-      renderHelpPage();
+      // ヘルプのキーの一覧と、設定の「ショートカット」を今のキーで描き直す。
+      if (STATE.route.screen === "help") renderHelpPage();
+      else if (STATE.route.screen === "settings") renderSettingsPage();
     },
     getSharedTag: () => ({
       text: uiText().settings.sharedTag,
@@ -5167,32 +5098,28 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 設定セクションが唯一の置き場で、ここは値の出し入れだけを受け持つ。
   const VIEWER_SETTINGS = createViewerSettings({
     getText: () => uiText().settings,
-    getTheme: () => {
-      if (STATE.theme === "light") return "light";
-      const palette = savedPalette();
-      return palette === "violet" ? "dark" : palette;
-    },
-    setTheme: (choice) => {
-      STATE.theme = choice === "light" ? "light" : "dark";
-      // ライトを選んでも、ダークの色違いの選択は残す (T で戻ったときに使う)。
-      const palette: ThemePalette | undefined =
-        choice === "light" ? undefined : choice === "dark" ? "violet" : choice;
-      patchSettings(
-        palette ? { theme: STATE.theme, palette } : { theme: STATE.theme },
-      );
+    getTheme: () => STATE.theme,
+    setTheme: (mode) => {
+      STATE.theme = mode;
+      patchSettings({ theme: mode });
       applyTheme();
     },
+    getColorTheme: savedColorTheme,
+    setColorTheme,
     getValues: () => ({
       userSettingsError: APP_SETTINGS.userSettingsError ?? "",
       language: STATE.language,
       sidebarFontSize: savedSidebarFontSize(),
       codeFontSize: savedCodeFontSize(),
+      terminalTone: savedTerminalTone(),
+      terminalImageShelfPlacement: imageShelfLayout().placement,
       omitDirs: effectiveScopeOmitDirs().join("\n"),
       excludeNames: effectiveScopeExcludeNames().join("\n"),
       watchLimit: effectiveScopeWatchLimit(),
       watchLimitMin: SERVER_SCOPE_WATCH_LIMIT_MIN,
       watchLimitMax: SERVER_SCOPE_WATCH_LIMIT_MAX,
       watchLimitDefault: SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
+      watchLimitApplies: !SERVER_SCOPE_WATCH_RECURSIVE,
       uploadEnabled: APP_SETTINGS.uploadEnabled !== false,
       agentNotifyWaiting: APP_SETTINGS.agentNotifyWaiting !== false,
       agentNotifyDone: APP_SETTINGS.agentNotifyDone !== false,
@@ -5210,6 +5137,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       agentRulesErrors: agentScreenRuleErrorsText(AGENT_SCREEN_RULE_ERRORS),
     }),
     getDefaultValues: defaultViewerSettingsDraft,
+    onChoose: chooseViewerSetting,
     refresh: async () => {
       await Promise.all([
         loadSettings(),
@@ -5235,6 +5163,37 @@ window.GdpExpandLogic = GdpExpandLogic;
     SHORTCUT_SETTINGS.localize();
   };
 
+  // ---------- Settings page: settings-page.ts ----------
+  const {
+    renderSettingsPage,
+    openSettingsPage,
+    openSettingsAt,
+    headingInHash: settingsHeadingInHash,
+  } = createSettingsPage({
+    $,
+    setRoute,
+    setPageMode,
+    setStatus,
+    currentRange,
+    cancelActiveSourceLoad,
+    removeStandaloneSource,
+    clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
+    getLanguage: () => STATE.language,
+    mountViewerSettings: (host) => VIEWER_SETTINGS.mount(host),
+    mountSettingsSearch: (host) => VIEWER_SETTINGS.mountSearch(host),
+    settingsCategories,
+    getSettingsCategory: () => VIEWER_SETTINGS.getCategory(),
+    setSettingsCategory: (category) => VIEWER_SETTINGS.setCategory(category),
+    revealHeading: (headingId) => VIEWER_SETTINGS.revealHeading(headingId),
+    hasHeading: (headingId) => VIEWER_SETTINGS.hasHeading(headingId),
+    openHelpSection: (section) => openHelpSection(helpSectionDeps(), section),
+  });
+
+  function settingsCategories() {
+    const labels = uiText().settings.categories;
+    return SETTINGS_CATEGORIES.map((id) => ({ id, ...labels[id] }));
+  }
+
   // ---------- Help page: extracted to help-page.ts ----------
   const { renderHelpPage } = createHelpPage({
     $,
@@ -5247,14 +5206,27 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     syncHeaderMenu,
     getLanguage: () => STATE.language,
-    mountViewerSettings: (host) => VIEWER_SETTINGS.mount(host),
-    mountSettingsSearch: (host) => VIEWER_SETTINGS.mountSearch(host),
-    settingsCategories: () => {
-      const labels = uiText().settings.categories;
-      return SETTINGS_CATEGORIES.map((id) => ({ id, ...labels[id] }));
+    // ヘルプの本文のボタン名は各画面の i18n から (views/help-guides.ts)。
+    // 一覧の列の頭の画面の名前と差分の帯のボタンは app が持つので渡す。
+    helpLabels: (lang) => {
+      const palette = activeKeyBindings().find(
+        (binding) => binding.action === "open-file-palette",
+      );
+      const text = UI_TEXT[lang];
+      return helpLabels(lang, {
+        diff: text.nav.diff,
+        history: text.nav.history,
+        worktree: text.nav.worktree,
+        tools: text.nav.tools,
+        split: text.topbar.split,
+        unified: text.topbar.unified,
+        ignoreWs: text.topbar.ignoreWsLabel,
+        hideTests: text.topbar.hideTestsLabel,
+        paletteKey: palette ? formatKeyBinding(palette) : "",
+      });
     },
-    getSettingsCategory: () => VIEWER_SETTINGS.getCategory(),
-    setSettingsCategory: (category) => VIEWER_SETTINGS.setCategory(category),
+    openAccountsSettings: () => openSettingsAt(ACCOUNTS_SECTION_ID),
+    toggleKeyboardShortcuts: () => QUICK_HELP?.toggle(),
     // ヘルプの一覧は PWA の窓のキーも (PWA) を付けて出す (通常のタブでも案内する)。
     getKeyBindings: activeKeyBindings,
     openShortcutSettings: () => openSettingsAt("shortcut-settings-title"),
@@ -5398,18 +5370,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         MARK_GITHUB_16_PATH,
       );
     }
-    const quickHelpIcon = document.querySelector<HTMLElement>(
-      "#quick-help-btn .goi-icon",
-    );
-    if (quickHelpIcon) {
-      quickHelpIcon.innerHTML = iconSvg("octicon-question", QUESTION_16_PATH);
-    }
     const navIcons: [string, string, string | string[]][] = [
       ["#nav-collapse", "octicon-sidebar-collapse", SIDEBAR_HIDE_16_PATHS],
       ["#nav-expand", "octicon-sidebar-expand", SIDEBAR_SHOW_16_PATHS],
       ["#nav-board-link", "octicon-apps", APPS_16_PATH],
+      ["#nav-add-project", "octicon-plus", PLUS_16_PATH],
       ["#nav-launch", "octicon-plus", PLUS_16_PATH],
       ["#nav-settings", "octicon-gear", GEAR_16_PATH],
+      ["#nav-help", "octicon-question", QUESTION_16_PATH],
     ];
     for (const [selector, className, paths] of navIcons) {
       const icon = document.querySelector<HTMLElement>(`${selector} .goi-icon`);
@@ -6197,7 +6165,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "main-tab-last") {
-      MAIN_TABS.activateNth(lastTabNumber(MAIN_TABS.layout()));
+      MAIN_TABS.activateNth(
+        lastTabNumber(MAIN_TABS.layout(), MAIN_TABS.groupOf),
+      );
       focusActiveMainTabSurface();
       return true;
     }
@@ -6234,7 +6204,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "open-settings") {
-      openHelpSection(helpSectionDeps(), "settings");
+      openSettingsPage();
+      return true;
+    }
+    if (action === "open-help-page") {
+      openHelpSection(helpSectionDeps(), helpSectionFromRoute(STATE.route));
       return true;
     }
     if (action === "switch-project") {
@@ -6437,8 +6411,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       historyLink.href = urlForRoute(route);
       setEmptyActionContent(
         historyLink,
-        "octicon-git-branch",
-        GIT_BRANCH_16_PATH,
+        "octicon-history",
+        HISTORY_16_PATH,
         text.noChangesHistory,
         text.noChangesHistoryTitle,
       );
@@ -6471,9 +6445,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   function load(
     options: { force?: boolean; changedPaths?: Set<string> | null } = {},
   ): Promise<RenderResult | null> {
-    if (STATE.route.screen === "help") {
+    if (STATE.route.screen === "help" || STATE.route.screen === "settings") {
       setStatus("live");
-      renderHelpPage();
+      if (STATE.route.screen === "help") renderHelpPage();
+      else renderSettingsPage();
       syncHeaderMenu();
       return Promise.resolve(null);
     }
@@ -6599,17 +6574,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     rememberEarlyLook({ split });
   }
 
-  /** 保存した配置に残った、サーバにもう無いシェルのタブを閉じる。 */
-  function closeTabsOfGoneShells(): void {
+  /**
+   * 保存した配置に残った、サーバにもう無いシェルのタブを繋ぎ直す (入口のサーバが
+   * 起き直すとシェルは全部終わる。recoverShellTabs)。
+   */
+  function recoverTabsOfGoneShells(): void {
     // 読み戻した時点のタブだけを見る (この後に開いたシェルは、一覧に載る前に
-    // 取り直しが返っても閉じない)。
+    // 取り直しが返っても触らない)。
     const saved = MAIN_TABS.terminalSessions();
     TERMINAL_VIEW.loadShells().then(
       (list) => {
-        // シェルを使えないサーバ (available: false) では一覧が空。閉じない。
+        // シェルを使えないサーバ (available: false) では一覧が空。触らない。
         if (!list.available) return;
         const live = new Set(list.sessions.map((session) => session.id));
-        MAIN_TABS.closeTerminals(saved.filter((id) => !live.has(id)));
+        recoverShellTabs(saved.filter((id) => !live.has(id)));
       },
       (error: unknown) =>
         console.error(
@@ -6620,6 +6598,15 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   loadInitialState().finally(() => {
+    // 設定とヘルプが 1 つのページだった頃の /help#<設定の見出し> は設定のページへ
+    // (ヘルプには無い見出しなので、ヘルプのまま開くと何も出ない)。
+    if (
+      STATE.route.screen === "help" &&
+      settingsHeadingInHash(window.location.hash)
+    ) {
+      STATE.route = { screen: "settings", range: STATE.route.range };
+      replaceUrlWithCurrentRoute();
+    }
     MAIN_TABS.syncRoute(STATE.route);
     // ?terminal= のタブが前面になるかは、読み戻したタブの並びで決まる。
     const restoring = MAIN_TABS.restore({
@@ -6639,7 +6626,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       )
         setRoute(INITIAL_RIGHT_ROUTE, true);
       syncTerminalFromUrl(INITIAL_TERMINAL_PARAM);
-      closeTabsOfGoneShells();
+      recoverTabsOfGoneShells();
       // 移ってきた先で開くペイン。一度きりなので、開いたら URL から外す
       // (読み直しで開き直さない)。行き先の判定は通さない (食い違ったときに
       // 移り直しを繰り返さない)。
@@ -6662,6 +6649,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.route.screen === "help") {
       setStatus("live");
       renderHelpPage();
+    } else if (STATE.route.screen === "settings") {
+      const heading = settingsHeadingInHash(window.location.hash);
+      if (heading) openSettingsAt(heading, true);
+      else {
+        setStatus("live");
+        renderSettingsPage();
+      }
     } else if (STATE.route.screen === "repo") loadRepo();
     else if (STATE.route.screen === "file" && dispatchFileRoute(STATE.route)) {
       // handled by dispatchFileRoute
@@ -6723,6 +6717,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         true,
       );
       renderHelpPage();
+    } else if (STATE.route.screen === "settings") {
+      setRoute({ screen: "settings", range }, true);
+      renderSettingsPage();
     } else {
       // Data を離れる後片付けは setRoute (leaveScreen) がする。
       setRoute({ screen: "diff", range }, true);
@@ -6820,10 +6817,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   QUICK_HELP = createQuickHelp({
     $,
     getLanguage: () => STATE.language,
-    getText: () => uiText().quickHelp,
     getKeyBindings: activeKeyBindings,
     openFullKeybindings: () => openHelpKeybindings(helpSectionDeps()),
-    openSettings: () => openHelpSection(helpSectionDeps(), "settings"),
+    openSettings: () => openSettingsPage(),
   });
 
   const DOCTOR_VIEW = createDoctorView({
@@ -7065,12 +7061,61 @@ window.GdpExpandLogic = GdpExpandLogic;
       mergeLocalSettings({ terminalImageShelfCollapsed: collapsed });
       patchSettings({ terminalImageShelfCollapsed: collapsed });
     },
+    // 棚の置き場所と大きさも人に付く設定 (全部の窓で同じ)。
+    getImageShelfLayout: imageShelfLayout,
+    // 画面のファイルのパス: 端末を隠さないよう反対の面で開く (⌘/Ctrl は固定の
+    // タブ)。行があればその行へ。
+    onOpenFile: (path, line, kept) => {
+      const route: FileRoute = {
+        screen: "file",
+        path,
+        ref: "worktree",
+        range: currentRange(),
+        view: "blob",
+        ...(line !== undefined ? { line } : {}),
+      };
+      if (kept) MAIN_TABS.openingNewTab(() => openFileInOtherPane(route));
+      else openFileInOtherPane(route);
+    },
+    // 棚の見出し: エージェントのペインはサイドバーと同じ名前 (種類 · 作業)。
+    paneName: (paneId) => {
+      const pane = AGENT_MONITOR.snapshot().overview?.panes.find(
+        (item) => item.id === paneId,
+      );
+      return pane?.kind
+        ? paneText(pane, agentsText(STATE.language)).headline
+        : null;
+    },
+    onImageShelfLayoutChange: (patch) => {
+      setImageShelfLayout(patch);
+      VIEWER_SETTINGS.sync();
+    },
     onOpenInTab: (session, pane, side) => {
-      if (pane) TAB_SHELL_PANES.set(session.id, pane);
+      if (pane) {
+        TAB_SHELL_PANES.set(session.id, pane);
+        // 開いた直後はサーバがまだシェルとペインを結び付けていない
+        // (shownInShell が空)。選んだペインの場所をここで覚え、保存に載せる。
+        rememberTmuxPlace(
+          session.id,
+          AGENT_MONITOR.snapshot().overview?.panes.find(
+            (item) => item.id === pane,
+          ),
+        );
+      }
       MAIN_TABS.openTerminal(session.id, side);
     },
     onShellEnded: (id) => closeEndedTerminal(id),
     onOpenFailed: (message) => TERMINAL_NOTICE.show(message),
+    // サーバが起き直して終わったシェルは、そのタブのグループのプロジェクトで開き直す。
+    // (グループは中身で決まるので、預けた右の面のタブでも引ける)。
+    reopenProject: (id) =>
+      shellProjectKey(
+        MAIN_TABS.groupOf({
+          id,
+          preview: false,
+          target: { kind: "terminal", session: id },
+        }),
+      ),
     tmuxWindow: (id) => TMUX_WINDOWS.get(id) ?? null,
     // 大きさを変えた後の取り直しは全画面共通の取り直しに相乗りする (重なれば
     // 走っているものを待つ)。
@@ -7078,8 +7123,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     onOpenImage: (image, gallery, kept) => {
       IMAGE_REFS.set(image.path, { image, images: gallery });
       const open = () => MAIN_TABS.openImage(image.path, "other-if-split");
-      if (kept) MAIN_TABS.openingNewTab(open);
-      else open();
+      IMAGE_TAB_RETURN.open(() => {
+        if (kept) MAIN_TABS.openingNewTab(open);
+        else open();
+      });
     },
   });
 
@@ -7675,6 +7722,7 @@ window.GdpExpandLogic = GdpExpandLogic;
             copyPath: (target) =>
               navigator.clipboard.writeText(filePathClipboardText(target)),
             openPath: (target) => openPathInOs(target, "file-parent"),
+            close: () => IMAGE_TAB_RETURN.close(side),
             language: STATE.language,
           });
           IMAGE_VIEWS[side] = view;
@@ -7716,6 +7764,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   );
 
   relocalizeTerminal = () => TERMINAL_VIEW.localize();
+
+  // title を持つ要素に速く出る吹き出し (アプリ全体で 1 つ)。
+  installTitleTooltips();
 
   // 電話の幅の骨格 (引き出し・下からの面・下端の帯・端末の操作札)。2 面は
   // 無いので、端末は左の面のものに送る。
@@ -7810,6 +7861,43 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
   }
 
+  /**
+   * シェルをそのプロジェクトの根で開くときの鍵 (このページのプロジェクト・
+   * どのプロジェクトでもないなら undefined: このページのプロジェクトで開く)。
+   */
+  async function shellProjectKey(
+    root: string | null,
+  ): Promise<string | undefined> {
+    return root === null || root === MAIN_TABS.currentProject()
+      ? undefined
+      : await projectKeyFor(root);
+  }
+
+  /**
+   * 新しいシェルを side の面に開いて前面に出す (＋ とグループの ▾)。root を
+   * 渡せば、そのプロジェクトの根をカレントにする: 入口はシェルの作業場所を
+   * 要求の鍵で決める (server/entry/server.ts)。別のプロジェクトの鍵は
+   * projectKeyFor (動いていなければ起こして知る。別のプロジェクトのファイルと
+   * 同じ経路)。失敗は理由の全文を出す。
+   */
+  async function openShellIn(
+    root: string | null,
+    side: PaneSide,
+  ): Promise<void> {
+    try {
+      await TERMINAL_VIEW.createShell(side, await shellProjectKey(root));
+    } catch (error) {
+      console.error(
+        `[code-viewer] shell create failed${root === null ? "" : ` in ${root}`}`,
+        error,
+      );
+      void showAlertDialog({
+        title: terminalText(STATE.language).shellCreateFailed,
+        body: formatErrorDetail(error),
+      });
+    }
+  }
+
   function newTabMenuItems(
     side: PaneSide,
     list: ShellListResponse | Error,
@@ -7834,15 +7922,7 @@ window.GdpExpandLogic = GdpExpandLogic;
             ? t.newShellTitle
             : `${t.shellUnavailable}\n${list.reason ?? ""}`,
         disabled: !(list instanceof Error) && !list.available,
-        onSelect: () => {
-          TERMINAL_VIEW.createShell(side).catch((error: unknown) => {
-            console.error("[code-viewer] shell create failed", error);
-            void showAlertDialog({
-              title: t.shellCreateFailed,
-              body: formatErrorDetail(error),
-            });
-          });
-        },
+        onSelect: () => void openShellIn(null, side),
       },
       // Tools と Search は page のタブ (左の面にだけ開く)。
       { label: uiText().nav.tools, onSelect: () => openToolsPage() },
@@ -8287,6 +8367,12 @@ window.GdpExpandLogic = GdpExpandLogic;
           (side === "right" && tab.target.kind === "file"));
       host.classList.toggle("is-shown", shown);
       host.dataset.kind = shown && tab ? tab.target.kind : "";
+      // ターミナルの面: ターミナルの明暗がダークなら、画面がライトでも箱の中を
+      // ダークの配色で描く (style.css の「ダーク」の塊)。
+      host.toggleAttribute(
+        "data-terminal-surface",
+        host.dataset.kind === "terminal",
+      );
       if (!shown || !tab) continue;
       const foreign =
         MAIN_TABS.groupOf(tab) !== null &&
@@ -8371,6 +8457,65 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 「Shell 2」になる。知らせには終わったもの (エージェント) の名前を出す。
    */
   const TAB_LAST_LABELS = new Map<string, string>();
+
+  /**
+   * タブのシェルが映していた tmux の場所 (保存する。core/main-tabs.ts の
+   * terminalTmux)。入口のサーバが起き直すとシェルは全部終わるので、この場所へ
+   * 同じ ID のシェルで繋ぎ直す (recoverShellTabs)。覚えるのはサーバが結び付けた
+   * ペイン (shownInShell) と、タブで開いたときに選んだペインだけ。TAB_SHELL_PANES
+   * からは覚えない: tmux が起き直すと同じ `%0` が別のペインに付く。消すのは
+   * タブを閉じたとき (保存に載せない)。
+   */
+  const TAB_TMUX_PLACES = new Map<string, TmuxPlace>();
+
+  function rememberTmuxPlace(
+    session: string,
+    pane: AgentPane | undefined,
+  ): void {
+    if (pane)
+      TAB_TMUX_PLACES.set(session, {
+        pane: pane.id,
+        session: pane.session,
+        window: pane.window,
+      });
+  }
+
+  /**
+   * サーバが替わって (入口が起き直した・読み直した) シェルが無くなったタブ。
+   * 閉じずに、tmux を映していたタブは同じ ID のシェルで同じ場所へ繋ぎ直す
+   * (タブの位置・グループ・選択はシェルの ID で決まるので変わらない)。場所が
+   * もう無い・合わないタブだけ閉じて知らせる。tmux を映していなかったタブは
+   * 残し、中に「新しいシェルで開き直す」を出す。サーバが同じままシェルが
+   * 終わったときは、今までどおり closeEndedTerminal が閉じる。
+   */
+  function recoverShellTabs(sessions: readonly string[]): void {
+    const saved = MAIN_TABS.layout().terminalTmux;
+    for (const session of sessions) {
+      // 覚えていなければ保存した値 (読み直した直後)。
+      const place = TAB_TMUX_PLACES.get(session) ?? saved?.[session];
+      if (!place) {
+        TERMINAL_VIEW.markEnded(session);
+        continue;
+      }
+      // 繋ぎ直すまでの名前付けと、同じペインを開いたときの重なりの判定用。
+      TAB_SHELL_PANES.set(session, place.pane);
+      TERMINAL_VIEW.reviveInTab(session, place).then(
+        (result) => {
+          if (result === "gone") closeEndedTerminal(session);
+        },
+        (error: unknown) => {
+          console.error(
+            `[code-viewer] could not reconnect the terminal tab of ${session} to tmux ${JSON.stringify(place)}`,
+            error,
+          );
+          TERMINAL_NOTICE.show(
+            `${terminalText(STATE.language).paneOpenFailed}\n${formatErrorDetail(error)}`,
+          );
+          TERMINAL_VIEW.markEnded(session);
+        },
+      );
+    }
+  }
   /** シェルごとの、中の tmux の端末とウインドウの大きさ (全画面共通の取り直し)。 */
   let TMUX_WINDOWS = new Map<string, TmuxClientWindow | null>();
   /** 前面でないタブのシェルの終わりを、取り直しの一覧から拾う。 */
@@ -8387,6 +8532,8 @@ window.GdpExpandLogic = GdpExpandLogic;
    */
   function closeEndedTerminal(session: string): void {
     TAB_SHELL_PANES.delete(session);
+    SHELLS_SHOWING_PANE.delete(session);
+    TAB_TMUX_PLACES.delete(session);
     if (!MAIN_TABS.hasTerminal(session)) {
       TAB_LAST_LABELS.delete(session);
       return;
@@ -8409,21 +8556,26 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * シェルのタブのグループ (プロジェクトの根)。映しているペインのプロジェクト、
-   * 無ければシェルを起こしたフォルダを含むプロジェクト (一覧の根の前方一致の
-   * いちばん深いもの)。どれでもなければ null (タブ列の右端)、一覧がまだ届いて
-   * いなければ undefined。
+   * この画面でペインを映していたことのあるシェル。結び付きが外れている間
+   * (tmux のクライアントが繋がり直す間など) は、起こしたフォルダでグループを
+   * 決め直さない (shellGroupOf)。
    */
+  const SHELLS_SHOWING_PANE = new Set<string>();
+
+  /** シェルのタブのグループ (決め方は views/main-tabs の shellGroupOf)。 */
   function terminalProjectOf(session: string): string | null | undefined {
-    // 一覧とシェルの一覧が届くまでは分からない (保存した控えで描く)。
-    if (!AGENT_MONITOR.snapshot().overview) return undefined;
     const pane = paneForShell(session);
-    if (pane) return pane.project || null;
+    if (pane) SHELLS_SHOWING_PANE.add(session);
     const shells = TERMINAL_VIEW.knownShells();
-    if (!shells) return undefined;
-    const cwd = shells.sessions.find((item) => item.id === session)?.cwd;
-    if (!cwd) return null;
-    return projectRootOfPath(cwd, PROJECT_LOOKS.order());
+    return shellGroupOf({
+      overview: AGENT_MONITOR.snapshot().overview,
+      pane,
+      shell: shells
+        ? shells.sessions.find((item) => item.id === session)
+        : null,
+      showedPane: SHELLS_SHOWING_PANE.has(session),
+      roots: PROJECT_LOOKS.order(),
+    });
   }
 
   /**
@@ -8487,7 +8639,10 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** 左の一覧の並びで前 (-1) / 次 (+1) のプロジェクトへ (端では回る)。 */
   function switchToAdjacentProject(delta: -1 | 1): void {
-    const order = PROJECT_LOOKS.order();
+    // 一覧から消えた根 (並びの位置だけ残している) には移らない。
+    const order = PROJECT_LOOKS.order().filter((root) =>
+      PROJECT_LOOKS.get(root),
+    );
     const here = MAIN_TABS.currentProject() ?? PROJECT_LOOKS.current()?.root;
     if (order.length < 2 || !here) return;
     const index = order.indexOf(here);
@@ -8661,6 +8816,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       suggested: false,
     },
     {
+      id: "open-help-page",
+      keymap: "open-help-page",
+      icon: QUESTION_16_PATH,
+      suggested: false,
+    },
+    {
       id: "open-help",
       keymap: "open-help",
       icon: QUESTION_16_PATH,
@@ -8757,6 +8918,34 @@ window.GdpExpandLogic = GdpExpandLogic;
         },
       });
     }
+    // キーの割り当てが無い操作 (PALETTE_ACTIONS はキーの操作だけ)。
+    commands.push({
+      group: "actions",
+      id: "action:add-project",
+      title: agents.projects.addProjectMenu,
+      iconHtml: iconSvg("gdp-palette-icon", PLUS_16_PATH),
+      shortcut: "",
+      suggested: false,
+      run: () => void PROJECT_ACTIONS.registerByPath(),
+    });
+    // テーマを選ぶ (「テーマ」と打つと全部が並ぶ)。もう一方の言語の名前でも引ける
+    // (両方の言語で同じ名前 (GitHub) なら補足は出さない)。
+    const currentTheme = savedColorTheme();
+    const other = STATE.language === "ja" ? "en" : "ja";
+    for (const theme of COLOR_THEMES) {
+      const name = COLOR_THEME_NAMES[theme][STATE.language];
+      const otherName = COLOR_THEME_NAMES[theme][other];
+      commands.push({
+        group: "themes",
+        id: `theme:${theme}`,
+        title: t.chooseTheme(name),
+        detail: otherName === name ? "" : otherName,
+        status: theme === currentTheme ? t.currentTheme : "",
+        iconHtml: iconSvg("gdp-palette-icon", MOON_16_PATH),
+        suggested: false,
+        run: () => setColorTheme(theme),
+      });
+    }
     return commands;
   }
 
@@ -8843,15 +9032,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       })
     : null;
 
-  /** 設定画面を開き、指定の見出しまで送る。 */
-  function openSettingsAt(headingId: string): void {
-    VIEWER_SETTINGS.revealHeading(headingId);
-    openHelpSection(helpSectionDeps(), "settings");
-    requestAnimationFrame(() =>
-      document.getElementById(headingId)?.scrollIntoView({ block: "start" }),
-    );
-  }
-
   let releaseAccounts: (() => void) | null = null;
   const ACCOUNTS_BAND = createAccountsBand({
     client: ACCOUNTS_CLIENT,
@@ -8875,6 +9055,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     actionHeaders,
     refresh: () => AGENT_MONITOR.refresh(),
     navigate: (url) => window.location.assign(url),
+    currentRoot: () => PROJECT_LOOKS.current()?.root ?? null,
   });
 
   const AGENT_PANE_OPENER = createAgentPaneOpener({
@@ -8945,6 +9126,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     // ペインに付く (ログインのウィンドウを閉じた後の最初の起動がそう)。
     // 残すと、新しいエージェントを閉じ終わった古いシェルのタブで開いてしまう。
     const overview = AGENT_MONITOR.snapshot().overview;
+    // タブのシェルが映している tmux の場所を覚える (入口が起き直した後に繋ぎ直す)。
+    for (const pane of overview?.panes ?? [])
+      if (pane.shownInShell && MAIN_TABS.hasTerminal(pane.shownInShell))
+        rememberTmuxPlace(pane.shownInShell, pane);
     // 前面でないタブのシェルは終わりが届かない。一覧から消えたら閉じる。
     // ペインとの対応を捨てる下の処理より先に、覚えている名前で知らせる。
     // shells の無い古い版のサーバでは何もしない。
@@ -8952,11 +9137,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       TMUX_WINDOWS = new Map(
         overview.shells.map((shell) => [shell.id, shell.window]),
       );
-      const ended = SHELL_ENDS.update(
+      const { ended, lost } = SHELL_ENDS.update(
         overview.shells.map((shell) => shell.id),
         MAIN_TABS.terminalSessions(),
+        overview.serverInstance,
       );
       for (const session of ended) closeEndedTerminal(session);
+      // 入口のサーバが起き直した: シェルはサーバと一緒に終わった。閉じずに繋ぎ直す。
+      recoverShellTabs(lost);
     }
     if (overview && !overview.tmux.error) {
       const live = new Set(overview.panes.map((pane) => pane.id));
@@ -8995,12 +9183,16 @@ window.GdpExpandLogic = GdpExpandLogic;
         openPane: openAgentPane,
         viewingPane: viewingAgentPane,
         launch: launchAgent,
+        handoff: HANDOFF_ACTIONS,
         openBoard: () =>
           navigateToRoute({ screen: "agents", range: currentRange() }),
         getCollapsed: () => APP_SETTINGS.navCollapsedProjects ?? [],
         currentName: () => PROJECT_NAME,
         saveCollapsed: (roots) =>
           patchSettings({ navCollapsedProjects: roots }),
+        isStoppedOpen: () => APP_SETTINGS.navStoppedProjectsOpen === true,
+        setStoppedOpen: (open) =>
+          patchSettings({ navStoppedProjectsOpen: open }),
         notifyHintDismissed: () =>
           APP_SETTINGS.agentNotifyHintDismissed === true,
         dismissNotifyHint: () =>
@@ -9010,6 +9202,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   document
     .querySelector<HTMLButtonElement>("#nav-launch")
     ?.addEventListener("click", () => launchAgent());
+  document
+    .querySelector<HTMLButtonElement>("#nav-add-project")
+    ?.addEventListener("click", () => void PROJECT_ACTIONS.registerByPath());
 
   const appNavElement = document.querySelector<HTMLElement>("#app-nav");
   const appNavResizer = document.querySelector<HTMLElement>("#app-nav-resizer");
@@ -9044,11 +9239,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     setElementText("#nav-launch .nav-foot-label", t.newAgent);
     setElementText("#nav-settings .nav-foot-label", t.settings);
-    setElementText("#quick-help-btn .nav-foot-label", t.help);
+    setElementText("#nav-help .nav-foot-label", t.help);
     for (const [selector, label] of [
       ["#nav-collapse", t.collapse],
       ["#nav-expand", t.expand],
       ["#nav-board-link", t.board],
+      ["#nav-add-project", agentsText(STATE.language).projects.addProject],
       ["#app-nav-resizer", t.resize],
     ] as const) {
       const el = document.querySelector<HTMLElement>(selector);
@@ -9091,6 +9287,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     accountsBand: ACCOUNTS_BAND,
     getAccounts: () => ACCOUNTS_CLIENT.snapshot().data,
     launch: launchAgent,
+    handoff: HANDOFF_ACTIONS,
     onVisibilityChange: (visible) => {
       releaseAccounts?.();
       releaseAccounts = null;
@@ -9326,10 +9523,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       return;
     }
-    if (STATE.route.screen === "help") {
+    if (STATE.route.screen === "help" || STATE.route.screen === "settings") {
       cancelActiveSourceLoad("navigation");
       setPageMode();
-      renderHelpPage();
+      if (STATE.route.screen === "help") renderHelpPage();
+      else renderSettingsPage();
       setStatus("live");
       return;
     }
@@ -9991,6 +10189,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     es.addEventListener("tabs", () => {
       void MAIN_TABS.refreshFromServer();
     });
+    // 全プロジェクト共通の設定 (明暗・テーマ) を別の窓が書いた。
+    es.addEventListener("user-settings", refreshLook);
     es.addEventListener("db-query", (event) => {
       DATABASE_VIEW.handleSse("db-query", (event as MessageEvent).data);
     });
@@ -10075,11 +10275,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     void ANNOTATIONS_UI?.refreshAnnotations();
     // 裏にあった間は SSE を切っているので、別の窓のタブの変更を取り直す。
     void MAIN_TABS.refreshFromServer();
+    refreshLook();
   });
   window.addEventListener("focus", () => {
     scheduleEventSourceConnect();
     catchUpMissedChanges("visible");
     void ANNOTATIONS_UI?.refreshAnnotations();
     void MAIN_TABS.refreshFromServer();
+    refreshLook();
   });
 })();

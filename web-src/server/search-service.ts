@@ -28,16 +28,11 @@ import type {
   GrepMatch,
   GrepResponse,
 } from "../core/types";
-import {
-  commandForExternal,
-  isCommandNotFoundResult,
-} from "./command-resolver";
+import { commandForExternal, commandRunFailure } from "./command-resolver";
 import { throwIfAborted } from "./database/adapters/abort";
 import { spawnTextAsync } from "./database/adapters/spawn-runner";
 import * as git from "./git";
 import { compileNamePatterns } from "./name-pattern";
-import { errno } from "./terminal/settings-file";
-import { skipUnreadablePath } from "./unreadable-path";
 import {
   buildFileSearchList,
   buildRgArgs,
@@ -48,6 +43,8 @@ import {
   parseGitGrepOutput,
   parseRgOutput,
 } from "./search";
+import { errno } from "./terminal/settings-file";
+import { skipUnreadablePath } from "./unreadable-path";
 
 export type SearchEnv = {
   cwd: string;
@@ -97,11 +94,12 @@ export async function rgAvailableAsync(cwd: string): Promise<boolean> {
     timeoutMessage: "rg version timed out after 5000ms",
     rejectOnError: false,
   });
-  if (proc.code !== 0 && !isCommandNotFoundResult("rg", proc)) {
-    // 入っているのに答えない rg は、組み込みの検索に切り替えるが、覚えずに
-    // 次も試し、理由を記録する (見つからないときだけ覚える)。
+  const failure = commandRunFailure("rg", proc);
+  if (proc.code !== 0 && failure?.kind !== "not-found") {
+    // 入っているのに答えない rg (時間切れ・起動の失敗も) は、組み込みの検索に
+    // 切り替えるが、覚えずに次も試し、理由を記録する (見つからないときだけ覚える)。
     console.error(
-      `[code-viewer] rg --version exited with ${proc.code}; searching without rg this time: ${proc.stderr.trim()}`,
+      `[code-viewer] ${failure ? failure.detail : `rg --version exited with ${proc.code}`}; searching without rg this time: ${proc.stderr.trim()}`,
     );
     return false;
   }

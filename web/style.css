@@ -3,17 +3,29 @@
  * 見た目の決まりはこのファイルの先頭の 2 層だけで決まる。
  *
  *   1. 名前の層 (--color-* / --space-* / --radius-* / --font-* ...)
- *      テーマ (html[data-theme] × html[data-palette]) ごとに値を差し替える。
+ *      明暗 (html[data-theme]) × テーマ (html[data-color-theme]) ごとに値を差し替える。
  *      部品はこの名前だけを使う。16 進の色と生の px を部品に直書きしない。
  *   2. 互換の層 (--bg / --fg / --accent ...)
  *      古い部品が読んでいる名前。値は 1 の名前への参照だけで、テーマごとに
  *      書き直さない (1 を差し替えれば古い部品も追従する)。新しい部品は 1 を読む。
  *
- * テーマ: 既定はダーク (data-palette 無し = 紫)。data-palette="graphite"
- * (無彩色) と "warm" (暖かい灰色) はダークの色違い。ライトは data-theme="light"。
+ * 明暗: 既定はダーク。ライトは data-theme="light"。
+ * テーマ (配色): 既定 (紫) は属性なしで、下の :root と [data-theme="dark"] の値。
+ * ほかのテーマは「テーマ」の節 (core/color-themes.ts の一覧と同じ id) で名前の層の
+ * 色を上書きする。どの組もコントラストの下限を満たす (color-themes-contrast.test.ts)。
  */
 
-:root {
+/* [data-theme="light"] は設定のテーマの見本の箱 (views/viewer-settings.ts) で、
+   ダークの窓の中にもライトの既定を描くため (html には :root で当たる)。
+   ターミナルの面 ([data-terminal-surface]) にも当てるのは、var() で作る値
+   (光・輪・互換の層・影など) を面の中で作り直すため: custom property は宣言した
+   箱で var() を解いた値を子へ継ぐので、html で解いたままではターミナルの明暗が
+   ダークのとき (下の「ダーク」の塊の説明)、面の中にライトの色が残る。
+   寸法の名前は下の別の塊に置く: 面の中で作り直すと、body や html の style で
+   変えた値が面の中だけ既定に戻る。 */
+:root,
+[data-theme="light"],
+[data-terminal-tone="dark"] [data-terminal-surface] {
   /* ---- 1. 名前の層: ライト (ごく薄い紫の明暗で分ける。純白を広く敷かない) ---- */
   --color-ground:       #f3f1f7;   /* 窓の地。上の行・最下段 */
   --color-nav:          #eae6f0;   /* サイドバー */
@@ -32,6 +44,20 @@
   --color-line:         #d8d1e1;
   --color-line-soft:    #e3dde9;
   --color-line-strong:  #bfb6cb;
+  /* 表・表のような一覧の行の区切り。どの面 (窓の地・本文・沈んだ面・浮く面・hover)
+     にも 1.5:1 以上 (web-src/test/table-rules-css.test.ts)。ライトは濃い線と同じ。 */
+  --color-line-row:     var(--color-line-strong);
+  /* 行の多い表の 1 行おきの面 (hover の面の半分ほど)。 */
+  --color-row-alt:      color-mix(in srgb, var(--color-raised) 45%, transparent);
+  /* エージェントの行 (.agent-card。左のサイドバーと全体ボード) の面と、行の間の線。
+     ライトは地のまま線で区切る (白い面の箱を並べると重い)。ダークは地より一段明るい
+     面に置き、線は引かない。 */
+  --color-agent-row:      transparent;
+  --color-agent-row-rule: var(--color-line-row);
+  /* 札 (.agent-card-badge) の地。行に面が無いライトでは本文の面を敷く (サイドバーの
+     地の上では入力待ちの色の小さな字が 4.5:1 に届かない)。ダークは行の面の上に
+     透けさせる。 */
+  --color-agent-badge:    var(--color-doc);
   --color-text:         #282331;
   --color-text-2:       #655c72;
   --color-text-3:       #7a7287;
@@ -47,14 +73,19 @@
   --color-shadow:       rgba(33, 29, 43, 0.16);
   /* コードの面 (ソース表示・差分)。本文の面より一段沈める。 */
   --color-code:         #f6f3f9;
-  /* 構文の色。抑えめにし、キーワード・文字列・型・コメントだけを分ける。
-     コメントも本文の地で読める濃さ (4.5:1 以上) にする。 */
+  /* 構文の色。種類ごとに色相を分ける (キーワードとタグ = 紫・関数名とクラス名 = 青・
+     文字列 = 緑・定数と数値と型と組み込み = 琥珀・変数と記号 = 地の文字)。
+     shiki の面も highlight.js の面もこの名前だけを読む (B-1 の節と diff2html の節)。
+     コードの面・追加の行・削除の行の上で 6.5:1 以上、コメントは 4.5:1 以上
+     (diff-code-contrast.test.ts)。 */
   --syntax-text:        #2c2735;
-  --syntax-keyword:     #6c4ba0;
-  --syntax-string:      #466232;
-  --syntax-type:        #285a78;
-  --syntax-function:    #4d3a78;
-  --syntax-comment:     #69637a;
+  --syntax-keyword:     #6329ad;
+  --syntax-string:      #255a16;
+  --syntax-type:        #7d4300;
+  --syntax-function:    #134f88;
+  --syntax-comment:     #5b5566;
+  /* 行番号 (ソース表示・Blame・差分)。本文より一段落とし、4.5:1 以上。 */
+  --syntax-gutter:      #645d70;
   /* 履歴のグラフの線。主線はアクセント、分かれた線は別の落ち着いた色。
      状態の色 (入力待ち・作業中など) と混ぜない。 */
   --graph-main:         var(--color-accent);
@@ -132,22 +163,29 @@
   --line-hit-bg:    var(--color-select);
   --line-hit-border:var(--accent);
   --done:           var(--color-done);
-  /* 差分の色はテーマの色違いに引きずられない (追加・削除の意味を保つ)。
-     ライトとダークで 1 組ずつ。 */
+  /* 差分の色。追加 = 緑・削除 = 赤の色相はどのテーマでも同じ (意味を保つ)。 */
   --diff-add-bg:        #e4f3e8;
-  --diff-add-num-bg:    #aceebb;
   --diff-add-num-sticky-bg: #d2eadb;
   --diff-add-word-bg:   #c0e2cb;
   --diff-del-bg:        #f9e8eb;
-  --diff-del-num-bg:    #ffcecb;
   --diff-del-num-sticky-bg: #f2d6db;
   --diff-del-word-bg:   #ecc2ca;
   --diff-hunk-bg:       color-mix(in srgb, var(--color-accent) 9%, transparent);
-  --diff-hunk-fg:       var(--color-accent-strong);
+  /* 区切り (@@ の行) の文字。本文より一段落とす。 */
+  --diff-hunk-fg:       #5a4a85;
   --diff-add-fg:        #1d4a31;
   --diff-del-fg:        #7a2436;
   --blob-tab-active:    var(--accent);
+  /* shadows */
+  --shadow-sm: 0 1px 0 var(--color-shadow);
+  --shadow-md: 0 3px 6px var(--color-shadow);
+  --shadow-pop: 0 16px 48px var(--color-shadow);
+  --shadow-context-menu: 0 12px 36px var(--color-shadow);
+}
 
+/* 寸法の名前。ターミナルの面には当てない (上の塊の説明)。 */
+:root,
+[data-theme="light"] {
   /* ---- 寸法 (T1: 固定物の実寸。ui-layout.md の 4 層) ---- */
   /* 上に居座る固定物の合計 = 最上段のタブ列 (#main-tabs) だけ。
      消費側 (ツールバーの top・各ページの --chrome-h・sticky) はこれだけを読む。
@@ -190,17 +228,19 @@
      タブや情報バーの見た目を変えたらこの 1 つを直す。
      いまはパンくず・情報のボタン・切替が 1 行 (文書の面の余白の節)。 */
   --file-detail-head-h: 75px;
-  /* shadows */
-  --shadow-sm: 0 1px 0 var(--color-shadow);
-  --shadow-md: 0 3px 6px var(--color-shadow);
-  --shadow-pop: 0 16px 48px var(--color-shadow);
-  --shadow-context-menu: 0 12px 36px var(--color-shadow);
   --context-menu-w: 240px;
   --context-menu-inline-pad: 16px;
 }
 
-/* ---- ダーク: 既定 (紫・面の奥行き) ---- */
-[data-theme="dark"] {
+/* ---- ダーク: 既定 (紫・面の奥行き) ----
+   ターミナルの明暗 (設定 → 表示。core/color-themes.ts の TerminalTone) がダークの
+   とき (html[data-terminal-tone="dark"])、ダークの塊とテーマの塊はターミナルの面
+   ([data-terminal-surface]: 端末のタブの箱・端末の枠・ペインの見本) にも当たり、
+   画面がライトでも面の中はそのテーマのダークになる。塊の後ろの並びと詳細度は
+   html のダークと同じ順 (:root → ダーク → テーマ → テーマのダーク) になるよう、
+   テーマの塊にはテーマの属性を足した形で書く (terminal-tone-css.test.ts)。 */
+[data-theme="dark"],
+[data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:       #101014;
   --color-nav:          #16141c;
   --color-doc:          #1f1b27;
@@ -217,6 +257,10 @@
   --color-line:         #28242f;
   --color-line-soft:    #211e28;
   --color-line-strong:  #3d3749;
+  --color-line-row:     #4b4557;
+  --color-agent-row:      var(--color-doc);
+  --color-agent-row-rule: transparent;
+  --color-agent-badge:    transparent;
   --color-text:         #eeeaf4;
   --color-text-2:       #aba3b5;
   --color-text-3:       #857d91;
@@ -231,15 +275,17 @@
   --color-backdrop:     rgba(4, 3, 8, 0.55);
   --color-shadow:       rgba(0, 0, 0, 0.45);
   --color-code:         #1b1821;
+  /* 構文の色 (ダーク)。 */
   --syntax-text:        #ddd8e6;
-  --syntax-keyword:     #bca4dd;
-  --syntax-string:      #bbc9a8;
-  --syntax-type:        #a7bfd0;
-  --syntax-function:    #e4dcf2;
-  --syntax-comment:     #978fa4;
+  --syntax-keyword:     #c8a6ff;
+  --syntax-string:      #a9d98f;
+  --syntax-type:        #f2bc7b;
+  --syntax-function:    #82c3ff;
+  --syntax-comment:     #a29bb0;
+  --syntax-gutter:      #9a93a8;
   --graph-branch:       #7e91b8;
-  /* プロジェクトの色。暗い地では明るめの色に濃い頭文字。色違いのダーク
-     (graphite / warm) もこの 1 組を使う。 */
+  /* プロジェクトの色。暗い地では明るめの色に濃い頭文字。どのテーマでもこの
+     1 組を使う (テーマを替えてもプロジェクトの見分けが変わらない)。 */
   --project-violet:     #a68ae6;
   --project-green:      #6cc28a;
   --project-orange:     #f0955a;
@@ -252,92 +298,1044 @@
   --project-none:       #8f8799;
   --project-ink:        #16121f;
 
-  /* 差分の面は控えめにし、＋／− の印と文字の色でも伝える。色違いの
-     ダーク (graphite / warm) もこの 1 組を使う。 */
-  --diff-add-bg:        #1c3028;
-  --diff-add-num-bg:    #213a2f;
-  --diff-add-num-sticky-bg: #1f3027;
-  --diff-add-word-bg:   #2d493b;
-  --diff-add-fg:        #b5d5c2;
-  --diff-del-bg:        #36232c;
-  --diff-del-num-bg:    #3f2833;
-  --diff-del-num-sticky-bg: #3a2229;
-  --diff-del-word-bg:   #55323f;
-  --diff-del-fg:        #e1b6be;
+  /* 差分の面は控えめにし、＋／− の印と文字の色でも伝える。面は地の紫を混ぜずに、
+     緑 (色相 140)・赤 (356) を暗い地に少しだけ乗せた澄んだ色にする (紫の地と
+     混ぜると灰色に濁った)。語の強調は行の面より一段明るく彩度を上げる。 */
+  --diff-add-bg:        #192e20;
+  --diff-add-num-sticky-bg: #1f3d29;
+  --diff-add-word-bg:   #244c31;
+  --diff-add-fg:        #9fe0ae;
+  --diff-del-bg:        #381e20;
+  --diff-del-num-sticky-bg: #472427;
+  --diff-del-word-bg:   #642b2f;
+  --diff-del-fg:        #ffb3ad;
+  --diff-hunk-fg:       #a898cc;
 }
-/* ---- ダーク: 無彩色 (線が少なく静か) ---- */
-[data-theme="dark"][data-palette="graphite"] {
-  --color-ground:       #111214;
-  --color-nav:          #17181b;
-  --color-doc:          #1a1b1e;
-  --color-inset:        #141518;
-  --color-raised:       #232428;
-  --color-select:       #292b30;
-  --color-overlay:      #222327;
-  --color-term:         #101113;
-  --color-term-text:    #e6e7eb;
-  --color-term-select:  #a9b8d040;
-  --color-term-white:   #cfd1d6;
-  --color-tree:         #17181b;
-  --color-line:         #242529;
-  --color-line-soft:    #1e1f22;
-  --color-line-strong:  #36383e;
-  --color-text:         #e6e7eb;
-  --color-text-2:       #9b9da5;
-  --color-text-3:       #7b7d86;
-  --color-on-accent:    #111214;
-  --color-accent:       #a9b8d0;
-  --color-accent-strong:#c3cfe2;
-  --color-waiting:      #cba566;
-  --color-working:      #799c86;
-  --color-done:         #98accf;
-  --color-failed:       #c77979;
-  --color-idle:         #9b9da5;
-  --color-code:         #161719;
-  --syntax-text:        #d9dbe0;
-  --syntax-keyword:     #b3bdd2;
-  --syntax-string:      #b6c4ab;
-  --syntax-type:        #a2b7c8;
-  --syntax-function:    #e2e4e9;
-  --syntax-comment:     #91949d;
-  --graph-branch:       #8f9aab;
+/* ---- テーマ (配色) ----
+   既定 (上の :root と [data-theme="dark"]) のほかのテーマ。明暗と組み合わせて使う
+   (html[data-color-theme] × html[data-theme])。id と表示名は core/color-themes.ts。
+   値は (最後の GitHub を除き)、面の色相と彩度・強調色と構文の色相だけを決め、明るさは「どの面に対して
+   何:1」から逆算した (本文 14:1・構文 6.9:1・コメント 4.9:1 など)。下限は
+   color-themes-contrast.test.ts ほかが全部の組で確かめる。追加 = 緑・削除 = 赤・
+   状態の色の色相はどのテーマでも同じ。プロジェクトの色はテーマで変えない。
+   ダークの塊は [data-theme="dark"] より詳細度が高いので、書いた名前は全部上書きする。 */
+/* 夜の海 / Night sea: 青みの灰の面に、海の青の強調色。キーワードは桃色 */
+[data-color-theme="night-sea"],
+[data-color-theme="night-sea"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #edf3f8;
+  --color-nav:           #e0eaf2;
+  --color-tree:          #e8f0f7;
+  --color-doc:           #f6fafd;
+  --color-inset:         #e6eef6;
+  --color-raised:        #d9e5f0;
+  --color-select:        #c2e1f2;
+  --color-overlay:       #f9fcff;
+  --color-term:          #e4ecf4;
+  --color-term-text:     #1b2936;
+  --color-term-white:    #485765;
+  --color-term-select:   #116c9040;
+  --color-line:          #c7d7e5;
+  --color-line-soft:     #d6e2ec;
+  --color-line-strong:   #a3b8c9;
+  --color-line-row:      #a3b8c9;
+  --color-text:          #1b2936;
+  --color-text-2:        #495e71;
+  --color-text-3:        #5f7284;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #116c90;
+  --color-accent-strong: #0a5675;
+  --color-waiting:       #936205;
+  --color-working:       #167b48;
+  --color-done:          #0f749c;
+  --color-failed:        #aa4f5e;
+  --color-idle:          #5c6b79;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #eff5fb;
+  --syntax-text:         #1e2c37;
+  --syntax-keyword:      #833064;
+  --syntax-string:       #0a5a41;
+  --syntax-type:         #684a0c;
+  --syntax-function:     #06566e;
+  --syntax-comment:      #566777;
+  --syntax-gutter:       #546676;
+  --graph-branch:        #3b809a;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #2b607a;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
 }
-/* ---- ダーク: 暖かい灰色 (読みやすさ) ---- */
-[data-theme="dark"][data-palette="warm"] {
-  --color-ground:       #191918;
-  --color-nav:          #1d1d1b;
-  --color-doc:          #242421;
-  --color-inset:        #1d1d1b;
-  --color-raised:       #2e2e2a;
-  --color-select:       #363631;
-  --color-overlay:      #2b2b27;
-  --color-term:         #141413;
-  --color-term-text:    #e9e7df;
-  --color-term-select:  #b6c5b040;
-  --color-term-white:   #d6d4cc;
-  --color-tree:         #20201e;
-  --color-line:         #2e2e2b;
-  --color-line-soft:    #272724;
-  --color-line-strong:  #42423d;
-  --color-text:         #e9e7df;
-  --color-text-2:       #aaa89e;
-  --color-text-3:       #8a887f;
-  --color-on-accent:    #191918;
-  --color-accent:       #b6c5b0;
-  --color-accent-strong:#cbd8c6;
-  --color-waiting:      #d5b477;
-  --color-working:      #83a88d;
-  --color-done:         #a0b1c8;
-  --color-failed:       #ce8d82;
-  --color-idle:         #aaa89e;
-  --color-code:         #1f1f1d;
-  --syntax-text:        #e0ddd3;
-  --syntax-keyword:     #cbbb98;
-  --syntax-string:      #b5c5a3;
-  --syntax-type:        #a8bcc0;
-  --syntax-function:    #ebe8df;
-  --syntax-comment:     #9b9886;
-  --graph-branch:       #a89d82;
+[data-color-theme="night-sea"][data-theme="dark"],
+[data-color-theme="night-sea"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #0a0f13;
+  --color-nav:           #09141d;
+  --color-tree:          #09141d;
+  --color-doc:           #0c1c2a;
+  --color-inset:         #09151f;
+  --color-raised:        #052740;
+  --color-select:        #0c3244;
+  --color-overlay:       #142532;
+  --color-term:          #070e15;
+  --color-term-text:     #e0edf8;
+  --color-term-white:    #b3c6d6;
+  --color-term-select:   #33a2d24d;
+  --color-line:          #162532;
+  --color-line-soft:     #111f2a;
+  --color-line-strong:   #213a4f;
+  --color-line-row:      #314a5e;
+  --color-text:          #e0edf8;
+  --color-text-2:        #8babc8;
+  --color-text-3:        #6c89a1;
+  --color-on-accent:     #081319;
+  --color-accent:        #33a2d2;
+  --color-accent-strong: #69bee8;
+  --color-waiting:       #c19351;
+  --color-working:       #61aa7c;
+  --color-done:          #3ba8d8;
+  --color-failed:        #d5858e;
+  --color-idle:          #94aabf;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #0c1823;
+  --syntax-text:         #ccdceb;
+  --syntax-keyword:      #eb9bc8;
+  --syntax-string:       #64c69e;
+  --syntax-type:         #d9ad5e;
+  --syntax-function:     #57c0e5;
+  --syntax-comment:      #7f9ab0;
+  --syntax-gutter:       #7790a7;
+  --graph-branch:        #40869f;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #699fba;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 森 / Forest: 緑みの灰の面に、深い緑の強調色。キーワードは煉瓦色 */
+[data-color-theme="forest"],
+[data-color-theme="forest"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #eef4f0;
+  --color-nav:           #e1ebe4;
+  --color-tree:          #e9f1ec;
+  --color-doc:           #f6faf7;
+  --color-inset:         #e7f0e9;
+  --color-raised:        #dbe7de;
+  --color-select:        #c7e4d2;
+  --color-overlay:       #fafdfb;
+  --color-term:          #e5eee7;
+  --color-term-text:     #1d2b22;
+  --color-term-white:    #485a4e;
+  --color-term-select:   #20714a40;
+  --color-line:          #c9d9ce;
+  --color-line-soft:     #d8e3db;
+  --color-line-strong:   #a6baac;
+  --color-line-row:      #a6baac;
+  --color-text:          #1d2b22;
+  --color-text-2:        #4a6051;
+  --color-text-3:        #607567;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #20714a;
+  --color-accent-strong: #0d5c39;
+  --color-waiting:       #926204;
+  --color-working:       #167b48;
+  --color-done:          #2a7952;
+  --color-failed:        #aa4f5d;
+  --color-idle:          #5d6d62;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #f0f6f2;
+  --syntax-text:         #202d24;
+  --syntax-keyword:      #893420;
+  --syntax-string:       #415604;
+  --syntax-type:         #684a0d;
+  --syntax-function:     #025578;
+  --syntax-comment:      #586a5e;
+  --syntax-gutter:       #56685c;
+  --graph-branch:        #437e9f;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #336449;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="forest"][data-theme="dark"],
+[data-color-theme="forest"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #0e120f;
+  --color-nav:           #0f1812;
+  --color-tree:          #0f1812;
+  --color-doc:           #142118;
+  --color-inset:         #0f1913;
+  --color-raised:        #142e1e;
+  --color-select:        #173927;
+  --color-overlay:       #1c2920;
+  --color-term:          #0c120e;
+  --color-term-text:     #e7f2ea;
+  --color-term-white:    #b6cbbc;
+  --color-term-select:   #5da97f4d;
+  --color-line:          #1d2a21;
+  --color-line-soft:     #18231c;
+  --color-line-strong:   #2c4032;
+  --color-line-row:      #3b4f41;
+  --color-text:          #e7f2ea;
+  --color-text-2:        #96b19e;
+  --color-text-3:        #768e7d;
+  --color-on-accent:     #0a140e;
+  --color-accent:        #5da97f;
+  --color-accent-strong: #84c59f;
+  --color-waiting:       #c49654;
+  --color-working:       #64ad7f;
+  --color-done:          #63b085;
+  --color-failed:        #d98791;
+  --color-idle:          #9cb0a2;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #131d16;
+  --syntax-text:         #d4e1d8;
+  --syntax-keyword:      #f59d87;
+  --syntax-string:       #a1be6e;
+  --syntax-type:         #d9ad5e;
+  --syntax-function:     #64bded;
+  --syntax-comment:      #869c8c;
+  --syntax-gutter:       #809686;
+  --graph-branch:        #4b87a8;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #73a688;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 砂 / Sand: 暖かい砂色の面に、素焼きの赤茶の強調色。ダークは今の「暖かい灰色」に近い */
+[data-color-theme="sand"],
+[data-color-theme="sand"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #f6f1ea;
+  --color-nav:           #efe7db;
+  --color-tree:          #f4eee4;
+  --color-doc:           #fcf9f3;
+  --color-inset:         #f3ece1;
+  --color-raised:        #ece2d3;
+  --color-select:        #f5d3cb;
+  --color-overlay:       #fefbf8;
+  --color-term:          #f1eadf;
+  --color-term-text:     #322614;
+  --color-term-white:    #5e5443;
+  --color-term-select:   #98504240;
+  --color-line:          #dfd3bf;
+  --color-line-soft:     #e8dfd0;
+  --color-line-strong:   #c3b399;
+  --color-line-row:      #c3b399;
+  --color-text:          #322614;
+  --color-text-2:        #6a593e;
+  --color-text-3:        #7e6e55;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #985042;
+  --color-accent-strong: #823b2f;
+  --color-waiting:       #936205;
+  --color-working:       #167b48;
+  --color-done:          #a15749;
+  --color-failed:        #aa4f5e;
+  --color-idle:          #746754;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #f9f4ec;
+  --syntax-text:         #332918;
+  --syntax-keyword:      #893237;
+  --syntax-string:       #2d5a04;
+  --syntax-type:         #633e87;
+  --syntax-function:     #085384;
+  --syntax-comment:      #72634c;
+  --syntax-gutter:       #71624b;
+  --graph-branch:        #4d7ca4;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #804e44;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="sand"][data-theme="dark"],
+[data-color-theme="sand"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #12100d;
+  --color-nav:           #18150f;
+  --color-tree:          #18150f;
+  --color-doc:           #221d14;
+  --color-inset:         #1a160f;
+  --color-raised:        #302615;
+  --color-select:        #482720;
+  --color-overlay:       #2a251c;
+  --color-term:          #12100b;
+  --color-term-text:     #f3eee6;
+  --color-term-white:    #d0c4b0;
+  --color-term-select:   #d485754d;
+  --color-line:          #2b251d;
+  --color-line-soft:     #241f18;
+  --color-line-strong:   #42392b;
+  --color-line-row:      #51483a;
+  --color-text:          #f3eee6;
+  --color-text-2:        #b4a996;
+  --color-text-3:        #908776;
+  --color-on-accent:     #1a0e0c;
+  --color-accent:        #d48575;
+  --color-accent-strong: #eba697;
+  --color-waiting:       #c39654;
+  --color-working:       #64ad7f;
+  --color-done:          #db8c7c;
+  --color-failed:        #d88790;
+  --color-idle:          #b2a99c;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #1d1912;
+  --syntax-text:         #e1dcd2;
+  --syntax-keyword:      #f19d9d;
+  --syntax-string:       #95bf7e;
+  --syntax-type:         #c5a7ea;
+  --syntax-function:     #7bbaee;
+  --syntax-comment:      #9f9587;
+  --syntax-gutter:       #978e7f;
+  --graph-branch:        #5484ac;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #c48d81;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 薄墨 / Ink wash: ほぼ無彩色の面と、青灰の強調色。静か。ダークは今の「無彩色」に近い */
+[data-color-theme="ink"],
+[data-color-theme="ink"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #f1f2f4;
+  --color-nav:           #e6e8eb;
+  --color-tree:          #edeff1;
+  --color-doc:           #f8f9fa;
+  --color-inset:         #ebedf0;
+  --color-raised:        #e1e4e8;
+  --color-select:        #cadef7;
+  --color-overlay:       #fbfcfd;
+  --color-term:          #e9ebee;
+  --color-term-text:     #25282d;
+  --color-term-white:    #4c5667;
+  --color-term-select:   #4c668640;
+  --color-line:          #d1d5da;
+  --color-line-soft:     #dee0e4;
+  --color-line-strong:   #b1b6bc;
+  --color-line-row:      #b1b6bc;
+  --color-text:          #25282d;
+  --color-text-2:        #575b63;
+  --color-text-3:        #6c7077;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #4c6686;
+  --color-accent-strong: #395271;
+  --color-waiting:       #926204;
+  --color-working:       #167b48;
+  --color-done:          #546d8e;
+  --color-failed:        #a94f5d;
+  --color-idle:          #66696f;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #f3f4f7;
+  --syntax-text:         #282a2f;
+  --syntax-keyword:      #51487f;
+  --syntax-string:       #225a32;
+  --syntax-type:         #704608;
+  --syntax-function:     #015579;
+  --syntax-comment:      #62666c;
+  --syntax-gutter:       #60646a;
+  --graph-branch:        #437e9f;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #3f5c82;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="ink"][data-theme="dark"],
+[data-color-theme="ink"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #101012;
+  --color-nav:           #141518;
+  --color-tree:          #141518;
+  --color-doc:           #1b1d21;
+  --color-inset:         #151719;
+  --color-raised:        #24282f;
+  --color-select:        #1e324b;
+  --color-overlay:       #23262a;
+  --color-term:          #0f1012;
+  --color-term-text:     #eceef1;
+  --color-term-white:    #bac6d9;
+  --color-term-select:   #809bbe4d;
+  --color-line:          #24262a;
+  --color-line-soft:     #1e2023;
+  --color-line-strong:   #373b41;
+  --color-line-row:      #464a4f;
+  --color-text:          #eceef1;
+  --color-text-2:        #a5aab1;
+  --color-text-3:        #83888e;
+  --color-on-accent:     #0c121a;
+  --color-accent:        #809bbe;
+  --color-accent-strong: #a0b8d7;
+  --color-waiting:       #c29553;
+  --color-working:       #63ac7e;
+  --color-done:          #86a2c5;
+  --color-failed:        #d88690;
+  --color-idle:          #a6aaaf;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #181a1d;
+  --syntax-text:         #dbdde1;
+  --syntax-keyword:      #b4ade5;
+  --syntax-string:       #8cc096;
+  --syntax-type:         #d6ac7c;
+  --syntax-function:     #7ebbde;
+  --syntax-comment:      #93979d;
+  --syntax-gutter:       #8c9096;
+  --graph-branch:        #4a86a7;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #7d9dc5;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 桜 / Blossom: ほんのり桃色の面に、紅紫の強調色 */
+[data-color-theme="sakura"],
+[data-color-theme="sakura"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #f7f0f3;
+  --color-nav:           #f1e4ea;
+  --color-tree:          #f6ecf0;
+  --color-doc:           #fdf7fa;
+  --color-inset:         #f5e9ee;
+  --color-raised:        #efdee5;
+  --color-select:        #efd2e4;
+  --color-overlay:       #fefbfc;
+  --color-term:          #f3e7ec;
+  --color-term-text:     #34222b;
+  --color-term-white:    #644f58;
+  --color-term-select:   #944a7e40;
+  --color-line:          #e2ced7;
+  --color-line-soft:     #eadbe2;
+  --color-line-strong:   #c8adb9;
+  --color-line-row:      #c8adb9;
+  --color-text:          #34222b;
+  --color-text-2:        #6e5460;
+  --color-text-3:        #826974;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #944a7e;
+  --color-accent-strong: #7e3569;
+  --color-waiting:       #926204;
+  --color-working:       #167b48;
+  --color-done:          #9d5186;
+  --color-failed:        #a94f5d;
+  --color-idle:          #77636c;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #faf2f5;
+  --syntax-text:         #36252d;
+  --syntax-keyword:      #76357b;
+  --syntax-string:       #055c28;
+  --syntax-type:         #754300;
+  --syntax-function:     #01518f;
+  --syntax-comment:      #765f6a;
+  --syntax-gutter:       #745d68;
+  --graph-branch:        #517ba5;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #784d6a;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="sakura"][data-theme="dark"],
+[data-color-theme="sakura"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #140f11;
+  --color-nav:           #1c1216;
+  --color-tree:          #1c1216;
+  --color-doc:           #27181f;
+  --color-inset:         #1e1318;
+  --color-raised:        #381f2b;
+  --color-select:        #432639;
+  --color-overlay:       #2f2127;
+  --color-term:          #150e11;
+  --color-term-text:     #f6eaef;
+  --color-term-white:    #d6bfc9;
+  --color-term-select:   #ce7fb54d;
+  --color-line:          #2f2228;
+  --color-line-soft:     #281c21;
+  --color-line-strong:   #49333d;
+  --color-line-row:      #59424c;
+  --color-text:          #f6eaef;
+  --color-text-2:        #bfa1ae;
+  --color-text-3:        #9a808b;
+  --color-on-accent:     #180e14;
+  --color-accent:        #ce7fb5;
+  --color-accent-strong: #e6a0ce;
+  --color-waiting:       #c29553;
+  --color-working:       #63ac7e;
+  --color-done:          #d685bb;
+  --color-failed:        #d7868f;
+  --color-idle:          #b9a3ad;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #21161b;
+  --syntax-text:         #e8d8de;
+  --syntax-keyword:      #dc9fde;
+  --syntax-string:       #7bc48a;
+  --syntax-type:         #e6a767;
+  --syntax-function:     #7bb8f6;
+  --syntax-comment:      #a8909b;
+  --syntax-gutter:       #a18893;
+  --graph-branch:        #5882ac;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #ba8caa;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 苔 / Moss: 黄みのある苔色の面に、苔の強調色。型は藤色 */
+[data-color-theme="moss"],
+[data-color-theme="moss"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #f2f3eb;
+  --color-nav:           #e9e9dc;
+  --color-tree:          #eff0e5;
+  --color-doc:           #f9faf4;
+  --color-inset:         #edeee2;
+  --color-raised:        #e4e5d4;
+  --color-select:        #d9e0c2;
+  --color-overlay:       #fcfcf8;
+  --color-term:          #ebece0;
+  --color-term-text:     #292915;
+  --color-term-white:    #565643;
+  --color-term-select:   #5e6a2940;
+  --color-line:          #d5d7c0;
+  --color-line-soft:     #e0e2d1;
+  --color-line-strong:   #b6b79a;
+  --color-line-row:      #b6b79a;
+  --color-text:          #292915;
+  --color-text-2:        #5c5d3f;
+  --color-text-3:        #717256;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #5e6a29;
+  --color-accent-strong: #4b5511;
+  --color-waiting:       #936205;
+  --color-working:       #167b48;
+  --color-done:          #667131;
+  --color-failed:        #aa4f5e;
+  --color-idle:          #6a6b55;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #f5f5ec;
+  --syntax-text:         #2b2b18;
+  --syntax-keyword:      #86380a;
+  --syntax-string:       #225b12;
+  --syntax-type:         #5e408b;
+  --syntax-function:     #085766;
+  --syntax-comment:      #66674e;
+  --syntax-gutter:       #64664c;
+  --graph-branch:        #338294;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #575f30;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="moss"][data-theme="dark"],
+[data-color-theme="moss"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #11110c;
+  --color-nav:           #16160c;
+  --color-tree:          #16160c;
+  --color-doc:           #1e1f0f;
+  --color-inset:         #17170c;
+  --color-raised:        #292a0b;
+  --color-select:        #2f3514;
+  --color-overlay:       #262717;
+  --color-term:          #101109;
+  --color-term-text:     #eff0e3;
+  --color-term-white:    #c5c7b1;
+  --color-term-select:   #93a05e4d;
+  --color-line:          #272719;
+  --color-line-soft:     #202114;
+  --color-line-strong:   #3c3c25;
+  --color-line-row:      #4a4c34;
+  --color-text:          #eff0e3;
+  --color-text-2:        #abad8d;
+  --color-text-3:        #898a6f;
+  --color-on-accent:     #111309;
+  --color-accent:        #93a05e;
+  --color-accent-strong: #b1bd85;
+  --color-waiting:       #c39654;
+  --color-working:       #64ad7f;
+  --color-done:          #99a765;
+  --color-failed:        #d98791;
+  --color-idle:          #abac96;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #1a1b0f;
+  --syntax-text:         #dddfce;
+  --syntax-keyword:      #eca280;
+  --syntax-string:       #8ec184;
+  --syntax-type:         #c0a8ed;
+  --syntax-function:     #5ac1d8;
+  --syntax-comment:      #97997f;
+  --syntax-gutter:       #909278;
+  --graph-branch:        #3c8a9b;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #95a06e;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 霧 / Mist: 冷たい薄灰の面に、青磁のような淡い青緑の強調色。面どうしの差を少なく */
+[data-color-theme="mist"],
+[data-color-theme="mist"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #f0f5f5;
+  --color-nav:           #e3ecec;
+  --color-tree:          #ebf2f2;
+  --color-doc:           #f8fcfc;
+  --color-inset:         #e9f1f1;
+  --color-raised:        #dde8e8;
+  --color-select:        #c1e7e1;
+  --color-overlay:       #fcfefe;
+  --color-term:          #e7efef;
+  --color-term-text:     #1e2c2b;
+  --color-term-white:    #435b5b;
+  --color-term-select:   #2c706940;
+  --color-line:          #cbdada;
+  --color-line-soft:     #d9e5e4;
+  --color-line-strong:   #a7bbbb;
+  --color-line-row:      #a7bbbb;
+  --color-text:          #1e2c2b;
+  --color-text-2:        #4c6060;
+  --color-text-3:        #627575;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #2c7069;
+  --color-accent-strong: #105b54;
+  --color-waiting:       #946307;
+  --color-working:       #187c49;
+  --color-done:          #337870;
+  --color-failed:        #ab505f;
+  --color-idle:          #5e6d6d;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #f2f8f8;
+  --syntax-text:         #222e2e;
+  --syntax-keyword:      #3a4b8d;
+  --syntax-string:       #0f5b3c;
+  --syntax-type:         #7b400b;
+  --syntax-function:     #035860;
+  --syntax-comment:      #586969;
+  --syntax-gutter:       #576868;
+  --graph-branch:        #31848d;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #20665f;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="mist"][data-theme="dark"],
+[data-color-theme="mist"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #0d1111;
+  --color-nav:           #0f1717;
+  --color-tree:          #0f1717;
+  --color-doc:           #132020;
+  --color-inset:         #0f1918;
+  --color-raised:        #132d2d;
+  --color-select:        #053934;
+  --color-overlay:       #1b2928;
+  --color-term:          #0b1111;
+  --color-term-text:     #e6f1f0;
+  --color-term-white:    #afcbca;
+  --color-term-select:   #62a69d4d;
+  --color-line:          #1d2929;
+  --color-line-soft:     #182222;
+  --color-line-strong:   #2b3f3f;
+  --color-line-row:      #3a4e4e;
+  --color-text:          #e6f1f0;
+  --color-text-2:        #95b0af;
+  --color-text-3:        #758d8c;
+  --color-on-accent:     #071413;
+  --color-accent:        #62a69d;
+  --color-accent-strong: #89c2b9;
+  --color-waiting:       #c39654;
+  --color-working:       #64ad7f;
+  --color-done:          #69aca4;
+  --color-failed:        #d88790;
+  --color-idle:          #9baead;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #121c1c;
+  --syntax-text:         #d2e0e0;
+  --syntax-keyword:      #9bb2f5;
+  --syntax-string:       #74c49a;
+  --syntax-type:         #e7a577;
+  --syntax-function:     #56c3ce;
+  --syntax-comment:      #859b9a;
+  --syntax-gutter:       #7e9493;
+  --graph-branch:        #388b93;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #63a79e;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 琥珀 / Amber: 蜂蜜色の面に、琥珀 (黄) の強調色。キーワードは紫、型は青緑 */
+[data-color-theme="amber"],
+[data-color-theme="amber"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #f7f1e9;
+  --color-nav:           #f1e7d9;
+  --color-tree:          #f6eee3;
+  --color-doc:           #fdf8f3;
+  --color-inset:         #f5ecdf;
+  --color-raised:        #eee1d0;
+  --color-select:        #ebd9bf;
+  --color-overlay:       #fefbf7;
+  --color-term:          #f3eadd;
+  --color-term-text:     #342510;
+  --color-term-white:    #605343;
+  --color-term-select:   #865c0440;
+  --color-line:          #e2d2bc;
+  --color-line-soft:     #eadece;
+  --color-line-strong:   #c7b195;
+  --color-line-row:      #c7b195;
+  --color-text:          #342510;
+  --color-text-2:        #6e5739;
+  --color-text-3:        #826c50;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #865c04;
+  --color-accent-strong: #6c4a01;
+  --color-waiting:       #926204;
+  --color-working:       #167b48;
+  --color-done:          #8d6413;
+  --color-failed:        #a94f5d;
+  --color-idle:          #776650;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #faf3eb;
+  --syntax-text:         #352814;
+  --syntax-keyword:      #5e408b;
+  --syntax-string:       #225b12;
+  --syntax-type:         #015956;
+  --syntax-function:     #025578;
+  --syntax-comment:      #756349;
+  --syntax-gutter:       #736147;
+  --graph-branch:        #437e9f;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #71562b;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="amber"][data-theme="dark"],
+[data-color-theme="amber"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #13100b;
+  --color-nav:           #1b140b;
+  --color-tree:          #1b140b;
+  --color-doc:           #261b0d;
+  --color-inset:         #1d150a;
+  --color-raised:        #372405;
+  --color-select:        #3f2d0f;
+  --color-overlay:       #2e2415;
+  --color-term:          #140f08;
+  --color-term-text:     #f5ede1;
+  --color-term-white:    #d1c3b0;
+  --color-term-select:   #c68f284d;
+  --color-line:          #2e2417;
+  --color-line-soft:     #271e13;
+  --color-line-strong:   #473721;
+  --color-line-row:      #564731;
+  --color-text:          #f5ede1;
+  --color-text-2:        #bca78a;
+  --color-text-3:        #97856b;
+  --color-on-accent:     #161107;
+  --color-accent:        #c68f28;
+  --color-accent-strong: #deaf61;
+  --color-waiting:       #c39553;
+  --color-working:       #63ac7e;
+  --color-done:          #cd9631;
+  --color-failed:        #d88690;
+  --color-idle:          #b7a893;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #20180d;
+  --syntax-text:         #e6dbcc;
+  --syntax-keyword:      #c0a8ed;
+  --syntax-string:       #8ec184;
+  --syntax-type:         #57c4bd;
+  --syntax-function:     #6ebce9;
+  --syntax-comment:      #a5947c;
+  --syntax-gutter:       #9e8d75;
+  --graph-branch:        #4a86a7;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #b39669;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 藍 / Indigo: 藍の面に、藍の強調色。キーワードは珊瑚色 */
+[data-color-theme="indigo"],
+[data-color-theme="indigo"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #eff2f9;
+  --color-nav:           #e3e8f4;
+  --color-tree:          #eaeff8;
+  --color-doc:           #f7f9fe;
+  --color-inset:         #e8edf8;
+  --color-raised:        #dde4f3;
+  --color-select:        #d0dbf7;
+  --color-overlay:       #fafcff;
+  --color-term:          #e6ebf6;
+  --color-term-text:     #202839;
+  --color-term-white:    #4d5567;
+  --color-term-select:   #4660af40;
+  --color-line:          #ccd5e7;
+  --color-line-soft:     #d9e0ee;
+  --color-line-strong:   #aab5ce;
+  --color-line-row:      #aab5ce;
+  --color-text:          #202839;
+  --color-text-2:        #505b74;
+  --color-text-3:        #657088;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #4660af;
+  --color-accent-strong: #344b99;
+  --color-waiting:       #926204;
+  --color-working:       #167b48;
+  --color-done:          #4d67b8;
+  --color-failed:        #aa4f5d;
+  --color-idle:          #61697c;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #f1f4fc;
+  --syntax-text:         #232a3a;
+  --syntax-keyword:      #8e2f24;
+  --syntax-string:       #055c28;
+  --syntax-type:         #5e4e09;
+  --syntax-function:     #0d5769;
+  --syntax-comment:      #5b667b;
+  --syntax-gutter:       #5a6479;
+  --graph-branch:        #368197;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #4a5983;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="indigo"][data-theme="dark"],
+[data-color-theme="indigo"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #0c0e14;
+  --color-nav:           #0d131f;
+  --color-tree:          #0d131f;
+  --color-doc:           #131b2c;
+  --color-inset:         #0e1421;
+  --color-raised:        #162444;
+  --color-select:        #232d49;
+  --color-overlay:       #1b2335;
+  --color-term:          #0a0e16;
+  --color-term-text:     #e5ecfb;
+  --color-term-white:    #bac4d7;
+  --color-term-select:   #7695e94d;
+  --color-line:          #1c2434;
+  --color-line-soft:     #171d2c;
+  --color-line-strong:   #2b3753;
+  --color-line-row:      #3a4763;
+  --color-text:          #e5ecfb;
+  --color-text-2:        #98a8cb;
+  --color-text-3:        #7886a5;
+  --color-on-accent:     #0e111b;
+  --color-accent:        #7695e9;
+  --color-accent-strong: #97b3fc;
+  --color-waiting:       #c19452;
+  --color-working:       #62ab7d;
+  --color-done:          #7d9bf0;
+  --color-failed:        #d5858e;
+  --color-idle:          #9ca8c2;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #111725;
+  --syntax-text:         #d1dbee;
+  --syntax-keyword:      #f69c8d;
+  --syntax-string:       #7bc48a;
+  --syntax-type:         #c9b35c;
+  --syntax-function:     #51c1e1;
+  --syntax-comment:      #8997b3;
+  --syntax-gutter:       #808eaa;
+  --graph-branch:        #3c879c;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #8698c5;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* GitHub: GitHub が公開している配色の値を写した (出典とライセンスの表記は配布物の
+   web/vendor/THIRD_PARTY_NOTICES.txt の Copied Values。一覧は
+   scripts/generate-third-party-notices.mjs の copiedValueSources)。面・文字・線・
+   状態・差分はその配色の同じ役の値、構文の色は GitHub の構文の配色 (キーワード = 赤・
+   文字列 = 紺・定数と数値 = 青・関数名とクラス名 = 紫)。
+   透明度つきの値は、乗る面 (hover はサイドバー、選択は本文の面、差分はコードの面) に
+   重ねた色にした。下限に届かない所だけ直した: ライトのキーワードと関数名・ダークの
+   キーワードは明るさだけ (構文の色 6.5:1)、文字列 (明暗とも) とライトの関数名は
+   色相だけ (定数と同じ青で、種類どうし 40 度に届かない)。 */
+[data-color-theme="github"],
+[data-color-theme="github"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #f6f8fa;
+  --color-nav:           #f6f8fa;
+  --color-tree:          #f6f8fa;
+  --color-doc:           #ffffff;
+  --color-inset:         #f6f8fa;
+  --color-raised:        #eaedf0;
+  --color-select:        #cee1f8;
+  --color-overlay:       #ffffff;
+  --color-term:          #f6f8fa;
+  --color-term-text:     #1f2328;
+  --color-term-white:    #59636e;
+  --color-term-select:   #54aeff66;
+  --color-line:          #d1d9e0;
+  --color-line-soft:     #dfe4e9;
+  --color-line-strong:   #818b98;
+  --color-line-row:      #818b98;
+  --color-text:          #1f2328;
+  --color-text-2:        #59636e;
+  --color-text-3:        #59636e;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #0969da;
+  --color-accent-strong: #0757ba;
+  --color-waiting:       #9a6700;
+  --color-working:       #1a7f37;
+  --color-done:          #8250df;
+  --color-failed:        #d1242f;
+  --color-idle:          #59636e;
+  --color-backdrop:      #c8d1da66;
+  --color-shadow:        #25292e3d;
+  --color-code:          #ffffff;
+  --syntax-text:         #1f2328;
+  --syntax-keyword:      #a71622;
+  --syntax-string:       #023a46;
+  --syntax-type:         #0550ae;
+  --syntax-function:     #6c34b4;
+  --syntax-comment:      #59636e;
+  --syntax-gutter:       #59636e;
+  --graph-branch:        #bc4c00;
+  --diff-add-bg:         #dafbe1;
+  --diff-add-num-sticky-bg: #aceebb;
+  --diff-add-word-bg:    #aceebb;
+  --diff-del-bg:         #ffebe9;
+  --diff-del-num-sticky-bg: #ffcecb;
+  --diff-del-word-bg:    #ffcecb;
+  --diff-hunk-fg:        #59636e;
+  --diff-add-fg:         #116329;
+  --diff-del-fg:         #82071e;
+}
+[data-color-theme="github"][data-theme="dark"],
+[data-color-theme="github"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #010409;
+  --color-nav:           #010409;
+  --color-tree:          #010409;
+  --color-doc:           #0d1117;
+  --color-inset:         #010409;
+  --color-raised:        #15191f;
+  --color-select:        #1e4273;
+  --color-overlay:       #010409;
+  --color-term:          #010409;
+  --color-term-text:     #f0f6fc;
+  --color-term-white:    #f0f6fc;
+  --color-term-select:   #388bfd66;
+  --color-line:          #3d444d;
+  --color-line-soft:     #2f353d;
+  --color-line-strong:   #656c76;
+  --color-line-row:      #656c76;
+  --color-text:          #f0f6fc;
+  --color-text-2:        #9198a1;
+  --color-text-3:        #9198a1;
+  --color-on-accent:     #0d1117;
+  --color-accent:        #4493f8;
+  --color-accent-strong: #79c0ff;
+  --color-waiting:       #d29922;
+  --color-working:       #3fb950;
+  --color-done:          #ab7df8;
+  --color-failed:        #f85149;
+  --color-idle:          #9198a1;
+  --color-backdrop:      #21283066;
+  --color-shadow:        #010409;
+  --color-code:          #0d1117;
+  --syntax-text:         #f0f6fc;
+  --syntax-keyword:      #fd8379;
+  --syntax-string:       #92dfe9;
+  --syntax-type:         #79c0ff;
+  --syntax-function:     #d2a8ff;
+  --syntax-comment:      #9198a1;
+  --syntax-gutter:       #9198a1;
+  --graph-branch:        #db6d28;
+  --diff-add-bg:         #12261e;
+  --diff-add-num-sticky-bg: #1c4428;
+  --diff-add-word-bg:    #1a4a29;
+  --diff-del-bg:         #25181c;
+  --diff-del-num-sticky-bg: #542426;
+  --diff-del-word-bg:    #6b2b2b;
+  --diff-hunk-fg:        #9198a1;
+  --diff-add-fg:         #aff5b4;
+  --diff-del-fg:         #ffdcd7;
 }
 
 /* 畳んだファイル一覧の縦の帯の幅 (--view-rail-w。下の html, body で --space-unit の倍数)
@@ -408,6 +1406,11 @@ html, body {
      密度で比例させるため --space-unit から作る。 */
   --ui-font-heading: calc(var(--space-unit) * 5.5);  /* 22 */
   --ui-font-section: calc(var(--space-unit) * 4.5);  /* 18 */
+  /* 設定とヘルプのページ: ページの見出し・読む本文・手順の 1 行の動作。本文は
+     一覧の文字 (--ui-font-*) より一段大きく読む文字。 */
+  --ui-font-page: calc(var(--space-unit) * 7);       /* 28 */
+  --ui-font-read: calc(var(--space-unit) * 3.75);    /* 15 */
+  --ui-font-step: calc(var(--space-unit) * 4);       /* 16 */
   /* メインの面のタブ列の高さ (34 / 30 / 38 / 43)。密度で --space-unit と一緒に
      変わるので、:root ではなくここで決め、合計の --global-header-h もここで
      決め直す (body で変わった --main-tabs-h を反映させるため。下のコメント)。 */
@@ -2570,6 +3573,10 @@ body.gdp-history-page #history-commit-info:not([hidden]),
   flex: 0 0 auto;
   display: inline-grid;
   grid-template-columns: 16px;
+  /* 16px の列そのものを枠の中央に置く (place-items だけでは列の中で中央になり、
+     列は左端に残るので絵が左へずれた)。 */
+  justify-content: center;
+  align-content: center;
   place-items: center;
   width: 28px;
   height: 28px;
@@ -2630,7 +3637,8 @@ body[data-focus-scope="sidebar"] :is(#sidebar, #file-list) {
   box-shadow: none;
 }
 body[data-focus-scope="main"] #content {
-  background: var(--bg);
+  --content-face: var(--bg);
+  background: var(--content-face);
   outline: none;
   box-shadow: none;
 }
@@ -2828,7 +3836,7 @@ body.gdp-history-resizing * {
   user-select: none !important;
 }
 
-/* Help ページの設定セクションに置くフォーム。読みやすい行長で止める。 */
+/* 設定のページ (views/settings-page.ts) のフォーム。読みやすい行長で止める。 */
 .scope-settings {
   max-width: 760px;
 }
@@ -2854,13 +3862,9 @@ body.gdp-history-resizing * {
 .scope-settings-title-row + label {
   margin-top: 0;
 }
-.scope-settings-section + .scope-settings-section {
-  margin-top: 12px;
-}
-#viewer-theme,
-#viewer-language,
-#sidebar-font-size,
-#code-font-size {
+/* 設定のページの選択の欄は全部この見た目 (欄を足しても id を並べ足さずに済むよう、
+   ページの中の select 全部に当てる。viewer-settings.test.ts が確かめる)。 */
+.scope-settings select {
   appearance: none;
   box-sizing: border-box;
   width: 100%;
@@ -2878,25 +3882,16 @@ body.gdp-history-resizing * {
   line-height: 34px;
   cursor: pointer;
 }
-#viewer-theme:hover,
-#viewer-language:hover,
-#sidebar-font-size:hover,
-#code-font-size:hover {
+.scope-settings select:hover {
   border-color: var(--border-strong);
   background-color: var(--bg-mute);
 }
-#viewer-theme:focus,
-#viewer-language:focus,
-#sidebar-font-size:focus,
-#code-font-size:focus {
+.scope-settings select:focus {
   border-color: var(--accent);
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-muted);
 }
-#viewer-theme:disabled,
-#viewer-language:disabled,
-#sidebar-font-size:disabled,
-#code-font-size:disabled {
+.scope-settings select:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
@@ -3177,7 +4172,6 @@ html[data-theme="dark"] .agent-screen-rules-highlight span[style] {
   font-size: 13px;
 }
 #quick-help-popover .gdp-help-group th {
-  width: auto;
   white-space: nowrap;
 }
 .quick-help-foot {
@@ -3265,94 +4259,7 @@ body.gdp-help-page #content {
   color: var(--accent-emph);
   font-weight: 700;
 }
-.gdp-help-content h2 {
-  margin: 0 0 8px;
-  font-size: 24px;
-}
-.gdp-help-content > p {
-  margin: 0 0 24px;
-  color: var(--fg-muted);
-}
-.gdp-help-group {
-  margin: 0 0 28px;
-}
-.gdp-help-group h3 {
-  margin: 0 0 10px;
-  font-size: 16px;
-}
-.gdp-help-group p {
-  max-width: 840px;
-  margin: 0 0 14px;
-  color: var(--fg-muted);
-  line-height: 1.65;
-}
-.gdp-help-steps {
-  max-width: 840px;
-  margin: 0 0 18px;
-  padding-left: 26px;
-  color: var(--fg-muted);
-  line-height: 1.65;
-}
-.gdp-help-steps li {
-  margin: 6px 0;
-}
-.gdp-help-command {
-  max-width: 920px;
-  margin: 0 0 16px;
-}
-.gdp-help-command-title {
-  margin: 0 0 6px;
-  color: var(--fg-muted);
-  font-size: 13px;
-  font-weight: 700;
-}
-.gdp-help-command pre {
-  margin: 0;
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-soft);
-  padding: 12px 14px;
-}
-.gdp-help-command code {
-  color: var(--fg);
-  font: 13px "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  white-space: pre;
-}
-.gdp-help-group table {
-  width: 100%;
-  border-collapse: collapse;
-  border-top: 1px solid var(--border);
-}
-.gdp-help-group th,
-.gdp-help-group td {
-  padding: 11px 8px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-.gdp-help-group th {
-  width: 230px;
-  color: var(--fg);
-  font-weight: 600;
-  text-align: left;
-}
-.gdp-help-group td {
-  color: var(--fg-muted);
-}
-.gdp-help-group kbd {
-  display: inline-block;
-  min-width: 24px;
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-bottom-color: var(--border-strong);
-  border-radius: 5px;
-  background: var(--bg-soft);
-  color: var(--fg);
-  font: 12px "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  text-align: center;
-}
-
-/* ===== Shortcuts (Help > Settings > Shortcuts) =====
+/* ===== Shortcuts (Settings > Shortcuts) =====
    設定の「ショートカット」の節 (views/help-keybinding-editor.ts)。行は押すと開き、
    開いた行の下にキーごとの効く所を並べる。寸法は名前だけで書く。 */
 .gdp-help-shortcut-link {
@@ -3491,15 +4398,6 @@ body.gdp-help-page #content {
 .shortcut-none {
   color: var(--color-text-3);
   font-size: var(--ui-font-sm);
-}
-.shortcut-settings kbd {
-  padding: 0 var(--space-1);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-sm);
-  background: var(--color-inset);
-  color: var(--color-text);
-  font: var(--ui-font-sm) / 1.6 var(--font-mono);
-  white-space: nowrap;
 }
 .shortcut-row-detail {
   margin: var(--space-1) 0 var(--space-2);
@@ -3973,6 +4871,10 @@ body.gdp-help-page #content {
    縦のスクロールバーはこの箱の右端 = 右の列の左に出る。箱の中の sticky は
    この箱の上端 (0) が基準になるので、中の見出しは chrome の変数を読まない。 */
 #content {
+  /* 本文の箱の後ろに見えている面。本文にフォーカスがある間は本文の面 (上の
+     data-focus-scope)、それ以外は何も塗らず body の地が見える。本文の箱の中で
+     面を塗る部品 (設定の保存の帯) はこれを読む (後ろと違う色で浮かないように)。 */
+  --content-face: var(--color-ground);
   --content-top-gap: 18px;
   /* 本文の左右の余白 (T3)。ソース表示はこの分だけ外へ出て、面を端まで敷く。 */
   --content-pad-x: 24px;
@@ -4437,14 +5339,15 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
    actions are visually separated so their payloads are unambiguous. */
 #line-ref-pill {
   position: fixed;
-  left: 50%;
+  /* 選択のある面の真ん中と幅 (line-ref-pill.ts の place が書く)。 */
+  left: var(--lrp-center, 50%);
   bottom: calc(var(--chrome-bottom) + var(--space-5));
   transform: translateX(-50%);
   z-index: 400;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: min(1040px, calc(100vw - 48px));
+  max-width: min(1040px, calc(var(--lrp-room, 100vw) - 48px));
   white-space: nowrap;
   padding: 4px;
   border: 1px solid var(--border-strong);
@@ -5554,7 +6457,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   max-width: 52ch;
   padding: 8px 14px;
   border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-line-row);
   overflow-wrap: anywhere;
   text-align: left;
   transition: background-color 0.12s ease;
@@ -5984,14 +6887,14 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   width: auto;
   max-width: 100%;
   border-collapse: collapse;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--color-line-row);
   background: var(--bg);
   font-size: 0.95em;
 }
 .gdp-markdown-preview th,
 .gdp-markdown-preview td {
   padding: 9px 14px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-line-row);
   text-align: left;
   vertical-align: top;
 }
@@ -6529,10 +7432,58 @@ body.gdp-file-detail-page #empty {
 .gdp-context-menu button[aria-checked="true"] {
   font-weight: 600;
 }
-.gdp-context-menu button[aria-checked="true"]::after {
-  content: "✓";
+.gdp-context-menu button.gdp-context-menu-leading[role="menuitemradio"]::after {
+  content: "";
+  flex: none;
+  width: var(--icon-md);
   margin-left: auto;
   color: var(--color-text-2);
+  text-align: center;
+}
+.gdp-context-menu button.gdp-context-menu-leading[aria-checked="true"]::after {
+  content: "✓";
+}
+/* 絵に画面の絵を使う項目 (グループの ▾ の画面の行)。絵はタブの絵と同じ大きさ。 */
+.gdp-context-menu-icon {
+  flex: none;
+  display: flex;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  color: var(--color-text-2);
+}
+.gdp-context-menu-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.gdp-context-menu button:disabled .gdp-context-menu-icon {
+  color: inherit;
+}
+/* 右端のキー (見た目はパレットのキーと共有)。印の列があればその左。 */
+.gdp-context-menu-key {
+  flex: none;
+  margin-left: auto;
+}
+.gdp-context-menu
+  button.gdp-context-menu-leading[role="menuitemradio"]:has(> .gdp-context-menu-key)::after {
+  margin-left: 0;
+}
+/* 絵の無い選び方の一覧 (棚の置き場所など): 印は左の固定の列。選んでいない行も
+   同じ幅を空けて、文字の頭をそろえる。 */
+.gdp-context-menu button[role="menuitemradio"]:not(.gdp-context-menu-leading) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.gdp-context-menu button[role="menuitemradio"]:not(.gdp-context-menu-leading)::before {
+  content: "";
+  flex: none;
+  width: var(--icon-md);
+  color: var(--color-text-2);
+  text-align: center;
+}
+.gdp-context-menu
+  button[role="menuitemradio"][aria-checked="true"]:not(.gdp-context-menu-leading)::before {
+  content: "✓";
 }
 /* 押せない項目 (理由は title)。危険な操作の色より優先して、押せないと分かる色に。 */
 .gdp-context-menu button:disabled {
@@ -6683,10 +7634,12 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
  * 祖先を :is() でまとめず、面ごとに並べる (先祖のクラスで規則を素早く外せる
  * 形にしておく。右端に :is() を置いた規則が長いファイルのスクロールを重く
  * したことは B-1 History の節の注釈)。テーマごとの値は名前の層が持つので、
- * ここでテーマを書き分けない。抑えめにし、キーワード・文字列・
- * 型・関数名・コメントだけを分ける (変数や引数は地の文字と同じ)。
+ * ここでテーマを書き分けない。
  * highlight.js のクラスを使う面 (差分・Markdown のコード・ソース表示の仮想表示)
- * はここ、shiki を使う面は B-1 の節で名前へ差し替える。 */
+ * はここ、shiki を使う面は B-1 の節で名前へ差し替える。種類分けは shiki の
+ * github テーマに合わせる (同じ種類が画面によって違う色にならないように):
+ * 組み込み・属性名・見出しは定数と同じ琥珀、クラス名は関数名と同じ青、
+ * タグ名はキーワードと同じ紫、リストの印と変数は地の文字。 */
 .d2h-code-line-ctn,
 .gdp-markdown-preview .hljs,
 .gdp-source-virtual-line-code {
@@ -6700,18 +7653,14 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 .gdp-markdown-preview .hljs-selector-tag,
 .gdp-source-line-code .hljs-selector-tag,
 .gdp-source-virtual-line-code .hljs-selector-tag,
-.d2h-code-line-ctn .hljs-built_in,
-.gdp-markdown-preview .hljs-built_in,
-.gdp-source-line-code .hljs-built_in,
-.gdp-source-virtual-line-code .hljs-built_in,
-.d2h-code-line-ctn .hljs-builtin-name,
-.gdp-markdown-preview .hljs-builtin-name,
-.gdp-source-line-code .hljs-builtin-name,
-.gdp-source-virtual-line-code .hljs-builtin-name,
 .d2h-code-line-ctn .hljs-tag,
 .gdp-markdown-preview .hljs-tag,
 .gdp-source-line-code .hljs-tag,
 .gdp-source-virtual-line-code .hljs-tag,
+.d2h-code-line-ctn .hljs-name,
+.gdp-markdown-preview .hljs-name,
+.gdp-source-line-code .hljs-name,
+.gdp-source-virtual-line-code .hljs-name,
 .d2h-code-line-ctn .hljs-meta-keyword,
 .gdp-markdown-preview .hljs-meta-keyword,
 .gdp-source-line-code .hljs-meta-keyword,
@@ -6724,10 +7673,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 .gdp-markdown-preview .hljs-symbol,
 .gdp-source-line-code .hljs-symbol,
 .gdp-source-virtual-line-code .hljs-symbol,
-.d2h-code-line-ctn .hljs-bullet,
-.gdp-markdown-preview .hljs-bullet,
-.gdp-source-line-code .hljs-bullet,
-.gdp-source-virtual-line-code .hljs-bullet,
 .d2h-code-line-ctn .hljs-template-tag,
 .gdp-markdown-preview .hljs-template-tag,
 .gdp-source-line-code .hljs-template-tag,
@@ -6752,38 +7697,22 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 .gdp-markdown-preview .hljs-literal,
 .gdp-source-line-code .hljs-literal,
 .gdp-source-virtual-line-code .hljs-literal,
-.d2h-code-line-ctn .hljs-doctag,
-.gdp-markdown-preview .hljs-doctag,
-.gdp-source-line-code .hljs-doctag,
-.gdp-source-virtual-line-code .hljs-doctag,
-.d2h-code-line-ctn .hljs-meta,
-.gdp-markdown-preview .hljs-meta,
-.gdp-source-line-code .hljs-meta,
-.gdp-source-virtual-line-code .hljs-meta,
+.d2h-code-line-ctn .hljs-built_in,
+.gdp-markdown-preview .hljs-built_in,
+.gdp-source-line-code .hljs-built_in,
+.gdp-source-virtual-line-code .hljs-built_in,
+.d2h-code-line-ctn .hljs-builtin-name,
+.gdp-markdown-preview .hljs-builtin-name,
+.gdp-source-line-code .hljs-builtin-name,
+.gdp-source-virtual-line-code .hljs-builtin-name,
 .d2h-code-line-ctn .hljs-type,
 .gdp-markdown-preview .hljs-type,
 .gdp-source-line-code .hljs-type,
 .gdp-source-virtual-line-code .hljs-type,
-.d2h-code-line-ctn .hljs-title.class_,
-.gdp-markdown-preview .hljs-title.class_,
-.gdp-source-line-code .hljs-title.class_,
-.gdp-source-virtual-line-code .hljs-title.class_,
-.d2h-code-line-ctn .hljs-class .hljs-title,
-.gdp-markdown-preview .hljs-class .hljs-title,
-.gdp-source-line-code .hljs-class .hljs-title,
-.gdp-source-virtual-line-code .hljs-class .hljs-title { color: var(--syntax-type) !important; }
-.d2h-code-line-ctn .hljs-title,
-.gdp-markdown-preview .hljs-title,
-.gdp-source-line-code .hljs-title,
-.gdp-source-virtual-line-code .hljs-title,
-.d2h-code-line-ctn .hljs-section,
-.gdp-markdown-preview .hljs-section,
-.gdp-source-line-code .hljs-section,
-.gdp-source-virtual-line-code .hljs-section,
-.d2h-code-line-ctn .hljs-name,
-.gdp-markdown-preview .hljs-name,
-.gdp-source-line-code .hljs-name,
-.gdp-source-virtual-line-code .hljs-name { color: var(--syntax-function) !important; }
+.d2h-code-line-ctn .hljs-meta,
+.gdp-markdown-preview .hljs-meta,
+.gdp-source-line-code .hljs-meta,
+.gdp-source-virtual-line-code .hljs-meta,
 .d2h-code-line-ctn .hljs-attr,
 .gdp-markdown-preview .hljs-attr,
 .gdp-source-line-code .hljs-attr,
@@ -6792,6 +7721,30 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 .gdp-markdown-preview .hljs-attribute,
 .gdp-source-line-code .hljs-attribute,
 .gdp-source-virtual-line-code .hljs-attribute,
+.d2h-code-line-ctn .hljs-section,
+.gdp-markdown-preview .hljs-section,
+.gdp-source-line-code .hljs-section,
+.gdp-source-virtual-line-code .hljs-section,
+.d2h-code-line-ctn .hljs-variable.language_,
+.gdp-markdown-preview .hljs-variable.language_,
+.gdp-source-line-code .hljs-variable.language_,
+.gdp-source-virtual-line-code .hljs-variable.language_,
+.d2h-code-line-ctn .hljs-variable.constant_,
+.gdp-markdown-preview .hljs-variable.constant_,
+.gdp-source-line-code .hljs-variable.constant_,
+.gdp-source-virtual-line-code .hljs-variable.constant_ { color: var(--syntax-type) !important; }
+.d2h-code-line-ctn .hljs-title,
+.gdp-markdown-preview .hljs-title,
+.gdp-source-line-code .hljs-title,
+.gdp-source-virtual-line-code .hljs-title,
+.d2h-code-line-ctn .hljs-title.class_,
+.gdp-markdown-preview .hljs-title.class_,
+.gdp-source-line-code .hljs-title.class_,
+.gdp-source-virtual-line-code .hljs-title.class_,
+.d2h-code-line-ctn .hljs-class .hljs-title,
+.gdp-markdown-preview .hljs-class .hljs-title,
+.gdp-source-line-code .hljs-class .hljs-title,
+.gdp-source-virtual-line-code .hljs-class .hljs-title { color: var(--syntax-function) !important; }
 .d2h-code-line-ctn .hljs-variable,
 .gdp-markdown-preview .hljs-variable,
 .gdp-source-line-code .hljs-variable,
@@ -6807,7 +7760,11 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 .d2h-code-line-ctn .hljs-property,
 .gdp-markdown-preview .hljs-property,
 .gdp-source-line-code .hljs-property,
-.gdp-source-virtual-line-code .hljs-property { color: var(--syntax-text) !important; }
+.gdp-source-virtual-line-code .hljs-property,
+.d2h-code-line-ctn .hljs-bullet,
+.gdp-markdown-preview .hljs-bullet,
+.gdp-source-line-code .hljs-bullet,
+.gdp-source-virtual-line-code .hljs-bullet { color: var(--syntax-text) !important; }
 .d2h-code-line-ctn .hljs-emphasis,
 .gdp-markdown-preview .hljs-emphasis,
 .gdp-source-line-code .hljs-emphasis,
@@ -8810,6 +9767,14 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 .project-switcher-note {
   color: var(--fg-subtle);
 }
+/* 起動中の行と停止中の行の区切り (切替の小窓は畳まない)。 */
+.project-switcher-divider {
+  margin: 6px 8px 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-line-soft);
+  color: var(--fg-subtle);
+  font-size: var(--ui-font-sm);
+}
 .project-switcher-message {
   margin: 4px 8px 8px;
   color: var(--fg-muted);
@@ -8846,12 +9811,14 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 .project-switcher-action:focus-visible {
   background: var(--accent-subtle);
 }
-/* メニューの区切り。取り返しのつかない操作を、よく使う操作と続けて置かない。 */
+/* メニューの区切り。取り返しのつかない操作を、よく使う操作と続けて置かない。
+   線は表の行の区切りと同じ (浮く面にも 1.5:1 以上。--color-line はダークで浮く面と
+   ほぼ同じ色で、区切りが見えなかった)。 */
 .gdp-context-menu-sep {
   margin: calc(var(--space-1) / 2)
     calc(var(--context-menu-inline-pad) - var(--space-1));
   border: 0;
-  border-top: 1px solid var(--color-line);
+  border-top: 1px solid var(--color-line-row);
 }
 
 /* 変更がまだ無い作業ツリーの案内 (右ペイン)。次にやることをその場に置く。 */
@@ -15285,11 +16252,7 @@ body.db-resizing {
   grid-template-columns: 90px 1fr;
   gap: 12px;
   padding: 8px 0;
-  border-top: 1px solid var(--bg-mute, #eaeef2);
   align-items: start;
-}
-.doctor-row:first-of-type {
-  border-top: 0;
 }
 .doctor-row-pill {
   font-size: 10px;
@@ -15714,6 +16677,12 @@ html[data-theme="dark"] .tools-code span[style] {
   display: flex;
   flex-direction: column;
 }
+/* サーバが起き直して終わったシェルの案内 (views/terminal/terminal-view.ts の
+   showEnded)。面の高さいっぱいに広げ、.empty の中央寄せで上下の真ん中に出す
+   (広げないと中身の高さのまま面の上に寄った)。 */
+.terminal-pane > .empty {
+  flex: 1 1 auto;
+}
 /* xterm 1 つと状態の行の組 (views/terminal/terminal-view.ts の ScreenSlot)。
    パネルとメインのタブの間で、この箱ごと付け替える。 */
 .terminal-slot {
@@ -15767,7 +16736,7 @@ html[data-theme="dark"] .tools-code span[style] {
 .terminal-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-/* ターミナルと、その上の添付の帯・右の画像の棚をまとめた入れ物。 */
+/* ターミナルと、右の画像の棚をまとめた入れ物。 */
 .terminal-pane-body {
   flex: 1 1 auto;
   min-width: 0;
@@ -15775,77 +16744,6 @@ html[data-theme="dark"] .tools-code span[style] {
   display: flex;
   flex-direction: column;
 }
-/* 貼り付けた画像。xterm のマス目の外に置くので、tmux の全画面書き換えでも
-   消えない。横に並べ、溢れたら横スクロールにする。 */
-.terminal-attachments {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 8px;
-  padding: 6px 8px;
-  overflow-x: auto;
-  background: var(--bg-soft, #f6f8fa);
-  border-bottom: 1px solid var(--border, #d0d7de);
-}
-.terminal-attachments[hidden] {
-  display: none;
-}
-.terminal-attachment {
-  position: relative;
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-width: 140px;
-}
-.terminal-attachment img {
-  display: block;
-  width: 100%;
-  height: 72px;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 1px solid var(--border, #d0d7de);
-  background: var(--bg, #fff);
-}
-.terminal-attachment-name {
-  font-size: 10px;
-  color: var(--fg-muted, #57606a);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.terminal-attachment-close {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font: inherit;
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-}
-.terminal-attachment-close:hover {
-  background: rgba(0, 0, 0, 0.75);
-}
-/* 帯のサムネイルは押して拡大できるので、ボタンとして見せる (枠は付けず、
-   画像そのものが的になる)。 */
-.terminal-attachment-open {
-  display: block;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: zoom-in;
-}
-.terminal-attachment-open:focus-visible {
-  outline: 2px solid var(--accent, #0969da);
-  outline-offset: 2px;
-}
-
 /* 画像の拡大表示。操作系 (ズーム・ドラッグ移動) は ER 図や mermaid
    プレビューと同じ core/diagram-viewport を使う。 */
 .terminal-lightbox {
@@ -15891,6 +16789,26 @@ html[data-theme="dark"] .tools-code span[style] {
 }
 .terminal-lightbox .terminal-font-btn:hover {
   background: rgba(40, 50, 70, 0.95);
+}
+/* 閉じる: 拡大縮小の塊から離し、明るい枠と「閉じる」「Esc」で押せば閉じると分かる形。 */
+.terminal-lightbox .terminal-lightbox-close {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  padding: 0 12px;
+  border-color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.14);
+}
+.terminal-lightbox .terminal-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+.terminal-lightbox-close kbd {
+  padding: 1px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 4px;
+  font: 500 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: rgba(255, 255, 255, 0.85);
 }
 .terminal-lightbox-view {
   flex: 1 1 auto;
@@ -16271,7 +17189,7 @@ html[data-theme="dark"] .tools-code span[style] {
    列の幅は固定し、状態やボタンの文言が変わっても行の中身が動かない。 */
 .agent-hooks-rows {
   margin-top: 8px;
-  border-top: 1px solid var(--border-muted);
+  border-top: 1px solid var(--color-line-row);
 }
 .agent-hooks-row {
   display: grid;
@@ -16279,7 +17197,6 @@ html[data-theme="dark"] .tools-code span[style] {
   align-items: center;
   column-gap: 10px;
   padding: 6px 0;
-  border-bottom: 1px solid var(--border-muted);
   font-size: 12px;
   line-height: 18px;
 }
@@ -16577,14 +17494,11 @@ body.gdp-search-page {
   align-items: center;
   row-gap: var(--space-1);
   padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--color-line-soft);
   color: var(--color-text);
   font-size: var(--ui-font-base);
 }
 .agent-accounts-head {
   padding: var(--space-1) 0;
-  color: var(--color-text-3);
-  font-size: var(--ui-font-sm);
 }
 .agent-accounts-name-cell,
 .agent-accounts-email,
@@ -16692,15 +17606,17 @@ body.gdp-search-page {
 .agent-accounts-add {
   margin-top: var(--space-3);
 }
+/* ログイン・使用量・起動コマンドは、設定のほかの節の見出しと同じ段 (分類の中の 3 つの節)。 */
 .agent-accounts-subtitle,
 .agent-accounts-subtitle-row {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  margin-top: var(--space-6);
+  margin-top: var(--space-7);
   color: var(--color-text);
-  font-size: var(--ui-font-md);
-  font-weight: 600;
+  font-size: var(--ui-font-section);
+  font-weight: 700;
+  line-height: 1.4;
 }
 .agent-accounts-section > .agent-accounts-subtitle:first-child {
   margin-top: 0;
@@ -16721,7 +17637,7 @@ body.gdp-search-page {
 /* 使用量: 受け取れているかと最後の時刻だけを 1 行で。仕組みは「仕組み」の欄。 */
 .agent-accounts-usage {
   margin-top: var(--space-2);
-  border-top: 1px solid var(--color-line-soft);
+  border-top: 1px solid var(--color-line-row);
 }
 .agent-accounts-usage-row {
   display: flex;
@@ -16729,7 +17645,6 @@ body.gdp-search-page {
   align-items: center;
   gap: var(--space-2) var(--space-4);
   padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--color-line-soft);
   font-size: var(--ui-font-base);
 }
 .agent-accounts-usage-who {
@@ -16753,12 +17668,15 @@ body.gdp-search-page {
   flex-basis: 100%;
   margin: 0;
 }
-.agent-accounts-how {
+/* 畳んだ「仕組み」と、設定の判定ルールの編集の欄 (既定で畳む)。 */
+.agent-accounts-how,
+.agent-screen-rules-details {
   margin-top: var(--space-2);
   color: var(--color-text-2);
-  font-size: var(--ui-font-sm);
+  font-size: var(--ui-font-md);
 }
-.agent-accounts-how > summary {
+.agent-accounts-how > summary,
+.agent-screen-rules-details > summary {
   cursor: pointer;
 }
 .agent-accounts-how-body > p {
@@ -16810,8 +17728,8 @@ body.gdp-search-page {
 }
 .agent-accounts-share-item {
   display: grid;
-  /* 名前の列は幅を揃える (長い名前は省略し、全体はツールチップ)。 */
-  grid-template-columns: auto 14em minmax(0, 1fr);
+  /* 長い名前は省略し、全体 (リンク元のパス) はツールチップ。 */
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: baseline;
   column-gap: 8px;
   padding: 2px 0;
@@ -16830,11 +17748,13 @@ body.gdp-search-page {
   margin: 0;
   accent-color: var(--accent);
 }
-.agent-accounts-share-why {
-  min-width: 0;
-  color: var(--fg-muted);
-  font-size: 11px;
-  line-height: 16px;
+/* まとまりの見出しの下の理由と、一覧の前の説明。本文と同じ濃さで読める字にする。 */
+.agent-accounts-share-why,
+.agent-accounts-share-intro {
+  margin: 0;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 18px;
 }
 
 /* ======================================================================
@@ -16875,22 +17795,24 @@ html[data-nav-collapsed] #app-nav {
   display: none;
 }
 /* 左のサイドバーの頭 (検索の入口) はタブ列と同じ高さ (--main-tabs-h) で、下端を
-   そろえる。検索欄は --ui-control-sm の枠。 */
+   そろえる。検索欄は枠のある箱なので、上端からも左右と同じ内側の余白 (--pad-face)
+   を取る (上下 3px で窓の上端に付いて見えた)。下は見出しの行が続くので詰め
+   (--space-1)、検索欄は残りの高さいっぱい。隣の絵のボタンも同じ中心にそろう。 */
 .nav-head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--space-1);
   height: var(--main-tabs-h);
-  padding: 0 var(--pad-face);
+  padding: var(--pad-face) var(--pad-face) var(--space-1);
 }
 .nav-search {
   flex: 1 1 auto;
+  align-self: stretch;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: var(--ui-control-sm);
   padding: 0 calc(var(--pad-text) - var(--pad-face));
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-md);
@@ -17209,6 +18131,41 @@ html[data-nav-collapsed] #app-nav {
   height: var(--ui-control-sm);
   padding: 0 calc(var(--pad-text) - var(--pad-face));
 }
+/* 起動中でない登録プロジェクト (core/project-running.ts)。一覧の最後に畳める
+   見出しとして置く。既定は畳む (開いたかは全プロジェクト共通の設定)。 */
+.nav-stopped {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-line-soft);
+}
+.nav-stopped-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  height: var(--ui-control-sm);
+  padding: 0 calc(var(--pad-text) - var(--pad-face));
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.nav-stopped-toggle:hover {
+  color: var(--color-text);
+}
+.nav-stopped-toggle svg {
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  transition: transform var(--motion-fast);
+}
+.nav-stopped-toggle[aria-expanded="false"] svg {
+  transform: rotate(-90deg);
+}
+.nav-stopped-list {
+  margin-top: var(--space-2);
+}
 .nav-project-problem {
   flex: none;
   padding: 0 var(--space-1);
@@ -17298,14 +18255,13 @@ html[data-nav-collapsed] #app-nav {
 .nav-agents[hidden] {
   display: none;
 }
-/* エージェントの行は見出しより字下げした 2 行組のカード (.agent-card)。地より一段
-   明るい面。 */
+/* エージェントの行は見出しより字下げした 2 行組 (.agent-card)。面と区切りの線は
+   .agent-card が持つ (ライトは線、ダークは面)。 */
 .nav-agent {
   margin-left: calc(var(--pad-text) - var(--pad-face) + var(--indent-step));
   padding: var(--space-1) var(--space-2);
   border: 0;
   border-radius: var(--radius-md);
-  background: var(--color-doc);
   color: var(--color-text);
   font: inherit;
   cursor: pointer;
@@ -17339,6 +18295,21 @@ body[data-sidebar-font-size="compact"] .nav-agent {
   align-items: center;
   column-gap: var(--space-2);
   text-align: left;
+  /* 面 (--color-agent-row) と、行の下端の区切りの線 (--color-agent-row-rule)。
+     線は背景に描く: 枠線や影は角丸に沿って両端が曲がり、箱の寸法も変える。
+     hover と選択中は background ごと面の色に替わる (線はその行だけ消える)。 */
+  background-color: var(--color-agent-row);
+  background-image: linear-gradient(
+    var(--color-agent-row-rule),
+    var(--color-agent-row-rule)
+  );
+  background-position: bottom;
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+}
+/* 線は行の間だけ (最後の行の下はプロジェクトの間の余白で区切る)。 */
+.agent-card:last-child {
+  background-image: none;
 }
 .agent-card > .terminal-mark {
   grid-area: mark;
@@ -17366,6 +18337,7 @@ body[data-sidebar-font-size="compact"] .nav-agent {
   padding: 0 var(--space-1);
   border: 1px solid currentColor;
   border-radius: var(--radius-sm);
+  background: var(--color-agent-badge);
   font-size: var(--ui-font-xs);
   font-weight: 500;
   line-height: 1.5;
@@ -17478,8 +18450,9 @@ body.gdp-nav-resizing {
 
 /* ---- メインの面のタブ列 (最上段。views/main-tabs/main-tabs-view.ts) ----
    高さは --main-tabs-h。タブが収まらなければタブの並びだけが横に送られ、
-   右端の ＋ と分割は隠れない。選択の強さは面の明るさ + 上端の 2px の線 (線は
-   フォーカスのある面の選択中のタブだけ、そのタブの幅だけ)。 */
+   右端の ＋ と分割は隠れない。選択中のタブは面の明るさ + 上端の 2px の線 (強調色の
+   線と強調色の絵と太い名前はフォーカスのある面の選択中のタブだけ。もう一方の面の
+   選択中のタブは弱い線。線はそのタブの幅だけ)。 */
 #main-tabs {
   position: fixed;
   /* 左端は一覧の列の頭の右 (列を畳んでも頭の行は残るので動かない)、右端は窓の右端。 */
@@ -17556,17 +18529,31 @@ body.main-split .main-tabs-pane[data-side="left"] {
   max-width: calc(var(--space-unit) * 50);   /* 200 */
   padding: 0 var(--space-3);
   background: var(--color-nav);
-  color: var(--color-text-2);
+  /* 選んでいないタブは文字を一段落とし、選択中のタブとの差を大きくする。 */
+  color: var(--color-text-3);
   font-size: var(--ui-font-md);
   cursor: pointer;
   user-select: none;
 }
 .main-tab:hover {
   background: color-mix(in srgb, var(--color-nav) 50%, var(--color-tab-active));
+  color: var(--color-text-2);
 }
+/* 選択中のタブ: 面の明るさ・本来の文字色・上の辺の線。寸法は変えない (線は
+   box-shadow と ::before、名前の太さは -webkit-text-stroke。font-weight だと名前の
+   幅が変わり、中身の幅で決まるタブの幅が選ぶたびに動く)。上の辺の線は、
+   もう一方の面の選択中のタブは弱い線、フォーカスのある面の選択中のタブは下の
+   .main-tab-focused の強調色の線 (絵も強調色、名前を太く)。下の辺の線は
+   プロジェクトのグループの色なので使わない。 */
 .main-tab.main-tab-active {
   background: var(--color-tab-active);
   color: var(--color-text);
+  box-shadow: inset 0 2px 0 var(--color-text-3);
+}
+/* フォーカスのある面の選択中のタブは、面に強調色を混ぜ、上の辺を強調色の線に
+   する (どのタブを見ているか一目で分かるように。線は ::before なので寸法は変わらない)。 */
+.main-tab.main-tab-focused {
+  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-tab-active));
 }
 .main-tab.main-tab-focused::before {
   content: "";
@@ -17588,6 +18575,12 @@ body.main-split .main-tabs-pane[data-side="left"] {
 }
 .main-tab-active .main-tab-icon {
   color: var(--color-text-2);
+}
+.main-tab.main-tab-focused .main-tab-icon {
+  color: var(--color-accent);
+}
+.main-tab.main-tab-focused .main-tab-name {
+  -webkit-text-stroke: 0.4px currentColor;
 }
 .main-tab-icon svg {
   width: 100%;
@@ -17791,6 +18784,34 @@ body.main-split .main-tabs-pane[data-side="left"] {
 /* 最後のタブの右へ落とす印 (グループごとに並びがあるので、列の最後のタブに付ける)。 */
 .main-tab.main-tab-drop-after {
   box-shadow: inset -2px 0 0 var(--color-accent);
+}
+
+/* ---- title の吹き出し (views/title-tooltip.ts) ----
+   title を持つ要素にマウスを置くと約 300ms で出る。body 直下の fixed (親の
+   overflow で切れない)。置き場所は title-tooltip.ts が要素のすぐ下 (入らなければ
+   上) に、窓の端で切れないように書く。文言は title のまま (改行もそのまま)。
+   押せない・触れない (pointer-events: none)。いちばん上に重ねる。 */
+.title-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10001;
+  max-width: calc(var(--space-unit) * 90);   /* 360 */
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-overlay);
+  color: var(--color-text);
+  box-shadow: var(--shadow-md);
+  font-family: var(--font-ui);
+  font-size: var(--ui-font-sm);
+  line-height: 1.4;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.title-tooltip[hidden] {
+  display: none;
 }
 
 /* ---- メインの面の左右の箱 (.main-pane-host。app.ts の PANE_HOSTS) ----
@@ -18537,7 +19558,11 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 :is(#filelist, #file-list-rows) {
   padding: var(--space-1) var(--space-2) 0;
 }
+/* フォルダの行もファイルの行と同じく枠線を持たない。フォルダの行だけ左に 2px の
+   透明な枠線が残っていると、字下げの線 (::before、枠線の内側から測る) が
+   フォルダの行だけ 2px 右にずれ、縦の線が行ごとに左右に揺れた。 */
 :is(#filelist, #file-list-rows) li,
+:is(#filelist, #file-list-rows).tree .tree-dir,
 :is(#filelist, #file-list-rows).tree .tree-file {
   border-left: 0;
   border-radius: var(--radius-md);
@@ -18547,6 +19572,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   background: color-mix(in srgb, var(--color-raised) 70%, transparent);
 }
 :is(#filelist, #file-list-rows) li.active,
+:is(#filelist, #file-list-rows).tree .tree-dir.active,
 :is(#filelist, #file-list-rows).tree .tree-file.active {
   background: var(--color-select);
   box-shadow: var(--glow-select);
@@ -19263,32 +20289,219 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   text-align: center;
 }
 
+/* ---- ターミナル: 棚の画像が出たペインの枠 (terminal-screen.ts の drawPaneFrame) ----
+   棚の項目にカーソルが載った間 (と「ターミナルで見る」の後しばらく)、その画像の
+   パスが出た tmux のペインを囲む。覆いと同じく .xterm-screen の中で、行と桁
+   (--frame-*。隣にペインがある辺は境目の線のマスまで半マス外へ、ウインドウの
+   端の辺はペインの内側) にマス目の大きさを掛けて位置を決める。線だけで中の
+   文字には重ねない。操作は下の端末へ通す。 */
+.terminal-pane-frame {
+  position: absolute;
+  top: calc(var(--frame-top) * var(--frame-cell-h));
+  left: calc(var(--frame-left) * var(--frame-cell-w));
+  width: calc(var(--frame-cols) * var(--frame-cell-w));
+  height: calc(var(--frame-rows) * var(--frame-cell-h));
+  z-index: 4;
+  box-sizing: border-box;
+  border: 2px solid var(--color-accent-strong);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+.terminal-pane-frame[hidden] {
+  display: none;
+}
+
+/* ---- ターミナル: 画面の中のリンクの印 (views/terminal/terminal-links-layer.ts) ----
+   画像のパス・URL・ファイルのパス。xterm の decoration は代替画面 (tmux) で付か
+   ないので、.xterm-screen の中の層に行と桁 (--link-*) × マス目の大きさで描く。
+   常に出すのは画像のパスの細い下線だけ。カーソルが載った文字列 (と棚から示す
+   パス) は強調色の半透明の面と下線。線と半透明の面だけで文字は読め、操作は下の
+   端末へ通す。重なりは覆い (z-index 4) より下。 */
+.terminal-link-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.terminal-link-mark,
+.terminal-link-hover {
+  position: absolute;
+  top: calc(var(--link-row) * var(--link-cell-h));
+  left: calc(var(--link-col) * var(--link-cell-w));
+  width: calc(var(--link-cols) * var(--link-cell-w));
+  height: var(--link-cell-h);
+}
+.terminal-link-mark {
+  box-shadow: inset 0 -1px 0
+    color-mix(in srgb, var(--color-accent) 70%, transparent);
+}
+.terminal-link-hover {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--color-accent) 34%, transparent);
+  box-shadow: inset 0 -2px 0 var(--color-accent-strong);
+}
+.terminal-screen[data-link-hover="true"] .xterm-screen {
+  cursor: pointer;
+}
+/* リンクに載ったときの帯: 開く・コピー (画像なら見本と名前・寸法も)。見た目は
+   title の吹き出しと同じ系統 (浮く面・線・影)。文字列のすぐ上か下に出し、
+   文字列そのものは隠さない。 */
+.terminal-link-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-overlay);
+  color: var(--color-text);
+  box-shadow: var(--shadow-md);
+  font-family: var(--font-ui);
+  font-size: var(--ui-font-sm);
+}
+.terminal-link-bar[hidden],
+.terminal-link-preview[hidden] {
+  display: none;
+}
+.terminal-link-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-1) 0;
+}
+.terminal-link-preview img {
+  display: block;
+  max-width: calc(var(--space-unit) * 60);
+  max-height: calc(var(--space-unit) * 60);
+  border-radius: var(--radius-sm);
+  background: var(--color-term);
+  object-fit: contain;
+}
+.terminal-link-preview-caption {
+  max-width: calc(var(--space-unit) * 60);
+  overflow: hidden;
+  color: var(--color-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-link-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+.terminal-link-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--ui-control-md);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+.terminal-link-action:hover {
+  background: var(--color-raised);
+}
+.terminal-link-action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.terminal-link-action[data-copied] {
+  color: var(--color-working);
+}
+.terminal-link-action-icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  fill: currentColor;
+}
+
 /* ---- ターミナル: 画像の棚 (views/terminal/image-shelf.ts) ----
-   端末の文字の上に重ねず、画面の右に別の列として場所を取る。画像が無ければ
-   出さない。畳むと画像の印と件数のボタンだけの細い列になる。 */
+   端末の文字の上に重ねず、画面の横に別の列 (右・左) か帯 (下・上) として場所を
+   取る。置き場所は棚の data-placement、大きさは :root の --terminal-shelf-w /
+   --terminal-shelf-h (image-shelf.ts が core/panel-sizes.ts の範囲で書く。CSS に
+   数値を書かない)。画像が無ければ出さない。
+   1 枚 = サムネイル・名前・時刻のまとまり。まとまりの中は詰め (--space-1)、
+   まとまりの間は広く取って薄い線 (--color-line-row) で区切る。ホバーと開いて
+   いる 1 枚は面の色で、どこからどこまでが 1 枚かを見せる。
+   出た所 (ペイン) ごとのまとまりの頭に小さな見出し (補足の色・上に広い間)。 */
+.terminal-screen-row:has(> .terminal-image-shelf[data-placement="left"]) {
+  flex-direction: row-reverse;
+}
+.terminal-screen-row:has(> .terminal-image-shelf[data-placement="bottom"]) {
+  flex-direction: column;
+}
+.terminal-screen-row:has(> .terminal-image-shelf[data-placement="top"]) {
+  flex-direction: column-reverse;
+}
 .terminal-image-shelf {
-  /* T3: サムネイルの枠 (既定の密度で 108×72)。--space-unit から作るので、
-     密度で余白と一緒に比例して変わる。棚の幅は枠 + 左右の余白。 */
-  --shelf-thumb-w: calc(var(--space-unit) * 27);
-  --shelf-thumb-h: calc(var(--space-unit) * 18);
   --shelf-pad: var(--space-3);
+  /* 1 枚のまとまりの内側 (面の色を付けたとき、枠と文字が面の端に接しない)。 */
+  --shelf-item-pad: var(--space-1);
+  /* まとまりの間。真ん中に区切りの線を引く。 */
+  --shelf-item-gap: var(--space-4);
+  --shelf-line-h: calc(var(--ui-font-base) * 1.4);
+  position: relative;
   flex: none;
   display: flex;
   flex-direction: column;
-  width: calc(var(--shelf-thumb-w) + 2 * var(--shelf-pad));
+  min-width: 0;
   min-height: 0;
   background: var(--color-nav);
   color: var(--color-text);
 }
+.terminal-image-shelf[data-placement="right"],
+.terminal-image-shelf[data-placement="left"] {
+  width: var(--terminal-shelf-w);
+}
+.terminal-image-shelf[data-placement="bottom"],
+.terminal-image-shelf[data-placement="top"] {
+  /* 下・上: サムネイルの高さは棚の高さから、見出し・名前と時刻の 2 行・余白を
+     引いたもの。幅はその 3:2。 */
+  --shelf-thumb-h: calc(
+    var(--terminal-shelf-h) - var(--space-6) - var(--shelf-pad) - 2 *
+      var(--shelf-item-pad) - 3 * var(--space-1) - 3 * var(--shelf-line-h)
+  );
+  height: var(--terminal-shelf-h);
+}
 .terminal-image-shelf[hidden],
 .terminal-image-shelf-head[hidden],
 .terminal-image-shelf-list[hidden],
-.terminal-image-shelf-expand[hidden] {
+.terminal-image-shelf-expand[hidden],
+.terminal-image-shelf-resizer[hidden] {
   display: none;
 }
+/* 畳んだ棚: 画像の印と件数のボタンだけの細い帯。 */
 .terminal-image-shelf[data-collapsed="true"] {
-  width: calc(var(--ui-control-sm) + 2 * var(--space-2));
   padding: var(--space-2);
+}
+.terminal-image-shelf[data-collapsed="true"]:is(
+    [data-placement="right"],
+    [data-placement="left"]
+  ) {
+  width: calc(var(--ui-control-sm) + 2 * var(--space-2));
+}
+.terminal-image-shelf[data-collapsed="true"]:is(
+    [data-placement="bottom"],
+    [data-placement="top"]
+  ) {
+  height: auto;
+  flex-direction: row;
+  padding: var(--space-1) var(--space-2);
+}
+/* 見出し・ペインの見出し・画像の名前は、縁のドラッグで選ばれないようにする
+   (パスのコピーは右クリックのメニューで)。 */
+.terminal-image-shelf-head,
+.terminal-image-shelf-group-head,
+.terminal-image-shelf-open,
+.terminal-image-shelf-name,
+.terminal-image-shelf-meta {
+  user-select: none;
 }
 .terminal-image-shelf-head {
   flex: none;
@@ -19306,6 +20519,41 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   color: var(--color-text-3);
   font-variant-numeric: tabular-nums;
 }
+/* カーソルかフォーカスが載っている項目の詳しいこと。見出しの行の中で題と件数に
+   代わる (行の高さは変えない)。パスは真ん中 (ディレクトリ) を省略し、ファイル名は
+   残す。全文は行の title。 */
+.terminal-image-shelf-detail {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+.terminal-image-shelf-detail[hidden] {
+  display: none;
+}
+.terminal-image-shelf-detail-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.terminal-image-shelf-detail-name {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--color-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+.terminal-image-shelf-detail-facts {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  /* 頭の「 · 」の空白を詰めない (flex の項目の頭の空白は消える)。 */
+  white-space: pre;
+}
 .terminal-image-shelf-toggle,
 .terminal-image-shelf-expand {
   display: inline-grid;
@@ -19321,6 +20569,8 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 }
 .terminal-image-shelf-toggle {
   width: var(--ui-control-sm);
+}
+.terminal-image-shelf-move {
   margin-left: auto;
 }
 .terminal-image-shelf-expand {
@@ -19329,6 +20579,14 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   width: 100%;
   font-size: var(--ui-font-sm);
 }
+.terminal-image-shelf[data-collapsed="true"]:is(
+    [data-placement="bottom"],
+    [data-placement="top"]
+  )
+  .terminal-image-shelf-expand {
+  width: auto;
+  padding: 0 var(--space-2);
+}
 .terminal-image-shelf-toggle:hover,
 .terminal-image-shelf-expand:hover {
   background: var(--color-raised);
@@ -19336,6 +20594,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 }
 .terminal-image-shelf-toggle:focus-visible,
 .terminal-image-shelf-expand:focus-visible,
+.terminal-image-shelf-resizer:focus-visible,
 .terminal-image-shelf-open:focus-visible .terminal-image-shelf-frame {
   outline: none;
   box-shadow: var(--focus-ring);
@@ -19351,21 +20610,170 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   height: var(--icon-md);
   fill: currentColor;
 }
+/* 内側の縁 (端末の側) の掴み。掴みしろは面の分割線 (.main-split-divider) と
+   同じ 1.5 単位で縁をまたぎ、ホバー・ドラッグ中に 2px の線。 */
+.terminal-image-shelf-resizer {
+  --shelf-grip: calc(var(--space-unit) * 1.5);
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+.terminal-image-shelf-resizer::after {
+  content: "";
+  position: absolute;
+  background: transparent;
+}
+.terminal-image-shelf-resizer:hover::after,
+.terminal-image-shelf.is-resizing .terminal-image-shelf-resizer::after {
+  background: var(--color-accent);
+}
+.terminal-image-shelf:is([data-placement="right"], [data-placement="left"])
+  .terminal-image-shelf-resizer {
+  top: 0;
+  bottom: 0;
+  width: var(--shelf-grip);
+  cursor: col-resize;
+}
+.terminal-image-shelf:is([data-placement="right"], [data-placement="left"])
+  .terminal-image-shelf-resizer::after {
+  top: 0;
+  bottom: 0;
+  left: calc(var(--shelf-grip) / 2 - 1px);
+  width: 2px;
+}
+.terminal-image-shelf[data-placement="right"] .terminal-image-shelf-resizer {
+  left: calc(var(--shelf-grip) / -2);
+}
+.terminal-image-shelf[data-placement="left"] .terminal-image-shelf-resizer {
+  right: calc(var(--shelf-grip) / -2);
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-resizer {
+  left: 0;
+  right: 0;
+  height: var(--shelf-grip);
+  cursor: row-resize;
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-resizer::after {
+  left: 0;
+  right: 0;
+  top: calc(var(--shelf-grip) / 2 - 1px);
+  height: 2px;
+}
+.terminal-image-shelf[data-placement="bottom"] .terminal-image-shelf-resizer {
+  top: calc(var(--shelf-grip) / -2);
+}
+.terminal-image-shelf[data-placement="top"] .terminal-image-shelf-resizer {
+  bottom: calc(var(--shelf-grip) / -2);
+}
+.terminal-image-shelf-list,
+.terminal-image-shelf-group-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 .terminal-image-shelf-list {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: var(--shelf-pad);
+  min-width: 0;
   min-height: 0;
-  margin: 0;
-  padding: 0 var(--shelf-pad) var(--shelf-pad);
+  padding: 0 calc(var(--shelf-pad) - var(--shelf-item-pad)) var(--shelf-pad);
   overflow-y: auto;
   overscroll-behavior: contain;
-  list-style: none;
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-list {
+  flex-direction: row;
+  align-items: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* 出た所 (ペイン) ごとのまとまり。見出しは画像のまとまりと違う見た目: 小さな
+   補足の色の 1 行で、上に広い間を取る (最初のまとまりは棚の見出しの下に詰める)。 */
+.terminal-image-shelf-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.terminal-image-shelf-group + .terminal-image-shelf-group {
+  margin-top: var(--space-5);
+}
+.terminal-image-shelf-group-head {
+  padding: 0 var(--shelf-item-pad) var(--space-1);
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 下・上: まとまりは横に並び、見出しは画像のまとまりの上の横書きの 1 行
+   (まとまりの幅で省略。全文は title)。 */
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-group {
+  flex: none;
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-group
+  + .terminal-image-shelf-group {
+  margin-top: 0;
+  margin-left: var(--space-5);
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-group-head {
+  /* 見出しの長さでまとまりを広げない (幅は画像の並びが決める)。 */
+  width: 0;
+  min-width: 100%;
+  line-height: var(--shelf-line-h);
+}
+.terminal-image-shelf-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--shelf-item-gap);
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-group-items {
+  flex-direction: row;
+}
+/* 1 枚のまとまり。 */
+.terminal-image-shelf-item {
+  position: relative;
+  padding: var(--shelf-item-pad);
+  border-radius: var(--radius-md);
+}
+/* まとまりの間の区切りの線 (間の真ん中)。 */
+.terminal-image-shelf-item + .terminal-image-shelf-item::before {
+  content: "";
+  position: absolute;
+  top: calc(var(--shelf-item-gap) / -2);
+  left: var(--shelf-item-pad);
+  right: var(--shelf-item-pad);
+  border-top: 1px solid var(--color-line-row);
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-item
+  + .terminal-image-shelf-item::before {
+  top: var(--shelf-item-pad);
+  bottom: var(--shelf-item-pad);
+  left: calc(var(--shelf-item-gap) / -2);
+  right: auto;
+  border-top: 0;
+  border-left: 1px solid var(--color-line-row);
+}
+.terminal-image-shelf-item:hover,
+.terminal-image-shelf-item:has(.terminal-image-shelf-open:focus-visible) {
+  background: var(--color-raised);
+}
+.terminal-image-shelf-item[data-opened],
+.terminal-image-shelf-item[data-linked] {
+  background: var(--color-select);
 }
 .terminal-image-shelf-open {
   display: flex;
   flex-direction: column;
+  gap: var(--space-1);
   width: 100%;
   padding: 0;
   border: 0;
@@ -19375,15 +20783,22 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   text-align: left;
   cursor: zoom-in;
 }
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-open {
+  width: calc(var(--shelf-thumb-h) * 3 / 2);
+}
 .terminal-image-shelf-frame {
   display: grid;
   place-items: center;
-  width: var(--shelf-thumb-w);
-  height: var(--shelf-thumb-h);
-  margin-bottom: var(--space-1);
+  width: 100%;
+  aspect-ratio: 3 / 2;
   overflow: hidden;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--color-term);
+}
+.terminal-image-shelf:is([data-placement="bottom"], [data-placement="top"])
+  .terminal-image-shelf-frame {
+  height: var(--shelf-thumb-h);
 }
 .terminal-image-shelf-frame img {
   display: block;
@@ -19391,33 +20806,27 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   height: 100%;
   object-fit: contain;
 }
-.terminal-image-shelf-open:hover .terminal-image-shelf-frame {
-  box-shadow: 0 0 0 1px var(--color-line-strong);
-}
 /* 文字の中のパスにカーソルが載った画像。棚の同じ列で強い選択は 1 つだけ。 */
 .terminal-image-shelf-item[data-linked] .terminal-image-shelf-frame,
 .terminal-image-shelf-list:not(:has([data-linked])) .terminal-image-shelf-item[data-opened] .terminal-image-shelf-frame {
   box-shadow: 0 0 0 2px var(--color-accent-strong), var(--glow-select);
 }
-.terminal-image-shelf-name {
+.terminal-image-shelf-name,
+.terminal-image-shelf-meta {
   overflow: hidden;
-  font-size: var(--ui-font-base);
+  line-height: var(--shelf-line-h);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 寸法と「何分前」は塊ごとに折り返す (途中で省略しない)。 */
+.terminal-image-shelf-name {
+  font-size: var(--ui-font-base);
+}
 .terminal-image-shelf-meta {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: var(--space-2);
   color: var(--color-text-3);
   font-size: var(--ui-font-sm);
   font-variant-numeric: tabular-nums;
 }
-.terminal-image-shelf-meta > span {
-  white-space: nowrap;
-}
-/* 読めなかった項目: サムネイルの代わりに印、理由は折り返して全部読ませる。 */
+/* 読めなかった項目: サムネイルの代わりに印、2 行目に理由 (全文は札)。 */
 .terminal-image-shelf-item[data-failed="true"] .terminal-image-shelf-open {
   cursor: pointer;
 }
@@ -19430,11 +20839,9 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   fill: currentColor;
   opacity: 0.6;
 }
-.terminal-image-shelf-item[data-failed="true"] .terminal-image-shelf-meta > span {
+.terminal-image-shelf-item[data-failed="true"] .terminal-image-shelf-meta {
   color: var(--color-waiting);
-  white-space: normal;
 }
-
 /* 拡大表示の前へ・次へ・パスのコピー。 */
 .terminal-lightbox-nav {
   flex: none;
@@ -19581,6 +20988,16 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 }
 .image-tab-button[data-copied="true"] {
   color: var(--color-working);
+}
+/* 閉じる: パスの操作から離し、強い枠・本来の文字色・「閉じる」「Esc」で閉じると分かる形。 */
+.image-tab-button.image-tab-close {
+  margin-left: var(--space-2);
+  border-color: var(--color-line-strong);
+  color: var(--color-text);
+}
+/* hover の面 (--color-raised) はキーの面と同じ色なので、キーを上の段の地の色に替えて形を残す。 */
+.image-tab-close:hover:not(:disabled) kbd {
+  background: var(--color-code);
 }
 .image-tab-icon {
   width: var(--icon-md);
@@ -20182,6 +21599,31 @@ button.agents-account-name:hover {
 .agents-project + .agents-project {
   margin-top: var(--space-3);
 }
+/* 全体ボードの停止中の節 (左のサイドバーと同じ判定)。一覧の最後に畳んで置く。 */
+.agents-stopped {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-line-soft);
+}
+.agents-stopped-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--ui-control-md);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-3);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.agents-stopped-toggle:hover {
+  color: var(--color-text);
+}
+.agents-stopped-list {
+  margin-top: var(--space-3);
+}
 .agents-project-toggle {
   display: inline-flex;
   align-items: center;
@@ -20259,8 +21701,8 @@ button.agents-account-name:hover {
 .agents-project-none[hidden] {
   display: none;
 }
-/* 行は左のサイドバーと同じ 2 行組のカード (.agent-card)。地より一段明るい面に
-   置き、行の間を少し空ける。 */
+/* 行は左のサイドバーと同じ 2 行組 (.agent-card。面と区切りの線もそちら)。行の間を
+   少し空ける。 */
 .agents-rows {
   display: flex;
   flex-direction: column;
@@ -20272,7 +21714,6 @@ button.agents-account-name:hover {
   padding: var(--space-2) var(--pad-text);
   border: 0;
   border-radius: var(--radius-md);
-  background: var(--color-doc);
   color: var(--color-text);
   font: inherit;
   cursor: pointer;
@@ -20711,6 +22152,98 @@ button.agents-account-name:hover {
 .gdp-dialog-description + .gdp-dialog-body {
   margin-top: var(--space-5);
 }
+/* ---- 「プロジェクトを追加」(views/projects/project-directory-dialog.ts) ----
+   左のサイドバーの「プロジェクト」の見出しの ＋ (全体ボードのリンクの左) と、
+   ダイアログの中の子のディレクトリの一覧。一覧の箱は高さを決めておき、場所を
+   移っても登録のボタンが動かないようにする (画面中央の overlay なので上限は
+   viewport 基準でよい。ui-layout.md)。 */
+.nav-section-head > .nav-section-title {
+  margin-right: auto;
+}
+.nav-section-head > .nav-icon-action + .nav-icon-action {
+  margin-left: var(--space-1);
+}
+.project-directory {
+  display: flex;
+  flex-direction: column;
+}
+.project-directory-path {
+  font-family: var(--font-mono);
+}
+.project-directory-hidden {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  cursor: pointer;
+}
+.project-directory-list {
+  height: min(calc(var(--space-unit) * 90), 50vh);
+  margin-top: var(--space-3);
+  padding: var(--space-1);
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+}
+.project-directory-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: var(--ui-row-h);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  text-align: left;
+  cursor: pointer;
+}
+.project-directory-row:hover {
+  background: var(--color-raised);
+}
+.project-directory-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.project-directory-icon {
+  flex: none;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  fill: currentColor;
+  color: var(--color-text-3);
+}
+.project-directory-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 確かめられなかった子 (読めないなど)。理由は title。 */
+.project-directory-unchecked .project-directory-name {
+  color: var(--color-text-3);
+}
+.project-directory-git {
+  flex: none;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+  color: var(--color-text);
+  font-size: var(--ui-font-xs);
+}
+.project-directory-status {
+  min-height: 1.5em;
+  margin-top: var(--space-2);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
 /* 「新しいエージェント」(views/agents/accounts-dialogs.ts の launch)。
    左に見出し、右に選ぶもの。行の間は 4 単位。 */
 .agent-launch-form {
@@ -20851,6 +22384,98 @@ button.agents-account-name:hover {
 }
 .agent-launch-preview-block .agent-launch-label {
   min-height: 0;
+}
+/* アカウントの一覧 (accounts-dialogs.ts の renderAccounts)。各行に 5 時間・週の
+   使用量といつの値かを並べ、空いているアカウントを選びやすくする。選んだ行は
+   種類の選択と同じ強い選択。状態で変えるのは面と影だけ (箱の寸法は変えない)。 */
+.agent-launch-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.agent-launch-account {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-launch-account:hover {
+  background: var(--color-raised);
+}
+.agent-launch-account.active {
+  background: var(--color-select);
+  box-shadow: inset 0 0 0 1px var(--color-accent), var(--glow-select);
+}
+.agent-launch-account:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--color-accent), var(--focus-ring);
+}
+.agent-launch-account-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.agent-launch-account-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-launch-account-current {
+  flex: 0 0 auto;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-xs);
+}
+.agent-launch-account-observed {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+.agent-launch-account-observed.stale {
+  color: var(--color-waiting);
+}
+.agent-launch-account-dir {
+  overflow: hidden;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-launch-account-usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--ui-font-sm);
+}
+.agent-launch-account-status {
+  color: var(--color-text-2);
+}
+/* 引き継ぐ会話記録のパス。途中を隠さず、長ければ枠の中で横にスクロールする。 */
+.agent-launch-log {
+  display: block;
+  overflow-x: auto;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  color: var(--color-text);
+  font-size: var(--ui-font-sm);
+  white-space: pre;
 }
 .agent-launch-preview {
   display: flex;
@@ -21257,13 +22882,13 @@ button.agents-account-name:hover {
   }
 }
 
-/* 行番号の列: 幅 12 単位 (48)、右寄せ、補助の色。列の右に細い線。 */
+/* 行番号の列: 幅 12 単位 (48)、右寄せ、行番号の色。列の右に細い線。 */
 .gdp-source-line-number,
 .gdp-source-virtual-line-number {
   min-width: calc(var(--space-unit) * 12);
   padding: 0 var(--space-3) 0 var(--space-2);
   background: var(--color-code);
-  color: var(--color-text-3);
+  color: var(--syntax-gutter);
   box-shadow: inset -1px 0 0 var(--color-line-soft);
 }
 .gdp-source-line-code {
@@ -21290,44 +22915,6 @@ button.agents-account-name:hover {
   content: none;
 }
 
-/* shiki の github テーマの色 → 構文の名前。light と dark の値は同じ span に
-   並んで入っているので、dark の値だけで見分けて両方を差し替える。 */
-.gdp-source-line-code span[style*="--shiki-dark:#f97583" i],
-.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#f97583" i],
-.gdp-source-line-code span[style*="--shiki-dark:#85e89d" i],
-.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#85e89d" i] {
-  --shiki-light: var(--syntax-keyword) !important;
-  --shiki-dark: var(--syntax-keyword) !important;
-}
-.gdp-source-line-code span[style*="--shiki-dark:#9ecbff" i],
-.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#9ecbff" i],
-.gdp-source-line-code span[style*="--shiki-dark:#dbedff" i],
-.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#dbedff" i] {
-  --shiki-light: var(--syntax-string) !important;
-  --shiki-dark: var(--syntax-string) !important;
-}
-.gdp-source-line-code span[style*="--shiki-dark:#79b8ff" i],
-.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#79b8ff" i] {
-  --shiki-light: var(--syntax-type) !important;
-  --shiki-dark: var(--syntax-type) !important;
-}
-.gdp-source-line-code span[style*="--shiki-dark:#b392f0" i],
-.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#b392f0" i] {
-  --shiki-light: var(--syntax-function) !important;
-  --shiki-dark: var(--syntax-function) !important;
-}
-.gdp-source-line-code span[style*="--shiki-dark:#6a737d" i],
-.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#6a737d" i] {
-  --shiki-light: var(--syntax-comment) !important;
-  --shiki-dark: var(--syntax-comment) !important;
-}
-.gdp-source-line-code span[style*="--shiki-dark:#e1e4e8" i],
-.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#e1e4e8" i],
-.gdp-source-line-code span[style*="--shiki-dark:#ffab70" i],
-.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#ffab70" i] {
-  --shiki-light: var(--syntax-text) !important;
-  --shiki-dark: var(--syntax-text) !important;
-}
 /* パンくず: 上の段の場所は補助の文字、今のファイルだけ地の文字 (絵のとおり)。
    押せる部分は hover で面と下線。 */
 .gdp-repo-blob-layout .gdp-file-detail-sticky .gdp-file-breadcrumb button.gdp-file-breadcrumb-part {
@@ -21822,8 +23409,8 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
   background: var(--color-raised);
   color: var(--color-text);
 }
-/* 差分の本文: 地はコードの面、変わっていない行の番号は補助の色。区切りの @@ は
-   補助の文字で、面の色を付けない。 */
+/* 差分の本文: 地はコードの面、変わっていない行の番号は行番号の色。区切りの @@ は
+   区切りの文字 (--diff-hunk-fg) で、面の色を付けない。 */
 .d2h-files-diff > div,
 .d2h-cntx,
 .d2h-cntx.d2h-code-linenumber,
@@ -21836,8 +23423,11 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 .d2h-cntx.d2h-code-side-linenumber,
 .d2h-code-linenumber,
 .d2h-code-side-linenumber {
-  color: var(--color-text-3) !important;
+  color: var(--syntax-gutter) !important;
   box-shadow: inset -1px 0 0 var(--color-line-soft);
+  /* diff2html の既定の左の線 (#eee と、追加・削除の行の淡い緑・赤) を消す。
+     暗い地で行番号の列の左に白い縦線が出ていた。 */
+  border-left: 0 !important;
 }
 .d2h-info {
   background: var(--color-code) !important;
@@ -21845,7 +23435,7 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 }
 .d2h-info .d2h-code-line,
 .d2h-info .d2h-code-side-line {
-  color: var(--color-text-3) !important;
+  color: var(--diff-hunk-fg) !important;
 }
 .d2h-emptyplaceholder,
 .d2h-code-side-emptyplaceholder {
@@ -22272,13 +23862,15 @@ body.gdp-history-page #history-commit-info:not([hidden]),
   padding: var(--space-4) var(--pad-doc);
 }
 
-/* ---- B-2: 設定・ヘルプ (views/help-page.ts・viewer-settings.ts) ----
+/* ---- B-2: 設定とヘルプのページ (枠は views/page-shell.ts。settings-page.ts・help-page.ts・viewer-settings.ts) ----
    絵 (round2/settings.png): 見出しの下に設定の検索、左に分類の列 (210px)、
    32px 空けて右に選んだ分類の中身。分類の行は --ui-control-md、選んでいる
    分類は強い選択。節は枠で囲まず、見出しと間隔で区切る。切り替えは面の色と
    形だけ (箱の寸法を変えない)。トグルはスイッチの形 (中身は checkbox のまま)。 */
 body.gdp-help-page #content {
   --content-top-gap: var(--space-5);
+  /* 下の余白は枠 (.gdp-help-shell) が持つ。設定の「変更を保存」を箱の下端に置くため。 */
+  --content-pad-bottom: 0px;
   padding-right: var(--pad-doc);
   padding-left: var(--pad-doc);
 }
@@ -22287,8 +23879,8 @@ body.gdp-help-page #content {
 }
 .gdp-help-header h1 {
   color: var(--color-text);
-  font-size: var(--ui-font-heading);
-  font-weight: 600;
+  font-size: var(--ui-font-page);
+  font-weight: 700;
 }
 .gdp-help-search-row {
   margin-bottom: var(--space-5);
@@ -22372,7 +23964,7 @@ body.gdp-help-page #content {
   color: var(--color-text);
   font-weight: 600;
 }
-/* 目次を開閉する 1 行は狭い面だけで出す (help-page.ts)。 */
+/* 目次を開閉する 1 行は狭い面だけで出す (page-shell.ts)。 */
 .gdp-help-nav-toggle {
   display: none;
 }
@@ -22441,70 +24033,531 @@ body.gdp-help-page #content {
     border-bottom: 1px solid var(--color-line-soft);
   }
 }
-.gdp-help-content h2 {
-  margin: 0 0 var(--space-1);
+/* ---- 設定とヘルプのページの文字と部品 (部品の DOM は views/help-blocks.ts) ----
+   階層は ページの見出し > 分類・節の見出し > 群の見出し > 本文 > 補足 を、大きさ・
+   太さ・色の濃さで分ける。本文は本来の文字色 (薄い灰色にしない)。一段薄い
+   --color-text-2 は補足 (要約・説明・注記) だけ。まとまりは余白で分ける: 中は詰め、
+   まとまりの間は --space-7 (枠や面では囲まない)。1 行の長さは --doc-measure
+   (英語 70 字前後・日本語 40 字前後。em / ch なので文字の大きさに比例する)。
+   強調色 (--color-accent) は押せるもの (リンク・ボタン) と目次の選択だけ。 */
+.gdp-help-shell {
+  --doc-measure: 68ch;
+  --doc-line-height: 1.75;
+  --help-step-mark: calc(var(--space-unit) * 7);
+  padding-bottom: var(--space-7);
+}
+.gdp-help-shell[lang="ja"] {
+  --doc-measure: 40em;
+}
+.gdp-help-content {
+  color: var(--color-text);
+  font-size: var(--ui-font-read);
+  line-height: var(--doc-line-height);
+}
+.gdp-help-content > h2 {
+  margin: 0 0 var(--space-2);
   color: var(--color-text);
   font-size: var(--ui-font-heading);
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 1.3;
 }
+/* 分類・節の要約。見出しのすぐ下に補足の色で。 */
 .gdp-help-content > p {
-  margin: 0 0 var(--space-5);
+  max-width: var(--doc-measure);
+  margin: 0 0 var(--space-2);
   color: var(--color-text-2);
 }
-/* 設定のフォーム: 節は見出しと間隔で区切る。 */
+/* 要約の下の、ほかのページへの 1 行 (設定 › ショートカットへ、など)。 */
+.gdp-help-content > .gdp-help-shortcut-link {
+  font-size: var(--ui-font-md);
+}
+.gdp-help-group {
+  margin: var(--space-7) 0 0;
+}
+.gdp-help-group > h3 {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text);
+  font-size: var(--ui-font-section);
+  font-weight: 700;
+  line-height: 1.4;
+}
+.gdp-help-group p,
+.gdp-help-list,
+.gdp-help-table,
+.gdp-help-note,
+.gdp-help-details,
+.gdp-help-command {
+  max-width: var(--doc-measure);
+}
+.gdp-help-group p {
+  margin: 0 0 var(--space-4);
+}
+.gdp-help-content a:not(.gdp-help-figure) {
+  color: var(--color-accent);
+  text-underline-offset: 0.2em;
+}
+.gdp-help-content :not(pre) > code {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-inset);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+/* 画面のボタン・画面の名前。 */
+.gdp-help-ui {
+  font-weight: 600;
+}
+.gdp-help-content .gdp-help-key {
+  font-size: var(--ui-font-md);
+}
+.gdp-help-list {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-5);
+}
+.gdp-help-list > li + li {
+  margin-top: var(--space-2);
+}
+.gdp-help-list > li::marker {
+  color: var(--color-text-3);
+}
+/* 番号つきの手順: 左に番号の丸、丸から次の手順へ縦の線。手順の間は広く空ける。 */
+.gdp-help-steps {
+  max-width: var(--doc-measure);
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  list-style: none;
+  counter-reset: help-step;
+}
+.gdp-help-steps > li {
+  position: relative;
+  padding: 0 0 var(--space-6) calc(var(--help-step-mark) + var(--space-4));
+  counter-increment: help-step;
+}
+.gdp-help-steps > li:last-child {
+  padding-bottom: 0;
+}
+.gdp-help-steps > li::before {
+  content: counter(help-step);
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--help-step-mark);
+  height: var(--help-step-mark);
+  border-radius: 50%;
+  background: var(--color-raised);
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+  font-weight: 700;
+  line-height: 1;
+}
+.gdp-help-steps > li::after {
+  content: "";
+  position: absolute;
+  top: calc(var(--help-step-mark) + var(--space-1));
+  bottom: var(--space-1);
+  left: calc(var(--help-step-mark) / 2 - 1px);
+  width: 2px;
+  background: var(--color-line);
+}
+.gdp-help-steps > li:last-child::after {
+  display: none;
+}
+.gdp-help-steps > li > p {
+  margin: 0 0 var(--space-2);
+}
+.gdp-help-steps > li > :last-child {
+  margin-bottom: 0;
+}
+/* 手順の 1 行の動作。番号の丸と同じ高さの行に載せる。 */
+.gdp-help-steps > li > .gdp-help-step-title {
+  font-size: var(--ui-font-step);
+  font-weight: 600;
+  line-height: var(--help-step-mark);
+}
+.gdp-help-steps > li > .gdp-help-step-link {
+  color: var(--color-text-2);
+  font-size: var(--ui-font-lg);
+}
+/* 画面のキャプチャ (views/help-images.ts)。本文の幅まで。押すと大きく開く
+   (views/terminal/image-lightbox.ts)。 */
+.gdp-help-figure {
+  display: block;
+  max-width: min(100%, var(--doc-measure));
+  margin: var(--space-3) 0 var(--space-5);
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  cursor: zoom-in;
+}
+.gdp-help-figure:hover {
+  border-color: var(--color-line-strong);
+}
+.gdp-help-figure:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.gdp-help-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.gdp-help-steps > li > .gdp-help-figure {
+  margin: var(--space-2) 0 var(--space-3);
+}
+/* コマンド: 等幅・沈んだ面・右上にコピー (押しても箱は変えない)。 */
+.gdp-help-command {
+  margin: var(--space-3) 0 var(--space-4);
+}
+.gdp-help-steps > li > .gdp-help-command {
+  margin: var(--space-2) 0 var(--space-3);
+}
+.gdp-help-command-title {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+  font-weight: 600;
+}
+.gdp-help-command-body {
+  position: relative;
+}
+.gdp-help-command pre {
+  margin: 0;
+  overflow-x: auto;
+  padding: var(--space-3) calc(var(--ui-control-sm) + var(--space-3)) var(--space-3) var(--space-4);
+  border: 1px solid var(--color-line-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+}
+/* 本文の幅で折り返す (横に送ると文字がコピーのボタンの下へ潜る)。写すのはボタンで。 */
+.gdp-help-command code {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-md);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.gdp-help-command-copy {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+.gdp-help-command-copy:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.gdp-help-command-copy:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.gdp-help-command-copy[data-copied] {
+  color: var(--color-working);
+}
+.gdp-help-command-copy.failed {
+  color: var(--color-failed);
+}
+/* 注意 / 補足: 左に色の線と小さな絵。色は注意だけ (入力待ちと同じ黄)。 */
+.gdp-help-note {
+  --help-note-color: var(--color-text-2);
+  display: flex;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--help-note-color);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--color-inset);
+  font-size: var(--ui-font-lg);
+}
+.gdp-help-note[data-kind="warning"] {
+  --help-note-color: var(--color-waiting);
+}
+.gdp-help-note-icon {
+  display: flex;
+  flex: none;
+  height: calc(var(--ui-font-lg) * 1.75);
+  align-items: center;
+  color: var(--help-note-color);
+}
+.gdp-help-note-body > .gdp-help-note-label {
+  display: block;
+  color: var(--help-note-color);
+  font-weight: 700;
+}
+.gdp-help-note-body > p {
+  margin: 0;
+}
+.gdp-help-note-body > p + p {
+  margin-top: var(--space-2);
+}
+/* 畳める「詳しく」。開くと左の線の内側に中身。 */
+.gdp-help-details {
+  margin: var(--space-5) 0 var(--space-4);
+}
+.gdp-help-details > summary {
+  width: fit-content;
+  color: var(--color-text);
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+}
+.gdp-help-details > summary::-webkit-details-marker {
+  display: none;
+}
+.gdp-help-details > summary::before {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 0.45em;
+  margin: 0 var(--space-2) 0.15em var(--space-1);
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+.gdp-help-details[open] > summary::before {
+  transform: rotate(45deg);
+}
+.gdp-help-details > summary:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--focus-ring);
+}
+.gdp-help-details-body {
+  margin-top: var(--space-3);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--color-line);
+}
+/* ヘルプの本文の表は本文の幅まで。表の見た目は下の .ui-table。 */
+.gdp-help-content table {
+  max-width: var(--doc-measure);
+  margin: 0 0 var(--space-4);
+  font-size: var(--ui-font-lg);
+  line-height: 1.6;
+}
+/* ---- 表と、表のような一覧 (ui-surface.md の「表」) ----
+   本物の <table> は .ui-table (組むのは views/help-blocks.ts の uiTable)。div で組んだ
+   一覧は行に .ui-table-row、見出しの行に .ui-table-head を付ける。
+   - 行の区切りは --color-line-row (どの面にも 1.5:1 以上)。見出しの行の下は 1 段太い
+   - 見出しの行は補足の色で小さく、太く (列の意味を示す)
+   - 行の多い表 (.ui-table-striped。UI_TABLE_STRIPE_MIN_ROWS 行から) は 1 行おきに
+     --color-row-alt、どの表も hover で行に面
+   - 数値の列は .ui-num で右寄せ・桁をそろえる。キーの列 (.ui-table-keys) は幅をそろえる */
+.ui-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.ui-table :is(th, td) {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-line-row);
+  color: var(--color-text);
+  text-align: left;
+  vertical-align: top;
+}
+.ui-table thead th,
+.ui-table-head {
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* div の一覧の行は小さな文字 (--ui-font-base) なので、見出しの行はそれより 1 段小さく。 */
+.ui-table-head {
+  font-size: var(--ui-font-sm);
+}
+.ui-table thead th {
+  border-bottom-width: 2px;
+}
+.ui-table tbody th {
+  font-weight: 600;
+}
+.ui-table-striped > tbody > tr:nth-child(even) > * {
+  background: var(--color-row-alt);
+}
+.ui-table > tbody > tr:hover > * {
+  background: var(--color-raised);
+}
+.ui-table .ui-num {
+  text-align: right;
+}
+.ui-table-keys > tbody > tr > th,
+.ui-table-keys > thead > tr > th:first-child {
+  width: 40%;
+}
+.ui-table-row {
+  border-bottom: 1px solid var(--color-line-row);
+}
+.ui-table-head {
+  border-bottom: 2px solid var(--color-line-row);
+}
+/* 設定のショートカット: 分類ごとの見出しの行 (分類の名前・キーの列の名前) は行と同じ列の組み。 */
+.shortcut-group-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(var(--space-unit) * 20) minmax(0, 1.4fr);
+  align-items: end;
+  gap: var(--space-3);
+  padding: 0 var(--space-2) var(--space-1);
+}
+.shortcut-group-head > .shortcut-group-title {
+  margin: 0;
+  padding: 0;
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+}
+.shortcut-group-keys {
+  text-align: right;
+}
+/* 設定のフォーム: 節は見出し → 何のための設定かの 1 文 (補足の色) → 操作。節の
+   間は --space-7 の余白で分ける (枠で囲まない)。 */
 .scope-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
   max-width: calc(var(--space-unit) * 225);
+  margin-top: var(--space-6);
 }
 .scope-settings > [hidden] {
   display: none;
 }
-.scope-settings-section + .scope-settings-section {
-  margin-top: var(--space-6);
-}
 .scope-settings-section-title,
 .scope-settings-title-row > .scope-settings-section-title {
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
   color: var(--color-text);
-  font-size: var(--ui-font-title);
-  font-weight: 600;
+  font-size: var(--ui-font-section);
+  font-weight: 700;
+  line-height: 1.4;
 }
 .scope-settings-title-row {
   align-items: center;
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 .scope-settings-shared {
   padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-  color: var(--color-text);
+  background: var(--color-raised);
+  color: var(--color-text-2);
 }
 .scope-settings label {
-  color: var(--color-text-2);
-  font-size: var(--ui-font-base);
+  color: var(--color-text);
+  font-size: var(--ui-font-lg);
+  font-weight: 500;
+  line-height: 1.4;
 }
 #display-settings-source,
 .scope-settings-help,
 #scope-omit-source {
-  color: var(--color-text-3);
-  font-size: var(--ui-font-sm);
+  max-width: var(--doc-measure);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+  line-height: 1.6;
 }
-#viewer-theme,
-#viewer-language,
-#sidebar-font-size,
-#code-font-size,
+/* 見出しのすぐ下の説明は、操作との間を 1 段空ける。 */
+.scope-settings-section-title + .scope-settings-help,
+.scope-settings-title-row + .scope-settings-help {
+  margin: 0 0 var(--space-3);
+}
+/* 操作とその説明で 1 組。次の操作との間は組の中より広く。 */
+.scope-settings-help + label,
+.scope-settings .scope-settings-help + .scope-settings-toggle {
+  margin-top: var(--space-4);
+}
+.scope-settings select,
 #scope-omit-dirs,
 #scope-exclude-names {
   border-color: var(--color-line-soft);
   background-color: var(--color-inset);
   color: var(--color-text);
 }
-#viewer-theme,
-#viewer-language,
-#sidebar-font-size,
-#code-font-size {
+.scope-settings select {
   width: min(calc(var(--space-unit) * 110), 100%);
   height: var(--ui-control-md);
+}
+/* テーマの見本 (views/viewer-settings.ts の colorThemePicker)。各見本はライトと
+   ダークの小さなコードと差分。見本の箱 (.theme-swatch-pane) は html と同じ
+   data-theme / data-color-theme を持ち、そのテーマの名前の層で描く。選んでいる
+   見本は強調色の枠 (aria-pressed)。 */
+.theme-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-unit) * 40), 1fr));
+  gap: var(--space-2);
+  max-width: calc(var(--space-unit) * 220);
+  margin-top: var(--space-2);
+}
+.theme-choice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  text-align: left;
+  cursor: pointer;
+}
+.theme-choice:hover {
+  background: var(--color-raised);
+}
+.theme-choice[aria-pressed="true"] {
+  box-shadow: var(--focus-ring-inset);
+}
+.theme-choice:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.theme-swatch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 1px var(--color-line-soft);
+}
+.theme-swatch-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--space-1) 0;
+  overflow: hidden;
+  /* 上端の線はそのテーマの強調色。 */
+  box-shadow: inset 0 2px 0 var(--color-accent);
+  background: var(--color-code);
+  color: var(--syntax-text);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-xs);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.theme-swatch-line {
+  padding: 0 var(--space-1);
+}
+.theme-swatch-keyword { color: var(--syntax-keyword); }
+.theme-swatch-function { color: var(--syntax-function); }
+.theme-swatch-string { color: var(--syntax-string); }
+.theme-swatch-type { color: var(--syntax-type); }
+.theme-swatch-comment { color: var(--syntax-comment); }
+.theme-swatch-add { background: var(--diff-add-bg); }
+.theme-swatch-del { background: var(--diff-del-bg); }
+.theme-swatch-add .theme-swatch-word { background: var(--diff-add-word-bg); }
+.theme-swatch-del .theme-swatch-word { background: var(--diff-del-word-bg); }
+.theme-choice-name {
+  padding: 0 var(--space-1);
 }
 /* トグル: 文字が左、スイッチが右 (絵の通知の行)。 */
 .scope-settings-toggle {
@@ -22518,7 +24571,7 @@ body.gdp-help-page #content {
   display: flex;
   margin: 0;
   color: var(--color-text);
-  font-size: var(--ui-font-md);
+  font-size: var(--ui-font-lg);
 }
 .scope-settings-toggle + .scope-settings-toggle {
   border-top: 1px solid var(--color-line-soft);
@@ -22556,10 +24609,54 @@ body.gdp-help-page #content {
   outline: none;
   box-shadow: var(--focus-ring);
 }
+/* 「変更を保存」はいつも本文の箱の下端 (短い分類でも長い分類でも同じ場所)。枠を
+   箱の高さまで伸ばし、足元を最後に押し下げて、長いときは下端に貼り付ける。 */
+.gdp-help-shell[data-page="settings"] {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(var(--content-h) - var(--content-top-gap));
+  padding-bottom: 0;
+}
+.gdp-help-shell[data-page="settings"] > .gdp-help-layout {
+  flex: 1 0 auto;
+  align-items: stretch;
+}
+.gdp-help-shell[data-page="settings"] .gdp-help-nav {
+  align-self: start;
+}
+.gdp-help-shell[data-page="settings"] .gdp-help-content {
+  display: flex;
+  flex-direction: column;
+}
+.gdp-help-shell[data-page="settings"] .scope-settings {
+  flex: 1 0 auto;
+}
 .scope-settings-footer {
-  margin-top: var(--space-6);
-  padding-top: 0;
-  border-top: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-4);
+  margin-top: auto;
+  /* 左右に内側の余白を取り、その分だけ外へ出す: 文言の左端とボタンの右端は
+     ほかの節の欄の端にそろい、帯の端には接しない。 */
+  margin-inline: calc(-1 * var(--space-4));
+  padding: var(--space-4);
+  border-top: 1px solid var(--color-line-soft);
+  background: var(--content-face);
+}
+.scope-settings-footer[hidden] {
+  display: none;
+}
+.scope-settings-footer > p {
+  grid-column: 1;
+}
+.scope-settings-footer > .scope-settings-actions {
+  grid-row: 1 / span 4;
+  grid-column: 2;
+  margin-top: 0;
 }
 /* 未保存の変更があることは、保存のボタンの横の文言を色と印で目立たせて示す。 */
 #scope-settings-save-status[data-state="unsaved"] {
@@ -22652,12 +24749,21 @@ body.gdp-help-page #content {
 }
 .gdp-palette-input-key,
 .gdp-palette-row-key,
+.gdp-context-menu-key,
 .gdp-palette-footer kbd,
-.empty-key kbd {
+.empty-key kbd,
+.image-tab-close kbd,
+.gdp-help-key,
+.shortcut-settings kbd {
   padding: 0 var(--space-1);
   border-radius: var(--radius-sm);
+  /* キーキャップの形: 面に表の線の縁と、下だけ 1 段厚い縁 (箱の寸法は変えない)。
+     縁の線はどの面にも 1.5:1 以上 (--color-line-row)。 */
   background: var(--color-raised);
-  color: var(--color-text-2);
+  box-shadow:
+    inset 0 0 0 1px var(--color-line-row),
+    inset 0 -1px 0 1px var(--color-line-row);
+  color: var(--color-text);
   font-family: var(--font-mono);
   font-size: var(--ui-font-sm);
   line-height: calc(var(--space-unit) * 5);
@@ -23212,15 +25318,16 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   background: var(--color-doc);
 }
 .db-root .db-grid-header-wrap {
-  border-bottom: 1px solid var(--color-line);
+  border-bottom: 2px solid var(--color-line-row);
   background: var(--color-inset);
 }
 .db-root .db-grid-header-label {
   color: var(--color-text);
   font-weight: 600;
 }
+/* 行の区切りは表の決まりの線 (ui-surface.md の「表」)。列の線は薄いまま。 */
 .db-root .db-grid-row {
-  border-bottom-color: var(--color-line-soft);
+  border-bottom-color: var(--color-line-row);
 }
 .db-root .db-grid-cell {
   border-right-color: var(--color-line-soft);
@@ -23325,7 +25432,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 /* ---- B-2: Data の他の面 (Schema・ER 図・各エクスプローラ・問い合わせの結果と
    履歴・スナップショット・全体検索) ----
    上の Data の表と同じ決まりに寄せる: 表の面は --color-code、見出しは沈んだ面と
-   1px の線、行は縞にせず薄い線で区切り、hover はわずかに明るく。一覧の行は
+   線、行は縞にせず表の決まりの線 (--color-line-row) で区切り、hover はわずかに明るく。一覧の行は
    左の木の行 (.db-table-item) と同じく、選んだものだけ強い選択。入力欄は
    クエリの入力欄と同じ枠 (コードの面・薄い線・フォーカスでアクセント)。
    データの文字 (PK・型・状態) は無彩色。DOM と操作は変えない (見た目だけ)。
@@ -23340,7 +25447,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   padding: 0 var(--space-2);
   border: 0;
   border-right: 1px solid var(--color-line-soft);
-  border-bottom: 1px solid var(--color-line-soft);
+  border-bottom: 1px solid var(--color-line-row);
   background: transparent;
   color: var(--color-text);
 }
@@ -23349,7 +25456,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 }
 .db-root :is(.db-schema-table, .db-query-table, .db-detail-table, .redis-value-hash-table) th {
   height: var(--ui-control-md);
-  border-bottom-color: var(--color-line);
+  border-bottom-color: var(--color-line-row);
   background: var(--color-inset);
   font-weight: 600;
 }
@@ -23399,7 +25506,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 }
 .db-root :is(.redis-db-item, .redis-key-item, .es-index-item, .es-doc-item, .dynamodb-table-item, .dynamodb-item-row, .s3-object-item, .db-snapshot-table-row, .db-search-hit-row, .db-query-history-entry) {
   border-left-color: transparent;
-  border-bottom-color: var(--color-line-soft);
+  border-bottom-color: var(--color-line-row);
   color: var(--color-text);
 }
 .db-root :is(.redis-db-item, .redis-key-item, .es-index-item, .es-doc-item, .dynamodb-table-item, .dynamodb-item-row, .s3-object-item, .db-snapshot-table-row, .db-search-hit-row, .db-query-history-entry):hover {
@@ -23425,7 +25532,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   background: var(--color-code);
 }
 .db-root .db-search-table-header {
-  border-bottom-color: var(--color-line);
+  border-bottom-color: var(--color-line-row);
   background: var(--color-inset);
   color: var(--color-text);
 }
@@ -24483,6 +26590,10 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body,
   body[data-sidebar-font-size] {
     --statusbar-h: var(--sp-touch);
+  }
+  /* 検索の欄が 44px になり頭と同じ高さなので、頭の上下の余白は取らない。 */
+  .nav-head {
+    padding-block: 0;
   }
   .main-tabs-action,
   .global-icon-action,

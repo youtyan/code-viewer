@@ -19,19 +19,17 @@ import {
   type Layout,
   type Pane,
   type PaneSide,
+  parseLayout,
   type SerializedLayout,
   type SerializedPageRoute,
   sameTarget,
   serializeLayout,
-  parseLayout,
   type Tab,
   targetProject,
 } from "./main-tabs";
 
 type Place = {
   side: PaneSide;
-  /** 同じ面の中で、base と mine の両方にあるタブのうち、すぐ左のもの。 */
-  anchor: string | null;
   preview: boolean;
   target: string;
 };
@@ -42,24 +40,74 @@ function paneOf(layout: Layout, side: PaneSide): Pane | undefined {
   return side === "left" ? layout.panes.left : layout.panes.right;
 }
 
-/** 各タブの面・並びの基準 (両方にあるタブの中のすぐ左)・仮か・中身。 */
-function placesOf(
-  layout: Layout,
-  shared: ReadonlySet<string>,
-): Map<string, Place> {
+/** 各タブの面・仮か・中身。 */
+function placesOf(layout: Layout): Map<string, Place> {
   const out = new Map<string, Place>();
-  for (const side of SIDES) {
-    let anchor: string | null = null;
-    for (const tab of paneOf(layout, side)?.tabs ?? []) {
+  for (const side of SIDES)
+    for (const tab of paneOf(layout, side)?.tabs ?? [])
       out.set(tab.id, {
         side,
-        anchor,
         preview: tab.preview,
         target: JSON.stringify(tab.target),
       });
-      if (shared.has(tab.id)) anchor = tab.id;
-    }
+  return out;
+}
+
+/** 2 つの並びの最長共通部分列 (同じ長さが複数あれば a の前のほうを残す)。 */
+function commonOrder(a: readonly string[], b: readonly string[]): string[] {
+  // longest[i][j] = a[i..] と b[j..] の最長共通部分列の長さ。
+  const longest = Array.from({ length: a.length + 1 }, () =>
+    new Array<number>(b.length + 1).fill(0),
+  );
+  for (let i = a.length - 1; i >= 0; i -= 1)
+    for (let j = b.length - 1; j >= 0; j -= 1)
+      longest[i][j] =
+        a[i] === b[j]
+          ? longest[i + 1][j + 1] + 1
+          : Math.max(longest[i + 1][j], longest[i][j + 1]);
+  const out: string[] = [];
+  for (let i = 0, j = 0; i < a.length && j < b.length; ) {
+    if (a[i] === b[j]) {
+      out.push(a[i]);
+      i += 1;
+      j += 1;
+    } else if (longest[i + 1][j] >= longest[i][j + 1]) i += 1;
+    else j += 1;
   }
+  return out;
+}
+
+/**
+ * before から after へ、面を変えずに並びも保ったタブ (両方にあるタブの並びの
+ * 最長共通部分列に入るもの)。それ以外が「動かした」タブ。1 つ動かしただけで
+ * 隣のタブまで「動かした」と数えないため (前はすぐ左のタブが変わったタブを
+ * 全部動かしたと数え、どちらの窓も動かしていないタブが端へ飛んでいた)。
+ */
+function stayedIn(
+  before: Layout,
+  after: Layout,
+  shared: ReadonlySet<string>,
+): Set<string> {
+  const out = new Set<string>();
+  for (const side of SIDES) {
+    const order = (layout: Layout) =>
+      (paneOf(layout, side)?.tabs ?? [])
+        .map((tab) => tab.id)
+        .filter((id) => shared.has(id));
+    for (const id of commonOrder(order(before), order(after))) out.add(id);
+  }
+  return out;
+}
+
+/** 各タブの面と、面の中の位置。 */
+function positionsOf(
+  layout: Layout,
+): Map<string, { side: PaneSide; index: number }> {
+  const out = new Map<string, { side: PaneSide; index: number }>();
+  for (const side of SIDES)
+    (paneOf(layout, side)?.tabs ?? []).forEach((tab, index) => {
+      out.set(tab.id, { side, index });
+    });
   return out;
 }
 
@@ -108,8 +156,25 @@ export function mergeLayouts(
   const baseIds = base ? idsOf(base) : new Set<string>();
   const mineIds = idsOf(mine);
   const kept = new Set([...baseIds].filter((id) => mineIds.has(id)));
-  const basePlaces = base ? placesOf(base, kept) : new Map<string, Place>();
-  const minePlaces = placesOf(mine, kept);
+  const basePlaces = base ? placesOf(base) : new Map<string, Place>();
+  const minePlaces = placesOf(mine);
+  const stayed = base ? stayedIn(base, mine, kept) : new Set<string>();
+  const positions = [base, mine, theirs].map((layout) =>
+    layout ? positionsOf(layout) : null,
+  );
+  /** a と b が 3 つとも side の面で同じ前後なら、a が前で -1・後で 1。ほかは 0。 */
+  const agreedOrder = (a: string, b: string, side: PaneSide): number => {
+    let sign = 0;
+    for (const where of positions) {
+      const from = where?.get(a);
+      const to = where?.get(b);
+      if (!from || !to || from.side !== side || to.side !== side) return 0;
+      const now = Math.sign(from.index - to.index);
+      if (sign !== 0 && now !== sign) return 0;
+      sign = now;
+    }
+    return sign;
+  };
   const panes: Record<PaneSide, Tab[]> = {
     left: [...theirs.panes.left.tabs],
     right: [...(theirs.panes.right?.tabs ?? [])],
@@ -128,10 +193,11 @@ export function mergeLayouts(
     const tabs = paneOf(mine, side)?.tabs ?? [];
     tabs.forEach((tab, index) => {
       const was = basePlaces.get(tab.id);
-      const now = minePlaces.get(tab.id) as Place;
+      const now = minePlaces.get(tab.id);
+      if (!now) throw new Error(`main tabs merge: tab ${tab.id} is not placed`);
       const inTheirs = has(tab.id);
       if (was && !inTheirs) return; // 相手が閉じた: 閉じたまま。
-      const moved = !was || was.side !== now.side || was.anchor !== now.anchor;
+      const moved = !was || !stayed.has(tab.id);
       const changed =
         !was || was.preview !== now.preview || was.target !== now.target;
       if (!moved && !changed) return;
@@ -151,6 +217,8 @@ export function mergeLayouts(
         return;
       }
       // すぐ左にあるタブ (相手の並びにもあるもの) の右へ。無ければ右隣の左へ。
+      // 右隣は動かしていないタブだけを見る (開いた・動かしたタブはこの後で
+      // このタブの右へ置き直すので、今の場所を基準にすると左端へ行けない)。
       const list = panes[side];
       let at = -1;
       for (let i = index - 1; i >= 0 && at < 0; i -= 1) {
@@ -158,10 +226,22 @@ export function mergeLayouts(
         if (left >= 0) at = left + 1;
       }
       for (let i = index + 1; i < tabs.length && at < 0; i += 1) {
+        if (!stayed.has(tabs[i].id)) continue;
         const right = list.findIndex((item) => item.id === tabs[i].id);
         if (right >= 0) at = right;
       }
       if (at < 0) at = list.length;
+      // base・この窓・相手の 3 つとも同じ前後にある 2 つのタブは、重ねた後も
+      // その前後にする (どちらの窓もその 2 つの前後を変えていない)。すぐ左の
+      // タブを相手が動かしていると、その右へ置くだけでは前後が崩れる。
+      let low = 0;
+      let high = list.length;
+      list.forEach((item, position) => {
+        const order = agreedOrder(item.id, tab.id, side);
+        if (order < 0) low = Math.max(low, position + 1);
+        if (order > 0) high = Math.min(high, position);
+      });
+      at = Math.min(Math.max(at, low), high);
       panes[side] = [...list.slice(0, at), tab, ...list.slice(at)];
     });
   }
@@ -237,11 +317,17 @@ function windowState(
     ? ((mine.panes.right ? mine.split : theirs.split) ?? DEFAULT_SPLIT)
     : undefined;
   const ids = new Set([...left.tabs, ...(right?.tabs ?? [])].map((t) => t.id));
-  const collapsed =
-    JSON.stringify(mine.collapsed ?? []) !==
-    JSON.stringify(base?.collapsed ?? [])
-      ? mine.collapsed
-      : theirs.collapsed;
+  // 畳んだグループはグループごとに重ねる: この窓が base から畳んだ・開いた
+  // グループはこの窓の値、ほかは相手の値 (配列ごとに選ぶと、2 つの窓で別々の
+  // グループを同時に畳んだとき片方が消えていた)。
+  const baseCollapsed = new Set(base?.collapsed ?? []);
+  const mineCollapsed = new Set(mine.collapsed ?? []);
+  const collapsed = (theirs.collapsed ?? []).filter(
+    (key) => !baseCollapsed.has(key) || mineCollapsed.has(key),
+  );
+  for (const key of mineCollapsed)
+    if (!baseCollapsed.has(key) && !collapsed.includes(key))
+      collapsed.push(key);
   const fronts: Record<string, string> = { ...(theirs.groupFronts ?? {}) };
   for (const [group, id] of Object.entries(mine.groupFronts ?? {}))
     if (base?.groupFronts?.[group] !== id) fronts[group] = map(id) as string;
@@ -259,6 +345,13 @@ function windowState(
     ...(mine.terminalGroups ?? {}),
   }))
     if (sessions.has(session)) terminalGroups[session] = root;
+  // 映していた tmux の場所も同じ (同じシェルはこの窓の値)。
+  const terminalTmux: NonNullable<Layout["terminalTmux"]> = {};
+  for (const [session, place] of Object.entries({
+    ...(theirs.terminalTmux ?? {}),
+    ...(mine.terminalTmux ?? {}),
+  }))
+    if (sessions.has(session)) terminalTmux[session] = place;
   return {
     panes: { left, ...(right ? { right } : {}) },
     focused,
@@ -266,6 +359,7 @@ function windowState(
     ...(collapsed && collapsed.length > 0 ? { collapsed: [...collapsed] } : {}),
     ...(Object.keys(fronts).length > 0 ? { groupFronts: fronts } : {}),
     ...(Object.keys(terminalGroups).length > 0 ? { terminalGroups } : {}),
+    ...(Object.keys(terminalTmux).length > 0 ? { terminalTmux } : {}),
   };
 }
 

@@ -71,7 +71,14 @@ export const KEYMAP_ACTION_INFO: Record<KeymapAction, KeymapActionInfo> = {
   },
   "open-help": {
     group: "global",
-    label: { en: "Open quick help", ja: "クイックヘルプを開く" },
+    label: {
+      en: "Show keyboard shortcuts",
+      ja: "キーボードショートカットを表示",
+    },
+  },
+  "open-help-page": {
+    group: "global",
+    label: { en: "Open help", ja: "ヘルプを開く" },
   },
   "open-settings": {
     group: "global",
@@ -79,7 +86,7 @@ export const KEYMAP_ACTION_INFO: Record<KeymapAction, KeymapActionInfo> = {
   },
   "toggle-theme": {
     group: "global",
-    label: { en: "Toggle theme", ja: "テーマ切り替え" },
+    label: { en: "Toggle light / dark", ja: "明暗の切り替え" },
   },
   "copy-ai-context": {
     group: "global",

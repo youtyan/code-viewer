@@ -12,7 +12,7 @@ import {
   type KeyBinding,
   resolveKeyBindings,
 } from "../core/keymap";
-import { createQuickHelp, type QuickHelpText } from "../views/quick-help";
+import { createQuickHelp } from "../views/quick-help";
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -22,30 +22,17 @@ afterAll(() => {
   GlobalRegistrator.unregister();
 });
 
-const EN_TEXT: QuickHelpText = {
-  panelTitle: "Quick Help",
-  close: "close quick help",
-  viewAll: "View all keybindings",
-  settings: "Settings",
-};
-
-const JA_TEXT: QuickHelpText = {
-  panelTitle: "クイックヘルプ",
-  close: "クイックヘルプを閉じる",
-  viewAll: "すべてのキーバインドを見る",
-  settings: "設定",
-};
-
 function installFixtureDom() {
   document.body.innerHTML = [
-    '<button id="quick-help-btn"></button>',
+    // ヘルプのページの「キーボードショートカット」のボタンと同じ印。
+    '<button id="sample-trigger" data-quick-help-trigger></button>',
     '<div id="quick-help-popover" hidden>',
     '  <div class="quick-help-head">',
     '    <strong id="quick-help-title"></strong>',
     '    <button id="quick-help-close"></button>',
     "  </div>",
     '  <div id="quick-help-groups"></div>',
-    '  <a id="quick-help-settings-link" href="/help?section=settings"></a>',
+    '  <a id="quick-help-settings-link" href="/settings"></a>',
     '  <a id="quick-help-full-link" href="/help?section=keybindings"></a>',
     "</div>",
     '<div id="outside-marker"></div>',
@@ -59,18 +46,29 @@ function makeQuickHelp(
   bindings: KeyBinding[] = DEFAULT_KEY_BINDINGS,
 ) {
   installFixtureDom();
-  return createQuickHelp({
+  const quickHelp = createQuickHelp({
     $: <T extends Element = HTMLElement>(sel: string): T => {
       const found = document.querySelector(sel);
       if (!found) throw new Error(`missing fixture element: ${sel}`);
       return found as T;
     },
     getLanguage: () => language,
-    getText: () => (language === "ja" ? JA_TEXT : EN_TEXT),
     getKeyBindings: () => bindings,
     openFullKeybindings: () => onOpenFull?.(),
     openSettings: () => onOpenSettings?.(),
   });
+  // 呼び出し側 (ヘルプのページ) と同じく、ボタンの click で開閉する。
+  document
+    .querySelector("#sample-trigger")
+    ?.addEventListener("click", quickHelp.toggle);
+  return quickHelp;
+}
+
+/** ボタンを押す: mousedown (外を押したら閉じる、の判定) の後に click。 */
+function pressTrigger() {
+  const trigger = document.querySelector<HTMLButtonElement>("#sample-trigger");
+  trigger?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  trigger?.click();
 }
 
 describe("quick help popover", () => {
@@ -80,11 +78,9 @@ describe("quick help popover", () => {
 
   test("trigger click opens the panel showing Global and Main Panel groups with AI/search shortcuts", () => {
     const quickHelp = makeQuickHelp();
-    const trigger =
-      document.querySelector<HTMLButtonElement>("#quick-help-btn");
 
     expect(quickHelp.isOpen()).toBe(false);
-    trigger?.click();
+    pressTrigger();
     expect(quickHelp.isOpen()).toBe(true);
 
     const groupTitles = Array.from(
@@ -116,18 +112,16 @@ describe("quick help popover", () => {
 
     const themeRow = Array.from(
       document.querySelectorAll("#quick-help-groups tr"),
-    ).find((row) => row.textContent?.includes("Toggle theme"));
+    ).find((row) => row.textContent?.includes("Toggle light / dark"));
     expect(themeRow?.querySelector("th")?.textContent).toBe("Alt+X");
   });
 
   test("re-clicking the trigger toggles the panel closed", () => {
     const quickHelp = makeQuickHelp();
-    const trigger =
-      document.querySelector<HTMLButtonElement>("#quick-help-btn");
 
-    trigger?.click();
+    pressTrigger();
     expect(quickHelp.isOpen()).toBe(true);
-    trigger?.click();
+    pressTrigger();
     expect(quickHelp.isOpen()).toBe(false);
   });
 
@@ -177,29 +171,38 @@ describe("quick help popover", () => {
       $: <T extends Element = HTMLElement>(sel: string): T =>
         document.querySelector(sel) as T,
       getLanguage: () => language,
-      getText: () => (language === "ja" ? JA_TEXT : EN_TEXT),
       getKeyBindings: () => DEFAULT_KEY_BINDINGS,
       openFullKeybindings: () => undefined,
       openSettings: () => undefined,
     });
 
+    const names = () => ({
+      title: document.querySelector("#quick-help-title")?.textContent,
+      close: document
+        .querySelector("#quick-help-close")
+        ?.getAttribute("aria-label"),
+      dialog: document
+        .querySelector("#quick-help-popover")
+        ?.getAttribute("aria-label"),
+    });
     quickHelp.open();
-    expect(document.querySelector("#quick-help-title")?.textContent).toBe(
-      "Quick Help",
-    );
+    const english = names();
 
     language = "ja";
     quickHelp.localize();
 
-    expect(document.querySelector("#quick-help-title")?.textContent).toBe(
-      "クイックヘルプ",
-    );
-    expect(
-      document.querySelector("#quick-help-close")?.getAttribute("aria-label"),
-    ).toBe("クイックヘルプを閉じる");
-    expect(
-      document.querySelector("#quick-help-popover")?.getAttribute("aria-label"),
-    ).toBe("クイックヘルプ");
+    expect({ english, japanese: names() }).toEqual({
+      english: {
+        title: "Keyboard shortcuts",
+        close: "Close keyboard shortcuts",
+        dialog: "Keyboard shortcuts",
+      },
+      japanese: {
+        title: "キーボードショートカット",
+        close: "キーボードショートカットを閉じる",
+        dialog: "キーボードショートカット",
+      },
+    });
     const groupTitles = Array.from(
       document.querySelectorAll("#quick-help-groups .gdp-help-group h3"),
       (el) => el.textContent,

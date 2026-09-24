@@ -43,14 +43,21 @@ import {
   SYNC_16_PATH,
   X_16_PATH,
 } from "../../core/icons";
+import {
+  partitionProjectsByRunning,
+  runningProjectRoots,
+} from "../../core/project-running";
+import { showContextMenu } from "../context-menu";
 import { renderEmptyState } from "../empty-state";
 import type { PageView } from "../page-view";
 import type { ProjectActions } from "../projects/project-actions";
 import { projectLook, projectMark } from "../projects/project-looks";
 import { showProjectMenu } from "../projects/project-menu";
 import type { AccountsBand } from "./accounts-band";
+import { paneAccountName } from "./accounts-dialogs";
 import { fillAgentCard } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
+import { type HandoffMenuActions, handoffMenuItems } from "./handoff";
 import type { AgentsText } from "./i18n";
 import { markPreviewRow, PANE_PREVIEW, type PanePreview } from "./pane-preview";
 import { paneText } from "./pane-text";
@@ -78,6 +85,8 @@ export type AgentsViewDeps = {
   getAccounts(): AccountsResponse | null;
   /** 「新しいエージェント」の画面を開く。project は選んでおくプロジェクト。 */
   launch(project?: string): void;
+  /** 行の右クリックのメニューの「別のアカウントで続ける…」(handoff.ts)。 */
+  handoff: HandoffMenuActions;
   /** 一覧に入った・出たとき (アカウントの取り直しを始める・止める)。 */
   onVisibilityChange(visible: boolean): void;
   /** プロジェクトの登録・開く・止める (ヘッダの切替と共通)。 */
@@ -210,6 +219,8 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
   let selected: string | null = null;
   /** 畳んだプロジェクト (root)。取り直しを跨いで保つ。 */
   const collapsed = new Set<string>();
+  /** 停止中のプロジェクトの節を開いているか (プロジェクトの畳みと同じくメモリだけ。既定は畳む)。 */
+  let stoppedOpen = false;
   /** 前回描いた中身。同じなら DOM を触らない (hover や選択を乱さない)。 */
   let lastSignature = "";
   let unsubscribe: (() => void) | null = null;
@@ -279,6 +290,22 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     };
     row.addEventListener("click", openBy);
     row.addEventListener("auxclick", openBy);
+    // 左のサイドバーの行と同じメニュー。
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      showContextMenu(
+        row,
+        [
+          { label: current.openPane, onSelect: () => select(pane) },
+          {
+            label: current.openPaneOpposite,
+            onSelect: () => select(pane, "opposite"),
+          },
+          ...handoffMenuItems(pane, current, deps.handoff),
+        ],
+        { at: { x: event.clientX, y: event.clientY } },
+      );
+    });
     return row;
   }
 
@@ -290,23 +317,18 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     const account = pane.account;
     if (!account) return label;
     const data = deps.getAccounts();
+    label.textContent = paneAccountName(pane, data, t);
     if (account.kind === "default" || account.kind === "registered") {
       const entry = data?.accounts.find((item) => item.id === account.id);
-      label.textContent =
-        account.kind === "default"
-          ? t.defaultName
-          : (entry?.name ?? account.id);
       label.title = t.paneAccountTitle(
         label.textContent,
         entry?.configDir ?? "",
       );
     } else if (account.kind === "unregistered") {
       label.classList.add("agents-account-unregistered");
-      label.textContent = t.unregistered;
       label.title = t.unregisteredTitle(account.configDir);
     } else {
       label.classList.add("agents-account-unknown");
-      label.textContent = t.unknownAccount;
       label.title = t.unknownAccountTitle(account.reason);
     }
     return label;
@@ -689,11 +711,11 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     // 登録したプロジェクトは、エージェントが居なくても (tmux が無くても)
     // 見出しだけで並べる。案内の箱はその上に出す。
     const registeredOnly = () => {
-      for (const group of groupAgentPanes([], overview.projects, {
-        includeEmptyRegistered: true,
-      })) {
-        list.appendChild(createProject(group));
-      }
+      appendGroups(
+        groupAgentPanes([], overview.projects, {
+          includeEmptyRegistered: true,
+        }),
+      );
     };
     if (overview.tmux.error) {
       registeredOnly();
@@ -749,11 +771,65 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     }
     // 絞り込み中は、エージェントの居ない登録プロジェクトを出さない
     // (「入力待ちだけ」を見たいときに、関係の無い見出しが並ばないように)。
-    for (const group of groupAgentPanes(visible, overview.projects, {
-      includeEmptyRegistered: stateFilter === "all",
-    })) {
-      list.appendChild(createProject(group));
+    appendGroups(
+      groupAgentPanes(visible, overview.projects, {
+        includeEmptyRegistered: stateFilter === "all",
+      }),
+    );
+  }
+
+  /**
+   * プロジェクトを並べる。行の無い登録プロジェクトのうち起動中でないもの
+   * (core/project-running.ts。左のサイドバーと同じ判定) は、一覧の下の畳める
+   * 「停止中」の節へ。並びはどちらも渡した順 (登録の順) のまま。
+   */
+  function appendGroups(groups: AgentProjectGroup[]): void {
+    const overview = deps.monitor.snapshot().overview;
+    if (!overview) return;
+    const starting = overview.projects
+      .filter((info) => deps.projects.activity(info.root)?.kind === "starting")
+      .map((info) => info.root);
+    const running = runningProjectRoots(overview, starting);
+    // 行のあるもの (すべてのペインを出しているときのシェルだけのペインも) は
+    // 畳みに入れない。
+    for (const group of groups) {
+      if (group.panes.length > 0) running.add(group.info.root);
     }
+    const split = partitionProjectsByRunning(
+      groups,
+      (group) => group.info.root,
+      running,
+    );
+    for (const group of split.running) list.appendChild(createProject(group));
+    if (split.stopped.length === 0) return;
+    const current = text();
+    const section = document.createElement("section");
+    section.className = "agents-stopped";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "agents-stopped-toggle";
+    toggle.setAttribute(NAV_ATTR, "stopped");
+    toggle.tabIndex = -1;
+    toggle.setAttribute("aria-expanded", String(stoppedOpen));
+    toggle.title = current.sidebar.stoppedTitle;
+    const twisty = document.createElement("span");
+    twisty.className = "terminal-tree-twisty agents-project-twisty";
+    twisty.classList.toggle("collapsed", !stoppedOpen);
+    twisty.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
+    twisty.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = current.sidebar.stopped(split.stopped.length);
+    toggle.append(twisty, label);
+    toggle.addEventListener("click", () => {
+      stoppedOpen = !stoppedOpen;
+      render(true);
+    });
+    const rows = document.createElement("div");
+    rows.className = "agents-stopped-list";
+    rows.hidden = !stoppedOpen;
+    for (const group of split.stopped) rows.appendChild(createProject(group));
+    section.append(toggle, rows);
+    list.appendChild(section);
   }
 
   function signature(): string {
@@ -765,6 +841,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       allPanes,
       selected,
       [...collapsed],
+      stoppedOpen,
       [...snapshot.unread],
       snapshot.error,
       snapshot.notifyError,

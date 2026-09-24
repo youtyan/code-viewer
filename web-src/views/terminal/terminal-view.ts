@@ -1,4 +1,4 @@
-import { apiUrl } from "../../core/api-url";
+import { apiUrl, PROJECT_HEADER } from "../../core/api-url";
 // メインの面 (左 / 右) のターミナルのタブの中身。映すのは PTY のシェルで、
 // tmux はその中で普通に動く。
 //
@@ -13,14 +13,16 @@ import {
   formatErrorDetail,
   responseErrorMessage,
 } from "../../core/error-detail";
+import { TERMINAL_16_PATHS } from "../../core/icons";
 import type { TerminalSoftKey } from "../../core/mobile-layout";
+import { UNINTERRUPTIBLE_REQUEST_HEADER } from "../../core/network-activity";
 import type {
   ShellListResponse,
   ShellSession,
   ShellSessionId,
 } from "../../core/shell";
 import type { TerminalImageRef } from "../../core/terminal-images";
-import type { TmuxClientWindow } from "../../core/tmux";
+import type { TmuxClientWindow, TmuxPlace } from "../../core/tmux";
 import {
   clampTerminalFontSize,
   MAX_TERMINAL_FONT_SIZE,
@@ -28,7 +30,9 @@ import {
   TERMINAL_FONT_SIZE_STEP,
 } from "../../core/tmux";
 import type { ContextMenuItem } from "../context-menu";
+import { renderEmptyState } from "../empty-state";
 import { type TerminalLang, type TerminalText, terminalText } from "./i18n";
+import type { ImageShelfLayout } from "./image-shelf";
 import {
   createTerminalScreen,
   type TerminalScreenHandle,
@@ -47,6 +51,14 @@ export type TerminalViewDeps = {
   isImageShelfCollapsed(): boolean;
   /** 棚を畳んだ・開いた。保存は呼び出し側 (app.ts) が持つ。 */
   onImageShelfCollapsedChange(collapsed: boolean): void;
+  /** 画像の棚の置き場所と大きさ (ユーザー単位の設定)。 */
+  getImageShelfLayout?(): ImageShelfLayout;
+  /** そのペインのエージェントの名前 (棚の見出し)。エージェントでなければ null。 */
+  paneName?(paneId: string): string | null;
+  /** 画面のファイルのパスを開く (プロジェクトの根からの相対パスと行)。 */
+  onOpenFile?(path: string, line: number | undefined, kept: boolean): void;
+  /** 棚の置き場所か大きさを変えた。保存は呼び出し側 (app.ts) が持つ。 */
+  onImageShelfLayoutChange?(patch: Partial<ImageShelfLayout>): void;
   /**
    * そのシェルのタブを開いて前面に出してもらう。pane は tmux ペインから
    * 開いたとき、そのペイン (シェルとペインの対応をサーバがまだ知らないときの
@@ -69,6 +81,12 @@ export type TerminalViewDeps = {
    * その端末でないと見えないので、常に見える場所にも出してもらう。
    */
   onOpenFailed(message: string): void;
+  /**
+   * 「新しいシェルで開き直す」でカレントにするプロジェクトの鍵 (そのタブの
+   * グループのプロジェクト。undefined ならこのページのプロジェクト)。無ければ
+   * このページのプロジェクトで開く。
+   */
+  reopenProject?(id: ShellSessionId): Promise<string | undefined>;
   /** そのシェルの中の tmux の端末とウインドウの大きさ。無ければ null。 */
   tmuxWindow(id: ShellSessionId): TmuxClientWindow | null;
   /** 端末の大きさを変えた。tmux の大きさを早めに取り直してもらう。 */
@@ -90,6 +108,8 @@ export type TerminalViewHandle = {
    */
   menuItems(): ContextMenuItem[];
   localize(): void;
+  /** 画像の棚の置き場所と大きさを設定から当て直す (設定の欄・別の窓で変えたとき)。 */
+  applyImageShelfLayout(): void;
   dispose(): void;
   /** メインの面 (左 / 右) のターミナルの置き場所。app がその面の箱に置く。 */
   tabPaneFor(side: TabSide): HTMLElement;
@@ -102,8 +122,30 @@ export type TerminalViewHandle = {
   releaseTab(id: ShellSessionId): void;
   /** tmux ペインを、そのセッションのシェルでタブに開く。失敗はその面の箱に出す。 */
   openPaneInTab(pane: string, side: TabSide): Promise<void>;
-  /** 新しいシェルを開き、そのタブを前面に出してもらう。失敗は reject する。 */
-  createShell(side: TabSide): Promise<void>;
+  /**
+   * 新しいシェルを開き、そのタブを前面に出してもらう。失敗は reject する。
+   * project はカレントにするプロジェクトの鍵 (無ければこのページのプロジェクト)。
+   * id はそのタブのシェルの ID のまま開き直すとき (サーバが起き直して終わった)。
+   */
+  createShell(
+    side: TabSide,
+    project?: string,
+    id?: ShellSessionId,
+  ): Promise<void>;
+  /**
+   * サーバが起き直して終わったシェルのタブを、同じ ID のシェルで保存した tmux の
+   * 場所へ繋ぎ直す。そのシェルを映していた面は新しいシェルを映し直す。場所が
+   * もう無い・合わない (tmux が起き直した) なら "gone"。ほかの失敗は reject する。
+   */
+  reviveInTab(
+    id: ShellSessionId,
+    place: TmuxPlace,
+  ): Promise<"revived" | "gone">;
+  /**
+   * サーバが起き直して終わった、tmux を映していなかったシェルのタブ。閉じずに、
+   * 映す面では端末の代わりに空の状態の案内と「新しいシェルで開き直す」を出す。
+   */
+  markEnded(id: ShellSessionId): void;
   /** シェルを止める。映していたタブの購読もやめる。失敗は reject する。 */
   closeShell(id: ShellSessionId): Promise<void>;
   /** シェルの一覧を取り直す。失敗は reject する (覚えている一覧は変えない)。 */
@@ -159,6 +201,16 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   let disposed = false;
   /** 「セッションを止める」で止めている最中のシェル。終わっても知らせない。 */
   const stopping = new Set<ShellSessionId>();
+  /**
+   * サーバが起き直して終わった、tmux を映していなかったシェル。開き直すまで、
+   * そのタブを映す面に案内を出す (markEnded)。
+   */
+  const ended = new Set<ShellSessionId>();
+  /** 面ごとの、タブが映すよう頼んだシェル (showInTab。タブを閉じたら null)。 */
+  const showing: Record<TabSide, ShellSessionId | null> = {
+    left: null,
+    right: null,
+  };
 
   function text(): TerminalText {
     return terminalText(deps.getLanguage());
@@ -207,6 +259,14 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       onTmuxWindowStale: deps.onTmuxWindowStale,
       isImageShelfCollapsed: deps.isImageShelfCollapsed,
       setImageShelfCollapsed: deps.onImageShelfCollapsedChange,
+      getImageShelfLayout: deps.getImageShelfLayout,
+      paneName: deps.paneName,
+      onOpenFile: deps.onOpenFile,
+      // 棚で変えたら、保存してから両方の面の棚に当て直す。
+      setImageShelfLayout: (patch) => {
+        deps.onImageShelfLayoutChange?.(patch);
+        for (const slot of slots()) slot.screen.applyImageShelfLayout();
+      },
       onOpenImage: deps.onOpenImage,
     });
     screen.setInputEnabled(inputEnabled);
@@ -239,7 +299,12 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   /** その面の枠 (まだ無ければ作る)。 */
   function tabSlot(side: TabSide): ScreenSlot {
     const existing = tabs[side];
-    if (existing) return existing;
+    if (existing) {
+      // 終わったシェルの案内を出していた面は枠に戻す。
+      if (existing.el.parentElement !== tabPanes[side])
+        tabPanes[side].replaceChildren(existing.el);
+      return existing;
+    }
     const created = createSlot();
     tabs[side] = created;
     tabPanes[side].replaceChildren(created.el);
@@ -301,7 +366,11 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     listGeneration += 1;
     shells = {
       available: true,
-      sessions: [...(shells?.sessions ?? []), session],
+      // 同じ ID で開き直したシェルは、前のものと入れ替える。
+      sessions: [
+        ...(shells?.sessions ?? []).filter((item) => item.id !== session.id),
+        session,
+      ],
     };
   }
 
@@ -372,7 +441,11 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     }
   }
 
-  async function createShell(side: TabSide): Promise<void> {
+  async function createShell(
+    side: TabSide,
+    project?: string,
+    id?: ShellSessionId,
+  ): Promise<void> {
     const size = tabs[side]?.screen.measure();
     const res = await deps.trackLoad(
       fetch(apiUrl("shellCreate"), {
@@ -380,8 +453,10 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
         headers: {
           ...deps.actionHeaders(),
           "Content-Type": "application/json",
+          // 入口はシェルの作業場所をこの鍵で決める (server/entry/server.ts)。
+          ...(project ? { [PROJECT_HEADER]: project } : {}),
         },
-        body: JSON.stringify({ cols: size?.cols, rows: size?.rows }),
+        body: JSON.stringify({ id, cols: size?.cols, rows: size?.rows }),
       }),
     );
     if (res.status === 429)
@@ -427,9 +502,15 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
 
   async function showInTab(id: ShellSessionId, side: TabSide): Promise<void> {
     if (disposed) return;
+    showing[side] = id;
+    if (ended.has(id)) {
+      showEnded(side, id);
+      return;
+    }
     const myGen = ++tabGeneration[side];
     if (tabs[otherSide(side)]?.screen.getAttached()?.id === id) {
       // もう一方の面で映していたシェル (反対側へ移したタブ)。枠ごと付け替える。
+      showing[otherSide(side)] = null;
       swapSides();
       tabs[side]?.screen.focus();
       return;
@@ -457,12 +538,94 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   }
 
   function releaseTab(id: ShellSessionId): void {
+    ended.delete(id);
     for (const side of ["left", "right"] as const) {
+      if (showing[side] === id) showing[side] = null;
       const slot = tabs[side];
       if (slot?.screen.getAttached()?.id !== id) continue;
       tabGeneration[side] += 1;
       slot.screen.detach();
     }
+  }
+
+  /** 終わったシェルのタブを映す面に、端末の代わりに案内を出す。 */
+  function showEnded(side: TabSide, id: ShellSessionId): void {
+    tabGeneration[side] += 1;
+    tabs[side]?.screen.detach();
+    const current = text();
+    tabPanes[side].replaceChildren(
+      renderEmptyState({
+        icon: TERMINAL_16_PATHS,
+        title: current.shellEndedByRestart,
+        hint: current.shellEndedByRestartHint,
+        actions: [
+          {
+            label: current.reopenShell,
+            primary: true,
+            run: () => void reopenEnded(id, side),
+          },
+        ],
+      }),
+    );
+  }
+
+  /** 案内の「新しいシェルで開き直す」: 同じ ID のシェルを開き、そのタブで映す。 */
+  async function reopenEnded(id: ShellSessionId, side: TabSide): Promise<void> {
+    // 開いたシェルのタブを前面に出す (onOpenInTab) と、すぐ映しに来る。その前に外す。
+    ended.delete(id);
+    try {
+      await createShell(side, await deps.reopenProject?.(id), id);
+    } catch (error) {
+      ended.add(id);
+      console.error(`[code-viewer] could not reopen the shell ${id}`, error);
+      deps.onOpenFailed(formatErrorDetail(error));
+    }
+    // 前面に出しても配置が変わらなければ映しに来ない。案内を出したままの面を映し直す。
+    for (const side of ["left", "right"] as const)
+      if (showing[side] === id) void showInTab(id, side);
+  }
+
+  function markEnded(id: ShellSessionId): void {
+    ended.add(id);
+    forgetShell(id);
+    for (const side of ["left", "right"] as const)
+      if (showing[side] === id) showEnded(side, id);
+  }
+
+  async function reviveInTab(
+    id: ShellSessionId,
+    place: TmuxPlace,
+  ): Promise<"revived" | "gone"> {
+    const res = await deps.trackLoad(
+      fetch(apiUrl("tmuxOpen"), {
+        method: "POST",
+        headers: {
+          ...deps.actionHeaders(),
+          "Content-Type": "application/json",
+          // 画面の切替の取消で止めない (サーバだけがシェルを開き、タブは古いまま残る)。
+          [UNINTERRUPTIBLE_REQUEST_HEADER]: "1",
+        },
+        body: JSON.stringify({
+          pane: place.pane,
+          revive: { shell: id, session: place.session, window: place.window },
+        }),
+      }),
+    );
+    if (res.status === 410) return "gone";
+    if (!res.ok)
+      throw new Error(await responseErrorMessage(res, text().paneOpenFailed));
+    const body = (await res.json()) as { session: ShellSession };
+    if (disposed) return "revived";
+    addShell(body.session);
+    // 映していた面の購読は前のサーバで切れている (読み直した直後なら、シェルが
+    // 無いので付いていない)。新しいシェルに付け直す。
+    for (const side of ["left", "right"] as const) {
+      if (showing[side] !== id) continue;
+      const slot = tabSlot(side);
+      tabGeneration[side] += 1;
+      await slot.screen.attach(body.session);
+    }
+    return "revived";
   }
 
   return {
@@ -471,6 +634,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     releaseTab,
     openPaneInTab,
     createShell,
+    reviveInTab,
+    markEnded,
     closeShell,
     loadShells,
     knownShells: () => shells,
@@ -486,8 +651,15 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       for (const slot of slots()) slot.screen.applyFontSize();
     },
     menuItems,
+    applyImageShelfLayout() {
+      for (const slot of slots()) slot.screen.applyImageShelfLayout();
+    },
     localize() {
       for (const slot of slots()) slot.screen.localize();
+      for (const side of ["left", "right"] as const) {
+        const id = showing[side];
+        if (id !== null && ended.has(id)) showEnded(side, id);
+      }
     },
     dispose() {
       disposed = true;

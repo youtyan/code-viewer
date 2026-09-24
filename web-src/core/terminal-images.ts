@@ -10,6 +10,7 @@
 import { hasControlCharacter } from "./control-chars";
 import { errorWithCause } from "./error-detail";
 import { PASTE_IMAGE_TYPES } from "./terminal-paste";
+import type { TmuxPaneId } from "./tmux";
 
 /**
  * 棚に出す画像の拡張子。貼り付けで受ける種類と同じものに揃える (jpeg は jpg
@@ -29,6 +30,26 @@ export const TERMINAL_IMAGE_EXTENSIONS: readonly string[] = [
  * で、普段は届かない。棚に並べる枚数の上限は MAX_SHELF_IMAGES。
  */
 export const MAX_TERMINAL_IMAGE_PATHS = 64;
+
+/** 画像の棚の置き場所 (ターミナルの画面のどちら側か)。先頭が既定。 */
+export const TERMINAL_IMAGE_SHELF_PLACEMENTS = [
+  "right",
+  "left",
+  "bottom",
+  "top",
+] as const;
+
+export type TerminalImageShelfPlacement =
+  (typeof TERMINAL_IMAGE_SHELF_PLACEMENTS)[number];
+
+export function isTerminalImageShelfPlacement(
+  value: unknown,
+): value is TerminalImageShelfPlacement {
+  return (
+    typeof value === "string" &&
+    (TERMINAL_IMAGE_SHELF_PLACEMENTS as readonly string[]).includes(value)
+  );
+}
 
 /** 1 リクエストで問い合わせるパスの上限。 */
 export const MAX_TERMINAL_IMAGE_QUERY = 16;
@@ -125,11 +146,77 @@ export type TerminalImageBase = {
   error?: string;
 };
 
+/**
+ * tmux のウインドウの中のペイン 1 つと、その位置。left・top はウインドウの
+ * 左上からの桁・行 (ステータスの行は含まない)。棚の出どころの名前と、端末の
+ * 上に描くペインの枠の材料。
+ */
+export type TerminalPaneBox = {
+  id: TmuxPaneId;
+  /** tmux のペイン番号 (`prefix q` で出る番号)。 */
+  index: number;
+  /**
+   * tmux のペインの題名。題名を付けていないペインで tmux が入れるホスト名は
+   * 空にしてある (ホスト名を画面に出さない)。
+   */
+  title: string;
+  command: string;
+  /** 作業場所の最後の名前 (題名が無いときの見出しに使う)。 */
+  folder: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+/** シェルが映している tmux のウインドウのペインの並び。 */
+export type TerminalPaneLayout = {
+  panes: TerminalPaneBox[];
+  /** ステータスの行数と位置 (上なら、ペインの行はその分だけ下にずれる)。 */
+  statusLines: number;
+  statusAt: "top" | "bottom";
+};
+
+/**
+ * 候補がどのペインのどの行に出ていたか。1 つの候補が複数のペインに出て
+ * いれば複数返り、新しい順 (ペインの下端に近いほど新しい) に並ぶ。
+ */
+export type TerminalImageSighting = {
+  candidate: string;
+  pane: TmuxPaneId;
+  /** パスが出た行。tmux の折り返しは繋いだ 1 行、行末の空白は落とす。 */
+  line: string;
+};
+
 export type TerminalImagesResponse = {
   images: TerminalImageRef[];
   rejected: TerminalImageRejection[];
   base: TerminalImageBase;
+  /**
+   * シェルが tmux を映していれば、そのウインドウのペインの並び。tmux で
+   * ないシェル・ペインを引けなかったとき・古い版のサーバでは無い。
+   */
+  layout?: TerminalPaneLayout | null;
+  /** 候補が出ていたペインと行 (layout と同じとき、同じ条件で無い)。 */
+  sightings?: TerminalImageSighting[];
+  /** ペインの並び・中身を読めなかった理由 (読めた分だけで答えている)。 */
+  originError?: string;
 };
+
+/** そのシェルが映している tmux のウインドウのペインの並び (枠を描き直すとき)。 */
+export type TerminalPaneLayoutResponse = {
+  layout: TerminalPaneLayout | null;
+};
+
+/** 「ターミナルで見る」: そのペインでその文字列が見える所まで tmux に遡らせる。 */
+export type TerminalRevealRequest = {
+  shell: string;
+  pane: TmuxPaneId;
+  text: string;
+};
+
+/** tmux に遡らせる文字列の上限。パスの 1 行より長いものは送らない。 */
+export const MAX_TERMINAL_REVEAL_TEXT = 1024;
 
 /** サーバ応答の画像 URL が、この画面と同じオリジンの HTTP URL か確かめる。 */
 export function validateTerminalImageResponseUrls<

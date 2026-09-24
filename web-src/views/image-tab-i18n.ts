@@ -10,6 +10,7 @@ export type ImageTabText = {
   nextImage: string;
   copyPath: string;
   openFolder: string;
+  closeTab: string;
   loading: string;
   imageLoadFailed: string;
   copyFailed: string;
@@ -29,6 +30,7 @@ const EN: ImageTabText = {
   nextImage: "Next image",
   copyPath: "Copy path",
   openFolder: "Open folder",
+  closeTab: "Close",
   loading: "Loading image…",
   imageLoadFailed: "Could not load the image.",
   copyFailed: "Could not copy the path.",
@@ -48,6 +50,7 @@ const JA: ImageTabText = {
   nextImage: "次の画像",
   copyPath: "パスをコピー",
   openFolder: "フォルダを開く",
+  closeTab: "閉じる",
   loading: "画像を読み込んでいます…",
   imageLoadFailed: "画像を読み込めませんでした。",
   copyFailed: "パスをコピーできませんでした。",

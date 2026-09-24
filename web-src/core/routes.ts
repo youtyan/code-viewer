@@ -49,6 +49,8 @@ export type AppRoute =
       virtual?: "off";
     }
   | { screen: "help"; range: DiffRange; lang: string; section: string }
+  /** 設定。表示の言語は設定の言語 (help のように ?lang= を持たない)。 */
+  | { screen: "settings"; range: DiffRange }
   | {
       screen: "worktree";
       /** 選んでいる作業ツリーの一意な id。 */
@@ -127,6 +129,7 @@ export const SPA_PATHS = [
   "/todiff",
   "/file",
   "/help",
+  "/settings",
   "/history",
   "/journal",
   "/database",
@@ -281,12 +284,17 @@ export function parseRoute(
       };
     }
     case "/help":
+      // 設定と案内が 1 つのページだった頃の設定の節 (保存したリンク・履歴)。
+      if (params.get("section") === "settings")
+        return { screen: "settings", range };
       return {
         screen: "help",
         range,
         lang: params.get("lang") || "en",
         section: params.get("section") || "overview",
       };
+    case "/settings":
+      return { screen: "settings", range };
     case "/worktree": {
       const wt = params.get("wt") || "";
       const file = params.get("file") || "";
@@ -499,6 +507,8 @@ function buildRoutePath(route: AppRoute): string {
       const qs = params.toString();
       return `/help${qs ? `?${qs}` : ""}`;
     }
+    case "settings":
+      return "/settings";
     case "history": {
       const params = new URLSearchParams();
       if (route.ref && route.ref !== "HEAD") params.set("ref", route.ref);
@@ -699,7 +709,7 @@ export function parsePaneOverlay(search: string): "right" | null {
 
 /**
  * 自分の箱を本文の面に置き、#diff を隠す画面。離れるときにその画面の後片付け
- * (箱を外して #diff を戻す) が要る。設定 (help) は #diff を描き直すだけなので
+ * (箱を外して #diff を戻す) が要る。設定とヘルプは #diff を描き直すだけなので
  * 入らない。History は範囲の戻しを伴う別の後片付け (app.ts) を持つ。
  */
 export type LeavableScreen =

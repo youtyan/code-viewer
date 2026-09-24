@@ -1,6 +1,8 @@
+import type { ColorTheme, TerminalTone } from "./color-themes";
 import type { DiffRowBasis } from "./diff-card-estimate";
 import type { GdpExpandLogic } from "./expand-logic";
 import type { KeymapOverrides } from "./keymap";
+import type { TerminalImageShelfPlacement } from "./terminal-images";
 import type { ToolId } from "./tools";
 import type {
   WorktreeFileOrigin,
@@ -176,18 +178,22 @@ export type WorktreeDiffResponse = {
   generation: number;
 };
 
-/** ダークテーマの色違い。既定は "violet"。 */
-export const THEME_PALETTES = ["violet", "graphite", "warm"] as const;
-export type ThemePalette = (typeof THEME_PALETTES)[number];
-
 export type ViewerFontSizeSetting = "compact" | "regular" | "large" | "xlarge";
 
 export type AppSettingsState = {
   version: 1;
   layout?: "side-by-side" | "line-by-line";
   theme?: "light" | "dark";
-  /** ダークの色違い。未設定なら既定 (紫)。ライトのときは使わない。 */
-  palette?: ThemePalette;
+  /**
+   * テーマ (配色。core/color-themes.ts)。明暗 (theme) とは別に選ぶ。未設定なら
+   * 既定。以前の「ダークの色違い」(palette) は読むときに読み替える (state-store.ts)。
+   */
+  colorTheme?: ColorTheme;
+  /**
+   * ターミナルの中の明暗 (core/color-themes.ts の TerminalTone)。未設定なら
+   * dark (画面がライトでもターミナルの中はダーク)。
+   */
+  terminalTone?: TerminalTone;
   language?: "en" | "ja";
   sidebarView?: "tree" | "flat";
   sidebarWidth?: number;
@@ -238,8 +244,14 @@ export type AppSettingsState = {
   agentNotifyHintDismissed?: boolean;
   /** エージェント一覧のアカウントの帯を畳んだ。 */
   agentAccountsCollapsed?: boolean;
-  /** ターミナルの右の画像の棚を畳んだ。 */
+  /** ターミナルの画像の棚を畳んだ。 */
   terminalImageShelfCollapsed?: boolean;
+  /** 画像の棚の置き場所 (右・左・下・上)。 */
+  terminalImageShelfPlacement?: TerminalImageShelfPlacement;
+  /** 画像の棚を右・左に置いたときの幅 (core/panel-sizes.ts の範囲)。 */
+  terminalImageShelfWidth?: number;
+  /** 画像の棚を下・上に置いたときの高さ。 */
+  terminalImageShelfHeight?: number;
   /**
    * 下パネル (Tools / Search) を開いていたか。下パネルは無くなり (Tools と
    * Search はタブ)、いまは読まない。保存してある値の形を変えないために残す。
@@ -251,6 +263,8 @@ export type AppSettingsState = {
   navWidth?: number;
   /** 左のサイドバーで畳んだプロジェクト (プロジェクトの root)。 */
   navCollapsedProjects?: string[];
+  /** 左のサイドバーの「停止中」の節を開いた (既定は畳む。core/project-running.ts)。 */
+  navStoppedProjectsOpen?: boolean;
   /**
    * 入口のサーバで最後に開いたプロジェクトの根 (実パス)。前置きの無い URL
    * (`/`・古いブックマーク) をどのプロジェクトへ送るかに使う。画面は書かない。

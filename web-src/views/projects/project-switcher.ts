@@ -6,10 +6,12 @@
 //   │ AR another-repo  ~/work/another-repo  ◆1 ●2       │
 //   │ TR third-repo    ~/work/third-repo    停止中       │
 //   │ ───────────────────────────────────────────────── │
-//   │ パスを入力して登録…                               │
+//   │ プロジェクトを追加…                               │
 //   └────────────────────────────────────────────────────┘
 //
-// 並べるのは登録したプロジェクトだけ (利用者が決めた順)。件数とサーバの
+// 並べるのは登録したプロジェクトだけ。起動中のもの (左のサイドバーと同じ判定。
+// core/project-running.ts) が先で、停止中のものは区切りの後。それぞれの中は
+// 利用者が決めた順。絞り込みと ↑↓ で選ぶ一覧なので畳まない。件数とサーバの
 // 状態は、どの画面でも動いているエージェントの取り直し (agent-monitor) の
 // 結果をそのまま使う (新しい取得は足さない)。選ぶと同じタブで、いまと同じ
 // 画面へ移る。動いていなければ起こしてから (project-actions)。
@@ -24,6 +26,10 @@ import {
   headerAgentCounts,
 } from "../../core/agent-overview";
 import { CHEVRON_DOWN_12_PATH, iconSvg } from "../../core/icons";
+import {
+  partitionProjectsByRunning,
+  runningProjectRoots,
+} from "../../core/project-running";
 import { matchesProjectQuery } from "../../core/projects";
 import type { ProjectActions } from "./project-actions";
 import { projectLook, projectMark } from "./project-looks";
@@ -76,10 +82,25 @@ export function mountProjectSwitcher(
   let active = 0;
   let cleanup: (() => void) | null = null;
 
+  function runningRoots(overview: AgentOverviewResponse): Set<string> {
+    const starting = overview.projects
+      .filter((info) => deps.actions.activity(info.root)?.kind === "starting")
+      .map((info) => info.root);
+    return runningProjectRoots(overview, starting);
+  }
+
+  /** 登録したプロジェクト。起動中 → 停止中、それぞれの中は登録の順。 */
   function registered(overview: AgentOverviewResponse): AgentProjectInfo[] {
-    return overview.projects
-      .filter((info) => info.registered !== null)
-      .sort((a, b) => (a.registered?.order ?? 0) - (b.registered?.order ?? 0));
+    const split = partitionProjectsByRunning(
+      overview.projects
+        .filter((info) => info.registered !== null)
+        .sort(
+          (a, b) => (a.registered?.order ?? 0) - (b.registered?.order ?? 0),
+        ),
+      (info) => info.root,
+      runningRoots(overview),
+    );
+    return [...split.running, ...split.stopped];
   }
 
   function currentProject(
@@ -208,7 +229,17 @@ export function mountProjectSwitcher(
     } else if (projects.length === 0) {
       list.appendChild(message(t.switcherNoMatch));
     }
+    // 停止中の最初の行の前に区切り。読み上げは行の「停止中」の注記に任せる。
+    const running = overview ? runningRoots(overview) : new Set<string>();
+    const firstStopped = projects.findIndex((info) => !running.has(info.root));
     projects.forEach((info, index) => {
+      if (index === firstStopped && index > 0) {
+        const divider = document.createElement("div");
+        divider.className = "project-switcher-divider";
+        divider.setAttribute("aria-hidden", "true");
+        divider.textContent = t.switcherStopped;
+        list?.appendChild(divider);
+      }
       list?.appendChild(row(info, index));
     });
     const selected = projects[active];
@@ -248,7 +279,7 @@ export function mountProjectSwitcher(
     }
     if (overview) {
       actions.appendChild(
-        action(t.switcherAddPath, () => {
+        action(t.addProjectMenu, () => {
           close();
           return deps.actions.registerByPath();
         }),

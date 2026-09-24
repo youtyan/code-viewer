@@ -4,7 +4,8 @@
 //
 // - エージェント: 保存したファイルのパスをそのままペインへ打ち込む。CLI の
 //   エージェントはパスを受け取れば読める。
-// - 人間: ターミナルのすぐ上に小さく出す。ちゃんと渡ったことが目で分かる。
+// - 人間: ターミナルの右の画像の棚に出す (出力から拾った画像と同じ棚)。
+//   ちゃんと渡ったことが目で分かる。
 //
 // サーバとブラウザが同じ判定を見るように core に置く。
 
@@ -34,12 +35,35 @@ export function pasteImageExtension(mime: unknown): string | null {
   return PASTE_IMAGE_TYPES[base] ?? null;
 }
 
+/** 貼り付けた画像の置き場 (リポジトリのルートからの相対パス)。 */
+export const PASTE_IMAGE_DIR = ".code-viewer/pasted";
+
+/**
+ * 貼り付けた画像の保存名。`pasted-image-20260925-143201.png` のように、中身
+ * (貼り付けた画像) と日時 (サーバの時計の現地時刻) が名前から読める形にする。
+ * 以前は `paste-<乱数>.png` で、ターミナルに打ち込まれたパスが何を指すのか
+ * 分からなかった。同じ秒に 2 枚目があれば attempt で `-2`・`-3` と足す。
+ */
+export function pastedImageName(
+  at: Date,
+  extension: string,
+  attempt = 1,
+): string {
+  const two = (value: number) => String(value).padStart(2, "0");
+  const day = `${at.getFullYear()}${two(at.getMonth() + 1)}${two(at.getDate())}`;
+  const time = `${two(at.getHours())}${two(at.getMinutes())}${two(at.getSeconds())}`;
+  const suffix = attempt > 1 ? `-${attempt}` : "";
+  return `pasted-image-${day}-${time}${suffix}.${extension}`;
+}
+
 // ai-dup-check: allow -- ok:path/name/bytes という並びが database/discovery.ts の
 // DiscoveredDb と偶然そっくりなだけで、指しているものが違う (発見した DB と
 // 貼り付けた画像)。共通化すると両方の意味が薄まる。
 export type PasteImageResponse = {
   /** 保存したファイルの絶対パス。これをそのままペインへ打ち込む。 */
   path: string;
+  /** リポジトリのルートからの相対パス (`.code-viewer/pasted/…`)。知らせの文に使う。 */
+  relativePath: string;
   /** 表示に使う名前。 */
   name: string;
   bytes: number;

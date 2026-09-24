@@ -73,3 +73,25 @@ describe("tmux open guards", () => {
     expect(res?.status).toBe(400);
   });
 });
+
+describe("tmux open: 繋ぎ直し (revive) の検証", () => {
+  // revive はサーバが起き直して終わったシェルのタブを、同じ ID で保存した場所へ
+  // 繋ぎ直す。形が合わなければ tmux もシェルも触らずに断る。
+  const good = { shell: "shell-abc123", session: "sample", window: 0 };
+  test.each([
+    { name: "null", revive: null },
+    { name: "文字列", revive: "shell-abc123" },
+    { name: "シェルの ID が無い", revive: { ...good, shell: undefined } },
+    { name: "シェルの ID の形でない", revive: { ...good, shell: "%1" } },
+    { name: "セッション名が空", revive: { ...good, session: "" } },
+    { name: "ウインドウの番号が無い", revive: { ...good, window: undefined } },
+    { name: "ウインドウの番号が負", revive: { ...good, window: -1 } },
+    { name: "ウインドウの番号が文字列", revive: { ...good, window: "0" } },
+  ])("$name なら 400 で、送られた値を添える", async ({ revive }) => {
+    const res = await postOpen({ pane: "%1", revive });
+    expect([res?.status, await res?.text()]).toEqual([
+      400,
+      `invalid revive: ${JSON.stringify(revive)} (expected { shell, session, window })`,
+    ]);
+  });
+});

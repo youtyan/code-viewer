@@ -38,9 +38,8 @@ describe("sticky line number styles", () => {
     expect(style.includes("color: var(--fg-muted) !important")).toBe(true);
   });
 
-  test("split diff add/delete line numbers use current GitHub number backgrounds", () => {
-    expect(style.includes("--diff-add-num-bg:    #aceebb;")).toBe(true);
-    expect(style.includes("--diff-del-num-bg:    #ffcecb;")).toBe(true);
+  // 色の下限は diff-code-contrast.test.ts が測る。
+  test("split diff add/delete line numbers use the number backgrounds", () => {
     expect(style.includes(".d2h-ins.d2h-code-side-linenumber")).toBe(true);
     expect(
       style.includes("background: var(--diff-add-num-sticky-bg) !important"),

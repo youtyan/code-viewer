@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test, vi } from "vitest";
 import { formatErrorDetail } from "../core/error-detail";
+import { spawnCollectAsync } from "../server/database/adapters/spawn-runner";
 import { collectLineRangeFromStream } from "../server/range";
 import {
   fileByteRangeResponseBody,
@@ -125,21 +126,80 @@ describe("server runtime compatibility helpers", () => {
   });
 
   // 子が先に終わって壊れたパイプ (EPIPE) は想定内。終了コードがそのまま結果を
-  // 決め、失敗としては報告しない。
-  test("runBytesAsync keeps a broken stdin pipe out of the result", async () => {
-    const result = await runBytesAsync(
-      [process.execPath, "-e", "process.exit(4)"],
-      process.cwd(),
-      { stdin: "x".repeat(4 * 1024 * 1024) },
-    );
-
-    expect(result.code).toBe(4);
-    expect(result.stderr).toBe("");
+  // 決め、失敗としては報告しない。runtime と spawn-runner は同じ規則
+  // (runtime.ts の onStdinWriteFailure) を使う。
+  test.each([
+    {
+      entry: "runBytesAsync",
+      run: async (input: string) => {
+        const result = await runBytesAsync(
+          [process.execPath, "-e", "process.exit(4)"],
+          process.cwd(),
+          { stdin: input },
+        );
+        return { code: result.code, stderr: result.stderr };
+      },
+    },
+    {
+      entry: "spawnCollectAsync",
+      run: async (input: string) => {
+        const result = await spawnCollectAsync({
+          command: process.execPath,
+          args: ["-e", "process.exit(4)"],
+          input,
+          timeoutMs: 10_000,
+          abortMessage: "sample aborted",
+          timeoutMessage: "sample timed out",
+        });
+        return { code: result.code, stderr: result.stderr.toString("utf8") };
+      },
+    },
+  ])("$entry keeps a broken stdin pipe out of the result", async ({ run }) => {
+    await expect(run("x".repeat(4 * 1024 * 1024))).resolves.toEqual({
+      code: 4,
+      stderr: "",
+    });
   });
 
-  // 直す前は stdin の error を全部捨てていたので、入力が子に届かなくても
-  // 「成功」で返っていた。EPIPE 以外は失敗として理由を stderr に残す。
-  test("runBytesAsync reports a stdin write failure that is not EPIPE", async () => {
+  // 直す前は stdin の error を全部捨てていたので (spawn-runner は 29c まで)、
+  // 入力が子に届かなくても「成功」で返っていた。EPIPE 以外は失敗として理由を
+  // stderr に残す。
+  test.each([
+    {
+      entry: "runBytesAsync",
+      run: async () => {
+        const runtime = await import("../server/runtime");
+        const result = await runtime.runBytesAsync(
+          ["anything"],
+          process.cwd(),
+          {
+            stdin: "input the child never reads",
+          },
+        );
+        return { code: result.code, stderr: result.stderr };
+      },
+      stderr: "write EACCES",
+    },
+    {
+      entry: "spawnCollectAsync",
+      run: async () => {
+        const runner = await import("../server/database/adapters/spawn-runner");
+        const result = await runner.spawnCollectAsync({
+          command: "anything",
+          args: [],
+          input: "input the child never reads",
+          timeoutMs: 10_000,
+          abortMessage: "sample aborted",
+          timeoutMessage: "sample timed out",
+        });
+        return { code: result.code, stderr: result.stderr.toString("utf8") };
+      },
+      stderr: "could not write the input to anything: write EACCES",
+    },
+  ])("$entry reports a stdin write failure that is not EPIPE", async ({
+    run,
+    stderr,
+  }) => {
     vi.resetModules();
     const { EventEmitter } = await import("node:events");
     const { PassThrough, Writable } = await import("node:stream");
@@ -166,20 +226,14 @@ describe("server runtime compatibility helpers", () => {
       spawn: () => child,
     }));
     try {
-      const runtime = await import("../server/runtime");
-      const pending = runtime.runBytesAsync(["anything"], process.cwd(), {
-        stdin: "input the child never reads",
-      });
+      const pending = run();
       await new Promise((resolve) => setTimeout(resolve, 10));
       child.stdout.end();
       child.stderr.end();
       child.emit("close", 0);
 
-      const result = await pending;
-
-      expect(result.stderr).toContain("write EACCES");
       // 子が 0 で終わっても、入力が届かなかったのは失敗として返す。
-      expect(result.code).toBe(1);
+      await expect(pending).resolves.toEqual({ code: 1, stderr });
     } finally {
       vi.doUnmock("node:child_process");
       vi.resetModules();

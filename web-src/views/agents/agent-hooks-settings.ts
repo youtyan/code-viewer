@@ -3,6 +3,8 @@ import { apiUrl } from "../../core/api-url";
 // フックを、書き込む内容を見せて確認してから入れる・外す。
 //
 //   エージェント連携
+//   入れると、claude と codex が作業中・入力待ち・完了を自分で知らせる…
+//   入れ方と、入れると何が変わるかは ヘルプ › はじめに にあります。
 //   claude  ● 設定済み        ~/.claude/settings.json        [外す]
 //   codex   ○ 未設定          ~/.codex/hooks.json            [入れる]
 //   ▸ フックの申告が code-viewer に届かなかったことが 3 件あります
@@ -36,6 +38,12 @@ export type AgentHooksSettingsDeps = {
   actionHeaders(): HeadersInit;
   /** 入れた・外した後。エージェント一覧の案内を出し直すため。 */
   onChanged(status: AgentHooksResponse): void;
+  /**
+   * 説明の下に置くヘルプへのリンク。label はヘルプの節の名前 (「ヘルプ ›
+   * はじめに」)、href は中ボタン・コピー用、押すと open。
+   */
+  helpLink(): { label: string; href: string };
+  openHelp(): void;
 };
 
 export type AgentHooksSettings = {
@@ -49,6 +57,9 @@ const AGENT_HOOKS_POLL_MS = 3000;
 
 /** 見出しの id。エージェント一覧の案内からここへ飛ぶ。 */
 export const AGENT_HOOKS_SECTION_ID = "agent-hooks-section-title";
+
+/** 説明の下のリンクが開くヘルプの節 (フックの入れ方と、状態の決め方)。 */
+export const AGENT_HOOKS_HELP_SECTION = "agent-hooks";
 
 type RowResult = { ok: boolean; text: string };
 
@@ -97,6 +108,12 @@ export function createAgentHooksSettings(
   title.className = "scope-settings-section-title";
   title.id = AGENT_HOOKS_SECTION_ID;
   const intro = paragraph("", "scope-settings-help");
+  const help = paragraph("", "gdp-help-shortcut-link");
+  const helpAnchor = document.createElement("a");
+  helpAnchor.addEventListener("click", (event) => {
+    event.preventDefault();
+    deps.openHelp();
+  });
   const rows = document.createElement("div");
   rows.className = "agent-hooks-rows";
   const loadError = paragraph(
@@ -123,7 +140,7 @@ export function createAgentHooksSettings(
   failuresError.hidden = true;
   failuresFooter.append(failuresLog, failuresClear);
   failures.append(failuresSummary, failuresBody, failuresFooter, failuresError);
-  element.append(title, intro, rows, loadError, failures);
+  element.append(title, intro, help, rows, loadError, failures);
 
   let status: AgentHooksResponse | null = null;
   let generation = 0;
@@ -192,7 +209,7 @@ export function createAgentHooksSettings(
   function createRow(row: AgentHookStatus): HTMLElement {
     const text = deps.getText();
     const box = document.createElement("div");
-    box.className = "agent-hooks-row";
+    box.className = "agent-hooks-row ui-table-row";
     box.dataset.agent = row.agent;
     const name = document.createElement("span");
     name.className = "agent-hooks-name";
@@ -270,6 +287,10 @@ export function createAgentHooksSettings(
     const text = deps.getText();
     title.textContent = text.title;
     intro.textContent = text.intro;
+    const link = deps.helpLink();
+    helpAnchor.href = link.href;
+    helpAnchor.textContent = link.label;
+    help.replaceChildren(text.helpBefore, helpAnchor, text.helpAfter);
     rows.replaceChildren();
     if (!status) {
       if (loadError.hidden)

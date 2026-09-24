@@ -78,7 +78,7 @@ describe("画像の拡大表示", () => {
     const zoomReset = buttons.item(1);
     if (!zoomOut || !zoomReset)
       throw new Error("lightbox zoom controls were not mounted");
-    expect(buttons).toHaveLength(4);
+    expect(buttons).toHaveLength(3);
     expect(zoomReset.textContent).toBe("100%");
 
     zoomOut.click();
@@ -88,6 +88,27 @@ describe("画像の拡大表示", () => {
     zoomReset.click();
     expect(stage.style.transform).toBe("scale(1)");
     expect(zoomReset.textContent).toBe("100%");
+  });
+
+  test("閉じるボタンは拡大縮小の塊の外の右端にあり、閉じる・Esc と書いてあって、押すと閉じる", () => {
+    openImageLightbox(IMAGE, text());
+    const bar = overlay()?.querySelector(".terminal-lightbox-bar");
+    const closeButton = bar?.lastElementChild as HTMLButtonElement | null;
+    expect({
+      isClose: closeButton?.classList.contains("terminal-lightbox-close"),
+      inZoomGroup: closeButton?.closest(".terminal-lightbox-actions") !== null,
+      text: closeButton?.textContent,
+      label: closeButton?.getAttribute("aria-label"),
+      hasIcon: closeButton?.querySelector("svg") !== null,
+    }).toEqual({
+      isClose: true,
+      inZoomGroup: false,
+      text: "CloseEsc",
+      label: "Close",
+      hasIcon: true,
+    });
+    closeButton?.click();
+    expect(overlay()).toBeNull();
   });
 
   test("返ってきた関数で閉じられる", () => {
@@ -240,6 +261,29 @@ describe("棚の並びごと開いたとき", () => {
     } finally {
       errors.mockRestore();
     }
+  });
+
+  // ヘルプの画面のキャプチャはファイルのパスを持たない (help-blocks.ts)。
+  test.each([
+    {
+      name: "パスの無い画像だけなら、見出しは名前でコピーのボタンは無い",
+      images: [
+        { url: "/help-images/a.en.webp", name: "Screen A" },
+        { url: "/help-images/b.en.webp", name: "Screen B" },
+      ],
+      expected: { title: "Screen B", copy: false },
+    },
+    {
+      name: "パスのある画像なら、見出しはパスでコピーのボタンがある",
+      images: [IMAGE, OTHER],
+      expected: { title: "/tmp/other.png", copy: true },
+    },
+  ])("$name", ({ images, expected }) => {
+    openImageLightbox({ images, index: 1 }, text());
+    expect({
+      title: overlay()?.querySelector(".terminal-lightbox-path")?.textContent,
+      copy: overlay()?.querySelector(".terminal-lightbox-copy") !== null,
+    }).toEqual(expected);
   });
 
   test("空の並びでは開かない", () => {

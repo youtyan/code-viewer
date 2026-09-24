@@ -11,10 +11,7 @@
 
 import { statSync } from "node:fs";
 import { errorWithCause } from "../../core/error-detail";
-import {
-  commandForExternal,
-  isCommandNotFoundResult,
-} from "../command-resolver";
+import { commandForExternal, commandRunFailure } from "../command-resolver";
 import { runAsync } from "../runtime";
 
 /** tmux が応答しないときに待ち続けない。ローカルの tmux は数 ms で返る。 */
@@ -95,7 +92,10 @@ export async function runTmux(
     };
   }
   if (result.code === 0) return { status: "ok", stdout: result.stdout };
-  if (isCommandNotFoundResult("tmux", result)) return { status: "missing" };
+  const failure = commandRunFailure("tmux", result);
+  if (failure?.kind === "not-found") return { status: "missing" };
+  // 時間切れ・起動の失敗は「tmux が無い」ではない。理由をそのまま error に。
+  if (failure) return { status: "error", error: new Error(failure.detail) };
   if (stderrIncludesAny(result.stderr, NO_SERVER_MARKERS)) {
     return { status: "no-server" };
   }

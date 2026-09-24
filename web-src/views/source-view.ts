@@ -31,6 +31,7 @@ import {
   loadShikiHighlighter,
   type ShikiHighlighter,
 } from "../core/shiki-loader";
+import { SHIKI_THEMES } from "../core/shiki-theme";
 import {
   EXT_TO_LANG,
   FILENAME_TO_LANG,
@@ -526,7 +527,6 @@ export function createSourceView(deps: SourceViewDeps) {
   ): Promise<ShikiHighlighter | null> {
     if (deps.loadSourceHighlighter) return deps.loadSourceHighlighter(lang);
     return loadShikiHighlighter({
-      themes: ["github-light", "github-dark"],
       langs: [lang],
     });
   }
@@ -544,7 +544,7 @@ export function createSourceView(deps: SourceViewDeps) {
     try {
       html = highlighter.codeToHtml(textValue || " ", {
         lang,
-        themes: { light: "github-light", dark: "github-dark" },
+        themes: SHIKI_THEMES,
         defaultColor: false,
       });
     } catch (error) {
