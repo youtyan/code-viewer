@@ -1725,6 +1725,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       // 左の面のファイルのまま残っていた。
       syncFocusedPaneUrl("replace");
     },
+    // 前面 (ターミナル・画像) の下の本文だけを置き換える (閉じた画面のタブの
+    // route を本文と URL に残さない)。setRoute の置き換えは syncRoute(route,
+    // false) なので前面は変えない。URL の ?terminal= は setRoute が組み直すので戻す。
+    replaceBody: (route) => {
+      const terminal = parseTerminalOverlay(window.location.search);
+      setRoute(route, true);
+      if (terminal === null) return;
+      const path = window.location.pathname + window.location.search;
+      const next = withTerminalOverlay(path, terminal);
+      if (next !== path)
+        history.replaceState(history.state, "", next + window.location.hash);
+    },
     currentRoute: () => STATE.route,
     defaultRoute: defaultRouteForTab,
     homeRoute: () => ({

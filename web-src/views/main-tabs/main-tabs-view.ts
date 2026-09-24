@@ -182,6 +182,12 @@ export type MainTabsDeps = {
   pageLabel(page: PageKind): string;
   /** その route を開く (replace なら履歴を積まない)。 */
   navigate(route: AppRoute, replace?: boolean): void;
+  /**
+   * 前面 (ターミナル・画像) を変えずに、その下の本文の route だけを置き換える
+   * (履歴は積まない。URL の ?terminal= などの重ね書きは残す)。本文の route の
+   * タブが閉じられたときに使う (followClosedBody)。
+   */
+  replaceBody?(route: AppRoute): void;
   /** 今の画面の route (URL の最新)。タブを離れるときに覚える。 */
   currentRoute(): AppRoute;
   /** 覚えた route が無いタブ (読み戻したタブ) を開くときの route。 */
@@ -1378,6 +1384,33 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const after = panesView(layout, currentRoot);
     if (!sameView(before, after)) deps.onPanes(after, how);
     followRouteSide(how);
+    followClosedBody(how);
+  }
+
+  /**
+   * 本文の route のタブが配置から消えた (前面がターミナル・画像の間に閉じた・
+   * 別の窓で閉じたのが届いた) ら、本文を左の面に残った route のタブ (最近前面
+   * だった順。無ければフォルダ表示) へ置き換える。前面が route のタブなら
+   * followRouteSide が移すので、ここは前面が route のタブでないときだけ。
+   * 残すと本文と URL が閉じたタブの route のままで、次の読み直しで restore が
+   * そのタブを作り直していた (閉じたタブが戻る)。
+   */
+  function followClosedBody(how: FrontChange): void {
+    if (how === "navigate" || routeSideOf(layout, currentRoot) !== null) return;
+    const current = deps.currentRoute();
+    if (current.screen === "repo") return;
+    const target = targetOf(current);
+    if (
+      !target ||
+      allTabs(fullLayout()).some((tab) => sameTarget(tab.target, target))
+    )
+      return;
+    const pane = layout.panes.left;
+    const recent = [...pane.recent]
+      .reverse()
+      .flatMap((id) => pane.tabs.filter((tab) => tab.id === id));
+    const next = [...recent, ...pane.tabs].find((tab) => routeTab(tab));
+    deps.replaceBody?.(next ? routeOf(next) : homeRoute());
   }
 
   /**
