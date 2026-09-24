@@ -255,6 +255,54 @@ describe("state store", () => {
     });
   });
 
+  // テーマ (配色)。以前の「ダークの色違い」(palette) は近いテーマに読み替え、書き戻す
+  // ときは colorTheme だけが残る。
+  test.each([
+    {
+      name: "a theme",
+      patch: { colorTheme: "forest" },
+      expected: { colorTheme: "forest" },
+    },
+    {
+      name: "the default",
+      patch: { colorTheme: "default" },
+      expected: { colorTheme: "default" },
+    },
+    {
+      name: "an unknown theme is dropped",
+      patch: { colorTheme: "neon" },
+      expected: {},
+    },
+    {
+      name: "the old graphite becomes ink",
+      patch: { palette: "graphite" },
+      expected: { colorTheme: "ink" },
+    },
+    {
+      name: "the old warm becomes sand",
+      patch: { palette: "warm" },
+      expected: { colorTheme: "sand" },
+    },
+    {
+      name: "the old violet (the default) leaves nothing",
+      patch: { palette: "violet" },
+      expected: {},
+    },
+    {
+      name: "a chosen theme wins over an old palette",
+      patch: { palette: "warm", colorTheme: "forest" },
+      expected: { colorTheme: "forest" },
+    },
+  ])("the theme setting: $name", async ({ patch, expected }) => {
+    await withTempProject(async (dir) => {
+      const saved = await patchAppSettingsState(dir, patch);
+      expect({ saved, reloaded: await loadAppSettingsState(dir) }).toEqual({
+        saved: { version: 1, ...expected },
+        reloaded: { version: 1, ...expected },
+      });
+    });
+  });
+
   test("grep selection history keeps the newest one hundred valid paths", async () => {
     await withTempProject(async (dir) => {
       const paths = Array.from(

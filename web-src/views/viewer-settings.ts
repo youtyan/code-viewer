@@ -2,6 +2,11 @@
 // ここで作った root を使い回して入力中の下書きを保持する。値の保存や、
 // フォント適用などの副作用は deps 経由で app.ts に任せる。
 
+import {
+  applyColorTheme,
+  COLOR_THEMES,
+  type ColorTheme,
+} from "../core/color-themes";
 import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import { iconSvg, SEARCH_16_PATH } from "../core/icons";
 import {
@@ -15,6 +20,9 @@ export type ViewerSettingsText = {
   theme: string;
   themeHelp: string;
   themeNames: Record<ThemeChoice, string>;
+  colorTheme: string;
+  colorThemeHelp: string;
+  colorThemeNames: Record<ColorTheme, string>;
   language: string;
   fileListFontSize: string;
   fileListFontSizeHelp: string;
@@ -135,7 +143,8 @@ export const SETTINGS_CATEGORIES = [
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
 
 /** 設定の「テーマ」の選択肢 (ライト 1 つとダークの色違い 3 つ)。 */
-export const THEME_CHOICES = ["dark", "graphite", "warm", "light"] as const;
+/** 明暗。テーマ (配色) は別に選ぶ (colorTheme)。 */
+export const THEME_CHOICES = ["dark", "light"] as const;
 export type ThemeChoice = (typeof THEME_CHOICES)[number];
 
 /**
@@ -157,11 +166,13 @@ export type SettingsDraft = {
 export type ViewerSettingsDeps = {
   getText(): ViewerSettingsText;
   /**
-   * テーマ。ほかの項目と違い、選んだ時点で当てて保存する (見比べて選ぶもの
-   * なので、保存ボタンを待たせない)。
+   * 明暗とテーマ。ほかの項目と違い、選んだ時点で当てて保存する (見比べて選ぶ
+   * ものなので、保存ボタンを待たせない)。
    */
   getTheme(): ThemeChoice;
   setTheme(choice: ThemeChoice): void;
+  getColorTheme(): ColorTheme;
+  setColorTheme(theme: ColorTheme): void;
   getValues(): ViewerSettingsValues;
   getDefaultValues(): ViewerSettingsDraft;
   refresh(): Promise<void>;
@@ -186,6 +197,18 @@ export type ViewerSettingsDeps = {
   /** ページの「変更を保存」で一緒に保存する節の下書き。 */
   drafts: readonly SettingsDraft[];
 };
+
+/**
+ * テーマの見本の中身 (固定の信頼できる HTML)。コードの 1 行・削除と追加の行
+ * (語の強調つき)・コメント。色は見本の箱が持つそのテーマの名前の層から読む
+ * (style.css の .theme-swatch)。
+ */
+const THEME_SWATCH_HTML = [
+  '<span class="theme-swatch-line"><span class="theme-swatch-keyword">const</span> <span class="theme-swatch-function">total</span> = <span class="theme-swatch-string">"a"</span></span>',
+  '<span class="theme-swatch-line theme-swatch-del">− <span class="theme-swatch-type">1</span><span class="theme-swatch-word">0</span></span>',
+  '<span class="theme-swatch-line theme-swatch-add">+ <span class="theme-swatch-type">1</span><span class="theme-swatch-word">5</span></span>',
+  '<span class="theme-swatch-line theme-swatch-comment">// sum</span>',
+].join("");
 
 const FONT_SIZE_VALUES = ["compact", "regular", "large", "xlarge"] as const;
 const LANGUAGE_VALUES = [
@@ -305,6 +328,8 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
 
   const theme = document.createElement("select");
   const themeHelp = helpText("viewer-theme-help");
+  const colorThemes = colorThemePicker();
+  const colorThemeHelp = helpText("viewer-color-theme-help");
   const language = document.createElement("select");
   const sidebarFontSize = fontSizeSelect("sidebar-font-size");
   const codeFontSize = fontSizeSelect("code-font-size");
@@ -389,6 +414,9 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   const watchTitle = sectionTitle();
   const agentRulesTitle = sectionTitle();
   const themeLabel = fieldLabel("viewer-theme");
+  // 見本の並びは 1 つの入力欄ではないので、for を持たない見出し (群の名前)。
+  const colorThemeLabel = document.createElement("label");
+  colorThemeLabel.id = "viewer-color-theme-label";
   const languageLabel = fieldLabel("viewer-language");
   const sidebarFontSizeLabel = fieldLabel("sidebar-font-size");
   const codeFontSizeLabel = fieldLabel("code-font-size");
@@ -436,6 +464,9 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     const display = section();
     display.append(
       titleRow(displayTitle, displayShared),
+      colorThemeLabel,
+      colorThemes.root,
+      colorThemeHelp,
       themeLabel,
       theme,
       themeHelp,
@@ -890,7 +921,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   async function initializeJsonHighlighting(): Promise<void> {
     try {
       jsonHighlighter = await loadShikiHighlighter({
-        themes: ["github-light", "github-dark"],
         langs: ["json"],
         failureMode: "throw",
       });
@@ -948,6 +978,9 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     agentRulesTitle.textContent = text.agentRulesTitle;
     themeLabel.textContent = text.theme;
     themeHelp.textContent = text.themeHelp;
+    colorThemeLabel.textContent = text.colorTheme;
+    colorThemeHelp.textContent = text.colorThemeHelp;
+    colorThemes.localize(text.colorThemeNames);
     for (const option of Array.from(theme.options)) {
       option.textContent =
         text.themeNames[option.value as ThemeChoice] ?? option.value;
@@ -1027,7 +1060,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     watchLimitRange.min = String(values.watchLimitMin);
     watchLimitRange.max = String(values.watchLimitMax);
     if (!generalDirty && !generalSavePending) applyGeneralFields(values);
-    setFieldValue(theme, deps.getTheme());
+    syncTheme();
     scopeSource.textContent = values.scopeSource;
     // 書きかけの規則 (と、保存に失敗した誤りの表示) は保存するまで残す。
     if (!agentRulesDirty && !generalSavePending) {
@@ -1185,10 +1218,67 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     applyText();
   }
 
+  /** 明暗とテーマの今の値を映す (別の窓や ⌘K・T のキーで変わったとき)。 */
+  function syncTheme(): void {
+    setFieldValue(theme, deps.getTheme());
+    colorThemes.select(deps.getColorTheme());
+  }
+
+  /**
+   * テーマの見本 (10 個)。各見本はライトとダークの小さなコードと差分を並べ、
+   * そのテーマの名前の層の色 (html と同じ data-color-theme / data-theme) で描く。
+   * 押すとすぐに当てる (明暗はそのまま)。
+   */
+  function colorThemePicker() {
+    const root = document.createElement("div");
+    root.id = "viewer-color-theme";
+    root.className = "theme-picker";
+    root.setAttribute("role", "group");
+    root.setAttribute("aria-labelledby", "viewer-color-theme-label");
+    const names = new Map<ColorTheme, HTMLElement>();
+    const buttons = new Map<ColorTheme, HTMLButtonElement>();
+    for (const id of COLOR_THEMES) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "theme-choice";
+      button.dataset.colorThemeChoice = id;
+      button.setAttribute("aria-pressed", "false");
+      const swatch = document.createElement("span");
+      swatch.className = "theme-swatch";
+      swatch.setAttribute("aria-hidden", "true");
+      for (const mode of THEME_CHOICES.slice().reverse()) {
+        const pane = document.createElement("span");
+        pane.className = "theme-swatch-pane";
+        pane.dataset.theme = mode;
+        applyColorTheme(pane, id);
+        pane.innerHTML = THEME_SWATCH_HTML;
+        swatch.append(pane);
+      }
+      const name = document.createElement("span");
+      name.className = "theme-choice-name";
+      button.append(swatch, name);
+      button.addEventListener("click", () => deps.setColorTheme(id));
+      names.set(id, name);
+      buttons.set(id, button);
+      root.append(button);
+    }
+    return {
+      root,
+      localize(labels: Record<ColorTheme, string>): void {
+        for (const [id, name] of names) name.textContent = labels[id];
+      },
+      select(current: ColorTheme): void {
+        for (const [id, button] of buttons)
+          button.setAttribute("aria-pressed", String(id === current));
+      },
+    };
+  }
+
   return {
     mount,
     mountSearch,
     sync,
+    syncTheme,
     localize,
     getCategory,
     setCategory,

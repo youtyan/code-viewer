@@ -9,6 +9,11 @@ import {
   test,
   vi,
 } from "vitest";
+import {
+  COLOR_THEME_NAMES,
+  COLOR_THEMES,
+  type ColorTheme,
+} from "../core/color-themes";
 import { ACCOUNTS_SECTION_ID } from "../views/agents/accounts-settings";
 import { AGENT_HOOKS_SECTION_ID } from "../views/agents/agent-hooks-settings";
 import {
@@ -47,13 +52,25 @@ afterAll(() => {
 
 const EN_TEXT: ViewerSettingsText = {
   display: "Display",
-  theme: "Theme",
+  theme: "Light or dark",
   themeHelp: "Applies right away.",
   themeNames: {
-    dark: "Dark (violet)",
-    graphite: "Dark (graphite)",
-    warm: "Dark (warm gray)",
+    dark: "Dark",
     light: "Light",
+  },
+  colorTheme: "Theme",
+  colorThemeHelp: "The colors.",
+  colorThemeNames: {
+    default: "Default",
+    "night-sea": "Night sea",
+    forest: "Forest",
+    sand: "Sand",
+    ink: "Ink wash",
+    sakura: "Blossom",
+    moss: "Moss",
+    mist: "Mist",
+    amber: "Amber",
+    indigo: "Indigo",
   },
   language: "Language",
   fileListFontSize: "UI font size",
@@ -130,6 +147,19 @@ const JA_TEXT: ViewerSettingsText = {
   ...EN_TEXT,
   display: "表示",
   language: "言語",
+  colorTheme: "テーマ",
+  colorThemeNames: {
+    default: "既定",
+    "night-sea": "夜の海",
+    forest: "森",
+    sand: "砂",
+    ink: "薄墨",
+    sakura: "桜",
+    moss: "苔",
+    mist: "霧",
+    amber: "琥珀",
+    indigo: "藍",
+  },
   sizeRegular: "標準",
   reset: "デフォルトに戻す",
   save: "変更を保存",
@@ -168,6 +198,7 @@ type Recorded = {
   refresh: number;
   getValues: number;
   theme: ThemeChoice[];
+  colorTheme: ColorTheme[];
 };
 
 function setup(
@@ -212,8 +243,16 @@ function setup(
     refresh: 0,
     getValues: 0,
     theme: [],
+    colorTheme: [],
   };
   let theme: ThemeChoice = "dark";
+  let colorTheme: ColorTheme = "default";
+  const look = {
+    set(next: { theme?: ThemeChoice; colorTheme?: ColorTheme }) {
+      theme = next.theme ?? theme;
+      colorTheme = next.colorTheme ?? colorTheme;
+    },
+  };
 
   const settings = createViewerSettings({
     getText: () => (language === "ja" ? JA_TEXT : EN_TEXT),
@@ -221,6 +260,11 @@ function setup(
     setTheme: (choice) => {
       calls.theme.push(choice);
       theme = choice;
+    },
+    getColorTheme: () => colorTheme,
+    setColorTheme: (choice) => {
+      calls.colorTheme.push(choice);
+      colorTheme = choice;
     },
     getValues: () => {
       calls.getValues++;
@@ -269,6 +313,7 @@ function setup(
     host,
     calls,
     values,
+    look,
     setLanguage(next: "en" | "ja") {
       language = next;
     },
@@ -838,20 +883,117 @@ describe("viewer settings form", () => {
     const theme = q<HTMLSelectElement>(document, "#viewer-theme");
     expect(theme.value).toBe("dark");
     expect([...theme.options].map((option) => option.textContent)).toEqual([
-      "Dark (violet)",
-      "Dark (graphite)",
-      "Dark (warm gray)",
+      "Dark",
       "Light",
     ]);
 
-    theme.value = "warm";
+    theme.value = "light";
     fire(theme, "change");
 
-    expect(calls.theme).toEqual(["warm"]);
+    expect(calls.theme).toEqual(["light"]);
     expect(calls.save).toEqual([]);
     expect(
       q<HTMLButtonElement>(document, "#scope-settings-save").disabled,
     ).toBe(true);
+  });
+
+  // テーマの見本: 10 個が一覧の順に並び、各見本はライトとダークの箱をそのテーマの
+  // 属性 (html と同じ) で描く。既定は data-color-theme を付けない (style.css の既定)。
+  test("the theme picker shows every theme with a light and a dark sample", () => {
+    const { settings, host } = setup();
+    settings.mount(host);
+    const choices = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        "#viewer-color-theme .theme-choice",
+      ),
+    ];
+    expect(
+      choices.map((choice) => ({
+        id: choice.dataset.colorThemeChoice,
+        name: choice.querySelector(".theme-choice-name")?.textContent,
+        pressed: choice.getAttribute("aria-pressed"),
+        panes: [
+          ...choice.querySelectorAll<HTMLElement>(".theme-swatch-pane"),
+        ].map(
+          (pane) => `${pane.dataset.theme}/${pane.dataset.colorTheme ?? ""}`,
+        ),
+      })),
+    ).toEqual(
+      COLOR_THEMES.map((id) => ({
+        id,
+        name: COLOR_THEME_NAMES[id].en,
+        pressed: String(id === "default"),
+        panes: [
+          `light/${id === "default" ? "" : id}`,
+          `dark/${id === "default" ? "" : id}`,
+        ],
+      })),
+    );
+    expect(
+      q<HTMLElement>(document, "#viewer-color-theme").getAttribute(
+        "aria-labelledby",
+      ),
+    ).toBe("viewer-color-theme-label");
+    expect(
+      q<HTMLElement>(document, "#viewer-color-theme-label").textContent,
+    ).toBe("Theme");
+  });
+
+  test.each([
+    { name: "a theme", pick: "forest" as const },
+    { name: "the default back", pick: "default" as const },
+  ])("picking $name applies it at once, without the save button", ({
+    pick,
+  }) => {
+    const { settings, host, calls, look } = setup();
+    look.set({ colorTheme: "indigo" });
+    settings.mount(host);
+
+    q<HTMLButtonElement>(
+      document,
+      `.theme-choice[data-color-theme-choice="${pick}"]`,
+    ).click();
+
+    expect({
+      picked: calls.colorTheme,
+      saved: calls.save,
+      saveDisabled: q<HTMLButtonElement>(document, "#scope-settings-save")
+        .disabled,
+    }).toEqual({ picked: [pick], saved: [], saveDisabled: true });
+  });
+
+  // 別の窓・⌘K・T のキーで変わった明暗とテーマを、開いている設定のページにも映す。
+  test("syncTheme shows a theme and a mode changed elsewhere", () => {
+    const { settings, host, look } = setup();
+    settings.mount(host);
+    look.set({ theme: "light", colorTheme: "sakura" });
+
+    settings.syncTheme();
+
+    expect({
+      mode: q<HTMLSelectElement>(document, "#viewer-theme").value,
+      pressed: [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          '#viewer-color-theme .theme-choice[aria-pressed="true"]',
+        ),
+      ].map((choice) => choice.dataset.colorThemeChoice),
+    }).toEqual({ mode: "light", pressed: ["sakura"] });
+  });
+
+  test("the theme names follow the language", () => {
+    const { settings, host, setLanguage } = setup();
+    settings.mount(host);
+    setLanguage("ja");
+
+    settings.localize();
+
+    expect(
+      [
+        ...document.querySelectorAll<HTMLElement>(
+          "#viewer-color-theme .theme-choice-name",
+        ),
+      ].map((name) => name.textContent),
+    ).toEqual(COLOR_THEMES.map((id) => COLOR_THEME_NAMES[id].ja));
   });
 
   test("the save button submits all edited settings once", async () => {

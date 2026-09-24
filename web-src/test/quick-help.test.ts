@@ -112,7 +112,7 @@ describe("quick help popover", () => {
 
     const themeRow = Array.from(
       document.querySelectorAll("#quick-help-groups tr"),
-    ).find((row) => row.textContent?.includes("Toggle theme"));
+    ).find((row) => row.textContent?.includes("Toggle light / dark"));
     expect(themeRow?.querySelector("th")?.textContent).toBe("Alt+X");
   });
 

@@ -21,8 +21,8 @@ export const EARLY_LOOK_STORAGE_KEY = "code-viewer:early-look";
 
 export type EarlyLook = {
   theme: "light" | "dark";
-  /** 既定の紫なら無し。 */
-  palette?: string;
+  /** テーマ (配色。core/color-themes.ts)。既定なら無し。 */
+  colorTheme?: string;
   navCollapsed: boolean;
   navWidth: number;
   /*

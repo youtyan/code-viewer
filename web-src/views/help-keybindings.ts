@@ -86,7 +86,7 @@ export const KEYMAP_ACTION_INFO: Record<KeymapAction, KeymapActionInfo> = {
   },
   "toggle-theme": {
     group: "global",
-    label: { en: "Toggle theme", ja: "テーマ切り替え" },
+    label: { en: "Toggle light / dark", ja: "明暗の切り替え" },
   },
   "copy-ai-context": {
     group: "global",

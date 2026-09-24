@@ -435,9 +435,8 @@ describe("markdown preview", () => {
     expect(shikiLoader.includes('"shiki.js"')).toBe(true);
     expect(shikiLoader.includes("createBundleLoader")).toBe(true);
     expect(lazyBundle.includes("/* @vite-ignore */")).toBe(true);
-    // markdown は loader を `themes: ["github-light","github-dark"]` で
-    // 呼び出す側。
-    expect(markdown.includes('"github-light", "github-dark"')).toBe(true);
+    // markdown はこのアプリの shiki のテーマ (core/shiki-theme.ts) で描く側。
+    expect(markdown.includes("themes: SHIKI_THEMES")).toBe(true);
   });
 
   test("markdown preview CSS includes TOC, tables, mermaid, and lightbox styling", () => {

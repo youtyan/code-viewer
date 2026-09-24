@@ -7,6 +7,7 @@
 // 値そのものは固定しない (密度の表や色を変えても、この関係を保てば通る)。
 
 import { describe, expect, test } from "vitest";
+import { themeVariants } from "./_color-themes";
 import {
   baseRules,
   cascadedDeclarations,
@@ -33,10 +34,13 @@ const densities = {
     ...block('body[data-sidebar-font-size="xlarge"]'),
   ]),
 };
-const themes = {
-  light: regular,
-  dark: new Map([...regular, ...block('[data-theme="dark"]')]),
-};
+// 10 テーマ × 明暗の全部 (body の寸法の名前は regular から)。
+const themes = Object.fromEntries(
+  themeVariants(rules).map((variant) => [
+    variant.name,
+    new Map([...regular, ...variant.vars]),
+  ]),
+);
 
 /**
  * var() を解いた後の長さ (`12px`・`calc(28px + 4px / 2)` など、px と数と四則だけ)

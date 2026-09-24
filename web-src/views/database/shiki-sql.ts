@@ -5,7 +5,6 @@
 //
 // 使い方:
 //   const highlighter = await loadShikiHighlighter({
-//     themes: ["github-light", "github-dark"],
 //     langs: ["sql"],
 //   });
 //   pre.innerHTML = highlightSqlToInnerHtml(sql, highlighter)

@@ -1007,13 +1007,13 @@ export function createTerminalScreen(
       cursorBlink: true,
       theme: terminalTheme(),
     });
-    // テーマ (html の data-theme / data-palette) が変わったら色を当て直す。
+    // 明暗とテーマ (html の data-theme / data-color-theme) が変わったら色を当て直す。
     themeObserver ??= new MutationObserver(() => {
       if (term) term.options.theme = terminalTheme();
     });
     themeObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-theme", "data-palette"],
+      attributeFilter: ["data-theme", "data-color-theme"],
     });
     const fit = new api.FitAddon();
     created.loadAddon(fit);

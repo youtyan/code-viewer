@@ -90,7 +90,6 @@ export function createQueryEditor(
 
   let shiki: ShikiHighlighter | null = null;
   loadShikiHighlighter({
-    themes: ["github-light", "github-dark"],
     langs: ["sql"],
   }).then((h) => {
     shiki = h;

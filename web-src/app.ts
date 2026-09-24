@@ -35,6 +35,14 @@ import {
 } from "./core/catch-up";
 import { changedPathsCoverPath } from "./core/changed-paths";
 import {
+  applyColorTheme,
+  COLOR_THEME_NAMES,
+  COLOR_THEMES,
+  type ColorTheme,
+  DEFAULT_COLOR_THEME,
+  isColorTheme,
+} from "./core/color-themes";
+import {
   errorWithCause,
   errorWithCauses,
   formatErrorDetail,
@@ -204,19 +212,17 @@ import {
   type TmuxPlace,
 } from "./core/tmux";
 import { isToolId, type ToolId } from "./core/tools";
-import {
-  type AppSettingsState,
-  type DiffCardElement,
-  type DiffMeta,
-  type FileMeta,
-  type HljsApi,
-  type RepoTreeEntry,
-  type SettingsResponse,
-  type SidebarItem,
-  THEME_PALETTES,
-  type ThemePalette,
-  type UndoActionResponse,
-  type ViewState,
+import type {
+  AppSettingsState,
+  DiffCardElement,
+  DiffMeta,
+  FileMeta,
+  HljsApi,
+  RepoTreeEntry,
+  SettingsResponse,
+  SidebarItem,
+  UndoActionResponse,
+  ViewState,
 } from "./core/types";
 import { createAccountsBand } from "./views/agents/accounts-band";
 import { createAccountsClient } from "./views/agents/accounts-client";
@@ -1217,10 +1223,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     return APP_SETTINGS.theme === "light" ? "light" : "dark";
   }
 
-  function savedPalette(): ThemePalette {
-    return (
-      THEME_PALETTES.find((value) => value === APP_SETTINGS.palette) ?? "violet"
-    );
+  function savedColorTheme(): ColorTheme {
+    return isColorTheme(APP_SETTINGS.colorTheme)
+      ? APP_SETTINGS.colorTheme
+      : DEFAULT_COLOR_THEME;
   }
 
   function savedSidebarView(): SidebarView {
@@ -2589,7 +2595,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         annotations: "code annotations",
         queryHistory: "query history",
         settings: "viewer settings",
-        theme: "toggle theme",
+        theme: "toggle light / dark",
         search:
           "Search projects, agents, sessions and files (Ctrl+K) · Shift+click: grep (Ctrl+G)",
         lineHistory: "Line history",
@@ -2854,7 +2860,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         annotations: "コード注釈",
         queryHistory: "クエリ履歴",
         settings: "ビューア設定",
-        theme: "テーマ切り替え",
+        theme: "明暗の切り替え",
         search:
           "プロジェクト・エージェント・セッション・ファイルを検索 (Ctrl+K)・Shift+クリックで grep (Ctrl+G)",
         lineHistory: "この行の履歴",
@@ -3476,17 +3482,61 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function applyTheme() {
     document.documentElement.dataset.theme = STATE.theme;
-    // 既定の紫は属性なし。色違いはダークのときだけ効く (style.css 先頭)。
-    const palette = savedPalette();
-    if (palette === "violet") delete document.documentElement.dataset.palette;
-    else document.documentElement.dataset.palette = palette;
+    // テーマ (配色) は明暗と別に選ぶ。既定は属性なし (style.css 先頭)。
+    const colorTheme = savedColorTheme();
+    applyColorTheme(document.documentElement, colorTheme);
     rememberEarlyLook({
       theme: STATE.theme,
-      palette: palette === "violet" ? undefined : palette,
+      colorTheme: colorTheme === DEFAULT_COLOR_THEME ? undefined : colorTheme,
     });
     $<HTMLLinkElement>("#hljs-light").disabled = STATE.theme === "dark";
     $<HTMLLinkElement>("#hljs-dark").disabled = STATE.theme !== "dark";
     syncWindowFrameColor();
+  }
+
+  /** テーマ (配色) を選ぶ (設定の見本・⌘K)。明暗はそのまま。 */
+  function setColorTheme(theme: ColorTheme): void {
+    patchSettings({ colorTheme: theme });
+    applyTheme();
+    VIEWER_SETTINGS.syncTheme();
+  }
+
+  /**
+   * 別の窓で変えた明暗・テーマ (全プロジェクト共通の設定) をこの窓にも当てる。
+   * サーバがユーザー単位の設定の書き換えを SSE (user-settings) で知らせる。裏に
+   * あった間は SSE を切っているので、前面に戻ったときにも取り直す。自分の書き込みが
+   * まだ終わっていなければ、それが済むまで待つ (古い値で戻さない)。
+   */
+  async function refreshLookFromServer(): Promise<void> {
+    if (pendingSettingsPatch || settingsPatchInFlight) return;
+    const settings = await loadStateResponse<AppSettingsState>(
+      apiUrl("stateSettings"),
+      "settings state request failed",
+    );
+    if (pendingSettingsPatch || settingsPatchInFlight) return;
+    if (
+      settings.theme === APP_SETTINGS.theme &&
+      settings.colorTheme === APP_SETTINGS.colorTheme
+    )
+      return;
+    mergeLocalSettings({
+      theme: settings.theme ?? null,
+      colorTheme: settings.colorTheme ?? null,
+    });
+    STATE.theme = savedTheme();
+    applyTheme();
+    VIEWER_SETTINGS.syncTheme();
+  }
+
+  function refreshLook(): void {
+    void refreshLookFromServer().catch((error: unknown) => {
+      console.error(
+        errorWithCause(
+          "could not apply the theme changed in another window",
+          error,
+        ),
+      );
+    });
   }
 
   /**
@@ -4984,21 +5034,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 設定セクションが唯一の置き場で、ここは値の出し入れだけを受け持つ。
   const VIEWER_SETTINGS = createViewerSettings({
     getText: () => uiText().settings,
-    getTheme: () => {
-      if (STATE.theme === "light") return "light";
-      const palette = savedPalette();
-      return palette === "violet" ? "dark" : palette;
-    },
-    setTheme: (choice) => {
-      STATE.theme = choice === "light" ? "light" : "dark";
-      // ライトを選んでも、ダークの色違いの選択は残す (T で戻ったときに使う)。
-      const palette: ThemePalette | undefined =
-        choice === "light" ? undefined : choice === "dark" ? "violet" : choice;
-      patchSettings(
-        palette ? { theme: STATE.theme, palette } : { theme: STATE.theme },
-      );
+    getTheme: () => STATE.theme,
+    setTheme: (mode) => {
+      STATE.theme = mode;
+      patchSettings({ theme: mode });
       applyTheme();
     },
+    getColorTheme: savedColorTheme,
+    setColorTheme,
     getValues: () => ({
       userSettingsError: APP_SETTINGS.userSettingsError ?? "",
       language: STATE.language,
@@ -8783,6 +8826,21 @@ window.GdpExpandLogic = GdpExpandLogic;
       suggested: false,
       run: () => void PROJECT_ACTIONS.registerByPath(),
     });
+    // テーマを選ぶ (「テーマ」と打つと 10 個が並ぶ)。もう一方の言語の名前でも引ける。
+    const currentTheme = savedColorTheme();
+    const other = STATE.language === "ja" ? "en" : "ja";
+    for (const theme of COLOR_THEMES) {
+      commands.push({
+        group: "themes",
+        id: `theme:${theme}`,
+        title: t.chooseTheme(COLOR_THEME_NAMES[theme][STATE.language]),
+        detail: COLOR_THEME_NAMES[theme][other],
+        status: theme === currentTheme ? t.currentTheme : "",
+        iconHtml: iconSvg("gdp-palette-icon", MOON_16_PATH),
+        suggested: false,
+        run: () => setColorTheme(theme),
+      });
+    }
     return commands;
   }
 
@@ -10026,6 +10084,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     es.addEventListener("tabs", () => {
       void MAIN_TABS.refreshFromServer();
     });
+    // 全プロジェクト共通の設定 (明暗・テーマ) を別の窓が書いた。
+    es.addEventListener("user-settings", refreshLook);
     es.addEventListener("db-query", (event) => {
       DATABASE_VIEW.handleSse("db-query", (event as MessageEvent).data);
     });
@@ -10110,11 +10170,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     void ANNOTATIONS_UI?.refreshAnnotations();
     // 裏にあった間は SSE を切っているので、別の窓のタブの変更を取り直す。
     void MAIN_TABS.refreshFromServer();
+    refreshLook();
   });
   window.addEventListener("focus", () => {
     scheduleEventSourceConnect();
     catchUpMissedChanges("visible");
     void ANNOTATIONS_UI?.refreshAnnotations();
     void MAIN_TABS.refreshFromServer();
+    refreshLook();
   });
 })();

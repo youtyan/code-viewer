@@ -3,17 +3,22 @@
  * 見た目の決まりはこのファイルの先頭の 2 層だけで決まる。
  *
  *   1. 名前の層 (--color-* / --space-* / --radius-* / --font-* ...)
- *      テーマ (html[data-theme] × html[data-palette]) ごとに値を差し替える。
+ *      明暗 (html[data-theme]) × テーマ (html[data-color-theme]) ごとに値を差し替える。
  *      部品はこの名前だけを使う。16 進の色と生の px を部品に直書きしない。
  *   2. 互換の層 (--bg / --fg / --accent ...)
  *      古い部品が読んでいる名前。値は 1 の名前への参照だけで、テーマごとに
  *      書き直さない (1 を差し替えれば古い部品も追従する)。新しい部品は 1 を読む。
  *
- * テーマ: 既定はダーク (data-palette 無し = 紫)。data-palette="graphite"
- * (無彩色) と "warm" (暖かい灰色) はダークの色違い。ライトは data-theme="light"。
+ * 明暗: 既定はダーク。ライトは data-theme="light"。
+ * テーマ (配色): 既定 (紫) は属性なしで、下の :root と [data-theme="dark"] の値。
+ * ほかの 9 つは「テーマ」の節 (core/color-themes.ts の一覧と同じ id) で名前の層の
+ * 色を上書きする。どの組もコントラストの下限を満たす (color-themes-contrast.test.ts)。
  */
 
-:root {
+/* [data-theme="light"] は設定のテーマの見本の箱 (views/viewer-settings.ts) で、
+   ダークの窓の中にもライトの既定を描くため (html には :root で当たる)。 */
+:root,
+[data-theme="light"] {
   /* ---- 1. 名前の層: ライト (ごく薄い紫の明暗で分ける。純白を広く敷かない) ---- */
   --color-ground:       #f3f1f7;   /* 窓の地。上の行・最下段 */
   --color-nav:          #eae6f0;   /* サイドバー */
@@ -142,8 +147,7 @@
   --line-hit-bg:    var(--color-select);
   --line-hit-border:var(--accent);
   --done:           var(--color-done);
-  /* 差分の色はテーマの色違いに引きずられない (追加・削除の意味を保つ)。
-     ライトとダークで 1 組ずつ。 */
+  /* 差分の色。追加 = 緑・削除 = 赤の色相はどのテーマでも同じ (意味を保つ)。 */
   --diff-add-bg:        #e4f3e8;
   --diff-add-num-sticky-bg: #d2eadb;
   --diff-add-word-bg:   #c0e2cb;
@@ -241,8 +245,7 @@
   --color-backdrop:     rgba(4, 3, 8, 0.55);
   --color-shadow:       rgba(0, 0, 0, 0.45);
   --color-code:         #1b1821;
-  /* 構文の色。色違いのダーク (graphite / warm) もこの色相の組を使い、地の文字・
-     コメント・行番号だけを地の色味に合わせる。 */
+  /* 構文の色 (ダーク)。 */
   --syntax-text:        #ddd8e6;
   --syntax-keyword:     #c8a6ff;
   --syntax-string:      #a9d98f;
@@ -251,8 +254,8 @@
   --syntax-comment:     #a29bb0;
   --syntax-gutter:      #9a93a8;
   --graph-branch:       #7e91b8;
-  /* プロジェクトの色。暗い地では明るめの色に濃い頭文字。色違いのダーク
-     (graphite / warm) もこの 1 組を使う。 */
+  /* プロジェクトの色。暗い地では明るめの色に濃い頭文字。どのテーマでもこの
+     1 組を使う (テーマを替えてもプロジェクトの見分けが変わらない)。 */
   --project-violet:     #a68ae6;
   --project-green:      #6cc28a;
   --project-orange:     #f0955a;
@@ -265,8 +268,7 @@
   --project-none:       #8f8799;
   --project-ink:        #16121f;
 
-  /* 差分の面は控えめにし、＋／− の印と文字の色でも伝える。色違いの
-     ダーク (graphite / warm) もこの 1 組を使う。面は地の紫を混ぜずに、
+  /* 差分の面は控えめにし、＋／− の印と文字の色でも伝える。面は地の紫を混ぜずに、
      緑 (色相 140)・赤 (356) を暗い地に少しだけ乗せた澄んだ色にする (紫の地と
      混ぜると灰色に濁った)。語の強調は行の面より一段明るく彩度を上げる。 */
   --diff-add-bg:        #192e20;
@@ -279,77 +281,904 @@
   --diff-del-fg:        #ffb3ad;
   --diff-hunk-fg:       #a898cc;
 }
-/* ---- ダーク: 無彩色 (線が少なく静か) ---- */
-[data-theme="dark"][data-palette="graphite"] {
-  --color-ground:       #111214;
-  --color-nav:          #17181b;
-  --color-doc:          #1a1b1e;
-  --color-inset:        #141518;
-  --color-raised:       #232428;
-  --color-select:       #292b30;
-  --color-overlay:      #222327;
-  --color-term:         #101113;
-  --color-term-text:    #e6e7eb;
-  --color-term-select:  #a9b8d040;
-  --color-term-white:   #cfd1d6;
-  --color-tree:         #17181b;
-  --color-line:         #242529;
-  --color-line-soft:    #1e1f22;
-  --color-line-strong:  #36383e;
-  --color-line-row:     #44464c;
-  --color-text:         #e6e7eb;
-  --color-text-2:       #9b9da5;
-  --color-text-3:       #7b7d86;
-  --color-on-accent:    #111214;
-  --color-accent:       #a9b8d0;
-  --color-accent-strong:#c3cfe2;
-  --color-waiting:      #cba566;
-  --color-working:      #799c86;
-  --color-done:         #98accf;
-  --color-failed:       #c77979;
-  --color-idle:         #9b9da5;
-  --color-code:         #161719;
-  --syntax-text:        #d9dbe0;
-  --syntax-comment:     #9b9ea7;
-  --syntax-gutter:      #92959e;
-  --diff-hunk-fg:       #a0a8bd;
-  --graph-branch:       #8f9aab;
+/* ---- テーマ (配色) ----
+   既定 (上の :root と [data-theme="dark"]) のほかの 9 つ。明暗と組み合わせて使う
+   (html[data-color-theme] × html[data-theme])。id と表示名は core/color-themes.ts。
+   値は、面の色相と彩度・強調色と構文の色相だけを決め、明るさは「どの面に対して
+   何:1」から逆算した (本文 14:1・構文 6.9:1・コメント 4.9:1 など)。下限は
+   color-themes-contrast.test.ts ほかが全部の組で確かめる。追加 = 緑・削除 = 赤・
+   状態の色の色相はどのテーマでも同じ。プロジェクトの色はテーマで変えない。
+   ダークの塊は [data-theme="dark"] より詳細度が高いので、書いた名前は全部上書きする。 */
+/* 夜の海 / Night sea: 青みの灰の面に、海の青の強調色。キーワードは桃色 */
+[data-color-theme="night-sea"] {
+  --color-ground:        #edf3f8;
+  --color-nav:           #e0eaf2;
+  --color-tree:          #e8f0f7;
+  --color-doc:           #f6fafd;
+  --color-inset:         #e6eef6;
+  --color-raised:        #d9e5f0;
+  --color-select:        #c2e1f2;
+  --color-overlay:       #f9fcff;
+  --color-term:          #e4ecf4;
+  --color-term-text:     #1b2936;
+  --color-term-white:    #485765;
+  --color-term-select:   #116c9040;
+  --color-line:          #c7d7e5;
+  --color-line-soft:     #d6e2ec;
+  --color-line-strong:   #a3b8c9;
+  --color-line-row:      #a3b8c9;
+  --color-text:          #1b2936;
+  --color-text-2:        #495e71;
+  --color-text-3:        #5f7284;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #116c90;
+  --color-accent-strong: #0a5675;
+  --color-waiting:       #936205;
+  --color-working:       #167b48;
+  --color-done:          #0f749c;
+  --color-failed:        #aa4f5e;
+  --color-idle:          #5c6b79;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #eff5fb;
+  --syntax-text:         #1e2c37;
+  --syntax-keyword:      #833064;
+  --syntax-string:       #0a5a41;
+  --syntax-type:         #684a0c;
+  --syntax-function:     #06566e;
+  --syntax-comment:      #566777;
+  --syntax-gutter:       #546676;
+  --graph-branch:        #3b809a;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #2b607a;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
 }
-/* ---- ダーク: 暖かい灰色 (読みやすさ) ---- */
-[data-theme="dark"][data-palette="warm"] {
-  --color-ground:       #191918;
-  --color-nav:          #1d1d1b;
-  --color-doc:          #242421;
-  --color-inset:        #1d1d1b;
-  --color-raised:       #2e2e2a;
-  --color-select:       #363631;
-  --color-overlay:      #2b2b27;
-  --color-term:         #141413;
-  --color-term-text:    #e9e7df;
-  --color-term-select:  #b6c5b040;
-  --color-term-white:   #d6d4cc;
-  --color-tree:         #20201e;
-  --color-line:         #2e2e2b;
-  --color-line-soft:    #272724;
-  --color-line-strong:  #42423d;
-  --color-line-row:     #4d4d47;
-  --color-text:         #e9e7df;
-  --color-text-2:       #aaa89e;
-  --color-text-3:       #8a887f;
-  --color-on-accent:    #191918;
-  --color-accent:       #b6c5b0;
-  --color-accent-strong:#cbd8c6;
-  --color-waiting:      #d5b477;
-  --color-working:      #83a88d;
-  --color-done:         #a0b1c8;
-  --color-failed:       #ce8d82;
-  --color-idle:         #aaa89e;
-  --color-code:         #1f1f1d;
-  --syntax-text:        #e0ddd3;
-  --syntax-comment:     #a5a290;
-  --syntax-gutter:      #9c9a90;
-  --diff-hunk-fg:       #b0ab98;
-  --graph-branch:       #a89d82;
+[data-color-theme="night-sea"][data-theme="dark"] {
+  --color-ground:        #0a0f13;
+  --color-nav:           #09141d;
+  --color-tree:          #09141d;
+  --color-doc:           #0c1c2a;
+  --color-inset:         #09151f;
+  --color-raised:        #052740;
+  --color-select:        #0c3244;
+  --color-overlay:       #142532;
+  --color-term:          #070e15;
+  --color-term-text:     #e0edf8;
+  --color-term-white:    #b3c6d6;
+  --color-term-select:   #33a2d24d;
+  --color-line:          #162532;
+  --color-line-soft:     #111f2a;
+  --color-line-strong:   #213a4f;
+  --color-line-row:      #314a5e;
+  --color-text:          #e0edf8;
+  --color-text-2:        #8babc8;
+  --color-text-3:        #6c89a1;
+  --color-on-accent:     #081319;
+  --color-accent:        #33a2d2;
+  --color-accent-strong: #69bee8;
+  --color-waiting:       #c19351;
+  --color-working:       #61aa7c;
+  --color-done:          #3ba8d8;
+  --color-failed:        #d5858e;
+  --color-idle:          #94aabf;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #0c1823;
+  --syntax-text:         #ccdceb;
+  --syntax-keyword:      #eb9bc8;
+  --syntax-string:       #64c69e;
+  --syntax-type:         #d9ad5e;
+  --syntax-function:     #57c0e5;
+  --syntax-comment:      #7f9ab0;
+  --syntax-gutter:       #7790a7;
+  --graph-branch:        #40869f;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #699fba;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 森 / Forest: 緑みの灰の面に、深い緑の強調色。キーワードは煉瓦色 */
+[data-color-theme="forest"] {
+  --color-ground:        #eef4f0;
+  --color-nav:           #e1ebe4;
+  --color-tree:          #e9f1ec;
+  --color-doc:           #f6faf7;
+  --color-inset:         #e7f0e9;
+  --color-raised:        #dbe7de;
+  --color-select:        #c7e4d2;
+  --color-overlay:       #fafdfb;
+  --color-term:          #e5eee7;
+  --color-term-text:     #1d2b22;
+  --color-term-white:    #485a4e;
+  --color-term-select:   #20714a40;
+  --color-line:          #c9d9ce;
+  --color-line-soft:     #d8e3db;
+  --color-line-strong:   #a6baac;
+  --color-line-row:      #a6baac;
+  --color-text:          #1d2b22;
+  --color-text-2:        #4a6051;
+  --color-text-3:        #607567;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #20714a;
+  --color-accent-strong: #0d5c39;
+  --color-waiting:       #926204;
+  --color-working:       #167b48;
+  --color-done:          #2a7952;
+  --color-failed:        #aa4f5d;
+  --color-idle:          #5d6d62;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #f0f6f2;
+  --syntax-text:         #202d24;
+  --syntax-keyword:      #893420;
+  --syntax-string:       #415604;
+  --syntax-type:         #684a0d;
+  --syntax-function:     #025578;
+  --syntax-comment:      #586a5e;
+  --syntax-gutter:       #56685c;
+  --graph-branch:        #437e9f;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #336449;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="forest"][data-theme="dark"] {
+  --color-ground:        #0e120f;
+  --color-nav:           #0f1812;
+  --color-tree:          #0f1812;
+  --color-doc:           #142118;
+  --color-inset:         #0f1913;
+  --color-raised:        #142e1e;
+  --color-select:        #173927;
+  --color-overlay:       #1c2920;
+  --color-term:          #0c120e;
+  --color-term-text:     #e7f2ea;
+  --color-term-white:    #b6cbbc;
+  --color-term-select:   #5da97f4d;
+  --color-line:          #1d2a21;
+  --color-line-soft:     #18231c;
+  --color-line-strong:   #2c4032;
+  --color-line-row:      #3b4f41;
+  --color-text:          #e7f2ea;
+  --color-text-2:        #96b19e;
+  --color-text-3:        #768e7d;
+  --color-on-accent:     #0a140e;
+  --color-accent:        #5da97f;
+  --color-accent-strong: #84c59f;
+  --color-waiting:       #c49654;
+  --color-working:       #64ad7f;
+  --color-done:          #63b085;
+  --color-failed:        #d98791;
+  --color-idle:          #9cb0a2;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #131d16;
+  --syntax-text:         #d4e1d8;
+  --syntax-keyword:      #f59d87;
+  --syntax-string:       #a1be6e;
+  --syntax-type:         #d9ad5e;
+  --syntax-function:     #64bded;
+  --syntax-comment:      #869c8c;
+  --syntax-gutter:       #809686;
+  --graph-branch:        #4b87a8;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #73a688;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 砂 / Sand: 暖かい砂色の面に、素焼きの赤茶の強調色。ダークは今の「暖かい灰色」に近い */
+[data-color-theme="sand"] {
+  --color-ground:        #f6f1ea;
+  --color-nav:           #efe7db;
+  --color-tree:          #f4eee4;
+  --color-doc:           #fcf9f3;
+  --color-inset:         #f3ece1;
+  --color-raised:        #ece2d3;
+  --color-select:        #f5d3cb;
+  --color-overlay:       #fefbf8;
+  --color-term:          #f1eadf;
+  --color-term-text:     #322614;
+  --color-term-white:    #5e5443;
+  --color-term-select:   #98504240;
+  --color-line:          #dfd3bf;
+  --color-line-soft:     #e8dfd0;
+  --color-line-strong:   #c3b399;
+  --color-line-row:      #c3b399;
+  --color-text:          #322614;
+  --color-text-2:        #6a593e;
+  --color-text-3:        #7e6e55;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #985042;
+  --color-accent-strong: #823b2f;
+  --color-waiting:       #936205;
+  --color-working:       #167b48;
+  --color-done:          #a15749;
+  --color-failed:        #aa4f5e;
+  --color-idle:          #746754;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #f9f4ec;
+  --syntax-text:         #332918;
+  --syntax-keyword:      #893237;
+  --syntax-string:       #2d5a04;
+  --syntax-type:         #633e87;
+  --syntax-function:     #085384;
+  --syntax-comment:      #72634c;
+  --syntax-gutter:       #71624b;
+  --graph-branch:        #4d7ca4;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #804e44;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="sand"][data-theme="dark"] {
+  --color-ground:        #12100d;
+  --color-nav:           #18150f;
+  --color-tree:          #18150f;
+  --color-doc:           #221d14;
+  --color-inset:         #1a160f;
+  --color-raised:        #302615;
+  --color-select:        #482720;
+  --color-overlay:       #2a251c;
+  --color-term:          #12100b;
+  --color-term-text:     #f3eee6;
+  --color-term-white:    #d0c4b0;
+  --color-term-select:   #d485754d;
+  --color-line:          #2b251d;
+  --color-line-soft:     #241f18;
+  --color-line-strong:   #42392b;
+  --color-line-row:      #51483a;
+  --color-text:          #f3eee6;
+  --color-text-2:        #b4a996;
+  --color-text-3:        #908776;
+  --color-on-accent:     #1a0e0c;
+  --color-accent:        #d48575;
+  --color-accent-strong: #eba697;
+  --color-waiting:       #c39654;
+  --color-working:       #64ad7f;
+  --color-done:          #db8c7c;
+  --color-failed:        #d88790;
+  --color-idle:          #b2a99c;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #1d1912;
+  --syntax-text:         #e1dcd2;
+  --syntax-keyword:      #f19d9d;
+  --syntax-string:       #95bf7e;
+  --syntax-type:         #c5a7ea;
+  --syntax-function:     #7bbaee;
+  --syntax-comment:      #9f9587;
+  --syntax-gutter:       #978e7f;
+  --graph-branch:        #5484ac;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #c48d81;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 薄墨 / Ink wash: ほぼ無彩色の面と、青灰の強調色。静か。ダークは今の「無彩色」に近い */
+[data-color-theme="ink"] {
+  --color-ground:        #f1f2f4;
+  --color-nav:           #e6e8eb;
+  --color-tree:          #edeff1;
+  --color-doc:           #f8f9fa;
+  --color-inset:         #ebedf0;
+  --color-raised:        #e1e4e8;
+  --color-select:        #cadef7;
+  --color-overlay:       #fbfcfd;
+  --color-term:          #e9ebee;
+  --color-term-text:     #25282d;
+  --color-term-white:    #4c5667;
+  --color-term-select:   #4c668640;
+  --color-line:          #d1d5da;
+  --color-line-soft:     #dee0e4;
+  --color-line-strong:   #b1b6bc;
+  --color-line-row:      #b1b6bc;
+  --color-text:          #25282d;
+  --color-text-2:        #575b63;
+  --color-text-3:        #6c7077;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #4c6686;
+  --color-accent-strong: #395271;
+  --color-waiting:       #926204;
+  --color-working:       #167b48;
+  --color-done:          #546d8e;
+  --color-failed:        #a94f5d;
+  --color-idle:          #66696f;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #f3f4f7;
+  --syntax-text:         #282a2f;
+  --syntax-keyword:      #51487f;
+  --syntax-string:       #225a32;
+  --syntax-type:         #704608;
+  --syntax-function:     #015579;
+  --syntax-comment:      #62666c;
+  --syntax-gutter:       #60646a;
+  --graph-branch:        #437e9f;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #3f5c82;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="ink"][data-theme="dark"] {
+  --color-ground:        #101012;
+  --color-nav:           #141518;
+  --color-tree:          #141518;
+  --color-doc:           #1b1d21;
+  --color-inset:         #151719;
+  --color-raised:        #24282f;
+  --color-select:        #1e324b;
+  --color-overlay:       #23262a;
+  --color-term:          #0f1012;
+  --color-term-text:     #eceef1;
+  --color-term-white:    #bac6d9;
+  --color-term-select:   #809bbe4d;
+  --color-line:          #24262a;
+  --color-line-soft:     #1e2023;
+  --color-line-strong:   #373b41;
+  --color-line-row:      #464a4f;
+  --color-text:          #eceef1;
+  --color-text-2:        #a5aab1;
+  --color-text-3:        #83888e;
+  --color-on-accent:     #0c121a;
+  --color-accent:        #809bbe;
+  --color-accent-strong: #a0b8d7;
+  --color-waiting:       #c29553;
+  --color-working:       #63ac7e;
+  --color-done:          #86a2c5;
+  --color-failed:        #d88690;
+  --color-idle:          #a6aaaf;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #181a1d;
+  --syntax-text:         #dbdde1;
+  --syntax-keyword:      #b4ade5;
+  --syntax-string:       #8cc096;
+  --syntax-type:         #d6ac7c;
+  --syntax-function:     #7ebbde;
+  --syntax-comment:      #93979d;
+  --syntax-gutter:       #8c9096;
+  --graph-branch:        #4a86a7;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #7d9dc5;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 桜 / Blossom: ほんのり桃色の面に、紅紫の強調色 */
+[data-color-theme="sakura"] {
+  --color-ground:        #f7f0f3;
+  --color-nav:           #f1e4ea;
+  --color-tree:          #f6ecf0;
+  --color-doc:           #fdf7fa;
+  --color-inset:         #f5e9ee;
+  --color-raised:        #efdee5;
+  --color-select:        #efd2e4;
+  --color-overlay:       #fefbfc;
+  --color-term:          #f3e7ec;
+  --color-term-text:     #34222b;
+  --color-term-white:    #644f58;
+  --color-term-select:   #944a7e40;
+  --color-line:          #e2ced7;
+  --color-line-soft:     #eadbe2;
+  --color-line-strong:   #c8adb9;
+  --color-line-row:      #c8adb9;
+  --color-text:          #34222b;
+  --color-text-2:        #6e5460;
+  --color-text-3:        #826974;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #944a7e;
+  --color-accent-strong: #7e3569;
+  --color-waiting:       #926204;
+  --color-working:       #167b48;
+  --color-done:          #9d5186;
+  --color-failed:        #a94f5d;
+  --color-idle:          #77636c;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #faf2f5;
+  --syntax-text:         #36252d;
+  --syntax-keyword:      #76357b;
+  --syntax-string:       #055c28;
+  --syntax-type:         #754300;
+  --syntax-function:     #01518f;
+  --syntax-comment:      #765f6a;
+  --syntax-gutter:       #745d68;
+  --graph-branch:        #517ba5;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #784d6a;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="sakura"][data-theme="dark"] {
+  --color-ground:        #140f11;
+  --color-nav:           #1c1216;
+  --color-tree:          #1c1216;
+  --color-doc:           #27181f;
+  --color-inset:         #1e1318;
+  --color-raised:        #381f2b;
+  --color-select:        #432639;
+  --color-overlay:       #2f2127;
+  --color-term:          #150e11;
+  --color-term-text:     #f6eaef;
+  --color-term-white:    #d6bfc9;
+  --color-term-select:   #ce7fb54d;
+  --color-line:          #2f2228;
+  --color-line-soft:     #281c21;
+  --color-line-strong:   #49333d;
+  --color-line-row:      #59424c;
+  --color-text:          #f6eaef;
+  --color-text-2:        #bfa1ae;
+  --color-text-3:        #9a808b;
+  --color-on-accent:     #180e14;
+  --color-accent:        #ce7fb5;
+  --color-accent-strong: #e6a0ce;
+  --color-waiting:       #c29553;
+  --color-working:       #63ac7e;
+  --color-done:          #d685bb;
+  --color-failed:        #d7868f;
+  --color-idle:          #b9a3ad;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #21161b;
+  --syntax-text:         #e8d8de;
+  --syntax-keyword:      #dc9fde;
+  --syntax-string:       #7bc48a;
+  --syntax-type:         #e6a767;
+  --syntax-function:     #7bb8f6;
+  --syntax-comment:      #a8909b;
+  --syntax-gutter:       #a18893;
+  --graph-branch:        #5882ac;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #ba8caa;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 苔 / Moss: 黄みのある苔色の面に、苔の強調色。型は藤色 */
+[data-color-theme="moss"] {
+  --color-ground:        #f2f3eb;
+  --color-nav:           #e9e9dc;
+  --color-tree:          #eff0e5;
+  --color-doc:           #f9faf4;
+  --color-inset:         #edeee2;
+  --color-raised:        #e4e5d4;
+  --color-select:        #d9e0c2;
+  --color-overlay:       #fcfcf8;
+  --color-term:          #ebece0;
+  --color-term-text:     #292915;
+  --color-term-white:    #565643;
+  --color-term-select:   #5e6a2940;
+  --color-line:          #d5d7c0;
+  --color-line-soft:     #e0e2d1;
+  --color-line-strong:   #b6b79a;
+  --color-line-row:      #b6b79a;
+  --color-text:          #292915;
+  --color-text-2:        #5c5d3f;
+  --color-text-3:        #717256;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #5e6a29;
+  --color-accent-strong: #4b5511;
+  --color-waiting:       #936205;
+  --color-working:       #167b48;
+  --color-done:          #667131;
+  --color-failed:        #aa4f5e;
+  --color-idle:          #6a6b55;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #f5f5ec;
+  --syntax-text:         #2b2b18;
+  --syntax-keyword:      #86380a;
+  --syntax-string:       #225b12;
+  --syntax-type:         #5e408b;
+  --syntax-function:     #085766;
+  --syntax-comment:      #66674e;
+  --syntax-gutter:       #64664c;
+  --graph-branch:        #338294;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #575f30;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="moss"][data-theme="dark"] {
+  --color-ground:        #11110c;
+  --color-nav:           #16160c;
+  --color-tree:          #16160c;
+  --color-doc:           #1e1f0f;
+  --color-inset:         #17170c;
+  --color-raised:        #292a0b;
+  --color-select:        #2f3514;
+  --color-overlay:       #262717;
+  --color-term:          #101109;
+  --color-term-text:     #eff0e3;
+  --color-term-white:    #c5c7b1;
+  --color-term-select:   #93a05e4d;
+  --color-line:          #272719;
+  --color-line-soft:     #202114;
+  --color-line-strong:   #3c3c25;
+  --color-line-row:      #4a4c34;
+  --color-text:          #eff0e3;
+  --color-text-2:        #abad8d;
+  --color-text-3:        #898a6f;
+  --color-on-accent:     #111309;
+  --color-accent:        #93a05e;
+  --color-accent-strong: #b1bd85;
+  --color-waiting:       #c39654;
+  --color-working:       #64ad7f;
+  --color-done:          #99a765;
+  --color-failed:        #d98791;
+  --color-idle:          #abac96;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #1a1b0f;
+  --syntax-text:         #dddfce;
+  --syntax-keyword:      #eca280;
+  --syntax-string:       #8ec184;
+  --syntax-type:         #c0a8ed;
+  --syntax-function:     #5ac1d8;
+  --syntax-comment:      #97997f;
+  --syntax-gutter:       #909278;
+  --graph-branch:        #3c8a9b;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #95a06e;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 霧 / Mist: 冷たい薄灰の面に、青磁のような淡い青緑の強調色。面どうしの差を少なく */
+[data-color-theme="mist"] {
+  --color-ground:        #f0f5f5;
+  --color-nav:           #e3ecec;
+  --color-tree:          #ebf2f2;
+  --color-doc:           #f8fcfc;
+  --color-inset:         #e9f1f1;
+  --color-raised:        #dde8e8;
+  --color-select:        #c1e7e1;
+  --color-overlay:       #fcfefe;
+  --color-term:          #e7efef;
+  --color-term-text:     #1e2c2b;
+  --color-term-white:    #435b5b;
+  --color-term-select:   #2c706940;
+  --color-line:          #cbdada;
+  --color-line-soft:     #d9e5e4;
+  --color-line-strong:   #a7bbbb;
+  --color-line-row:      #a7bbbb;
+  --color-text:          #1e2c2b;
+  --color-text-2:        #4c6060;
+  --color-text-3:        #627575;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #2c7069;
+  --color-accent-strong: #105b54;
+  --color-waiting:       #946307;
+  --color-working:       #187c49;
+  --color-done:          #337870;
+  --color-failed:        #ab505f;
+  --color-idle:          #5e6d6d;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #f2f8f8;
+  --syntax-text:         #222e2e;
+  --syntax-keyword:      #3a4b8d;
+  --syntax-string:       #0f5b3c;
+  --syntax-type:         #7b400b;
+  --syntax-function:     #035860;
+  --syntax-comment:      #586969;
+  --syntax-gutter:       #576868;
+  --graph-branch:        #31848d;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #20665f;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="mist"][data-theme="dark"] {
+  --color-ground:        #0d1111;
+  --color-nav:           #0f1717;
+  --color-tree:          #0f1717;
+  --color-doc:           #132020;
+  --color-inset:         #0f1918;
+  --color-raised:        #132d2d;
+  --color-select:        #053934;
+  --color-overlay:       #1b2928;
+  --color-term:          #0b1111;
+  --color-term-text:     #e6f1f0;
+  --color-term-white:    #afcbca;
+  --color-term-select:   #62a69d4d;
+  --color-line:          #1d2929;
+  --color-line-soft:     #182222;
+  --color-line-strong:   #2b3f3f;
+  --color-line-row:      #3a4e4e;
+  --color-text:          #e6f1f0;
+  --color-text-2:        #95b0af;
+  --color-text-3:        #758d8c;
+  --color-on-accent:     #071413;
+  --color-accent:        #62a69d;
+  --color-accent-strong: #89c2b9;
+  --color-waiting:       #c39654;
+  --color-working:       #64ad7f;
+  --color-done:          #69aca4;
+  --color-failed:        #d88790;
+  --color-idle:          #9baead;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #121c1c;
+  --syntax-text:         #d2e0e0;
+  --syntax-keyword:      #9bb2f5;
+  --syntax-string:       #74c49a;
+  --syntax-type:         #e7a577;
+  --syntax-function:     #56c3ce;
+  --syntax-comment:      #859b9a;
+  --syntax-gutter:       #7e9493;
+  --graph-branch:        #388b93;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #63a79e;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 琥珀 / Amber: 蜂蜜色の面に、琥珀 (黄) の強調色。キーワードは紫、型は青緑 */
+[data-color-theme="amber"] {
+  --color-ground:        #f7f1e9;
+  --color-nav:           #f1e7d9;
+  --color-tree:          #f6eee3;
+  --color-doc:           #fdf8f3;
+  --color-inset:         #f5ecdf;
+  --color-raised:        #eee1d0;
+  --color-select:        #ebd9bf;
+  --color-overlay:       #fefbf7;
+  --color-term:          #f3eadd;
+  --color-term-text:     #342510;
+  --color-term-white:    #605343;
+  --color-term-select:   #865c0440;
+  --color-line:          #e2d2bc;
+  --color-line-soft:     #eadece;
+  --color-line-strong:   #c7b195;
+  --color-line-row:      #c7b195;
+  --color-text:          #342510;
+  --color-text-2:        #6e5739;
+  --color-text-3:        #826c50;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #865c04;
+  --color-accent-strong: #6c4a01;
+  --color-waiting:       #926204;
+  --color-working:       #167b48;
+  --color-done:          #8d6413;
+  --color-failed:        #a94f5d;
+  --color-idle:          #776650;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #faf3eb;
+  --syntax-text:         #352814;
+  --syntax-keyword:      #5e408b;
+  --syntax-string:       #225b12;
+  --syntax-type:         #015956;
+  --syntax-function:     #025578;
+  --syntax-comment:      #756349;
+  --syntax-gutter:       #736147;
+  --graph-branch:        #437e9f;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #71562b;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="amber"][data-theme="dark"] {
+  --color-ground:        #13100b;
+  --color-nav:           #1b140b;
+  --color-tree:          #1b140b;
+  --color-doc:           #261b0d;
+  --color-inset:         #1d150a;
+  --color-raised:        #372405;
+  --color-select:        #3f2d0f;
+  --color-overlay:       #2e2415;
+  --color-term:          #140f08;
+  --color-term-text:     #f5ede1;
+  --color-term-white:    #d1c3b0;
+  --color-term-select:   #c68f284d;
+  --color-line:          #2e2417;
+  --color-line-soft:     #271e13;
+  --color-line-strong:   #473721;
+  --color-line-row:      #564731;
+  --color-text:          #f5ede1;
+  --color-text-2:        #bca78a;
+  --color-text-3:        #97856b;
+  --color-on-accent:     #161107;
+  --color-accent:        #c68f28;
+  --color-accent-strong: #deaf61;
+  --color-waiting:       #c39553;
+  --color-working:       #63ac7e;
+  --color-done:          #cd9631;
+  --color-failed:        #d88690;
+  --color-idle:          #b7a893;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #20180d;
+  --syntax-text:         #e6dbcc;
+  --syntax-keyword:      #c0a8ed;
+  --syntax-string:       #8ec184;
+  --syntax-type:         #57c4bd;
+  --syntax-function:     #6ebce9;
+  --syntax-comment:      #a5947c;
+  --syntax-gutter:       #9e8d75;
+  --graph-branch:        #4a86a7;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #b39669;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
+}
+/* 藍 / Indigo: 藍の面に、藍の強調色。キーワードは珊瑚色 */
+[data-color-theme="indigo"] {
+  --color-ground:        #eff2f9;
+  --color-nav:           #e3e8f4;
+  --color-tree:          #eaeff8;
+  --color-doc:           #f7f9fe;
+  --color-inset:         #e8edf8;
+  --color-raised:        #dde4f3;
+  --color-select:        #d0dbf7;
+  --color-overlay:       #fafcff;
+  --color-term:          #e6ebf6;
+  --color-term-text:     #202839;
+  --color-term-white:    #4d5567;
+  --color-term-select:   #4660af40;
+  --color-line:          #ccd5e7;
+  --color-line-soft:     #d9e0ee;
+  --color-line-strong:   #aab5ce;
+  --color-line-row:      #aab5ce;
+  --color-text:          #202839;
+  --color-text-2:        #505b74;
+  --color-text-3:        #657088;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #4660af;
+  --color-accent-strong: #344b99;
+  --color-waiting:       #926204;
+  --color-working:       #167b48;
+  --color-done:          #4d67b8;
+  --color-failed:        #aa4f5d;
+  --color-idle:          #61697c;
+  --color-backdrop:      rgba(20, 18, 26, 0.18);
+  --color-shadow:        rgba(20, 18, 26, 0.16);
+  --color-code:          #f1f4fc;
+  --syntax-text:         #232a3a;
+  --syntax-keyword:      #8e2f24;
+  --syntax-string:       #055c28;
+  --syntax-type:         #5e4e09;
+  --syntax-function:     #0d5769;
+  --syntax-comment:      #5b667b;
+  --syntax-gutter:       #5a6479;
+  --graph-branch:        #368197;
+  --diff-add-bg:         #dff5e3;
+  --diff-add-num-sticky-bg: #d4ead7;
+  --diff-add-word-bg:    #c0e1c5;
+  --diff-del-bg:         #ffe7e7;
+  --diff-del-num-sticky-bg: #f5d7d6;
+  --diff-del-word-bg:    #f1c3c3;
+  --diff-hunk-fg:        #4a5983;
+  --diff-add-fg:         #264e30;
+  --diff-del-fg:         #762828;
+}
+[data-color-theme="indigo"][data-theme="dark"] {
+  --color-ground:        #0c0e14;
+  --color-nav:           #0d131f;
+  --color-tree:          #0d131f;
+  --color-doc:           #131b2c;
+  --color-inset:         #0e1421;
+  --color-raised:        #162444;
+  --color-select:        #232d49;
+  --color-overlay:       #1b2335;
+  --color-term:          #0a0e16;
+  --color-term-text:     #e5ecfb;
+  --color-term-white:    #bac4d7;
+  --color-term-select:   #7695e94d;
+  --color-line:          #1c2434;
+  --color-line-soft:     #171d2c;
+  --color-line-strong:   #2b3753;
+  --color-line-row:      #3a4763;
+  --color-text:          #e5ecfb;
+  --color-text-2:        #98a8cb;
+  --color-text-3:        #7886a5;
+  --color-on-accent:     #0e111b;
+  --color-accent:        #7695e9;
+  --color-accent-strong: #97b3fc;
+  --color-waiting:       #c19452;
+  --color-working:       #62ab7d;
+  --color-done:          #7d9bf0;
+  --color-failed:        #d5858e;
+  --color-idle:          #9ca8c2;
+  --color-backdrop:      rgba(4, 3, 8, 0.55);
+  --color-shadow:        rgba(0, 0, 0, 0.45);
+  --color-code:          #111725;
+  --syntax-text:         #d1dbee;
+  --syntax-keyword:      #f69c8d;
+  --syntax-string:       #7bc48a;
+  --syntax-type:         #c9b35c;
+  --syntax-function:     #51c1e1;
+  --syntax-comment:      #8997b3;
+  --syntax-gutter:       #808eaa;
+  --graph-branch:        #3c879c;
+  --diff-add-bg:         #1a2e1e;
+  --diff-add-num-sticky-bg: #213d27;
+  --diff-add-word-bg:    #264c2f;
+  --diff-del-bg:         #391e1f;
+  --diff-del-num-sticky-bg: #482426;
+  --diff-del-word-bg:    #642b2f;
+  --diff-hunk-fg:        #8698c5;
+  --diff-add-fg:         #99dba6;
+  --diff-del-fg:         #f8ada7;
 }
 
 /* 畳んだファイル一覧の縦の帯の幅 (--view-rail-w。下の html, body で --space-unit の倍数)
@@ -21484,39 +22313,6 @@ button.agents-account-name:hover {
   content: none;
 }
 
-/* shiki の github テーマの色 → 構文の名前。light と dark の値は同じ span に
-   並んで入っているので、dark の値だけで見分けて両方を差し替える。shiki を使う
-   面 (ソース表示・Blame・Markdown・Data・Tools・状態判定の設定) のどこでも同じ
-   色にするため、祖先で絞らない。#f97583 = キーワード、#85e89d = タグ名、
-   #9ecbff / #dbedff = 文字列と正規表現、#79b8ff = 定数・数値・組み込み・
-   プロパティ名・見出し、#b392f0 = 関数名とクラス名、#e1e4e8 / #ffab70 = 変数。 */
-span[style*="--shiki-dark:#f97583" i],
-span[style*="--shiki-dark:#85e89d" i] {
-  --shiki-light: var(--syntax-keyword) !important;
-  --shiki-dark: var(--syntax-keyword) !important;
-}
-span[style*="--shiki-dark:#9ecbff" i],
-span[style*="--shiki-dark:#dbedff" i] {
-  --shiki-light: var(--syntax-string) !important;
-  --shiki-dark: var(--syntax-string) !important;
-}
-span[style*="--shiki-dark:#79b8ff" i] {
-  --shiki-light: var(--syntax-type) !important;
-  --shiki-dark: var(--syntax-type) !important;
-}
-span[style*="--shiki-dark:#b392f0" i] {
-  --shiki-light: var(--syntax-function) !important;
-  --shiki-dark: var(--syntax-function) !important;
-}
-span[style*="--shiki-dark:#6a737d" i] {
-  --shiki-light: var(--syntax-comment) !important;
-  --shiki-dark: var(--syntax-comment) !important;
-}
-span[style*="--shiki-dark:#e1e4e8" i],
-span[style*="--shiki-dark:#ffab70" i] {
-  --shiki-light: var(--syntax-text) !important;
-  --shiki-dark: var(--syntax-text) !important;
-}
 /* パンくず: 上の段の場所は補助の文字、今のファイルだけ地の文字 (絵のとおり)。
    押せる部分は hover で面と下線。 */
 .gdp-repo-blob-layout .gdp-file-detail-sticky .gdp-file-breadcrumb button.gdp-file-breadcrumb-part {
@@ -23094,6 +23890,78 @@ body.gdp-help-page #content {
 #code-font-size {
   width: min(calc(var(--space-unit) * 110), 100%);
   height: var(--ui-control-md);
+}
+/* テーマの見本 (views/viewer-settings.ts の colorThemePicker)。各見本はライトと
+   ダークの小さなコードと差分。見本の箱 (.theme-swatch-pane) は html と同じ
+   data-theme / data-color-theme を持ち、そのテーマの名前の層で描く。選んでいる
+   見本は強調色の枠 (aria-pressed)。 */
+.theme-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-unit) * 40), 1fr));
+  gap: var(--space-2);
+  max-width: calc(var(--space-unit) * 220);
+  margin-top: var(--space-2);
+}
+.theme-choice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  text-align: left;
+  cursor: pointer;
+}
+.theme-choice:hover {
+  background: var(--color-raised);
+}
+.theme-choice[aria-pressed="true"] {
+  box-shadow: var(--focus-ring-inset);
+}
+.theme-choice:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.theme-swatch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 1px var(--color-line-soft);
+}
+.theme-swatch-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--space-1) 0;
+  overflow: hidden;
+  /* 上端の線はそのテーマの強調色。 */
+  box-shadow: inset 0 2px 0 var(--color-accent);
+  background: var(--color-code);
+  color: var(--syntax-text);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-xs);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.theme-swatch-line {
+  padding: 0 var(--space-1);
+}
+.theme-swatch-keyword { color: var(--syntax-keyword); }
+.theme-swatch-function { color: var(--syntax-function); }
+.theme-swatch-string { color: var(--syntax-string); }
+.theme-swatch-type { color: var(--syntax-type); }
+.theme-swatch-comment { color: var(--syntax-comment); }
+.theme-swatch-add { background: var(--diff-add-bg); }
+.theme-swatch-del { background: var(--diff-del-bg); }
+.theme-swatch-add .theme-swatch-word { background: var(--diff-add-word-bg); }
+.theme-swatch-del .theme-swatch-word { background: var(--diff-del-word-bg); }
+.theme-choice-name {
+  padding: 0 var(--space-1);
 }
 /* トグル: 文字が左、スイッチが右 (絵の通知の行)。 */
 .scope-settings-toggle {

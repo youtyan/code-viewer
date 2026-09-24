@@ -111,7 +111,6 @@ export function createSessionLogView(
   // あればロード完了時に再描画する。失敗時は null のまま plain text 表示。
   let shiki: ShikiHighlighter | null = null;
   loadShikiHighlighter({
-    themes: ["github-light", "github-dark"],
     langs: ["sql"],
   }).then((h) => {
     shiki = h;

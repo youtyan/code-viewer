@@ -32,6 +32,7 @@ export type MarkdownPreviewOptions = {
 
 import { loadMermaid, type MermaidApi } from "./mermaid-loader";
 import { loadShikiHighlighter, type ShikiHighlighter } from "./shiki-loader";
+import { SHIKI_THEMES } from "./shiki-theme";
 
 // 後方互換のため re-export (外部 import が無いことは grep 確認済みだが、
 // 公開済み export 型を黙って削除すると下流の型推論を壊しうる)。
@@ -243,7 +244,7 @@ function createMarkdownIt(
         try {
           return highlighter.codeToHtml(code, {
             lang: language,
-            themes: { light: "github-light", dark: "github-dark" },
+            themes: SHIKI_THEMES,
             defaultColor: false,
           });
         } catch (error) {
@@ -533,7 +534,6 @@ function splitYamlFrontmatter(
 
 export function loadMarkdownHighlighter(): Promise<ShikiHighlighter | null> {
   return loadShikiHighlighter({
-    themes: ["github-light", "github-dark"],
     langs: MARKDOWN_SHIKI_LANGS,
   });
 }

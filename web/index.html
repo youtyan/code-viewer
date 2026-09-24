@@ -26,15 +26,17 @@
 
 <!-- 前回の骨格の見た目 (テーマ・左のサイドバー) を CSS より先に当てる。
      控えを書くのは web-src/views/shell/early-look.ts (キーと形はそちらと同じ)。
-     控えが無い・読めないときは既定 (ダーク・開いたサイドバー) のまま描く。 -->
-<script>
+     控えが無い・読めないときは既定 (ダーク・既定のテーマ・開いたサイドバー) のまま描く。
+     テーマ (data-color-theme) も CSS より先に付けるので、別のテーマで一瞬描かれない
+     (web-src/test/first-screen.test.ts)。 -->
+<script id="first-look">
 (function () {
   var raw = window.localStorage.getItem("code-viewer:early-look");
   if (!raw) return;
   var look = JSON.parse(raw);
   var root = document.documentElement;
   if (look.theme === "light" || look.theme === "dark") root.dataset.theme = look.theme;
-  if (look.palette) root.dataset.palette = look.palette;
+  if (look.colorTheme) root.dataset.colorTheme = look.colorTheme;
   if (look.navCollapsed) root.dataset.navCollapsed = "";
   if (look.navWidth > 0) root.style.setProperty("--nav-w", look.navWidth + "px");
 })();

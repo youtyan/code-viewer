@@ -306,6 +306,63 @@ describe("#first-screen は app.ts と同じ印を付ける", () => {
   });
 });
 
+// 明暗とテーマは、app.js を待たずに控えから CSS より先に付ける (ちらつかない)。
+// 控えを書くのは app.ts の applyTheme (rememberEarlyLook)。
+describe("#first-look は明暗とテーマを CSS より先に付ける", () => {
+  function runFirstLook(look: Partial<Look> | null) {
+    const root = document.documentElement;
+    delete root.dataset.theme;
+    delete root.dataset.colorTheme;
+    if (look)
+      localStorage.setItem("code-viewer:early-look", JSON.stringify(look));
+    new Function(inlineScript("first-look"))();
+    return {
+      theme: root.dataset.theme ?? null,
+      colorTheme: root.dataset.colorTheme ?? null,
+    };
+  }
+
+  test.each([
+    {
+      name: "a theme in dark",
+      look: { theme: "dark", colorTheme: "forest" },
+      expected: { theme: "dark", colorTheme: "forest" },
+    },
+    {
+      name: "a theme in light",
+      look: { theme: "light", colorTheme: "sakura" },
+      expected: { theme: "light", colorTheme: "sakura" },
+    },
+    {
+      name: "the default theme (no attribute)",
+      look: { theme: "light" },
+      expected: { theme: "light", colorTheme: null },
+    },
+    {
+      name: "no look yet (the html default stays)",
+      look: null,
+      expected: { theme: null, colorTheme: null },
+    },
+  ] as const)("$name", ({ look, expected }) => {
+    expect(runFirstLook(look)).toEqual(expected);
+  });
+
+  test("what applyTheme remembers is what the next page paints first", async () => {
+    const early = await import("../views/shell/early-look");
+    early.rememberEarlyLook({ theme: "dark", colorTheme: "ink" });
+    expect(runFirstLook(null)).toEqual({ theme: "dark", colorTheme: "ink" });
+  });
+
+  test("the script runs before the stylesheet", () => {
+    const script = html.indexOf('<script id="first-look">');
+    const style = html.indexOf('<link rel="stylesheet" href="/style.css" />');
+    expect({ found: script > 0 && style > 0, before: script < style }).toEqual({
+      found: true,
+      before: true,
+    });
+  });
+});
+
 describe("#first-status は setStatus と同じ文言を同じ並びで重ねる", () => {
   function runFirstStatus(url: string, look: Look): string {
     (

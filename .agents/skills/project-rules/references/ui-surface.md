@@ -75,7 +75,7 @@
   2px の線 (もう一方の面の選択中は `--color-text-3` の `box-shadow: inset`、フォーカスのある面の選択中は
   上の強調色の線・強調色の絵・`-webkit-text-stroke` で太い名前)。下端の線はグループの色なので使わない
   (検査は `main-tabs-active-css.test.ts`)。地・タブとの色の差はダーク / ライト、
-  3 つの色違い、密度 4 段で 4.95:1 以上 (実測)
+  当時の 3 つの色違い、密度 4 段で 4.95:1 以上 (実測。10 テーマにしてからは測っていない)
 - **URL はフォーカスのある面の前面のタブ**に合わせる (右の面のファイルなら `pane=right`)。左の前面が
   替わって本文を裏で移すとき、フォーカスが右の面に残るなら履歴を積まず (`followRouteSide` の
   replace)、移した後に `syncFocusedPaneUrl` で右の面の URL へ戻す (app の `navigate`。分割のボタンで
@@ -189,23 +189,25 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
 | 何 | 名前 |
 |---|---|
 | 面の段階 | `--color-ground` (窓の地・上の行・最下段) / `--color-nav` (サイドバー) / `--color-tree` (ファイルのツリー) / `--color-doc` (本文) / `--color-code` (コードの面: ソース表示・差分) / `--color-inset` (本文の中の沈んだ面) / `--color-raised` (hover) / `--color-select` (選んでいる行) / `--color-term` |
-| 構文の色 | `--syntax-text` / `--syntax-keyword` / `--syntax-string` / `--syntax-type` / `--syntax-function` / `--syntax-comment`、行番号は `--syntax-gutter`。shiki の github テーマの色 (どの面でも) と highlight.js のクラスは `style.css` の B-1 の節と diff2html の節で名前へ差し替え、同じ種類は同じ名前にする。下限 (本文 7:1・構文の色 6.5:1・コメントと行番号 4.5:1) と 2 系統の対応は `diff-code-contrast.test.ts` |
+| 構文の色 | `--syntax-text` / `--syntax-keyword` / `--syntax-string` / `--syntax-type` / `--syntax-function` / `--syntax-comment`、行番号は `--syntax-gutter`。shiki はこのアプリのテーマ (`core/shiki-theme.ts`。色はこの名前の var()) で描き、highlight.js のクラスは `style.css` の diff2html の節で名前へ差し替える。同じ種類は同じ名前にする。下限 (本文 7:1・構文の色 6.5:1・コメントと行番号 4.5:1) と 2 系統の対応は `diff-code-contrast.test.ts`・`shiki-theme.test.ts` |
 | 差分の文字 / 履歴のグラフ | `--diff-add-fg` / `--diff-del-fg` (面は `--diff-*-bg`)、@@ の行の文字は `--diff-hunk-fg`。`--graph-main` (主線) / `--graph-branch` (分かれた線)。状態の色と混ぜない |
 | 文字の段階 | `--color-text` / `--color-text-2` / `--color-text-3` / `--color-on-accent` |
 | 線 | `--color-line` / `--color-line-soft` / `--color-line-strong`。**線は最後の手段。** 面の明るさの差で分けられるなら線を引かない。表の行の区切りだけは `--color-line-row` (上の「表」) |
 | アクセントと状態 | `--color-accent` / `--color-accent-strong`、`--color-waiting` `--color-working` `--color-done` `--color-failed` `--color-idle` |
-| プロジェクトの色 | `--project-<色>` (`core/project-colors.ts` の `PROJECT_COLORS` と `none`)・頭文字の `--project-ink`。部品は `data-project-color` の下で `--project-color` を読む。色違いのダーク (graphite / warm) もダークの 1 組を使う |
+| プロジェクトの色 | `--project-<色>` (`core/project-colors.ts` の `PROJECT_COLORS` と `none`)・頭文字の `--project-ink`。部品は `data-project-color` の下で `--project-color` を読む。どのテーマでもライト・ダークの 1 組ずつ (テーマで変えない) |
 | 選んでいる行の光 | `--glow-select` (内側の box-shadow。箱の寸法を変えない) |
 | 余白 / 角丸 | `--space-1`〜`--space-6` (4〜32px) / `--radius-sm` `--radius-md` `--radius-lg` |
 | 文字の大きさ・行の高さ | 密度の段階 (T0): `--ui-font-*`・`--ui-control-*`・`--ui-row-h`・`--ui-table-row-h` (`ui-layout.md`、下の決まり 7) |
 | 文字の家族 | `--font-ui` / `--font-mono` |
 
-- テーマは同じ名前の値を差し替えるだけ: `html[data-theme="light"|"dark"]` × `html[data-palette]`
-  (`graphite` / `warm`、無し = 既定の紫)。**テーマごとに部品の規則を書き分けない。**
+- 明暗とテーマは同じ名前の値を差し替えるだけ: `html[data-theme="light"|"dark"]` × `html[data-color-theme]`
+  (10 テーマ。id と表示名は `core/color-themes.ts`、無し = 既定)。**テーマごとに部品の規則を書き分けない。**
+  テーマの塊は 16 進で持つ色の名前を全部書き、下限は 10 テーマ × 明暗の全部で確かめる
+  (`web-src/test/_color-themes.ts` を回すテスト。新しい色の下限のテストもこれで回す)
   古い `[data-theme="dark"] .x { color: #... }` を見つけたら、名前へ寄せる (触ったら直す)
 - 古い名前 (`--bg` `--fg` `--accent` `--border` …) は互換の層で、中身は名前の層への参照だけ。
   新しい部品は名前の層を読む。互換の層に 16 進を書き戻さない
-- 差分の色 (`--diff-*`) は色違いに引きずられない (追加・削除の意味を保つ)。ライトとダークで 1 組ずつ
+- 差分の色 (`--diff-*`) は追加 = 緑・削除 = 赤の色相をどのテーマでも保つ (意味を保つ)
 - 状態の印は形で区別する: ひし形 = 入力待ち、回る弧 = 作業中、チェック = 完了、白抜きの丸 = 待機
   (`.terminal-mark-*`)。色だけで伝えない。`prefers-reduced-motion` で回転を止めても形で読める
 - xterm は CSS 変数を読めないので、端末の色は `views/terminal/terminal-screen.ts` の
@@ -365,5 +367,5 @@ DOM 構造と CSS を合わせる。並行する別レイアウトを発明し�
 - [ ] ユーザーに見える文字列を `i18n.ts` に置き、`en` / `ja` 両方を書いた
 - [ ] CLI / 操作が変わったなら Help ページ（en + ja）と README を同じ変更で直した
 - [ ] 色・余白・角丸を名前の層から読んだ（16 進・生の px を部品に足していない）
-- [ ] 実画面を見た（→ `diagnose.md`）。ライトと、ダークの色違い 3 つ
+- [ ] 実画面を見た（→ `diagnose.md`）。ライトとダーク、色を足したならテーマをいくつか
 - [ ] `pnpm run verify` が通る

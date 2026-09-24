@@ -814,7 +814,7 @@ describe("user settings", () => {
   // 移るたびに戻るので、全部ユーザー単位の項目でなければならない。
   test.each([
     "theme",
-    "palette",
+    "colorTheme",
     "navCollapsed",
     "navWidth",
     "navCollapsedProjects",

@@ -11,6 +11,7 @@ import {
 import type { TerminalImageRef } from "../core/terminal-images";
 import { createImageTabView, type ImageTabHandle } from "../views/image-tab";
 import { contrastRatio } from "./_color-contrast";
+import { themeVariants } from "./_color-themes";
 import {
   baseRules,
   cascadedDeclarations,
@@ -502,13 +503,6 @@ describe("image tab close", () => {
 
 describe("image tab close look", () => {
   const rules = baseRules(loadStyleSheet());
-  const light = cascadedDeclarations(rules, (s) => s === ":root");
-  const themeVars = (selector: string) =>
-    new Map([
-      ...light,
-      ...cascadedDeclarations(rules, (s) => s === '[data-theme="dark"]'),
-      ...cascadedDeclarations(rules, (s) => s === selector),
-    ]);
   const plain = cascadedDeclarations(rules, (s) => s === ".image-tab-button");
   const close = cascadedDeclarations(
     rules,
@@ -520,18 +514,10 @@ describe("image tab close look", () => {
   );
 
   // 枠の色だけを比べる (ほかのボタンの枠は border の一括指定の最後の語)。
-  test.each([
-    { name: "light", vars: light },
-    { name: "dark", vars: themeVars('[data-theme="dark"]') },
-    {
-      name: "dark graphite",
-      vars: themeVars('[data-theme="dark"][data-palette="graphite"]'),
-    },
-    {
-      name: "dark warm",
-      vars: themeVars('[data-theme="dark"][data-palette="warm"]'),
-    },
-  ])("the close border stands out more than the other buttons' ($name)", ({
+  // 10 テーマ × 明暗の全部。
+  test.each(
+    themeVariants(rules),
+  )("the close border stands out more than the other buttons' ($name)", ({
     vars,
   }) => {
     const ground = resolveVar(toolbar.get("background") ?? "", vars);

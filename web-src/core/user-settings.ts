@@ -20,7 +20,7 @@ import type { AppSettingsState } from "./types";
 // のサーバもそれぞれ別のポート)。決まりの本体は project-rules の ui-layout.md。
 export const USER_SETTING_KEYS = [
   "theme",
-  "palette",
+  "colorTheme",
   "language",
   /** 文字の大きさと、それに連動する表示の密度 (body[data-sidebar-font-size])。 */
   "sidebarFontSize",

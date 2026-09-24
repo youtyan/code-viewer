@@ -1,1 +1,5 @@
-export { bundledLanguages, createHighlighter } from "shiki/bundle/full";
+export {
+  bundledLanguages,
+  bundledThemes,
+  createHighlighter,
+} from "shiki/bundle/full";

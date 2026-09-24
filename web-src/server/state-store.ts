@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { colorThemeFromPalette, isColorTheme } from "../core/color-themes";
 import { hasControlCharacter } from "../core/control-chars";
 import { sanitizeKeymapOverrides } from "../core/keymap";
 import { HISTORY_WIDTH, NAV_WIDTH, SIDEBAR_WIDTH } from "../core/panel-sizes";
@@ -17,14 +18,13 @@ import {
   TOOL_IDS,
   type ToolId,
 } from "../core/tools";
-import {
-  type AppSettingsState,
-  type DbUiPrefs,
-  type DbUiState,
-  THEME_PALETTES,
-  type ToolsState,
-  type ViewerFontSizeSetting,
-  type ViewState,
+import type {
+  AppSettingsState,
+  DbUiPrefs,
+  DbUiState,
+  ToolsState,
+  ViewerFontSizeSetting,
+  ViewState,
 } from "../core/types";
 import { createJsonFileStore, type JsonFileStore } from "./json-store";
 import {
@@ -172,8 +172,12 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   if (raw.layout === "side-by-side" || raw.layout === "line-by-line")
     out.layout = raw.layout;
   if (raw.theme === "light" || raw.theme === "dark") out.theme = raw.theme;
-  const palette = THEME_PALETTES.find((value) => value === raw.palette);
-  if (palette) out.palette = palette;
+  // 以前の「ダークの色違い」(palette) は近いテーマへ読み替える。書き戻すときは
+  // colorTheme だけが残る。
+  const colorTheme = isColorTheme(raw.colorTheme)
+    ? raw.colorTheme
+    : colorThemeFromPalette(raw.palette);
+  if (colorTheme) out.colorTheme = colorTheme;
   if (raw.language === "en" || raw.language === "ja")
     out.language = raw.language;
   if (raw.sidebarView === "tree" || raw.sidebarView === "flat")

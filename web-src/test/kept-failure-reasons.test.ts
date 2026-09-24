@@ -50,7 +50,6 @@ test("a shiki bundle that cannot load falls back to plain text and logs why", as
     const { loadShikiHighlighter } = await import("../core/shiki-loader");
     expect(
       await loadShikiHighlighter({
-        themes: ["sample"],
         langs: ["sql", "bash"],
       }),
     ).toBeNull();

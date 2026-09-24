@@ -165,7 +165,7 @@ export function syncThemeColor(
     .trim();
   if (!value)
     throw new Error(
-      `pwa: ${variable} is empty on <html data-theme="${doc.documentElement.dataset.theme}" data-palette="${doc.documentElement.dataset.palette ?? ""}">`,
+      `pwa: ${variable} is empty on <html data-theme="${doc.documentElement.dataset.theme}" data-color-theme="${doc.documentElement.dataset.colorTheme ?? ""}">`,
     );
   for (const meta of doc.querySelectorAll<HTMLMetaElement>(
     'meta[name="theme-color"]',

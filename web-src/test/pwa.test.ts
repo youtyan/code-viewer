@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { applyColorTheme, type ColorTheme } from "../core/color-themes";
 import {
   defaultKeyBindings,
   type KeyEventLike,
@@ -19,6 +20,7 @@ import {
   type UserAgentBrand,
 } from "../core/pwa";
 import { staticFileSpec } from "../server/static-files";
+import { themeVariants } from "./_color-themes";
 import {
   baseRules,
   cascadedDeclarations,
@@ -574,20 +576,13 @@ describe("the tab keys of an installed window", () => {
 });
 
 describe("the window frame color follows the app theme", () => {
-  const THEME_RULES: [string, string, string][] = [
-    // [data-theme, data-palette, その地を決める規則]
-    ["light", "", ":root"],
-    ["dark", "", '[data-theme="dark"]'],
-    ["dark", "graphite", '[data-theme="dark"][data-palette="graphite"]'],
-    ["dark", "warm", '[data-theme="dark"][data-palette="warm"]'],
-    // 色違いはダークだけに効く
-    ["light", "warm", ":root"],
-  ];
+  // 10 テーマ × 明暗。html に付ける属性の組と、その組で効く地の値
+  // (_color-themes.ts がカスケードの順で解いたもの)。
+  const VARIANTS = themeVariants();
   const root = () => document.documentElement;
-  const setLook = (theme: string, palette: string) => {
+  const setLook = (theme: "light" | "dark", colorTheme: ColorTheme) => {
     root().dataset.theme = theme;
-    if (palette) root().dataset.palette = palette;
-    else delete root().dataset.palette;
+    applyColorTheme(root(), colorTheme);
   };
   const themeColors = () =>
     Array.from(document.querySelectorAll('meta[name="theme-color"]'), (meta) =>
@@ -609,29 +604,31 @@ describe("the window frame color follows the app theme", () => {
   });
   afterAll(() => GlobalRegistrator.unregister());
 
-  test.each(
-    THEME_RULES,
-  )("theme %s palette '%s' paints both theme colors with the ground of %s", (theme, palette, selector) => {
-    const ground = cascadedDeclarations(
-      baseRules(loadStyleSheet()),
-      (s) => s === selector,
-    ).get("--color-ground");
-    if (!ground) throw new Error(`${selector} does not set --color-ground`);
-    setLook(theme, palette);
+  test.each(VARIANTS)("$name paints both theme colors with its ground", ({
+    theme,
+    mode,
+    vars,
+  }) => {
+    const ground = vars.get("--color-ground");
+    if (!ground)
+      throw new Error(`${theme} ${mode} does not set --color-ground`);
+    setLook(mode, theme);
     syncThemeColor(document);
     expect(themeColors()).toEqual([ground, ground]);
   });
 
   test("switching back and forth repaints every time", () => {
     const seen: (string | null)[] = [];
-    for (const [theme, palette] of THEME_RULES) {
-      setLook(theme, palette);
+    for (const { theme, mode } of [...VARIANTS, VARIANTS[0]]) {
+      setLook(mode, theme);
       syncThemeColor(document);
       seen.push(themeColors()[0] ?? null);
     }
-    // 4 つのテーマの地はどれも違う (同じなら上の表の検査が何も見分けていない)。
-    expect(new Set(seen.slice(0, 4)).size).toBe(4);
-    expect(seen[4]).toBe(seen[0]);
+    // 20 通りの地はどれも違う (同じなら上の表の検査が何も見分けていない)。
+    expect({
+      distinct: new Set(seen.slice(0, VARIANTS.length)).size,
+      back: seen[seen.length - 1],
+    }).toEqual({ distinct: VARIANTS.length, back: seen[0] });
   });
 
   // いま見ているプロジェクトの色 (app がその変数を渡す)。テーマで値が替わる。
@@ -644,17 +641,17 @@ describe("the window frame color follows the app theme", () => {
       (s) => s === selector,
     ).get("--project-green");
     if (!green) throw new Error(`${selector} does not set --project-green`);
-    setLook(theme, "");
+    setLook(theme as "light" | "dark", "default");
     syncThemeColor(document, "--project-green");
     expect(themeColors()).toEqual([green, green]);
   });
 
   test("a page without the stylesheet is reported instead of painting an empty color", () => {
     style.remove();
-    setLook("dark", "");
+    setLook("dark", "default");
     try {
       expect(() => syncThemeColor(document)).toThrow(
-        'pwa: --color-ground is empty on <html data-theme="dark" data-palette="">',
+        'pwa: --color-ground is empty on <html data-theme="dark" data-color-theme="">',
       );
     } finally {
       document.head.append(style);

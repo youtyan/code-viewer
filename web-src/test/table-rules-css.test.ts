@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { themeVariants } from "./_color-themes";
 import {
   baseRules,
   cascadedDeclarations,
@@ -20,33 +21,17 @@ import {
 
 const rules = baseRules(loadStyleSheet());
 
-const PALETTES = {
-  light: [":root"],
-  dark: [":root", '[data-theme="dark"]'],
-  graphite: [
-    ":root",
-    '[data-theme="dark"]',
-    '[data-theme="dark"][data-palette="graphite"]',
-  ],
-  warm: [
-    ":root",
-    '[data-theme="dark"]',
-    '[data-theme="dark"][data-palette="warm"]',
-  ],
-} as const;
-type Palette = keyof typeof PALETTES;
+// 10 テーマ × 明暗の全部 (`default light`・`forest dark` …)。
+const PALETTES = Object.fromEntries(
+  themeVariants(rules).map((variant) => [variant.name, variant.vars]),
+);
+type Palette = string;
 
-/** その色違いで効く名前の層の値 (後の塊が前を上書きする)。 */
+/** その組で効く名前の層の値 (後の塊が前を上書きする)。 */
 function tokens(palette: Palette): Map<string, string> {
-  const merged = new Map<string, string>();
-  for (const selector of PALETTES[palette]) {
-    for (const [name, value] of cascadedDeclarations(
-      rules,
-      (candidate) => candidate === selector,
-    ))
-      merged.set(name, value);
-  }
-  return merged;
+  const vars = PALETTES[palette];
+  if (!vars) throw new Error(`table rules test: no theme ${palette}`);
+  return vars;
 }
 
 function color(palette: Palette, name: string): string {
@@ -71,7 +56,7 @@ function contrast(a: string, b: string): number {
 }
 
 describe("the row line of tables", () => {
-  const CASES = (Object.keys(PALETTES) as Palette[]).flatMap((palette) =>
+  const CASES = Object.keys(PALETTES).flatMap((palette) =>
     [
       "--color-ground",
       "--color-doc",
@@ -168,7 +153,7 @@ describe("tables drawn with the rule", () => {
     const style = computed(html, selector);
     expect([style.borderBottomStyle, style.borderBottomColor]).toEqual([
       "solid",
-      color("dark", "--color-line-row"),
+      color("default dark", "--color-line-row"),
     ]);
   });
 
@@ -182,7 +167,7 @@ describe("tables drawn with the rule", () => {
       line: head.borderBottomWidth,
       cellLine: cell.borderBottomWidth,
     }).toEqual({
-      color: color("light", "--color-text-2"),
+      color: color("default light", "--color-text-2"),
       weight: "600",
       line: "2px",
       cellLine: "1px",
@@ -204,7 +189,7 @@ describe("tables drawn with the rule", () => {
     expect([
       even.get("background"),
       odd.get("background"),
-      tokens("light").get("--color-row-alt"),
+      tokens("default light").get("--color-row-alt"),
     ]).toEqual([
       "var(--color-row-alt)",
       undefined,
@@ -222,10 +207,10 @@ describe("tables drawn with the rule", () => {
   ])("%s is a key cap edged with the row line", (_name, html) => {
     document.documentElement.dataset.theme = "dark";
     const style = computed(html, "#x");
-    const line = color("dark", "--color-line-row");
+    const line = color("default dark", "--color-line-row");
     expect({
       edged: style.boxShadow.includes(line),
       text: style.color,
-    }).toEqual({ edged: true, text: color("dark", "--color-text") });
+    }).toEqual({ edged: true, text: color("default dark", "--color-text") });
   });
 });

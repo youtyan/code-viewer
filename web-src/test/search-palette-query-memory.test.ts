@@ -407,6 +407,34 @@ describe("palette projects, agents and actions", () => {
     }
   });
 
+  // テーマは 10 個 (core/color-themes.ts) を全部並べる。ほかの種類は 5 件まで。
+  test("choosing a theme lists every theme under its own heading, after the actions", async () => {
+    const ran: string[] = [];
+    const themes = Array.from({ length: 10 }, (_, index) =>
+      command("themes", `Choose theme: sample ${index + 1}`, "", false, ran),
+    );
+    const { palette } = await setup({
+      files: ["src/lib.ts"],
+      commands: [...commands(ran), ...themes],
+    });
+    try {
+      palette.openSearchPalette("file");
+      typeQuery("choose theme");
+      await waitFor(() => listing().length === 11);
+      expect(listing()).toEqual([
+        "# Themes",
+        ...themes.map(
+          (theme, index) => `${theme.title}|${index === 0 ? " *" : ""}`,
+        ),
+      ]);
+      key("ArrowDown");
+      key("Enter");
+      expect(ran).toEqual(["Choose theme: sample 2"]);
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+
   test.each([
     {
       name: "a name matches loosely, a file stays selected",

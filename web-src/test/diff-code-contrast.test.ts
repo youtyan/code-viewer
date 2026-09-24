@@ -6,11 +6,13 @@
 // 行番号と @@ の行は本文より一段落とすが 4.5:1 以上。追加・削除の行の面は、
 // ダークで地の紫と混ぜて灰色に濁り、行番号 (4.4:1) と一緒に画面が霞んで見えていた。
 //
-// 構文の色は 2 系統 (shiki の github テーマの色と highlight.js のクラス) を同じ名前
-// (--syntax-*) へ寄せる。同じ種類が画面によって違う色にならないことも確かめる。
+// 構文の色は 2 系統 (shiki のテーマ core/shiki-theme.ts と highlight.js のクラス) を
+// 同じ名前 (--syntax-*) へ寄せる。同じ種類が画面によって違う色にならないことも確かめる。
 
 import { describe, expect, test } from "vitest";
+import { SHIKI_COLOR_TOKENS } from "../core/shiki-theme";
 import { contrastRatio } from "./_color-contrast";
+import { themeVariants } from "./_color-themes";
 import {
   baseRules,
   cascadedDeclarations,
@@ -19,23 +21,10 @@ import {
 } from "./_css-fixture";
 
 const rules = baseRules(loadStyleSheet());
-const block = (selector: string) =>
-  cascadedDeclarations(rules, (s) => s === selector);
-// テーマは同じ名前の値を差し替えるだけ (ui-surface.md)。後ろほど強い。
-const light = block(":root");
-const dark = new Map([...light, ...block('[data-theme="dark"]')]);
-const THEMES = {
-  light,
-  dark,
-  "dark graphite": new Map([
-    ...dark,
-    ...block('[data-theme="dark"][data-palette="graphite"]'),
-  ]),
-  "dark warm": new Map([
-    ...dark,
-    ...block('[data-theme="dark"][data-palette="warm"]'),
-  ]),
-};
+// テーマは同じ名前の値を差し替えるだけ (ui-surface.md)。10 テーマ × 明暗の全部。
+const THEMES = Object.fromEntries(
+  themeVariants(rules).map((variant) => [variant.name, variant.vars]),
+);
 
 const token = (name: string, vars: Map<string, string>) =>
   resolveVar(`var(${name})`, vars);
@@ -193,7 +182,8 @@ describe("the diff and code rules read the measured tokens", () => {
 });
 
 // 同じ種類は shiki の面 (ソース表示・Markdown・Data・Tools) でも highlight.js の面
-// (差分・仮想表示) でも同じ名前を読む。shiki の色は github-dark の値で見分ける。
+// (差分・仮想表示) でも同じ名前を読む。shiki の種類は、割り当てを借りた github-dark の
+// 色で見分ける (core/shiki-theme.ts の表)。
 describe("shiki and highlight.js give the same kind the same color", () => {
   const exactly = (selector: string) =>
     cascadedDeclarations(rules, (s) => s === selector);
@@ -286,11 +276,7 @@ describe("shiki and highlight.js give the same kind the same color", () => {
   ];
 
   test.each(KINDS)("$kind (shiki #$shiki)", ({ shiki, token: name }) => {
-    const rule = exactly(`span[style*="--shiki-dark:#${shiki}" i]`);
-    expect([rule.get("--shiki-light"), rule.get("--shiki-dark")]).toEqual([
-      `var(${name}) !important`,
-      `var(${name}) !important`,
-    ]);
+    expect(SHIKI_COLOR_TOKENS[`#${shiki}`]).toBe(name);
   });
 
   test.each(

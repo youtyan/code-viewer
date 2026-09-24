@@ -1,3 +1,4 @@
+import type { ColorTheme } from "./color-themes";
 import type { DiffRowBasis } from "./diff-card-estimate";
 import type { GdpExpandLogic } from "./expand-logic";
 import type { KeymapOverrides } from "./keymap";
@@ -176,18 +177,17 @@ export type WorktreeDiffResponse = {
   generation: number;
 };
 
-/** ダークテーマの色違い。既定は "violet"。 */
-export const THEME_PALETTES = ["violet", "graphite", "warm"] as const;
-export type ThemePalette = (typeof THEME_PALETTES)[number];
-
 export type ViewerFontSizeSetting = "compact" | "regular" | "large" | "xlarge";
 
 export type AppSettingsState = {
   version: 1;
   layout?: "side-by-side" | "line-by-line";
   theme?: "light" | "dark";
-  /** ダークの色違い。未設定なら既定 (紫)。ライトのときは使わない。 */
-  palette?: ThemePalette;
+  /**
+   * テーマ (配色。core/color-themes.ts)。明暗 (theme) とは別に選ぶ。未設定なら
+   * 既定。以前の「ダークの色違い」(palette) は読むときに読み替える (state-store.ts)。
+   */
+  colorTheme?: ColorTheme;
   language?: "en" | "ja";
   sidebarView?: "tree" | "flat";
   sidebarWidth?: number;

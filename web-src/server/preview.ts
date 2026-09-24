@@ -84,7 +84,6 @@ import {
 import { processAlive } from "./file-lock";
 import { writeUploadedFiles } from "./file-upload";
 import * as git from "./git";
-import { mainTabsPath } from "./main-tabs-store";
 import {
   GithubIssueListError,
   normalizeGithubIssueListLimit,
@@ -109,6 +108,7 @@ import {
   updateJournalTask,
   updateJournalTaskState,
 } from "./journal";
+import { mainTabsPath } from "./main-tabs-store";
 import {
   buildMcpInstructions,
   defaultMcpTools,
@@ -140,9 +140,9 @@ import {
   fileByteRangeResponseBody,
   fileReadableStream,
   readFileTextRange,
+  type SpawnStreamExit,
   SSE_HEARTBEAT_INTERVAL_MS,
   SSE_RETRY_MS,
-  type SpawnStreamExit,
   startServer,
 } from "./runtime";
 import { DEFAULT_EXCLUDE_NAMES, normalizeGrepMax } from "./search";
@@ -166,6 +166,7 @@ import { loadAppSettingsState } from "./state-store";
 import { staticFile, WEB_ROOT } from "./static-files";
 import { errno } from "./terminal/settings-file";
 import type { ListTmuxPanesOptions } from "./tmux/panes";
+import { userSettingsPath } from "./user-settings";
 import { startWatchSupervisor, type WatchSupervisor } from "./watch-supervisor";
 import { LAUNCHED_BY_ENV } from "./worktree/open";
 import {
@@ -3522,6 +3523,10 @@ const shutdown = createProcessShutdown([
     label: "code-viewer main tabs watch stop",
     run: () => unwatchFile(mainTabsWatched),
   },
+  {
+    label: "code-viewer user settings watch stop",
+    run: () => unwatchFile(userSettingsWatched),
+  },
   { label: "code-viewer server close", run: () => server.close() },
 ]);
 
@@ -3636,6 +3641,18 @@ watchFile(
   { interval: MAIN_TABS_WATCH_INTERVAL_MS, persistent: false },
   (now, before) => {
     if (now.mtimeMs !== before.mtimeMs) sendSse("tabs", String(now.mtimeMs));
+  },
+);
+
+// 全プロジェクト共通の設定 (明暗・テーマなど) も別の窓が書く。書き換わったら
+// 画面へ知らせ、画面が取り直して明暗とテーマを当てる (app.ts の refreshLook)。
+const userSettingsWatched = userSettingsPath();
+watchFile(
+  userSettingsWatched,
+  { interval: MAIN_TABS_WATCH_INTERVAL_MS, persistent: false },
+  (now, before) => {
+    if (now.mtimeMs !== before.mtimeMs)
+      sendSse("user-settings", String(now.mtimeMs));
   },
 );
 

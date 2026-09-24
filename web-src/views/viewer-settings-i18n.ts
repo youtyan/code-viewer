@@ -5,7 +5,18 @@
 // 畳んだ中かヘルプへ回す。1 段落の長さは settings-text-length.test.ts が見る
 // (日本語 120 文字・英語 240 文字まで)。
 
+import {
+  COLOR_THEME_NAMES,
+  COLOR_THEMES,
+  type ColorTheme,
+} from "../core/color-themes";
 import type { ViewerSettingsText } from "./viewer-settings";
+
+function colorThemeNames(language: "en" | "ja"): Record<ColorTheme, string> {
+  return Object.fromEntries(
+    COLOR_THEMES.map((id) => [id, COLOR_THEME_NAMES[id][language]]),
+  ) as Record<ColorTheme, string>;
+}
 
 const RULES_EXAMPLE = `{
   "version": 1,
@@ -25,15 +36,16 @@ const RULES_EXAMPLE = `{
 export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
   en: {
     display: "Display",
-    theme: "Theme",
-    themeHelp:
-      "Applies right away. The T key switches between light and the dark theme you picked.",
+    theme: "Light or dark",
+    themeHelp: "Applies right away. The T key switches between light and dark.",
     themeNames: {
-      dark: "Dark (violet)",
-      graphite: "Dark (graphite)",
-      warm: "Dark (warm gray)",
+      dark: "Dark",
       light: "Light",
     },
+    colorTheme: "Theme",
+    colorThemeHelp:
+      "The colors, used with light or dark. Applies right away, in every window.",
+    colorThemeNames: colorThemeNames("en"),
     language: "Language",
     fileListFontSize: "UI font size",
     fileListFontSizeHelp: "Applies to everything except code.",
@@ -151,15 +163,16 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
   },
   ja: {
     display: "表示",
-    theme: "テーマ",
-    themeHelp:
-      "選ぶとすぐに変わります。T キーでライトと、選んだダークを切り替えます。",
+    theme: "明暗",
+    themeHelp: "選ぶとすぐに変わります。T キーでライトとダークを切り替えます。",
     themeNames: {
-      dark: "ダーク (紫)",
-      graphite: "ダーク (無彩色)",
-      warm: "ダーク (暖かい灰色)",
+      dark: "ダーク",
       light: "ライト",
     },
+    colorTheme: "テーマ",
+    colorThemeHelp:
+      "配色です。明暗と組み合わせて使います。選ぶとすぐに、ほかの窓にも効きます。",
+    colorThemeNames: colorThemeNames("ja"),
     language: "言語",
     fileListFontSize: "UIの文字サイズ",
     fileListFontSizeHelp: "コードの本文以外のすべてに効きます。",

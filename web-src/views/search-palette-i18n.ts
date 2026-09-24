@@ -83,7 +83,7 @@ export type SearchPaletteText = CodePreviewText & {
   // Ctrl+K に混ぜるプロジェクト・エージェント・セッション・操作 (search-palette-ui.ts の PaletteCommand)。
   searchEverything: string;
   groups: Record<
-    "projects" | "agents" | "sessions" | "files" | "actions",
+    "projects" | "agents" | "sessions" | "files" | "actions" | "themes",
     string
   >;
   footerMove: string;
@@ -94,6 +94,10 @@ export type SearchPaletteText = CodePreviewText & {
   footerSwitch: (mode: "file" | "grep") => string;
   currentProject: string;
   actions: Record<PaletteActionId, string>;
+  /** テーマの行の名前 (「テーマ」と打つと 10 個が並ぶ)。 */
+  chooseTheme: (name: string) => string;
+  /** 今のテーマの行の右に出す文字。 */
+  currentTheme: string;
 };
 
 /** パレットの Actions に並べる操作 (app.ts が実行の仕方を持つ)。 */
@@ -210,6 +214,7 @@ const EN: SearchPaletteText = {
     sessions: "Sessions",
     files: "Files",
     actions: "Actions",
+    themes: "Themes",
   },
   footerMove: "move",
   footerOpen: "open",
@@ -217,10 +222,12 @@ const EN: SearchPaletteText = {
   footerClose: "close",
   footerSwitch: (mode) => (mode === "file" ? "text search" : "file search"),
   currentProject: "This screen",
+  chooseTheme: (name) => `Choose theme: ${name}`,
+  currentTheme: "In use",
   actions: {
     "new-agent": "New agent",
     "open-settings": "Settings",
-    "toggle-theme": "Toggle theme",
+    "toggle-theme": "Toggle light / dark",
     "goto-repo": "Go to Files",
     "goto-diff": "Go to Diff",
     "goto-history": "Go to History",
@@ -332,6 +339,7 @@ const JA: SearchPaletteText = {
     sessions: "セッション",
     files: "ファイル",
     actions: "操作",
+    themes: "テーマ",
   },
   footerMove: "移動",
   footerOpen: "開く",
@@ -339,10 +347,12 @@ const JA: SearchPaletteText = {
   footerClose: "閉じる",
   footerSwitch: (mode) => (mode === "file" ? "コード検索" : "ファイル検索"),
   currentProject: "この画面",
+  chooseTheme: (name) => `テーマを選ぶ: ${name}`,
+  currentTheme: "使用中",
   actions: {
     "new-agent": "新しいエージェント",
     "open-settings": "設定",
-    "toggle-theme": "テーマ切り替え",
+    "toggle-theme": "明暗の切り替え",
     "goto-repo": "ファイルへ移る",
     "goto-diff": "差分へ移る",
     "goto-history": "履歴へ移る",
