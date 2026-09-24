@@ -32,6 +32,7 @@
 // 表示名は画面側 (i18n) が作る。ここは同一判定だけを持つ。
 
 import type { SourceLineTarget } from "./routes";
+import { isTmuxPlace, type TmuxPlace } from "./tmux";
 
 /**
  * page の種類。AppRoute の screen のうち、タブとして開く画面。repo (フォルダ
@@ -148,6 +149,12 @@ export type Layout = {
    * 届いたときにグループへ飛んでタブ列が動く。
    */
   terminalGroups?: Record<string, string>;
+  /**
+   * シェルのタブが映していた tmux の場所 (シェルの id → 場所)。入口のサーバが
+   * 起き直すとシェルは全部終わるので、画面がこの場所へ同じ id のシェルで
+   * 繋ぎ直す (app.ts の recoverShellTabs)。書くのは画面の保存 (app.ts の save)。
+   */
+  terminalTmux?: Record<string, TmuxPlace>;
 };
 
 /** 分割した直後の左の面の比。 */
@@ -1123,6 +1130,8 @@ export type SerializedLayout = {
   collapsed?: string[];
   /** シェルのタブのグループの控え (シェルの id → プロジェクトの根)。 */
   terminalGroups?: Record<string, string>;
+  /** シェルのタブが映していた tmux の場所 (シェルの id → 場所)。 */
+  terminalTmux?: Record<string, TmuxPlace>;
   panes: Array<{
     side: PaneSide;
     activeId: string | null;
@@ -1159,6 +1168,9 @@ export function serializeLayout(
     ...(layout.terminalGroups && Object.keys(layout.terminalGroups).length > 0
       ? { terminalGroups: { ...layout.terminalGroups } }
       : {}),
+    ...(layout.terminalTmux && Object.keys(layout.terminalTmux).length > 0
+      ? { terminalTmux: { ...layout.terminalTmux } }
+      : {}),
     panes: sides(layout).map((side) => {
       const pane = paneOf(layout, side) as Pane;
       return {
@@ -1179,6 +1191,29 @@ export function serializeLayout(
       };
     }),
   };
+}
+
+/**
+ * 保存する配置の terminalTmux を、開いているシェルのタブの場所だけにする。
+ * placeOf が知っている場所 (画面が覚えた今の場所) を優先し、知らなければ
+ * 配置が持っていた値 (読み戻した・別の窓が書いた場所) を残す。
+ */
+export function withTerminalTmux(
+  layout: SerializedLayout,
+  placeOf: (session: string) => TmuxPlace | undefined,
+): SerializedLayout {
+  const places: Record<string, TmuxPlace> = {};
+  for (const pane of layout.panes)
+    for (const tab of pane.tabs) {
+      if (tab.target.kind !== "terminal") continue;
+      const session = tab.target.session;
+      const place = placeOf(session) ?? layout.terminalTmux?.[session];
+      if (place) places[session] = place;
+    }
+  const { terminalTmux: _before, ...rest } = layout;
+  return Object.keys(places).length > 0
+    ? { ...rest, terminalTmux: places }
+    : rest;
 }
 
 type ParsedLayout = {
@@ -1516,12 +1551,22 @@ function parseGroupState(
   raw: Record<string, unknown>,
   layout: Layout,
 ): {
-  state: Pick<Layout, "groupFronts" | "collapsed" | "terminalGroups">;
+  state: Pick<
+    Layout,
+    "groupFronts" | "collapsed" | "terminalGroups" | "terminalTmux"
+  >;
   stale: Array<{ group: string; id: string }>;
 } {
   const problems: string[] = [];
-  const state: Pick<Layout, "groupFronts" | "collapsed" | "terminalGroups"> =
-    {};
+  const state: Pick<
+    Layout,
+    "groupFronts" | "collapsed" | "terminalGroups" | "terminalTmux"
+  > = {};
+  const open = new Set(
+    allTabs(layout).flatMap((tab) =>
+      tab.target.kind === "terminal" ? [tab.target.session] : [],
+    ),
+  );
   const stale: Array<{ group: string; id: string }> = [];
   if (raw.groupFronts !== undefined) {
     if (!isRecord(raw.groupFronts))
@@ -1555,11 +1600,6 @@ function parseGroupState(
       problems.push(`terminalGroups is ${JSON.stringify(raw.terminalGroups)}`);
     else {
       const groups: Record<string, string> = {};
-      const open = new Set(
-        allTabs(layout).flatMap((tab) =>
-          tab.target.kind === "terminal" ? [tab.target.session] : [],
-        ),
-      );
       for (const [session, root] of Object.entries(raw.terminalGroups)) {
         if (typeof root !== "string" || !root.startsWith("/"))
           problems.push(
@@ -1569,6 +1609,27 @@ function parseGroupState(
         else if (open.has(session)) groups[session] = root;
       }
       if (Object.keys(groups).length > 0) state.terminalGroups = groups;
+    }
+  }
+  if (raw.terminalTmux !== undefined) {
+    if (!isRecord(raw.terminalTmux))
+      problems.push(`terminalTmux is ${JSON.stringify(raw.terminalTmux)}`);
+    else {
+      const places: Record<string, TmuxPlace> = {};
+      for (const [session, place] of Object.entries(raw.terminalTmux)) {
+        if (!isTmuxPlace(place))
+          problems.push(
+            `terminalTmux[${JSON.stringify(session)}] is ${JSON.stringify(place)}`,
+          );
+        // 閉じたシェルの場所は読まない (次の保存で消える)。
+        else if (open.has(session))
+          places[session] = {
+            pane: place.pane,
+            session: place.session,
+            window: place.window,
+          };
+      }
+      if (Object.keys(places).length > 0) state.terminalTmux = places;
     }
   }
   if (problems.length > 0)

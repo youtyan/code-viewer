@@ -13,20 +13,33 @@
 export const SHELL_END_NOTICE_MS = 5000;
 
 /**
- * 生きているシェルの一覧を受け取るたびに、前回あって今回無いシェルのうち、
- * タブで開いているものを返す。一度も一覧で見ていないシェルは返さない
- * (開いた直後のシェルは、次の一覧に載る前に取り直しが返ることがある)。
+ * 生きているシェルの一覧を受け取るたびに、タブで開いているシェルのうち無く
+ * なったものを返す。server は一覧を返したサーバ (serverInstance)。
+ *
+ * - ended: サーバが同じで、前回あって今回無いもの (シェルが終わった。タブを
+ *   閉じる)。一度も一覧で見ていないシェルは返さない (開いた直後のシェルは、
+ *   次の一覧に載る前に取り直しが返ることがある)
+ * - lost: サーバが替わった (入口が起き直した) ときの、今回無いもの全部。
+ *   シェルはサーバと一緒に終わっただけなので閉じない (app.ts の recoverShellTabs)
  */
 export function createShellEndTracker(): {
-  update(live: readonly string[], tabbed: readonly string[]): string[];
+  update(
+    live: readonly string[],
+    tabbed: readonly string[],
+    server: string,
+  ): { ended: string[]; lost: string[] };
 } {
   let seen = new Set<string>();
+  let lastServer: string | null = null;
   return {
-    update(live, tabbed) {
+    update(live, tabbed, server) {
       const now = new Set(live);
-      const ended = tabbed.filter((id) => seen.has(id) && !now.has(id));
+      const restarted = lastServer !== null && lastServer !== server;
+      lastServer = server;
+      const gone = tabbed.filter((id) => !now.has(id));
+      const ended = restarted ? [] : gone.filter((id) => seen.has(id));
       seen = now;
-      return ended;
+      return { ended, lost: restarted ? gone : [] };
     },
   };
 }

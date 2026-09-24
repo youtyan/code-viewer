@@ -187,10 +187,11 @@ export async function buildAgentOverview(
     })),
   );
   const result: AgentPane[] = [];
-  const sessionOf = new Map<string, string>();
+  const placeOf = new Map<string, { session: string; window: number }>();
   for (const session of panes.sessions) {
     for (const window of session.windows) {
-      for (const pane of window.panes) sessionOf.set(pane.id, session.name);
+      for (const pane of window.panes)
+        placeOf.set(pane.id, { session: session.name, window: window.index });
     }
   }
   for (const pane of tmuxPanes) {
@@ -215,10 +216,14 @@ export async function buildAgentOverview(
     }
     const record = states.get(pane.id);
     const source = record?.source ?? null;
+    // tmuxPanes は同じ木を平らにしたものなので、必ず見つかる。
+    const place = placeOf.get(pane.id);
+    if (!place) throw new Error(`tmux pane ${pane.id} is not in the pane tree`);
     result.push({
       id: pane.id,
       label: pane.label,
-      session: sessionOf.get(pane.id) ?? "",
+      session: place.session,
+      window: place.window,
       title: pane.title,
       command: pane.command,
       path: pane.path,

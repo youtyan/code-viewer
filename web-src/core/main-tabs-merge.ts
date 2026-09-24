@@ -259,6 +259,13 @@ function windowState(
     ...(mine.terminalGroups ?? {}),
   }))
     if (sessions.has(session)) terminalGroups[session] = root;
+  // 映していた tmux の場所も同じ (同じシェルはこの窓の値)。
+  const terminalTmux: NonNullable<Layout["terminalTmux"]> = {};
+  for (const [session, place] of Object.entries({
+    ...(theirs.terminalTmux ?? {}),
+    ...(mine.terminalTmux ?? {}),
+  }))
+    if (sessions.has(session)) terminalTmux[session] = place;
   return {
     panes: { left, ...(right ? { right } : {}) },
     focused,
@@ -266,6 +273,7 @@ function windowState(
     ...(collapsed && collapsed.length > 0 ? { collapsed: [...collapsed] } : {}),
     ...(Object.keys(fronts).length > 0 ? { groupFronts: fronts } : {}),
     ...(Object.keys(terminalGroups).length > 0 ? { terminalGroups } : {}),
+    ...(Object.keys(terminalTmux).length > 0 ? { terminalTmux } : {}),
   };
 }
 

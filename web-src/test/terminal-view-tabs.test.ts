@@ -348,3 +348,151 @@ describe("terminal view: シェルの終わり", () => {
     expect(ended).toEqual(["shell-e2"]);
   });
 });
+
+// 入口のサーバが起き直すとシェルは全部終わる。タブは閉じずに、tmux を映して
+// いたものは同じ ID のシェルで繋ぎ直し、そうでないものは中に開き直しの案内を出す
+// (app.ts の recoverShellTabs)。
+describe("terminal view: サーバが起き直して終わったシェルのタブ", () => {
+  const PLACE = { pane: "%3", session: "sample", window: 1 };
+
+  async function showing(
+    id: string,
+    responses: Parameters<typeof setup>[0],
+  ) {
+    const session = shell(id);
+    const env = setup([
+      () => json({ available: true, sessions: [session] }),
+      ...responses,
+    ]);
+    await env.view.loadShells();
+    await env.view.showInTab(session.id, "left");
+    return { ...env, session };
+  }
+
+  test("繋ぎ直せたら、同じ ID と保存した場所を送り、映していた面を新しいシェルに付け直す", async () => {
+    const revived = { ...shell("shell-r1"), tty: "/dev/sample-new" };
+    const { view, requests } = await showing("shell-r1", [
+      () => json({ session: revived, action: "attached" }),
+    ]);
+
+    const result = await view.reviveInTab(revived.id, PLACE);
+
+    expect([
+      result,
+      requests[requests.length - 1],
+      terminalScreenState.screens[0]?.attached,
+      view.knownShells()?.sessions,
+    ]).toEqual([
+      "revived",
+      'POST /_tmux/open {"pane":"%3","revive":{"shell":"shell-r1","session":"sample","window":1}}',
+      revived,
+      [revived],
+    ]);
+  });
+
+  test("場所がもう無い (410) なら gone を返し、付け直さない", async () => {
+    const { view, session } = await showing("shell-r2", [
+      () => new Response("pane is gone", { status: 410 }),
+    ]);
+
+    await expect(view.reviveInTab(session.id, PLACE)).resolves.toBe("gone");
+    expect(terminalScreenState.screens[0]?.attached).toEqual(session);
+  });
+
+  test("それ以外の失敗は理由と本文ごと reject する", async () => {
+    const { view, session } = await showing("shell-r3", [
+      () => new Response("tmux failed", { status: 500 }),
+    ]);
+
+    await expect(view.reviveInTab(session.id, PLACE)).rejects.toThrow(
+      "Could not open this pane. (HTTP 500): tmux failed",
+    );
+  });
+
+  test("tmux を映していなかったタブは閉じず、端末の代わりに開き直しの案内を出す", async () => {
+    const { view, session } = await showing("shell-p1", []);
+
+    view.markEnded(session.id);
+
+    const pane = view.tabPaneFor("left");
+    expect([
+      pane.querySelector("h2")?.textContent,
+      pane.querySelector(".empty-action-primary")?.textContent,
+      terminalScreenState.screens[0]?.attached,
+      view.knownShells()?.sessions,
+    ]).toEqual([
+      "The shell ended when the server restarted",
+      "Reopen in a new shell",
+      null,
+      [],
+    ]);
+  });
+
+  test("ほかのタブへ移って戻っても、開き直すまで案内のまま", async () => {
+    const other = shell("shell-p3");
+    const { view, session } = await showing("shell-p2", [
+      () => json({ available: true, sessions: [other] }),
+    ]);
+    view.markEnded(session.id);
+
+    await view.showInTab(other.id, "left");
+    const shownOther = terminalScreenState.screens[0]?.attached;
+    await view.showInTab(session.id, "left");
+
+    expect([
+      shownOther,
+      view.tabPaneFor("left").querySelector("h2")?.textContent,
+    ]).toEqual([other, "The shell ended when the server restarted"]);
+  });
+
+  test("「新しいシェルで開き直す」は同じ ID で開き、タブの中に端末を戻す", async () => {
+    const reopened = { ...shell("shell-p4"), tty: "/dev/sample-new" };
+    const { view, session, requests, opened } = await showing("shell-p4", [
+      () => json({ session: reopened }),
+    ]);
+    view.markEnded(session.id);
+
+    view
+      .tabPaneFor("left")
+      .querySelector<HTMLButtonElement>(".empty-action-primary")
+      ?.click();
+    await vi.waitFor(() =>
+      expect(terminalScreenState.screens[0]?.attached).toEqual(reopened),
+    );
+
+    expect([
+      requests[requests.length - 1],
+      opened,
+      view.tabPaneFor("left").querySelector("h2"),
+    ]).toEqual([
+      'POST /_shell/create {"id":"shell-p4","cols":80,"rows":24}',
+      ["shell-p4:left"],
+      null,
+    ]);
+  });
+
+  test("開き直せなければ理由を知らせ、案内を残す", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const { view, session, openFailures } = await showing("shell-p5", [
+      () => new Response("spawn failed", { status: 500 }),
+    ]);
+    view.markEnded(session.id);
+
+    view
+      .tabPaneFor("left")
+      .querySelector<HTMLButtonElement>(".empty-action-primary")
+      ?.click();
+    await vi.waitFor(() => expect(openFailures).toHaveLength(1));
+    consoleError.mockRestore();
+
+    expect([
+      openFailures,
+      view.tabPaneFor("left").querySelector("h2")?.textContent,
+    ]).toEqual([
+      ["Error: Could not open a shell. (HTTP 500): spawn failed"],
+      "The shell ended when the server restarted",
+    ]);
+  });
+});

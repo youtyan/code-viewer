@@ -39,6 +39,14 @@ export type TerminalText = {
    */
   tabEnded: (name: string) => string;
   /**
+   * サーバが起き直してシェルが終わり、繋ぎ直す tmux の場所が無い (tmux を映して
+   * いなかった・繋ぎ直せなかった) タブ。タブは残し、中に空の状態の案内として出す。
+   */
+  shellEndedByRestart: string;
+  shellEndedByRestartHint: string;
+  /** その案内の操作: 同じタブで新しいシェルを開く。 */
+  reopenShell: string;
+  /**
    * tmux のウインドウが端末より小さく、外側を覆っている理由。shared は、同じ
    * セッションを別の端末でも開いているか。
    */
@@ -168,6 +176,10 @@ const EN: TerminalText = {
       : `The shell has exited (code ${exitCode}).`,
   shellClosed: "This shell has been closed.",
   tabEnded: (name) => `${name} has ended.`,
+  shellEndedByRestart: "The shell ended when the server restarted",
+  shellEndedByRestartHint:
+    "There is nothing to reconnect to. Open a new shell in this tab to keep working here.",
+  reopenShell: "Reopen in a new shell",
   tmuxWindowSmaller: (cols, rows, shared) =>
     shared
       ? `The tmux window is ${cols}×${rows} (sized to another terminal attached to the same session).`
@@ -264,6 +276,10 @@ const JA: TerminalText = {
       : `シェルが終了しました (終了コード ${exitCode})。`,
   shellClosed: "このシェルは閉じられました。",
   tabEnded: (name) => `${name} は終了しました`,
+  shellEndedByRestart: "サーバの再起動でシェルが終わりました",
+  shellEndedByRestartHint:
+    "繋ぎ直す先がありません。このタブで新しいシェルを開けます。",
+  reopenShell: "新しいシェルで開き直す",
   tmuxWindowSmaller: (cols, rows, shared) =>
     shared
       ? `tmux のウインドウは ${cols}×${rows} です（同じセッションを開いている別の端末の大きさに合わせています）`

@@ -13,14 +13,16 @@ import {
   formatErrorDetail,
   responseErrorMessage,
 } from "../../core/error-detail";
+import { TERMINAL_16_PATHS } from "../../core/icons";
 import type { TerminalSoftKey } from "../../core/mobile-layout";
+import { UNINTERRUPTIBLE_REQUEST_HEADER } from "../../core/network-activity";
 import type {
   ShellListResponse,
   ShellSession,
   ShellSessionId,
 } from "../../core/shell";
 import type { TerminalImageRef } from "../../core/terminal-images";
-import type { TmuxClientWindow } from "../../core/tmux";
+import type { TmuxClientWindow, TmuxPlace } from "../../core/tmux";
 import {
   clampTerminalFontSize,
   MAX_TERMINAL_FONT_SIZE,
@@ -28,6 +30,7 @@ import {
   TERMINAL_FONT_SIZE_STEP,
 } from "../../core/tmux";
 import type { ContextMenuItem } from "../context-menu";
+import { renderEmptyState } from "../empty-state";
 import { type TerminalLang, type TerminalText, terminalText } from "./i18n";
 import {
   createTerminalScreen,
@@ -102,8 +105,25 @@ export type TerminalViewHandle = {
   releaseTab(id: ShellSessionId): void;
   /** tmux ペインを、そのセッションのシェルでタブに開く。失敗はその面の箱に出す。 */
   openPaneInTab(pane: string, side: TabSide): Promise<void>;
-  /** 新しいシェルを開き、そのタブを前面に出してもらう。失敗は reject する。 */
-  createShell(side: TabSide): Promise<void>;
+  /**
+   * 新しいシェルを開き、そのタブを前面に出してもらう。失敗は reject する。
+   * id はそのタブのシェルの ID のまま開き直すとき (サーバが起き直して終わった)。
+   */
+  createShell(side: TabSide, id?: ShellSessionId): Promise<void>;
+  /**
+   * サーバが起き直して終わったシェルのタブを、同じ ID のシェルで保存した tmux の
+   * 場所へ繋ぎ直す。そのシェルを映していた面は新しいシェルを映し直す。場所が
+   * もう無い・合わない (tmux が起き直した) なら "gone"。ほかの失敗は reject する。
+   */
+  reviveInTab(
+    id: ShellSessionId,
+    place: TmuxPlace,
+  ): Promise<"revived" | "gone">;
+  /**
+   * サーバが起き直して終わった、tmux を映していなかったシェルのタブ。閉じずに、
+   * 映す面では端末の代わりに空の状態の案内と「新しいシェルで開き直す」を出す。
+   */
+  markEnded(id: ShellSessionId): void;
   /** シェルを止める。映していたタブの購読もやめる。失敗は reject する。 */
   closeShell(id: ShellSessionId): Promise<void>;
   /** シェルの一覧を取り直す。失敗は reject する (覚えている一覧は変えない)。 */
@@ -159,6 +179,16 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   let disposed = false;
   /** 「セッションを止める」で止めている最中のシェル。終わっても知らせない。 */
   const stopping = new Set<ShellSessionId>();
+  /**
+   * サーバが起き直して終わった、tmux を映していなかったシェル。開き直すまで、
+   * そのタブを映す面に案内を出す (markEnded)。
+   */
+  const ended = new Set<ShellSessionId>();
+  /** 面ごとの、タブが映すよう頼んだシェル (showInTab。タブを閉じたら null)。 */
+  const showing: Record<TabSide, ShellSessionId | null> = {
+    left: null,
+    right: null,
+  };
 
   function text(): TerminalText {
     return terminalText(deps.getLanguage());
@@ -239,7 +269,12 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   /** その面の枠 (まだ無ければ作る)。 */
   function tabSlot(side: TabSide): ScreenSlot {
     const existing = tabs[side];
-    if (existing) return existing;
+    if (existing) {
+      // 終わったシェルの案内を出していた面は枠に戻す。
+      if (existing.el.parentElement !== tabPanes[side])
+        tabPanes[side].replaceChildren(existing.el);
+      return existing;
+    }
     const created = createSlot();
     tabs[side] = created;
     tabPanes[side].replaceChildren(created.el);
@@ -301,7 +336,11 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     listGeneration += 1;
     shells = {
       available: true,
-      sessions: [...(shells?.sessions ?? []), session],
+      // 同じ ID で開き直したシェルは、前のものと入れ替える。
+      sessions: [
+        ...(shells?.sessions ?? []).filter((item) => item.id !== session.id),
+        session,
+      ],
     };
   }
 
@@ -372,7 +411,10 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     }
   }
 
-  async function createShell(side: TabSide): Promise<void> {
+  async function createShell(
+    side: TabSide,
+    id?: ShellSessionId,
+  ): Promise<void> {
     const size = tabs[side]?.screen.measure();
     const res = await deps.trackLoad(
       fetch(apiUrl("shellCreate"), {
@@ -381,7 +423,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
           ...deps.actionHeaders(),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ cols: size?.cols, rows: size?.rows }),
+        body: JSON.stringify({ id, cols: size?.cols, rows: size?.rows }),
       }),
     );
     if (res.status === 429)
@@ -427,9 +469,15 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
 
   async function showInTab(id: ShellSessionId, side: TabSide): Promise<void> {
     if (disposed) return;
+    showing[side] = id;
+    if (ended.has(id)) {
+      showEnded(side, id);
+      return;
+    }
     const myGen = ++tabGeneration[side];
     if (tabs[otherSide(side)]?.screen.getAttached()?.id === id) {
       // もう一方の面で映していたシェル (反対側へ移したタブ)。枠ごと付け替える。
+      showing[otherSide(side)] = null;
       swapSides();
       tabs[side]?.screen.focus();
       return;
@@ -457,12 +505,94 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   }
 
   function releaseTab(id: ShellSessionId): void {
+    ended.delete(id);
     for (const side of ["left", "right"] as const) {
+      if (showing[side] === id) showing[side] = null;
       const slot = tabs[side];
       if (slot?.screen.getAttached()?.id !== id) continue;
       tabGeneration[side] += 1;
       slot.screen.detach();
     }
+  }
+
+  /** 終わったシェルのタブを映す面に、端末の代わりに案内を出す。 */
+  function showEnded(side: TabSide, id: ShellSessionId): void {
+    tabGeneration[side] += 1;
+    tabs[side]?.screen.detach();
+    const current = text();
+    tabPanes[side].replaceChildren(
+      renderEmptyState({
+        icon: TERMINAL_16_PATHS,
+        title: current.shellEndedByRestart,
+        hint: current.shellEndedByRestartHint,
+        actions: [
+          {
+            label: current.reopenShell,
+            primary: true,
+            run: () => void reopenEnded(id, side),
+          },
+        ],
+      }),
+    );
+  }
+
+  /** 案内の「新しいシェルで開き直す」: 同じ ID のシェルを開き、そのタブで映す。 */
+  async function reopenEnded(id: ShellSessionId, side: TabSide): Promise<void> {
+    // 開いたシェルのタブを前面に出す (onOpenInTab) と、すぐ映しに来る。その前に外す。
+    ended.delete(id);
+    try {
+      await createShell(side, id);
+    } catch (error) {
+      ended.add(id);
+      console.error(`[code-viewer] could not reopen the shell ${id}`, error);
+      deps.onOpenFailed(formatErrorDetail(error));
+    }
+    // 前面に出しても配置が変わらなければ映しに来ない。案内を出したままの面を映し直す。
+    for (const side of ["left", "right"] as const)
+      if (showing[side] === id) void showInTab(id, side);
+  }
+
+  function markEnded(id: ShellSessionId): void {
+    ended.add(id);
+    forgetShell(id);
+    for (const side of ["left", "right"] as const)
+      if (showing[side] === id) showEnded(side, id);
+  }
+
+  async function reviveInTab(
+    id: ShellSessionId,
+    place: TmuxPlace,
+  ): Promise<"revived" | "gone"> {
+    const res = await deps.trackLoad(
+      fetch(apiUrl("tmuxOpen"), {
+        method: "POST",
+        headers: {
+          ...deps.actionHeaders(),
+          "Content-Type": "application/json",
+          // 画面の切替の取消で止めない (サーバだけがシェルを開き、タブは古いまま残る)。
+          [UNINTERRUPTIBLE_REQUEST_HEADER]: "1",
+        },
+        body: JSON.stringify({
+          pane: place.pane,
+          revive: { shell: id, session: place.session, window: place.window },
+        }),
+      }),
+    );
+    if (res.status === 410) return "gone";
+    if (!res.ok)
+      throw new Error(await responseErrorMessage(res, text().paneOpenFailed));
+    const body = (await res.json()) as { session: ShellSession };
+    if (disposed) return "revived";
+    addShell(body.session);
+    // 映していた面の購読は前のサーバで切れている (読み直した直後なら、シェルが
+    // 無いので付いていない)。新しいシェルに付け直す。
+    for (const side of ["left", "right"] as const) {
+      if (showing[side] !== id) continue;
+      const slot = tabSlot(side);
+      tabGeneration[side] += 1;
+      await slot.screen.attach(body.session);
+    }
+    return "revived";
   }
 
   return {
@@ -471,6 +601,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     releaseTab,
     openPaneInTab,
     createShell,
+    reviveInTab,
+    markEnded,
     closeShell,
     loadShells,
     knownShells: () => shells,
@@ -488,6 +620,10 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     menuItems,
     localize() {
       for (const slot of slots()) slot.screen.localize();
+      for (const side of ["left", "right"] as const) {
+        const id = showing[side];
+        if (id !== null && ended.has(id)) showEnded(side, id);
+      }
     },
     dispose() {
       disposed = true;

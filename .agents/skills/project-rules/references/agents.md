@@ -711,7 +711,7 @@ find web-src -name '*.ts' -not -path 'web-src/server/*' -not -path 'web-src/test
 | `<状態>/agent-usage/` | statusLine を包むスクリプト・claude の使用量・`failures.log` | 同上 |
 | `<状態>/projects.json` | プロジェクトの登録簿（並び・名前・色） | 同上 |
 | `<状態>/settings.json` | 全プロジェクト共通の設定 | 同上 |
-| `<状態>/main-tabs.json` | メインの面のタブの配置（全プロジェクト共通の 1 つ）。形は `{ version: 2, rev, savedAt, layout }`（`server/main-tabs-store.ts`）、配置は `core/main-tabs.ts` の `LAYOUT_VERSION` 5（タブが持ち物のプロジェクトを持つ）。書くたびに `rev` が進み、画面は前に読んだ `rev` と値を添えて書く。進んでいれば（別の窓が先に書いた）サーバが `core/main-tabs-merge.ts` で重ねて書く。各裏はこのファイルを `watchFile` で見て SSE の `tabs` を送り、画面が取り直す。前の版（`{ version: 1, projects: { <根>: { layout } }, common }`）を読んだらロックの中で 1 つの配置へ移し（`core/main-tabs-migrate.ts`。移せなかったものは場所・理由・元の値を返す）、元を `main-tabs.json.v1-<時刻>` に写す。新しい版のファイルは使わず上書きもしない。読めない配置は上書きせず、先に `POST /_state/tabs/backup` で `main-tabs.json.broken-<時刻>` へ写してから空で始める（写せなければ保存しない。理由は console.error）。`/_state/tabs` | 同上 |
+| `<状態>/main-tabs.json` | メインの面のタブの配置（全プロジェクト共通の 1 つ）。形は `{ version: 2, rev, savedAt, layout }`（`server/main-tabs-store.ts`）、配置は `core/main-tabs.ts` の `LAYOUT_VERSION` 5（タブが持ち物のプロジェクトを持つ）。シェルのタブが映していた tmux の場所 `terminalTmux` は省略できる欄なので版を上げない（13）。書くたびに `rev` が進み、画面は前に読んだ `rev` と値を添えて書く。進んでいれば（別の窓が先に書いた）サーバが `core/main-tabs-merge.ts` で重ねて書く。各裏はこのファイルを `watchFile` で見て SSE の `tabs` を送り、画面が取り直す。前の版（`{ version: 1, projects: { <根>: { layout } }, common }`）を読んだらロックの中で 1 つの配置へ移し（`core/main-tabs-migrate.ts`。移せなかったものは場所・理由・元の値を返す）、元を `main-tabs.json.v1-<時刻>` に写す。新しい版のファイルは使わず上書きもしない。読めない配置は上書きせず、先に `POST /_state/tabs/backup` で `main-tabs.json.broken-<時刻>` へ写してから空で始める（写せなければ保存しない。理由は console.error）。`/_state/tabs` | 同上 |
 | `<状態>/server-logs/` | code-viewer が起こしたサーバ・裏の出力（起動に失敗したとき・落ちたとき末尾を理由に添える） | 同上 |
 | `<状態>/entry.json`・`entry.json.start.lock` | 動いている入口の `{url, pid, token, version, started_at}` と起動の排他 | 同上 |
 | `<状態>/agent-screen-rules.json`・`agent-screen-rules.migrated` | 画面ルールの保存済み上書き（ユーザー単位）と、リポジトリから写した・保存した・戻した印 | 同上 |
@@ -928,6 +928,17 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
     ペインを前面にしただけ）: 閉じない。タブは attach でウインドウ全体を映しているので、見張りの宛先を
     その前面のペインへ移す（タブの名前もそのペインで付け直る。`list-clients` の `#{window_id}`）
   - ふつうのシェル（「＋」）で `exit`: シェルが終わる（以前はタブが残り、状態の行に理由が出ていた）
+- **入口のサーバが起き直した（`serverInstance` が替わった・読み直したらシェルが無い）ときは閉じない。**
+  シェルは入口の子なので全部終わるが、それはシェルの終わりではない（以前は `pnpm dev` の再起動のたびに
+  ターミナルのタブが全部閉じた）。見分けは `shell-ends.ts` の `createShellEndTracker`（`lost`）、扱いは
+  `app.ts` の `recoverShellTabs`:
+  - tmux を映していたタブ: 保存した場所（`main-tabs.json` の `terminalTmux`。ペイン ID・セッション名・
+    ウインドウの番号）へ、**同じ ID のシェル**で繋ぎ直す（`/_tmux/open` の `revive`）。タブの配置はシェルの
+    ID で指すので、位置・グループ・選択は変わらない。ペイン ID は tmux が起き直すと別のペインに付くので、
+    セッション名とウインドウの番号も合うときだけ繋ぐ。合わない・無いタブだけ閉じて知らせる
+  - それ以外のタブ: 残し、中に空の状態の案内と「新しいシェルで開き直す」（同じ ID で `/_shell/create`）
+  - 保存したタブにシェルが無いのが、サーバが同じまま本当に終わったのか（窓を開いていない間に `exit`・
+    detach）は、読み直した時点では分からない。同じ扱いにする
 - シェルの終わりの届き方は 2 つ。前面のタブは購読の流れの `exited`。前面でないタブは購読していないので、
   全画面共通の取り直し（`/_agent/overview` の `shells`。数秒ごと）で、前回あって今回無いシェルを拾う
   （`createShellEndTracker`。一度も一覧で見ていないシェルは閉じない。開いた直後のタブを閉じないため）

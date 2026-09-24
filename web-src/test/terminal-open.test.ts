@@ -69,6 +69,7 @@ describe("openTmuxPaneInShell", () => {
     mocks.resolvePaneSession.mockResolvedValue({
       status: "ok",
       session: "sample-session",
+      window: 2,
     });
     mocks.selectTmuxPane.mockResolvedValue({ status: "ok" });
     mocks.listTmuxClients.mockResolvedValue({ status: "ok", clients: [] });
@@ -136,7 +137,11 @@ describe("openTmuxPaneInShell", () => {
     expected,
   }) => {
     rememberSignInPane("%7", SIGN_IN);
-    mocks.resolvePaneSession.mockResolvedValue({ status: "ok", session });
+    mocks.resolvePaneSession.mockResolvedValue({
+      status: "ok",
+      session,
+      window: 0,
+    });
     mocks.writeToShellWhenReady.mockResolvedValue({ status: "ok" });
     await openTmuxPaneInShell("%7", "/sample");
     expect(mocks.rememberShellTmuxAttachment).toHaveBeenCalledWith(
@@ -189,5 +194,70 @@ describe("openTmuxPaneInShell", () => {
     expect(
       (result.error as Error & { errors: unknown[] }).errors,
     ).toStrictEqual([writeError, cleanupError]);
+  });
+
+  describe("繋ぎ直し (サーバが起き直して終わったシェルのタブ)", () => {
+    const REVIVE = {
+      shell: "shell-sample1",
+      session: "sample-session",
+      window: 2,
+    };
+
+    test("保存した場所と一致すれば、同じ ID のシェルを開いて attach を打ち込む", async () => {
+      // 同じセッションを映している別のシェルがあっても使い回さない (ID を保つ)。
+      mocks.findShellSessionForTmuxSession.mockReturnValue({
+        ...SESSION,
+        id: "shell-other",
+      });
+      mocks.writeToShellWhenReady.mockResolvedValue({ status: "ok" });
+
+      const result = await openTmuxPaneInShell("%1", "/sample", {}, REVIVE);
+
+      expect([
+        result,
+        mocks.createShellSession.mock.calls,
+        mocks.writeToShellWhenReady.mock.calls,
+      ]).toEqual([
+        { status: "ok", session: SESSION, action: "attached" },
+        [["/sample", {}, "shell-sample1"]],
+        [["shell-sample1", "attach sample pane\r"]],
+      ]);
+    });
+
+    // ペイン ID は tmux が起き直すと別のペインに付く。ID だけで繋がない。
+    test.each([
+      { name: "セッション名が違う", session: "another-session", window: 2 },
+      { name: "ウインドウの番号が違う", session: "sample-session", window: 3 },
+    ])("$name なら開かずに gone", async ({ session, window }) => {
+      const result = await openTmuxPaneInShell(
+        "%1",
+        "/sample",
+        {},
+        {
+          ...REVIVE,
+          session,
+          window,
+        },
+      );
+
+      expect([result, mocks.createShellSession.mock.calls]).toEqual([
+        { status: "gone" },
+        [],
+      ]);
+    });
+
+    test("別の窓が先に繋ぎ直していれば、そのシェルを返し attach を打ち直さない", async () => {
+      mocks.createShellSession.mockResolvedValue({
+        status: "in-use",
+        session: SESSION,
+      });
+
+      const result = await openTmuxPaneInShell("%1", "/sample", {}, REVIVE);
+
+      expect([result, mocks.writeToShellWhenReady.mock.calls]).toEqual([
+        { status: "ok", session: SESSION, action: "switched" },
+        [],
+      ]);
+    });
   });
 });

@@ -134,7 +134,7 @@ describe("watchAttachedShell", () => {
       listClients,
       resolvePane: async (pane) =>
         alive.has(pane)
-          ? { status: "ok", session: "work" }
+          ? { status: "ok", session: "work", window: 0 }
           : { status: "gone" },
       follow,
       closeShell,

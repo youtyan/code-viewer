@@ -47,6 +47,7 @@ export function agentPane(
   return {
     label: `sample:0.${over.id.slice(1)}`,
     session: "sample",
+    window: 0,
     title: "",
     command: "claude",
     path: "/work/sample",

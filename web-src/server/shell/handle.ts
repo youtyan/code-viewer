@@ -153,12 +153,26 @@ async function handleList(): Promise<Response> {
 }
 
 async function handleCreate(req: Request, cwd: string): Promise<Response> {
-  const body = await parsePostJsonBody<{ cols?: unknown; rows?: unknown }>(req);
+  const body = await parsePostJsonBody<{
+    id?: unknown;
+    cols?: unknown;
+    rows?: unknown;
+  }>(req);
   if (body instanceof Response) return body;
-  const result = await createShellSession(cwd, {
-    cols: typeof body.cols === "number" ? body.cols : undefined,
-    rows: typeof body.rows === "number" ? body.rows : undefined,
-  });
+  // id はサーバが起き直して終わったシェルのタブを、同じ ID のまま開き直すとき。
+  let id: ShellSessionId | undefined;
+  if (body.id !== undefined) {
+    if (!isShellSessionId(body.id)) return textError("invalid shell id", 400);
+    id = body.id;
+  }
+  const result = await createShellSession(
+    cwd,
+    {
+      cols: typeof body.cols === "number" ? body.cols : undefined,
+      rows: typeof body.rows === "number" ? body.rows : undefined,
+    },
+    id,
+  );
   if (result.status === "unavailable") {
     return textError(result.reason, 501);
   }

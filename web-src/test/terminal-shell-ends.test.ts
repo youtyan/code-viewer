@@ -21,49 +21,112 @@ import {
 } from "../views/terminal/shell-ends";
 
 describe("createShellEndTracker", () => {
+  // server は一覧を返したサーバ (serverInstance)。替わったら入口が起き直した。
   test.each([
     {
       name: "前回あって今回無い、タブのシェルを返す",
       rounds: [
-        { live: ["shell-a", "shell-b"], tabbed: ["shell-a", "shell-b"] },
-        { live: ["shell-b"], tabbed: ["shell-a", "shell-b"] },
+        {
+          live: ["shell-a", "shell-b"],
+          tabbed: ["shell-a", "shell-b"],
+          server: "s1",
+        },
+        { live: ["shell-b"], tabbed: ["shell-a", "shell-b"], server: "s1" },
       ],
-      expected: [[], ["shell-a"]],
+      expected: [
+        { ended: [], lost: [] },
+        { ended: ["shell-a"], lost: [] },
+      ],
     },
     {
       name: "一覧でまだ見ていないタブのシェル (開いた直後) は返さない",
       rounds: [
-        { live: ["shell-a"], tabbed: ["shell-a"] },
-        { live: ["shell-a"], tabbed: ["shell-a", "shell-new"] },
+        { live: ["shell-a"], tabbed: ["shell-a"], server: "s1" },
+        { live: ["shell-a"], tabbed: ["shell-a", "shell-new"], server: "s1" },
       ],
-      expected: [[], []],
+      expected: [
+        { ended: [], lost: [] },
+        { ended: [], lost: [] },
+      ],
     },
     {
       name: "タブで開いていないシェルが終わっても返さない",
       rounds: [
-        { live: ["shell-a", "shell-b"], tabbed: ["shell-a"] },
-        { live: ["shell-a"], tabbed: ["shell-a"] },
+        { live: ["shell-a", "shell-b"], tabbed: ["shell-a"], server: "s1" },
+        { live: ["shell-a"], tabbed: ["shell-a"], server: "s1" },
       ],
-      expected: [[], []],
+      expected: [
+        { ended: [], lost: [] },
+        { ended: [], lost: [] },
+      ],
     },
     {
       name: "同じ終わりを 2 度返さない",
       rounds: [
-        { live: ["shell-a"], tabbed: ["shell-a"] },
-        { live: [], tabbed: ["shell-a"] },
-        { live: [], tabbed: ["shell-a"] },
+        { live: ["shell-a"], tabbed: ["shell-a"], server: "s1" },
+        { live: [], tabbed: ["shell-a"], server: "s1" },
+        { live: [], tabbed: ["shell-a"], server: "s1" },
       ],
-      expected: [[], ["shell-a"], []],
+      expected: [
+        { ended: [], lost: [] },
+        { ended: ["shell-a"], lost: [] },
+        { ended: [], lost: [] },
+      ],
     },
     {
-      name: "初めての一覧では何も返さない (読み込み直後。消えたタブは起動時の片付けが閉じる)",
-      rounds: [{ live: [], tabbed: ["shell-a"] }],
-      expected: [[]],
+      name: "初めての一覧では何も返さない (読み込み直後。消えたタブは起動時に繋ぎ直す)",
+      rounds: [{ live: [], tabbed: ["shell-a"], server: "s1" }],
+      expected: [{ ended: [], lost: [] }],
+    },
+    {
+      name: "サーバが替わったら、無くなったタブのシェルを閉じる側でなく lost に返す",
+      rounds: [
+        {
+          live: ["shell-a", "shell-b"],
+          tabbed: ["shell-a", "shell-b"],
+          server: "s1",
+        },
+        { live: [], tabbed: ["shell-a", "shell-b"], server: "s2" },
+      ],
+      expected: [
+        { ended: [], lost: [] },
+        { ended: [], lost: ["shell-a", "shell-b"] },
+      ],
+    },
+    {
+      name: "サーバが替わったとき、一覧で見ていなかったタブのシェルも lost に入れ、生きているものは入れない",
+      rounds: [
+        { live: ["shell-a"], tabbed: ["shell-a"], server: "s1" },
+        {
+          live: ["shell-new"],
+          tabbed: ["shell-a", "shell-new", "shell-unseen"],
+          server: "s2",
+        },
+      ],
+      expected: [
+        { ended: [], lost: [] },
+        { ended: [], lost: ["shell-a", "shell-unseen"] },
+      ],
+    },
+    {
+      name: "替わった後のサーバでシェルが終わったら、また閉じる側に返す",
+      rounds: [
+        { live: ["shell-a"], tabbed: ["shell-a"], server: "s1" },
+        { live: ["shell-a"], tabbed: ["shell-a"], server: "s2" },
+        { live: [], tabbed: ["shell-a"], server: "s2" },
+      ],
+      expected: [
+        { ended: [], lost: [] },
+        { ended: [], lost: [] },
+        { ended: ["shell-a"], lost: [] },
+      ],
     },
   ])("$name", ({ rounds, expected }) => {
     const tracker = createShellEndTracker();
     expect(
-      rounds.map((round) => tracker.update(round.live, round.tabbed)),
+      rounds.map((round) =>
+        tracker.update(round.live, round.tabbed, round.server),
+      ),
     ).toEqual(expected);
   });
 });

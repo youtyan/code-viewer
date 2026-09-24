@@ -27,7 +27,6 @@ import {
   routePathname,
   withoutProjectPrefix,
 } from "./core/api-url";
-import { renderMarkdownPreview } from "./core/markdown-preview";
 import {
   type CatchUpReason,
   catchUpKind,
@@ -116,7 +115,13 @@ import {
   listColumnLayout,
   restoredListWidth,
 } from "./core/list-column";
-import type { PaneSide, Tab, TabTarget } from "./core/main-tabs";
+import {
+  type PaneSide,
+  type Tab,
+  type TabTarget,
+  withTerminalTmux,
+} from "./core/main-tabs";
+import { renderMarkdownPreview } from "./core/markdown-preview";
 import {
   diffLayoutFor,
   PHONE_MEDIA_QUERY,
@@ -195,7 +200,11 @@ import {
   projectRootOfPath,
   type TerminalTabProject,
 } from "./core/terminal-tab-name";
-import { clampTerminalFontSize, type TmuxClientWindow } from "./core/tmux";
+import {
+  clampTerminalFontSize,
+  type TmuxClientWindow,
+  type TmuxPlace,
+} from "./core/tmux";
 import { isToolId, type ToolId } from "./core/tools";
 import {
   type AppSettingsState,
@@ -1748,7 +1757,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         body: JSON.stringify({
           baseRev: base.rev,
           base: base.layout,
-          layout,
+          layout: withTerminalTmux(layout, (session) =>
+            TAB_TMUX_PLACES.get(session),
+          ),
         }),
       });
       if (!response.ok)
@@ -6599,17 +6610,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     rememberEarlyLook({ split });
   }
 
-  /** 保存した配置に残った、サーバにもう無いシェルのタブを閉じる。 */
-  function closeTabsOfGoneShells(): void {
+  /**
+   * 保存した配置に残った、サーバにもう無いシェルのタブを繋ぎ直す (入口のサーバが
+   * 起き直すとシェルは全部終わる。recoverShellTabs)。
+   */
+  function recoverTabsOfGoneShells(): void {
     // 読み戻した時点のタブだけを見る (この後に開いたシェルは、一覧に載る前に
-    // 取り直しが返っても閉じない)。
+    // 取り直しが返っても触らない)。
     const saved = MAIN_TABS.terminalSessions();
     TERMINAL_VIEW.loadShells().then(
       (list) => {
-        // シェルを使えないサーバ (available: false) では一覧が空。閉じない。
+        // シェルを使えないサーバ (available: false) では一覧が空。触らない。
         if (!list.available) return;
         const live = new Set(list.sessions.map((session) => session.id));
-        MAIN_TABS.closeTerminals(saved.filter((id) => !live.has(id)));
+        recoverShellTabs(saved.filter((id) => !live.has(id)));
       },
       (error: unknown) =>
         console.error(
@@ -6639,7 +6653,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       )
         setRoute(INITIAL_RIGHT_ROUTE, true);
       syncTerminalFromUrl(INITIAL_TERMINAL_PARAM);
-      closeTabsOfGoneShells();
+      recoverTabsOfGoneShells();
       // 移ってきた先で開くペイン。一度きりなので、開いたら URL から外す
       // (読み直しで開き直さない)。行き先の判定は通さない (食い違ったときに
       // 移り直しを繰り返さない)。
@@ -7066,7 +7080,17 @@ window.GdpExpandLogic = GdpExpandLogic;
       patchSettings({ terminalImageShelfCollapsed: collapsed });
     },
     onOpenInTab: (session, pane, side) => {
-      if (pane) TAB_SHELL_PANES.set(session.id, pane);
+      if (pane) {
+        TAB_SHELL_PANES.set(session.id, pane);
+        // 開いた直後はサーバがまだシェルとペインを結び付けていない
+        // (shownInShell が空)。選んだペインの場所をここで覚え、保存に載せる。
+        rememberTmuxPlace(
+          session.id,
+          AGENT_MONITOR.snapshot().overview?.panes.find(
+            (item) => item.id === pane,
+          ),
+        );
+      }
       MAIN_TABS.openTerminal(session.id, side);
     },
     onShellEnded: (id) => closeEndedTerminal(id),
@@ -8371,6 +8395,65 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 「Shell 2」になる。知らせには終わったもの (エージェント) の名前を出す。
    */
   const TAB_LAST_LABELS = new Map<string, string>();
+
+  /**
+   * タブのシェルが映していた tmux の場所 (保存する。core/main-tabs.ts の
+   * terminalTmux)。入口のサーバが起き直すとシェルは全部終わるので、この場所へ
+   * 同じ ID のシェルで繋ぎ直す (recoverShellTabs)。覚えるのはサーバが結び付けた
+   * ペイン (shownInShell) と、タブで開いたときに選んだペインだけ。TAB_SHELL_PANES
+   * からは覚えない: tmux が起き直すと同じ `%0` が別のペインに付く。消すのは
+   * タブを閉じたとき (保存に載せない)。
+   */
+  const TAB_TMUX_PLACES = new Map<string, TmuxPlace>();
+
+  function rememberTmuxPlace(
+    session: string,
+    pane: AgentPane | undefined,
+  ): void {
+    if (pane)
+      TAB_TMUX_PLACES.set(session, {
+        pane: pane.id,
+        session: pane.session,
+        window: pane.window,
+      });
+  }
+
+  /**
+   * サーバが替わって (入口が起き直した・読み直した) シェルが無くなったタブ。
+   * 閉じずに、tmux を映していたタブは同じ ID のシェルで同じ場所へ繋ぎ直す
+   * (タブの位置・グループ・選択はシェルの ID で決まるので変わらない)。場所が
+   * もう無い・合わないタブだけ閉じて知らせる。tmux を映していなかったタブは
+   * 残し、中に「新しいシェルで開き直す」を出す。サーバが同じままシェルが
+   * 終わったときは、今までどおり closeEndedTerminal が閉じる。
+   */
+  function recoverShellTabs(sessions: readonly string[]): void {
+    const saved = MAIN_TABS.layout().terminalTmux;
+    for (const session of sessions) {
+      // 覚えていなければ保存した値 (読み直した直後)。
+      const place = TAB_TMUX_PLACES.get(session) ?? saved?.[session];
+      if (!place) {
+        TERMINAL_VIEW.markEnded(session);
+        continue;
+      }
+      // 繋ぎ直すまでの名前付けと、同じペインを開いたときの重なりの判定用。
+      TAB_SHELL_PANES.set(session, place.pane);
+      TERMINAL_VIEW.reviveInTab(session, place).then(
+        (result) => {
+          if (result === "gone") closeEndedTerminal(session);
+        },
+        (error: unknown) => {
+          console.error(
+            `[code-viewer] could not reconnect the terminal tab of ${session} to tmux ${JSON.stringify(place)}`,
+            error,
+          );
+          TERMINAL_NOTICE.show(
+            `${terminalText(STATE.language).paneOpenFailed}\n${formatErrorDetail(error)}`,
+          );
+          TERMINAL_VIEW.markEnded(session);
+        },
+      );
+    }
+  }
   /** シェルごとの、中の tmux の端末とウインドウの大きさ (全画面共通の取り直し)。 */
   let TMUX_WINDOWS = new Map<string, TmuxClientWindow | null>();
   /** 前面でないタブのシェルの終わりを、取り直しの一覧から拾う。 */
@@ -8387,6 +8470,7 @@ window.GdpExpandLogic = GdpExpandLogic;
    */
   function closeEndedTerminal(session: string): void {
     TAB_SHELL_PANES.delete(session);
+    TAB_TMUX_PLACES.delete(session);
     if (!MAIN_TABS.hasTerminal(session)) {
       TAB_LAST_LABELS.delete(session);
       return;
@@ -8945,6 +9029,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     // ペインに付く (ログインのウィンドウを閉じた後の最初の起動がそう)。
     // 残すと、新しいエージェントを閉じ終わった古いシェルのタブで開いてしまう。
     const overview = AGENT_MONITOR.snapshot().overview;
+    // タブのシェルが映している tmux の場所を覚える (入口が起き直した後に繋ぎ直す)。
+    for (const pane of overview?.panes ?? [])
+      if (pane.shownInShell && MAIN_TABS.hasTerminal(pane.shownInShell))
+        rememberTmuxPlace(pane.shownInShell, pane);
     // 前面でないタブのシェルは終わりが届かない。一覧から消えたら閉じる。
     // ペインとの対応を捨てる下の処理より先に、覚えている名前で知らせる。
     // shells の無い古い版のサーバでは何もしない。
@@ -8952,11 +9040,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       TMUX_WINDOWS = new Map(
         overview.shells.map((shell) => [shell.id, shell.window]),
       );
-      const ended = SHELL_ENDS.update(
+      const { ended, lost } = SHELL_ENDS.update(
         overview.shells.map((shell) => shell.id),
         MAIN_TABS.terminalSessions(),
+        overview.serverInstance,
       );
       for (const session of ended) closeEndedTerminal(session);
+      // 入口のサーバが起き直した: シェルはサーバと一緒に終わった。閉じずに繋ぎ直す。
+      recoverShellTabs(lost);
     }
     if (overview && !overview.tmux.error) {
       const live = new Set(overview.panes.map((pane) => pane.id));

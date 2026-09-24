@@ -65,6 +65,8 @@ export type AgentPane = {
   /** tmux 上の場所 (`session:window.pane`)。 */
   label: string;
   session: string;
+  /** ウインドウの番号 (`#{window_index}`)。タブが映していた場所として保存する (TmuxPlace)。 */
+  window: number;
   /** ペインのタイトル。AI CLI は作業内容をここに出す。 */
   title: string;
   command: string;

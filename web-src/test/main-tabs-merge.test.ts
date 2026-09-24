@@ -61,6 +61,24 @@ function show(layout: Layout): string {
     : one(layout.panes.left);
 }
 
+describe("mergeLayouts: シェルのタブが映していた tmux の場所", () => {
+  test("両方の窓の場所を合わせ (同じシェルはこの窓の値)、閉じたシェルの場所は落とす", () => {
+    const place = (pane: string) => ({ pane, session: "sample", window: 0 });
+    const merged = mergeLayouts(
+      layoutOf("[x] $s $t $u"),
+      {
+        ...layoutOf("[x] $s $t"),
+        terminalTmux: { s: place("%1"), u: place("%9") },
+      },
+      {
+        ...layoutOf("[x] $s $t"),
+        terminalTmux: { s: place("%2"), t: place("%3"), u: place("%8") },
+      },
+    ).layout;
+    expect(merged.terminalTmux).toEqual({ s: place("%1"), t: place("%3") });
+  });
+});
+
 describe("mergeLayouts", () => {
   test.each([
     {

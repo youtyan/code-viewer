@@ -411,6 +411,40 @@ describe("buildAgentOverview", () => {
     ).toEqual([["find_server", "/work/another-repo"]]);
   });
 
+  // タブが映していた tmux の場所 (セッション名とウインドウの番号) として保存する。
+  test("ペインにセッション名とウインドウの番号を付ける", async () => {
+    const [first, second] =
+      panesResponse([
+        { id: "%1", path: "/work/notes", command: "zsh" },
+        { id: "%5", path: "/work/notes", command: "zsh" },
+      ]).sessions[0]?.windows[0]?.panes ?? [];
+    if (!first || !second) throw new Error("the fixture has two panes");
+    const overview = await buildAgentOverview(
+      deps({
+        listPanes: async () => ({
+          available: true,
+          running: true,
+          sessions: [
+            {
+              name: "sample-session",
+              attached: false,
+              windows: [
+                { index: 0, name: "main", active: true, panes: [first] },
+                { index: 3, name: "logs", active: false, panes: [second] },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+    expect(
+      overview.panes.map((item) => [item.id, item.session, item.window]),
+    ).toEqual([
+      ["%1", "sample-session", 0],
+      ["%5", "sample-session", 3],
+    ]);
+  });
+
   test("このサーバのシェルが映しているペインに、そのシェルの ID を付ける", async () => {
     const overview = await buildAgentOverview(
       deps({
