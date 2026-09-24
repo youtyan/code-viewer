@@ -217,6 +217,10 @@ Requires Node.js 20 or newer. Development uses
   with a copy button. Missing windows are not
   invented; when one config directory holds records from two accounts, the card
   keeps the newest values and adds a Mixed note that says how to separate them.
+  The same steps run from the terminal with `code-viewer accounts`
+  (`list`, `plan`, `create`, `register`, `login`, `wait`, `rename`, `remove`),
+  so an AI agent with the bundled `code-viewer-accounts` skill can add accounts
+  for you; you still approve each sign-in in your browser.
 - Register your projects so they stay in the Agents list (in your order) even
   with no agent running, and switch between them from the project name at
   the head of the list column (`p`) or from the left sidebar on any screen. One
@@ -399,7 +403,9 @@ Requires Node.js 20 or newer. Development uses
    bottom bar and the tab title; **Enable notifications** on the Agents screen
    turns on desktop notifications.
 4. **Settings → Accounts** signs in (the default `~/.claude` and `~/.codex`
-   are created on the first sign-in or start) and adds more accounts.
+   are created on the first sign-in or start) and adds more accounts. Or ask
+   your AI agent to add them (`code-viewer skill install`, then "add a claude
+   account"); it runs `code-viewer accounts` and you approve each sign-in.
 5. When something does not work, `code-viewer doctor` lists what is missing
    (git, tmux, an old code-viewer still running, …) and how to fix it.
 
@@ -1074,9 +1080,9 @@ stdout and adds `text truncated` to stderr when the server flagged
 truncation. `--json` always emits the full server response envelope.
 
 AI agents who don't yet know which subcommand they need can run
-`code-viewer agent-help` once. It prints a short index of the eight
+`code-viewer agent-help` once. It prints a short index of the ten
 AI-facing entry points (`status`, `query`, `annotate`, `journal`, `search`,
-`file`, `skill`, `doctor`) with the exact `code-viewer <name>
+`file`, `terminal`, `accounts`, `skill`, `doctor`) with the exact `code-viewer <name>
 agent-help` command for each full guide. The index runs without any
 preflight, so it works even before SQLite or a running server is set
 up.
@@ -1359,12 +1365,13 @@ write concise Markdown explanations, and how to install the bundled agent skill.
 
 ### Agent Skill
 
-The package bundles four [Agent Skills](https://agentskills.io)
-(the SKILL.md open standard) — `code-viewer-annotate`,
+The package bundles five [Agent Skills](https://agentskills.io)
+(the SKILL.md open standard) — `code-viewer-accounts`, `code-viewer-annotate`,
 `code-viewer-journal`, `code-viewer-query`, and `code-viewer-snapshot` —
-that teach AI coding agents when and how to use `annotate`, Work Log task
-queues, read-only `query`, and snapshot / diff workflows. A single
-`skill install` copies all four into the selected agent directories:
+that teach AI coding agents when and how to add and sign in claude / codex
+accounts, use `annotate`, Work Log task queues, read-only `query`, and
+snapshot / diff workflows. A single `skill install` copies all five into the
+selected agent directories:
 
 ```sh
 npx -y @youtyan/code-viewer skill install                       # Claude Code (.claude/skills/)

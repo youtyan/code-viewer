@@ -314,13 +314,14 @@ Usage:
   code-viewer search code --term <text> [--ref <ref>] [--path <p>...] [--regex] [--max <n>] [--json] [--bin git=<path>]
   code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json] [--bin git=<path>]
   code-viewer file <blame|history|show|diff> --path <p> [--ref <ref>] [...subcommand options] [--json] [--bin git=<path>]
+  code-viewer accounts <list|plan|create|register|login|wait|rename|remove> [options]
   code-viewer skill install [--agent <list>] [--global]
   code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|rg|docker|gh|tmux>=<path>]
   code-viewer agent-help
   code-viewer help
 
 AI-agent index (start here):  code-viewer agent-help
-Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search|file|terminal|skill|doctor> agent-help
+Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search|file|terminal|accounts|skill|doctor> agent-help
 
 One code-viewer serves every project on one port. Running it again in another
 repository adds that repository to the running one and prints its URL.

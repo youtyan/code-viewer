@@ -1,13 +1,14 @@
 // Top-level `code-viewer agent-help` aggregator. Lets an AI coding agent
 // discover every AI-facing subcommand guide (status / query / annotate /
-// journal / search / file / skill / doctor) by running ONE command, instead of
-// guessing which subcommand to agent-help into first.
+// journal / search / file / terminal / accounts / skill / doctor) by running
+// ONE command, instead of guessing which subcommand to agent-help into first.
 //
 // Implementation rule: we MUST NOT copy any text from the subcommand guides.
 // The signature line of each *_AGENT_HELP is imported and rendered through
 // firstLine() so that any rename in the underlying constant flows here
 // automatically and nothing drifts.
 
+import { ACCOUNTS_AGENT_HELP } from "./accounts-cli";
 import { ANNOTATE_AGENT_HELP } from "./annotate-cli";
 import { DOCTOR_AGENT_HELP } from "./doctor-agent-help";
 import { FILE_AGENT_HELP } from "./file-cli";
@@ -27,6 +28,7 @@ export type AgentGuideEntry = {
     | "search"
     | "file"
     | "terminal"
+    | "accounts"
     | "skill"
     | "doctor";
   signature: string;
@@ -78,6 +80,11 @@ export const AGENT_GUIDES: readonly AgentGuideEntry[] = [
     name: "terminal",
     signature: firstLine(TERMINAL_AGENT_HELP),
     rerun: "code-viewer terminal agent-help",
+  },
+  {
+    name: "accounts",
+    signature: firstLine(ACCOUNTS_AGENT_HELP),
+    rerun: "code-viewer accounts agent-help",
   },
   {
     name: "skill",

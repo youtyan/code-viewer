@@ -53,6 +53,7 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 | `server/terminal/overview.ts` | `/_agent/overview`。ペイン・プロジェクト・サーバ・アカウントを 1 つの応答にまとめる |
 | `server/terminal/hooks.ts`・`hook-report.ts`・`statusline.ts`・`settings-file.ts` | フック・statusLine の入れ外しと、フックからの申告 |
 | `server/accounts/` | アカウントの登録簿・プロセスの環境変数・ログイン状態・使用量・起動 |
+| `server/accounts-cli.ts`・`skills/code-viewer-accounts/` | `code-viewer accounts`（AI が利用者の代わりにアカウントを作る・ログインを始める・名前を変える・外す）と、それを教える配布スキル |
 | `server/projects/`・`server/user-settings.ts` | プロジェクトの登録簿・開く・止める、全プロジェクト共通の設定 |
 | `server/terminal/handle.ts` | `/_agent/` の振り分け表（アカウント・プロジェクトの経路もここに載っている） |
 | `server/entry/` | 入口のサーバ。`/p/<鍵>/…` の取り次ぎ・裏のプロセスの起動と本人確認・`entry.json` |
@@ -450,6 +451,20 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 - 別の登録アカウントを「既定」にする操作は**作らない**（決定）。「既定」は選べる属性ではなく、
   環境変数を渡さない `~/.claude` / `~/.codex` という固定の経路
 
+### CLI（`code-viewer accounts`）
+
+- **画面と同じ入口（`/_agent/accounts`・`/_agent/accounts/plan`・`/_agent/accounts/login`）を
+  叩くだけ。** 共有の分類・名前・設定ディレクトリの規則を CLI に写さない（写すとサーバと
+  ずれる。サーバが最後の検査を持つ）。`create` は計画を読み、`defaultShareSelection` と
+  `--share` で指定したものを渡す
+- 相手は入口のサーバ（`ensureAgentServerUrl`。`terminal` と同じ）
+- `wait` は `?login=refresh&account=<id>` を数秒おきに訊き直すだけ。ログインの承認は
+  利用者がブラウザで行い、**CLI もスキルも認証情報に触れない**
+- 引数は「そのサブコマンドのものでないオプション」を弾く（`parseAccountsArgs`）。AI が
+  綴りや置き場所を間違えたとき、頼んだものと違うアカウントを黙って作らないため
+- サブコマンドやオプションを変えたら `skills/code-viewer-accounts/SKILL.md` の例も直す
+  （`accounts-cli.test.ts` が例を全部パースし、件数も数える）
+
 ### プロセスの環境変数（`server/accounts/process-env.ts`）
 
 一覧の行のアカウントは、ペインのエージェントのプロセスの `CLAUDE_CONFIG_DIR` / `CODEX_HOME`
@@ -812,7 +827,7 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 |---|---|
 | 使っていない裏の自動停止 | 入った（7）。止めるまでの時間は CLI の `--idle-stop` だけで、設定画面には出していない。入口を起動し直すと数え直す（前の入口が数えていた時間は引き継がない）ので、拾い直した裏はそこから `--idle-stop` 秒後に止まる |
 | 未読 | サーバのメモリ（3）。サーバの再起動では消える |
-| アカウントの追加のときの名前の重なり | 名前の変更は同じ種類の重なりと既定の名前を断るが、追加はまだ見ていない（5 の登録・削除・表示名）。既定の付け替えは作らないと決めた |
+| アカウントの追加のときの名前の重なり | 名前の変更は同じ種類の重なりと既定の名前を断るが、追加はまだ見ていない（5 の登録・削除・表示名）。`code-viewer accounts` のスキルとヘルプは「ほかと重ならない名前を選ぶ」と AI に言うだけで、断るのはサーバの仕事のまま。既定の付け替えは作らないと決めた |
 | 起動時に `--settings` でフックを渡す | 作っていない。設定ファイルが書けない人向けの別の入れ方になりうる |
 | tmux の巡回を 1 本にまとめる | 入口の下では入口の 1 本だけ。`--standalone` と古い版が並ぶ間はそれぞれが巡回する（見られていないサーバを遅くする仕組みで抑える） |
 | 前置きの無い古いブックマーク | 最後に開いたプロジェクトへ転送するので、別のプロジェクトを最後に開いていればそちらで開く |

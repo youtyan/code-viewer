@@ -806,7 +806,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "Agent Skill",
         title: "Agent Skill Setup",
         intro:
-          "The package bundles four skills — code-viewer-annotate, code-viewer-journal, code-viewer-query, and code-viewer-snapshot — so AI agents know when and how to create browser walkthroughs, manage Work Log task queues, run read-only queries, and capture snapshot / diff sessions. A single skill install command copies all four into the selected agent directories.",
+          "The package bundles five skills — code-viewer-accounts, code-viewer-annotate, code-viewer-journal, code-viewer-query, and code-viewer-snapshot — so AI agents know when and how to add and sign in claude / codex accounts, create browser walkthroughs, manage Work Log task queues, run read-only queries, and capture snapshot / diff sessions. A single skill install command copies all five into the selected agent directories.",
         groups: [
           {
             title: "Install the skills",
@@ -1728,7 +1728,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "スキル登録",
         title: "Agent Skill の登録",
         intro:
-          "このパッケージには 4 つのスキル (code-viewer-annotate / code-viewer-journal / code-viewer-query / code-viewer-snapshot) が同梱されており、AI エージェントに annotate でのウォークスルー、Work Log タスク管理、read-only な query、スナップショット / 差分の使い分けを教えます。skill install を 1 回叩くと、選んだエージェントすべてに 4 スキルがコピーされます。",
+          "このパッケージには 5 つのスキル (code-viewer-accounts / code-viewer-annotate / code-viewer-journal / code-viewer-query / code-viewer-snapshot) が同梱されており、AI エージェントに claude / codex のアカウントの追加とログイン、annotate でのウォークスルー、Work Log タスク管理、read-only な query、スナップショット / 差分の使い分けを教えます。skill install を 1 回叩くと、選んだエージェントすべてに 5 スキルがコピーされます。",
         groups: [
           {
             title: "スキルをインストールする",
