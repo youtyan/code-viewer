@@ -1023,14 +1023,77 @@ export function launchCommandLine(
   configDir: string | null,
   command: string,
   home: string,
+  args: readonly string[] = [],
 ): string {
-  if (configDir === null) return command;
+  const line = [command, ...args.map(shellQuoteForDisplay)].join(" ");
+  if (configDir === null) return line;
   const short = abbreviateHome(configDir, home);
   const value =
     short.startsWith("~/") && SHELL_SAFE_WORD.test(short.slice(2))
       ? short
       : shellQuoteForDisplay(configDir);
-  return `${ACCOUNT_ENV[agent]}=${value} ${command}`;
+  return `${ACCOUNT_ENV[agent]}=${value} ${line}`;
+}
+
+/** 引き継ぎの指示文の言語 (利用者の画面の言語)。 */
+export type HandoffLanguage = "en" | "ja";
+
+export function isHandoffLanguage(value: unknown): value is HandoffLanguage {
+  return value === "en" || value === "ja";
+}
+
+/** 指示文に入れる前の担当のアカウント名の上限 (表示名の上限より長くとる)。 */
+export const MAX_HANDOFF_ACCOUNT_LABEL = 80;
+
+/** 前の担当。指示文に入れるものだけ。 */
+export type HandoffFrom = {
+  agent: AccountAgent;
+  /** アカウントの表示名 (既定なら画面の言語の Default / 既定)。 */
+  account: string;
+  /** フックが渡した会話記録のファイル (core/agent-state.ts の AgentConversation)。 */
+  transcriptPath: string;
+};
+
+/**
+ * 「別のアカウントで続ける」で、次の担当に最初の指示として渡す文。記録の
+ * 中身を code-viewer が読んで要約することはしない (書式が公式に約束されて
+ * いない)。読むのは次の担当のエージェント自身。
+ */
+export function handoffPrompt(
+  language: HandoffLanguage,
+  from: HandoffFrom,
+): string {
+  return language === "ja"
+    ? `前の担当（${from.agent}・${from.account}）の作業を引き継いでください。前の担当の会話記録は ${from.transcriptPath}（JSONL）にあります。最後の依頼と、どこまで進んだかを読んで、続きをやってください。わからないことは、作業を始める前に聞いてください。`
+    : `Take over the work of the previous agent (${from.agent} · ${from.account}). Its conversation log is at ${from.transcriptPath} (JSONL). Read the last request and how far it got, then continue the work. If anything is unclear, ask before you start.`;
+}
+
+/** 会話記録のファイルがあるディレクトリ。 */
+export function transcriptDir(transcriptPath: string): string {
+  const cut = transcriptPath.lastIndexOf("/");
+  return cut <= 0 ? "/" : transcriptPath.slice(0, cut);
+}
+
+/**
+ * 引き継ぎで起動コマンドの後ろに足す引数。最初の指示は引数で渡す
+ * (send-keys で打ち込まない。6 節)。
+ *
+ * - claude: 作業フォルダの外のファイルを読むには許可が要るので、記録の
+ *   ディレクトリを `--add-dir` で足す (公式の CLI reference)。指示を先に
+ *   置く。`--add-dir` は値を複数とるので、後ろに置いた指示をディレクトリと
+ *   して読んでしまう
+ * - codex: `--add-dir` は書き込みの許可を足すもの (公式の CLI reference) で、
+ *   読むだけの記録には強すぎるので付けない。既定のサンドボックス
+ *   (workspace-write / read-only) は作業フォルダの外も読める
+ */
+export function handoffArgs(
+  agent: AccountAgent,
+  prompt: string,
+  transcriptPath: string,
+): string[] {
+  return agent === "claude"
+    ? [prompt, "--add-dir", transcriptDir(transcriptPath)]
+    : [prompt];
 }
 
 /** tmux のセッション名として使える形 (`.` と `:` は tmux の区切り)。 */

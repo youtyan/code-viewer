@@ -9,6 +9,7 @@
 // 持つ点だけが違う。
 
 import type {
+  AgentConversation,
   AgentEvent,
   AgentState,
   AgentStateRecord,
@@ -99,6 +100,8 @@ export type RecordAgentStateInput = {
   note?: string;
   /** フックが名乗った種類。送られてこなければ前の値を残す。 */
   agent?: ReportedAgent;
+  /** フックが渡した会話の場所。送られてこなければ前の値を残す。 */
+  conversation?: AgentConversation;
 };
 
 /**
@@ -177,6 +180,12 @@ export function recordAgentState(
   const ended =
     input.source === "hook" ? input.event === "exit" : previous?.ended;
   if (ended) record.ended = true;
+  // 会話の場所も申告だけが決める。終わったセッションの場所は持ち越さない
+  // (同じペインで次に動くものの会話ではない)。
+  const conversation = ended
+    ? undefined
+    : (input.conversation ?? previous?.conversation);
+  if (conversation) record.conversation = conversation;
   if (previous?.state !== next) {
     noteAgentStateChange(key, previous?.state, next);
   }

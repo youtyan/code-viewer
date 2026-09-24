@@ -248,6 +248,9 @@ export async function buildAgentOverview(
             reason: "the account of this pane was not resolved",
           })
         : null,
+      ...(record?.conversation && !record.ended
+        ? { conversation: record.conversation }
+        : {}),
     });
   }
 

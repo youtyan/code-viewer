@@ -63,6 +63,12 @@ export type AgentsText = {
   openPaneOpposite: string;
   /** サイドバーの行の説明に添える、修飾キーの案内。 */
   openPaneOppositeHint: string;
+  /** 行・タブの右クリックのメニュー: 別のアカウントで続ける (views/agents/handoff.ts)。 */
+  handoff: string;
+  handoffTitle: string;
+  /** 会話記録の場所が分からないとき。押せない項目の下に出す、フックの案内。 */
+  handoffNeedsHooks: string;
+  handoffNeedsHooksTitle: string;
   openServer: string;
   openServerTitle: (url: string) => string;
   currentServer: string;
@@ -465,6 +471,12 @@ const EN: AgentsText = {
   openPane: "Open in a tab",
   openPaneOpposite: "Open in the opposite pane",
   openPaneOppositeHint: "Alt+click: open in the opposite pane",
+  handoff: "Continue with another account…",
+  handoffTitle:
+    "Start claude or codex with another account in a new window of the same tmux session, and have it read this agent's conversation log and continue",
+  handoffNeedsHooks: "Needs the agent hooks — show how to install",
+  handoffNeedsHooksTitle:
+    "The hooks tell code-viewer where the conversation log is. After installing them, send the agent one message.",
   openServer: "Open",
   openServerTitle: (url) =>
     `Open the code-viewer running for this project (${url})`,
@@ -601,6 +613,12 @@ const JA: AgentsText = {
   openPane: "タブで開く",
   openPaneOpposite: "反対の面で開く",
   openPaneOppositeHint: "Alt+クリック: 反対の面で開く",
+  handoff: "別のアカウントで続ける…",
+  handoffTitle:
+    "同じ tmux のセッションの新しいウィンドウで、別のアカウントの claude か codex を起動し、このエージェントの会話記録を読んで続きをやらせます",
+  handoffNeedsHooks: "フックを入れると使えます（入れ方を見る）",
+  handoffNeedsHooksTitle:
+    "会話記録の場所はフックから受け取ります。入れた後、そのエージェントに一度話しかけると使えます。",
   openServer: "開く",
   openServerTitle: (url) =>
     `このプロジェクトを開いている code-viewer へ移動 (${url})`,

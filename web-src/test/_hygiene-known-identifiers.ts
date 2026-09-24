@@ -218,6 +218,7 @@ export const KNOWN_SNAKE_CASE_IDENTIFIERS: readonly string[] = [
   "title_requires_input",
   "title_spinner",
   "token_count",
+  "transcript_path",
   "transcript_view",
   "ttable_comment",
   "ttable_type",

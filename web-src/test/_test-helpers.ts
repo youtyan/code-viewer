@@ -11,8 +11,10 @@
 // - agentPane(over): エージェントのペインの偽データ (エージェント系の 8 つの
 //   テストファイルの 9 か所が全欄を書き写していた。AgentPane に欄が増えたら
 //   ここだけ直す)
+// - tmuxPanes(ids, over): tmux のペイン一覧の偽データ (1 セッション・1 ウィンドウ)
 
 import type { AgentPane } from "../core/agent-overview";
+import type { TmuxPanesResponse } from "../core/tmux";
 import type { DiffMeta, FileMeta } from "../core/types";
 
 // 同期・非同期どちらの throw も拾う。呼び出しが投げなければテストを失敗させる。
@@ -37,6 +39,50 @@ export function makeDiffMeta(
       deletions: files.reduce((sum, f) => sum + (f.deletions || 0), 0),
     },
     ...overrides,
+  };
+}
+
+type TmuxPaneFixture =
+  TmuxPanesResponse["sessions"][number]["windows"][number]["panes"][number];
+
+/**
+ * sample-session の 1 つのウィンドウに ids のペインを並べた一覧。over は全部の
+ * ペインに重ねる欄 (既定は /work/sample の codex)。
+ */
+export function tmuxPanes(
+  ids: readonly string[],
+  over: Partial<TmuxPaneFixture> = {},
+): TmuxPanesResponse {
+  return {
+    available: true,
+    running: true,
+    sessions: [
+      {
+        name: "sample-session",
+        attached: false,
+        windows: [
+          {
+            index: 0,
+            name: "main",
+            active: true,
+            panes: ids.map((id, index) => ({
+              id,
+              label: `sample-session:0.${index}`,
+              paneIndex: index,
+              title: "",
+              command: "codex",
+              path: "/work/sample",
+              pid: 1000 + index,
+              width: 80,
+              height: 24,
+              active: index === 0,
+              inRepo: true,
+              ...over,
+            })),
+          },
+        ],
+      },
+    ],
   };
 }
 

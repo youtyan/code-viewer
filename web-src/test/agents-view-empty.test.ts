@@ -103,6 +103,14 @@ async function mountBoard(
     launch: () => {
       calls.push("launch");
     },
+    handoff: {
+      handoff: (pane) => {
+        calls.push(`handoff:${pane.id}`);
+      },
+      openHookHelp: () => {
+        calls.push("hook-help");
+      },
+    },
     onVisibilityChange: () => undefined,
     projects: actions,
     preview,
@@ -240,5 +248,60 @@ describe("the board and stopped projects", () => {
       hidden: false,
       names: ["sample-lib"],
     });
+  });
+});
+
+// 行の右クリックのメニュー (左のサイドバーの行と同じ項目。有効・無効の表は
+// agents-sidebar.test.ts)。このファイルの mountBoard を使い回す。
+describe("the board row context menu", () => {
+  test.each([
+    {
+      name: "会話記録の場所があれば引き継げる",
+      conversation: {
+        sessionId: "abc123",
+        transcriptPath: "/home/sample/log/sample.jsonl",
+        cwd: "/work/sample",
+      },
+      labels: [
+        "Open in a tab",
+        "Open in the opposite pane",
+        "Continue with another account…",
+      ],
+      click: "Continue with another account…",
+      calls: ["handoff:%1"],
+    },
+    {
+      name: "フックが無ければ入れ方へ",
+      conversation: undefined,
+      labels: [
+        "Open in a tab",
+        "Open in the opposite pane",
+        "Continue with another account…",
+        "Needs the agent hooks — show how to install",
+      ],
+      click: "Needs the agent hooks — show how to install",
+      calls: ["hook-help"],
+    },
+  ])("$name", async ({ conversation, labels, click, calls: expected }) => {
+    const { calls } = await mountBoard([
+      agentPane({ id: "%1", state: "waiting", conversation }),
+    ]);
+    const row = document.querySelector<HTMLElement>(".agents-row");
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+    });
+    row?.dispatchEvent(event);
+    const items = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        ".gdp-context-menu button",
+      ),
+    ];
+    expect([
+      event.defaultPrevented,
+      items.map((item) => item.textContent),
+    ]).toEqual([true, labels]);
+    items.find((item) => item.textContent === click)?.click();
+    expect(calls).toEqual(expected);
   });
 });

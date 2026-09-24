@@ -100,9 +100,13 @@ function setup(
     onNewTab: (side, anchor) =>
       calls.push(`new:${side}:${anchor.getAttribute("aria-label")}`),
     stopTerminal: (session) => calls.push(`stop:${session}`),
-    terminalMenuItems: () => [
-      { label: "Larger text (13)", onSelect: () => calls.push("larger") },
-    ],
+    // session: そのタブのシェル (映しているエージェントの項目を足すため)。
+    terminalMenuItems: (session) => {
+      calls.push(`menu:${session}`);
+      return [
+        { label: "Larger text (13)", onSelect: () => calls.push("larger") },
+      ];
+    },
     loadSaved: async () => ({
       layout: await loadSaved(),
       rev: 1,
@@ -1566,7 +1570,7 @@ function menuLabels(): string[] {
 }
 
 describe("main tabs view: ターミナルのタブ", () => {
-  test("右クリックに端末の操作と「セッションを止める」が並び、止めるはそのシェルで呼ぶ", async () => {
+  test("右クリックに端末の操作と「セッションを止める」が並び、どちらもそのシェルで呼ぶ", async () => {
     const { handle, mount, calls } = setup(async () => null);
     await handle.restore();
     handle.openTerminal("shell-a1");
@@ -1595,7 +1599,7 @@ describe("main tabs view: ターミナルのタブ", () => {
         "Copy path (disabled)",
       ],
       true,
-      ["stop:shell-a1"],
+      ["menu:shell-a1", "stop:shell-a1"],
     ]);
   });
 

@@ -10,6 +10,7 @@
 
 import type { PaneAccount } from "./agent-accounts";
 import type {
+  AgentConversation,
   AgentState,
   AgentStateObservationError,
   AgentStateRecord,
@@ -103,6 +104,12 @@ export type AgentPane = {
    * プロセスの CLAUDE_CONFIG_DIR / CODEX_HOME から)。それ以外の行は null。
    */
   account: PaneAccount | null;
+  /**
+   * フックが渡した会話の場所 (core/agent-state.ts の AgentConversation)。
+   * フックが無い・まだ申告が来ていない・セッションが終わったペインと、
+   * この欄を持たない古い版のサーバでは無い。
+   */
+  conversation?: AgentConversation;
 };
 
 /**

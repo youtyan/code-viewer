@@ -21033,6 +21033,98 @@ button.agents-account-name:hover {
 .agent-launch-preview-block .agent-launch-label {
   min-height: 0;
 }
+/* アカウントの一覧 (accounts-dialogs.ts の renderAccounts)。各行に 5 時間・週の
+   使用量といつの値かを並べ、空いているアカウントを選びやすくする。選んだ行は
+   種類の選択と同じ強い選択。状態で変えるのは面と影だけ (箱の寸法は変えない)。 */
+.agent-launch-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.agent-launch-account {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-launch-account:hover {
+  background: var(--color-raised);
+}
+.agent-launch-account.active {
+  background: var(--color-select);
+  box-shadow: inset 0 0 0 1px var(--color-accent), var(--glow-select);
+}
+.agent-launch-account:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--color-accent), var(--focus-ring);
+}
+.agent-launch-account-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.agent-launch-account-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-launch-account-current {
+  flex: 0 0 auto;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-xs);
+}
+.agent-launch-account-observed {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+.agent-launch-account-observed.stale {
+  color: var(--color-waiting);
+}
+.agent-launch-account-dir {
+  overflow: hidden;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-launch-account-usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--ui-font-sm);
+}
+.agent-launch-account-status {
+  color: var(--color-text-2);
+}
+/* 引き継ぐ会話記録のパス。途中を隠さず、長ければ枠の中で横にスクロールする。 */
+.agent-launch-log {
+  display: block;
+  overflow-x: auto;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  color: var(--color-text);
+  font-size: var(--ui-font-sm);
+  white-space: pre;
+}
 .agent-launch-preview {
   display: flex;
   align-items: center;

@@ -138,6 +138,8 @@ function mount(
   if (!root) throw new Error("missing sidebar root");
   const { monitor, publish } = fakeMonitor(data, notify);
   const saved: string[][] = [];
+  /** 「別のアカウントで続ける…」の呼び出し (handoff.ts)。 */
+  const handoffs: string[] = [];
   let dismissed = notify.dismissed ?? false;
   let stoppedOpen = false;
   mountAgentsSidebar({
@@ -148,6 +150,10 @@ function mount(
     openPane,
     viewingPane: () => null,
     launch: () => undefined,
+    handoff: {
+      handoff: (target) => handoffs.push(`handoff:${target.id}`),
+      openHookHelp: () => handoffs.push("hook-help"),
+    },
     openBoard: () => undefined,
     getCollapsed: () => [],
     currentName: () => "sample-app",
@@ -161,7 +167,14 @@ function mount(
       dismissed = true;
     },
   });
-  return { root, publish, actions, saved, dismissed: () => dismissed };
+  return {
+    root,
+    publish,
+    actions,
+    saved,
+    handoffs,
+    dismissed: () => dismissed,
+  };
 }
 
 /** 区画ごとの見出しの並び (登録 / tmux で検出)。 */
@@ -370,9 +383,13 @@ describe("agents sidebar actions", () => {
         ".gdp-context-menu button",
       ),
     ];
+    // 3 つ目からは「別のアカウントで続ける…」(フックの無いペインなので押せず、
+    // 入れ方の案内が並ぶ。handoff の表は agents-handoff.test.ts)。
     expect(items.map((item) => item.textContent)).toEqual([
       "Open in a tab",
       "Open in the opposite pane",
+      "Continue with another account…",
+      "Needs the agent hooks — show how to install",
     ]);
     items[1]?.click();
     expect(opened).toEqual([
@@ -380,6 +397,86 @@ describe("agents sidebar actions", () => {
       ["%1", "opposite"],
       ["%1", "opposite"],
     ]);
+  });
+
+  // 「別のアカウントで続ける…」は、フックが会話記録の場所を知らせたペインだけ
+  // 押せる。知らせていなければ押せず、フックの入れ方へ送る項目を並べる。
+  // エージェントでないペインには出さない。
+  test.each([
+    {
+      name: "会話記録の場所があれば押せる",
+      over: {
+        conversation: {
+          sessionId: "abc123",
+          transcriptPath: "/home/sample/log/sample.jsonl",
+          cwd: "/work/sample-app",
+        },
+      },
+      items: [["Continue with another account…", false]],
+      click: "Continue with another account…",
+      called: ["handoff:%1"],
+    },
+    {
+      name: "フックが無ければ押せず、入れ方へ送る",
+      over: {},
+      items: [
+        ["Continue with another account…", true],
+        ["Needs the agent hooks — show how to install", false],
+      ],
+      click: "Needs the agent hooks — show how to install",
+      called: ["hook-help"],
+    },
+    {
+      name: "codex の transcript_path が null (空) なら押せない",
+      over: {
+        kind: "codex" as const,
+        command: "codex",
+        conversation: {
+          sessionId: "sample_thread",
+          transcriptPath: "",
+          cwd: "/work/sample-app",
+        },
+      },
+      items: [
+        ["Continue with another account…", true],
+        ["Needs the agent hooks — show how to install", false],
+      ],
+      click: "Needs the agent hooks — show how to install",
+      called: ["hook-help"],
+    },
+    {
+      name: "エージェントでないペインには出さない",
+      over: { kind: null, command: "zsh" },
+      items: [],
+      click: null,
+      called: [],
+    },
+  ])("右クリックの「別のアカウントで続ける…」: $name", ({
+    over,
+    items,
+    click,
+    called,
+  }) => {
+    const data = overview(
+      [{ ...pane("%1", "work:0.0", "/work/sample-app", "idle"), ...over }],
+      REGISTERED,
+    );
+    const { root, handoffs } = mount(data);
+    root
+      .querySelector<HTMLElement>('[data-nav-item="pane:%1"]')
+      ?.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+    const buttons = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        ".gdp-context-menu button",
+      ),
+    ].slice(2);
+    expect(
+      buttons.map((button) => [button.textContent, button.disabled]),
+    ).toEqual(items);
+    buttons.find((button) => button.textContent === click)?.click();
+    expect(handoffs).toEqual(called);
   });
 });
 

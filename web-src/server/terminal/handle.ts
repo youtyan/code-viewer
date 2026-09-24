@@ -36,6 +36,7 @@ import type { AgentOverviewResponse } from "../../core/agent-overview";
 import type { AgentScreenRuleIssue } from "../../core/agent-screen";
 import {
   type AgentStatesResponse,
+  isAgentConversation,
   isAgentEvent,
   isReportedAgent,
 } from "../../core/agent-state";
@@ -120,6 +121,12 @@ import { clearAgentUnread, noteAgentUnread } from "./unread";
 /** 申告 1 件の本文上限。指示文が丸ごと来ても収まる程度。 */
 const MAX_STATE_TEXT = 2000;
 const MAX_AGENT_ACTION_BODY_BYTES = 16 * 1024;
+/**
+ * 申告 (/_agent/state) の本文の上限。指示文 (MAX_STATE_TEXT 文字。制御文字は
+ * JSON で 6 バイトになる) と会話の場所の 3 つの欄 (MAX_CONVERSATION_FIELD
+ * 文字、1 文字 3 バイトまで) が最悪の文字でも収まる大きさ。
+ */
+const MAX_AGENT_STATE_BODY_BYTES = 32 * 1024;
 
 function textField(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -148,7 +155,7 @@ async function handleStatePost(
 ): Promise<Response> {
   const parsed = await parseBoundedJsonBody(
     req,
-    MAX_AGENT_ACTION_BODY_BYTES,
+    MAX_AGENT_STATE_BODY_BYTES,
     "agent state request too large",
   );
   if (parsed instanceof Response) return parsed;
@@ -163,6 +170,7 @@ async function handleStatePost(
     note?: unknown;
     agent?: unknown;
     relay?: unknown;
+    conversation?: unknown;
   };
 
   const target = body.target;
@@ -179,6 +187,12 @@ async function handleStatePost(
 
   if (body.relay !== undefined && body.relay !== true) {
     return textError("invalid relay", 400);
+  }
+  if (
+    body.conversation !== undefined &&
+    !isAgentConversation(body.conversation)
+  ) {
+    return textError("invalid conversation", 400);
   }
   const now = Date.now();
   if (
@@ -198,6 +212,9 @@ async function handleStatePost(
     lastPrompt: textField(body.lastPrompt),
     note: textField(body.note),
     agent: isReportedAgent(body.agent) ? body.agent : undefined,
+    conversation: isAgentConversation(body.conversation)
+      ? body.conversation
+      : undefined,
   });
   if (!record) return textError("invalid event", 400);
   // 画面で「読んだ」ときは、ほかのサーバにも伝える (read-relay.ts)。送り先

@@ -36,41 +36,12 @@ import {
   recordAgentState,
 } from "../server/terminal/agent-state";
 import { noteAgentUnread, resetAgentUnread } from "../server/terminal/unread";
-import { agentPane } from "./_test-helpers";
+import { agentPane, tmuxPanes } from "./_test-helpers";
 
 const paneIds = Array.from({ length: 16 }, (_, index) => `%${index + 1}`);
 
 function tmuxPanesFixture() {
-  return {
-    available: true,
-    running: true,
-    sessions: [
-      {
-        name: "sample-session",
-        attached: false,
-        windows: [
-          {
-            index: 0,
-            name: "main",
-            active: true,
-            panes: paneIds.map((id, index) => ({
-              id,
-              label: `sample-session:0.${index}`,
-              paneIndex: index,
-              title: "sample activity",
-              command: "codex",
-              path: "/work/sample",
-              pid: 1000 + index,
-              width: 80,
-              height: 24,
-              active: index === 0,
-              inRepo: true,
-            })),
-          },
-        ],
-      },
-    ],
-  };
+  return tmuxPanes(paneIds, { title: "sample activity" });
 }
 
 function capture(id: string): TmuxCaptureResult {

@@ -47,6 +47,7 @@ import {
 import { showProjectMenu } from "../projects/project-menu";
 import { agentStateMark, fillAgentCard } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
+import { type HandoffMenuActions, handoffMenuItems } from "./handoff";
 import type { AgentsText } from "./i18n";
 import { markPreviewRow, PANE_PREVIEW, type PanePreview } from "./pane-preview";
 import { paneText } from "./pane-text";
@@ -62,6 +63,8 @@ export type AgentsSidebarDeps = {
   viewingPane(): string | null;
   /** 「新しいエージェント」の画面。project は選んでおくプロジェクト。 */
   launch(project?: string): void;
+  /** 行の右クリックのメニューの「別のアカウントで続ける…」(handoff.ts)。 */
+  handoff: HandoffMenuActions;
   /** エージェントの全体ボードへ。 */
   openBoard(): void;
   /**
@@ -207,6 +210,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
             label: current.openPaneOpposite,
             onSelect: () => openHere("opposite"),
           },
+          ...handoffMenuItems(pane, current, deps.handoff),
         ],
         { at: { x: event.clientX, y: event.clientY } },
       );

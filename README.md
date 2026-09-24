@@ -218,6 +218,14 @@ Requires Node.js 20 or newer. Development uses
   with a copy button. Missing windows are not
   invented; when one config directory holds records from two accounts, the card
   keeps the newest values and adds a Mixed note that says how to separate them.
+  New agent lists each account with its 5-hour and weekly usage and how old
+  the values are, so you can pick one with room left. To move an agent's work
+  to another account without signing in again, right-click the agent (or its
+  tab) → Continue with another account…: it starts claude or codex with the
+  account you pick in a new window of the same tmux session, and its first
+  message says where the previous agent's conversation log is (the hooks
+  report the location; code-viewer does not read the log). The previous agent
+  keeps running.
   The same steps run from the terminal with `code-viewer accounts`
   (`list`, `plan`, `create`, `register`, `login`, `wait`, `rename`, `remove`),
   so an AI agent with the bundled `code-viewer-accounts` skill can add accounts

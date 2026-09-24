@@ -47,14 +47,17 @@ import {
   partitionProjectsByRunning,
   runningProjectRoots,
 } from "../../core/project-running";
+import { showContextMenu } from "../context-menu";
 import { renderEmptyState } from "../empty-state";
 import type { PageView } from "../page-view";
 import type { ProjectActions } from "../projects/project-actions";
 import { projectLook, projectMark } from "../projects/project-looks";
 import { showProjectMenu } from "../projects/project-menu";
 import type { AccountsBand } from "./accounts-band";
+import { paneAccountName } from "./accounts-dialogs";
 import { fillAgentCard } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
+import { type HandoffMenuActions, handoffMenuItems } from "./handoff";
 import type { AgentsText } from "./i18n";
 import { markPreviewRow, PANE_PREVIEW, type PanePreview } from "./pane-preview";
 import { paneText } from "./pane-text";
@@ -82,6 +85,8 @@ export type AgentsViewDeps = {
   getAccounts(): AccountsResponse | null;
   /** 「新しいエージェント」の画面を開く。project は選んでおくプロジェクト。 */
   launch(project?: string): void;
+  /** 行の右クリックのメニューの「別のアカウントで続ける…」(handoff.ts)。 */
+  handoff: HandoffMenuActions;
   /** 一覧に入った・出たとき (アカウントの取り直しを始める・止める)。 */
   onVisibilityChange(visible: boolean): void;
   /** プロジェクトの登録・開く・止める (ヘッダの切替と共通)。 */
@@ -285,6 +290,22 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     };
     row.addEventListener("click", openBy);
     row.addEventListener("auxclick", openBy);
+    // 左のサイドバーの行と同じメニュー。
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      showContextMenu(
+        row,
+        [
+          { label: current.openPane, onSelect: () => select(pane) },
+          {
+            label: current.openPaneOpposite,
+            onSelect: () => select(pane, "opposite"),
+          },
+          ...handoffMenuItems(pane, current, deps.handoff),
+        ],
+        { at: { x: event.clientX, y: event.clientY } },
+      );
+    });
     return row;
   }
 
@@ -296,23 +317,18 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     const account = pane.account;
     if (!account) return label;
     const data = deps.getAccounts();
+    label.textContent = paneAccountName(pane, data, t);
     if (account.kind === "default" || account.kind === "registered") {
       const entry = data?.accounts.find((item) => item.id === account.id);
-      label.textContent =
-        account.kind === "default"
-          ? t.defaultName
-          : (entry?.name ?? account.id);
       label.title = t.paneAccountTitle(
         label.textContent,
         entry?.configDir ?? "",
       );
     } else if (account.kind === "unregistered") {
       label.classList.add("agents-account-unregistered");
-      label.textContent = t.unregistered;
       label.title = t.unregisteredTitle(account.configDir);
     } else {
       label.classList.add("agents-account-unknown");
-      label.textContent = t.unknownAccount;
       label.title = t.unknownAccountTitle(account.reason);
     }
     return label;

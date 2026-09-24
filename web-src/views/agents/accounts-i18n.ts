@@ -4,12 +4,15 @@
 import type {
   AccountLogin,
   BlockedReason,
+  HandoffLanguage,
   StatusLineState,
   UsageUnavailableReason,
   UsageWindow,
 } from "../../core/agent-accounts";
 
 export type AccountsText = {
+  /** この文言の言語。引き継ぎの指示文 (core/agent-accounts.ts の handoffPrompt) を合わせる。 */
+  language: HandoffLanguage;
   /** 既定のアカウントの表示名。 */
   defaultName: string;
   unregistered: string;
@@ -214,7 +217,17 @@ export type AccountsText = {
   launchNotSetUp: string;
   launchLoginUnknown: (detail: string) => string;
   launchNoProjects: string;
+  /** 選んだ種類のアカウントが 1 つも無い。 */
+  launchNoAccounts: string;
   currentServerProject: (name: string) => string;
+  // 別のアカウントで続ける (起動の画面を使い回す)
+  handoffDialogTitle: string;
+  handoffIntro: (from: string) => string;
+  handoffLog: string;
+  handoffLogHint: string;
+  /** アカウントの一覧で、前の担当が使っているアカウントに付ける札。 */
+  handoffCurrent: string;
+  handoffRun: string;
 };
 
 /** 残り時間を「時間と分」「日と時間」の 2 段で書く。 */
@@ -245,6 +258,7 @@ function windowName(
 }
 
 export const ACCOUNTS_EN: AccountsText = {
+  language: "en",
   defaultName: "Default",
   unregistered: "Unregistered",
   unregisteredTitle: (path) =>
@@ -515,10 +529,20 @@ export const ACCOUNTS_EN: AccountsText = {
     "This account has not been used yet (no settings directory). The agent sets it up and asks you to sign in.",
   launchLoginUnknown: (detail) => `Sign-in could not be checked: ${detail}`,
   launchNoProjects: "No project to choose.",
+  launchNoAccounts: "No account of this kind.",
   currentServerProject: (name) => `${name} (this server)`,
+  handoffDialogTitle: "Continue with another account",
+  handoffIntro: (from) =>
+    `Start an agent with another account. It reads the conversation log of ${from} and continues the work.`,
+  handoffLog: "Conversation log",
+  handoffLogHint:
+    "code-viewer does not read it. The new agent reads it, and asks before it starts if anything is unclear.",
+  handoffCurrent: "in use now",
+  handoffRun: "Start and hand over",
 };
 
 export const ACCOUNTS_JA: AccountsText = {
+  language: "ja",
   defaultName: "既定",
   unregistered: "未登録",
   unregisteredTitle: (path) =>
@@ -801,5 +825,14 @@ export const ACCOUNTS_JA: AccountsText = {
   launchLoginUnknown: (detail) =>
     `ログイン状態を確かめられませんでした: ${detail}`,
   launchNoProjects: "選べるプロジェクトがありません。",
+  launchNoAccounts: "この種類のアカウントがありません。",
   currentServerProject: (name) => `${name}（このサーバ）`,
+  handoffDialogTitle: "別のアカウントで続ける",
+  handoffIntro: (from) =>
+    `別のアカウントでエージェントを起動し、${from} の会話記録を読んで続きをやらせます。`,
+  handoffLog: "引き継ぐ会話記録",
+  handoffLogHint:
+    "中身は code-viewer では読みません。起動したエージェントが読み、わからないことは始める前に聞きます。",
+  handoffCurrent: "いまの担当",
+  handoffRun: "起動して引き継ぐ",
 };

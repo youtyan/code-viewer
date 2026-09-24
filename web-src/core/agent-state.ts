@@ -9,6 +9,8 @@
 //
 // ここは純粋な型と遷移規則だけを置く。保存も HTTP も server 側で行う。
 
+import { hasControlCharacter } from "./control-chars";
+
 /**
  * 画面に出す 4 つの状態。
  *
@@ -103,6 +105,90 @@ export function isReportedAgent(value: unknown): value is ReportedAgent {
 /** 状態の出どころ。UI で「申告なので確か」と「当て推量」を区別するために持つ。 */
 export type AgentStateSource = "hook" | "screen" | "activity";
 
+/**
+ * フックの入力にある会話の場所。claude・codex とも公式の共通欄
+ * (`session_id`・`transcript_path`・`cwd`) で、どの出来事にも付く。
+ * 「別のアカウントで続ける」が、次の担当に会話記録の場所を渡すのに使う。
+ * 会話記録の中身は code-viewer では読まない (書式は公式に約束されていない)。
+ * 渡されなかった欄は空 (codex の transcript_path は null になりうる)。
+ */
+export type AgentConversation = {
+  sessionId: string;
+  /** 会話記録のファイル (JSONL) の絶対パス。 */
+  transcriptPath: string;
+  /** フックが呼ばれたときのエージェントの作業フォルダの絶対パス。 */
+  cwd: string;
+};
+
+/**
+ * 1 つの欄の上限 (文字数)。実際のパスは数百文字に収まる。申告の本文の上限
+ * (server/terminal/handle.ts の MAX_AGENT_STATE_BODY_BYTES) に、指示文と
+ * 3 つの欄が最悪の文字でも収まるように小さくとる。
+ */
+export const MAX_CONVERSATION_FIELD = 1024;
+
+/**
+ * 欄の値として受け取れるか。空は「渡されなかった」。パスは絶対パスだけ
+ * (相対パスはエージェントのプロセスの cwd に依存し、ほかから読めない)。
+ */
+export function conversationFieldValid(
+  field: keyof AgentConversation,
+  value: string,
+): boolean {
+  if (value === "") return true;
+  if (value.length > MAX_CONVERSATION_FIELD || hasControlCharacter(value))
+    return false;
+  return field === "sessionId" || value.startsWith("/");
+}
+
+const CONVERSATION_FIELDS = ["sessionId", "transcriptPath", "cwd"] as const;
+
+/** サーバが申告の本文を受けるときの検査。3 つの欄が全部あり、どれも受け取れる値。 */
+export function isAgentConversation(
+  value: unknown,
+): value is AgentConversation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return CONVERSATION_FIELDS.every(
+    (field) =>
+      typeof record[field] === "string" &&
+      conversationFieldValid(field, record[field] as string),
+  );
+}
+
+/**
+ * フックに渡された JSON から会話の場所を取り出す。受け取れない値の欄は空に
+ * して、欄の名前を rejected に返す (申告そのものは止めない。呼び出し側が
+ * 失敗の記録に残す)。欄が無い・null は渡されなかっただけ (codex の
+ * transcript_path は null になりうる)。3 つとも空なら conversation は null。
+ */
+export function conversationFromHookInput(input: Record<string, unknown>): {
+  conversation: AgentConversation | null;
+  rejected: (keyof AgentConversation)[];
+} {
+  const rejected: (keyof AgentConversation)[] = [];
+  const pick = (field: keyof AgentConversation, value: unknown): string => {
+    if (value === undefined || value === null) return "";
+    if (typeof value === "string" && conversationFieldValid(field, value))
+      return value;
+    rejected.push(field);
+    return "";
+  };
+  const conversation: AgentConversation = {
+    sessionId: pick("sessionId", input.session_id),
+    transcriptPath: pick("transcriptPath", input.transcript_path),
+    cwd: pick("cwd", input.cwd),
+  };
+  return {
+    conversation: CONVERSATION_FIELDS.some(
+      (field) => conversation[field] !== "",
+    )
+      ? conversation
+      : null,
+    rejected,
+  };
+}
+
 export type AgentStateRecord = {
   /** tmux ペイン ID か、ブラウザシェルのセッション ID。 */
   target: string;
@@ -125,6 +211,8 @@ export type AgentStateRecord = {
   note: string;
   /** フックが名乗った種類。名乗っていなければ無い。 */
   agent?: ReportedAgent;
+  /** フックが渡した会話の場所。フックが無い・まだ申告が来ていなければ無い。 */
+  conversation?: AgentConversation;
   /**
    * 最後の申告がセッションの終了 (exit) だった。そのペインではもう
    * エージェントが動いていないので、一覧では種類を持たないペインに戻す。

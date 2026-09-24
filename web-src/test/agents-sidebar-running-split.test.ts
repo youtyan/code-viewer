@@ -221,6 +221,10 @@ function mount(
     openPane: () => undefined,
     viewingPane: () => null,
     launch: () => undefined,
+    handoff: {
+      handoff: () => undefined,
+      openHookHelp: () => undefined,
+    },
     openBoard: () => undefined,
     getCollapsed: () => [],
     currentName: () => "sample-app",

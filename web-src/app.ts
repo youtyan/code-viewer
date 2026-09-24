@@ -237,6 +237,10 @@ import {
   mountAgentsSidebar,
 } from "./views/agents/agents-sidebar";
 import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
+import {
+  type HandoffMenuActions,
+  handoffMenuItems,
+} from "./views/agents/handoff";
 import { agentsText } from "./views/agents/i18n";
 import { paneText, shellName } from "./views/agents/pane-text";
 import { mountUsageStatus } from "./views/agents/usage-status";
@@ -1761,7 +1765,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     onNewTab: (side, anchor) => void openNewTabMenu(side, anchor),
     stopTerminal: (session) => void stopTerminal(session as ShellSessionId),
-    terminalMenuItems: () => TERMINAL_VIEW.menuItems(),
+    // タブのシェルがエージェントのペインを映していれば、行と同じ
+    // 「別のアカウントで続ける…」も出す (views/agents/handoff.ts)。
+    terminalMenuItems: (session) => {
+      const pane = paneForShell(session);
+      return [
+        ...TERMINAL_VIEW.menuItems(),
+        ...(pane
+          ? handoffMenuItems(pane, agentsText(STATE.language), HANDOFF_ACTIONS)
+          : []),
+      ];
+    },
     // 全プロジェクト共通の配置 (server/main-tabs-store.ts)。root はこの裏の根で、
     // タブの持ち物のプロジェクトになる。
     loadSaved: () =>
@@ -4897,6 +4911,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     serverRoot: () => ACCOUNTS_CLIENT.snapshot().data?.serverRoot ?? "",
     refreshOverview: () => AGENT_MONITOR.refresh(),
   });
+  // 「別のアカウントで続ける…」(行・タブの右クリック)。起動の画面を引き継ぎの
+  // 形で開く。フックが無いときの案内は、設定のエージェント連携の節へ。
+  const HANDOFF_ACTIONS: HandoffMenuActions = {
+    handoff: (pane) => {
+      ACCOUNT_DIALOGS.launch({ handoff: pane }).then(
+        () => AGENTS_VIEW?.localize(),
+        (error: unknown) =>
+          console.error("[code-viewer] handoff dialog failed", error),
+      );
+    },
+    openHookHelp: () => openSettingsAt(AGENT_HOOKS_SECTION_ID),
+  };
   const ACCOUNTS_SETTINGS = createAccountsSettings({
     client: ACCOUNTS_CLIENT,
     dialogs: ACCOUNT_DIALOGS,
@@ -8967,6 +8993,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         openPane: openAgentPane,
         viewingPane: viewingAgentPane,
         launch: launchAgent,
+        handoff: HANDOFF_ACTIONS,
         openBoard: () =>
           navigateToRoute({ screen: "agents", range: currentRange() }),
         getCollapsed: () => APP_SETTINGS.navCollapsedProjects ?? [],
@@ -9070,6 +9097,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     accountsBand: ACCOUNTS_BAND,
     getAccounts: () => ACCOUNTS_CLIENT.snapshot().data,
     launch: launchAgent,
+    handoff: HANDOFF_ACTIONS,
     onVisibilityChange: (visible) => {
       releaseAccounts?.();
       releaseAccounts = null;

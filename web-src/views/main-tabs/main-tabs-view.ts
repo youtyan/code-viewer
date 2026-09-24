@@ -211,8 +211,11 @@ export type MainTabsDeps = {
   onNewTab(side: PaneSide, anchor: HTMLElement): void;
   /** ターミナルのタブの右クリックの「セッションを止める」。 */
   stopTerminal(session: string): void;
-  /** ターミナルのタブの右クリックに足す、端末の操作 (文字の大きさなど)。 */
-  terminalMenuItems(): ContextMenuItem[];
+  /**
+   * ターミナルのタブの右クリックに足す、端末の操作 (文字の大きさなど) と、
+   * そのシェルが映しているエージェントへの操作。session はそのタブのシェル。
+   */
+  terminalMenuItems(session: string): ContextMenuItem[];
   /**
    * 保存した配置 (全プロジェクト共通)。layout が無ければ null。rev は保存の版の
    * 番号、root はこのページのプロジェクトの根 (タブの持ち物)、newer はこの
@@ -1747,7 +1750,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       // ターミナルのタブ: 端末の操作と、シェルそのものを止める (閉じるはタブだけ)。
       ...(tab.target.kind === "terminal"
         ? [
-            ...deps.terminalMenuItems(),
+            ...deps.terminalMenuItems(tab.target.session),
             { kind: "separator" as const },
             {
               label: current.stopSession,
