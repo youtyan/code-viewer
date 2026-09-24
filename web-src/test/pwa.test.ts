@@ -576,7 +576,7 @@ describe("the tab keys of an installed window", () => {
 });
 
 describe("the window frame color follows the app theme", () => {
-  // 10 テーマ × 明暗。html に付ける属性の組と、その組で効く地の値
+  // 全部のテーマ × 明暗。html に付ける属性の組と、その組で効く地の値
   // (_color-themes.ts がカスケードの順で解いたもの)。
   const VARIANTS = themeVariants();
   const root = () => document.documentElement;
@@ -624,7 +624,7 @@ describe("the window frame color follows the app theme", () => {
       syncThemeColor(document);
       seen.push(themeColors()[0] ?? null);
     }
-    // 20 通りの地はどれも違う (同じなら上の表の検査が何も見分けていない)。
+    // 全部の組の地はどれも違う (同じなら上の表の検査が何も見分けていない)。
     expect({
       distinct: new Set(seen.slice(0, VARIANTS.length)).size,
       back: seen[seen.length - 1],

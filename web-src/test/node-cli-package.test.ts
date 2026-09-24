@@ -38,6 +38,27 @@ describe("node cli package metadata", () => {
 
     expect(notices).toContain("\ncluster-key-slot@");
   });
+
+  // 依存として入れずに値だけを写したもの (generate-third-party-notices.mjs の
+  // copiedValueSources) も、著作権表記と許諾の本文ごと載る。
+  test("third-party notices include values copied from other packages", () => {
+    const notices = readFileSync(
+      join(root, "web", "vendor", "THIRD_PARTY_NOTICES.txt"),
+      "utf8",
+    );
+    const heading = "\n@primer/primitives@11.10.0 (copied values)\n";
+    const entry = notices.slice(notices.indexOf(heading));
+
+    expect(notices).toContain("\nCopied Values\n");
+    expect(notices).toContain(heading);
+    expect(entry).toContain(
+      'Copied into: web/style.css (the [data-color-theme="github"] theme blocks)',
+    );
+    expect(entry).toContain("Copyright (c) 2018 GitHub Inc.");
+    expect(entry).toContain(
+      "The above copyright notice and this permission notice shall be included in all",
+    );
+  });
 });
 
 function productionServerFiles(dir: string): string[] {

@@ -282,9 +282,9 @@
   --diff-hunk-fg:       #a898cc;
 }
 /* ---- テーマ (配色) ----
-   既定 (上の :root と [data-theme="dark"]) のほかの 9 つ。明暗と組み合わせて使う
+   既定 (上の :root と [data-theme="dark"]) のほかのテーマ。明暗と組み合わせて使う
    (html[data-color-theme] × html[data-theme])。id と表示名は core/color-themes.ts。
-   値は、面の色相と彩度・強調色と構文の色相だけを決め、明るさは「どの面に対して
+   値は (最後の GitHub を除き)、面の色相と彩度・強調色と構文の色相だけを決め、明るさは「どの面に対して
    何:1」から逆算した (本文 14:1・構文 6.9:1・コメント 4.9:1 など)。下限は
    color-themes-contrast.test.ts ほかが全部の組で確かめる。追加 = 緑・削除 = 赤・
    状態の色の色相はどのテーマでも同じ。プロジェクトの色はテーマで変えない。
@@ -1179,6 +1179,115 @@
   --diff-hunk-fg:        #8698c5;
   --diff-add-fg:         #99dba6;
   --diff-del-fg:         #f8ada7;
+}
+/* GitHub: GitHub が公開している配色の値を写した (出典とライセンスの表記は配布物の
+   web/vendor/THIRD_PARTY_NOTICES.txt の Copied Values。一覧は
+   scripts/generate-third-party-notices.mjs の copiedValueSources)。面・文字・線・
+   状態・差分はその配色の同じ役の値、構文の色は GitHub の構文の配色 (キーワード = 赤・
+   文字列 = 紺・定数と数値 = 青・関数名とクラス名 = 紫)。
+   透明度つきの値は、乗る面 (hover はサイドバー、選択は本文の面、差分はコードの面) に
+   重ねた色にした。下限に届かない所だけ直した: ライトのキーワードと関数名・ダークの
+   キーワードは明るさだけ (構文の色 6.5:1)、文字列 (明暗とも) とライトの関数名は
+   色相だけ (定数と同じ青で、種類どうし 40 度に届かない)。 */
+[data-color-theme="github"],
+[data-color-theme="github"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #f6f8fa;
+  --color-nav:           #f6f8fa;
+  --color-tree:          #f6f8fa;
+  --color-doc:           #ffffff;
+  --color-inset:         #f6f8fa;
+  --color-raised:        #eaedf0;
+  --color-select:        #cee1f8;
+  --color-overlay:       #ffffff;
+  --color-term:          #f6f8fa;
+  --color-term-text:     #1f2328;
+  --color-term-white:    #59636e;
+  --color-term-select:   #54aeff66;
+  --color-line:          #d1d9e0;
+  --color-line-soft:     #dfe4e9;
+  --color-line-strong:   #818b98;
+  --color-line-row:      #818b98;
+  --color-text:          #1f2328;
+  --color-text-2:        #59636e;
+  --color-text-3:        #59636e;
+  --color-on-accent:     #ffffff;
+  --color-accent:        #0969da;
+  --color-accent-strong: #0757ba;
+  --color-waiting:       #9a6700;
+  --color-working:       #1a7f37;
+  --color-done:          #8250df;
+  --color-failed:        #d1242f;
+  --color-idle:          #59636e;
+  --color-backdrop:      #c8d1da66;
+  --color-shadow:        #25292e3d;
+  --color-code:          #ffffff;
+  --syntax-text:         #1f2328;
+  --syntax-keyword:      #a71622;
+  --syntax-string:       #023a46;
+  --syntax-type:         #0550ae;
+  --syntax-function:     #6c34b4;
+  --syntax-comment:      #59636e;
+  --syntax-gutter:       #59636e;
+  --graph-branch:        #bc4c00;
+  --diff-add-bg:         #dafbe1;
+  --diff-add-num-sticky-bg: #aceebb;
+  --diff-add-word-bg:    #aceebb;
+  --diff-del-bg:         #ffebe9;
+  --diff-del-num-sticky-bg: #ffcecb;
+  --diff-del-word-bg:    #ffcecb;
+  --diff-hunk-fg:        #59636e;
+  --diff-add-fg:         #116329;
+  --diff-del-fg:         #82071e;
+}
+[data-color-theme="github"][data-theme="dark"],
+[data-color-theme="github"][data-terminal-tone="dark"] [data-terminal-surface] {
+  --color-ground:        #010409;
+  --color-nav:           #010409;
+  --color-tree:          #010409;
+  --color-doc:           #0d1117;
+  --color-inset:         #010409;
+  --color-raised:        #15191f;
+  --color-select:        #1e4273;
+  --color-overlay:       #010409;
+  --color-term:          #010409;
+  --color-term-text:     #f0f6fc;
+  --color-term-white:    #f0f6fc;
+  --color-term-select:   #388bfd66;
+  --color-line:          #3d444d;
+  --color-line-soft:     #2f353d;
+  --color-line-strong:   #656c76;
+  --color-line-row:      #656c76;
+  --color-text:          #f0f6fc;
+  --color-text-2:        #9198a1;
+  --color-text-3:        #9198a1;
+  --color-on-accent:     #0d1117;
+  --color-accent:        #4493f8;
+  --color-accent-strong: #79c0ff;
+  --color-waiting:       #d29922;
+  --color-working:       #3fb950;
+  --color-done:          #ab7df8;
+  --color-failed:        #f85149;
+  --color-idle:          #9198a1;
+  --color-backdrop:      #21283066;
+  --color-shadow:        #010409;
+  --color-code:          #0d1117;
+  --syntax-text:         #f0f6fc;
+  --syntax-keyword:      #fd8379;
+  --syntax-string:       #92dfe9;
+  --syntax-type:         #79c0ff;
+  --syntax-function:     #d2a8ff;
+  --syntax-comment:      #9198a1;
+  --syntax-gutter:       #9198a1;
+  --graph-branch:        #db6d28;
+  --diff-add-bg:         #12261e;
+  --diff-add-num-sticky-bg: #1c4428;
+  --diff-add-word-bg:    #1a4a29;
+  --diff-del-bg:         #25181c;
+  --diff-del-num-sticky-bg: #542426;
+  --diff-del-word-bg:    #6b2b2b;
+  --diff-hunk-fg:        #9198a1;
+  --diff-add-fg:         #aff5b4;
+  --diff-del-fg:         #ffdcd7;
 }
 
 /* 畳んだファイル一覧の縦の帯の幅 (--view-rail-w。下の html, body で --space-unit の倍数)

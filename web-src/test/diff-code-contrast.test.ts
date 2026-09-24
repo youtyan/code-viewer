@@ -21,7 +21,7 @@ import {
 } from "./_css-fixture";
 
 const rules = baseRules(loadStyleSheet());
-// テーマは同じ名前の値を差し替えるだけ (ui-surface.md)。10 テーマ × 明暗の全部。
+// テーマは同じ名前の値を差し替えるだけ (ui-surface.md)。全部のテーマ × 明暗。
 const THEMES = Object.fromEntries(
   themeVariants(rules).map((variant) => [variant.name, variant.vars]),
 );

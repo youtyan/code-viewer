@@ -8826,15 +8826,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       suggested: false,
       run: () => void PROJECT_ACTIONS.registerByPath(),
     });
-    // テーマを選ぶ (「テーマ」と打つと 10 個が並ぶ)。もう一方の言語の名前でも引ける。
+    // テーマを選ぶ (「テーマ」と打つと全部が並ぶ)。もう一方の言語の名前でも引ける
+    // (両方の言語で同じ名前 (GitHub) なら補足は出さない)。
     const currentTheme = savedColorTheme();
     const other = STATE.language === "ja" ? "en" : "ja";
     for (const theme of COLOR_THEMES) {
+      const name = COLOR_THEME_NAMES[theme][STATE.language];
+      const otherName = COLOR_THEME_NAMES[theme][other];
       commands.push({
         group: "themes",
         id: `theme:${theme}`,
-        title: t.chooseTheme(COLOR_THEME_NAMES[theme][STATE.language]),
-        detail: COLOR_THEME_NAMES[theme][other],
+        title: t.chooseTheme(name),
+        detail: otherName === name ? "" : otherName,
         status: theme === currentTheme ? t.currentTheme : "",
         iconHtml: iconSvg("gdp-palette-icon", MOON_16_PATH),
         suggested: false,

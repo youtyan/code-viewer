@@ -1178,7 +1178,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       ...cap(groups.sessions),
       ...files,
       ...cap(groups.actions),
-      // テーマは 10 個を全部並べる (「テーマ」と打って見比べて選ぶ)。
+      // テーマは全部並べる (「テーマ」と打って見比べて選ぶ)。
       ...groups.themes,
     ];
     const firstFile = state.items.findIndex((item) => item.kind === "file");

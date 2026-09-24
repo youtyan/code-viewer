@@ -1225,7 +1225,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   }
 
   /**
-   * テーマの見本 (10 個)。各見本はライトとダークの小さなコードと差分を並べ、
+   * テーマの見本 (全部のテーマ)。各見本はライトとダークの小さなコードと差分を並べ、
    * そのテーマの名前の層の色 (html と同じ data-color-theme / data-theme) で描く。
    * 押すとすぐに当てる (明暗はそのまま)。
    */

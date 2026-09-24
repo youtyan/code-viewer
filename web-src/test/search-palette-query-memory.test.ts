@@ -1,5 +1,6 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { COLOR_THEMES } from "../core/color-themes";
 import type { FileRangeResponse, FileSearchListResponse } from "../core/types";
 import type { PaletteCommand } from "../views/search-palette-ui";
 import { q, waitFor } from "./_test-helpers";
@@ -407,10 +408,10 @@ describe("palette projects, agents and actions", () => {
     }
   });
 
-  // テーマは 10 個 (core/color-themes.ts) を全部並べる。ほかの種類は 5 件まで。
+  // テーマは全部 (core/color-themes.ts) 並べる。ほかの種類は 5 件まで。
   test("choosing a theme lists every theme under its own heading, after the actions", async () => {
     const ran: string[] = [];
-    const themes = Array.from({ length: 10 }, (_, index) =>
+    const themes = COLOR_THEMES.map((_, index) =>
       command("themes", `Choose theme: sample ${index + 1}`, "", false, ran),
     );
     const { palette } = await setup({
@@ -420,7 +421,7 @@ describe("palette projects, agents and actions", () => {
     try {
       palette.openSearchPalette("file");
       typeQuery("choose theme");
-      await waitFor(() => listing().length === 11);
+      await waitFor(() => listing().length === themes.length + 1);
       expect(listing()).toEqual([
         "# Themes",
         ...themes.map(

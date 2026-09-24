@@ -68,6 +68,28 @@ pnpm run build:server && ls -l dist/code-viewer.js
 - 可用性は `server/doctor.ts` に出す（`sqlite.driver` 行が既にその形）
 - ネイティブモジュールはバンドルできない。`SERVER_BUNDLE.external` に入れて実行時解決に回す
 
+## npm の依存でなく値を写したもの
+
+他のパッケージの値 (配色・表・文言など) を、依存として入れずに手書きのソース
+(`web/style.css` など) へ写すことがある。パッケージを入れていないので、上の
+`distributedPackageRoots` の自動の収集には載らない。**それでもライセンスの義務は残る**
+(MIT なら著作権表記と許諾の本文を写したものに添える)。
+
+- 置き場所: `scripts/generate-third-party-notices.mjs` の `copiedValueSources` に 1 件。
+  配布物の `web/vendor/THIRD_PARTY_NOTICES.txt` の「Copied Values」に出る。一覧はここ
+  1 か所だけに持ち、写した先のコメントには「表記は THIRD_PARTY_NOTICES にある」への
+  参照だけを書く (出典・版・本文を写した先に二重に書かない)
+- 足すときの手順:
+  1. 写す元の版を 1 つに決め、その版の公開のパッケージ (jsDelivr などから読むだけ) の
+     `package.json` と LICENSE を取る。推測で値を書かない
+  2. `copiedValueSources` に、名前・版・ライセンス・出典の URL・写したもの・写した先・
+     その版の LICENSE の全文 (そのまま) を足す
+  3. 写した先に、上の参照のコメントを置く
+  4. `pnpm run build` の後の `web/vendor/THIRD_PARTY_NOTICES.txt` に載ること、
+     `npm pack --dry-run` にそのファイルが入ることを見る
+     (`web-src/test/node-cli-package.test.ts` が Copied Values の項目を確かめる)
+- 写した値を消したら、その項目も消す。版を上げて写し直したら、版と本文を取り直す
+
 ## 削除するとき
 
 配線チェックリストの 6 項目を**逆にたどる**。加えて:

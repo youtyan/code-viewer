@@ -1,5 +1,5 @@
-// 画面のテーマ (配色)。明暗 (html[data-theme]) とは別に選び、「テーマ × 明暗」で
-// 20 通りになる。
+// 画面のテーマ (配色)。明暗 (html[data-theme]) とは別に選び、「テーマ × 明暗」の
+// 組で決まる。
 //
 // テーマは名前 (id) と表示名だけをここに持ち、色の値は web/style.css の名前の層に
 // 置く (既定は :root と [data-theme="dark"]、ほかは [data-color-theme="<id>"] と
@@ -8,7 +8,8 @@
 // style.css の値で確かめる。
 //
 // 既定のテーマは html に属性を付けない (style.css の :root と [data-theme="dark"]
-// のまま)。表示名はどれも一般の語で、他のプロジェクトの配色の名前は使わない。
+// のまま)。表示名は一般の語にする。github だけは利用者がその名前で求めたもので、
+// GitHub が公開している配色の値を写している (出典は style.css のその塊)。
 
 export const COLOR_THEMES = [
   "default",
@@ -21,6 +22,7 @@ export const COLOR_THEMES = [
   "mist",
   "amber",
   "indigo",
+  "github",
 ] as const;
 
 export type ColorTheme = (typeof COLOR_THEMES)[number];
@@ -39,6 +41,7 @@ export const COLOR_THEME_NAMES: Record<ColorTheme, { en: string; ja: string }> =
     mist: { en: "Mist", ja: "霧" },
     amber: { en: "Amber", ja: "琥珀" },
     indigo: { en: "Indigo", ja: "藍" },
+    github: { en: "GitHub", ja: "GitHub" },
   };
 
 export function isColorTheme(value: unknown): value is ColorTheme {

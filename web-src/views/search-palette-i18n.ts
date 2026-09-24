@@ -94,7 +94,7 @@ export type SearchPaletteText = CodePreviewText & {
   footerSwitch: (mode: "file" | "grep") => string;
   currentProject: string;
   actions: Record<PaletteActionId, string>;
-  /** テーマの行の名前 (「テーマ」と打つと 10 個が並ぶ)。 */
+  /** テーマの行の名前 (「テーマ」と打つと全部が並ぶ)。 */
   chooseTheme: (name: string) => string;
   /** 今のテーマの行の右に出す文字。 */
   currentTheme: string;

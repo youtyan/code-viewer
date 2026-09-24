@@ -68,7 +68,7 @@ function contrast(a: Rgba, b: Rgba): number {
 const rules = baseRules(loadStyleSheet());
 const block = (selector: string) =>
   cascadedDeclarations(rules, (s) => s === selector);
-// テーマは同じ名前の値を差し替えるだけ (ui-surface.md)。10 テーマ × 明暗の全部。
+// テーマは同じ名前の値を差し替えるだけ (ui-surface.md)。全部のテーマ × 明暗。
 const light = block(":root");
 const themes = Object.fromEntries(
   themeVariants(rules).map((variant) => [variant.name, variant.vars]),
