@@ -317,11 +317,17 @@ function windowState(
     ? ((mine.panes.right ? mine.split : theirs.split) ?? DEFAULT_SPLIT)
     : undefined;
   const ids = new Set([...left.tabs, ...(right?.tabs ?? [])].map((t) => t.id));
-  const collapsed =
-    JSON.stringify(mine.collapsed ?? []) !==
-    JSON.stringify(base?.collapsed ?? [])
-      ? mine.collapsed
-      : theirs.collapsed;
+  // 畳んだグループはグループごとに重ねる: この窓が base から畳んだ・開いた
+  // グループはこの窓の値、ほかは相手の値 (配列ごとに選ぶと、2 つの窓で別々の
+  // グループを同時に畳んだとき片方が消えていた)。
+  const baseCollapsed = new Set(base?.collapsed ?? []);
+  const mineCollapsed = new Set(mine.collapsed ?? []);
+  const collapsed = (theirs.collapsed ?? []).filter(
+    (key) => !baseCollapsed.has(key) || mineCollapsed.has(key),
+  );
+  for (const key of mineCollapsed)
+    if (!baseCollapsed.has(key) && !collapsed.includes(key))
+      collapsed.push(key);
   const fronts: Record<string, string> = { ...(theirs.groupFronts ?? {}) };
   for (const [group, id] of Object.entries(mine.groupFronts ?? {}))
     if (base?.groupFronts?.[group] !== id) fronts[group] = map(id) as string;

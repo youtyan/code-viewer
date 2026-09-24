@@ -190,6 +190,13 @@ export type MainTabsDeps = {
    * タブが閉じられたときに使う (followClosedBody)。
    */
   replaceBody?(route: AppRoute): void;
+  /**
+   * この窓だけに残り、読み直しでは消えない保存 (app は sessionStorage)。窓ごとの
+   * 前面を覚え、読み直し (restore の keepSavedFront) ではそれを保存した配置の
+   * 前面より優先する (保存した配置の前面は、最後に書いた別の窓のものでありうる)。
+   * 無ければ覚えない。
+   */
+  windowStorage?: Pick<Storage, "getItem" | "setItem">;
   /** 今の画面の route (URL の最新)。タブを離れるときに覚える。 */
   currentRoute(): AppRoute;
   /** 覚えた route が無いタブ (読み戻したタブ) を開くときの route。 */
@@ -693,18 +700,40 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   }
 
   /**
-   * グループの並びの位置: 左の一覧の並び、一覧に無いプロジェクトはその後ろ、
-   * どのプロジェクトのものでもないタブは右端。
+   * グループの並びの位置 (小さい順): 左の一覧の並び、どのプロジェクトのもので
+   * もないタブは右端。一覧に無いプロジェクト (登録を外した・一覧から消えた) は、
+   * layouts の中でその面のすぐ左にある一覧のプロジェクトのすぐ後ろ (無ければ
+   * 先頭)。末尾へ潰すと、読み直した窓 (消えた根を知らない) でグループが末尾へ
+   * 飛んだ。前の layouts ほど優先する。
    */
-  function rankOf(tab: Tab): number {
-    return rankOfKey(keyOf(tab));
+  function ranksIn(...layouts: Layout[]): (key: string | null) => number {
+    const order = deps.projectOrder?.() ?? [];
+    const unknown = new Map<string, number>();
+    for (const target of layouts)
+      for (const side of SIDES) {
+        let left = -1;
+        for (const tab of (side === "left"
+          ? target.panes.left
+          : target.panes.right
+        )?.tabs ?? []) {
+          const key = keyOf(tab);
+          if (key === null) continue;
+          const index = order.indexOf(key);
+          if (index >= 0) left = index;
+          else if (!unknown.has(key)) unknown.set(key, left + 0.5);
+        }
+      }
+    return (key) => {
+      if (key === null) return Number.MAX_SAFE_INTEGER;
+      const index = order.indexOf(key);
+      return index >= 0 ? index : (unknown.get(key) ?? order.length);
+    };
   }
 
-  function rankOfKey(key: string | null): number {
-    if (key === null) return Number.MAX_SAFE_INTEGER;
-    const order = deps.projectOrder?.() ?? [];
-    const index = order.indexOf(key);
-    return index >= 0 ? index : order.length;
+  /** layouts の並びでグループの順に並べ直す (ranksIn)。 */
+  function regroupIn(target: Layout, ...layouts: Layout[]): Layout {
+    const rank = ranksIn(...layouts);
+    return regroup(target, (tab) => rank(keyOf(tab)));
   }
 
   /**
@@ -717,8 +746,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const root = currentRoot;
     if (side !== "left" || root === null) return groups;
     if (groups.some((group) => group.key === root)) return groups;
-    const rank = rankOfKey(root);
-    const at = groups.findIndex((group) => rankOfKey(group.key) > rank);
+    const rankOf = ranksIn(layout);
+    const rank = rankOf(root);
+    const at = groups.findIndex((group) => rankOf(group.key) > rank);
     const empty = { key: root, tabs: [] };
     return at < 0
       ? [...groups, empty]
@@ -820,7 +850,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   function normalize(next: Layout): Layout {
     // groupOfTarget は layout の控えを読むので、控えを先に今の値にする。
     layout = withTerminalGroups(next);
-    const result = regroup(noteGroupFronts(returnHome(layout), keyOf), rankOf);
+    const placed = noteGroupFronts(returnHome(layout), keyOf);
+    const result = regroupIn(placed, placed);
     const open = new Set(
       [...allTabs(result), ...(parked?.pane.tabs ?? [])].map((tab) => tab.id),
     );
@@ -1229,9 +1260,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
    * タブを「この窓で動かした」と数え、別の窓が右へ移したタブを古い場所へ戻していた。
    */
   function baseLayout(): Layout | null {
-    return base.layout
-      ? regroup(parseLayout(base.layout).layout, rankOf)
-      : null;
+    if (!base.layout) return null;
+    const saved = parseLayout(base.layout).layout;
+    return regroupIn(saved, layout, saved);
   }
 
   /** 書くときに添える base (並べ直した値。サーバはこれと比べて重ねる)。 */
@@ -1394,6 +1425,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     if (nextParked !== undefined) parked = nextParked;
     layout = normalize(next);
     fitToWidth();
+    writeWindowFronts();
     pruneRoutes();
     applyGeometry();
     render();
@@ -2539,6 +2571,99 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
    * そのプロジェクトへ移る途中で読み直した)、読み戻しでは移らずに外す: 左の面は
    * 本文の既定、右の面はほかのタブ。
    */
+  // ---- 窓ごとの前面 (deps.windowStorage) ----
+
+  type WindowFronts = {
+    left: string | null;
+    right: string | null;
+    focused: PaneSide;
+  };
+  const WINDOW_FRONTS_KEY = "code-viewer:main-tabs:fronts";
+  /** 窓の保存を読めない・書けないと 1 度知らせた (書くのは変えるたびなので 1 度だけ)。 */
+  let windowStorageReported = false;
+
+  function reportWindowStorage(what: string, error: unknown): void {
+    if (windowStorageReported) return;
+    windowStorageReported = true;
+    console.error(
+      `[code-viewer] main tabs: this window's front tabs could not be ${what} in the window storage (sessionStorage); a reload shows the front saved by the last window that wrote the tabs instead`,
+      error,
+    );
+  }
+
+  function isWindowFronts(value: unknown): value is WindowFronts {
+    if (!value || typeof value !== "object") return false;
+    const { left, right, focused } = value as Record<string, unknown>;
+    const id = (item: unknown) => item === null || typeof item === "string";
+    return id(left) && id(right) && (focused === "left" || focused === "right");
+  }
+
+  /** この窓が前に覚えた前面 (無い・読めなければ null。読めない理由は出す)。 */
+  function readWindowFronts(): WindowFronts | null {
+    const storage = deps.windowStorage;
+    if (!storage) return null;
+    let raw: string | null;
+    try {
+      raw = storage.getItem(WINDOW_FRONTS_KEY);
+    } catch (error) {
+      reportWindowStorage("read", error);
+      return null;
+    }
+    if (raw === null) return null;
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch (error) {
+      console.error(
+        `[code-viewer] main tabs: this window's remembered front tabs are broken and are ignored: ${raw}`,
+        error,
+      );
+      return null;
+    }
+    if (isWindowFronts(value)) return value;
+    console.error(
+      `[code-viewer] main tabs: this window's remembered front tabs have an unknown shape and are ignored: ${raw}`,
+    );
+    return null;
+  }
+
+  /** この窓の前面を覚える (読み戻しを始めてから。その前の 1 枚だけの配置で上書きしない)。 */
+  function writeWindowFronts(): void {
+    const storage = deps.windowStorage;
+    if (!storage || !restored) return;
+    const full = fullLayout();
+    const value: WindowFronts = {
+      left: full.panes.left.activeId,
+      right: full.panes.right?.activeId ?? null,
+      focused: full.focused,
+    };
+    try {
+      storage.setItem(WINDOW_FRONTS_KEY, JSON.stringify(value));
+    } catch (error) {
+      reportWindowStorage("written", error);
+    }
+  }
+
+  /** 覚えた前面を当てる (その面にまだそのタブがあるものだけ。左が null ならフォルダ表示)。 */
+  function withWindowFronts(
+    target: Layout,
+    fronts: WindowFronts | null,
+  ): Layout {
+    if (!fronts) return target;
+    let next = target;
+    if (fronts.left === null) next = showHome(next);
+    for (const side of SIDES) {
+      const id = fronts[side];
+      const pane = side === "left" ? next.panes.left : next.panes.right;
+      if (id !== null && pane?.tabs.some((tab) => tab.id === id))
+        next = activate(next, id);
+    }
+    return focusPane(
+      next,
+      fronts.focused === "right" && next.panes.right ? "right" : "left",
+    );
+  }
+
   function withoutSwitchFronts(target: Layout): Layout {
     let next = target;
     if (needsSwitch(frontTab(next, "left"))) {
@@ -2589,6 +2714,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     options: { rightRoute?: FileRoute; keepSavedFront?: boolean } = {},
   ): Promise<void> {
     if (restored) return;
+    // 書き込み (commit) より先に、この窓が前に覚えた前面を読む。
+    const windowFronts = options.keepSavedFront ? readWindowFronts() : null;
     restored = true;
     // 保存した配置を使えないときも、URL が指す右の面のファイルは開く。
     const openUrlRight = () => {
@@ -2702,7 +2829,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const urlRoute = deps.currentRoute();
     const target = targetOf(urlRoute);
     routes.clear();
-    const restoredLayout = withoutSwitchFronts(parsed.layout);
+    // 読み直しでは、この窓が覚えた前面を先に当てる (保存した配置の前面は、
+    // 最後に書いた別の窓のものでありうる)。
+    const restoredLayout = withoutSwitchFronts(
+      withWindowFronts(parsed.layout, windowFronts),
+    );
     seedPageRoutes(restoredLayout, parsed.pageRoutes);
     if (options.rightRoute) {
       // URL は右の面のファイル: 左の面 (本文) は保存した前面のまま。

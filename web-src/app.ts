@@ -1738,6 +1738,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (next !== path)
         history.replaceState(history.state, "", next + window.location.hash);
     },
+    // 窓ごとの前面。sessionStorage は取り出すだけで例外になる環境があるので、
+    // 取り出しも呼ばれたときにする (例外は読む・書く側が理由ごと出す)。
+    windowStorage: {
+      getItem: (key) => window.sessionStorage.getItem(key),
+      setItem: (key, value) => window.sessionStorage.setItem(key, value),
+    },
     currentRoute: () => STATE.route,
     defaultRoute: defaultRouteForTab,
     homeRoute: () => ({
