@@ -17750,22 +17750,24 @@ html[data-nav-collapsed] #app-nav {
   display: none;
 }
 /* 左のサイドバーの頭 (検索の入口) はタブ列と同じ高さ (--main-tabs-h) で、下端を
-   そろえる。検索欄は --ui-control-sm の枠。 */
+   そろえる。検索欄は枠のある箱なので、上端からも左右と同じ内側の余白 (--pad-face)
+   を取る (上下 3px で窓の上端に付いて見えた)。下は見出しの行が続くので詰め
+   (--space-1)、検索欄は残りの高さいっぱい。隣の絵のボタンも同じ中心にそろう。 */
 .nav-head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--space-1);
   height: var(--main-tabs-h);
-  padding: 0 var(--pad-face);
+  padding: var(--pad-face) var(--pad-face) var(--space-1);
 }
 .nav-search {
   flex: 1 1 auto;
+  align-self: stretch;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: var(--ui-control-sm);
   padding: 0 calc(var(--pad-text) - var(--pad-face));
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-md);

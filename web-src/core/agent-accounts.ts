@@ -725,6 +725,8 @@ export type CreateAccountPlan = {
   configDir: string;
   /** 設定ディレクトリの親 (無ければ作る)。 */
   parent: string;
+  /** 既定の設定ディレクトリ (リンク元。entries はこの直下にあるもの)。 */
+  defaultDir: string;
   /** 既定の設定ディレクトリの直下にあるもの全部 (分類つき)。 */
   entries: ShareEntry[];
   /** 公式の「共有する」のうち、既定の側に無いもの (リンクしない)。 */

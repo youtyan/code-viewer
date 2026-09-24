@@ -334,6 +334,7 @@ export function formatCreatePlan(plan: CreateAccountPlan): string {
     `${label}: ${list.length > 0 ? list.join(", ") : "-"}`;
   const lines = [
     `settings directory: ${plan.configDir}`,
+    `entries below are in the default directory: ${plan.defaultDir}`,
     line("linked from the default account", names("shared")),
     line("not linked, optional (add with --share)", names("optional")),
     line("never linked", names("blocked")),

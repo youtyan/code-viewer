@@ -333,6 +333,7 @@ describe("formatCreatePlan", () => {
     name: "work",
     configDir: "/tmp/state/accounts/claude-work",
     parent: "/tmp/state/accounts",
+    defaultDir: "/t",
     entries: [
       {
         name: "settings.json",
@@ -371,6 +372,7 @@ describe("formatCreatePlan", () => {
     expect(formatCreatePlan(plan)).toBe(
       [
         "settings directory: /tmp/state/accounts/claude-work",
+        "entries below are in the default directory: /t",
         "linked from the default account: settings.json, skills",
         "not linked, optional (add with --share): plugins",
         "never linked: projects (history)",
@@ -388,6 +390,7 @@ describe("formatCreatePlan", () => {
     ).toBe(
       [
         "settings directory: /tmp/state/accounts/claude-work",
+        "entries below are in the default directory: /t",
         "linked from the default account: -",
         "not linked, optional (add with --share): -",
         "never linked: -",

@@ -130,6 +130,10 @@ export type AccountsText = {
   addPathRequired: string;
   createTitle: (name: string) => string;
   createDir: string;
+  /** リンク元 (既定の設定ディレクトリ) の欄の名前。 */
+  createSource: string;
+  /** 下の一覧が何か (どのディレクトリの中身で、選ぶと何が起きるか)。 */
+  shareIntro: (dir: string) => string;
   createLinks: string;
   createLinkMissing: (names: string) => string;
   usageReasonShort: Record<UsageUnavailableReason, string>;
@@ -137,7 +141,7 @@ export type AccountsText = {
   shareShared: string;
   shareOptional: string;
   shareBlocked: (count: number) => string;
-  /** 「選べば共有できる」の各項目に添える、既定でオフの理由。 */
+  /** 「選べば共有できる」の見出しの下に 1 回だけ添える、既定でオフの理由。 */
   shareOptionalWhy: string;
   blockedWhy: Record<BlockedReason, string>;
   shareNone: string;
@@ -403,6 +407,9 @@ export const ACCOUNTS_EN: AccountsText = {
   addPathRequired: "Enter an absolute path.",
   createTitle: (name) => `Create the account "${name}"`,
   createDir: "New settings directory",
+  createSource: "Linked from (default settings directory)",
+  shareIntro: (dir) =>
+    `The items below are the files and folders in ${dir}. Each checked one becomes a link from the new directory to the one in ${dir}, so both accounts use the same thing (nothing is copied).`,
   createLinks: "Links that will be created",
   createLinkMissing: (names) =>
     `Not in the default directory, so not linked: ${names}`,
@@ -697,6 +704,9 @@ export const ACCOUNTS_JA: AccountsText = {
   addPathRequired: "絶対パスを入れてください。",
   createTitle: (name) => `アカウント「${name}」を作る`,
   createDir: "新しい設定ディレクトリ",
+  createSource: "リンク元（既定の設定ディレクトリ）",
+  shareIntro: (dir) =>
+    `下の項目は ${dir} の中にあるファイルとフォルダです。チェックしたものは、新しいディレクトリから ${dir} の同じ項目へのリンクになり、両方のアカウントで同じものを使います（コピーはしません）。`,
   createLinks: "作るリンク",
   createLinkMissing: (names) =>
     `既定のディレクトリに無いためリンクしないもの: ${names}`,

@@ -307,8 +307,14 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
   ): { body: HTMLElement; selected(): string[] } {
     const t = text();
     const body = el("div", "agent-hooks-dialog");
+    const source = abbreviateHome(plan.defaultDir, home);
     body.appendChild(
       labeled(t.createDir, abbreviateHome(plan.configDir, home)),
+    );
+    body.appendChild(labeled(t.createSource, source));
+    // 一覧の名前 (.cc-writes/ など) がどこの何かを、一覧の前に 1 回だけ言う。
+    body.appendChild(
+      el("p", "agent-accounts-share-intro", t.shareIntro(source)),
     );
     const boxes = new Map<string, HTMLInputElement>();
     const preview = el("pre", "agent-hooks-dialog-code terminal-mono");
@@ -318,10 +324,12 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     function group(
       title: string,
       entries: ShareEntry[],
-      why: (entry: ShareEntry) => string,
+      why = "",
     ): HTMLElement {
       const box = el("div", "agent-accounts-share");
       box.appendChild(el("span", "agent-hooks-dialog-label", title));
+      // 理由はまとまりに 1 回だけ (行ごとに同じ文を繰り返すと、名前が読めない)。
+      if (why) box.appendChild(el("p", "agent-accounts-share-why", why));
       const list = el("div", "agent-accounts-share-list");
       for (const entry of entries) {
         const item = el("label", "agent-accounts-share-item");
@@ -331,11 +339,8 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
         input.addEventListener("change", syncPreview);
         boxes.set(entry.name, input);
         const name = el("span", "terminal-mono", displayName(entry));
-        name.title = entry.target;
+        name.title = abbreviateHome(entry.target, home);
         item.append(input, name);
-        const reason = why(entry);
-        if (reason)
-          item.appendChild(el("span", "agent-accounts-share-why", reason));
         list.appendChild(item);
       }
       box.appendChild(list);
@@ -350,12 +355,10 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       (entry) => entry.category === "blocked",
     );
     if (shared.length > 0) {
-      body.appendChild(group(t.shareShared, shared, () => ""));
+      body.appendChild(group(t.shareShared, shared));
     }
     if (optional.length > 0) {
-      body.appendChild(
-        group(t.shareOptional, optional, () => t.shareOptionalWhy),
-      );
+      body.appendChild(group(t.shareOptional, optional, t.shareOptionalWhy));
     }
     if (blocked.length > 0) {
       // 選べないものは畳んでおく (多くても画面を埋めない)。
