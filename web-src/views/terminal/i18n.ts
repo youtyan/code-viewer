@@ -207,7 +207,7 @@ const EN: TerminalText = {
   zoomIn: "zoom in",
   zoomOut: "zoom out",
   zoomReset: "fit",
-  closeImage: "close",
+  closeImage: "Close",
   imageHint: "drag to pan · ctrl+wheel to zoom · ← → to move · Esc to close",
   previousImage: "previous image",
   nextImage: "next image",

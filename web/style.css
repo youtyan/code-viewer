@@ -15831,6 +15831,26 @@ html[data-theme="dark"] .tools-code span[style] {
 .terminal-lightbox .terminal-font-btn:hover {
   background: rgba(40, 50, 70, 0.95);
 }
+/* 閉じる: 拡大縮小の塊から離し、明るい枠と「閉じる」「Esc」で押せば閉じると分かる形。 */
+.terminal-lightbox .terminal-lightbox-close {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  padding: 0 12px;
+  border-color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.14);
+}
+.terminal-lightbox .terminal-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+.terminal-lightbox-close kbd {
+  padding: 1px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 4px;
+  font: 500 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: rgba(255, 255, 255, 0.85);
+}
 .terminal-lightbox-view {
   flex: 1 1 auto;
   min-height: 0;

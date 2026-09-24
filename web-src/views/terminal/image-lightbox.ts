@@ -17,6 +17,7 @@ import {
   CHEVRON_RIGHT_16_PATH,
   COPY_16_PATHS,
   iconSvg,
+  X_16_PATH,
 } from "../../core/icons";
 import type { TerminalText } from "./i18n";
 
@@ -184,14 +185,22 @@ export function openImageLightbox(
   nav.append(previous, next, copy);
 
   zoomReset = button("100%", text.zoomReset, () => viewport.reset());
-  const closeButton = button("×", text.closeImage, close);
+  // 閉じるは拡大縮小の塊から離して右端に置き、絵・文字・キーで閉じるものだと
+  // 分かるようにする (「× 」だけが − 100% ＋ と同じ形で並んでいて、閉じ方が
+  // 分からなかった)。
+  const closeButton = iconButton(X_16_PATH, text.closeImage, close);
+  closeButton.classList.add("terminal-lightbox-close");
+  const closeLabel = document.createElement("span");
+  closeLabel.textContent = text.closeImage;
+  const closeKey = document.createElement("kbd");
+  closeKey.textContent = "Esc";
+  closeButton.append(closeLabel, closeKey);
   actions.append(
     button("−", text.zoomOut, () => viewport.zoomOut()),
     zoomReset,
     button("＋", text.zoomIn, () => viewport.zoomIn()),
-    closeButton,
   );
-  bar.append(title, nav, actions);
+  bar.append(title, nav, actions, closeButton);
 
   overlay.append(bar, viewport.container, hint);
   show(index);
