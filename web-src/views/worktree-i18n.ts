@@ -208,6 +208,10 @@ export type WorktreeText = {
      * 押しても消えないことを先に言う。
      */
     lockedNote: string;
+    /** ロックを外すボタン・外したとき・外せなかったとき。 */
+    unlock: string;
+    unlocked: string;
+    unlockFailed: string;
     /**
      * prune は対象を 1 本に絞れないので、同じ状態の登録が他にあるなら
      * まとめて消えることを件数つきで伝える。
@@ -326,7 +330,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       diffFailed: "Failed to load the diff.",
       mediaUnavailable: "Media not available",
       diffTruncated: (shown, total) =>
-        `showing ${shown} of ${total} hunks — open the worktree in a new tab for the whole file`,
+        `Showing ${shown} of ${total} hunks. Opening this worktree shows the whole file.`,
     },
     noCommit: "no commit",
     lastTouched: (when) => `updated ${when}`,
@@ -414,7 +418,10 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       missingNote:
         "Its folder is already gone from disk; only the git entry is removed.",
       lockedNote:
-        "This entry is locked, so git will leave it in place. Unlock it first.",
+        "This entry is locked, so git leaves it in place. Unlocking it (the command below) lets you remove it right here.",
+      unlock: "Unlock",
+      unlocked: "Unlocked. You can remove it now.",
+      unlockFailed: "Could not unlock the worktree.",
       missingOthers: (n) =>
         n === 1
           ? "1 other entry whose folder is gone will be cleaned up at the same time."
@@ -511,7 +518,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       diffFailed: "差分を読み込めませんでした。",
       mediaUnavailable: "メディアを読み込めませんでした。",
       diffTruncated: (shown, total) =>
-        `${total} 個のうち ${shown} 個のかたまりを表示しています。全部見るには、その作業ツリーを別タブで見てください`,
+        `${total} 個のうち ${shown} 個のかたまりを表示しています。この作業ツリーを開くと、全部見られます。`,
     },
     noCommit: "コミットなし",
     lastTouched: (when) => `最終更新 ${when}`,
@@ -596,7 +603,10 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       missingNote:
         "フォルダは既にディスク上にありません。git の管理情報だけを消します。",
       lockedNote:
-        "この登録はロックされているので、git はそのまま残します。先にロックを外してください。",
+        "この登録はロックされているので、git はそのまま残します。ロックを外すと（下のコマンド）、このまま消せます。",
+      unlock: "ロックを外す",
+      unlocked: "ロックを外しました。このまま消せます。",
+      unlockFailed: "作業ツリーのロックを外せませんでした。",
       missingOthers: (n) =>
         `フォルダが無くなっている他の登録 ${n} 件も、同時に整理されます。`,
       submit: "削除する",

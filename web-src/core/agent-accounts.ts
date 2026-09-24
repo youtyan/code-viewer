@@ -596,6 +596,11 @@ export type UsageCheckFailure =
 
 type UsageCheckBase = {
   accountId: string;
+  /**
+   * claude を起こした (起こそうとした) フォルダ = サーバのプロジェクトの
+   * ルート。画面で止まったときに「このアカウントでここを開く」に使う。
+   */
+  cwd: string;
   /** この確認のために作った tmux のセッション。作らなかったら空。 */
   session: string;
   /** 作ったセッションを閉じられなかった理由。閉じた (作らなかった) なら空。 */
@@ -1238,6 +1243,11 @@ export type StatusLinePlanResponse = {
   after: unknown;
   changed: boolean;
   backupPath: string | null;
+  /**
+   * 書く前と後の unified diff (core/text-diff.ts)。確認の画面が差分の見た目で
+   * 出す。変わらないなら空。ファイルが無ければ全部が足す行。
+   */
+  diff: string;
   formattingChanged: boolean;
   wrapper: { path: string; write: boolean };
   /** 保存先。 */
@@ -1263,4 +1273,9 @@ export type LaunchResponse = {
   command: string;
   /** 前回の選択を覚えられなかった理由。覚えたなら空。 */
   rememberError: string;
+  /**
+   * プロジェクトの statusLine を読めず、このセッションの使用量を記録できない
+   * 理由 (server/accounts/project-statusline.ts)。起動はしている。無ければ空。
+   */
+  statusLineError: string;
 };

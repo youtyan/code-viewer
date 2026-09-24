@@ -32,7 +32,7 @@ import {
   statSync,
   unlinkSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type {
   StatusLineAction,
   StatusLineApplyResponse,
@@ -42,6 +42,7 @@ import type {
 } from "../../core/agent-accounts";
 import { serializeHookFile } from "../../core/agent-hooks";
 import { formatErrorDetail } from "../../core/error-detail";
+import { unifiedDiff } from "../../core/text-diff";
 import { shellSingleQuote } from "../cli-helpers";
 import { shellWord } from "./hooks";
 import {
@@ -73,7 +74,7 @@ export function statusLineFailureLog(usageDir: string): string {
 
 type JsonObject = Record<string, unknown>;
 
-function isPlainObject(value: unknown): value is JsonObject {
+export function isPlainObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -485,6 +486,13 @@ export function planStatusLine(
     before: plan.before ?? null,
     after: plan.after ?? null,
     changed: plan.changed,
+    diff: plan.changed
+      ? unifiedDiff(
+          original,
+          serializeHookFile(plan.next, original),
+          basename(path),
+        )
+      : "",
     backupPath:
       plan.changed && file.kind === "ok" ? backupPathFor(path, now) : null,
     formattingChanged:

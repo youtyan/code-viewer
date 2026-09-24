@@ -23,6 +23,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { unifiedDiff } from "../core/text-diff";
 import { claudeUsageFile } from "../server/accounts/usage";
 import {
   applyStatusLine,
@@ -509,5 +510,49 @@ describe("maintainStatusLineWrapper", () => {
   test("does not create a missing wrapper or directory", () => {
     expect(maintainStatusLineWrapper(usageDir, NOW_MS)).toEqual([]);
     expect(existsSync(usageDir)).toBe(false);
+  });
+});
+
+describe("the diff shown before writing", () => {
+  // 確認の画面の差分は、サーバが実際に書く中身から作る。
+  test.each([
+    {
+      name: "install over a user's statusLine",
+      start: "own",
+      action: "install",
+    },
+    { name: "install into a missing file", start: "none", action: "install" },
+    { name: "uninstall", start: "wrapped", action: "uninstall" },
+    { name: "nothing changes", start: "wrapped", action: "install" },
+  ] as const)("$name", async ({ start, action }) => {
+    if (start !== "none") {
+      write({
+        model: "sample",
+        statusLine: { type: "command", command: ORIGINAL },
+      });
+    }
+    if (start === "wrapped") await roundTrip("install");
+    const before = existsSync(settingsPath())
+      ? readFileSync(settingsPath(), "utf8")
+      : null;
+    const plan = planStatusLine(configDir, action, usageDir, NOW);
+    await applyStatusLine(configDir, action, usageDir, plan, NOW);
+    const after = existsSync(settingsPath())
+      ? readFileSync(settingsPath(), "utf8")
+      : null;
+    if (!plan.changed) {
+      expect(plan.diff).toBe("");
+      expect(after).toBe(before);
+      return;
+    }
+    expect(plan.diff).toBe(unifiedDiff(before, after ?? "", "settings.json"));
+    const lines = plan.diff.split("\n");
+    // 変わるのは statusLine の command の行だけ (ほかの行は前後の文脈)。
+    if (start === "own") {
+      expect(lines.filter((line) => /^[+-][^+-]/.test(line))).toEqual([
+        `-    "command": ${JSON.stringify(ORIGINAL)}`,
+        `+    "command": ${JSON.stringify(wrappedCommand(statusLineWrapperPath(usageDir), ORIGINAL))}`,
+      ]);
+    }
   });
 });

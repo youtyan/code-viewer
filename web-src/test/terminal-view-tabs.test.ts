@@ -202,7 +202,8 @@ describe("terminal view: シェルの作成と停止", () => {
     {
       name: "上限",
       respond: () => new Response("limit 8", { status: 429 }),
-      message: "Too many shells are open. Close one first. (HTTP 429): limit 8",
+      message:
+        "The limit of open shells is reached. Closing a shell tab makes room for a new one. (HTTP 429): limit 8",
     },
     {
       name: "それ以外",
@@ -231,7 +232,8 @@ describe("terminal view: シェルの作成と停止", () => {
     {
       name: "上限",
       status: 429,
-      message: "Too many shells are open. Close one first. (HTTP 429): limit 8",
+      message:
+        "The limit of open shells is reached. Closing a shell tab makes room for a new one. (HTTP 429): limit 8",
     },
     {
       name: "それ以外",

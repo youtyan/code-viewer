@@ -82,6 +82,9 @@ export type AgentsText = {
   emptyNoTmuxBody: string;
   emptyNotInstalledTitle: string;
   emptyNotInstalledBody: string;
+  /** 入れ方の箱の 1 文と、ヘルプへのリンク。 */
+  tmuxInstallIntro: string;
+  tmuxInstallHelp: (section: string) => string;
   emptyNoAgentsTitle: string;
   emptyNoAgentsBody: string;
   emptyNoAgentsAction: string;
@@ -102,6 +105,8 @@ export type AgentsText = {
   notifyAskAgain: string;
   notifyDenied: string;
   notifyDeniedHelp: string;
+  /** 通知を許可した後に押す、ページの再読み込み。 */
+  notifyReload: string;
   notifyUnsupported: string;
   notifyRequestFailed: string;
   /** ブラウザ通知の本文。 */
@@ -199,6 +204,8 @@ export type AgentHooksText = {
   dialogAdded: string;
   dialogRemoved: string;
   dialogNothing: string;
+  /** 差分の見た目の部品が読み込めず、差分を文字で出すとき。 */
+  dialogDiffFailed: string;
   dialogBackup: (path: string) => string;
   dialogNewFile: string;
   dialogKept: (count: number) => string;
@@ -222,6 +229,13 @@ export type AgentHooksText = {
   applyFailed: string;
   /** どの時点から効くか。公式ドキュメントの記述に合わせる。 */
   effect: Record<HookAgent, Record<HookAction, string>>;
+  /** 入れた結果に添える文 (下の「開く」ボタンで何が済むか)。 */
+  afterInstall: Record<HookAgent, string>;
+  /** 入れた結果の下の「claude を開く」「codex を開く」と、その結果。 */
+  openAgent: Record<HookAgent, string>;
+  openAgentTitle: (agent: HookAgent) => string;
+  openedAgent: (agent: HookAgent) => string;
+  openAgentFailed: (agent: HookAgent) => string;
   failures: (count: number) => string;
   failuresLog: (path: string) => string;
   failuresClear: string;
@@ -270,6 +284,8 @@ const HOOKS_EN: AgentHooksText = {
   dialogRemoved: "Removed",
   dialogNothing:
     "The file already has exactly these hooks. Nothing in it changes.",
+  dialogDiffFailed:
+    "The diff view could not be loaded, so the change is shown as text.",
   dialogBackup: (path) =>
     `The current content is saved to ${path} before writing.`,
   dialogNewFile:
@@ -314,17 +330,28 @@ const HOOKS_EN: AgentHooksText = {
   effect: {
     claude: {
       install:
-        "Running claude sessions normally pick this up on their own (claude watches its settings file). If one does not, check /hooks in it or restart it.",
+        "Running claude sessions normally pick this up on their own (claude watches its settings file). After installing, Open claude shows the hooks under /hooks.",
       uninstall:
         "Running claude sessions normally stop calling the hooks on their own.",
     },
     codex: {
       install:
-        "codex runs a new hook only after you trust it: open /hooks in codex and trust the code-viewer hooks. The codex documentation does not say whether running sessions pick up new hooks, so count on sessions started from now on.",
+        "codex runs a new hook only after you trust it; after installing, /hooks in the tab Open codex opens lets you trust them. The codex docs do not say whether running sessions pick up new hooks, so count on new sessions.",
       uninstall:
         "Sessions started from now on no longer call the hooks. Already running ones may keep them until restarted.",
     },
   },
+  afterInstall: {
+    claude:
+      "Running claude sessions normally pick this up on their own. If one does not, /hooks in the tab Open claude opens shows the hooks that are in.",
+    codex:
+      "codex runs the hooks once you trust them: in the tab Open codex opens, open /hooks and trust the code-viewer hooks.",
+  },
+  openAgent: { claude: "Open claude", codex: "Open codex" },
+  openAgentTitle: (agent) =>
+    `Starts ${agent} with the default account in this project's folder and brings its terminal tab to the front.`,
+  openedAgent: (agent) => `Opened ${agent} in a terminal tab.`,
+  openAgentFailed: (agent) => `Could not open ${agent}:`,
   failures: (count) =>
     `${count} hook report${count === 1 ? "" : "s"} did not reach code-viewer`,
   failuresLog: (path) => `Full log: ${path}`,
@@ -374,6 +401,8 @@ const HOOKS_JA: AgentHooksText = {
   dialogRemoved: "消すもの",
   dialogNothing:
     "このファイルには既にこのとおりのフックがあります。中身は変わりません。",
+  dialogDiffFailed:
+    "差分の画面の部品を読み込めなかったので、変わる所を文字で出しています。",
   dialogBackup: (path) => `書く前の中身を ${path} に残します。`,
   dialogNewFile:
     "ファイルがまだ無いので、新しく作ります (バックアップするものはありません)。",
@@ -417,16 +446,27 @@ const HOOKS_JA: AgentHooksText = {
   effect: {
     claude: {
       install:
-        "動いている claude にも、通常はそのまま効きます (claude が設定ファイルの変更を読み直すため)。効かないときは claude の /hooks で確かめるか、起動し直してください。",
+        "動いている claude にも、通常はそのまま効きます (claude が設定ファイルの変更を読み直すため)。入れた後の［claude を開く］で開くと、/hooks に入ったフックが出ます。",
       uninstall: "動いている claude からも、通常はそのまま外れます。",
     },
     codex: {
       install:
-        "codex は、信頼するまでフックを実行しません。codex で /hooks を開き、code-viewer のフックを信頼してください。動いている codex に効くかは公式の説明に無いため、確実なのはこれから起動するものです。",
+        "codex は、信頼するまでフックを実行しません。入れた後の［codex を開く］で開いたタブの /hooks で信頼できます。動いている codex に効くかは公式の説明に無いため、確実なのはこれから起動するものです。",
       uninstall:
         "これから起動する codex では呼ばれません。動いているものには、起動し直すまで残ることがあります。",
     },
   },
+  afterInstall: {
+    claude:
+      "動いている claude にも、通常はそのまま効きます。効かないときは、［claude を開く］で開いたタブの /hooks で、入ったフックを確かめられます。",
+    codex:
+      "codex は信頼するまでフックを実行しません。［codex を開く］で開いたタブで /hooks を開き、code-viewer のフックを信頼すると効きます。",
+  },
+  openAgent: { claude: "claude を開く", codex: "codex を開く" },
+  openAgentTitle: (agent) =>
+    `既定のアカウントで、このプロジェクトのフォルダの ${agent} を起こし、ターミナルのタブで前に出します。`,
+  openedAgent: (agent) => `${agent} をターミナルのタブで開きました。`,
+  openAgentFailed: (agent) => `${agent} を開けませんでした:`,
   failures: (count) =>
     `フックの申告が code-viewer に届かなかったことが ${count} 件あります`,
   failuresLog: (path) => `記録の全体: ${path}`,
@@ -493,7 +533,10 @@ const EN: AgentsText = {
     "Agents are listed here when they run inside tmux. New agent starts claude or codex in a new tmux session for you, or run them in tmux yourself (“tmux new -s work”).",
   emptyNotInstalledTitle: "tmux was not found",
   emptyNotInstalledBody:
-    "This list reads agents from tmux. Install tmux (or pass --bin tmux=<path>) and run your agents inside it.",
+    "This list reads the agents that run inside tmux, and tmux was not found (if it lives elsewhere, start code-viewer with --bin tmux=<path>).",
+  tmuxInstallIntro:
+    "Installing tmux and starting agents inside it lists them here:",
+  tmuxInstallHelp: (section) => `Help › ${section}`,
   emptyNoAgentsTitle: "No agents are running",
   emptyNoAgentsBody:
     "Start one with New agent, or launch claude or codex in a tmux pane; it appears here, grouped by project.",
@@ -515,7 +558,8 @@ const EN: AgentsText = {
   notifyAskAgain: "Ask again",
   notifyDenied: "Notifications are blocked",
   notifyDeniedHelp:
-    "Allow notifications for this site from the icon at the left of the address bar, then reload.",
+    "Allow notifications from the icon at the left of the address bar, then reload to pick it up (it is a browser setting, so a page cannot change it).",
+  notifyReload: "Reload",
   notifyUnsupported: "This browser cannot show notifications",
   notifyRequestFailed: "Could not ask for notification permission",
   notifyWaitingTitle: (project) => `Needs input · ${project}`,
@@ -635,7 +679,10 @@ const JA: AgentsText = {
     "エージェントは tmux の中で動いているとここに並びます。「新しいエージェント」で claude や codex を新しい tmux のセッションに起動できます (自分で「tmux new -s work」から起動してもかまいません)。",
   emptyNotInstalledTitle: "tmux が見つかりません",
   emptyNotInstalledBody:
-    "この一覧は tmux からエージェントを読み取ります。tmux をインストールし (場所が違うなら --bin tmux=<パス>)、その中でエージェントを動かしてください。",
+    "この一覧は tmux の中で動くエージェントを読み取ります。tmux が見つかりませんでした（別の場所にあるなら --bin tmux=<パス> で起動します）。",
+  tmuxInstallIntro:
+    "tmux を入れて、その中でエージェントを起こすと、ここに並びます:",
+  tmuxInstallHelp: (section) => `ヘルプ › ${section}`,
   emptyNoAgentsTitle: "エージェントが動いていません",
   emptyNoAgentsBody:
     "「新しいエージェント」で起動するか、tmux のペインで claude や codex を起動すると、プロジェクトごとにここへ並びます。",
@@ -657,7 +704,8 @@ const JA: AgentsText = {
   notifyAskAgain: "もう一度求める",
   notifyDenied: "通知がブロックされています",
   notifyDeniedHelp:
-    "アドレスバー左のアイコンからこのサイトの「通知」を許可し、再読み込みしてください。",
+    "アドレスバー左のアイコンで「通知」を許可すると、再読み込みで効きます (ブラウザの設定なので、ページからは変えられません)。",
+  notifyReload: "再読み込み",
   notifyUnsupported: "このブラウザは通知に対応していません",
   notifyRequestFailed: "通知の許可を求められませんでした",
   notifyWaitingTitle: (project) => `入力待ち · ${project}`,

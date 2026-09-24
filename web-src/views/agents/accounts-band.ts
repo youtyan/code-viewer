@@ -60,6 +60,8 @@ export type AccountsBandDeps = {
   openSettings(): void;
   /** 描き直しを頼む (結果の文を出した後など)。 */
   requestRender(): void;
+  /** 設定のアカウントの起動コマンドの欄へ移り、焦点を当てる。 */
+  openLaunchCommands(): void;
   /** 今の時刻 (テストで差し替える)。 */
   now?(): number;
 };
@@ -177,6 +179,29 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       );
       why.title = line.title;
       box.append(line, why);
+      // 包んでいない: その場で statusLine の確認の画面 (差分つき) を開く。
+      // 有効にしたら一覧を読み直すので、カードは値を待つ形に替わる。
+      const status = account.statusLine;
+      if (
+        usage.reason === "not-wrapped" &&
+        status &&
+        status.state !== "unreadable" &&
+        status.state !== "no-config-dir"
+      ) {
+        const enable = el(
+          "button",
+          "agents-secondary agents-account-enable-usage",
+          t.usageEnable,
+        );
+        enable.type = "button";
+        enable.title = t.statusLineDialogTitle("install");
+        enable.disabled = busy;
+        enable.addEventListener(
+          "click",
+          () => void run(() => deps.dialogs.statusLine(account, "install")),
+        );
+        box.appendChild(enable);
+      }
       return box;
     }
     for (const view of usageWindowViews(usage, now)) {
@@ -265,7 +290,10 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       head.appendChild(menu);
     }
     box.append(head, whoLine(account), usageBlock(account, now));
-    const check = usageCheckBlock(account, now, deps.client, t);
+    const check = usageCheckBlock(account, now, deps.client, t, {
+      ...deps.dialogs,
+      openLaunchCommands: deps.openLaunchCommands,
+    });
     if (check) box.appendChild(check);
 
     const foot = el("div", "agents-account-foot");

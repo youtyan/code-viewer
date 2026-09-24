@@ -34,20 +34,17 @@ import type {
   AccountAgent,
   AccountLogin,
   AccountStatus,
-  StatusLinePlanResponse,
 } from "../../core/agent-accounts";
 import { HOOK_AGENTS } from "../../core/agent-hooks";
 import { abbreviateHome } from "../../core/agent-overview";
 import { formatErrorDetail } from "../../core/error-detail";
 import { CHECK_16_PATHS, iconSvg } from "../../core/icons";
-import { showFormDialog } from "../ui-dialog";
 import type { SettingsDraft } from "../viewer-settings";
 import type { AccountsClient } from "./accounts-client";
 import {
   type AccountDialogs,
   accountDisplayName,
   el,
-  labeled,
   planLabel,
   resultLine,
 } from "./accounts-dialogs";
@@ -68,6 +65,9 @@ export type AccountsSettings = AgentHooksSettings & { draft: SettingsDraft };
 /** 見出しの id。帯の「管理」からここへ飛ぶ。 */
 export const ACCOUNTS_SECTION_ID = "agent-accounts-section-title";
 
+/** claude の起動コマンドの欄の id (使用量を確かめるの「起動コマンドを開く」の送り先)。 */
+export const CLAUDE_LAUNCH_COMMAND_ID = "agent-accounts-command-claude";
+
 /** 起動コマンドの既定 (登録簿に書かれていないとき)。 */
 const DEFAULT_COMMANDS: Record<AccountAgent, string> = {
   claude: "claude",
@@ -83,12 +83,6 @@ export function shownLoginState(
   if (login.state === "logged-in") return "in";
   if (login.state === "unknown") return "unknown";
   return "out";
-}
-
-function json(value: unknown, none: string): string {
-  return value === null || value === undefined
-    ? none
-    : JSON.stringify(value, null, 2);
 }
 
 /** 保存する値。空と既定の名前は「既定」(登録簿から外す) にする。 */
@@ -142,6 +136,7 @@ export function createAccountsSettings(
   };
   const commandsReset = el("button", "gdp-btn gdp-btn-sm");
   commandsReset.type = "button";
+  commandInputs.claude.id = CLAUDE_LAUNCH_COMMAND_ID;
   for (const [agent, input] of Object.entries(commandInputs)) {
     input.type = "text";
     input.spellcheck = false;
@@ -444,93 +439,19 @@ export function createAccountsSettings(
     return row;
   }
 
-  function statusLineBody(plan: StatusLinePlanResponse): HTMLElement {
-    const t = text();
-    const home = deps.client.snapshot().data?.home ?? "";
-    const short = (path: string) => abbreviateHome(path, home);
-    const body = el("div", "agent-hooks-dialog");
-    if (plan.writeBlocked && plan.changed) {
-      body.appendChild(el("p", "", t.statusLineBlocked));
-      body.appendChild(
-        labeled(t.statusLineAfter, json(plan.after, t.statusLineNone), true),
-      );
-      body.appendChild(labeled("", plan.writeBlocked, true));
-      return body;
-    }
-    body.appendChild(labeled(t.statusLineFile, short(plan.path)));
-    if (plan.symlink) {
-      body.appendChild(labeled(t.statusLineLinkTarget, short(plan.realPath)));
-    }
-    body.appendChild(
-      labeled(t.statusLineBefore, json(plan.before, t.statusLineNone), true),
-    );
-    body.appendChild(
-      labeled(t.statusLineAfter, json(plan.after, t.statusLineNone), true),
-    );
-    const notes: string[] = [];
-    if (!plan.changed) notes.push(t.statusLineNothing);
-    if (plan.changed) {
-      notes.push(
-        plan.backupPath
-          ? t.statusLineBackup(
-              short(plan.backupPath).replace(
-                /-\d{8}-\d{6}$/,
-                "-<YYYYMMDD-HHMMSS>",
-              ),
-            )
-          : t.statusLineNewFile,
-      );
-      if (plan.formattingChanged) notes.push(t.statusLineFormatting);
-    }
-    if (plan.action === "install") {
-      if (plan.wrapper.write)
-        notes.push(t.statusLineWrapper(short(plan.wrapper.path)));
-      notes.push(t.statusLineSaves(short(plan.usageDir)));
-      notes.push(t.statusLineRestore);
-    }
-    notes.push(t.statusLineEffect);
-    const list = el("ul", "agent-hooks-dialog-notes");
-    for (const note of notes) list.appendChild(el("li", "", note));
-    body.appendChild(list);
-    return body;
-  }
-
-  async function reviewStatusLine(
-    account: AccountStatus,
-    action: "install" | "uninstall",
-  ): Promise<string | null> {
-    const t = text();
-    const plan = await deps.client.planStatusLine(account.id, action);
-    const blocked = plan.writeBlocked !== "" && plan.changed;
-    return showFormDialog({
-      title: t.statusLineDialogTitle(action),
-      body: statusLineBody(plan),
-      wide: true,
-      danger: false,
-      submitLabel: blocked
-        ? t.close
-        : action === "install"
-          ? t.statusLineInstall.replace(/…$/, "")
-          : t.statusLineUninstall.replace(/…$/, ""),
-      cancelLabel: t.cancel,
-      submit: async () => {
-        if (blocked) return null;
-        const result = await deps.client.applyStatusLine(plan, account.id);
-        const lines = [
-          result.changed ? t.statusLineApplied[action] : t.statusLineUnchanged,
-        ];
-        if (result.backupPath) lines.push(t.backupAt(result.backupPath));
-        if (result.wrapperWritten)
-          lines.push(t.statusLineWrapper(plan.wrapper.path));
-        return lines.join("\n");
-      },
-    });
-  }
-
   /**
    * claude の設定ファイル (実際に書くファイル) ごとに 1 行。受け取れているかと
    * 最後に受け取った時刻だけを出し、仕組みと書き換えるファイルは「仕組み」の欄へ。
    */
+  /** 使用量を確かめるの開く操作。起動コマンドの欄は同じページにある。 */
+  const openers = {
+    ...deps.dialogs,
+    openLaunchCommands() {
+      commandInputs.claude.scrollIntoView({ block: "center" });
+      commandInputs.claude.focus();
+    },
+  };
+
   function renderUsage(accounts: AccountStatus[], home: string): void {
     const t = text();
     usageRows.replaceChildren();
@@ -594,7 +515,7 @@ export function createAccountsSettings(
             t.statusLineDialogTitle(action),
             () =>
               void run(`statusline:${realPath}`, () =>
-                reviewStatusLine(first, action),
+                deps.dialogs.statusLine(first, action),
               ),
           ),
         );
@@ -603,7 +524,7 @@ export function createAccountsSettings(
       // 使用量を確かめる (全体ボードのカードと同じ部品)。同じ設定ファイルを
       // 共有するアカウントが並ぶときは、ボタンに名前を添える。
       for (const member of members) {
-        const check = usageCheckBlock(member, now(), deps.client, t, {
+        const check = usageCheckBlock(member, now(), deps.client, t, openers, {
           name: members.length > 1 ? accountDisplayName(member, t) : undefined,
         });
         if (check) box.appendChild(check);

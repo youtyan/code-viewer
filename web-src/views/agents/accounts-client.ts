@@ -40,6 +40,11 @@ export type UsageCheckState = {
   running: boolean;
   response?: UsageCheckResponse;
   error?: string;
+  /**
+   * 画面で止まった後、利用者が「このアカウントで開く」(か「ログイン」) を
+   * 押した。開けなかったなら error にその理由。
+   */
+  opened?: { error: string; notice?: string };
 };
 
 export type AccountsSnapshot = {
@@ -94,6 +99,8 @@ export type AccountsClient = {
    * 結果は usageCheck に置き、失敗も投げずにそこへ残す。
    */
   checkUsage(id: string): Promise<void>;
+  /** 止まった確認の後で、そのアカウントで開いた (開けなかった理由)。 */
+  noteUsageCheckOpened(id: string, error: string, notice?: string): void;
 };
 
 /**
@@ -339,6 +346,15 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
       await load();
     },
     usageCheck: (id) => checks.get(id) ?? null,
+    noteUsageCheckOpened(id, error, notice = "") {
+      const current = checks.get(id);
+      if (!current || current.running) return;
+      checks.set(id, {
+        ...current,
+        opened: notice ? { error, notice } : { error },
+      });
+      emit();
+    },
     async checkUsage(id) {
       if (checks.get(id)?.running) return;
       checks.set(id, { running: true });

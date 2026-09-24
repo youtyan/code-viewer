@@ -29,7 +29,11 @@ import {
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { signalProcessGroup } from "../runtime";
 import { runTmux, type TmuxRunResult } from "../tmux/command";
-import { agentCommandArgv, sessionExists } from "./launch";
+import {
+  agentCommandArgv,
+  sessionExists,
+  statusLineSettingsArgs,
+} from "./launch";
 import { AccountError } from "./registry";
 import { sharedAccountService } from "./service";
 
@@ -143,18 +147,12 @@ export function classifyUsageCheckScreen(screen: string): ScreenVerdict {
 }
 
 /**
- * claude に足す引数。包んだ statusLine を --settings で渡す: コマンドラインの
- * 設定はプロジェクトの設定 (.claude/settings.json) より優先されるので、作業
- * 場所のプロジェクトに別の statusLine があっても使用量が保存される
- * (https://code.claude.com/docs/en/settings の優先順位)。引数は "$@" で渡る
- * (agentCommandArgv) ので、JSON をシェルの文字列に埋め込まない。
+ * claude に足す引数。包んだ statusLine を --settings で渡す: 作業場所の
+ * プロジェクトに別の statusLine があっても使用量が保存される。
  */
 export function usageCheckArgs(statusLineCommand: string): string[] {
   return [
-    "--settings",
-    JSON.stringify({
-      statusLine: { type: "command", command: statusLineCommand },
-    }),
+    ...statusLineSettingsArgs({ type: "command", command: statusLineCommand }),
     "--model",
     USAGE_CHECK_MODEL,
     USAGE_CHECK_PROMPT,
@@ -267,6 +265,7 @@ export function createUsageChecker(deps: UsageCheckDeps): UsageChecker {
     const startedAt = deps.now();
     const base = {
       accountId: account.id,
+      cwd,
       session: "",
       closeError: "",
       joined: false,
@@ -381,6 +380,7 @@ export function createUsageChecker(deps: UsageCheckDeps): UsageChecker {
       if (usage.status === "ok" && usage.observedAt >= startedAt) {
         return {
           accountId: account.id,
+          cwd,
           session,
           closeError: "",
           joined: false,

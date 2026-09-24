@@ -157,6 +157,7 @@ const API_ENDPOINTS = {
   worktreeOpen: { path: "/_worktree/open", zone: "entry" },
   worktreeRemove: { path: "/_worktree/remove", zone: "project" },
   worktreeStop: { path: "/_worktree/stop", zone: "entry" },
+  worktreeUnlock: { path: "/_worktree/unlock", zone: "project" },
   diffJson: { path: "/diff.json", zone: "project" },
   entryBackend: { path: "/_entry/backend", zone: "entry" },
   entryRestart: { path: "/_entry/restart", zone: "entry" },

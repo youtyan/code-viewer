@@ -199,6 +199,7 @@ function harness(language: "en" | "ja" = "en") {
     clearUsageFailures: unused("clearUsageFailures"),
     usageCheck: () => null,
     checkUsage: unused("checkUsage"),
+    noteUsageCheckOpened: unused("noteUsageCheckOpened"),
   };
   const dialogs: AccountDialogs = {
     add: unused("add"),
@@ -206,6 +207,8 @@ function harness(language: "en" | "ja" = "en") {
     rename: unused("rename"),
     remove: unused("remove"),
     launch: unused("launch"),
+    openHere: unused("openHere"),
+    statusLine: unused("statusLine"),
   };
   const settings = createAccountsSettings({
     client,

@@ -941,6 +941,91 @@ describe("remove dialog", () => {
     ]);
   });
 
+  test.each([
+    { name: "folder gone", missing: true },
+    { name: "folder still there", missing: false },
+  ])("a locked worktree ($name): shows the command, unlocks, and lets it be removed", async ({
+    missing,
+  }) => {
+    const mounted = await openRemoveDialog(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "feature-x",
+          path: "/repo/.worktrees/feature x",
+          branch: "feature-x",
+          missing,
+          locked: true,
+        }),
+      ]),
+      "/repo/.worktrees/feature x",
+    );
+    const dialog = openDialog();
+    // 開いた直後の Enter でロックが外れないよう、焦点は［キャンセル］にある。
+    expect(document.activeElement).toBe(
+      dialog.querySelector(".gdp-dialog-cancel"),
+    );
+    const block = dialog.querySelector<HTMLElement>(".worktree-unlock");
+    // 押す前に、実行するコマンドを出す (空白のあるパスは引用する)。
+    expect(block?.querySelector(".worktree-unlock-command")?.textContent).toBe(
+      "git worktree unlock '/repo/.worktrees/feature x'",
+    );
+    block?.querySelector<HTMLButtonElement>("button")?.click();
+    await flush();
+    expect(mounted.posts).toEqual([
+      {
+        url: "/_worktree/unlock",
+        body: { path: "/repo/.worktrees/feature x" },
+      },
+    ]);
+    expect(dialog.querySelector(".worktree-unlock")?.textContent).toBe(
+      TEXT.removeDialog.unlocked,
+    );
+    // 画面は閉じず、そのまま消せる。
+    dialogSubmit(dialog).click();
+    await flush();
+    expect(mounted.posts.map((post) => post.url)).toEqual([
+      "/_worktree/unlock",
+      "/_worktree/remove",
+    ]);
+  });
+
+  test("a failed unlock shows git's whole output and keeps the button", async () => {
+    await openRemoveDialog(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "feature-x",
+          path: "/repo/.worktrees/feature-x",
+          locked: true,
+          missing: true,
+        }),
+      ]),
+      "/repo/.worktrees/feature-x",
+    );
+    const failing = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("fatal: sample unlock failure\nsecond line from git", {
+        status: 500,
+      })) as typeof fetch;
+    try {
+      const dialog = openDialog();
+      const button = dialog.querySelector<HTMLButtonElement>(
+        ".worktree-unlock button",
+      );
+      button?.click();
+      await flush();
+      const result =
+        dialog.querySelector(".worktree-unlock-result")?.textContent ?? "";
+      expect(result).toContain(TEXT.removeDialog.unlockFailed);
+      expect(result).toContain("fatal: sample unlock failure");
+      expect(result).toContain("second line from git");
+      expect(button?.disabled).toBe(false);
+    } finally {
+      globalThis.fetch = failing;
+    }
+  });
+
   test("says only the git entry is removed when the folder is gone", async () => {
     await openRemoveDialog(
       response([
@@ -1856,6 +1941,48 @@ describe("diffs", () => {
       },
     );
     expect(diff.textContent).toContain(TEXT.panes.diffTruncated(200, 900));
+  });
+
+  test("the cut-short notice opens the worktree (the same as the row's Open)", async () => {
+    const { diff, posts } = await mountWith(
+      response([item({ name: "repo", files: [file()] })]),
+      {
+        route: { wt: "/repo" },
+        diff: {
+          diff: "@@ -1 +1 @@\n-a\n+b\n",
+          totalHunks: 900,
+          renderedHunks: 200,
+          truncated: true,
+        },
+        postResponse: { url: "http://127.0.0.1:4321/" },
+      },
+    );
+    const tab = { opener: null, location: { href: "" }, close: vi.fn() };
+    const originalOpen = window.open;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      value: () => tab,
+    });
+    try {
+      const open = diff.querySelector<HTMLButtonElement>(
+        ".worktree-diff-truncated button",
+      );
+      expect(open?.textContent).toBe(TEXT.open);
+      open?.click();
+      for (let i = 0; i < 8; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(posts).toContainEqual({
+        url: "/_worktree/open",
+        body: { path: "/repo" },
+      });
+      expect(tab.location.href).toBe("http://127.0.0.1:4321/");
+    } finally {
+      Object.defineProperty(window, "open", {
+        configurable: true,
+        value: originalOpen,
+      });
+    }
   });
 
   test("asks for a worktree before loading anything", async () => {

@@ -22,6 +22,8 @@ function setup(
     regex?: boolean;
     matches?: GrepResponse["matches"];
     language?: () => "en" | "ja";
+    /** 今のサーバの世代 (応答は 1)。1 より大きいと、応答は古い。 */
+    serverGeneration?: () => number;
   } = {},
 ) {
   document.body.innerHTML =
@@ -68,7 +70,7 @@ function setup(
     getLanguage: options.language ?? (() => "en"),
     appendScopeParams: () => undefined,
     getRef: () => "worktree",
-    getServerGeneration: () => 1,
+    getServerGeneration: options.serverGeneration ?? (() => 1),
     isAbortError: () => false,
     getGrepRegex: () => regex,
     getGrepCaseSensitive: () => false,
@@ -265,5 +267,33 @@ describe("search results sheet", () => {
     expect(view.isOpen()).toBe(true);
     expect(document.querySelectorAll(".gdp-palette-row").length).toBe(3);
     expect(urls.length).toBe(1);
+  });
+});
+
+describe("when the repository changes while searching", () => {
+  test("says what happened and searches again with the same words", async () => {
+    let current = 2;
+    const { view, urls } = setup({ serverGeneration: () => current });
+    view.open("needle path:src/");
+    const status = q<HTMLElement>(document, ".search-results-status");
+    await waitFor(() =>
+      status.textContent?.includes(searchPaletteText("en").repositoryChanged),
+    );
+    const again = status.querySelector<HTMLButtonElement>(
+      ".gdp-palette-status-action",
+    );
+    expect(again?.textContent).toBe(searchPaletteText("en").searchAgain);
+    const before = urls.length;
+    current = 1;
+    again?.click();
+    await waitFor(() => urls.length > before);
+    // 同じ語・同じ条件で読み直す。
+    expect(urls[urls.length - 1]).toBe(urls[before - 1]);
+    await waitFor(
+      () =>
+        !status.textContent?.includes(
+          searchPaletteText("en").repositoryChanged,
+        ),
+    );
   });
 });

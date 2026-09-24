@@ -729,6 +729,46 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     if (isCurrent(seq)) await refresh();
   }
 
+  /**
+   * 消す画面の「ロックされています」と、実行するコマンド、［ロックを外す］。
+   * 外したらこの欄を「外しました」に替え、そのまま消せる。失敗は git の出力を全部出す。
+   */
+  function unlockBlock(item: WorktreeItem): HTMLElement {
+    const t = text();
+    const box = el("div", "worktree-warn worktree-unlock");
+    const quoted = /[^\w./-]/.test(item.path)
+      ? `'${item.path.split("'").join("'\\''")}'`
+      : item.path;
+    const button = el("button", "gdp-btn gdp-btn-sm", t.removeDialog.unlock);
+    button.type = "button";
+    const result = el("p", "worktree-unlock-result");
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      result.textContent = "";
+      try {
+        await deps.trackLoad(
+          postWorktreeAction(apiUrl("worktreeUnlock"), { path: item.path }),
+        );
+        box.className = "worktree-unlock";
+        box.replaceChildren(el("p", "worktree-hint", t.removeDialog.unlocked));
+      } catch (error) {
+        button.disabled = false;
+        result.textContent = failureMessage(t.removeDialog.unlockFailed, error);
+      }
+    });
+    box.append(
+      el("p", "", t.removeDialog.lockedNote),
+      el(
+        "pre",
+        "worktree-unlock-command terminal-mono",
+        `git worktree unlock ${quoted}`,
+      ),
+      button,
+      result,
+    );
+    return box;
+  }
+
   async function removeWorktree(item: WorktreeItem): Promise<void> {
     if (busyPath) return;
     const seq = lifecycle;
@@ -740,10 +780,8 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       body.appendChild(el("p", "", t.removeDialog.missingBody(item.name)));
       body.appendChild(el("p", "worktree-hint", t.removeDialog.missingNote));
       // ロックされた登録は prune が黙って飛ばす (サーバが 409 で返す)。
-      // 押す前に理由が分かるようにする。
-      if (item.locked) {
-        body.appendChild(el("p", "worktree-warn", t.removeDialog.lockedNote));
-      }
+      // 押す前に理由と、その場で外す操作を出す。
+      if (item.locked) body.appendChild(unlockBlock(item));
       // prune は対象を 1 本に絞れないので、同じ状態の登録が他にあれば
       // まとめて消えることを先に伝える。飛ばされるロック済みは数に入れない。
       const otherMissing = (data?.worktrees || []).filter(
@@ -758,6 +796,8 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     } else {
       body.appendChild(el("p", "", t.removeDialog.body(item.name)));
       body.appendChild(el("p", "", t.removeDialog.diskNote(item.path)));
+      // ロックされた作業ツリーは git worktree remove が断る。
+      if (item.locked) body.appendChild(unlockBlock(item));
     }
     if (item.branch) {
       body.appendChild(
@@ -790,6 +830,10 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       cancelLabel: t.cancel,
       // フォルダごと消える不可逆の操作なので、確定は常に危険色。
       danger: true,
+      // ［ロックを外す］は押すとすぐ git を書き換える。開いた直後の Enter で
+      // 押されないよう、焦点は確認のチェックか［キャンセル］に置く。
+      focusTarget: force,
+      focusCancel: true,
       validate: () =>
         force && !force.checked ? t.removeDialog.forceRequired : null,
       submit: () => ({ force: force?.checked ?? false }),
@@ -2163,13 +2207,20 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         const head = shell.querySelector<HTMLElement>(".gdp-shell-header");
         if (head) head.style.display = "none";
         if (res.truncated) {
-          body.appendChild(
+          // 全部見る入口 (行の右端の「開く」と同じ操作) を知らせの横に置く。
+          const notice = el("div", "gdp-info worktree-diff-truncated");
+          const open = el("button", "gdp-btn gdp-btn-sm", t.open);
+          open.type = "button";
+          open.addEventListener("click", () => void openWorktree(item));
+          notice.append(
             el(
-              "div",
-              "gdp-info",
+              "span",
+              "",
               t.panes.diffTruncated(res.renderedHunks, res.totalHunks),
             ),
+            open,
           );
+          body.appendChild(notice);
         }
         const host = el("div", "");
         body.appendChild(host);

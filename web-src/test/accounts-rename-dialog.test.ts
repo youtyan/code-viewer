@@ -112,6 +112,7 @@ function client(
     clearUsageFailures: unused("clearUsageFailures"),
     usageCheck: () => null,
     checkUsage: unused("checkUsage"),
+    noteUsageCheckOpened: unused("noteUsageCheckOpened"),
   };
 }
 

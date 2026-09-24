@@ -157,7 +157,11 @@ function figure(lang: HelpLanguage, item: HelpFigure): HTMLAnchorElement {
   return link;
 }
 
-function command(
+/**
+ * コピーのボタンつきのコマンドの箱。ヘルプの本文と、画面で入れ方を出す所
+ * (install-help.ts) が同じものを使う。
+ */
+export function command(
   lang: HelpLanguage,
   text: string,
   title?: string,

@@ -21,6 +21,7 @@ import type { AccountDialogs } from "../views/agents/accounts-dialogs";
 import { ACCOUNTS_EN, ACCOUNTS_JA } from "../views/agents/accounts-i18n";
 import { createAccountsSettings } from "../views/agents/accounts-settings";
 import {
+  type UsageCheckOpeners,
   usageCheckBlock,
   usageCheckMenuItem,
 } from "../views/agents/usage-check";
@@ -92,6 +93,7 @@ function failed(
 ): UsageCheckResponse {
   return {
     accountId: "claude-sample",
+    cwd: "/home/sample/work/sample-app",
     status: "failed",
     reason,
     detail: `the claude screen shows "sample marker"`,
@@ -136,9 +138,22 @@ function fakeClient(
     async checkUsage(id) {
       pressed.push(id);
     },
+    noteUsageCheckOpened(id, error) {
+      opened.push([id, error]);
+    },
   };
-  return { client, pressed };
+  const opened: Array<[string, string]> = [];
+  return { client, pressed, opened };
 }
+
+/** 押されない「このアカウントで開く」「ログイン」。 */
+const NO_OPENERS: UsageCheckOpeners = {
+  openHere: () => Promise.reject(new Error("openHere is not used here")),
+  login: () => Promise.reject(new Error("login is not used here")),
+  openLaunchCommands: () => {
+    throw new Error("openLaunchCommands is not used here");
+  },
+};
 
 function shown(element: HTMLElement | null) {
   if (!element) return null;
@@ -221,7 +236,7 @@ describe("when the check is offered", () => {
     },
   ])("$name", ({ account: row, button }) => {
     const { client } = fakeClient();
-    const block = shown(usageCheckBlock(row, NOW, client, t));
+    const block = shown(usageCheckBlock(row, NOW, client, t, NO_OPENERS));
     expect(block?.button ?? null).toEqual(button);
     // ⋯ のメニューは claude なら値に関係なくある (理由は押した結果で返る)。
     expect(usageCheckMenuItem(row, client, t)?.label ?? null).toBe(
@@ -231,7 +246,7 @@ describe("when the check is offered", () => {
 
   test("pressing starts the check at once (no confirmation)", () => {
     const { client, pressed } = fakeClient();
-    const block = usageCheckBlock(account(), NOW, client, t);
+    const block = usageCheckBlock(account(), NOW, client, t, NO_OPENERS);
     block?.querySelector<HTMLButtonElement>(".usage-check-button")?.click();
     expect(pressed).toEqual(["claude-sample"]);
     usageCheckMenuItem(account(), client, t)?.onSelect();
@@ -251,35 +266,6 @@ describe("while checking and after", () => {
         reason: "",
         next: "",
         more: "",
-      },
-    },
-    {
-      name: "stopped at the trust question: reason, next step and the screen",
-      state: { running: false, response: failed("trust") },
-      row: account(),
-      want: {
-        button: BUTTON,
-        status: "",
-        reason: t.usageCheckFailed.trust,
-        next: t.usageCheckNext.trust,
-        more: `the claude screen shows "sample marker"\n\n${t.usageCheckEvidence}\nsample line one\nsample line two`,
-      },
-    },
-    {
-      name: "timed out",
-      state: {
-        running: false,
-        response: failed("timeout", {
-          detail: "no new usage arrived within 60s",
-        }),
-      },
-      row: account(),
-      want: {
-        button: BUTTON,
-        status: "",
-        reason: t.usageCheckFailed.timeout,
-        next: t.usageCheckNext.timeout,
-        more: `no new usage arrived within 60s\n\n${t.usageCheckEvidence}\nsample line one\nsample line two`,
       },
     },
     {
@@ -327,7 +313,9 @@ describe("while checking and after", () => {
     const { client } = fakeClient({
       "claude-sample": state as UsageCheckState,
     });
-    expect(shown(usageCheckBlock(row, NOW, client, t))).toEqual(want);
+    expect(shown(usageCheckBlock(row, NOW, client, t, NO_OPENERS))).toEqual(
+      want,
+    );
   });
 
   test("the words exist in both languages for every reason", () => {
@@ -341,10 +329,192 @@ describe("while checking and after", () => {
         "start-failed",
       ] as const) {
         expect(text.usageCheckFailed[reason]).not.toBe("");
-        expect(text.usageCheckNext[reason]).not.toBe("");
       }
+      for (const reason of ["not-wrapped", "timeout", "start-failed"] as const)
+        expect(text.usageCheckNext[reason]).not.toBe("");
     }
     expect(ACCOUNTS_JA.usageChecking).toBe("確かめています…");
+  });
+});
+
+/** 画面で止まったときのカードの中身。 */
+function stopShown(element: HTMLElement | null) {
+  if (!element) return null;
+  const folder = element.querySelector<HTMLElement>(".usage-check-folder");
+  return {
+    reason: element.querySelector(".usage-check-failed")?.textContent ?? "",
+    folder: folder?.textContent ?? "",
+    folderTitle: folder?.title ?? "",
+    buttons: [
+      ...element.querySelectorAll<HTMLButtonElement>(
+        ".usage-check-actions button",
+      ),
+    ].map((button) => button.textContent),
+    next: [...element.querySelectorAll(".usage-check-next")]
+      .map((line) => line.textContent)
+      .join("\n"),
+  };
+}
+
+describe("stopped at a claude screen", () => {
+  function block(
+    reason: "onboarding" | "trust" | "login" | "timeout" | "start-failed",
+    state: Partial<UsageCheckState> = {},
+    lang = t,
+  ) {
+    const data = response([account()]);
+    const calls: string[] = [];
+    const { client, pressed, opened } = fakeClient(
+      {
+        "claude-sample": {
+          running: false,
+          response: failed(reason),
+          ...state,
+        },
+      },
+      data,
+    );
+    const element = usageCheckBlock(account(), NOW, client, lang, {
+      async openHere(row, folder) {
+        calls.push(`openHere ${row.id} ${folder}`);
+        return "";
+      },
+      async login(row) {
+        calls.push(`login ${row.id}`);
+        return "";
+      },
+      openLaunchCommands() {
+        calls.push("openLaunchCommands");
+      },
+    });
+    return { element, calls, pressed, opened };
+  }
+
+  test.each([
+    {
+      reason: "onboarding",
+      buttons: [t.usageCheckOpenHere, t.usageCheckAgain],
+      opens: "openHere claude-sample /home/sample/work/sample-app",
+      next: "",
+      after: t.usageCheckAfterOpen("answer", t.usageCheckAgain),
+    },
+    {
+      reason: "trust",
+      buttons: [t.usageCheckOpenHere, t.usageCheckAgain],
+      opens: "openHere claude-sample /home/sample/work/sample-app",
+      next: "",
+      after: t.usageCheckAfterOpen("answer", t.usageCheckAgain),
+    },
+    {
+      reason: "login",
+      buttons: [t.loginButton, t.usageCheckAgain],
+      opens: "login claude-sample",
+      next: "",
+      after: t.usageCheckAfterOpen("login", t.usageCheckAgain),
+    },
+    {
+      // 時間切れも同じ形。画面の最後の行は「詳しく」、状況の 1 行は残す。
+      reason: "timeout",
+      buttons: [t.usageCheckOpenHere, t.usageCheckAgain],
+      opens: "openHere claude-sample /home/sample/work/sample-app",
+      next: t.usageCheckNext.timeout,
+      after: `${t.usageCheckAfterOpen("look", t.usageCheckAgain)}\n${t.usageCheckNext.timeout}`,
+    },
+  ] as const)("$reason", async ({ reason, buttons, opens, next, after }) => {
+    const before = block(reason);
+    expect(stopShown(before.element)).toEqual({
+      reason: t.usageCheckFailed[reason],
+      folder: "~/work/sample-app",
+      folderTitle: "/home/sample/work/sample-app",
+      buttons,
+      next,
+    });
+    // 画面で止まったときは上の「使用量を確かめる」を出さない (下の 2 つで足りる)。
+    expect(
+      before.element?.querySelectorAll(".usage-check-button"),
+    ).toHaveLength(1);
+    const [open, again] = [
+      ...(before.element?.querySelectorAll<HTMLButtonElement>(
+        ".usage-check-actions button",
+      ) ?? []),
+    ];
+    open?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(before.calls).toEqual([opens]);
+    expect(before.opened).toEqual([["claude-sample", ""]]);
+    again?.click();
+    expect(before.pressed).toEqual(["claude-sample"]);
+    // 開いた後はカードの文が替わる。
+    expect(
+      stopShown(block(reason, { opened: { error: "" } }).element)?.next,
+    ).toBe(after);
+  });
+
+  test("start failed: a button moves to the launch command", () => {
+    const failed = block("start-failed");
+    expect(stopShown(failed.element)).toMatchObject({
+      reason: t.usageCheckFailed["start-failed"],
+      folder: "",
+      buttons: [t.usageCheckOpenCommands, t.usageCheckAgain],
+      next: t.usageCheckNext["start-failed"],
+    });
+    // 上の「使用量を確かめる」は出さない (下の「もう一度確かめる」が同じ役)。
+    expect(
+      [...(failed.element?.querySelectorAll(".usage-check-button") ?? [])].map(
+        (button) => button.textContent,
+      ),
+    ).toEqual([t.usageCheckAgain]);
+    failed.element
+      ?.querySelector<HTMLButtonElement>(".usage-check-commands")
+      ?.click();
+    expect(failed.calls).toEqual(["openLaunchCommands"]);
+  });
+
+  test("opened, but the session will not record usage: the card says why", () => {
+    const shownAfter = stopShown(
+      block("trust", { opened: { error: "", notice: "sample reason" } })
+        .element,
+    );
+    expect(shownAfter?.next).toBe(
+      t.usageCheckAfterOpen("answer", t.usageCheckAgain),
+    );
+    const failedLines = [
+      ...(block("trust", {
+        opened: { error: "", notice: "sample reason" },
+      }).element?.querySelectorAll(".usage-check-failed") ?? []),
+    ].map((line) => line.textContent);
+    expect(failedLines).toEqual([t.usageCheckFailed.trust, "sample reason"]);
+  });
+
+  test("a failure to open keeps the reason in the card", async () => {
+    const shownAfter = stopShown(
+      block("trust", {
+        opened: { error: "start the agent (HTTP 500): sample" },
+      }).element,
+    );
+    expect(shownAfter?.next).toBe("start the agent (HTTP 500): sample");
+    const failedLines = [
+      ...(block("trust", {
+        opened: { error: "sample" },
+      }).element?.querySelectorAll(".usage-check-failed") ?? []),
+    ].map((line) => line.textContent);
+    expect(failedLines).toEqual([
+      t.usageCheckFailed.trust,
+      t.usageCheckOpenFailed,
+    ]);
+  });
+
+  test("Japanese words match the brief", () => {
+    const ja = stopShown(block("trust", {}, ACCOUNTS_JA).element);
+    expect(ja).toMatchObject({
+      reason: "このフォルダをこのアカウントでまだ信頼していません",
+      buttons: ["このアカウントで開く", "もう一度確かめる"],
+    });
+    expect(
+      stopShown(block("trust", { opened: { error: "" } }, ACCOUNTS_JA).element)
+        ?.next,
+    ).toBe("開いたタブで答えてから、「もう一度確かめる」を押してください。");
   });
 });
 
@@ -354,6 +524,8 @@ const DIALOGS: AccountDialogs = {
   rename: async () => null,
   remove: async () => null,
   launch: async () => null,
+  openHere: async () => "",
+  statusLine: async () => null,
 };
 
 function response(accounts: AccountStatus[]): AccountsResponse {
@@ -399,6 +571,7 @@ describe("the same part in the card and in Settings", () => {
       setCollapsed: () => undefined,
       openSettings: () => undefined,
       requestRender: () => undefined,
+      openLaunchCommands: () => undefined,
     });
     document.body.appendChild(band.element);
     band.render();
@@ -408,12 +581,13 @@ describe("the same part in the card and in Settings", () => {
     const codex = band.element.querySelector<HTMLElement>(
       '.agents-account-card[data-account="codex-sample"]',
     );
-    expect(shown(claude?.querySelector(".usage-check") ?? null)).toEqual({
-      button: BUTTON,
-      status: "",
+    // 止まった理由・フォルダ・[ログイン] [もう一度確かめる] がカードの中にある。
+    expect(stopShown(claude?.querySelector(".usage-check") ?? null)).toEqual({
       reason: t.usageCheckFailed.login,
-      next: t.usageCheckNext.login,
-      more: `the claude screen shows "sample marker"\n\n${t.usageCheckEvidence}\nsample line one\nsample line two`,
+      folder: "~/work/sample-app",
+      folderTitle: "/home/sample/work/sample-app",
+      buttons: [t.loginButton, t.usageCheckAgain],
+      next: "",
     });
     expect(codex?.querySelector(".usage-check")).toBeNull();
   });
@@ -440,6 +614,7 @@ describe("the same part in the card and in Settings", () => {
       setCollapsed: () => undefined,
       openSettings: () => undefined,
       requestRender: () => undefined,
+      openLaunchCommands: () => undefined,
     });
     document.body.appendChild(band.element);
     band.render();

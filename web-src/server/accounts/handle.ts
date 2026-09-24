@@ -41,6 +41,7 @@ import {
   planStatusLine,
   StatusLineError,
   statusLineFailureLog,
+  statusLineWrapperPath,
 } from "../terminal/statusline";
 import {
   accountWindowName,
@@ -48,6 +49,7 @@ import {
   loginWindowArgv,
   openAccountWindow,
 } from "./launch";
+import { launchStatusLineArgs } from "./project-statusline";
 import {
   AccountError,
   applyCreateAccount,
@@ -324,16 +326,25 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
     const account = findAccount(accountId);
     const service = sharedAccountService();
     const command = service.launchCommands()[account.agent];
+    const handoffArgs = handoffLaunchArgs(handoff, account.agent);
+    // 使用量を記録しているアカウントなら、プロジェクトの statusLine に負けない
+    // よう、包んだものを --settings で渡す (project-statusline.ts)。先に置くのは、
+    // 引き継ぎの --add-dir が値を複数とるため。
+    const statusLine = await launchStatusLineArgs({
+      recording:
+        account.agent === "claude" &&
+        service.usage(account).statusLineCommand !== null,
+      wrapper: statusLineWrapperPath(service.paths.usageDir),
+      folder: cwd,
+      home: service.paths.home,
+    });
     const pane = await openAccountWindow({
       agent: account.agent,
       account,
       cwd,
       session: sessionName,
       windowName: accountWindowName(account.agent, account),
-      argv: agentCommandArgv(
-        command,
-        handoffLaunchArgs(handoff, account.agent),
-      ),
+      argv: agentCommandArgv(command, [...statusLine.args, ...handoffArgs]),
     });
     // 次に開いたときの既定。覚えられなくても起動は済んでいるので、理由を
     // 添えて返す (画面に出す)。
@@ -358,7 +369,12 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
       );
       rememberError = formatErrorDetail(error);
     }
-    return json({ ...pane, command, rememberError });
+    return json({
+      ...pane,
+      command,
+      rememberError,
+      statusLineError: statusLine.problem,
+    });
   } catch (error) {
     return errorResponse(error);
   }

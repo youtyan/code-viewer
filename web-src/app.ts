@@ -235,6 +235,7 @@ import { createAccountsClient } from "./views/agents/accounts-client";
 import { createAccountDialogs } from "./views/agents/accounts-dialogs";
 import {
   ACCOUNTS_SECTION_ID,
+  CLAUDE_LAUNCH_COMMAND_ID,
   createAccountsSettings,
 } from "./views/agents/accounts-settings";
 import {
@@ -300,6 +301,12 @@ import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
 import { createImageTabView, type ImageTabHandle } from "./views/image-tab";
 import { createImageTabReturn } from "./views/image-tab-return";
+import {
+  installHelpBlock,
+  NODE_PTY_INSTALL_COMMANDS,
+  showInstallDialog,
+  TMUX_INSTALL_COMMANDS,
+} from "./views/install-help";
 import {
   createJournalView,
   type JournalView,
@@ -1851,12 +1858,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     newShellIn: (root, side) => void openShellIn(root, side),
     launchAgentIn: (root) => launchAgent(root),
     groupFacts: (root) => {
-      const shells = TERMINAL_VIEW.knownShells();
       return {
-        shellUnavailable:
-          shells && !shells.available
-            ? `${terminalText(STATE.language).shellUnavailable}\n${shells.reason ?? ""}`
-            : null,
+        // 開けないときも押せるようにする (openShellIn が理由と入れ直し方を出す)。
+        shellUnavailable: null,
         git:
           AGENT_MONITOR.snapshot().overview?.projects.find(
             (item) => item.root === root,
@@ -5026,6 +5030,21 @@ window.GdpExpandLogic = GdpExpandLogic;
     }),
     openHelp: () =>
       openHelpSection(helpSectionDeps(), AGENT_HOOKS_HELP_SECTION),
+    openAgent: async (agent) => {
+      // フックを入れた先は既定のアカウント (既定の設定ディレクトリ)。起動は
+      // 「このアカウントで開く」と同じ経路で、このサーバのプロジェクトのフォルダ。
+      await ACCOUNTS_CLIENT.load();
+      const data = ACCOUNTS_CLIENT.snapshot().data;
+      const account = data?.accounts.find(
+        (entry) => entry.id === `${agent}:default`,
+      );
+      if (!data || !account) {
+        throw new Error(
+          `the default ${agent} account is not in the account list${ACCOUNTS_CLIENT.snapshot().error ? `: ${ACCOUNTS_CLIENT.snapshot().error}` : ""}`,
+        );
+      }
+      return ACCOUNT_DIALOGS.openHere(account, data.serverRoot);
+    },
   });
 
   // ---------- Accounts: views/agents/accounts-*.ts ----------
@@ -7880,10 +7899,39 @@ window.GdpExpandLogic = GdpExpandLogic;
    * projectKeyFor (動いていなければ起こして知る。別のプロジェクトのファイルと
    * 同じ経路)。失敗は理由の全文を出す。
    */
+  /**
+   * シェルを開けない (任意の依存 @lydell/node-pty が無い) ときの画面。何が無いか、
+   * 入れ直すコマンド (コピーつき)、ヘルプの節へのリンク、サーバの理由を出す。
+   */
+  function showShellUnavailable(reason: string): void {
+    const t = terminalText(STATE.language);
+    void showInstallDialog({
+      title: t.shellUnavailableTitle,
+      help: {
+        intro: t.shellUnavailable,
+        commands: NODE_PTY_INSTALL_COMMANDS,
+        help: {
+          label: agentsText(STATE.language).tmuxInstallHelp(
+            helpSectionName(STATE.language, "terminal"),
+          ),
+          open: () => openHelpSection(helpSectionDeps(), "terminal"),
+        },
+      },
+      reason,
+      closeLabel: t.shellUnavailableClose,
+      lang: STATE.language,
+    });
+  }
+
   async function openShellIn(
     root: string | null,
     side: PaneSide,
   ): Promise<void> {
+    const known = TERMINAL_VIEW.knownShells();
+    if (known && !known.available) {
+      showShellUnavailable(known.reason ?? "");
+      return;
+    }
     try {
       await TERMINAL_VIEW.createShell(side, await shellProjectKey(root));
     } catch (error) {
@@ -7917,12 +7965,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       },
       {
         label: t.newShell,
+        // 開けないときも押せる。押すと理由と入れ直し方の画面を出す。
         title:
           list instanceof Error || list.available
             ? t.newShellTitle
             : `${t.shellUnavailable}\n${list.reason ?? ""}`,
-        disabled: !(list instanceof Error) && !list.available,
-        onSelect: () => void openShellIn(null, side),
+        onSelect: () =>
+          list instanceof Error || list.available
+            ? void openShellIn(null, side)
+            : showShellUnavailable(list.reason ?? ""),
       },
       // Tools と Search は page のタブ (左の面にだけ開く)。
       { label: uiText().nav.tools, onSelect: () => openToolsPage() },
@@ -9046,6 +9097,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     openSettings: () => openSettingsAt(ACCOUNTS_SECTION_ID),
     requestRender: () => AGENTS_VIEW?.localize(),
+    openLaunchCommands: () => {
+      openSettingsAt(CLAUDE_LAUNCH_COMMAND_ID);
+      // 設定のページが描き終わってから、欄を真ん中に出して焦点を当てる
+      // (下端の保存の帯に隠さない)。
+      const reveal = (frames: number) =>
+        requestAnimationFrame(() => {
+          const input = document.getElementById(CLAUDE_LAUNCH_COMMAND_ID);
+          if (!input?.isConnected || input.offsetParent === null) {
+            if (frames > 0) reveal(frames - 1);
+            return;
+          }
+          input.scrollIntoView({ block: "center" });
+          input.focus({ preventScroll: true });
+        });
+      reveal(30);
+    },
   });
   ACCOUNTS_CLIENT.subscribe(() => AGENTS_VIEW?.localize());
 
@@ -9267,6 +9334,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         getText: () => agentsText(STATE.language),
         openSettings: () => openSettingsAt(ACCOUNTS_SECTION_ID),
         login: (account) => ACCOUNT_DIALOGS.login(account),
+        openBoard: () =>
+          navigateToRoute({ screen: "agents", range: currentRange() }),
       })
     : null;
 
@@ -9277,6 +9346,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setPageMode,
     syncHeaderMenu,
     openPane: openAgentPane,
+    reloadPage: () => window.location.reload(),
     openNotificationSettings: () =>
       openSettingsAt("agent-notify-section-title"),
     getHookStatus: () => AGENT_HOOK_STATUS,
@@ -9284,6 +9354,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     hookHintDismissed: () => APP_SETTINGS.agentHookHintDismissed === true,
     dismissHookHint: () => patchSettings({ agentHookHintDismissed: true }),
     openHookSettings: () => openSettingsAt(AGENT_HOOKS_SECTION_ID),
+    tmuxInstallHelp: () => {
+      const a = agentsText(STATE.language);
+      return installHelpBlock(
+        {
+          intro: a.tmuxInstallIntro,
+          commands: TMUX_INSTALL_COMMANDS,
+          help: {
+            label: a.tmuxInstallHelp(
+              helpSectionName(STATE.language, "getting-started"),
+            ),
+            open: () => openHelpSection(helpSectionDeps(), "getting-started"),
+          },
+        },
+        STATE.language,
+      );
+    },
     accountsBand: ACCOUNTS_BAND,
     getAccounts: () => ACCOUNTS_CLIENT.snapshot().data,
     launch: launchAgent,

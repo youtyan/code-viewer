@@ -44,6 +44,8 @@ export type UsageStatusDeps = {
   openSettings(): void;
   /** 公式のログインを tmux で開く。戻り値は結果の文。 */
   login(account: AccountStatus): Promise<string>;
+  /** 全体ボード (アカウントのカードのある画面) へ移る。 */
+  openBoard(): void;
 };
 
 export type UsageStatus = {
@@ -230,6 +232,20 @@ export function mountUsageStatus(deps: UsageStatusDeps): UsageStatus {
         [t.usageReason[usage.reason], usage.detail].filter(Boolean).join(" "),
       );
       block.append(line, why);
+      // 包んでいない: 有効にするボタンはカードにある。そこへ移る。
+      if (usage.reason === "not-wrapped") {
+        const enable = el(
+          "button",
+          "usage-popover-link usage-popover-enable",
+          `${t.usagePopoverEnable} →`,
+        );
+        enable.type = "button";
+        enable.addEventListener("click", () => {
+          close();
+          deps.openBoard();
+        });
+        block.appendChild(enable);
+      }
       return block;
     }
     for (const view of usageWindowViews(usage, now)) {

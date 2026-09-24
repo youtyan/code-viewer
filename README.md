@@ -224,6 +224,9 @@ Requires Node.js 20 or newer. Development uses
   uses a little usage), waits for the new value and closes that session; if
   claude stops at its first-run setup, the folder trust question or sign-in,
   the card says so and what to do next.
+  When a project has its own status line in `.claude/settings.json` or
+  `.claude/settings.local.json`, claude started from code-viewer is given that
+  status line wrapped with `--settings`, so its usage is still recorded.
   New agent lists each account with its 5-hour and weekly usage and how old
   the values are, so you can pick one with room left. To move an agent's work
   to another account without signing in again, right-click the agent (or its

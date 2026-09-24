@@ -169,7 +169,26 @@ export function createCodePreview(
         if (!isCurrent(myGeneration, abort.signal)) return;
         const text = codePreviewText(deps.getLanguage());
         if (deps.isStaleGeneration?.(response.generation)) {
-          renderFrame(request, text.fileChanged);
+          // この見本だけを読み直すボタンを添える (選択を動かさなくてよい)。
+          const body = renderFrame(request, text.fileChanged);
+          const reload = document.createElement("button");
+          reload.type = "button";
+          reload.className = "gdp-btn gdp-btn-sm gdp-code-preview-reload";
+          reload.textContent = text.reload;
+          // 検索の小窓の入力欄から焦点を奪わない (見出しの操作と同じ)。
+          reload.addEventListener("mousedown", (event) =>
+            event.preventDefault(),
+          );
+          reload.addEventListener("click", () => {
+            previewKey = "";
+            show(request);
+          });
+          // 文とボタンを 1 つの行にまとめる (枠は grid の中央寄せなので、
+          // そのまま足すと上下に離れて並ぶ)。
+          const message = body.querySelector(".gdp-code-preview-message");
+          const line = document.createElement("div");
+          line.append(...(message?.childNodes ?? []), reload);
+          message?.replaceChildren(line);
           return;
         }
         const body = renderFrame(request);

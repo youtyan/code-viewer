@@ -87,7 +87,11 @@ function account(overrides: Partial<AccountStatus> = {}): AccountStatus {
   };
 }
 
-function render(accounts: AccountStatus[], t: AccountsText = ACCOUNTS_EN) {
+function render(
+  accounts: AccountStatus[],
+  t: AccountsText = ACCOUNTS_EN,
+  calls: string[] = [],
+) {
   const data: AccountsResponse = {
     home: "/home/sample",
     serverRoot: "/home/sample/work/sample-app",
@@ -120,6 +124,7 @@ function render(accounts: AccountStatus[], t: AccountsText = ACCOUNTS_EN) {
     clearUsageFailures: unused("clearUsageFailures"),
     usageCheck: () => null,
     checkUsage: unused("checkUsage"),
+    noteUsageCheckOpened: unused("noteUsageCheckOpened"),
   };
   const dialogs: AccountDialogs = {
     add: unused("add"),
@@ -127,6 +132,11 @@ function render(accounts: AccountStatus[], t: AccountsText = ACCOUNTS_EN) {
     rename: unused("rename"),
     remove: unused("remove"),
     launch: unused("launch"),
+    openHere: unused("openHere"),
+    statusLine: async (row, action) => {
+      calls.push(`statusLine ${row.id} ${action}`);
+      return null;
+    },
   };
   const band = createAccountsBand({
     client,
@@ -138,6 +148,7 @@ function render(accounts: AccountStatus[], t: AccountsText = ACCOUNTS_EN) {
     setCollapsed: () => undefined,
     openSettings: () => undefined,
     requestRender: () => undefined,
+    openLaunchCommands: () => undefined,
     now: () => NOW,
   });
   document.body.appendChild(band.element);
@@ -309,5 +320,53 @@ describe("when a window comes back", () => {
         (name) => name.textContent,
       ),
     ).toEqual([ACCOUNTS_EN.windowName(WEEK)]);
+  });
+});
+
+describe("usage collection that is off", () => {
+  const off = (state: "none" | "plain" | "unreadable") =>
+    account({
+      usage: {
+        status: "unavailable",
+        reason: "not-wrapped",
+        detail: "",
+        observedAt: 0,
+      },
+      statusLine: {
+        state,
+        path: "/home/sample/accounts/claude-work/settings.json",
+        realPath: "/home/sample/accounts/claude-work/settings.json",
+        symlink: false,
+        writeBlocked: "",
+        detail: "",
+        command: "",
+        wrapperMissing: false,
+      },
+    });
+
+  test.each([
+    { state: "none", button: true },
+    { state: "plain", button: true },
+    // 読めない設定ファイルは確認の画面を作れない (理由は設定の行に出る)。
+    { state: "unreadable", button: false },
+  ] as const)("statusLine $state: button shown = $button", async ({
+    state,
+    button,
+  }) => {
+    const calls: string[] = [];
+    const { card } = render([off(state)], ACCOUNTS_EN, calls)("claude-work");
+    expect(card.querySelector(".agents-account-usage-why")?.textContent).toBe(
+      ACCOUNTS_EN.usageReasonShort["not-wrapped"],
+    );
+    const enable = card.querySelector<HTMLButtonElement>(
+      ".agents-account-enable-usage",
+    );
+    expect(enable?.textContent ?? null).toBe(
+      button ? ACCOUNTS_EN.usageEnable : null,
+    );
+    enable?.click();
+    await Promise.resolve();
+    // その場で statusLine の確認の画面 (差分つき) を開く。
+    expect(calls).toEqual(button ? ["statusLine claude-work install"] : []);
   });
 });

@@ -153,6 +153,19 @@ export function agentCommandArgv(
   return [shell, "-i", "-c", script, shell, ...args];
 }
 
+/**
+ * claude に statusLine を渡す引数 (`--settings '{"statusLine":…}'`)。コマンド
+ * ラインの設定はプロジェクト・ユーザーの設定より優先される
+ * (https://code.claude.com/docs/en/settings の優先順位)。引数は "$@" で渡る
+ * (agentCommandArgv) ので、JSON をシェルの文字列に埋め込まない。使用量を
+ * 確かめる (usage-check.ts) と起動 (project-statusline.ts) が使う。
+ */
+export function statusLineSettingsArgs(
+  statusLine: Record<string, unknown>,
+): string[] {
+  return ["--settings", JSON.stringify({ statusLine })];
+}
+
 /** codex app-server (account/read で誰としてかを訊く。server/accounts/login.ts)。 */
 export function accountReadArgv(command: string): string[] {
   return agentCommandArgv(command, ["app-server"]);

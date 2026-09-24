@@ -347,7 +347,18 @@ export function createSearchResultsView(
         ) {
           lastResponse = null;
           renderResults();
-          if (status) status.textContent = text().repositoryChanged;
+          if (status) {
+            // 同じ語・同じ条件で検索し直すボタンを添える。
+            const again = document.createElement("button");
+            again.type = "button";
+            again.className = "gdp-palette-status-action";
+            again.textContent = text().searchAgain;
+            again.addEventListener("click", () => run(query));
+            status.replaceChildren(
+              document.createTextNode(`${text().repositoryChanged} `),
+              again,
+            );
+          }
           return;
         }
         lastResponse = { response, term: parsed.term };

@@ -380,6 +380,7 @@ code-viewer から信頼の操作はしない・できない。入れた後の�
 | 一時ファイルに書いて置き換える。元の権限を保つ | 途中で落ちても壊れたファイルを残さない |
 | リンクはリンクのまま、リンク先を書き換える。バックアップはリンクの側（設定ディレクトリ）に置く | 利用者の設定は dotfiles からのリンクであることが多い。リンク先の管理下にバックアップを散らかさない |
 | 自分の分はコマンド文字列の印（`AGENT_HOOK_MARKER`・`STATUSLINE_MARKER`）で見分ける。ほかのツールの分は 1 つも消さず、順序も変えない | 共存 |
+| 確認画面に書き込む先（リンクなら「リンク → 実体」）と、書く前と後の差分を出す。差分は plan が実際に書く文字列から作り（`core/text-diff.ts` の `unifiedDiff`、plan の `diff`）、画面は差分の画面と同じ diff2html で描くだけ（`views/agents/settings-diff.ts`） | 何が変わるか分からない書き込みを利用者が怖がって入れない（実際に言われた）。画面で推測すると書くものとずれる |
 | 何度入れても増えない。外すと元に戻る（入れる前から空だった入れ物は、外すときに区別できず片付く） | 入れ外しの往復 |
 
 **書けるかどうかは、リンクを最後までたどった先で判断する**（`writeBlockedReason` は
@@ -526,6 +527,20 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 | claude | statusLine に渡される JSON にしか上限の情報が無い。settings.json の `statusLine.command` を包み、受け取った JSON を `<状態ディレクトリ>/agent-usage/` に保存してから元のコマンドにそのまま渡す（`server/terminal/statusline.ts`） | 包む・戻すは 4 の部品と同じ約束・同じ確認画面。**包むスクリプトは元の出力と終了コードを必ず返す**（保存に失敗しても。失敗は同じ場所の `failures.log`）。動いているセッションが無いと更新されない |
 | codex | `<CODEX_HOME>/sessions/` のセッション記録の `token_count` の上限情報（`server/accounts/usage.ts`） | **公式に約束された書式ではない。** 読めなければ理由つきで「取得できません」にし、0% や空欄にしない。mtime は読む候補を有界に絞るためだけに使い、解析後の新旧はイベントの `observedAt` で決める。大きなファイルは末尾だけ読む |
 
+**プロジェクトの statusLine に負けない起動**（`server/accounts/project-statusline.ts`）。プロジェクトの
+`.claude/settings.local.json`・`.claude/settings.json` に statusLine があると、ユーザーの設定の（包んだ）
+ものより優先され、そのプロジェクトで動く claude から使用量が保存されない（利用者の実プロジェクトで
+起きた）。code-viewer が claude を起こす経路（`POST /_agent/launch`: 新しいエージェント・別の
+アカウントで続ける・このアカウントで開く）では、そのアカウントで使用量を記録しているときだけ、
+起動するフォルダで効くプロジェクトの statusLine を包んで `--settings` で渡す（表示はそのプロジェクトの
+まま。padding などの欄も引き継ぐ。既に包みなら足さない）。引数の作り方は使用量を確かめると同じ
+`statusLineSettingsArgs`（`launch.ts`）。どのファイルが効くかは Claude Code の読み方に合わせる
+（公式の settings の説明）: 1) git のルート（worktree なら本体のルート。git の外・ルートがホームなら
+起動したフォルダ）の `settings.local.json`、2) 起動したフォルダの `settings.local.json`（以前の版の置き場）、
+3) 起動したフォルダの `settings.json`。読めない・JSON でないときは足さずに起動し、理由を起動の結果
+（`LaunchResponse.statusLineError`）とサーバのログに出す。**利用者が自分の端末で起こした claude は
+今も負けたまま**（code-viewer は起動にしか手を入れない）
+
 **使用量には必ず「いつの値か」を添える。** claude の値はセッションが動いているときにしか
 更新されないので、古い値を今の値のように見せると使い切りを見誤る。
 
@@ -554,6 +569,10 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
   件数・通知・巡回から除く。判定は `core/agent-accounts.ts` の `agentTmuxPanes`（セッション名の頭
   `USAGE_CHECK_SESSION_PREFIX`）1 か所で、`terminal/overview.ts` と `terminal/activity.ts` がこれを通す。
   ログインのウィンドウ（`code-viewer-login`）は除かない
+- claude の画面（初回の案内・信頼の確認・ログイン）で止まったら、カードに理由・フォルダ（応答の `cwd`）・
+  ［このアカウントで開く］［もう一度確かめる］を出す。開くのは起動の画面と同じ経路
+  （`accounts-dialogs.ts` の `openHere` → `POST /_agent/launch` → そのペインをターミナルのタブで開く）。
+  ログインで止まったときは既存の「ログイン」（`claude auth login` のウィンドウ）にする
 - 止まった理由は 6 種類（`UsageCheckFailure`）。応答は理由・元のエラーの全文・画面の最後の行。
   次の手順の文は画面の言語で i18n に 1 か所（`usageCheckNext`）
 - statusLine を包んでいない・未ログインのカードにはボタンを出さない（⋯ からは押せ、理由が返る）
@@ -973,7 +992,7 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 | worktree の 2 段表示 | worktree は本体のプロジェクトにまとめ、行に worktree 名を出すだけ |
 | 通知はタブを開いている間だけ | ブラウザの通知なので、code-viewer のタブが 1 つも無ければ出ない。長く裏にあるタブはブラウザがタイマーを間引くので遅れる（ブラウザの仕様。遅れの幅は測っていない） |
 | `ps` の出力の切り方 | `ps eww` は区切りを持たないので、値の終わりを「空白 + `名前=`」で決めている。パスに ` NAME=` の並びがあると切り損なう。起動後に環境が変わった場合やセッション中のアカウント切替は見えない |
-| 内部形式に頼っている箇所 | codex のセッション記録（使用量）、エージェントの画面の文言（状態）、claude の `.claude.json` の `hasCompletedOnboarding`（初回の案内の印。5 のログイン）、Claude Code の初回の案内・信頼の確認・ログインの画面の文言（使用量を確かめる。`server/accounts/usage-check.ts` の `CLAUDE_BLOCKING_SCREENS` の 1 か所）。どれも版が上がれば壊れうる。壊れたら理由つきで「取得できません」・画面ルールの修正（2）・使用量を確かめるは画面で止まらず時間切れになる（応答の画面の最後の行を見て表を直す） |
+| 内部形式に頼っている箇所 | codex のセッション記録（使用量）、エージェントの画面の文言（状態）、claude の `.claude.json` の `hasCompletedOnboarding`（初回の案内の印。5 のログイン）、Claude Code の初回の案内・信頼の確認・ログインの画面の文言（使用量を確かめる。`server/accounts/usage-check.ts` の `CLAUDE_BLOCKING_SCREENS` の 1 か所）、Claude Code がプロジェクトの設定ファイルを読む場所と順（起動のときの statusLine。`server/accounts/project-statusline.ts` の `projectSettingsFiles`。公式の説明にあるが、版で変わってきた: 以前は settings.local.json を起動したフォルダに置いていた）。どれも版が上がれば壊れうる。壊れたら理由つきで「取得できません」・画面ルールの修正（2）・使用量を確かめるは画面で止まらず時間切れになる（応答の画面の最後の行を見て表を直す） |
 | 使用量を確かめる途中でサーバが落ちた | 作ったセッションは閉じられずに残る。claude が既に終わっていれば眠りの 10 分後にシェルが終わって消えるが、claude が動いたままなら利用者が閉じるまで残る（名前 `code-viewer-usage-…` で分かる） |
 | 画面ルールの保存済み上書き | ユーザー単位に移した（8）。`--standalone` のサーバもユーザー単位のものを読むので、並んでいても同じルールで判定する |
 | xterm の代替画面の行数の上限（上流の不具合。6.0.0 と上流の main で同じ） | xterm は、一度も使っていない代替画面（tmux・vim・less が使う画面）を縮めても、その画面の行数の上限を縮めない。上限が画面より大きいまま tmux が代替画面へ入ると、画面に無いはずの行が溜まり、次に行数が変わったときに画面の起点がずれて、最後の行が重複して並ぶ。回避は `terminal-screen.ts` の `attach` で「寸法を合わせてから `reset`」の順にすること（`reset` は今の寸法で両方の画面を作り直す。順番は `terminal-screen-resize.test.ts` が見る）。**残る限界**: tmux を使わない素のシェルで、代替画面に入っていない間に下のパネルを低くしてから vim などを起動すると、同じ崩れが起きうる（公開 API では上限を直せない）。開き直す（タブを行き来する・再読み込み）と `attach` が作り直すので直る |

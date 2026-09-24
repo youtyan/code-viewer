@@ -548,6 +548,23 @@ export async function worktreeRemoveResultAsync(
 }
 
 /**
+ * 作業ツリーのロックを外す (`git worktree unlock <path>`)。失敗は git の出力を
+ * 全部 (stderr と stdout) 返す。
+ */
+export async function worktreeUnlockResultAsync(
+  cwd: string,
+  path: string,
+): Promise<Partial<GitErrorResult>> {
+  const res = await runGitAsync(["git", "worktree", "unlock", path], cwd);
+  if (res.code !== 0) {
+    const failed = gitFailureResult(res, "git worktree unlock failed");
+    const stdout = res.stdout?.trim() ?? "";
+    return stdout ? { ...failed, error: `${failed.error}\n${stdout}` } : failed;
+  }
+  return {};
+}
+
+/**
  * 消えた作業ツリーの管理情報を掃除する。フォルダが既に無いエントリに
  * `git worktree remove` を受け付けない git があるため、missing なエントリの
  * 削除はこちらに切り替える。特定の 1 本だけを掃除する形は git に無く、

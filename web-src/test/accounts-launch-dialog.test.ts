@@ -115,6 +115,7 @@ function fakeClient() {
     clearUsageFailures: unused("clearUsageFailures"),
     usageCheck: () => null,
     checkUsage: unused("checkUsage"),
+    noteUsageCheckOpened: unused("noteUsageCheckOpened"),
   };
   return {
     client,
@@ -339,6 +340,7 @@ function launchClient(data: AccountsResponse) {
         created: false,
         command: "claude",
         rememberError: "",
+        statusLineError: "",
       };
     },
   };
@@ -562,4 +564,89 @@ describe("別のアカウントで続ける (起動の画面を引き継ぎの�
     ).rejects.toThrow("launch dialog: %4 has no conversation log to hand over");
     expect(document.querySelector(".gdp-dialog")).toBeNull();
   });
+});
+
+test("「このアカウントで開く」は起動と同じ口に、アカウントとフォルダを渡してタブを開く", async () => {
+  const fake = fakeClient();
+  const launched: unknown[] = [];
+  const opened: string[] = [];
+  fake.client.launch = async (request) => {
+    launched.push(request);
+    return {
+      paneId: "%7",
+      session: "sample-app",
+      created: false,
+      command: "claude",
+      rememberError: "",
+      statusLineError: "",
+    };
+  };
+  const overview: AgentOverviewResponse = {
+    serverInstance: "sample-instance",
+    observedAt: 1,
+    tmux: { available: true, running: true, error: "" },
+    panes: [
+      agentPane({
+        id: "%3",
+        project: "/home/sample/work/sample-app",
+        session: "work-session",
+      }),
+    ],
+    projects: [],
+    errors: [],
+    registry: { projects: [], error: "", path: "/home/sample/projects.json" },
+  };
+  let refreshed = 0;
+  const dialogs = createAccountDialogs({
+    client: fake.client,
+    getText: () => ACCOUNTS_EN,
+    openPane: (pane) => opened.push(pane),
+    getOverview: () => overview,
+    serverRoot: () => "/home/sample/work/sample-app",
+    refreshOverview: async () => {
+      refreshed++;
+    },
+  });
+  const account = response("claude").accounts[0];
+  if (!account) throw new Error("no sample account");
+  // 使用量を記録できたなら、知らせることは無い。
+  expect(await dialogs.openHere(account, "/home/sample/work/sample-app")).toBe(
+    "",
+  );
+  // セッションは起動の画面と同じ既定 (そのプロジェクトのペインがあるセッション)。
+  expect(launched).toEqual([
+    {
+      accountId: "claude:default",
+      project: "/home/sample/work/sample-app",
+      session: "work-session",
+    },
+  ]);
+  expect(opened).toEqual(["%7"]);
+  expect([refreshed, fake.loads()]).toEqual([1, 1]);
+});
+
+test("起動はしたが使用量を記録できないときは、その理由を起動の結果に出す", async () => {
+  const fake = fakeClient();
+  fake.client.launch = async () => ({
+    paneId: "%7",
+    session: "sample-app",
+    created: false,
+    command: "claude",
+    rememberError: "",
+    statusLineError:
+      "the project statusLine in /work/.claude/settings.json could not be read",
+  });
+  const dialogs = createAccountDialogs({
+    client: fake.client,
+    getText: () => ACCOUNTS_JA,
+    openPane: () => undefined,
+    getOverview: () => null,
+    serverRoot: () => "/home/sample/work/sample-app",
+    refreshOverview: async () => undefined,
+  });
+  const account = response("claude").accounts[0];
+  if (!account) throw new Error("no sample account");
+  expect(await dialogs.openHere(account, "/home/sample/work/sample-app")).toBe(
+    `${ACCOUNTS_JA.launchStatusLineFailed}\nthe project statusLine in /work/.claude/settings.json could not be read`,
+  );
 });

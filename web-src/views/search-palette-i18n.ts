@@ -55,6 +55,8 @@ export type SearchPaletteText = CodePreviewText & {
   invalidRegex: string;
   searching: string;
   repositoryChanged: string;
+  /** その横の「もう一度検索」(同じ語・同じ条件で)。 */
+  searchAgain: string;
   grepSummary: (options: {
     engine: string;
     regex: boolean;
@@ -169,7 +171,8 @@ const EN: SearchPaletteText = {
   typeToGrep: "Type to grep",
   invalidRegex: "Invalid regular expression",
   searching: "Searching...",
-  repositoryChanged: "Repository changed; search again",
+  repositoryChanged: "The repository changed while searching.",
+  searchAgain: "Search again",
   grepSummary: ({
     engine,
     regex,
@@ -292,7 +295,8 @@ const JA: SearchPaletteText = {
   typeToGrep: "検索するコードを入力してください",
   invalidRegex: "正規表現が正しくありません",
   searching: "検索中...",
-  repositoryChanged: "リポジトリが変更されました。もう一度検索してください",
+  repositoryChanged: "検索している間にリポジトリが変わりました。",
+  searchAgain: "もう一度検索",
   grepSummary: ({
     engine,
     regex,

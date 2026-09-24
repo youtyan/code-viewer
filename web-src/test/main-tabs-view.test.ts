@@ -2334,12 +2334,12 @@ describe("main tabs view: 左右 2 面", () => {
       arrange: (handle: MainTabsHandle) =>
         handle.syncRoute({ screen: "diff", range }),
       title:
-        "Split right: this screen stays on the left. Bring a file, terminal or image tab to the front",
+        "Split right: this screen stays on the left; works when a file, terminal or image tab is in front",
     },
     {
       name: "左の面で何も選んでいない",
       arrange: (handle: MainTabsHandle) => handle.showHome(),
-      title: "Split right: open a file, terminal or image tab first",
+      title: "Split right: works when a file, terminal or image tab is open",
     },
     {
       name: "前面がファイル",

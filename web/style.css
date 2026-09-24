@@ -21231,15 +21231,25 @@ button.agents-section-title:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   color: var(--color-text-2);
+}
+.agents-notify-reload {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .agents-notify-status {
   color: var(--color-text-3);
 }
 .agents-notify-denied {
+  flex: 0 0 auto;
+  white-space: nowrap;
   color: var(--color-waiting);
 }
+/* 狭いときは説明だけが縮む (全文は状態の title にある)。操作は切らない。 */
 .agents-notify-help {
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: calc(var(--space-unit) * 80);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -21436,7 +21446,8 @@ button.agents-account-name:hover {
 .agents-account-path {
   min-width: 0;
   overflow: hidden;
-  color: var(--color-text-3);
+  /* 取れない理由は読む文なので、薄い灰色 (text-3) にしない。 */
+  color: var(--color-text-2);
   font-size: var(--ui-font-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -21510,6 +21521,173 @@ button.agents-account-name:hover {
 }
 .agent-accounts-usage-row > .usage-check {
   flex-basis: 100%;
+}
+/* 画面で止まったときのフォルダ。最後の段を残して前を省略する (真ん中が「…」)。 */
+.usage-check > .usage-check-folder {
+  display: flex;
+  min-width: 0;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+.usage-check-folder-head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.usage-check-folder-tail {
+  flex: none;
+}
+.usage-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* 設定ファイルに書く前の確認の画面の差分 (views/agents/settings-diff.ts)。見た目は
+   差分の画面の diff2html のまま。長ければこの中でスクロールする。ファイルの名前の
+   見出しは上の「書き込むファイル」と重なるので出さない。 */
+.agent-settings-diff {
+  max-height: calc(var(--space-unit) * 90);
+  overflow: auto;
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--color-line);
+}
+.agent-settings-diff .d2h-file-header {
+  display: none;
+}
+/* 確認の画面の中だけ、長い行 (包むスクリプトの絶対パスなど) を折り返して全部見せる。
+   差分の画面は今のまま (横スクロール)。行番号の列は上にそろえる。 */
+.agent-settings-diff table.d2h-diff-table {
+  width: 100%;
+}
+.agent-settings-diff table.d2h-diff-table .d2h-code-line,
+.agent-settings-diff table.d2h-diff-table .d2h-code-line-ctn {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+.agent-settings-diff table.d2h-diff-table .d2h-code-line {
+  display: flex;
+}
+.agent-settings-diff table.d2h-diff-table .d2h-code-line-prefix {
+  flex: none;
+}
+.agent-settings-diff table.d2h-diff-table td.d2h-code-linenumber {
+  vertical-align: top;
+}
+.agent-settings-diff .d2h-file-wrapper {
+  margin: 0;
+  border: 0;
+}
+.agent-settings-diff-none {
+  margin: 0;
+  color: var(--color-text);
+}
+/* ---- 言うだけの文に付けた、その場の入口 ---- */
+/* フックを入れた結果の下の「claude を開く」「codex を開く」と、押した結果。 */
+.agent-hooks-open {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  margin-top: var(--space-2);
+}
+.agent-hooks-open > .agent-hooks-result {
+  margin: 0;
+}
+/* 最下段の使用量: 有効にするボタンのある全体ボードへ移る。 */
+.usage-popover-enable {
+  align-self: flex-start;
+  margin-top: var(--space-1);
+}
+/* 入れ方の箱 (説明・コピーつきのコマンド・ヘルプへのリンク。views/install-help.ts)。 */
+.install-help {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  max-width: calc(var(--space-unit) * 160);
+  margin: 0 auto var(--space-5);
+  color: var(--color-text);
+}
+.install-help-intro {
+  margin: 0;
+}
+.install-help > .gdp-help-command {
+  margin: 0;
+}
+/* ヘルプへ移るリンク。ほかのリンク (.quick-help-foot a) と同じ強調色で、押せると分かる
+   ように下線を引く (灰色の字では文と見分けられなかった)。 */
+.install-help-link {
+  align-self: flex-start;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.install-help-link:hover {
+  color: var(--accent);
+}
+/* アカウントを作る画面の「選べば共有できる」の行の［場所をコピー］。 */
+.agent-accounts-share-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+.agent-accounts-share-copied {
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+}
+/* 作業ツリーの差分で塊を省いたときの知らせと［別タブで見る］。 */
+.worktree-diff-truncated {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+}
+/* ロックされた作業ツリーを消す画面: 理由・実行するコマンド・［ロックを外す］・結果。 */
+.worktree-unlock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.worktree-unlock > p {
+  margin: 0;
+}
+.worktree-unlock-command {
+  align-self: stretch;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-inset);
+  color: var(--color-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.worktree-unlock-result {
+  color: var(--color-failed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.worktree-unlock-result:empty {
+  display: none;
+}
+/* 検索の「もう一度検索」・コードの見本の「再読み込み」: 文の横の小さな操作。 */
+.gdp-palette-status-action {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.gdp-palette-status-action:hover {
+  text-decoration: underline;
+}
+.gdp-code-preview-reload {
+  margin-left: var(--space-2);
 }
 /* 使用量の 1 枠 (カードとポップオーバー共通)。名前・割合・バーの列をそろえる。 */
 .usage-meter {

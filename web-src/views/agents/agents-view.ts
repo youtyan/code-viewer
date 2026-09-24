@@ -72,6 +72,8 @@ export type AgentsViewDeps = {
   openPane(pane: string, destination?: "opposite"): void;
   /** 設定画面の通知の項目へ。 */
   openNotificationSettings(): void;
+  /** ページを読み込み直す (通知をブラウザで許可した後)。 */
+  reloadPage(): void;
   /** フックの状態。まだ取っていなければ null。 */
   getHookStatus(): AgentHooksResponse | null;
   refreshHookStatus(): Promise<void>;
@@ -79,6 +81,11 @@ export type AgentsViewDeps = {
   dismissHookHint(): void;
   /** 設定画面のエージェント連携の節へ。 */
   openHookSettings(): void;
+  /**
+   * tmux が無いときの入れ方 (コピーのボタンつきのコマンドとヘルプへのリンク。
+   * views/install-help.ts)。
+   */
+  tmuxInstallHelp(): HTMLElement;
   /** 一覧の上に出すアカウントの帯。 */
   accountsBand: AccountsBand;
   /** アカウントの一覧 (まだ取っていなければ null)。行の名前に使う。 */
@@ -627,7 +634,13 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       const help = document.createElement("span");
       help.className = "agents-notify-help";
       help.textContent = current.notifyDeniedHelp;
-      notifyBox.append(status, help);
+      // 許可した後の再読み込み (ブラウザの設定はページからは開けない)。
+      const reload = document.createElement("button");
+      reload.type = "button";
+      reload.className = "agents-text-action agents-notify-reload";
+      reload.textContent = current.notifyReload;
+      reload.addEventListener("click", () => deps.reloadPage());
+      notifyBox.append(status, help, reload);
     } else {
       status.textContent = current.notifyUnsupported;
       notifyBox.appendChild(status);
@@ -728,6 +741,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
           current.emptyNotInstalledBody,
         ),
       );
+      list.appendChild(deps.tmuxInstallHelp());
       registeredOnly();
       return;
     }

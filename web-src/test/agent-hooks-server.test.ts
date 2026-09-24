@@ -17,7 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   AGENT_HOOK_MARKER,
@@ -26,6 +26,7 @@ import {
   planHookChange,
   serializeHookFile,
 } from "../core/agent-hooks";
+import { unifiedDiff } from "../core/text-diff";
 import {
   AgentHookError,
   type AgentHookTarget,
@@ -609,5 +610,76 @@ describe("status", () => {
     expect(result.launcherWritten).toBe(true);
     expect(readFileSync(settingsPath(), "utf8")).toBe(before);
     expect(agentHookStatus(target(), launcher).state).toBe("installed");
+  });
+});
+
+describe("the diff shown before writing", () => {
+  // 確認の画面の差分は、サーバが実際に書く中身から作る。書いた後のファイルと
+  // 書く前のファイルの差分が、確認の画面に出したものと同じであること。
+  test.each([
+    {
+      name: "install into an existing file",
+      agent: "claude",
+      start: "foreign",
+      action: "install",
+    },
+    {
+      name: "install into a missing file",
+      agent: "claude",
+      start: "none",
+      action: "install",
+    },
+    {
+      name: "uninstall",
+      agent: "claude",
+      start: "installed",
+      action: "uninstall",
+    },
+    {
+      name: "codex install",
+      agent: "codex",
+      start: "foreign",
+      action: "install",
+    },
+    {
+      name: "nothing changes",
+      agent: "claude",
+      start: "installed",
+      action: "install",
+    },
+  ] as const)("$name", async ({ agent, start, action }) => {
+    if (start !== "none") {
+      writeFileSync(
+        settingsPath(agent),
+        `${JSON.stringify(FOREIGN, null, 2)}\n`,
+      );
+    }
+    if (start === "installed") await apply("install", agent);
+    const before = existsSync(settingsPath(agent))
+      ? readFileSync(settingsPath(agent), "utf8")
+      : null;
+    const { plan } = await apply(action, agent);
+    const after = existsSync(settingsPath(agent))
+      ? readFileSync(settingsPath(agent), "utf8")
+      : null;
+    if (!plan.changed) {
+      expect(plan.diff).toBe("");
+      expect(after).toBe(before);
+      return;
+    }
+    expect(plan.diff).toBe(
+      unifiedDiff(before, after ?? "", basename(settingsPath(agent))),
+    );
+    expect(plan.diff).not.toBe("");
+    // ファイルが無ければ全部が足す行。
+    if (before === null) {
+      expect(plan.diff.split("\n").slice(0, 3)).toEqual([
+        `diff --git a/settings.json b/settings.json`,
+        "--- /dev/null",
+        "+++ b/settings.json",
+      ]);
+      const body = plan.diff.split("\n").slice(4).filter(Boolean);
+      expect(body.every((line) => line.startsWith("+"))).toBe(true);
+    }
   });
 });
