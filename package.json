@@ -65,7 +65,7 @@
   "license": "MIT",
   "devDependencies": {
     "@biomejs/biome": "2.4.14",
-    "@happy-dom/global-registrator": "^20.10.6",
+    "@happy-dom/global-registrator": "^20.11.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/d3-dsv": "3.0.7",
     "@types/markdown-it": "14.1.2",

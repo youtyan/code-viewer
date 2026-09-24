@@ -27,8 +27,8 @@ importers:
         specifier: 2.4.14
         version: 2.4.14
       '@happy-dom/global-registrator':
-        specifier: ^20.10.6
-        version: 20.11.1
+        specifier: ^20.11.2
+        version: 20.11.2
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
@@ -79,7 +79,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@types/node@26.1.2)(happy-dom@20.11.1)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(tsx@4.23.1)(yaml@2.9.0))
+        version: 4.1.10(@types/node@26.1.2)(happy-dom@20.11.2)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(tsx@4.23.1)(yaml@2.9.0))
       yaml:
         specifier: 2.9.0
         version: 2.9.0
@@ -324,8 +324,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@happy-dom/global-registrator@20.11.1':
-    resolution: {integrity: sha512-1C0wwHiyMlEdsbrJqff5ORE2PwaXBOam5rMqkZVOReAezd5nt6Tl/WGg28UAo75Ziuwchs0KaF8lvnn2oAtvJA==}
+  '@happy-dom/global-registrator@20.11.2':
+    resolution: {integrity: sha512-7fkpoXZWzyxaBkzRtlD0wRU5ckxbNT4j6BywzpSYh+SFPsGxEVmNR9KHaMwM2xkHB0pADQLl4Z8DSrztECJ7Ww==}
     engines: {node: '>=20.0.0'}
 
   '@iconify/types@2.0.0':
@@ -1029,8 +1029,8 @@ packages:
   hachure-fill@0.5.2:
     resolution: {integrity: sha512-3GKBOn+m2LX9iq+JC1064cSFprJY4jL1jCXTcpnfER5HYE2l/4EfWSGzkPa/ZDBmYI0ZOEj5VHV/eKnPGkHuOg==}
 
-  happy-dom@20.11.1:
-    resolution: {integrity: sha512-XSt8tMzbW9ymE7687xztkO1ckR7qJNQ3LywY9vlYGhGi3zXrGBHuUo2Cl1ztZaICW+1eAGdkLbj6iwVqDT33kg==}
+  happy-dom@20.11.2:
+    resolution: {integrity: sha512-7MB+bJLkxu3SowAfBJbjW+c55kNz5tkR45gu2qzrxznezhLeN5YIlJbwUgSzlGc+qWoZ8Ykg71H5ezz69xixrw==}
     engines: {node: '>=20.0.0'}
 
   hast-util-to-html@9.0.5:
@@ -1786,10 +1786,10 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@happy-dom/global-registrator@20.11.1':
+  '@happy-dom/global-registrator@20.11.2':
     dependencies:
       '@types/node': 26.1.2
-      happy-dom: 20.11.1
+      happy-dom: 20.11.2
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -2518,7 +2518,7 @@ snapshots:
 
   hachure-fill@0.5.2: {}
 
-  happy-dom@20.11.1:
+  happy-dom@20.11.2:
     dependencies:
       '@types/node': 26.1.2
       '@types/whatwg-mimetype': 3.0.2
@@ -3087,7 +3087,7 @@ snapshots:
       tsx: 4.23.1
       yaml: 2.9.0
 
-  vitest@4.1.10(@types/node@26.1.2)(happy-dom@20.11.1)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(tsx@4.23.1)(yaml@2.9.0)):
+  vitest@4.1.10(@types/node@26.1.2)(happy-dom@20.11.2)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(tsx@4.23.1)(yaml@2.9.0)):
     dependencies:
       '@vitest/expect': 4.1.10
       '@vitest/mocker': 4.1.10(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(tsx@4.23.1)(yaml@2.9.0))
@@ -3111,7 +3111,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 26.1.2
-      happy-dom: 20.11.1
+      happy-dom: 20.11.2
     transitivePeerDependencies:
       - msw
 
