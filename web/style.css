@@ -17685,8 +17685,8 @@ body.gdp-search-page {
 }
 .agent-accounts-share-item {
   display: grid;
-  /* 名前の列は幅を揃える (長い名前は省略し、全体はツールチップ)。 */
-  grid-template-columns: auto 14em minmax(0, 1fr);
+  /* 長い名前は省略し、全体 (リンク元のパス) はツールチップ。 */
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: baseline;
   column-gap: 8px;
   padding: 2px 0;
@@ -17705,11 +17705,13 @@ body.gdp-search-page {
   margin: 0;
   accent-color: var(--accent);
 }
-.agent-accounts-share-why {
-  min-width: 0;
-  color: var(--fg-muted);
-  font-size: 11px;
-  line-height: 16px;
+/* まとまりの見出しの下の理由と、一覧の前の説明。本文と同じ濃さで読める字にする。 */
+.agent-accounts-share-why,
+.agent-accounts-share-intro {
+  margin: 0;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 18px;
 }
 
 /* ======================================================================
