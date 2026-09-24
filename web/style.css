@@ -32,6 +32,11 @@
   --color-line:         #d8d1e1;
   --color-line-soft:    #e3dde9;
   --color-line-strong:  #bfb6cb;
+  /* 表・表のような一覧の行の区切り。どの面 (窓の地・本文・沈んだ面・浮く面・hover)
+     にも 1.5:1 以上 (web-src/test/table-rules-css.test.ts)。ライトは濃い線と同じ。 */
+  --color-line-row:     var(--color-line-strong);
+  /* 行の多い表の 1 行おきの面 (hover の面の半分ほど)。 */
+  --color-row-alt:      color-mix(in srgb, var(--color-raised) 45%, transparent);
   --color-text:         #282331;
   --color-text-2:       #655c72;
   --color-text-3:       #7a7287;
@@ -221,6 +226,7 @@
   --color-line:         #28242f;
   --color-line-soft:    #211e28;
   --color-line-strong:  #3d3749;
+  --color-line-row:     #4b4557;
   --color-text:         #eeeaf4;
   --color-text-2:       #aba3b5;
   --color-text-3:       #857d91;
@@ -290,6 +296,7 @@
   --color-line:         #242529;
   --color-line-soft:    #1e1f22;
   --color-line-strong:  #36383e;
+  --color-line-row:     #44464c;
   --color-text:         #e6e7eb;
   --color-text-2:       #9b9da5;
   --color-text-3:       #7b7d86;
@@ -325,6 +332,7 @@
   --color-line:         #2e2e2b;
   --color-line-soft:    #272724;
   --color-line-strong:  #42423d;
+  --color-line-row:     #4d4d47;
   --color-text:         #e9e7df;
   --color-text-2:       #aaa89e;
   --color-text-3:       #8a887f;
@@ -412,6 +420,11 @@ html, body {
      密度で比例させるため --space-unit から作る。 */
   --ui-font-heading: calc(var(--space-unit) * 5.5);  /* 22 */
   --ui-font-section: calc(var(--space-unit) * 4.5);  /* 18 */
+  /* 設定とヘルプのページ: ページの見出し・読む本文・手順の 1 行の動作。本文は
+     一覧の文字 (--ui-font-*) より一段大きく読む文字。 */
+  --ui-font-page: calc(var(--space-unit) * 7);       /* 28 */
+  --ui-font-read: calc(var(--space-unit) * 3.75);    /* 15 */
+  --ui-font-step: calc(var(--space-unit) * 4);       /* 16 */
   /* メインの面のタブ列の高さ (34 / 30 / 38 / 43)。密度で --space-unit と一緒に
      変わるので、:root ではなくここで決め、合計の --global-header-h もここで
      決め直す (body で変わった --main-tabs-h を反映させるため。下のコメント)。 */
@@ -2862,9 +2875,6 @@ body.gdp-history-resizing * {
 .scope-settings-title-row + label {
   margin-top: 0;
 }
-.scope-settings-section + .scope-settings-section {
-  margin-top: 12px;
-}
 #viewer-theme,
 #viewer-language,
 #sidebar-font-size,
@@ -3185,7 +3195,6 @@ html[data-theme="dark"] .agent-screen-rules-highlight span[style] {
   font-size: 13px;
 }
 #quick-help-popover .gdp-help-group th {
-  width: auto;
   white-space: nowrap;
 }
 .quick-help-foot {
@@ -3273,93 +3282,6 @@ body.gdp-help-page #content {
   color: var(--accent-emph);
   font-weight: 700;
 }
-.gdp-help-content h2 {
-  margin: 0 0 8px;
-  font-size: 24px;
-}
-.gdp-help-content > p {
-  margin: 0 0 24px;
-  color: var(--fg-muted);
-}
-.gdp-help-group {
-  margin: 0 0 28px;
-}
-.gdp-help-group h3 {
-  margin: 0 0 10px;
-  font-size: 16px;
-}
-.gdp-help-group p {
-  max-width: 840px;
-  margin: 0 0 14px;
-  color: var(--fg-muted);
-  line-height: 1.65;
-}
-.gdp-help-steps {
-  max-width: 840px;
-  margin: 0 0 18px;
-  padding-left: 26px;
-  color: var(--fg-muted);
-  line-height: 1.65;
-}
-.gdp-help-steps li {
-  margin: 6px 0;
-}
-.gdp-help-command {
-  max-width: 920px;
-  margin: 0 0 16px;
-}
-.gdp-help-command-title {
-  margin: 0 0 6px;
-  color: var(--fg-muted);
-  font-size: 13px;
-  font-weight: 700;
-}
-.gdp-help-command pre {
-  margin: 0;
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-soft);
-  padding: 12px 14px;
-}
-.gdp-help-command code {
-  color: var(--fg);
-  font: 13px "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  white-space: pre;
-}
-.gdp-help-group table {
-  width: 100%;
-  border-collapse: collapse;
-  border-top: 1px solid var(--border);
-}
-.gdp-help-group th,
-.gdp-help-group td {
-  padding: 11px 8px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-.gdp-help-group th {
-  width: 230px;
-  color: var(--fg);
-  font-weight: 600;
-  text-align: left;
-}
-.gdp-help-group td {
-  color: var(--fg-muted);
-}
-.gdp-help-group kbd {
-  display: inline-block;
-  min-width: 24px;
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-bottom-color: var(--border-strong);
-  border-radius: 5px;
-  background: var(--bg-soft);
-  color: var(--fg);
-  font: 12px "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  text-align: center;
-}
-
 /* ===== Shortcuts (Settings > Shortcuts) =====
    設定の「ショートカット」の節 (views/help-keybinding-editor.ts)。行は押すと開き、
    開いた行の下にキーごとの効く所を並べる。寸法は名前だけで書く。 */
@@ -3499,15 +3421,6 @@ body.gdp-help-page #content {
 .shortcut-none {
   color: var(--color-text-3);
   font-size: var(--ui-font-sm);
-}
-.shortcut-settings kbd {
-  padding: 0 var(--space-1);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-sm);
-  background: var(--color-inset);
-  color: var(--color-text);
-  font: var(--ui-font-sm) / 1.6 var(--font-mono);
-  white-space: nowrap;
 }
 .shortcut-row-detail {
   margin: var(--space-1) 0 var(--space-2);
@@ -5562,7 +5475,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   max-width: 52ch;
   padding: 8px 14px;
   border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-line-row);
   overflow-wrap: anywhere;
   text-align: left;
   transition: background-color 0.12s ease;
@@ -5992,14 +5905,14 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   width: auto;
   max-width: 100%;
   border-collapse: collapse;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--color-line-row);
   background: var(--bg);
   font-size: 0.95em;
 }
 .gdp-markdown-preview th,
 .gdp-markdown-preview td {
   padding: 9px 14px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-line-row);
   text-align: left;
   vertical-align: top;
 }
@@ -15307,11 +15220,7 @@ body.db-resizing {
   grid-template-columns: 90px 1fr;
   gap: 12px;
   padding: 8px 0;
-  border-top: 1px solid var(--bg-mute, #eaeef2);
   align-items: start;
-}
-.doctor-row:first-of-type {
-  border-top: 0;
 }
 .doctor-row-pill {
   font-size: 10px;
@@ -16248,7 +16157,7 @@ html[data-theme="dark"] .tools-code span[style] {
    列の幅は固定し、状態やボタンの文言が変わっても行の中身が動かない。 */
 .agent-hooks-rows {
   margin-top: 8px;
-  border-top: 1px solid var(--border-muted);
+  border-top: 1px solid var(--color-line-row);
 }
 .agent-hooks-row {
   display: grid;
@@ -16256,7 +16165,6 @@ html[data-theme="dark"] .tools-code span[style] {
   align-items: center;
   column-gap: 10px;
   padding: 6px 0;
-  border-bottom: 1px solid var(--border-muted);
   font-size: 12px;
   line-height: 18px;
 }
@@ -16554,14 +16462,11 @@ body.gdp-search-page {
   align-items: center;
   row-gap: var(--space-1);
   padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--color-line-soft);
   color: var(--color-text);
   font-size: var(--ui-font-base);
 }
 .agent-accounts-head {
   padding: var(--space-1) 0;
-  color: var(--color-text-3);
-  font-size: var(--ui-font-sm);
 }
 .agent-accounts-name-cell,
 .agent-accounts-email,
@@ -16669,15 +16574,17 @@ body.gdp-search-page {
 .agent-accounts-add {
   margin-top: var(--space-3);
 }
+/* ログイン・使用量・起動コマンドは、設定のほかの節の見出しと同じ段 (分類の中の 3 つの節)。 */
 .agent-accounts-subtitle,
 .agent-accounts-subtitle-row {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  margin-top: var(--space-6);
+  margin-top: var(--space-7);
   color: var(--color-text);
-  font-size: var(--ui-font-md);
-  font-weight: 600;
+  font-size: var(--ui-font-section);
+  font-weight: 700;
+  line-height: 1.4;
 }
 .agent-accounts-section > .agent-accounts-subtitle:first-child {
   margin-top: 0;
@@ -16698,7 +16605,7 @@ body.gdp-search-page {
 /* 使用量: 受け取れているかと最後の時刻だけを 1 行で。仕組みは「仕組み」の欄。 */
 .agent-accounts-usage {
   margin-top: var(--space-2);
-  border-top: 1px solid var(--color-line-soft);
+  border-top: 1px solid var(--color-line-row);
 }
 .agent-accounts-usage-row {
   display: flex;
@@ -16706,7 +16613,6 @@ body.gdp-search-page {
   align-items: center;
   gap: var(--space-2) var(--space-4);
   padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--color-line-soft);
   font-size: var(--ui-font-base);
 }
 .agent-accounts-usage-who {
@@ -16735,7 +16641,7 @@ body.gdp-search-page {
 .agent-screen-rules-details {
   margin-top: var(--space-2);
   color: var(--color-text-2);
-  font-size: var(--ui-font-sm);
+  font-size: var(--ui-font-md);
 }
 .agent-accounts-how > summary,
 .agent-screen-rules-details > summary {
@@ -22565,6 +22471,8 @@ body.gdp-history-page #history-commit-info:not([hidden]),
    形だけ (箱の寸法を変えない)。トグルはスイッチの形 (中身は checkbox のまま)。 */
 body.gdp-help-page #content {
   --content-top-gap: var(--space-5);
+  /* 下の余白は枠 (.gdp-help-shell) が持つ。設定の「変更を保存」を箱の下端に置くため。 */
+  --content-pad-bottom: 0px;
   padding-right: var(--pad-doc);
   padding-left: var(--pad-doc);
 }
@@ -22573,8 +22481,8 @@ body.gdp-help-page #content {
 }
 .gdp-help-header h1 {
   color: var(--color-text);
-  font-size: var(--ui-font-heading);
-  font-weight: 600;
+  font-size: var(--ui-font-page);
+  font-weight: 700;
 }
 .gdp-help-search-row {
   margin-bottom: var(--space-5);
@@ -22727,71 +22635,448 @@ body.gdp-help-page #content {
     border-bottom: 1px solid var(--color-line-soft);
   }
 }
-.gdp-help-content h2 {
-  margin: 0 0 var(--space-1);
+/* ---- 設定とヘルプのページの文字と部品 (部品の DOM は views/help-blocks.ts) ----
+   階層は ページの見出し > 分類・節の見出し > 群の見出し > 本文 > 補足 を、大きさ・
+   太さ・色の濃さで分ける。本文は本来の文字色 (薄い灰色にしない)。一段薄い
+   --color-text-2 は補足 (要約・説明・注記) だけ。まとまりは余白で分ける: 中は詰め、
+   まとまりの間は --space-7 (枠や面では囲まない)。1 行の長さは --doc-measure
+   (英語 70 字前後・日本語 40 字前後。em / ch なので文字の大きさに比例する)。
+   強調色 (--color-accent) は押せるもの (リンク・ボタン) と目次の選択だけ。 */
+.gdp-help-shell {
+  --doc-measure: 68ch;
+  --doc-line-height: 1.75;
+  --help-step-mark: calc(var(--space-unit) * 7);
+  padding-bottom: var(--space-7);
+}
+.gdp-help-shell[lang="ja"] {
+  --doc-measure: 40em;
+}
+.gdp-help-content {
+  color: var(--color-text);
+  font-size: var(--ui-font-read);
+  line-height: var(--doc-line-height);
+}
+.gdp-help-content > h2 {
+  margin: 0 0 var(--space-2);
   color: var(--color-text);
   font-size: var(--ui-font-heading);
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 1.3;
 }
+/* 分類・節の要約。見出しのすぐ下に補足の色で。 */
 .gdp-help-content > p {
-  margin: 0 0 var(--space-5);
+  max-width: var(--doc-measure);
+  margin: 0 0 var(--space-2);
   color: var(--color-text-2);
 }
-/* ヘルプの画面のキャプチャ (views/help-images.ts)。800 px 幅で撮った 2 倍の画像を、
-   撮った幅より大きくしない。手順の中では文の下に置く。 */
+/* 要約の下の、ほかのページへの 1 行 (設定 › ショートカットへ、など)。 */
+.gdp-help-content > .gdp-help-shortcut-link {
+  font-size: var(--ui-font-md);
+}
+.gdp-help-group {
+  margin: var(--space-7) 0 0;
+}
+.gdp-help-group > h3 {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text);
+  font-size: var(--ui-font-section);
+  font-weight: 700;
+  line-height: 1.4;
+}
+.gdp-help-group p,
+.gdp-help-list,
+.gdp-help-table,
+.gdp-help-note,
+.gdp-help-details,
+.gdp-help-command {
+  max-width: var(--doc-measure);
+}
+.gdp-help-group p {
+  margin: 0 0 var(--space-4);
+}
+.gdp-help-content a:not(.gdp-help-figure) {
+  color: var(--color-accent);
+  text-underline-offset: 0.2em;
+}
+.gdp-help-content :not(pre) > code {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-inset);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+/* 画面のボタン・画面の名前。 */
+.gdp-help-ui {
+  font-weight: 600;
+}
+.gdp-help-content .gdp-help-key {
+  font-size: var(--ui-font-md);
+}
+.gdp-help-list {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-5);
+}
+.gdp-help-list > li + li {
+  margin-top: var(--space-2);
+}
+.gdp-help-list > li::marker {
+  color: var(--color-text-3);
+}
+/* 番号つきの手順: 左に番号の丸、丸から次の手順へ縦の線。手順の間は広く空ける。 */
+.gdp-help-steps {
+  max-width: var(--doc-measure);
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  list-style: none;
+  counter-reset: help-step;
+}
+.gdp-help-steps > li {
+  position: relative;
+  padding: 0 0 var(--space-6) calc(var(--help-step-mark) + var(--space-4));
+  counter-increment: help-step;
+}
+.gdp-help-steps > li:last-child {
+  padding-bottom: 0;
+}
+.gdp-help-steps > li::before {
+  content: counter(help-step);
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--help-step-mark);
+  height: var(--help-step-mark);
+  border-radius: 50%;
+  background: var(--color-raised);
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+  font-weight: 700;
+  line-height: 1;
+}
+.gdp-help-steps > li::after {
+  content: "";
+  position: absolute;
+  top: calc(var(--help-step-mark) + var(--space-1));
+  bottom: var(--space-1);
+  left: calc(var(--help-step-mark) / 2 - 1px);
+  width: 2px;
+  background: var(--color-line);
+}
+.gdp-help-steps > li:last-child::after {
+  display: none;
+}
+.gdp-help-steps > li > p {
+  margin: 0 0 var(--space-2);
+}
+.gdp-help-steps > li > :last-child {
+  margin-bottom: 0;
+}
+/* 手順の 1 行の動作。番号の丸と同じ高さの行に載せる。 */
+.gdp-help-steps > li > .gdp-help-step-title {
+  font-size: var(--ui-font-step);
+  font-weight: 600;
+  line-height: var(--help-step-mark);
+}
+.gdp-help-steps > li > .gdp-help-step-link {
+  color: var(--color-text-2);
+  font-size: var(--ui-font-lg);
+}
+/* 画面のキャプチャ (views/help-images.ts)。本文の幅まで。押すと大きく開く
+   (views/terminal/image-lightbox.ts)。 */
 .gdp-help-figure {
   display: block;
-  max-width: calc(var(--space-unit) * 200);
-  margin: var(--space-2) 0 var(--space-5);
+  max-width: min(100%, var(--doc-measure));
+  margin: var(--space-3) 0 var(--space-5);
   overflow: hidden;
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  cursor: zoom-in;
+}
+.gdp-help-figure:hover {
+  border-color: var(--color-line-strong);
+}
+.gdp-help-figure:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .gdp-help-figure img {
   display: block;
   width: 100%;
   height: auto;
 }
-.gdp-help-steps .gdp-help-figure {
-  margin-bottom: var(--space-4);
+.gdp-help-steps > li > .gdp-help-figure {
+  margin: var(--space-2) 0 var(--space-3);
 }
-/* 設定のフォーム: 節は見出しと間隔で区切る。 */
+/* コマンド: 等幅・沈んだ面・右上にコピー (押しても箱は変えない)。 */
+.gdp-help-command {
+  margin: var(--space-3) 0 var(--space-4);
+}
+.gdp-help-steps > li > .gdp-help-command {
+  margin: var(--space-2) 0 var(--space-3);
+}
+.gdp-help-command-title {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+  font-weight: 600;
+}
+.gdp-help-command-body {
+  position: relative;
+}
+.gdp-help-command pre {
+  margin: 0;
+  overflow-x: auto;
+  padding: var(--space-3) calc(var(--ui-control-sm) + var(--space-3)) var(--space-3) var(--space-4);
+  border: 1px solid var(--color-line-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+}
+/* 本文の幅で折り返す (横に送ると文字がコピーのボタンの下へ潜る)。写すのはボタンで。 */
+.gdp-help-command code {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-md);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.gdp-help-command-copy {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+.gdp-help-command-copy:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.gdp-help-command-copy:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.gdp-help-command-copy[data-copied] {
+  color: var(--color-working);
+}
+.gdp-help-command-copy.failed {
+  color: var(--color-failed);
+}
+/* 注意 / 補足: 左に色の線と小さな絵。色は注意だけ (入力待ちと同じ黄)。 */
+.gdp-help-note {
+  --help-note-color: var(--color-text-2);
+  display: flex;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--help-note-color);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--color-inset);
+  font-size: var(--ui-font-lg);
+}
+.gdp-help-note[data-kind="warning"] {
+  --help-note-color: var(--color-waiting);
+}
+.gdp-help-note-icon {
+  display: flex;
+  flex: none;
+  height: calc(var(--ui-font-lg) * 1.75);
+  align-items: center;
+  color: var(--help-note-color);
+}
+.gdp-help-note-body > .gdp-help-note-label {
+  display: block;
+  color: var(--help-note-color);
+  font-weight: 700;
+}
+.gdp-help-note-body > p {
+  margin: 0;
+}
+.gdp-help-note-body > p + p {
+  margin-top: var(--space-2);
+}
+/* 畳める「詳しく」。開くと左の線の内側に中身。 */
+.gdp-help-details {
+  margin: var(--space-5) 0 var(--space-4);
+}
+.gdp-help-details > summary {
+  width: fit-content;
+  color: var(--color-text);
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+}
+.gdp-help-details > summary::-webkit-details-marker {
+  display: none;
+}
+.gdp-help-details > summary::before {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 0.45em;
+  margin: 0 var(--space-2) 0.15em var(--space-1);
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+.gdp-help-details[open] > summary::before {
+  transform: rotate(45deg);
+}
+.gdp-help-details > summary:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--focus-ring);
+}
+.gdp-help-details-body {
+  margin-top: var(--space-3);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--color-line);
+}
+/* ヘルプの本文の表は本文の幅まで。表の見た目は下の .ui-table。 */
+.gdp-help-content table {
+  max-width: var(--doc-measure);
+  margin: 0 0 var(--space-4);
+  font-size: var(--ui-font-lg);
+  line-height: 1.6;
+}
+/* ---- 表と、表のような一覧 (ui-surface.md の「表」) ----
+   本物の <table> は .ui-table (組むのは views/help-blocks.ts の uiTable)。div で組んだ
+   一覧は行に .ui-table-row、見出しの行に .ui-table-head を付ける。
+   - 行の区切りは --color-line-row (どの面にも 1.5:1 以上)。見出しの行の下は 1 段太い
+   - 見出しの行は補足の色で小さく、太く (列の意味を示す)
+   - 行の多い表 (.ui-table-striped。UI_TABLE_STRIPE_MIN_ROWS 行から) は 1 行おきに
+     --color-row-alt、どの表も hover で行に面
+   - 数値の列は .ui-num で右寄せ・桁をそろえる。キーの列 (.ui-table-keys) は幅をそろえる */
+.ui-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.ui-table :is(th, td) {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-line-row);
+  color: var(--color-text);
+  text-align: left;
+  vertical-align: top;
+}
+.ui-table thead th,
+.ui-table-head {
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* div の一覧の行は小さな文字 (--ui-font-base) なので、見出しの行はそれより 1 段小さく。 */
+.ui-table-head {
+  font-size: var(--ui-font-sm);
+}
+.ui-table thead th {
+  border-bottom-width: 2px;
+}
+.ui-table tbody th {
+  font-weight: 600;
+}
+.ui-table-striped > tbody > tr:nth-child(even) > * {
+  background: var(--color-row-alt);
+}
+.ui-table > tbody > tr:hover > * {
+  background: var(--color-raised);
+}
+.ui-table .ui-num {
+  text-align: right;
+}
+.ui-table-keys > tbody > tr > th,
+.ui-table-keys > thead > tr > th:first-child {
+  width: 40%;
+}
+.ui-table-row {
+  border-bottom: 1px solid var(--color-line-row);
+}
+.ui-table-head {
+  border-bottom: 2px solid var(--color-line-row);
+}
+/* 設定のショートカット: 分類ごとの見出しの行 (分類の名前・キーの列の名前) は行と同じ列の組み。 */
+.shortcut-group-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(var(--space-unit) * 20) minmax(0, 1.4fr);
+  align-items: end;
+  gap: var(--space-3);
+  padding: 0 var(--space-2) var(--space-1);
+}
+.shortcut-group-head > .shortcut-group-title {
+  margin: 0;
+  padding: 0;
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+}
+.shortcut-group-keys {
+  text-align: right;
+}
+/* 設定のフォーム: 節は見出し → 何のための設定かの 1 文 (補足の色) → 操作。節の
+   間は --space-7 の余白で分ける (枠で囲まない)。 */
 .scope-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
   max-width: calc(var(--space-unit) * 225);
+  margin-top: var(--space-6);
 }
 .scope-settings > [hidden] {
   display: none;
 }
-.scope-settings-section + .scope-settings-section {
-  margin-top: var(--space-6);
-}
 .scope-settings-section-title,
 .scope-settings-title-row > .scope-settings-section-title {
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
   color: var(--color-text);
-  font-size: var(--ui-font-title);
-  font-weight: 600;
+  font-size: var(--ui-font-section);
+  font-weight: 700;
+  line-height: 1.4;
 }
 .scope-settings-title-row {
   align-items: center;
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 .scope-settings-shared {
   padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-  color: var(--color-text);
+  background: var(--color-raised);
+  color: var(--color-text-2);
 }
 .scope-settings label {
-  color: var(--color-text-2);
-  font-size: var(--ui-font-base);
+  color: var(--color-text);
+  font-size: var(--ui-font-lg);
+  font-weight: 500;
+  line-height: 1.4;
 }
 #display-settings-source,
 .scope-settings-help,
 #scope-omit-source {
-  color: var(--color-text-3);
-  font-size: var(--ui-font-sm);
+  max-width: var(--doc-measure);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+  line-height: 1.6;
+}
+/* 見出しのすぐ下の説明は、操作との間を 1 段空ける。 */
+.scope-settings-section-title + .scope-settings-help,
+.scope-settings-title-row + .scope-settings-help {
+  margin: 0 0 var(--space-3);
+}
+/* 操作とその説明で 1 組。次の操作との間は組の中より広く。 */
+.scope-settings-help + label,
+.scope-settings .scope-settings-help + .scope-settings-toggle {
+  margin-top: var(--space-4);
 }
 #viewer-theme,
 #viewer-language,
@@ -22822,7 +23107,7 @@ body.gdp-help-page #content {
   display: flex;
   margin: 0;
   color: var(--color-text);
-  font-size: var(--ui-font-md);
+  font-size: var(--ui-font-lg);
 }
 .scope-settings-toggle + .scope-settings-toggle {
   border-top: 1px solid var(--color-line-soft);
@@ -22860,10 +23145,48 @@ body.gdp-help-page #content {
   outline: none;
   box-shadow: var(--focus-ring);
 }
+/* 「変更を保存」はいつも本文の箱の下端 (短い分類でも長い分類でも同じ場所)。枠を
+   箱の高さまで伸ばし、足元を最後に押し下げて、長いときは下端に貼り付ける。 */
+.gdp-help-shell[data-page="settings"] {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(var(--content-h) - var(--content-top-gap));
+  padding-bottom: 0;
+}
+.gdp-help-shell[data-page="settings"] > .gdp-help-layout {
+  flex: 1 0 auto;
+  align-items: stretch;
+}
+.gdp-help-shell[data-page="settings"] .gdp-help-nav {
+  align-self: start;
+}
+.gdp-help-shell[data-page="settings"] .gdp-help-content {
+  display: flex;
+  flex-direction: column;
+}
+.gdp-help-shell[data-page="settings"] .scope-settings {
+  flex: 1 0 auto;
+}
 .scope-settings-footer {
-  margin-top: var(--space-6);
-  padding-top: 0;
-  border-top: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-4);
+  margin-top: auto;
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--color-line-soft);
+  background: var(--color-ground);
+}
+.scope-settings-footer > p {
+  grid-column: 1;
+}
+.scope-settings-footer > .scope-settings-actions {
+  grid-row: 1 / span 4;
+  grid-column: 2;
+  margin-top: 0;
 }
 /* 未保存の変更があることは、保存のボタンの横の文言を色と印で目立たせて示す。 */
 #scope-settings-save-status[data-state="unsaved"] {
@@ -22958,11 +23281,18 @@ body.gdp-help-page #content {
 .gdp-palette-row-key,
 .gdp-palette-footer kbd,
 .empty-key kbd,
-.image-tab-close kbd {
+.image-tab-close kbd,
+.gdp-help-key,
+.shortcut-settings kbd {
   padding: 0 var(--space-1);
   border-radius: var(--radius-sm);
+  /* キーキャップの形: 面に表の線の縁と、下だけ 1 段厚い縁 (箱の寸法は変えない)。
+     縁の線はどの面にも 1.5:1 以上 (--color-line-row)。 */
   background: var(--color-raised);
-  color: var(--color-text-2);
+  box-shadow:
+    inset 0 0 0 1px var(--color-line-row),
+    inset 0 -1px 0 1px var(--color-line-row);
+  color: var(--color-text);
   font-family: var(--font-mono);
   font-size: var(--ui-font-sm);
   line-height: calc(var(--space-unit) * 5);
@@ -23517,15 +23847,16 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   background: var(--color-doc);
 }
 .db-root .db-grid-header-wrap {
-  border-bottom: 1px solid var(--color-line);
+  border-bottom: 2px solid var(--color-line-row);
   background: var(--color-inset);
 }
 .db-root .db-grid-header-label {
   color: var(--color-text);
   font-weight: 600;
 }
+/* 行の区切りは表の決まりの線 (ui-surface.md の「表」)。列の線は薄いまま。 */
 .db-root .db-grid-row {
-  border-bottom-color: var(--color-line-soft);
+  border-bottom-color: var(--color-line-row);
 }
 .db-root .db-grid-cell {
   border-right-color: var(--color-line-soft);
@@ -23630,7 +23961,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 /* ---- B-2: Data の他の面 (Schema・ER 図・各エクスプローラ・問い合わせの結果と
    履歴・スナップショット・全体検索) ----
    上の Data の表と同じ決まりに寄せる: 表の面は --color-code、見出しは沈んだ面と
-   1px の線、行は縞にせず薄い線で区切り、hover はわずかに明るく。一覧の行は
+   線、行は縞にせず表の決まりの線 (--color-line-row) で区切り、hover はわずかに明るく。一覧の行は
    左の木の行 (.db-table-item) と同じく、選んだものだけ強い選択。入力欄は
    クエリの入力欄と同じ枠 (コードの面・薄い線・フォーカスでアクセント)。
    データの文字 (PK・型・状態) は無彩色。DOM と操作は変えない (見た目だけ)。
@@ -23645,7 +23976,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   padding: 0 var(--space-2);
   border: 0;
   border-right: 1px solid var(--color-line-soft);
-  border-bottom: 1px solid var(--color-line-soft);
+  border-bottom: 1px solid var(--color-line-row);
   background: transparent;
   color: var(--color-text);
 }
@@ -23654,7 +23985,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 }
 .db-root :is(.db-schema-table, .db-query-table, .db-detail-table, .redis-value-hash-table) th {
   height: var(--ui-control-md);
-  border-bottom-color: var(--color-line);
+  border-bottom-color: var(--color-line-row);
   background: var(--color-inset);
   font-weight: 600;
 }
@@ -23704,7 +24035,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 }
 .db-root :is(.redis-db-item, .redis-key-item, .es-index-item, .es-doc-item, .dynamodb-table-item, .dynamodb-item-row, .s3-object-item, .db-snapshot-table-row, .db-search-hit-row, .db-query-history-entry) {
   border-left-color: transparent;
-  border-bottom-color: var(--color-line-soft);
+  border-bottom-color: var(--color-line-row);
   color: var(--color-text);
 }
 .db-root :is(.redis-db-item, .redis-key-item, .es-index-item, .es-doc-item, .dynamodb-table-item, .dynamodb-item-row, .s3-object-item, .db-snapshot-table-row, .db-search-hit-row, .db-query-history-entry):hover {
@@ -23730,7 +24061,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   background: var(--color-code);
 }
 .db-root .db-search-table-header {
-  border-bottom-color: var(--color-line);
+  border-bottom-color: var(--color-line-row);
   background: var(--color-inset);
   color: var(--color-text);
 }

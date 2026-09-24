@@ -39,8 +39,11 @@ export type LightboxImage = {
   url: string;
   /** 表示に使う名前。 */
   name: string;
-  /** 実体のパス。見出しに出す。 */
-  path: string;
+  /**
+   * 実体のパス。見出しに出し、コピーできる。無い画像 (ヘルプの画面のキャプチャ)
+   * は見出しに名前を出し、並びのどれにも無ければコピーのボタンを置かない。
+   */
+  path?: string;
 };
 
 /**
@@ -143,8 +146,8 @@ export function openImageLightbox(
     const image = current();
     picture.src = image.url;
     picture.alt = image.name;
-    title.textContent = image.path;
-    title.title = image.path;
+    title.textContent = image.path ?? image.name;
+    title.title = image.path ?? image.name;
     overlay.setAttribute("aria-label", image.name);
     viewport.reset();
   };
@@ -160,7 +163,13 @@ export function openImageLightbox(
   next.disabled = images.length < 2;
 
   const copy = iconButton(COPY_16_PATHS, text.copyImagePath, () => {
-    const path = filePathClipboardText(current().path);
+    // コピーのボタンは、並びのどれにもパスがあるときだけ置く (下)。
+    const imagePath = current().path;
+    if (imagePath === undefined)
+      throw new Error(
+        `openImageLightbox: the image "${current().name}" has no path to copy`,
+      );
+    const path = filePathClipboardText(imagePath);
     navigator.clipboard.writeText(path).then(
       () => {
         // 形は変えず、印だけ替える (押した後にボタンの箱を動かさない)。
@@ -182,7 +191,8 @@ export function openImageLightbox(
     );
   });
   copy.classList.add("terminal-lightbox-copy");
-  nav.append(previous, next, copy);
+  nav.append(previous, next);
+  if (images.every((image) => image.path !== undefined)) nav.append(copy);
 
   zoomReset = button("100%", text.zoomReset, () => viewport.reset());
   // 閉じるは拡大縮小の塊から離して右端に置き、絵・文字・キーで閉じるものだと

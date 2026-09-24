@@ -75,6 +75,8 @@ export type ShortcutText = {
   problem: string;
   changed: string;
   noKey: string;
+  /** 分類ごとの見出しの行の、キーの列の名前。 */
+  keysColumn: string;
   addKey: string;
   pressKey: string;
   gFirst: string;
@@ -144,6 +146,7 @@ export const SHORTCUT_SETTINGS_TEXT: Record<
     problem: "Fix the shortcut JSON before saving.",
     changed: "Changed",
     noKey: "No key",
+    keysColumn: "Keys",
     addKey: "Add key",
     pressKey: "Press a key…",
     gFirst: "Press g first",
@@ -214,6 +217,7 @@ export const SHORTCUT_SETTINGS_TEXT: Record<
     problem: "ショートカットの JSON を直してから保存してください。",
     changed: "変更済み",
     noKey: "キーなし",
+    keysColumn: "キー",
     addKey: "キーを追加",
     pressKey: "キーを押してください…",
     gFirst: "先に g を押す",
@@ -663,7 +667,7 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
   function renderRow(action: KeymapAction, keys: KeyLabel[]): HTMLElement {
     const t = text();
     const row = document.createElement("div");
-    row.className = "shortcut-row";
+    row.className = "shortcut-row ui-table-row";
     row.dataset.action = action;
     if (draft[action] !== undefined) row.dataset.changed = "true";
     const head = button("shortcut-row-head", `${action}:head`);
@@ -750,10 +754,17 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
       shown += rows.length;
       const section = document.createElement("section");
       section.className = "shortcut-group";
+      // 見出しの行: 分類の名前と、キーの列の名前 (行と同じ列の組み)。
+      const head = document.createElement("div");
+      head.className = "shortcut-group-head ui-table-head";
       const heading = document.createElement("h4");
       heading.className = "shortcut-group-title";
       heading.textContent = keymapGroupTitle(group, deps.getLanguage());
-      section.append(heading, ...rows);
+      const keysColumn = document.createElement("span");
+      keysColumn.className = "shortcut-group-keys";
+      keysColumn.textContent = t.keysColumn;
+      head.append(heading, document.createElement("span"), keysColumn);
+      section.append(head, ...rows);
       groups.push(section);
     }
     list.replaceChildren(...groups);

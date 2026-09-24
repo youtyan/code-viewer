@@ -23,6 +23,7 @@
 | 補助の情報 (大きさ・日時など) | 行にしない。情報のボタン (`.gdp-file-detail-meta` の形: 押せる領域は固定、hover / フォーカスで小さな面) に入れる |
 | topbar のトグルボタン | `.controls > button` パターン（`#ignore-ws` `#hide-tests` が実例） |
 | セグメント（排他選択） | `.seg` パターン |
+| 表・表のような一覧 (列があり、目で行を横に追うもの) | 本物の `<table>` は `.ui-table` (ヘルプは `views/help-blocks.ts` の `uiTable` で組む)、div の一覧は行に `.ui-table-row`・見出しの行に `.ui-table-head`。行の区切りは `--color-line-row` (どの面にも 1.5:1 以上。部品ごとに `--color-line-soft` などの薄い線で区切らない)、見出しの行を置き (補足の色・小さく・太く、下の線は 1 段太い)、行の多い表 (`UI_TABLE_STRIPE_MIN_ROWS` 行から) は `.ui-table-striped` で 1 行おきに `--color-row-alt`、行に hover の面。数値の列は `.ui-num` で右寄せ、キーの列 (`.ui-table-keys`) は幅をそろえる。キーはキーキャップの共有の規則 (`.gdp-help-key`・`.empty-key kbd` などの並び。縁が `--color-line-row`) に選択子を足す。独自の作りの表 (Data の `table-grid.ts`・CSV・Markdown) は構造を変えず、行の区切りの線だけを `--color-line-row` に合わせる。`web-src/test/table-rules-css.test.ts` が線のコントラストと各所の線を見る |
 | 確認 / 入力ダイアログ | `views/ui-dialog.ts` の `showConfirmDialog` / `showAlertDialog` / `showPromptDialog` / `showFormDialog`。型は 1 つ (面は `--color-overlay`、内側 7 単位、右上の閉じる = 取り消し、ボタンは `gdp-dialog-cancel` / `gdp-dialog-confirm` / 危険は `danger`)。見出しの下の 1 文は `description`。本文の見出しつきの値・コードの枠・箇条書きは `agent-hooks-dialog-*` の部品 (`accounts-dialogs.ts` の `labeled`)。ボタンのクラスを呼び出し側で付け直さない |
 | 使用量 (5h / week の割合・バー・リセットまで・いつの値か) | `views/agents/usage-meter.ts` の `usageMeterRow` / `usageObservedText`。全体ボードのカードと最下段のポップオーバーが同じものを使う (場所で見え方を変えない) |
 | 全体ボードの操作 | 主の操作は `agents-primary`、枠つきの小さな操作は `agents-secondary`、文字だけは `agents-text-action`、アイコンは `agents-icon-action` (28px 角)。プロジェクトの見出しの開く・起動・⋯ は hover / フォーカスで出し、場所は最初から取る |
@@ -191,7 +192,7 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
 | 構文の色 | `--syntax-text` / `--syntax-keyword` / `--syntax-string` / `--syntax-type` / `--syntax-function` / `--syntax-comment`、行番号は `--syntax-gutter`。shiki の github テーマの色 (どの面でも) と highlight.js のクラスは `style.css` の B-1 の節と diff2html の節で名前へ差し替え、同じ種類は同じ名前にする。下限 (本文 7:1・構文の色 6.5:1・コメントと行番号 4.5:1) と 2 系統の対応は `diff-code-contrast.test.ts` |
 | 差分の文字 / 履歴のグラフ | `--diff-add-fg` / `--diff-del-fg` (面は `--diff-*-bg`)、@@ の行の文字は `--diff-hunk-fg`。`--graph-main` (主線) / `--graph-branch` (分かれた線)。状態の色と混ぜない |
 | 文字の段階 | `--color-text` / `--color-text-2` / `--color-text-3` / `--color-on-accent` |
-| 線 | `--color-line` / `--color-line-soft` / `--color-line-strong`。**線は最後の手段。** 面の明るさの差で分けられるなら線を引かない |
+| 線 | `--color-line` / `--color-line-soft` / `--color-line-strong`。**線は最後の手段。** 面の明るさの差で分けられるなら線を引かない。表の行の区切りだけは `--color-line-row` (上の「表」) |
 | アクセントと状態 | `--color-accent` / `--color-accent-strong`、`--color-waiting` `--color-working` `--color-done` `--color-failed` `--color-idle` |
 | プロジェクトの色 | `--project-<色>` (`core/project-colors.ts` の `PROJECT_COLORS` と `none`)・頭文字の `--project-ink`。部品は `data-project-color` の下で `--project-color` を読む。色違いのダーク (graphite / warm) もダークの 1 組を使う |
 | 選んでいる行の光 | `--glow-select` (内側の box-shadow。箱の寸法を変えない) |
@@ -310,6 +311,19 @@ CLI のサブコマンド・フラグ・画面の操作が変わったら、**�
   節と画像の対応・幅 1600 px・1 枚 150KB / 合計 2MB は `help-page.test.ts` の「help page captures」が見る
 - リポジトリルートの `README.md`
 - 配布スキル `skills/code-viewer-*/SKILL.md`（CLI のサブコマンド / フラグを宣伝している場合）
+
+本文の部品 (段落・箇条書き・番号つきの手順・画像・注意 / 補足・コマンド・キー・「詳しく」・表) は
+`web-src/views/help-blocks.ts` の `helpBlocks(lang)` だけで作る。本文を書く側はクラスも CSS も書かない。
+見た目の決まりは `style.css` の「設定とヘルプのページの文字と部品」の節 (設定のページも同じ):
+
+- 階層は ページの見出し (`--ui-font-page`) > 節 (`--ui-font-heading`) > 群・設定の節 (`--ui-font-section`) >
+  手順の動作 (`--ui-font-step`) > 本文 (`--ui-font-read`、一覧の文字より一段大きい)。見出しは太字
+- 本文は `--color-text`。`--color-text-2` は要約・設定の説明・コマンドの題などの補足だけ。本文を薄くしない
+- 1 行の長さは `--doc-measure` (枠の `lang` で日本語 40em・英語 68ch)。行間は `--doc-line-height`
+- まとまりは余白で分ける (群・設定の節の間は `--space-7`、中は詰める)。枠や面で囲まない
+- 強調色は押せるもの (リンク・ボタン) と目次の選択だけ。注意は `--color-waiting` の線、補足は無彩色の線
+- 設定の「変更を保存」は本文の箱の下端に貼り付ける (短い分類でも同じ場所)
+- `web-src/test/help-typography-css.test.ts` (計算値) と `help-blocks.test.ts` (DOM) が見る
 
 リリース時の詳細な照合手順は `.agents/skills/project-npm-publish-procedure/SKILL.md` にある。
 

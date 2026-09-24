@@ -758,3 +758,37 @@ describe("the key cells of a row", () => {
     ]);
   });
 });
+
+// 表の決まり (ui-surface.md の「表」): 分類ごとに見出しの行があり、行は区切り線の行。
+describe("the table look of the list", () => {
+  test("each group starts with a head row naming the group and the key column", () => {
+    const { root } = setup();
+    const groups = Array.from(root.querySelectorAll(".shortcut-group"));
+    const heads = groups.map((group) => group.firstElementChild);
+    expect({
+      someGroups: groups.length > 0,
+      headsFirst: heads.every((head) =>
+        head?.classList.contains("ui-table-head"),
+      ),
+      titled: heads.every(
+        (head) =>
+          (head?.querySelector(".shortcut-group-title")?.textContent ?? "") !==
+          "",
+      ),
+      keyColumn: heads[0]?.querySelector(".shortcut-group-keys")?.textContent,
+    }).toEqual({
+      someGroups: true,
+      headsFirst: true,
+      titled: true,
+      keyColumn: "Keys",
+    });
+  });
+
+  test("every row is a table row", () => {
+    const { root } = setup();
+    const rows = root.querySelectorAll(".shortcut-row");
+    expect(
+      Array.from(rows).every((item) => item.classList.contains("ui-table-row")),
+    ).toBe(true);
+  });
+});

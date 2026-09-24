@@ -52,8 +52,8 @@ const CATEGORY_HELP_LINKS: Partial<
   accounts: {
     section: "add-account",
     before: {
-      en: "Each row is one claude or codex account. How to add one, sign it in and start an agent with it: ",
-      ja: "1 行が claude か codex のアカウント 1 つです。足し方・ログインのしかた・エージェントでの使い方は ",
+      en: "How to add an account, sign it in and start an agent with it: ",
+      ja: "足し方・ログインのしかた・エージェントでの使い方は ",
     },
   },
   shortcuts: {
@@ -122,6 +122,7 @@ export function createSettingsPage(deps: SettingsPageDeps) {
     deps.mountSettingsSearch(searchRow);
     const view = shell.render(deps.$("#diff"), {
       page: "settings",
+      lang,
       title: agentsText(lang).sidebar.settings,
       searchRow,
       nav: categories.map((category) => ({

@@ -263,6 +263,29 @@ describe("棚の並びごと開いたとき", () => {
     }
   });
 
+  // ヘルプの画面のキャプチャはファイルのパスを持たない (help-blocks.ts)。
+  test.each([
+    {
+      name: "パスの無い画像だけなら、見出しは名前でコピーのボタンは無い",
+      images: [
+        { url: "/help-images/a.en.webp", name: "Screen A" },
+        { url: "/help-images/b.en.webp", name: "Screen B" },
+      ],
+      expected: { title: "Screen B", copy: false },
+    },
+    {
+      name: "パスのある画像なら、見出しはパスでコピーのボタンがある",
+      images: [IMAGE, OTHER],
+      expected: { title: "/tmp/other.png", copy: true },
+    },
+  ])("$name", ({ images, expected }) => {
+    openImageLightbox({ images, index: 1 }, text());
+    expect({
+      title: overlay()?.querySelector(".terminal-lightbox-path")?.textContent,
+      copy: overlay()?.querySelector(".terminal-lightbox-copy") !== null,
+    }).toEqual(expected);
+  });
+
   test("空の並びでは開かない", () => {
     expect(() => openImageLightbox({ images: [], index: 0 }, text())).toThrow(
       "openImageLightbox needs at least one image",

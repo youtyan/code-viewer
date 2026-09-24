@@ -10,6 +10,11 @@ export type PageShellNavItem =
 export type PageShellParts = {
   /** どのページの枠か。別のページから移ったら「入った」と数える。 */
   page: "settings" | "help";
+  /**
+   * 本文の言語 (lang 属性)。1 行の長さを言語で変える (style.css の --doc-measure。
+   * ヘルプは ?lang= でアプリと別の言語を開ける)。
+   */
+  lang: "en" | "ja";
   title: string;
   /** 見出しの右に並べるもの (ヘルプの「キーボードショートカット」)。 */
   headerActions?: HTMLElement[];
@@ -51,6 +56,7 @@ export function createPageShell() {
     const shell = document.createElement("section");
     shell.className = "gdp-help-shell";
     shell.dataset.page = parts.page;
+    shell.lang = parts.lang;
     const header = document.createElement("header");
     header.className = "gdp-help-header";
     const title = document.createElement("h1");

@@ -12,6 +12,7 @@ import {
   type GuideSection,
   guideContent,
 } from "./help-guides";
+import { helpBlocks, type HelpStepSpec } from "./help-blocks";
 import { type HelpFigure, helpFigure } from "./help-images";
 import { buildHelpKeybindingGroups } from "./help-keybindings";
 import { createPageShell, type PageShellNavItem } from "./page-shell";
@@ -70,7 +71,7 @@ export type HelpBlock =
       open(): void;
     }
   /** 手順。画像のある手順は、その番号の中に文の下へ画像を置く。 */
-  | { kind: "steps"; items: Array<string | HelpStep> }
+  | { kind: "steps"; items: Array<string | HelpStepSpec> }
   /** 画面のキャプチャ (help-images.ts)。 */
   | { kind: "figure"; figure: HelpFigure }
   /** インストールの案内 (PWA)。ボタンはブラウザが出せるときだけ。Chrome 以外では出さない */
@@ -2048,40 +2049,6 @@ export function openHelpKeybindings(deps: OpenHelpSectionDeps): void {
   openHelpSection(deps, "keybindings");
 }
 
-function renderHelpCommand(block: Extract<HelpBlock, { kind: "command" }>) {
-  const wrap = document.createElement("div");
-  wrap.className = "gdp-help-command";
-  const title = document.createElement("div");
-  title.className = "gdp-help-command-title";
-  title.textContent = block.title;
-  const pre = document.createElement("pre");
-  const code = document.createElement("code");
-  code.textContent = block.command;
-  pre.appendChild(code);
-  wrap.append(title, pre);
-  return wrap;
-}
-
-export function renderHelpTable(rows: Array<[string, string]>) {
-  const table = document.createElement("table");
-  rows.forEach(([keys, description]) => {
-    const tr = document.createElement("tr");
-    const keyCell = document.createElement("th");
-    keyCell.scope = "row";
-    keys.split(" / ").forEach((key, index) => {
-      if (index > 0) keyCell.append(" / ");
-      const kbd = document.createElement("kbd");
-      kbd.textContent = key;
-      keyCell.appendChild(kbd);
-    });
-    const desc = document.createElement("td");
-    desc.textContent = description;
-    tr.append(keyCell, desc);
-    table.appendChild(tr);
-  });
-  return table;
-}
-
 function renderHelpLink(block: Extract<HelpBlock, { kind: "link" }>) {
   const p = document.createElement("p");
   p.className = "gdp-help-shortcut-link";
@@ -2097,46 +2064,16 @@ function renderHelpLink(block: Extract<HelpBlock, { kind: "link" }>) {
 }
 
 function renderHelpBlock(
+  lang: HelpLanguage,
   block: Exclude<HelpBlock, { kind: "install" }>,
 ): HTMLElement {
+  const blocks = helpBlocks(lang);
   if (block.kind === "link") return renderHelpLink(block);
-  if (block.kind === "paragraph") {
-    const p = document.createElement("p");
-    p.textContent = block.text;
-    return p;
-  }
-  if (block.kind === "steps") return renderHelpSteps(block.items);
-  if (block.kind === "command") return renderHelpCommand(block);
-  if (block.kind === "figure") return renderHelpFigure(block.figure);
-  return renderHelpTable(block.rows);
-}
-
-/** 画像は縮めて出すので、押すと元の大きさで別のタブに開く。 */
-function renderHelpFigure(figure: HelpFigure): HTMLAnchorElement {
-  const link = document.createElement("a");
-  link.className = "gdp-help-figure";
-  link.href = figure.src;
-  link.target = "_blank";
-  link.rel = "noopener";
-  const img = document.createElement("img");
-  img.src = figure.src;
-  img.alt = figure.alt;
-  img.loading = "lazy";
-  img.decoding = "async";
-  link.appendChild(img);
-  return link;
-}
-
-function renderHelpSteps(items: Array<string | HelpStep>): HTMLOListElement {
-  const ol = document.createElement("ol");
-  ol.className = "gdp-help-steps";
-  items.forEach((item) => {
-    const li = document.createElement("li");
-    if (typeof item === "string") li.textContent = item;
-    else li.append(item.text, ...item.figures.map(renderHelpFigure));
-    ol.appendChild(li);
-  });
-  return ol;
+  if (block.kind === "paragraph") return blocks.paragraph(block.text);
+  if (block.kind === "steps") return blocks.steps(block.items);
+  if (block.kind === "command") return blocks.command(block.command, block.title);
+  if (block.kind === "figure") return blocks.figure(block.figure);
+  return blocks.keyTable(block.rows);
 }
 
 /**
@@ -2144,6 +2081,7 @@ function renderHelpSteps(items: Array<string | HelpStep>): HTMLOListElement {
  * (押すと 1 度きりなので、押した後は手順の文だけになる)。
  */
 function fillInstallBlock(
+  lang: HelpLanguage,
   host: HTMLElement,
   block: Extract<HelpBlock, { kind: "install" }>,
   offer: InstallOffer,
@@ -2161,7 +2099,7 @@ function fillInstallBlock(
     row.append(button);
     children.push(row);
   }
-  children.push(renderHelpSteps(block.steps));
+  children.push(helpBlocks(lang).steps(block.steps));
   host.replaceChildren(...children);
 }
 
@@ -2284,7 +2222,11 @@ export function createHelpPage(deps: HelpPageDeps) {
     h2.textContent = current.title;
     const intro = document.createElement("p");
     intro.textContent = current.intro;
-    article.append(h2, intro, ...(current.lead ?? []).map(renderHelpBlock));
+    article.append(
+      h2,
+      intro,
+      ...(current.lead ?? []).map((block) => renderHelpBlock(lang, block)),
+    );
     if (section === "keybindings") article.append(shortcutSettingsLink(lang));
     sectionGroups.forEach((group) => {
       const groupSection = document.createElement("section");
@@ -2294,14 +2236,15 @@ export function createHelpPage(deps: HelpPageDeps) {
       groupSection.append(groupTitle);
       group.blocks.forEach((block) => {
         if (block.kind !== "install") {
-          groupSection.appendChild(renderHelpBlock(block));
+          groupSection.appendChild(renderHelpBlock(lang, block));
           return;
         }
         if (deps.installOffer.state() === "hidden") return;
         const host = document.createElement("div");
         host.className = "gdp-help-install";
-        fillInstallBlock(host, block, deps.installOffer);
-        installBlock = () => fillInstallBlock(host, block, deps.installOffer);
+        fillInstallBlock(lang, host, block, deps.installOffer);
+        installBlock = () =>
+          fillInstallBlock(lang, host, block, deps.installOffer);
         groupSection.appendChild(host);
       });
       article.appendChild(groupSection);
@@ -2319,6 +2262,7 @@ export function createHelpPage(deps: HelpPageDeps) {
 
     shell.render(deps.$("#diff"), {
       page: "help",
+      lang,
       title: agentsText(lang).sidebar.help,
       headerActions: [shortcuts],
       nav,

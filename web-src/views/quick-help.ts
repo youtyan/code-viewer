@@ -1,10 +1,10 @@
 import { isImeComposing } from "../core/keyboard";
 import type { KeyBinding } from "../core/keymap";
+import { helpBlocks } from "./help-blocks";
 import {
   buildHelpKeybindingGroups,
   type HelpKeybindingLanguage,
 } from "./help-keybindings";
-import { renderHelpTable } from "./help-page";
 import { quickHelpText } from "./quick-help-i18n";
 
 // キーボードショートカットの小窓 (? で開く)。よく使う分類だけを出し、全部の
@@ -47,7 +47,10 @@ export function createQuickHelp(deps: QuickHelpDeps) {
       section.className = "gdp-help-group";
       const title = document.createElement("h3");
       title.textContent = group.title;
-      section.append(title, renderHelpTable(group.rows));
+      section.append(
+        title,
+        helpBlocks(deps.getLanguage()).keyTable(group.rows),
+      );
       groupsHost.appendChild(section);
     }
   }

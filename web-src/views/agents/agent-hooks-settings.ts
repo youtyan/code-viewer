@@ -212,7 +212,7 @@ export function createAgentHooksSettings(
   function createRow(row: AgentHookStatus): HTMLElement {
     const text = deps.getText();
     const box = document.createElement("div");
-    box.className = "agent-hooks-row";
+    box.className = "agent-hooks-row ui-table-row";
     box.dataset.agent = row.agent;
     const name = document.createElement("span");
     name.className = "agent-hooks-name";
