@@ -251,6 +251,8 @@ export type AppSettingsState = {
   navWidth?: number;
   /** 左のサイドバーで畳んだプロジェクト (プロジェクトの root)。 */
   navCollapsedProjects?: string[];
+  /** 左のサイドバーの「停止中」の節を開いた (既定は畳む。core/project-running.ts)。 */
+  navStoppedProjectsOpen?: boolean;
   /**
    * 入口のサーバで最後に開いたプロジェクトの根 (実パス)。前置きの無い URL
    * (`/`・古いブックマーク) をどのプロジェクトへ送るかに使う。画面は書かない。

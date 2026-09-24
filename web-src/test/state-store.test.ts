@@ -240,6 +240,21 @@ describe("state store", () => {
     });
   });
 
+  test.each([
+    { value: true, expected: { navStoppedProjectsOpen: true } },
+    { value: false, expected: { navStoppedProjectsOpen: false } },
+    { value: "yes", expected: {} },
+  ])("the stopped projects section keeps only a boolean: $value", async ({
+    value,
+    expected,
+  }) => {
+    await withTempProject(async (dir) => {
+      expect(
+        await patchAppSettingsState(dir, { navStoppedProjectsOpen: value }),
+      ).toEqual({ version: 1, ...expected });
+    });
+  });
+
   test("grep selection history keeps the newest one hundred valid paths", async () => {
     await withTempProject(async (dir) => {
       const paths = Array.from(

@@ -2,15 +2,21 @@
 // の noAgentsState、共通の部品 views/empty-state.ts)。次にやること (新しい
 // エージェント・プロジェクトの登録) と、ボードへ戻るキー。ペインはあるが
 // エージェントでないだけなら、登録の代わりに今までの「すべてのペインを表示」。
+// 起動中でない登録プロジェクトは、左のサイドバーと同じ判定で下の「停止中」へ。
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import type { AgentOverviewResponse, AgentPane } from "../core/agent-overview";
+import type {
+  AgentOverviewResponse,
+  AgentPane,
+  AgentProjectInfo,
+} from "../core/agent-overview";
 import type { AgentMonitor } from "../views/agents/agent-monitor";
 import { createAgentsView } from "../views/agents/agents-view";
 import { agentsText } from "../views/agents/i18n";
 import type { PanePreview } from "../views/agents/pane-preview";
 import type { ProjectActions } from "../views/projects/project-actions";
+import { info, overview as overviewWith } from "./_agents-sidebar-fixture";
 import { agentPane } from "./_test-helpers";
 
 beforeAll(() => {
@@ -37,11 +43,12 @@ async function mountBoard(
   panes: AgentPane[],
   lang: "en" | "ja" = "en",
   preview?: PanePreview,
+  projects?: AgentProjectInfo[],
 ) {
   document.body.innerHTML = '<main id="content"></main>';
   const calls: string[] = [];
   const snapshot = {
-    overview: overview(panes),
+    overview: projects ? overviewWith(panes, projects) : overview(panes),
     error: "",
     notifyError: "",
     unread: new Map(),
@@ -57,7 +64,7 @@ async function mountBoard(
     permission: () => "granted",
     requestPermission: async () => "granted",
   };
-  const projects: ProjectActions = {
+  const actions: ProjectActions = {
     activity: () => null,
     signature: () => "",
     dismiss: () => undefined,
@@ -97,7 +104,7 @@ async function mountBoard(
       calls.push("launch");
     },
     onVisibilityChange: () => undefined,
-    projects,
+    projects: actions,
     preview,
   });
   await view.enter();
@@ -183,5 +190,55 @@ describe("the board rows and the screen preview", () => {
     ]).toEqual(["%1", "claude · Review plan · work:0.0"]);
     view.suspend();
     expect(watched).toEqual(["watch agents-list below", "unwatch"]);
+  });
+});
+
+describe("the board and stopped projects", () => {
+  test("registered projects that are not running fold into Not running (n) at the bottom", async () => {
+    const app = info("/work/sample-app", 0, { status: "current" });
+    await mountBoard(
+      [agentPane({ id: "%1", project: app.root, path: app.root })],
+      "en",
+      undefined,
+      [
+        app,
+        info("/work/sample-lib", 1),
+        info("/work/sample-docs", 2, {
+          status: "running",
+          url: "/p/docs/",
+          launched: true,
+        }),
+      ],
+    );
+    const names = (scope: Element | null) =>
+      [
+        ...(scope?.querySelectorAll(
+          ":scope > .agents-project .agents-project-name",
+        ) ?? []),
+      ].map((el) => el.textContent);
+    const list = document.querySelector(".agents-list");
+    const stopped = () =>
+      document.querySelector<HTMLElement>(".agents-stopped-list");
+    const toggle = document.querySelector<HTMLButtonElement>(
+      ".agents-stopped-toggle",
+    );
+
+    expect({
+      running: names(list),
+      toggle: toggle?.textContent,
+      expanded: toggle?.getAttribute("aria-expanded"),
+      hidden: stopped()?.hidden,
+    }).toEqual({
+      running: ["sample-app", "sample-docs"],
+      toggle: "Not running (1)",
+      expanded: "false",
+      hidden: true,
+    });
+
+    toggle?.click();
+    expect({ hidden: stopped()?.hidden, names: names(stopped()) }).toEqual({
+      hidden: false,
+      names: ["sample-lib"],
+    });
   });
 });

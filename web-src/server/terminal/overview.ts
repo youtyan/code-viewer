@@ -324,6 +324,7 @@ function overviewShells(
     .filter((shell) => !shell.exited)
     .map((shell) => ({
       id: shell.id,
+      cwd: shell.cwd,
       window:
         (shell.tty
           ? clients.find((client) => client.tty === shell.tty)?.window

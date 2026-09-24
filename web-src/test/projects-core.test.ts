@@ -818,6 +818,7 @@ describe("user settings", () => {
     "navCollapsed",
     "navWidth",
     "navCollapsedProjects",
+    "navStoppedProjectsOpen",
   ])("the workspace look %s is a per-person item", (key) => {
     expect(isUserSettingKey(key)).toBe(true);
   });

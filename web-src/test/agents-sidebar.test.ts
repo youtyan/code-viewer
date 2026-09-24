@@ -18,19 +18,11 @@ import {
   test,
   vi,
 } from "vitest";
-import type {
-  AgentOverviewResponse,
-  AgentPane,
-  AgentProjectInfo,
-} from "../core/agent-overview";
+import type { AgentOverviewResponse, AgentPane } from "../core/agent-overview";
 import type { AgentState } from "../core/agent-state";
 import { BACKGROUND_REQUEST_HEADER } from "../core/network-activity";
 import { PANE_PREVIEW_DELAY_MS } from "../core/pane-preview";
 import { PROJECT_COLORS, type ProjectColor } from "../core/project-colors";
-import type {
-  AgentMonitor,
-  AgentMonitorSnapshot,
-} from "../views/agents/agent-monitor";
 import {
   type AgentsSidebarDeps,
   mountAgentsSidebar,
@@ -42,6 +34,12 @@ import {
   createProjectActions,
   type ProjectActions,
 } from "../views/projects/project-actions";
+import {
+  fakeMonitor,
+  info,
+  overview,
+  projectNames,
+} from "./_agents-sidebar-fixture";
 import { closeOpenDialog } from "./_dialog-helpers";
 import { agentPane } from "./_test-helpers";
 
@@ -58,31 +56,6 @@ afterEach(() => {
   closeOpenDialog();
   vi.unstubAllGlobals();
 });
-
-function info(
-  root: string,
-  order: number | null,
-  server: AgentProjectInfo["server"] = { status: "absent" },
-): AgentProjectInfo {
-  const name = root.slice(root.lastIndexOf("/") + 1);
-  return {
-    root,
-    name,
-    displayRoot: root,
-    git: true,
-    error: "",
-    server,
-    registered:
-      order === null
-        ? null
-        : {
-            root,
-            name,
-            order,
-            color: PROJECT_COLORS[order % PROJECT_COLORS.length],
-          },
-  };
-}
 
 function pane(
   id: string,
@@ -101,76 +74,6 @@ function pane(
     source: "screen",
     project,
   });
-}
-
-function overview(
-  panes: AgentPane[],
-  projects: AgentProjectInfo[],
-): AgentOverviewResponse {
-  return {
-    serverInstance: "sample",
-    observedAt: 0,
-    tmux: { available: true, running: true, error: "" },
-    panes,
-    projects,
-    errors: [],
-    registry: {
-      projects: projects
-        .filter((item) => item.registered)
-        .map((item) => ({
-          root: item.root,
-          name: item.name,
-          order: item.registered?.order ?? 0,
-          color: item.registered?.color ?? "violet",
-          port: null,
-        })),
-      error: "",
-      path: "/state/projects.json",
-    },
-  };
-}
-
-function fakeMonitor(
-  initial: AgentOverviewResponse,
-  notify: {
-    sawWaiting?: boolean;
-    permission?: ReturnType<AgentMonitor["permission"]>;
-    permissionAsked?: boolean;
-    requested?: ReturnType<AgentMonitor["permission"]>;
-  } = {},
-) {
-  let snapshot: AgentMonitorSnapshot = {
-    overview: initial,
-    error: "",
-    notifyError: "",
-    unread: new Map(),
-    sawWaiting: notify.sawWaiting ?? false,
-    permissionAsked: notify.permissionAsked ?? false,
-  };
-  const listeners = new Set<() => void>();
-  const monitor: AgentMonitor = {
-    start: () => undefined,
-    refresh: async () => undefined,
-    snapshot: () => snapshot,
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    markRead: () => undefined,
-    permission: () => notify.permission ?? "default",
-    requestPermission: async () => {
-      snapshot = { ...snapshot, permissionAsked: true };
-      notify.permission = notify.requested ?? "default";
-      return notify.permission;
-    },
-  };
-  return {
-    monitor,
-    publish(next: AgentOverviewResponse) {
-      snapshot = { ...snapshot, overview: next };
-      for (const listener of listeners) listener();
-    },
-  };
 }
 
 function fakeActions(): ProjectActions & {
@@ -236,6 +139,7 @@ function mount(
   const { monitor, publish } = fakeMonitor(data, notify);
   const saved: string[][] = [];
   let dismissed = notify.dismissed ?? false;
+  let stoppedOpen = false;
   mountAgentsSidebar({
     root,
     monitor,
@@ -248,6 +152,10 @@ function mount(
     getCollapsed: () => [],
     currentName: () => "sample-app",
     saveCollapsed: (roots) => saved.push(roots),
+    isStoppedOpen: () => stoppedOpen,
+    setStoppedOpen: (open) => {
+      stoppedOpen = open;
+    },
     notifyHintDismissed: () => dismissed,
     dismissNotifyHint: () => {
       dismissed = true;
@@ -258,12 +166,11 @@ function mount(
 
 /** 区画ごとの見出しの並び (登録 / tmux で検出)。 */
 function layout(root: HTMLElement) {
-  const names = (scope: Element) =>
-    [...scope.querySelectorAll(":scope > .nav-project .nav-project-name")].map(
-      (el) => el.textContent,
-    );
   const detected = root.querySelector(".nav-detected");
-  return { registered: names(root), detected: detected && names(detected) };
+  return {
+    registered: projectNames(root),
+    detected: detected && projectNames(detected),
+  };
 }
 
 function rowIds(root: HTMLElement): string[] {
@@ -272,10 +179,20 @@ function rowIds(root: HTMLElement): string[] {
   );
 }
 
+/**
+ * 裏のプロセスが動いている (起動中)。並び・印・ドラッグのテストは起動中の側
+ * (一覧の直下) で見る。停止中の節への分け方は agents-sidebar-running-split.test.ts。
+ */
+const RUNNING = {
+  status: "running",
+  url: "/p/sample/",
+  launched: true,
+} as const;
+
 const REGISTERED = [
   info("/work/sample-app", 0, { status: "current" }),
-  info("/work/sample-lib", 1),
-  info("/work/sample-docs", 2),
+  info("/work/sample-lib", 1, RUNNING),
+  info("/work/sample-docs", 2, RUNNING),
 ];
 
 describe("agents sidebar order", () => {
@@ -1135,9 +1052,9 @@ describe("agents sidebar reordering projects", () => {
       head.closest(".nav-project")?.classList.contains("nav-project-dragging"),
     ).toBe(true);
     const reordered = overview(data.panes, [
-      info("/work/sample-lib", 0),
+      info("/work/sample-lib", 0, RUNNING),
       info("/work/sample-app", 1, { status: "current" }),
-      info("/work/sample-docs", 2),
+      info("/work/sample-docs", 2, RUNNING),
       info("/work/sample-tools", null),
     ]);
     publish(reordered);

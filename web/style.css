@@ -8814,6 +8814,14 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 .project-switcher-note {
   color: var(--fg-subtle);
 }
+/* 起動中の行と停止中の行の区切り (切替の小窓は畳まない)。 */
+.project-switcher-divider {
+  margin: 6px 8px 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-line-soft);
+  color: var(--fg-subtle);
+  font-size: var(--ui-font-sm);
+}
 .project-switcher-message {
   margin: 4px 8px 8px;
   color: var(--fg-muted);
@@ -17168,6 +17176,41 @@ html[data-nav-collapsed] #app-nav {
   height: var(--ui-control-sm);
   padding: 0 calc(var(--pad-text) - var(--pad-face));
 }
+/* 起動中でない登録プロジェクト (core/project-running.ts)。一覧の最後に畳める
+   見出しとして置く。既定は畳む (開いたかは全プロジェクト共通の設定)。 */
+.nav-stopped {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-line-soft);
+}
+.nav-stopped-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  height: var(--ui-control-sm);
+  padding: 0 calc(var(--pad-text) - var(--pad-face));
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.nav-stopped-toggle:hover {
+  color: var(--color-text);
+}
+.nav-stopped-toggle svg {
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  transition: transform var(--motion-fast);
+}
+.nav-stopped-toggle[aria-expanded="false"] svg {
+  transform: rotate(-90deg);
+}
+.nav-stopped-list {
+  margin-top: var(--space-2);
+}
 .nav-project-problem {
   flex: none;
   padding: 0 var(--space-1);
@@ -20188,6 +20231,31 @@ button.agents-account-name:hover {
   padding: 0 var(--pad-face) 0 var(--pad-text);
 }
 .agents-project + .agents-project {
+  margin-top: var(--space-3);
+}
+/* 全体ボードの停止中の節 (左のサイドバーと同じ判定)。一覧の最後に畳んで置く。 */
+.agents-stopped {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-line-soft);
+}
+.agents-stopped-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--ui-control-md);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-3);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.agents-stopped-toggle:hover {
+  color: var(--color-text);
+}
+.agents-stopped-list {
   margin-top: var(--space-3);
 }
 .agents-project-toggle {

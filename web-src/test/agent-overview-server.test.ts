@@ -479,12 +479,13 @@ describe("buildAgentOverview", () => {
 
   // ブラウザは shells で、前面でないタブのシェルが終わったことを知り (タブを
   // 閉じる)、tmux のウインドウの外側を覆う。端末名が空のシェルに、無関係な
-  // 端末 (空の tty) の大きさを付けない。
-  test("生きているシェルと、そのシェルの tmux の端末とウインドウの大きさを載せる", async () => {
+  // 端末 (空の tty) の大きさを付けない。起こした場所は、シェルがどのプロジェクトを
+  // 起動中にしているかの判定に使う (core/project-running.ts)。
+  test("生きているシェルと、起こした場所・そのシェルの tmux の端末とウインドウの大きさを載せる", async () => {
     const shell = (id: string, tty: string, exited = false) => ({
       id,
       command: "zsh",
-      cwd: "/work/sample-repo",
+      cwd: `/work/sample-repo/${id}`,
       cols: 80,
       rows: 24,
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -524,9 +525,13 @@ describe("buildAgentOverview", () => {
       }),
     );
     expect(overview.shells).toEqual([
-      { id: "shell-tmux", window },
-      { id: "shell-plain", window: null },
-      { id: "shell-no-tty", window: null },
+      { id: "shell-tmux", cwd: "/work/sample-repo/shell-tmux", window },
+      { id: "shell-plain", cwd: "/work/sample-repo/shell-plain", window: null },
+      {
+        id: "shell-no-tty",
+        cwd: "/work/sample-repo/shell-no-tty",
+        window: null,
+      },
     ]);
   });
 
@@ -551,7 +556,9 @@ describe("buildAgentOverview", () => {
         ],
       }),
     );
-    expect(overview.shells).toEqual([{ id: "shell-1", window: null }]);
+    expect(overview.shells).toEqual([
+      { id: "shell-1", cwd: "/work/sample-repo", window: null },
+    ]);
   });
 });
 

@@ -222,6 +222,11 @@ export type AgentOverviewResponse = {
 
 export type AgentOverviewShell = {
   id: string;
+  /**
+   * シェルを起こした場所。どのプロジェクトのシェルかを決める (起動中の判定。
+   * core/project-running.ts)。この欄を持たない古い版のサーバでは無い。
+   */
+  cwd?: string;
   /** tmux のクライアントとして繋がっていなければ (大きさが読めなければ) null。 */
   window: TmuxClientWindow | null;
 };

@@ -330,6 +330,9 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     maxLen: 4096,
   });
   if (navCollapsedProjects) out.navCollapsedProjects = navCollapsedProjects;
+  const navStoppedProjectsOpen = optionalBoolean(raw.navStoppedProjectsOpen);
+  if (navStoppedProjectsOpen !== undefined)
+    out.navStoppedProjectsOpen = navStoppedProjectsOpen;
   const lastProjectRoot = optionalString(raw.lastProjectRoot, 4096);
   if (
     lastProjectRoot?.startsWith("/") &&

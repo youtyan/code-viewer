@@ -36,6 +36,7 @@ export const USER_SETTING_KEYS = [
   "navCollapsed",
   "navWidth",
   "navCollapsedProjects",
+  "navStoppedProjectsOpen",
   "lastProjectRoot",
 ] as const satisfies readonly (keyof AppSettingsState)[];
 

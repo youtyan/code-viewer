@@ -150,6 +150,9 @@ export type AgentsSidebarText = {
   /** 下の区画 (登録していないが tmux にエージェントが居るプロジェクト)。 */
   detected: string;
   detectedTitle: string;
+  /** 一覧の下の、起動中でない登録プロジェクトの節の見出し (件数つき)。 */
+  stopped: (count: number) => string;
+  stoppedTitle: string;
   /** プロジェクトのサーバを起こしている最中 (見出しの中)。 */
   starting: string;
   /** 登録したプロジェクトの見出しのツールチップ (並べ替えの仕方)。 */
@@ -535,6 +538,9 @@ const EN: AgentsText = {
     starting: "Starting…",
     detectedTitle:
       "Projects with agents in tmux that are not registered. Opening one registers it.",
+    stopped: (count) => `Not running (${count})`,
+    stoppedTitle:
+      "Registered projects with no agent, no shell and no running process. Opening one starts it.",
     noProjectsTitle: "No projects yet",
     noProjectsBody: "Register a repository and it is listed here.",
     reorderHint: "Drag, or Alt+↑ / Alt+↓, to reorder",
@@ -666,6 +672,9 @@ const JA: AgentsText = {
     starting: "起動中…",
     detectedTitle:
       "登録していないが tmux でエージェントが動いているプロジェクト。開くと登録されます。",
+    stopped: (count) => `停止中 (${count})`,
+    stoppedTitle:
+      "エージェントもシェルも無く、プロセスも動いていない登録済みのプロジェクト。開くと起動します。",
     noProjectsTitle: "プロジェクトはまだありません",
     noProjectsBody: "リポジトリを登録すると、ここに並びます。",
     reorderHint: "ドラッグか Alt+↑ / Alt+↓ で並べ替え",

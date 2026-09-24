@@ -9217,6 +9217,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         currentName: () => PROJECT_NAME,
         saveCollapsed: (roots) =>
           patchSettings({ navCollapsedProjects: roots }),
+        isStoppedOpen: () => APP_SETTINGS.navStoppedProjectsOpen === true,
+        setStoppedOpen: (open) =>
+          patchSettings({ navStoppedProjectsOpen: open }),
         notifyHintDismissed: () =>
           APP_SETTINGS.agentNotifyHintDismissed === true,
         dismissNotifyHint: () =>
