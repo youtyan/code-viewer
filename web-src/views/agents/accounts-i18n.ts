@@ -79,6 +79,8 @@ export type AccountsText = {
   unknownWhy: (detail: string) => string;
   /** ログイン済みなのにメールアドレスが無い理由。 */
   noEmailWhy: (detail: string) => string;
+  /** 初回の案内を済ませた印を足せなかった (対話で開くと案内とログインをやり直させる)。 */
+  onboardingMarkFailed: (detail: string) => string;
   checkedAgo: (ago: string) => string;
   checkedJustNow: string;
   checking: string;
@@ -351,6 +353,8 @@ export const ACCOUNTS_EN: AccountsText = {
   noEmail: "—",
   unknownWhy: (detail) => `Could not check: ${detail}`,
   noEmailWhy: (detail) => `No email: ${detail}`,
+  onboardingMarkFailed: (detail) =>
+    `Opening claude will run the first-run setup and ask you to sign in again, because code-viewer could not record that setup is done: ${detail}`,
   checkedAgo: (ago) => `${ago} ago`,
   checkedJustNow: "just now",
   checking: "Checking…",
@@ -648,6 +652,8 @@ export const ACCOUNTS_JA: AccountsText = {
   noEmail: "—",
   unknownWhy: (detail) => `確かめられませんでした: ${detail}`,
   noEmailWhy: (detail) => `メールアドレスを出せません: ${detail}`,
+  onboardingMarkFailed: (detail) =>
+    `claude を開くと初回の案内とログインをやり直させます。初回の案内を済ませた印を付けられませんでした: ${detail}`,
   checkedAgo: (ago) => `${ago}前`,
   checkedJustNow: "たった今",
   checking: "確かめています…",

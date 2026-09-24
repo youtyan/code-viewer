@@ -307,6 +307,13 @@ export function createAccountsSettings(
             t.noConfigDir(account.configDir),
           );
     }
+    if (login.state === "logged-in" && login.setupDetail) {
+      return el(
+        "p",
+        "agent-hooks-detail agent-hooks-detail-problem",
+        t.onboardingMarkFailed(login.setupDetail),
+      );
+    }
     if (login.state === "logged-in" && !login.who && login.whoDetail) {
       return el("p", "agent-hooks-detail", t.noEmailWhy(login.whoDetail));
     }

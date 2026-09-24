@@ -512,6 +512,11 @@ export type AccountLogin = {
   plan: string;
   /** unknown の理由。 */
   detail: string;
+  /**
+   * ログイン済みの claude に初回の案内を済ませた印を足せなかった理由
+   * (server/accounts/onboarding.ts)。足せた・要らなかったときは無い。
+   */
+  setupDetail?: string;
   checkedAt: number;
 };
 
