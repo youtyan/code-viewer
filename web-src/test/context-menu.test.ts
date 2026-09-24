@@ -153,3 +153,35 @@ describe("context menu closes on Escape and Tab", () => {
     ]).toEqual([false, returnTo, true, []]);
   });
 });
+
+// 右端のキー (hint): 名前の後ろに kbd で置く。無ければ何も足さない。
+describe("context menu key hints", () => {
+  test.each([
+    { name: "with a hint", hint: "gd", expected: ["Diff", "KBD:gd"] },
+    { name: "without a hint", hint: undefined, expected: ["Diff"] },
+    { name: "with an empty hint", hint: "", expected: ["Diff"] },
+  ])("$name", ({ hint, expected }) => {
+    document.body.innerHTML = '<button id="anchor">+</button>';
+    const menu = showContextMenu(
+      document.getElementById("anchor") as HTMLElement,
+      [
+        {
+          label: "Diff",
+          leading: document.createElement("span"),
+          ...(hint === undefined ? {} : { hint }),
+          onSelect: () => undefined,
+        },
+      ],
+    );
+    const item = menu.querySelector("button") as HTMLButtonElement;
+    expect(
+      [...item.childNodes].flatMap((node) =>
+        node.nodeType === Node.TEXT_NODE
+          ? [node.textContent]
+          : node.nodeName === "KBD"
+            ? [`KBD:${node.textContent}`]
+            : [],
+      ),
+    ).toEqual(expected);
+  });
+});

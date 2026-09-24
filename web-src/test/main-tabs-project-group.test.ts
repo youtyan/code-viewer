@@ -274,7 +274,7 @@ describe("タブの無いグループの札", () => {
     return items;
   };
 
-  test("▾ の畳む・閉じるは押せない (新しいシェル・エージェントは押せる)。タブのあるグループは押せる", async () => {
+  test("▾ の畳む・閉じるは押せない (新しいシェル・エージェント・画面の行は押せる)。タブのあるグループは押せる", async () => {
     const { mount } = await open(libOnly, APP, home);
     expect([menuOf(mount, APP), menuOf(mount, LIB)]).toEqual([
       [
@@ -282,6 +282,13 @@ describe("タブの無いグループの札", () => {
         "---",
         "New shell",
         "New agent…",
+        "---",
+        "repo",
+        "diff",
+        "history",
+        "worktree",
+        "database",
+        "journal",
         "---",
         "Switch to this project (disabled: This project is already open)",
         "Collapse (disabled: No tabs are open in this project)",
@@ -293,6 +300,13 @@ describe("タブの無いグループの札", () => {
         "---",
         "New shell",
         "New agent…",
+        "---",
+        "repo",
+        "diff",
+        "history",
+        "worktree",
+        "database",
+        "journal",
         "---",
         "Switch to this project",
         "Collapse",

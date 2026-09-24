@@ -7388,10 +7388,58 @@ body.gdp-file-detail-page #empty {
 .gdp-context-menu button[aria-checked="true"] {
   font-weight: 600;
 }
-.gdp-context-menu button[aria-checked="true"]::after {
-  content: "✓";
+.gdp-context-menu button.gdp-context-menu-leading[role="menuitemradio"]::after {
+  content: "";
+  flex: none;
+  width: var(--icon-md);
   margin-left: auto;
   color: var(--color-text-2);
+  text-align: center;
+}
+.gdp-context-menu button.gdp-context-menu-leading[aria-checked="true"]::after {
+  content: "✓";
+}
+/* 絵に画面の絵を使う項目 (グループの ▾ の画面の行)。絵はタブの絵と同じ大きさ。 */
+.gdp-context-menu-icon {
+  flex: none;
+  display: flex;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  color: var(--color-text-2);
+}
+.gdp-context-menu-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.gdp-context-menu button:disabled .gdp-context-menu-icon {
+  color: inherit;
+}
+/* 右端のキー (見た目はパレットのキーと共有)。印の列があればその左。 */
+.gdp-context-menu-key {
+  flex: none;
+  margin-left: auto;
+}
+.gdp-context-menu
+  button.gdp-context-menu-leading[role="menuitemradio"]:has(> .gdp-context-menu-key)::after {
+  margin-left: 0;
+}
+/* 絵の無い選び方の一覧 (棚の置き場所など): 印は左の固定の列。選んでいない行も
+   同じ幅を空けて、文字の頭をそろえる。 */
+.gdp-context-menu button[role="menuitemradio"]:not(.gdp-context-menu-leading) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.gdp-context-menu button[role="menuitemradio"]:not(.gdp-context-menu-leading)::before {
+  content: "";
+  flex: none;
+  width: var(--icon-md);
+  color: var(--color-text-2);
+  text-align: center;
+}
+.gdp-context-menu
+  button[role="menuitemradio"][aria-checked="true"]:not(.gdp-context-menu-leading)::before {
+  content: "✓";
 }
 /* 押せない項目 (理由は title)。危険な操作の色より優先して、押せないと分かる色に。 */
 .gdp-context-menu button:disabled {
@@ -9719,12 +9767,14 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 .project-switcher-action:focus-visible {
   background: var(--accent-subtle);
 }
-/* メニューの区切り。取り返しのつかない操作を、よく使う操作と続けて置かない。 */
+/* メニューの区切り。取り返しのつかない操作を、よく使う操作と続けて置かない。
+   線は表の行の区切りと同じ (浮く面にも 1.5:1 以上。--color-line はダークで浮く面と
+   ほぼ同じ色で、区切りが見えなかった)。 */
 .gdp-context-menu-sep {
   margin: calc(var(--space-1) / 2)
     calc(var(--context-menu-inline-pad) - var(--space-1));
   border: 0;
-  border-top: 1px solid var(--color-line);
+  border-top: 1px solid var(--color-line-row);
 }
 
 /* 変更がまだ無い作業ツリーの案内 (右ペイン)。次にやることをその場に置く。 */
@@ -24256,6 +24306,7 @@ body.gdp-help-page #content {
 }
 .gdp-palette-input-key,
 .gdp-palette-row-key,
+.gdp-context-menu-key,
 .gdp-palette-footer kbd,
 .empty-key kbd,
 .image-tab-close kbd,

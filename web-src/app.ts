@@ -323,6 +323,7 @@ import {
   type SavedWrite,
   SPLIT_DIVIDER_WIDTH,
   shellGroupOf,
+  type ViewScreen,
 } from "./views/main-tabs/main-tabs-view";
 import { pageIconPaths } from "./views/main-tabs/tab-icons";
 import { installMobileShell } from "./views/mobile-shell";
@@ -395,10 +396,7 @@ import { worktreeText } from "./views/worktree-i18n";
 import { createWorktreeView, type WorktreeView } from "./views/worktree-view";
 
 /** 画面の入口の絵柄と、その画面へ移るキー (Worktrees にはキーが無い)。 */
-const VIEW_STRIP_KEYS: Record<
-  "repo" | "diff" | "history" | "worktree" | "database" | "journal",
-  KeymapAction | null
-> = {
+const VIEW_STRIP_KEYS: Record<ViewScreen, KeymapAction | null> = {
   repo: "goto-repo",
   diff: "goto-diff",
   history: "goto-history",
@@ -837,6 +835,15 @@ window.GdpExpandLogic = GdpExpandLogic;
   function shownKeyBindings(): KeyBinding[] {
     const standalone = isStandaloneWindow();
     return activeKeyBindings().filter((binding) => standalone || !binding.pwa);
+  }
+
+  /** 画面の入口 (とグループの ▾ の画面の行) に添えるキーの表記。無ければ ""。 */
+  function viewScreenKey(screen: ViewScreen): string {
+    const action = VIEW_STRIP_KEYS[screen];
+    const binding = action
+      ? shownKeyBindings().find((item) => item.action === action)
+      : undefined;
+    return binding ? formatKeyBinding(binding) : "";
   }
 
   let pendingSettingsPatch: SettingsPatch | null = null;
@@ -1728,6 +1735,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     splitListColumnWidth: () => splitListColumnWidth(),
     getLanguage: () => STATE.language,
     pageLabel: (page) => uiText().nav[page],
+    screenKey: (screen) => viewScreenKey(screen),
     navigate: (route, replace) => {
       if (replace) replaceWithRoute(route);
       else navigateToRoute(route);
@@ -3177,18 +3185,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     // 画面の入口 (木の見出しの絵柄の列)。絵だけなので、名前とキーは
     // title / aria-label に出す。
-    const bindings = shownKeyBindings();
     document
       .querySelectorAll<HTMLElement>(".view-strip-item")
       .forEach((link) => {
-        const route = link.dataset.route as keyof typeof VIEW_STRIP_KEYS;
+        const route = link.dataset.route as ViewScreen;
         const name = text.nav[route];
         if (!name) throw new Error(`view strip: no label for route ${route}`);
-        const action = VIEW_STRIP_KEYS[route];
-        const binding = action
-          ? bindings.find((item) => item.action === action)
-          : undefined;
-        const label = binding ? `${name} (${formatKeyBinding(binding)})` : name;
+        const key = viewScreenKey(route);
+        const label = key ? `${name} (${key})` : name;
         link.title = label;
         link.setAttribute("aria-label", label);
         const icon = link.querySelector<HTMLElement>(".goi-icon");

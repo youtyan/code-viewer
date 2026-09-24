@@ -134,6 +134,20 @@ import {
   pageIconPaths,
 } from "./tab-icons";
 
+/**
+ * 画面の入口 (左の縦の列。web/index.html の .view-strip-item) の並び。グループの
+ * ▾ にも同じ順で出す。repo はフォルダ表示 (タブにしない)。
+ */
+export const VIEW_SCREENS = [
+  "repo",
+  "diff",
+  "history",
+  "worktree",
+  "database",
+  "journal",
+] as const;
+export type ViewScreen = (typeof VIEW_SCREENS)[number];
+
 /** 保存をまとめる間隔。並べ替えや連続した移動を 1 回の書き込みにする。 */
 const SAVE_DELAY_MS = 300;
 const DRAG_TYPE = "application/x-code-viewer-main-tab";
@@ -180,8 +194,13 @@ export type MainTabsDeps = {
    */
   columnHead?: HTMLElement;
   getLanguage(): MainTabsLang;
-  /** page のタブの名前 (画面の入口と同じ文言)。 */
-  pageLabel(page: PageKind): string;
+  /** page のタブの名前 (画面の入口と同じ文言)。repo はフォルダ表示の入口の名前。 */
+  pageLabel(page: PageKind | "repo"): string;
+  /**
+   * その画面へ移るキーの表記 (画面の入口の title と同じ。割り当てが無ければ "")。
+   * グループの ▾ の画面の行の右端に出す。無ければ出さない。
+   */
+  screenKey?(screen: ViewScreen): string;
   /** その route を開く (replace なら履歴を積まない)。 */
   navigate(route: AppRoute, replace?: boolean): void;
   /**
@@ -1572,6 +1591,58 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     deps.switchProject?.(root, isRouteTab(tab) ? routeOf(tab) : null, tab);
   }
 
+  /**
+   * グループの ▾ の画面の行: そのプロジェクトのその画面を、そのグループのタブ
+   * として前面に出す (開いていればそのタブ、無ければ開く)。別のプロジェクトなら
+   * そのプロジェクトへ移ってから (タブの前面に出すときと同じ)。repo (ファイル) は
+   * タブにしないので、そのプロジェクトのフォルダ表示。
+   */
+  function openScreenIn(root: string, screen: ViewScreen): void {
+    const here = root === currentRoot;
+    if (screen === "repo") {
+      if (here) changeAndGo(showHome);
+      else switchWithout(root, null);
+      return;
+    }
+    const tab = allTabs(layout).find(
+      (item) =>
+        item.target.kind === "page" &&
+        item.target.page === screen &&
+        keyOf(item) === root,
+    );
+    if (tab) {
+      activateTab(tab.id);
+      return;
+    }
+    const route = deps.defaultRoute({ kind: "page", page: screen });
+    if (here) deps.navigate(route);
+    else switchWithout(root, route);
+  }
+
+  /** そのプロジェクトのタブを前面にせずに、route (無ければフォルダ表示) へ移る。 */
+  function switchWithout(root: string, route: AppRoute | null): void {
+    rememberRoute();
+    flush(true);
+    deps.switchProject?.(root, route, null);
+  }
+
+  /**
+   * いま本文に出ている画面の入口 (グループの ▾ の選択の印)。本文が前面に無い
+   * (左の前面がターミナル・画像・別のプロジェクトのタブ) なら無し。ファイルは
+   * ファイル (repo)、ファイルの差分の route は差分 (app.ts の headerRouteForFront と同じ)。
+   */
+  function shownScreen(): ViewScreen | null {
+    if (routeSideOf(layout, currentRoot) === null) return null;
+    const route = deps.currentRoute();
+    if (route.screen === "file")
+      return route.view === "blob" ||
+        route.view === "blame" ||
+        route.view === "history"
+        ? "repo"
+        : "diff";
+    return VIEW_SCREENS.find((screen) => screen === route.screen) ?? null;
+  }
+
   /** グループの ▾ の「このプロジェクトに切り替える」。 */
   function switchToProject(root: string): void {
     const tab = prepareProjectSwitch(root);
@@ -2453,6 +2524,27 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       : facts.git === false && !here
         ? current.notGitProject
         : null;
+    // 画面の行。別のプロジェクトは移って開く (移れなければ押せない)。印は
+    // いま見ているプロジェクトの、本文に出ている画面だけ。
+    const shown = here ? shownScreen() : null;
+    const screens: ContextMenuItem[] = VIEW_SCREENS.map((screen) => {
+      const icon = document.createElement("span");
+      icon.className = "gdp-context-menu-icon";
+      icon.innerHTML = iconSvg(
+        "gdp-context-menu-icon-svg",
+        pageIconPaths(screen),
+      );
+      const hint = deps.screenKey?.(screen) ?? "";
+      return {
+        label: deps.pageLabel(screen),
+        leading: icon,
+        ...(hint ? { hint } : {}),
+        checked: screen === shown,
+        disabled: !here && !deps.switchProject,
+        ...(here ? {} : { title: current.openScreenInTitle(look.name) }),
+        onSelect: () => openScreenIn(key, screen),
+      };
+    });
     return [
       // メニューの頭はプロジェクトの名前 (札には頭文字しか無い)。押せない行。
       {
@@ -2474,6 +2566,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         disabled: agentBlocker !== null,
         onSelect: () => deps.launchAgentIn?.(key),
       },
+      { kind: "separator" },
+      ...screens,
       { kind: "separator" },
       {
         label: current.switchToProject,

@@ -56,6 +56,8 @@ type MainTabsText = {
   shellNeedsSwitch: string;
   /** git のリポジトリでないプロジェクトでエージェントを起動できない理由。 */
   notGitProject: string;
+  /** グループの ▾ の画面の行 (別のプロジェクト): 移ってから開くこと。 */
+  openScreenInTitle: (name: string) => string;
   switchToProject: string;
   /** 今見ているプロジェクトのグループの「切り替える」が押せない理由。 */
   currentProject: string;
@@ -113,6 +115,7 @@ const EN: MainTabsText = {
   newAgentHereTitle: (name) => `Start an agent in ${name}`,
   shellNeedsSwitch: "Switch to this project to open a shell in it",
   notGitProject: "Agents can only be started in a git repository",
+  openScreenInTitle: (name) => `Switch to ${name} and open this screen`,
   switchToProject: "Switch to this project",
   currentProject: "This project is already open",
   collapseGroup: "Collapse",
@@ -172,6 +175,7 @@ const JA: MainTabsText = {
   newAgentHereTitle: (name) => `${name} でエージェントを起動します`,
   shellNeedsSwitch: "このプロジェクトに切り替えるとシェルを開けます",
   notGitProject: "エージェントを起動できるのは git のリポジトリだけです",
+  openScreenInTitle: (name) => `${name} に切り替えて、この画面を開きます`,
   switchToProject: "このプロジェクトに切り替える",
   currentProject: "いま見ているプロジェクトです",
   collapseGroup: "畳む",
