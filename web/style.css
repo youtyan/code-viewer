@@ -2667,35 +2667,17 @@ body.gdp-diff-page #repo-target-wrap {
   background: var(--fg-subtle);
   transition: background 0.2s ease, box-shadow 0.2s ease;
 }
+/* 繋がっている間は止まった点。点滅させると、繋がっている間ずっとページが毎秒 60 回
+   描き直され、打鍵が画面に出るまでが遅れた (端末の打鍵の往復の中央値 27ms の大半)。 */
 #status.live::before {
   background: #2ea043;
   box-shadow: 0 0 0 3px rgba(46,160,67,0.20);
-  animation: status-live-pulse 1.6s ease-out infinite;
 }
 #status.refreshing::before { background: #d29922; box-shadow: 0 0 0 3px rgba(210,153,34,0.25); }
 #status.error::before { background: var(--danger); box-shadow: 0 0 0 3px rgba(207,34,46,0.20); }
 #status.live { color: var(--success); }
 #status.refreshing { color: var(--attn); }
 #status.error { color: var(--danger); }
-@keyframes status-live-pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(46, 160, 67, 0.42);
-    transform: scale(0.92);
-  }
-  55% {
-    box-shadow: 0 0 0 6px rgba(46, 160, 67, 0);
-    transform: scale(1.08);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(46, 160, 67, 0);
-    transform: scale(0.92);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  #status.live::before {
-    animation: none;
-  }
-}
 
 /* ===== Top-edge loading bar (indeterminate) ===== */
 #load-bar {
@@ -2718,6 +2700,10 @@ body.gdp-diff-page #repo-target-wrap {
   left: 0; top: 0; bottom: 0;
   width: 30%;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+/* 回すのは読み込み中だけ。見えていない (opacity 0) 間も回していて、ページが毎秒 60 回
+   描き直されていた。 */
+#load-bar.active::after {
   animation: gdp-loadbar 1.1s linear infinite;
 }
 @keyframes gdp-loadbar {
@@ -19516,12 +19502,15 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   transform: rotate(45deg);
   box-shadow: 0 0 8px color-mix(in srgb, var(--color-waiting) 45%, transparent);
 }
+/* 作業中は回さない (欠けた輪と作業中の色で示す)。エージェントが作業している間は
+   ずっと出ているので、回すとその間ページが毎秒 60 回描き直され、端末の打鍵が
+   画面に出るまでが遅れた。コマ送り (steps) でも描き直しの要求は毎フレーム残った。 */
 .terminal-mark-working {
   border: 1.75px solid var(--color-working);
   border-top-color: transparent;
   border-right-color: transparent;
   border-radius: 50%;
-  animation: gdp-spin 1.1s linear infinite;
+  transform: rotate(-45deg);
 }
 .terminal-mark-done {
   width: var(--icon-sm);
