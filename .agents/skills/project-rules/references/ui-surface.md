@@ -188,8 +188,8 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
 | 何 | 名前 |
 |---|---|
 | 面の段階 | `--color-ground` (窓の地・上の行・最下段) / `--color-nav` (サイドバー) / `--color-tree` (ファイルのツリー) / `--color-doc` (本文) / `--color-code` (コードの面: ソース表示・差分) / `--color-inset` (本文の中の沈んだ面) / `--color-raised` (hover) / `--color-select` (選んでいる行) / `--color-term` |
-| 構文の色 | `--syntax-text` / `--syntax-keyword` / `--syntax-string` / `--syntax-type` / `--syntax-function` / `--syntax-comment`。shiki の github テーマの色と highlight.js のクラスは `style.css` の B-1 の節と diff2html の節で名前へ差し替える。コメントもコードの面と差分の面で 4.5:1 以上 |
-| 差分の文字 / 履歴のグラフ | `--diff-add-fg` / `--diff-del-fg` (面は `--diff-*-bg`)。`--graph-main` (主線) / `--graph-branch` (分かれた線)。状態の色と混ぜない |
+| 構文の色 | `--syntax-text` / `--syntax-keyword` / `--syntax-string` / `--syntax-type` / `--syntax-function` / `--syntax-comment`、行番号は `--syntax-gutter`。shiki の github テーマの色 (どの面でも) と highlight.js のクラスは `style.css` の B-1 の節と diff2html の節で名前へ差し替え、同じ種類は同じ名前にする。下限 (本文 7:1・構文の色 6.5:1・コメントと行番号 4.5:1) と 2 系統の対応は `diff-code-contrast.test.ts` |
+| 差分の文字 / 履歴のグラフ | `--diff-add-fg` / `--diff-del-fg` (面は `--diff-*-bg`)、@@ の行の文字は `--diff-hunk-fg`。`--graph-main` (主線) / `--graph-branch` (分かれた線)。状態の色と混ぜない |
 | 文字の段階 | `--color-text` / `--color-text-2` / `--color-text-3` / `--color-on-accent` |
 | 線 | `--color-line` / `--color-line-soft` / `--color-line-strong`。**線は最後の手段。** 面の明るさの差で分けられるなら線を引かない |
 | アクセントと状態 | `--color-accent` / `--color-accent-strong`、`--color-waiting` `--color-working` `--color-done` `--color-failed` `--color-idle` |

@@ -25,6 +25,7 @@ export const KNOWN_SNAKE_CASE_IDENTIFIERS: readonly string[] = [
   "bearer_token",
   "better_sqlite3",
   "bottom_non_empty",
+  "built_in",
   "capture_screen",
   "child_process",
   "client_height",
