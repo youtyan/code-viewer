@@ -18601,7 +18601,11 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 :is(#filelist, #file-list-rows) {
   padding: var(--space-1) var(--space-2) 0;
 }
+/* フォルダの行もファイルの行と同じく枠線を持たない。フォルダの行だけ左に 2px の
+   透明な枠線が残っていると、字下げの線 (::before、枠線の内側から測る) が
+   フォルダの行だけ 2px 右にずれ、縦の線が行ごとに左右に揺れた。 */
 :is(#filelist, #file-list-rows) li,
+:is(#filelist, #file-list-rows).tree .tree-dir,
 :is(#filelist, #file-list-rows).tree .tree-file {
   border-left: 0;
   border-radius: var(--radius-md);
@@ -18611,6 +18615,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   background: color-mix(in srgb, var(--color-raised) 70%, transparent);
 }
 :is(#filelist, #file-list-rows) li.active,
+:is(#filelist, #file-list-rows).tree .tree-dir.active,
 :is(#filelist, #file-list-rows).tree .tree-file.active {
   background: var(--color-select);
   box-shadow: var(--glow-select);
