@@ -40,8 +40,9 @@ Requires Node.js 20 or newer. Development uses
   their whole name up to about 40% of the room they share with the subject. The tabs are
   shared by all projects and grouped by project: each group starts with a label in
   the project's color (its initials and ▾ for New shell / New agent… in that
-  project, Switch to this project / Collapse / Close this group; the name is in
-  the tooltip) and its tabs are underlined in that color, in the order of the
+  project, its Files / Diff / History / Worktrees / Data / Work log screens,
+  Switch to this project / Collapse / Close this group; the name is in the
+  tooltip) and its tabs are underlined in that color, in the order of the
   sidebar; tabs of no project (agent board, Tools, Settings, Help) sit at the right
   end, and a terminal belongs to the project of its folder. Click a label to
   collapse a group. Files, terminals and images of another project open in place;
@@ -336,8 +337,19 @@ Requires Node.js 20 or newer. Development uses
   which ends the shell after asking; closing the tab never stops the shell or
   the agent. The same terminal moves to the other side with its screen and
   half-typed input. Images the agent writes are listed on a shelf beside the
-  terminal; a click opens them in an image tab (on the other side when split),
-  a middle-click or ⌘/Ctrl+click in a kept one, Alt+click in the full-screen viewer. The palette (`Ctrl+K`) lists agents
+  terminal (right, left, below or above; move it from the shelf's ⋯), grouped by
+  the pane they came from; hovering one shows its path and size in the shelf's
+  header and highlights where it appears on the screen. A click opens them in an
+  image tab (on the other side when split), a middle-click or ⌘/Ctrl+click in a
+  kept one, Alt+click in the full-screen viewer. Pasting an image (⌘V /
+  Ctrl+V) hands it to the agent: it is saved in the project as
+  `.code-viewer/pasted/pasted-image-<date>-<time>.png` (not tracked by git), its
+  path is typed at the prompt without sending, and a note says where it went.
+  URLs, image paths and paths of
+  files in the project on the terminal screen are links: hovering one
+  highlights it with Open and Copy buttons, and a click opens it (a file opens
+  at its line on the other side). With tmux mouse mode on, a plain click still
+  opens it; hold ⌘/Ctrl to keep the click from tmux. The palette (`Ctrl+K`) lists agents
   under Agents, and shells and plain tmux panes under Sessions.
 - Terminal status combines lifecycle reports with priority-based matching of
   the live terminal title and recent visible lines. Matching rules can report
@@ -539,7 +551,10 @@ PATH differs from the environment that starts code-viewer. Override paths must
 be absolute executable files outside the opened repository.
 
 Open **Settings** at the bottom of the left sidebar to change display options such
-as theme (dark in violet, graphite or warm gray, or light), font sizes (file list and code), and UI language. The language
+as light or dark, the color theme (Default, Night sea, Forest, Sand, Ink wash,
+Blossom, Moss, Mist, Amber, Indigo or GitHub, each in light and dark), terminal
+colors (always dark, or matching the page), font sizes (file list and code), and
+UI language. The language
 setting translates the viewer chrome itself, including that page, settings labels,
 sidebars, history controls, datastore viewer, and annotation panel labels.
 

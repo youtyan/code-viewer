@@ -1275,9 +1275,31 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   " from the tab's right-click menu.",
                 ],
                 "Images the agent writes are listed on the shelf at the right; select one to open it in an image tab.",
+                [
+                  "The shelf groups images by the pane they came from; hover one to outline that pane and show its path in the shelf header. Choose ",
+                  ui(l.terminal.imageShowInTerminal),
+                  " from the right-click menu to scroll back to the line.",
+                ],
+                "Move the shelf to the right, left, bottom, or top with the ⋯ on its header, and drag its inner edge to resize it.",
+                "Paste an image (⌘V / Ctrl+V) to hand it to the agent: it is saved in the project as .code-viewer/pasted/pasted-image-<date>-<time>.png (not tracked by git), that path is typed at the prompt without sending, and the image shows on the shelf.",
+                "Hover a URL, file path, or image path on the screen for Open and Copy buttons, or click it to open. When tmux handles the mouse, hold ⌘/Ctrl while clicking.",
+                [
+                  "The terminal is drawn dark even when the page is light. To change this, pick ",
+                  ui(l.settings.terminalTone),
+                  " in ",
+                  settings,
+                  " → ",
+                  ui(cat.appearance.label),
+                  ".",
+                ],
               ],
             },
             more(
+              [
+                "If some colors are still hard to read after matching a light page, switch the agent's own colors to a light theme too (",
+                code("/theme"),
+                " in claude).",
+              ],
               "tmux panes open as one shell per tmux session.",
               [
                 "If the same tmux session is also open in another terminal, the smaller one loses its right and bottom edges. Setting tmux's ",
@@ -1329,6 +1351,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(l.mainTabs.closeGroup),
                   ".",
                 ],
+                "The Diff, History and other rows in ▾ open the same screens as the vertical strip on the left, as a tab of that project (switching to that project first if it is another one).",
               ],
             },
             {
