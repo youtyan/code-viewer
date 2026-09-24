@@ -4,12 +4,44 @@
 
 import type { HelpLanguage } from "./help-page";
 
-export type HelpFigure = { src: string; alt: string };
+/**
+ * 撮った画像の名前。本文は撮る予定の画面も名前で書いておき、ここに無いものは
+ * 描かない (壊れた画像を出さない)。撮ったら画像と一緒にここへ足す
+ * (help-page.test.ts が web/help-images/ の中身と一致することを見る)。
+ */
+export const HELP_CAPTURES: ReadonlySet<string> = new Set([
+  "accounts-add",
+  "accounts-list",
+  "accounts-review",
+  "accounts-sign-in",
+  "accounts-signed-in",
+  "agent-launch",
+  "agent-new",
+  "agent-running",
+  "overview",
+  "project-add",
+  "project-register",
+  "quick-help",
+  "skill-install",
+]);
+
+export type HelpFigure = {
+  name: string;
+  src: string;
+  alt: string;
+  /** 画像があるか (HELP_CAPTURES)。無いものは描かない。 */
+  captured: boolean;
+};
 
 export function helpFigure(
   lang: HelpLanguage,
   name: string,
   alt: string,
 ): HelpFigure {
-  return { src: `/help-images/${name}.${lang}.webp`, alt };
+  return {
+    name,
+    src: `/help-images/${name}.${lang}.webp`,
+    alt,
+    captured: HELP_CAPTURES.has(name),
+  };
 }

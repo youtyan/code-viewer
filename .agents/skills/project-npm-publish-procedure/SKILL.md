@@ -79,7 +79,7 @@ Before any commit that goes into a release, tag, GitHub Release, or `npm publish
 Required scan for every release:
 
 1. `README.md` at the repository root — Features list, Usage / CLI options, Repository View, Uploads/Scope Settings, Datastore Viewer, AI Code Annotations, Agent Skill, Development sections. Walk the release diff range and confirm each user-visible change is reflected.
-2. In-app Help page (`web-src/views/help-page.ts`) — **both** `en` and `ja` `HELP_CONTENT` entries. Sections covering CLI commands, datastore viewer UI, annotations, agent skill install, and keyboard shortcuts must match the implementation.
+2. In-app Help page text (`web-src/views/help-text-en.ts` and `help-text-ja.ts`; section list in `help-guides.ts`) — **both** languages. Sections covering CLI commands, datastore viewer UI, annotations, agent skill install, and keyboard shortcuts must match the implementation.
 3. Bundled Agent Skill files under `skills/code-viewer-*/SKILL.md` — if the CLI subcommands or flags they advertise changed, update them too.
 4. Any other doc file the diff touches: `AGENTS.md`, top-level `CLAUDE.md`, this `SKILL.md`. Do not assume "internal docs" are exempt — they ship in the repository.
 

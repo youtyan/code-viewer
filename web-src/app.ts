@@ -272,7 +272,7 @@ import {
   fileRouteKeepingActiveView,
   isBlobOrBlameFileRoute,
 } from "./views/file-shell";
-import { guideLabels } from "./views/help-guides";
+import { helpLabels } from "./views/help-guides";
 import { createShortcutSettings } from "./views/help-keybinding-editor";
 import { formatKeyBinding } from "./views/help-keybindings";
 import {
@@ -4912,7 +4912,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     refreshOverview: () => AGENT_MONITOR.refresh(),
   });
   // 「別のアカウントで続ける…」(行・タブの右クリック)。起動の画面を引き継ぎの
-  // 形で開く。フックが無いときの案内は、設定のエージェント連携の節へ。
+  // 形で開く。フックが無いときの案内は、ヘルプのフックの節 (入れ方と、入れると
+  // 何が変わるか) へ。
   const HANDOFF_ACTIONS: HandoffMenuActions = {
     handoff: (pane) => {
       ACCOUNT_DIALOGS.launch({ handoff: pane }).then(
@@ -4921,7 +4922,8 @@ window.GdpExpandLogic = GdpExpandLogic;
           console.error("[code-viewer] handoff dialog failed", error),
       );
     },
-    openHookHelp: () => openSettingsAt(AGENT_HOOKS_SECTION_ID),
+    openHookHelp: () =>
+      openHelpSection(helpSectionDeps(), AGENT_HOOKS_HELP_SECTION),
   };
   const ACCOUNTS_SETTINGS = createAccountsSettings({
     client: ACCOUNTS_CLIENT,
@@ -5078,13 +5080,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     syncHeaderMenu,
     getLanguage: () => STATE.language,
-    // やり方の案内のボタン名は各画面の i18n から (views/help-guides.ts)。
-    guideLabels: (lang) => {
+    // ヘルプの本文のボタン名は各画面の i18n から (views/help-guides.ts)。
+    // 一覧の列の頭の画面の名前と差分の帯のボタンは app が持つので渡す。
+    helpLabels: (lang) => {
       const palette = activeKeyBindings().find(
         (binding) => binding.action === "open-file-palette",
       );
-      return guideLabels(lang, {
-        accounts: UI_TEXT[lang].settings.categories.accounts.label,
+      const text = UI_TEXT[lang];
+      return helpLabels(lang, {
+        diff: text.nav.diff,
+        history: text.nav.history,
+        worktree: text.nav.worktree,
+        tools: text.nav.tools,
+        split: text.topbar.split,
+        unified: text.topbar.unified,
+        ignoreWs: text.topbar.ignoreWsLabel,
+        hideTests: text.topbar.hideTestsLabel,
         paletteKey: palette ? formatKeyBinding(palette) : "",
       });
     },

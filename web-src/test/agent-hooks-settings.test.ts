@@ -71,7 +71,7 @@ describe("the agent integration section", () => {
     const event = new MouseEvent("click", { bubbles: true, cancelable: true });
     link.dispatchEvent(event);
     expect([link.getAttribute("href"), event.defaultPrevented, opened]).toEqual(
-      ["/help?section=overview", true, ["overview"]],
+      ["/help?section=agent-hooks", true, ["agent-hooks"]],
     );
   });
 });

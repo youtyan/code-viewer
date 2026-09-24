@@ -300,15 +300,23 @@ disabled / updated のすべてで箱の寸法を保つ。**
 
 CLI のサブコマンド・フラグ・画面の操作が変わったら、**同じ変更で**次を更新する。
 
-- `web-src/views/help-page.ts` の `HELP_CONTENT` — **`en` と `ja` の両方**
-- ヘルプの「やり方」の案内 (アカウントの追加・エージェントの起動・プロジェクトの追加・AI に任せる) は
-  `web-src/views/help-guides.ts`。ボタンや画面の名前は各画面の i18n の値を `guideLabels` で集めて
-  組み立てる (文字を写さない。`help-page.test.ts` が、案内が使う名前を全部出していることを見る)。
-  手順の順番やボタンが変わったら文も直す
-- 案内の画面のキャプチャ (`web/help-images/<名前>.<en|ja>.webp`、置く場所は `help-images.ts` の
-  `helpFigure`)。写っている画面が変わったら `node scripts/help-captures.mjs --window <窓の id>` で
-  撮り直す (砂場と偽の claude・codex で撮るので実データは写らない。撮った画像は 1 枚ずつ目で確かめる)。
-  節と画像の対応・幅 1600 px・1 枚 150KB / 合計 2MB は `help-page.test.ts` の「help page captures」が見る
+- ヘルプの本文は `web-src/views/help-text-en.ts` と `help-text-ja.ts` — **`en` と `ja` の両方**。
+  節の並び・名前・古い `?section=` の読み替え (`HELP_SECTION_ALIASES`) は `help-guides.ts`。読む人は
+  使う人: 節は見出し → 1〜2 文の要約 → 手順か箇条書き (1 項目 1〜2 文) → 細部は畳んだ「詳しく」。
+  内部の仕組み・寸法・判定の細部・キーの一覧は書かない (キーは小窓 `?` とキーの節が持つ)。1 段落・
+  1 項目は日本語 120 文字・英語 240 文字、1 節の本文は 600 / 1200 文字まで、導入手順は 1 手順に
+  動作 1 行・画像 1 枚・説明 1 文 (`help-text-length.test.ts` が本物の i18n の値で組んで測る)。
+  節を足す・名前を変えるなら、古い値を `HELP_SECTION_ALIASES` に残す (保存したリンク・タブの並び)
+- ボタンや画面の名前は各画面の i18n の表を `helpLabels` で集めて `{ ui: … }` で組み立てる (文字を
+  写さない。`help-page.test.ts` が、本文の名前が画面の値そのものであることを見る)。app だけが持つ
+  名前 (一覧の列の頭の画面の名前・差分の帯のボタン) は `AppHelpLabels` で app から渡す。手順の順番や
+  ボタンが変わったら文も直す
+- 画面のキャプチャ (`web/help-images/<名前>.<en|ja>.webp`、置く場所は `help-images.ts` の
+  `helpFigure`)。本文は撮る予定の画面も名前で書き、撮ったものだけを `HELP_CAPTURES` に載せる (載って
+  いないものは描かない)。写っている画面が変わったら `node scripts/help-captures.mjs` で撮り直す (砂場と
+  偽の claude・codex で撮るので実データは写らない。撮った画像は 1 枚ずつ目で確かめる)。節と画像の
+  対応・`HELP_CAPTURES` と置いた画像の一致・幅 1600 px・1 枚 150KB / 合計 2MB は `help-page.test.ts` の
+  「help page captures」が見る
 - リポジトリルートの `README.md`
 - 配布スキル `skills/code-viewer-*/SKILL.md`（CLI のサブコマンド / フラグを宣伝している場合）
 

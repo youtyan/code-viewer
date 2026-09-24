@@ -13,13 +13,13 @@ import type { InstallOffer, InstallOfferState } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
 import { parseQueryArgs } from "../server/query-cli";
 import { staticFileSpec, WEB_ROOT } from "../server/static-files";
-import { agentsText } from "../views/agents/i18n";
 import {
-  GUIDE_SECTIONS,
-  type GuideLabels,
-  type GuideSection,
-  guideLabels,
+  type AppHelpLabels,
+  HELP_SECTION_ALIASES,
+  type HelpLabels,
+  helpLabels,
 } from "../views/help-guides";
+import { HELP_CAPTURES } from "../views/help-images";
 import {
   buildHelpKeybindingGroups,
   collectHelpKeybindingCoverage,
@@ -34,7 +34,6 @@ import {
   helpSectionName,
   openHelpKeybindings,
 } from "../views/help-page";
-import { mainTabsText } from "../views/main-tabs/i18n";
 import { mobileShellText } from "../views/mobile-shell-i18n";
 import { quickHelpText } from "../views/quick-help-i18n";
 import { createSettingsPage } from "../views/settings-page";
@@ -46,11 +45,6 @@ const HIDDEN_INSTALL_OFFER: InstallOffer = {
   install: () => Promise.reject(new Error("no install prompt in this test")),
   onChange: () => undefined,
 };
-
-const EXPECTED_QUERY_DIFF_COMMANDS = [
-  "code-viewer query diff tables --before snap-abc123 --after snap-def456 --json",
-  "code-viewer query diff rows --before snap-abc123 --after snap-def456 --table users --limit 50",
-];
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -242,6 +236,32 @@ function renderSettings(lang: HelpLanguage = "en", keepDom = false) {
   };
 }
 
+/** app だけが持つ名前 (本物は app.ts の UI_TEXT の値)。 */
+const APP_LABELS: Record<HelpLanguage, AppHelpLabels> = {
+  en: {
+    diff: "Diff",
+    history: "History",
+    worktree: "Worktrees",
+    tools: "Tools",
+    split: "split",
+    unified: "unified",
+    ignoreWs: "ws",
+    hideTests: "no test",
+    paletteKey: "⌘K",
+  },
+  ja: {
+    diff: "差分",
+    history: "履歴",
+    worktree: "作業ツリー",
+    tools: "ツール",
+    split: "分割",
+    unified: "統合",
+    ignoreWs: "空白",
+    hideTests: "テスト非表示",
+    paletteKey: "⌘K",
+  },
+};
+
 function renderHelpPage(
   lang: HelpLanguage,
   section: HelpSection | string,
@@ -268,11 +288,7 @@ function renderHelpPage(
     currentRange: () => ({ from: "HEAD", to: "worktree" }),
     syncHeaderMenu: () => undefined,
     getLanguage: () => lang,
-    guideLabels: (guideLang) =>
-      guideLabels(guideLang, {
-        accounts: guideLang === "ja" ? "アカウント" : "Accounts",
-        paletteKey: "⌘K",
-      }),
+    helpLabels: (labelLang) => helpLabels(labelLang, APP_LABELS[labelLang]),
     openAccountsSettings: () => calls.push("openAccountsSettings"),
     toggleKeyboardShortcuts: () => calls.push("toggleKeyboardShortcuts"),
     getKeyBindings: () => DEFAULT_KEY_BINDINGS,
@@ -352,7 +368,7 @@ describe("settings page", () => {
       document
         .querySelector<HTMLButtonElement>(".gdp-help-nav-toggle")
         ?.click();
-      clickNav("Getting Started");
+      clickNav("Getting started");
       expect(level()).toBe("section");
       const view = renderSettings("en", true);
       expect(level()).toBe("contents");
@@ -437,7 +453,7 @@ describe("settings page", () => {
   test.each<[HelpLanguage, SettingsCategory, HelpSection, string]>([
     ["en", "accounts", "add-account", "Help › Add an account"],
     ["ja", "accounts", "add-account", "ヘルプ › アカウントを追加する"],
-    ["en", "shortcuts", "keybindings", "Help › Keyboard Shortcuts"],
+    ["en", "shortcuts", "keybindings", "Help › Keyboard shortcuts"],
     ["ja", "shortcuts", "keybindings", "ヘルプ › キーボードショートカット"],
   ])("in %s the %s category links to the help section %s", (lang, category, section, label) => {
     const view = renderSettings(lang);
@@ -469,38 +485,62 @@ describe("help page", () => {
       "en",
       "Help",
       [
-        "Getting Started *",
-        "Add an account",
+        "Getting started *",
+        "Projects",
+        "Read files",
+        "Read diffs",
+        "Search and history",
+        "Worktrees",
         "Start an agent",
-        "Add a project",
-        "Let AI do it",
-        "Keyboard Shortcuts",
-        "Project Files",
-        "AI Annotations",
+        "Watch your agents",
+        "Notifications",
+        "Reliable states (hooks)",
+        "Add an account",
+        "Terminal",
+        "Tabs and layout",
+        "Install as an app",
+        "On a phone",
         "Datastores",
-        "Agent Skill",
-        "MCP Server",
+        "Tools",
+        "AI annotations",
+        "Let AI do it",
+        "CLI and MCP for AI",
+        "What it saves",
+        "Troubleshooting",
+        "Keyboard shortcuts",
       ],
     ],
     [
       "ja",
       "ヘルプ",
       [
-        "はじめに *",
-        "アカウントを追加する",
+        "導入手順 *",
+        "プロジェクト",
+        "ファイルを読む",
+        "差分を読む",
+        "検索と履歴",
+        "作業ツリー",
         "エージェントを起動する",
-        "プロジェクトを追加する",
-        "AI に任せる",
-        "キーボードショートカット",
-        "プロジェクトファイル",
-        "AI注釈",
+        "エージェントの様子を見る",
+        "通知を受け取る",
+        "状態を正しく出す（フック）",
+        "アカウントを追加する",
+        "ターミナル",
+        "タブと画面の配置",
+        "アプリとして入れる",
+        "SP で使う",
         "データストア",
-        "スキル登録",
-        "MCPサーバー",
+        "ツール",
+        "AI の注釈",
+        "AI に任せる",
+        "AI 向けの CLI と MCP",
+        "保存するもの",
+        "困ったとき",
+        "キーボードショートカット",
       ],
     ],
-  ])("in %s lists the help sections only, under %s", (lang, title, nav) => {
-    renderHelpPage(lang, "overview");
+  ])("in %s lists the help sections in the order people use them, under %s", (lang, title, nav) => {
+    renderHelpPage(lang, "getting-started");
     expect({
       title: document.querySelector(".gdp-help-header h1")?.textContent,
       nav: navItems(),
@@ -509,15 +549,62 @@ describe("help page", () => {
   });
 
   // 設定の節だった値は route が設定のページへ移す (routes.test.ts)。ここに来たら
-  // はじめにを出す。
-  test("an unknown section shows Getting Started", () => {
-    renderHelpPage("en", "settings");
-    expect(navItems()[0]).toBe("Getting Started *");
+  // 先頭の節を出す。
+  test.each([
+    { name: "an old settings value", section: "settings" },
+    { name: "an unknown value", section: "sample-missing" },
+    { name: "an empty value", section: "" },
+  ])("$name shows Getting started", ({ section }) => {
+    renderHelpPage("en", section);
+    expect(navItems().filter((item) => item.endsWith(" *"))).toEqual([
+      "Getting started *",
+    ]);
+  });
+
+  // 構成を組み直す前の ?section= (保存したリンク・履歴・タブの並び) は、中身が
+  // 移った節を開く。
+  test.each([
+    { old: "overview", nav: "Getting started *", h2: "Getting started" },
+    { old: "add-project", nav: "Projects *", h2: "Add and switch projects" },
+    { old: "storage", nav: "What it saves *", h2: "What code-viewer saves" },
+    { old: "database", nav: "Datastores *", h2: "Browse datastores" },
+    { old: "skills", nav: "Let AI do it *", h2: "Let AI do it (skills)" },
+    { old: "mcp", nav: "CLI and MCP for AI *", h2: "CLI and MCP for AI" },
+    { old: "add-account", nav: "Add an account *", h2: "Add an account" },
+    { old: "start-agent", nav: "Start an agent *", h2: "Start an agent" },
+    { old: "ask-ai", nav: "Let AI do it *", h2: "Let AI do it (skills)" },
+    {
+      old: "annotations",
+      nav: "AI annotations *",
+      h2: "Have AI explain code (annotations)",
+    },
+    {
+      old: "keybindings",
+      nav: "Keyboard shortcuts *",
+      h2: "Keyboard shortcuts",
+    },
+  ])("the old ?section=$old opens $nav", ({ old, nav, h2 }) => {
+    renderHelpPage("en", old);
+    expect([
+      navItems().filter((item) => item.endsWith(" *")),
+      document.querySelector(".gdp-help-content h2")?.textContent,
+    ]).toEqual([[nav], h2]);
+  });
+
+  test("every old value that is not a section any more has a place to go", () => {
+    expect(HELP_SECTION_ALIASES).toEqual({
+      overview: "getting-started",
+      "add-project": "projects",
+      storage: "project-files",
+      database: "datastores",
+      skills: "ask-ai",
+      mcp: "ai-cli-mcp",
+    });
   });
 
   test("picking a section moves ?section= and keeps the page", () => {
-    const view = renderHelpPage("en", "overview");
-    clickNav("Keyboard Shortcuts");
+    const view = renderHelpPage("en", "getting-started");
+    clickNav("Keyboard shortcuts");
     expect([
       view.route(),
       navItems().filter((item) => item.endsWith(" *")),
@@ -528,7 +615,29 @@ describe("help page", () => {
         section: "keybindings",
         range: { from: "HEAD", to: "worktree" },
       },
-      ["Keyboard Shortcuts *"],
+      ["Keyboard shortcuts *"],
+    ]);
+  });
+
+  test("a link to another section in the text opens that section", () => {
+    const view = renderHelpPage("en", "getting-started");
+    const link = [
+      ...document.querySelectorAll<HTMLAnchorElement>(".gdp-help-content a"),
+    ].find((a) => a.textContent === "Reliable states (hooks)");
+    link?.click();
+    expect([
+      link?.getAttribute("href"),
+      view.route(),
+      document.querySelector(".gdp-help-content h2")?.textContent,
+    ]).toEqual([
+      "/help?section=agent-hooks",
+      {
+        screen: "help",
+        lang: "en",
+        section: "agent-hooks",
+        range: { from: "HEAD", to: "worktree" },
+      },
+      "Show agent state reliably (install hooks)",
     ]);
   });
 
@@ -536,7 +645,7 @@ describe("help page", () => {
     "en",
     "ja",
   ])("in %s the header button opens the keyboard shortcuts window by its name", (lang) => {
-    const view = renderHelpPage(lang, "overview");
+    const view = renderHelpPage(lang, "getting-started");
     const button = document.querySelector<HTMLButtonElement>(
       ".gdp-help-header button[data-quick-help-trigger]",
     );
@@ -547,152 +656,224 @@ describe("help page", () => {
     ]);
   });
 
-  test("the key list links to Settings › Shortcuts", () => {
-    const view = renderHelpPage("en", "keybindings");
+  test("the keys link in the text opens the keyboard shortcuts window", () => {
+    const view = renderHelpPage("en", "tabs-layout");
+    const link = [
+      ...document.querySelectorAll<HTMLAnchorElement>(".gdp-help-content a"),
+    ].find((a) => a.textContent === quickHelpText("en").panelTitle);
+    link?.click();
+    expect(view.calls).toEqual(["toggleKeyboardShortcuts"]);
+  });
+
+  test.each<[HelpLanguage, string]>([
+    ["en", "Settings › Shortcuts"],
+    ["ja", "設定 › ショートカット"],
+  ])("in %s the key list links to %s", (lang, label) => {
+    const view = renderHelpPage(lang, "keybindings");
     const link = document.querySelector<HTMLAnchorElement>(
       ".gdp-help-shortcut-link a",
     );
     link?.click();
-    expect([link?.getAttribute("href"), view.calls]).toEqual([
-      "/settings",
-      ["openShortcutSettings"],
+    expect([link?.textContent, link?.getAttribute("href"), view.calls]).toEqual(
+      [label, "/settings", ["openShortcutSettings"]],
+    );
+  });
+});
+
+describe("help page getting started", () => {
+  test.each<[HelpLanguage, string[]]>([
+    [
+      "en",
+      [
+        "Start it",
+        "Find your way around",
+        "(Optional) Add another repository",
+        "Install tmux",
+        "Sign in to your account",
+        "(Optional, recommended) Set up hooks",
+        "Start an agent",
+        "(Optional) Turn on notifications",
+        "(Optional) Give your AI the skills",
+        "If something does not work, run doctor",
+      ],
+    ],
+    [
+      "ja",
+      [
+        "起動する",
+        "画面の見方",
+        "（任意）ほかのリポジトリを足す",
+        "tmux を入れる",
+        "アカウントにログインする",
+        "（任意・おすすめ）フックを入れる",
+        "エージェントを起動する",
+        "（任意）通知を有効にする",
+        "（任意）AI にスキルを入れる",
+        "うまく動かないときは doctor を見る",
+      ],
+    ],
+  ])("in %s is the first section: ten numbered steps before any group", (lang, titles) => {
+    renderHelpPage(lang, "getting-started");
+    const content = document.querySelector(".gdp-help-content");
+    expect([
+      [
+        ...(content?.querySelectorAll(
+          ":scope > .gdp-help-steps > li > .gdp-help-step-title",
+        ) ?? []),
+      ].map((title) => title.textContent),
+      content?.querySelectorAll(".gdp-help-group").length,
+    ]).toEqual([titles, 0]);
+  });
+
+  test("the steps carry the commands to type", () => {
+    renderHelpPage("en", "getting-started");
+    expect(
+      Array.from(
+        document.querySelectorAll(".gdp-help-steps .gdp-help-command code"),
+        (code) => code.textContent,
+      ),
+    ).toEqual([
+      "npx @youtyan/code-viewer --open",
+      "brew install tmux",
+      "npx @youtyan/code-viewer skill install",
+      "npx @youtyan/code-viewer doctor",
     ]);
   });
 });
 
-describe("help page guides", () => {
-  const LABEL_SETS: Record<HelpLanguage, GuideLabels> = {
-    en: guideLabels("en", { accounts: "Accounts", paletteKey: "⌘K" }),
-    ja: guideLabels("ja", { accounts: "アカウント", paletteKey: "⌘K" }),
-  };
+describe("help page text uses each screen's names", () => {
+  /** 名前を差し替えたラベル (画面の文言が変われば本文も変わることを見る)。 */
+  function renamed(lang: HelpLanguage): HelpLabels {
+    const labels = helpLabels(lang, APP_LABELS[lang]);
+    return {
+      ...labels,
+      agents: {
+        ...labels.agents,
+        sidebar: { ...labels.agents.sidebar, newAgent: "Sample new agent" },
+        accounts: { ...labels.agents.accounts, loginButton: "Sample sign in" },
+      },
+    };
+  }
 
-  /** その案内で使う名前 (GuideLabels の欄)。 */
-  const USED: Record<GuideSection, Array<keyof GuideLabels>> = {
-    "add-account": [
-      "settings",
-      "accounts",
-      "add",
-      "addKind",
-      "addName",
-      "addModeCreate",
-      "addModeRegister",
-      "addNext",
-      "createRun",
-      "registerRun",
-      "login",
-      "signedIn",
-    ],
-    "start-agent": [
-      "newAgent",
-      "launchKind",
-      "launchAccount",
-      "launchProject",
-      "launchRun",
-      "groupNewAgent",
-    ],
-    "add-project": [
-      "projects",
-      "addProject",
-      "addProjectSubmit",
-      "addProjectMenu",
-      "paletteKey",
-    ],
-    "ask-ai": [],
-  };
-
-  // 名前は画面の i18n の値そのもの (写した文字ではない)。
-  test.each<HelpLanguage>([
-    "en",
-    "ja",
-  ])("in %s the labels are the values of each screen's i18n", (lang) => {
-    const agents = agentsText(lang);
-    expect(LABEL_SETS[lang]).toMatchObject({
-      settings: agents.sidebar.settings,
-      add: agents.accounts.add,
-      addModeCreate: agents.accounts.addModeCreate,
-      addModeRegister: agents.accounts.addModeRegister,
-      login: agents.accounts.loginButton,
-      newAgent: agents.sidebar.newAgent,
-      launchAccount: agents.accounts.launchAccount,
-      groupNewAgent: mainTabsText(lang).newAgentHere,
-      projects: agents.sidebar.projects,
-      addProject: agents.projects.addProject,
-      addProjectMenu: agents.projects.addProjectMenu,
-    });
+  test.each<[HelpLanguage, string, string]>([
+    ["en", "getting-started", "Sample new agent"],
+    ["en", "getting-started", "Sample sign in"],
+    ["ja", "start-agent", "Sample new agent"],
+    ["ja", "add-account", "Sample sign in"],
+  ])("in %s the %s section shows a renamed button %j", (lang, section, name) => {
+    renderHelpPage(lang, section, { helpLabels: renamed });
+    const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
+    expect(text.includes(name)).toBe(true);
   });
 
-  const CASES = (["en", "ja"] as const).flatMap((lang) =>
-    GUIDE_SECTIONS.map((section) => [lang, section] as const),
-  );
-
-  test.each(
-    CASES,
-  )("in %s the %s guide shows every name it uses", (lang, section) => {
+  // 本文の［…］は画面の i18n の値そのもの (写した文字ではない)。
+  test.each<[HelpLanguage, string, string[]]>([
+    [
+      "en",
+      "getting-started",
+      [
+        "Projects",
+        "Register this folder",
+        "Sign in",
+        "Signed in",
+        "Agent integration",
+        "Set up",
+        "New agent",
+        "Launch",
+        "All agents",
+        "Enable notifications",
+        "Environment doctor",
+      ],
+    ],
+    [
+      "ja",
+      "getting-started",
+      [
+        "プロジェクト",
+        "このディレクトリを登録",
+        "ログイン",
+        "ログイン済み",
+        "エージェント連携",
+        "入れる",
+        "新しいエージェント",
+        "起動",
+        "すべてのエージェント",
+        "通知を有効にする",
+        "環境ドクター",
+      ],
+    ],
+    [
+      "ja",
+      "add-account",
+      [
+        "設定",
+        "アカウント",
+        "アカウントを追加…",
+        "新しく作る",
+        "既にあるディレクトリを使う",
+        "内容を確認…",
+        "ログイン",
+        "別のアカウントで続ける…",
+        "起動して引き継ぐ",
+      ],
+    ],
+    [
+      "en",
+      "agent-hooks",
+      [
+        "Settings",
+        "Agents",
+        "Agent integration",
+        "Set up",
+        "Finished · unread",
+        "Hook target missing",
+        "Repair",
+        "Show how to set up",
+        "Remove",
+        "Advanced",
+      ],
+    ],
+  ])("in %s the %s section names the buttons as the screens do", (lang, section, names) => {
     renderHelpPage(lang, section);
-    const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
-    const labels = LABEL_SETS[lang];
-    const missing = USED[section].filter((key) => !text.includes(labels[key]));
-    expect([navItems().filter((item) => item.endsWith(" *")), missing]).toEqual(
-      [[`${helpSectionName(lang, section)} *`], []],
+    const shown = Array.from(
+      document.querySelectorAll(".gdp-help-content .gdp-help-ui"),
+      (ui) => ui.textContent ?? "",
     );
+    expect(names.filter((name) => !shown.includes(name))).toEqual([]);
   });
 
-  // 画面の文言が変われば案内も変わる (案内に文字を写していない)。
-  test("a renamed button shows up in the guide", () => {
-    renderHelpPage("en", "add-account", {
-      guideLabels: () => ({
-        ...LABEL_SETS.en,
-        add: "Sample add button",
-        login: "Sample sign-in button",
-      }),
-    });
-    const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
-    expect([
-      text.includes("Sample add button"),
-      text.includes("Sample sign-in button"),
-      text.includes(LABEL_SETS.en.add),
-    ]).toEqual([true, true, false]);
-  });
-
-  test.each<HelpLanguage>([
-    "en",
-    "ja",
-  ])("in %s the account guide links to Settings › Accounts and warns about the browser account", (lang) => {
+  test.each<[HelpLanguage, string]>([
+    ["en", "Settings › Accounts"],
+    ["ja", "設定 › アカウント"],
+  ])("in %s the account section links to %s and warns about the browser account", (lang, label) => {
     const view = renderHelpPage(lang, "add-account");
-    const link = document.querySelector<HTMLAnchorElement>(
-      ".gdp-help-content .gdp-help-shortcut-link a",
-    );
+    const link = [
+      ...document.querySelectorAll<HTMLAnchorElement>(".gdp-help-content a"),
+    ].find((a) => a.textContent === label);
     link?.click();
-    const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
     expect([
-      link?.textContent,
+      link?.getAttribute("href"),
       view.calls,
-      text.includes(
-        lang === "en"
-          ? "second account of the same service"
-          : "同じサービスで 2 つ目",
-      ),
-    ]).toEqual([
-      `${LABEL_SETS[lang].settings} › ${LABEL_SETS[lang].accounts}`,
-      ["openAccountsSettings"],
-      true,
-    ]);
+      document.querySelectorAll(
+        ".gdp-help-content .gdp-help-note[data-kind='warning']",
+      ).length,
+    ]).toEqual(["/settings", ["openAccountsSettings"], 1]);
   });
 
   test.each<HelpLanguage>([
     "en",
     "ja",
-  ])("in %s the AI guide shows the skill install commands and every accounts command", (lang) => {
+  ])("in %s the AI section shows the skill install commands and every skill", (lang) => {
     renderHelpPage(lang, "ask-ai");
     const commands = Array.from(
       document.querySelectorAll(".gdp-help-command code"),
       (code) => code.textContent,
     );
-    const rows = Array.from(
-      document.querySelectorAll(".gdp-help-content th"),
-      (th) => th.textContent,
+    const skills = Array.from(
+      document.querySelectorAll(".gdp-help-table tbody tr td:first-child"),
+      (cell) => cell.textContent,
     );
-    expect([commands, rows]).toEqual([
+    expect([commands, skills]).toEqual([
       [
         "code-viewer skill install",
         "code-viewer skill install --agent claude,codex",
@@ -704,39 +885,47 @@ describe("help page guides", () => {
         "code-viewer-journal",
         "code-viewer-query",
         "code-viewer-snapshot",
-        "list",
-        "plan",
-        "create",
-        "register",
-        "login",
-        "wait",
-        "rename",
-        "remove",
       ],
     ]);
   });
+
+  // 利用者の呼び方は「SP」。日本語の本文に「電話」を混ぜない。
+  test("the Japanese help calls the phone layout SP", () => {
+    renderHelpPage("ja", "phone");
+    const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
+    expect([
+      document.querySelector(".gdp-help-content h2")?.textContent,
+      text.includes("電話"),
+      mobileShellText("ja").tabsParkedTitle.includes("電話"),
+    ]).toEqual(["SP で使う", false, false]);
+  });
 });
 
-describe("help page CLI reference", () => {
-  function renderHelp(
-    lang: "en" | "ja",
-    section: HelpSection = "database",
-    installOffer: InstallOffer = HIDDEN_INSTALL_OFFER,
-  ): {
-    text: string;
-    commands: string[];
-  } {
-    renderHelpPage(lang, section, { installOffer });
-    const root = document.querySelector("#diff");
-    return {
-      text: root?.textContent ?? "",
-      commands: Array.from(
-        document.querySelectorAll(".gdp-help-command code"),
-        (code) => code.textContent ?? "",
-      ),
-    };
-  }
+describe("help page commands", () => {
+  const SECTIONS = ["read-diffs", "ai-cli-mcp", "ask-ai", "doctor"] as const;
 
+  // 本文のコマンドは、今の CLI が受け付けるものだけ。
+  test.each(
+    (["en", "ja"] as const).flatMap((lang) =>
+      SECTIONS.map((section) => [lang, section] as const),
+    ),
+  )("in %s every code-viewer query command in %s parses", (lang, section) => {
+    renderHelpPage(lang, section);
+    const queries = Array.from(
+      document.querySelectorAll(".gdp-help-content code"),
+      (code) => code.textContent ?? "",
+    )
+      .flatMap((text) => text.split("\n"))
+      .filter((line) => line.startsWith("code-viewer query "));
+    expect(
+      queries.filter(
+        (line) => !parseQueryArgs(line.trim().split(/\s+/).slice(2)).ok,
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("help page install guide", () => {
   /** 状態を外から切り替えられる案内。install() の呼び出しを数える。 */
   function switchableOffer(initial: InstallOfferState) {
     let state = initial;
@@ -760,7 +949,7 @@ describe("help page CLI reference", () => {
     return offer;
   }
 
-  /** 「アプリとしてインストール」の節: [ボタンの文字, 手順の数] (節が無ければ null)。 */
+  /** 「アプリとして入れる」の案内: [ボタンの文字, 手順の数] (案内が無ければ null)。 */
   function installGuide(): [string[], number] | null {
     const host = document.querySelector(".gdp-help-install");
     if (!host) return null;
@@ -776,18 +965,16 @@ describe("help page CLI reference", () => {
     ["en", "manual", [[], 2]],
     ["ja", "manual", [[], 2]],
     ["en", "hidden", null],
-  ])("Getting Started in %s with the offer %s shows the install guide %j", (lang, state, expected) => {
-    const { text } = renderHelp(lang, "overview", switchableOffer(state));
+  ])("in %s with the offer %s the install section shows %j", (lang, state, expected) => {
+    renderHelpPage(lang, "install-app", {
+      installOffer: switchableOffer(state),
+    });
     expect(installGuide()).toEqual(expected);
-    // キーの説明は案内を出さないブラウザでも残る。
-    expect(text).toContain(
-      lang === "en" ? "Installed as an app" : "アプリとしてインストールすると",
-    );
   });
 
   test("the install button appears when the browser starts offering, and asks the browser once", () => {
     const offer = switchableOffer("manual");
-    renderHelp("en", "overview", offer);
+    renderHelpPage("en", "install-app", { installOffer: offer });
     expect(installGuide()).toEqual([[], 2]);
     offer.set("prompt");
     expect(installGuide()).toEqual([["Install code-viewer"], 2]);
@@ -801,53 +988,10 @@ describe("help page CLI reference", () => {
 
   test("a help section without the guide stops listening for the offer", () => {
     const offer = switchableOffer("manual");
-    renderHelp("en", "overview", offer);
+    renderHelpPage("en", "install-app", { installOffer: offer });
     expect(offer.listening()).toBe(true);
-    renderHelp("en", "database", offer);
+    renderHelpPage("en", "datastores", { installOffer: offer });
     expect(offer.listening()).toBe(false);
-  });
-
-  function parseRenderedQueryCommand(command: string) {
-    const parts = command.trim().split(/\s+/);
-    expect(parts.slice(0, 2)).toEqual(["code-viewer", "query"]);
-    return parseQueryArgs(parts.slice(2));
-  }
-
-  test("documents only wired query diff CLI commands in both languages", () => {
-    for (const lang of ["en", "ja"] as const) {
-      const { text, commands } = renderHelp(lang);
-      const diffCommands = commands.filter((command) =>
-        command.startsWith("code-viewer query diff "),
-      );
-      expect(diffCommands).toEqual(EXPECTED_QUERY_DIFF_COMMANDS);
-      for (const command of diffCommands) {
-        expect(parseRenderedQueryCommand(command).ok).toBe(true);
-      }
-      expect(text.includes("code-viewer query diff create")).toBe(false);
-      expect(text.includes("code-viewer query diff list")).toBe(false);
-      expect(text.includes("code-viewer query diff delete")).toBe(false);
-      expect(text.includes("code-viewer query diff tables --id")).toBe(false);
-      expect(text.includes("code-viewer query diff rows --id")).toBe(false);
-    }
-  });
-
-  test("documents Doctor checks and command overrides in both languages", () => {
-    for (const lang of ["en", "ja"] as const) {
-      const { text, commands } = renderHelp(lang, "overview");
-      expect(text).toContain("rg");
-      expect(text).toContain("tmux");
-      expect(text).toContain("@lydell/node-pty");
-      expect(commands.join("\n")).toContain("--bin rg=/opt/bin/rg");
-      expect(commands.join("\n")).toContain("--bin tmux=/opt/bin/tmux");
-    }
-  });
-
-  // 利用者の呼び方は「SP」。日本語の案内に「電話」を混ぜない。
-  test("the Japanese help calls the phone layout SP", () => {
-    const { text } = renderHelp("ja", "overview");
-    expect(text).toContain("SP (640px 以下の窓");
-    expect(text).not.toContain("電話");
-    expect(mobileShellText("ja").tabsParkedTitle).not.toContain("電話");
   });
 });
 
@@ -919,9 +1063,31 @@ describe("help page keybinding reference", () => {
 });
 
 describe("help page captures", () => {
-  /** 節ごとの画面のキャプチャ (出る順)。撮り直すのは scripts/help-captures.mjs。 */
-  const FIGURES: Array<[HelpSection, string[]]> = [
-    ["overview", ["overview"]],
+  /**
+   * 節ごとに描く画面のキャプチャ (出る順)。本文は撮る予定の画面も名前で書いて
+   * あり、撮っていないもの (HELP_CAPTURES に無いもの) は描かない。撮り直すのは
+   * scripts/help-captures.mjs。
+   */
+  const FIGURES: Array<[string, string[]]> = [
+    [
+      "getting-started",
+      [
+        "overview",
+        "project-register",
+        "accounts-sign-in",
+        "agent-launch",
+        "skill-install",
+      ],
+    ],
+    ["projects", ["project-add", "project-register"]],
+    ["read-files", []],
+    ["read-diffs", []],
+    ["search", []],
+    ["worktrees", []],
+    ["start-agent", ["agent-new", "agent-launch"]],
+    ["agent-state", ["agent-running"]],
+    ["notifications", []],
+    ["agent-hooks", []],
     [
       "add-account",
       [
@@ -932,15 +1098,18 @@ describe("help page captures", () => {
         "accounts-signed-in",
       ],
     ],
-    ["start-agent", ["agent-new", "agent-launch", "agent-running"]],
-    ["add-project", ["project-add", "project-register"]],
-    ["ask-ai", ["skill-install"]],
-    ["keybindings", ["quick-help"]],
-    ["storage", []],
+    ["terminal", []],
+    ["tabs-layout", []],
+    ["install-app", []],
+    ["phone", []],
+    ["datastores", []],
+    ["tools", []],
     ["annotations", []],
-    ["database", []],
-    ["skills", []],
-    ["mcp", []],
+    ["ask-ai", ["skill-install"]],
+    ["ai-cli-mcp", []],
+    ["project-files", []],
+    ["doctor", []],
+    ["keybindings", ["quick-help"]],
   ];
   /** 1 枚と全部の大きさの上限、画像の幅 (800 CSS px を 2 倍の画素で撮る)。 */
   const MAX_IMAGE_BYTES = 150 * 1024;
@@ -948,7 +1117,7 @@ describe("help page captures", () => {
   const IMAGE_WIDTH = 1600;
   const IMAGE_DIR = join(WEB_ROOT, "help-images");
 
-  function renderedFigures(lang: HelpLanguage, section: HelpSection) {
+  function renderedFigures(lang: HelpLanguage, section: string) {
     renderHelpPage(lang, section);
     return [...document.querySelectorAll(".gdp-help-figure")].map((link) => {
       const img = link.querySelector("img");
@@ -973,6 +1142,35 @@ describe("help page captures", () => {
     FIGURES.map(([section, names]) => [lang, section, names] as const),
   );
 
+  test("the table covers every help section", () => {
+    renderHelpPage("en", "getting-started");
+    expect(FIGURES.map(([section]) => section)).toEqual([
+      "getting-started",
+      "projects",
+      "read-files",
+      "read-diffs",
+      "search",
+      "worktrees",
+      "start-agent",
+      "agent-state",
+      "notifications",
+      "agent-hooks",
+      "add-account",
+      "terminal",
+      "tabs-layout",
+      "install-app",
+      "phone",
+      "datastores",
+      "tools",
+      "annotations",
+      "ask-ai",
+      "ai-cli-mcp",
+      "project-files",
+      "doctor",
+      "keybindings",
+    ]);
+  });
+
   test.each(
     CASES,
   )("in %s the %s section shows its captures, each with a description", (lang, section, names) => {
@@ -985,10 +1183,24 @@ describe("help page captures", () => {
   });
 
   test("ships exactly the captures the help shows", () => {
-    const shown = CASES.flatMap(([lang, , names]) =>
-      names.map((name) => `${name}.${lang}.webp`),
-    ).sort();
+    const shown = [
+      ...new Set(
+        CASES.flatMap(([lang, , names]) =>
+          names.map((name) => `${name}.${lang}.webp`),
+        ),
+      ),
+    ].sort();
     expect(readdirSync(IMAGE_DIR).sort()).toEqual(shown);
+  });
+
+  // 撮った画像の一覧 (描くかどうかを決める) と、置いてある画像が食い違わない。
+  test("the list of taken captures matches web/help-images", () => {
+    const files = readdirSync(IMAGE_DIR);
+    expect(files.sort()).toEqual(
+      [...HELP_CAPTURES]
+        .flatMap((name) => [`${name}.en.webp`, `${name}.ja.webp`])
+        .sort(),
+    );
   });
 
   test("the server hands out each capture as WebP from web/help-images", () => {

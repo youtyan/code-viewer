@@ -58,11 +58,8 @@ const AGENT_HOOKS_POLL_MS = 3000;
 /** 見出しの id。エージェント一覧の案内からここへ飛ぶ。 */
 export const AGENT_HOOKS_SECTION_ID = "agent-hooks-section-title";
 
-/**
- * 説明の下のリンクが開くヘルプの節。フックの説明はいまヘルプの「はじめに」の
- * エージェントの段にある (専用の節ができたらここを変える)。
- */
-export const AGENT_HOOKS_HELP_SECTION = "overview";
+/** 説明の下のリンクが開くヘルプの節 (フックの入れ方と、状態の決め方)。 */
+export const AGENT_HOOKS_HELP_SECTION = "agent-hooks";
 
 type RowResult = { ok: boolean; text: string };
 
