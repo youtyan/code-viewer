@@ -17496,13 +17496,15 @@ body.main-split .main-tabs-pane[data-side="left"] {
   max-width: calc(var(--space-unit) * 50);   /* 200 */
   padding: 0 var(--space-3);
   background: var(--color-nav);
-  color: var(--color-text-2);
+  /* 選んでいないタブは文字を一段落とし、選択中のタブとの差を大きくする。 */
+  color: var(--color-text-3);
   font-size: var(--ui-font-md);
   cursor: pointer;
   user-select: none;
 }
 .main-tab:hover {
   background: color-mix(in srgb, var(--color-nav) 50%, var(--color-tab-active));
+  color: var(--color-text-2);
 }
 /* 選択中のタブ: 面の明るさ・本来の文字色・上の辺の線。寸法は変えない (線は
    box-shadow と ::before、名前の太さは -webkit-text-stroke。font-weight だと名前の
@@ -17514,6 +17516,11 @@ body.main-split .main-tabs-pane[data-side="left"] {
   background: var(--color-tab-active);
   color: var(--color-text);
   box-shadow: inset 0 2px 0 var(--color-text-3);
+}
+/* フォーカスのある面の選択中のタブは、面に強調色を混ぜ、上の辺を強調色の線に
+   する (どのタブを見ているか一目で分かるように。線は ::before なので寸法は変わらない)。 */
+.main-tab.main-tab-focused {
+  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-tab-active));
 }
 .main-tab.main-tab-focused::before {
   content: "";

@@ -9,6 +9,11 @@
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import {
+  baseRules,
+  cascadedDeclarations,
+  loadStyleSheet,
+} from "./_css-fixture";
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -139,4 +144,23 @@ describe("the selected tab", () => {
     const plain = sizes("plain");
     expect([sizes("otherSide"), sizes("focused")]).toEqual([plain, plain]);
   });
+});
+
+// happy-dom は color-mix() の宣言を捨てるので、フォーカスのある面の選択中の面の色は
+// 計算値ではなくカスケードの結果 (宣言) で見る。
+test("the focused side's selected tab tints its face with the accent colour", () => {
+  const rules = baseRules(loadStyleSheet());
+  const onTab = (classes: string[]) =>
+    cascadedDeclarations(rules, (selector) =>
+      [".main-tab", ...classes.map((name) => `.main-tab.${name}`)].includes(
+        selector,
+      ),
+    ).get("background");
+  expect([
+    onTab(["main-tab-active"]),
+    onTab(["main-tab-active", "main-tab-focused"]),
+  ]).toEqual([
+    "var(--color-tab-active)",
+    "color-mix(in srgb, var(--color-accent) 18%, var(--color-tab-active))",
+  ]);
 });
