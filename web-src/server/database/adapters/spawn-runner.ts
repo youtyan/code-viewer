@@ -1,5 +1,12 @@
-import { type SpawnOptions, spawn } from "node:child_process";
-import type { RunResult } from "../../runtime";
+import type { SpawnOptions } from "node:child_process";
+import {
+  onStdinWriteFailure,
+  type RunFailure,
+  type RunResult,
+  spawnErrorFailure,
+  spawnProcess,
+  timedOutFailure,
+} from "../../runtime";
 import { abortError, throwIfAborted } from "./abort";
 
 export type SpawnCollectOptions = {
@@ -20,6 +27,8 @@ export type SpawnCollectResult = {
   stdout: Buffer<ArrayBufferLike>;
   stderr: Buffer<ArrayBufferLike>;
   code: number;
+  /** 終了コードを返すところまで動かなかった理由 (runtime.ts の RunFailure)。 */
+  failure?: RunFailure;
 };
 
 function appendMessage(
@@ -35,8 +44,9 @@ export function spawnCollectAsync(
 ): Promise<SpawnCollectResult> {
   throwIfAborted(opts.signal, opts.abortMessage);
   const killSignal = opts.killSignal ?? "SIGTERM";
+  const startedAt = Date.now();
   return new Promise((resolve, reject) => {
-    const child = spawn(opts.command, opts.args, {
+    const child = spawnProcess(opts.command, opts.args, {
       cwd: opts.cwd,
       env: opts.env,
       stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
@@ -45,7 +55,12 @@ export function spawnCollectAsync(
     const stderrChunks: Buffer<ArrayBufferLike>[] = [];
     let settled = false;
     let timedOut = false;
-    const finish = (code: number, fallbackStderr?: string) => {
+    let stdinError: NodeJS.ErrnoException | undefined;
+    const finish = (
+      code: number,
+      fallbackStderr?: string,
+      failure?: RunFailure,
+    ) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -56,6 +71,7 @@ export function spawnCollectAsync(
         stdout: Buffer.concat(stdoutChunks),
         stderr,
         code,
+        failure,
       });
     };
     const fail = (err: unknown) => {
@@ -79,18 +95,42 @@ export function spawnCollectAsync(
     child.stderr?.on("data", (chunk) => {
       stderrChunks.push(Buffer.from(chunk));
     });
-    child.stdin?.on("error", () => {
-      // Process exit/abort can close stdin before the pending input is flushed.
+    // 入力が届かなかったら子を止め、子が 0 で終わっても失敗として返す
+    // (runtime.ts の runBytesAsync と同じ)。
+    onStdinWriteFailure(child, (error) => {
+      stdinError ??= error;
+      child.kill(killSignal);
     });
     child.on("error", (err) => {
       if (opts.rejectOnError === false) {
-        finish(1, err.message);
+        finish(
+          1,
+          err.message,
+          spawnErrorFailure(err, opts.cwd ?? process.cwd()),
+        );
       } else {
         fail(err);
       }
     });
     child.on("close", (code) => {
-      finish(timedOut ? 1 : (code ?? 1), timedOut ? opts.timeoutMessage : "");
+      if (stdinError) {
+        finish(
+          1,
+          `could not write the input to ${opts.command}: ${stdinError.message}`,
+        );
+        return;
+      }
+      finish(
+        timedOut ? 1 : (code ?? 1),
+        timedOut ? opts.timeoutMessage : "",
+        timedOut
+          ? timedOutFailure(
+              [opts.command, ...opts.args],
+              opts.timeoutMs,
+              startedAt,
+            )
+          : undefined,
+      );
     });
     opts.signal?.addEventListener("abort", abort, { once: true });
     if (opts.signal?.aborted) {
@@ -109,5 +149,6 @@ export async function spawnTextAsync(
     stdout: result.stdout.toString("utf8"),
     stderr: result.stderr.toString("utf8"),
     code: result.code,
+    failure: result.failure,
   };
 }

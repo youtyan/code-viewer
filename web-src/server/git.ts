@@ -29,16 +29,11 @@ import {
   setTimedCacheEntry,
   type TimedCacheEntry,
 } from "./cache";
-import {
-  commandForExternal,
-  commandNotFoundDetail,
-  isCommandNotFoundResult,
-} from "./command-resolver";
-import { errno } from "./terminal/settings-file";
-import { skipUnreadablePath } from "./unreadable-path";
+import { commandForExternal, commandRunFailure } from "./command-resolver";
 import { compileNamePatterns, type NamePatternSet } from "./name-pattern";
 import {
   type RunAsyncOptions,
+  type RunFailure,
   type RunOptions,
   runAsync,
   runBytesAsync,
@@ -46,6 +41,8 @@ import {
   type SpawnStreamExit,
   spawnStream,
 } from "./runtime";
+import { errno } from "./terminal/settings-file";
+import { skipUnreadablePath } from "./unreadable-path";
 
 export type GitFileMeta = {
   order?: number;
@@ -272,25 +269,27 @@ export function gitCommand(): string {
   return commandForExternal("git");
 }
 
-export function gitFailureMessage(
-  res: { code: number; stderr?: string },
-  fallback: string,
-): string {
-  const message = isCommandNotFoundResult("git", res)
-    ? `${commandNotFoundDetail("git")}. Install git, add its directory to PATH, or pass --bin git=/absolute/path.`
-    : res.stderr?.trim() || fallback;
+type GitRunResult = { code: number; stderr?: string; failure?: RunFailure };
+
+/**
+ * git を使えなかった (無い・時間切れ・起動できなかった) ときはその理由、git が
+ * 動いて非 0 で終わったなら stderr。
+ */
+export function gitFailureMessage(res: GitRunResult, fallback: string): string {
+  const failure = commandRunFailure("git", res);
+  const message = !failure
+    ? res.stderr?.trim() || fallback
+    : failure.kind === "not-found"
+      ? `${failure.detail}. Install git, add its directory to PATH, or pass --bin git=/absolute/path.`
+      : failure.detail;
   console.error(`[code-viewer] ${fallback} (git exit ${res.code}): ${message}`);
   return message;
 }
 
-function gitFailureResult(
-  res: { code: number; stderr?: string },
-  fallback: string,
-): GitErrorResult {
+/** git を使えなかったときは 503 (git が動いて非 0 で終わったのとは分ける)。 */
+function gitFailureResult(res: GitRunResult, fallback: string): GitErrorResult {
   const error = gitFailureMessage(res, fallback);
-  return isCommandNotFoundResult("git", res)
-    ? { error, status: 503 }
-    : { error };
+  return commandRunFailure("git", res) ? { error, status: 503 } : { error };
 }
 
 function runGitRefLookup(args: string[], cwd: string): string | null {
@@ -579,9 +578,8 @@ export function repoRootResult(
     env: { ...process.env, LC_ALL: "C" },
   });
   if (res.code === 0) return { kind: "root", root: res.stdout.trimEnd() };
-  if (isCommandNotFoundResult("git", res)) {
-    return { kind: "error", error: commandNotFoundDetail("git") };
-  }
+  const unusable = commandRunFailure("git", res);
+  if (unusable) return { kind: "error", error: unusable.detail };
   const stderr = res.stderr.trim();
   if (/not a git repository/i.test(stderr)) return { kind: "outside" };
   return { kind: "error", error: stderr || "git rev-parse failed" };
@@ -632,9 +630,8 @@ export async function projectRootResultAsync(
     const root = commonDir.endsWith("/.git") ? dirname(commonDir) : toplevel;
     return { kind: "root", root, toplevel };
   }
-  if (isCommandNotFoundResult("git", res)) {
-    return { kind: "error", error: commandNotFoundDetail("git") };
-  }
+  const unusable = commandRunFailure("git", res);
+  if (unusable) return { kind: "error", error: unusable.detail };
   const stderr = res.stderr.trim();
   if (/not a git repository/i.test(stderr)) return { kind: "outside" };
   return {
@@ -653,13 +650,13 @@ export function currentBranchAsync(cwd: string): Promise<string | null> {
 export async function verifyCommitAsync(
   ref: string,
   cwd: string,
-): Promise<{ ok: true; sha: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; sha: string } | ({ ok: false } & GitErrorResult)> {
   const res = await runGitAsync(
     ["git", "rev-parse", "--verify", `${ref}^{commit}`],
     cwd,
   );
   if (res.code === 0) return { ok: true, sha: res.stdout.trim() };
-  return { ok: false, error: gitFailureMessage(res, "unknown ref") };
+  return { ok: false, ...gitFailureResult(res, "unknown ref") };
 }
 
 export async function statusPorcelainForPathAsync(
@@ -1059,7 +1056,7 @@ export async function refsResultAsync(
     ],
     cwd,
   );
-  if (branches.code !== 0 && isCommandNotFoundResult("git", branches)) {
+  if (commandRunFailure("git", branches)) {
     return { refs: out, ...gitFailureResult(branches, "git refs failed") };
   }
   if (branches.code === 0) {
@@ -1084,7 +1081,7 @@ export async function refsResultAsync(
     ],
     cwd,
   );
-  if (tags.code !== 0 && isCommandNotFoundResult("git", tags)) {
+  if (commandRunFailure("git", tags)) {
     return { refs: out, ...gitFailureResult(tags, "git refs failed") };
   }
   if (tags.code === 0) {
@@ -1167,7 +1164,7 @@ async function runCommitLogResultAsync(
 ): Promise<{ commits: GitCommitMeta[] } & Partial<GitErrorResult>> {
   const commits = await runGitAsync(args, cwd);
   if (commits.code === 0) return { commits: parseCommitLog(commits.stdout) };
-  if (isCommandNotFoundResult("git", commits))
+  if (commandRunFailure("git", commits))
     return { commits: [], ...gitFailureResult(commits, "git log failed") };
   return { commits: [] };
 }
@@ -1188,7 +1185,7 @@ export async function refCommitPageResultAsync(
       ["git", "rev-parse", "--verify", `${trimmed}^{commit}`],
       cwd,
     );
-    if (verified.code !== 0 && isCommandNotFoundResult("git", verified)) {
+    if (commandRunFailure("git", verified)) {
       return {
         commits: [],
         hasMore: false,
@@ -1208,7 +1205,7 @@ export async function refCommitPageResultAsync(
       ],
       cwd,
     );
-    if (single.code !== 0 && isCommandNotFoundResult("git", single)) {
+    if (commandRunFailure("git", single)) {
       return {
         commits: [],
         hasMore: false,
@@ -1840,13 +1837,9 @@ export async function blameAsync(
   args.push("--", path);
   const res = await runGitAsync(args, cwd);
   if (res.code !== 0) {
-    if (isCommandNotFoundResult("git", res)) {
-      return {
-        lines: [],
-        commits: {},
-        error: commandNotFoundDetail("git"),
-        status: 503,
-      };
+    const unusable = commandRunFailure("git", res);
+    if (unusable) {
+      return { lines: [], commits: {}, error: unusable.detail, status: 503 };
     }
     if (normalized.base === "worktree") {
       // untracked / newly added file: synthesize an all-uncommitted blame.
@@ -2558,9 +2551,8 @@ export async function fileDiffTextAsync(
     ],
     cwd,
   );
-  if (isCommandNotFoundResult("git", res)) {
-    return { ...res, stderr: commandNotFoundDetail("git"), status: 503 };
-  }
+  const unusable = commandRunFailure("git", res);
+  if (unusable) return { ...res, stderr: unusable.detail, status: 503 };
   return res;
 }
 
@@ -2589,9 +2581,8 @@ export async function untrackedFileDiffAsync(
     ],
     cwd,
   );
-  if (isCommandNotFoundResult("git", res)) {
-    return { ...res, stderr: commandNotFoundDetail("git"), status: 503 };
-  }
+  const unusable = commandRunFailure("git", res);
+  if (unusable) return { ...res, stderr: unusable.detail, status: 503 };
   if (path.startsWith("./")) return res;
   return { ...res, stdout: withoutDotSlashInHeader(res.stdout, path) };
 }

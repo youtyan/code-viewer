@@ -60,7 +60,6 @@ import {
   type TimedCacheEntry,
 } from "./cache";
 import {
-  commandNotFoundDetail,
   configureExternalCommands,
   type ExternalCommandOverride,
   parseExternalCommandOverride,
@@ -1743,9 +1742,7 @@ async function handleFileBlame(url: URL) {
   } else {
     const resolved = await git.verifyCommitAsync(normalized.ref, cwd);
     if (resolved.ok === false) {
-      const status =
-        resolved.error === commandNotFoundDetail("git") ? 503 : 400;
-      return text(resolved.error || "unknown ref", status);
+      return text(resolved.error || "unknown ref", resolved.status ?? 400);
     }
     cacheKey = `HEAD|${path}|${resolved.sha}`;
   }

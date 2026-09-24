@@ -1,6 +1,7 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { formatErrorDetail } from "../core/error-detail";
+import type { RunFailure } from "./runtime";
 
 export const EXTERNAL_COMMAND_NAMES = [
   "git",
@@ -133,12 +134,54 @@ export function resetExternalCommandsForTest(): void {
   activeOverrides.clear();
 }
 
-export function isCommandNotFoundResult(
+/**
+ * コマンドが終了コードを返すところまで動かなかった理由。動いて終わったなら
+ * (0 でも非 0 でも) null。
+ *
+ * - not-found: 実行ファイルが見つからない (ENOENT) ときだけ
+ * - timed-out: こちらが時間切れで止めた
+ * - could-not-start: fork / exec の失敗 (EAGAIN・EMFILE・EACCES など)
+ * - cwd-missing: 作業ディレクトリが無い (node はこれも ENOENT で返す)
+ *
+ * 以前は stderr に `spawn <command>` があれば全部「無い」にしていたので、tmux
+ * の 3 秒の時間切れ (`spawn tmux ETIMEDOUT`) が「tmux が無い」になり、本当の
+ * 理由が消えていた。呼び出し側は、どの種類でも「そのコマンドを使えなかった」
+ * として detail を出し、非 0 の終了と同じ扱いにしない。
+ */
+export type CommandRunFailure = {
+  kind: "not-found" | "timed-out" | "could-not-start" | "cwd-missing";
+  /** コマンド・理由 (・時間切れならかかった時間) を含む説明。 */
+  detail: string;
+};
+
+export function commandRunFailure(
   command: ExternalCommandName,
-  result: { code: number; stderr?: string },
-): boolean {
-  if (result.code === 0) return false;
-  return isCommandNotFoundMessage(command, result.stderr || "");
+  result: { code: number; stderr?: string; failure?: RunFailure },
+): CommandRunFailure | null {
+  if (result.code === 0) return null;
+  const failure = result.failure;
+  if (failure?.kind === "timed-out") {
+    return { kind: "timed-out", detail: failure.message };
+  }
+  if (failure?.kind === "cwd-missing") {
+    return {
+      kind: "cwd-missing",
+      detail: `${command} could not run because the working directory ${failure.cwd} does not exist or is not a directory`,
+    };
+  }
+  if (failure?.kind === "spawn-error") {
+    return failure.error.code === "ENOENT"
+      ? { kind: "not-found", detail: commandNotFoundDetail(command) }
+      : {
+          kind: "could-not-start",
+          detail: `${command} could not be started: ${formatErrorDetail(failure.error)}`,
+        };
+  }
+  // 起動の記録が無い結果 (シェル経由の exit 127、差し替えた spawnSync) は
+  // stderr の文言で「無い」だけを見分ける。
+  return isCommandNotFoundMessage(command, result.stderr || "")
+    ? { kind: "not-found", detail: commandNotFoundDetail(command) }
+    : null;
 }
 
 export function commandNotFoundDetail(command: ExternalCommandName): string {
@@ -237,7 +280,6 @@ function isCommandNotFoundMessage(
 ): boolean {
   const lower = message.toLowerCase();
   if (lower.includes("enoent")) return true;
-  if (lower.includes(`spawn ${command.toLowerCase()}`)) return true;
   if (lower.includes(`${command.toLowerCase()}: command not found`))
     return true;
   if (lower.includes(`${command.toLowerCase()}: not found`)) return true;

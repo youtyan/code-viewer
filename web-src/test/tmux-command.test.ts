@@ -7,10 +7,6 @@ import { formatErrorDetail } from "../core/error-detail";
 const runAsync = vi.hoisted(() => vi.fn());
 
 vi.mock("../server/runtime", () => ({ runAsync }));
-vi.mock("../server/command-resolver", () => ({
-  commandForExternal: () => "tmux",
-  isCommandNotFoundResult: () => false,
-}));
 
 import { readTmuxServerGeneration, runTmux } from "../server/tmux/command";
 
@@ -45,6 +41,83 @@ describe("runTmux error details", () => {
     expect(formatErrorDetail(result.error)).toBe(
       "Error: failed to execute tmux\nCaused by: TypeError: process launch failed",
     );
+  });
+});
+
+// 時間切れ・起動の失敗を「tmux が無い」にしない (巡回のログが
+// "server generation was missing" と出して本当の理由を消していた)。
+const TIMED_OUT = {
+  kind: "timed-out",
+  message:
+    "tmux display-message -p timed out after 3000 ms (ETIMEDOUT; stopped at 3004 ms)",
+  timeoutMs: 3000,
+  elapsedMs: 3004,
+};
+
+function spawnFailure(code: string) {
+  return {
+    kind: "spawn-error",
+    error: Object.assign(new Error(`spawn tmux ${code}`), {
+      code,
+      syscall: "spawn tmux",
+    }),
+  };
+}
+
+describe("tmux that could not run", () => {
+  beforeEach(() => {
+    runAsync.mockReset();
+  });
+
+  test.each([
+    {
+      name: "not found",
+      result: {
+        code: 1,
+        stdout: "",
+        stderr: "spawn tmux ENOENT",
+        failure: spawnFailure("ENOENT"),
+      },
+      expected: { status: "missing" },
+    },
+    {
+      name: "timed out",
+      result: {
+        code: 1,
+        stdout: "",
+        stderr: TIMED_OUT.message,
+        failure: TIMED_OUT,
+      },
+      expected: {
+        status: "error",
+        error:
+          "Error: tmux display-message -p timed out after 3000 ms (ETIMEDOUT; stopped at 3004 ms)",
+      },
+    },
+    {
+      name: "could not start",
+      result: {
+        code: 1,
+        stdout: "",
+        stderr: "spawn tmux EAGAIN",
+        failure: spawnFailure("EAGAIN"),
+      },
+      expected: {
+        status: "error",
+        error:
+          'Error: tmux could not be started: Error: spawn tmux EAGAIN\nDetails: {"code":"EAGAIN","syscall":"spawn tmux"}',
+      },
+    },
+  ])("$name", async ({ result, expected }) => {
+    runAsync.mockResolvedValue(result);
+
+    const generation = await readTmuxServerGeneration("/sample");
+
+    expect(
+      generation.status === "error"
+        ? { status: "error", error: formatErrorDetail(generation.error) }
+        : generation,
+    ).toEqual(expected);
   });
 });
 

@@ -78,6 +78,58 @@
           }
         }
       }
+    },
+    {
+      // サーバの子プロセスは runtime.ts の spawnProcess / runSync / runAsync /
+      // spawnStream だけで起こす。そこで detached にし、サーバを動かしている端末を
+      // 子の制御端末にしない (対話シェルが端末の前面を奪って戻さず、pnpm dev の
+      // Ctrl+C が効かなくなった)。許すのは型の名前だけ (allowImportNames)。
+      "includes": ["web-src/server/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:child_process": {
+                    "message": "Start child processes with spawnProcess / runSync / runAsync / spawnStream in web-src/server/runtime.ts, which detach them from the terminal.",
+                    "allowImportNames": [
+                      "ChildProcess",
+                      "SpawnOptions",
+                      "SpawnSyncOptionsWithBufferEncoding"
+                    ]
+                  },
+                  "child_process": "Import node:child_process only through web-src/server/runtime.ts (spawnProcess / runSync / runAsync / spawnStream)."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // 例外: runtime.ts は入口そのもの。dev.ts が起こすサーバは端末の Ctrl+C を
+      // 受けるべき前面の仕事なので端末に付ける。worktree/open.ts は自分で detached
+      // にし、親より長く生きる裏のサーバを起こす。データベースの 4 つは、テストで
+      // 差し替えた spawnSync との比較と型のためだけに spawnSync を import する
+      // (本番の経路は spawn-runner.ts)。
+      "includes": [
+        "web-src/server/runtime.ts",
+        "web-src/server/dev.ts",
+        "web-src/server/worktree/open.ts",
+        "web-src/server/database/adapters/docker.ts",
+        "web-src/server/database/adapters/docker-utils.ts",
+        "web-src/server/database/adapters/dynamodb.ts",
+        "web-src/server/database/adapters/s3.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
     }
   ]
 }
