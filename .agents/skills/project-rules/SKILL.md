@@ -32,7 +32,7 @@ description: Use at the start of any implementation, investigation, or review in
 | コントロール・アイコン・文言・状態表示・装飾を足す / 変える | `.agents/skills/project-rules/references/ui-surface.md` |
 | ルート・ハンドラ・CLI・外部プロセス連携を足す / 変える。`fetch` を書く | `.agents/skills/project-rules/references/server.md` |
 | 依存を足す / 消す / 上げる。バンドル構成を変える | `.agents/skills/project-rules/references/dependencies.md` |
-| 「〜が原因だ」と口に出す・書く直前 | `.agents/skills/project-rules/references/diagnose.md` |
+| 「〜が原因だ」と口に出す・書く直前。UI を変えて、実画面（砂場と headless Chrome）で確かめる | `.agents/skills/project-rules/references/diagnose.md` |
 | テストを書く / 落ちたテストを直す | `.agents/skills/project-rules/references/testing.md` |
 | エージェント一覧・状態判定・通知・フック・アカウント・使用量・起動・プロジェクトの登録と切替を触る / 調べる | `.agents/skills/project-rules/references/agents.md` |
 | リリース・npm publish・Trusted Publisher | `.agents/skills/project-npm-publish-procedure/SKILL.md` |

@@ -1451,6 +1451,14 @@ preview server when `web-src/server/*.ts` changes, and keeps the URL stable on
 `http://127.0.0.1:64160/` unless you pass `--port <port>`. Use
 `pnpm run preview:raw` to launch `preview.ts` directly without the dev watcher.
 
+To check the UI without touching your own data, run `pnpm run build`, then
+`pnpm run sandbox`: it starts a server on a free port against sample
+repositories, with stand-in claude and codex agents, and its home, state and
+tmux under `/tmp/cvdemo`. `pnpm run ui-check <project URL> <steps.json> <out dir>`
+drives a throwaway headless Chrome through the steps (open, change settings,
+click, hover, type, screenshot) and exits non-zero on a failed step or a page
+error; the step list is at the top of `scripts/ui-check.mjs`.
+
 TypeScript runs through [tsx](https://tsx.is/), bundles are built with
 [esbuild](https://esbuild.github.io/), and tests run on
 [Vitest](https://vitest.dev/).

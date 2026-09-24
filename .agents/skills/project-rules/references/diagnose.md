@@ -34,21 +34,46 @@
 | 「CSS / HTML の変更が反映されない」 | `CODE_VIEWER_DEV=1` で起動しているか。SSE の `reload` が飛んだか | 遅延バンドル（xterm / shiki / mermaid / yaml / highlight）は dev で焼き直されない。`pnpm run build:web` が要る |
 | 「端末の表示が見切れる」 | **サーバ側**: `list-panes -a -F ...` / `list-clients -F ...` が返すウィンドウ・ペインの寸法（`server/tmux/panes.ts` / `clients.ts` と同じ形式）。**クライアント側**: fit addon の `proposeDimensions()` が返す cols/rows。**両者を突き合わせる** | フォント幅は**別の仮説**。主張するならセルを実測する。tmux の寸法不一致とフォント幅は互いの証拠にならない |
 | 「環境が壊れている」 | `/_doctor` エンドポイント、または `code-viewer doctor` | アプリのロジックの正否。doctor は環境しか見ない |
-| 「UI が正しい / 壊れている」 | dev サーバ（既定ポート 64160）を Browser Pilot で開き、対象要素の **DOM と `getComputedStyle`** を読む | ソース文字列の検査。`style.css` に文字列があることは、その規則が実際に適用されていることを意味しない（→ `testing.md`） |
+| 「UI が正しい / 壊れている」 | 砂場のサーバを `pnpm run ui-check` で開き、撮った画像を見て、対象要素の **DOM と `getComputedStyle`** を読む（下の「UI を実画面で確認する」） | ソース文字列の検査。`style.css` に文字列があることは、その規則が実際に適用されていることを意味しない（→ `testing.md`） |
 | 「レイアウトが密度モードで壊れる」 | `body[data-sidebar-font-size]` を 4 値（既定 / compact / large / xlarge）切り替えて実測 | 既定モードだけの確認 |
 | 「リクエストが競合した / 古い応答が勝った」 | 応答の `generation` と view 側のカウンタを突き合わせる | ネットワークの遅さ。遅いことと、古い応答が反映されることは別問題 |
 | 「バンドルが重くなった / 軽くなった」 | 変更前後の `ls -l web/*.js dist/code-viewer.js` | 体感速度。どのバンドルに載ったかで意味が変わる（→ `dependencies.md`） |
 
 ## UI を実画面で確認する
 
-UI 変更は、**振る舞いが正しいと言う前に実画面を見る。**
+UI 変更は、**振る舞いが正しいと言う前に実画面を見る。** 見るのは利用者の dev サーバでも
+利用者のブラウザでもなく、**砂場のサーバと使い捨ての headless Chrome**。利用者は同じ作業
+ツリーで `pnpm run dev` を動かしているので、そこで試すと作業途中の画面がそのまま利用者に出る。
+利用者の Chrome の窓はロックされていることがあり、触ると利用者の作業を奪う。
 
-1. dev サーバを起動する（`pnpm run dev`、既定ポート 64160）
-2. Browser Pilot で対象のルートを開く
-3. 対象要素の DOM 構造と `getComputedStyle` を読む
-4. ユーザーが参照 UI を指しているなら、**その参照実装も同じ手順で読み**、構造を比べる
+1. **ビルドする。** `pnpm run build`（砂場のサーバは `web/` の成果物を配る）
+2. **砂場を起こす。** `pnpm run sandbox`（`scripts/help-captures.mjs --setup-only`）。
+   HOME・状態・登録簿・tmux を `/tmp/cvdemo` の下へ逃がし、中立な名前のリポジトリ
+   （sample-app・sample-lib・sample-docs）と偽の claude・codex を置いて、空いたポートで
+   サーバを起こす。最後の行 `setup only: <URL>` がプロジェクトの URL。Ctrl+C で止まる。
+   `/tmp/cvdemo` は起こすたびに作り直すので、そこに置いた物は残らない。
+   ビルドし直したら砂場も起こし直す
+3. **手順を JSON に書いて流す。** `pnpm run ui-check <URL> <steps.json> <出力のフォルダ>`。
+   手順の種類（開く・設定の変更・押す・載せる・引く・キー・文字の入力・評価・撮る）は
+   `scripts/ui-check.mjs` の頭。失敗した手順・ページの例外・console の error と warning が
+   1 つでもあれば終了コード 1
+4. **撮った画像を自分の目で見る。** 数値（DOM・`getComputedStyle`）は補助。見切れ・重なり・
+   端に接した操作・読めない濃さは、画像を見ないと分からない
+5. ユーザーが参照 UI を指しているなら、**その参照実装も同じ手順で読み**、構造を比べる
 
-light / dark 両方を見る。レイアウトを変えたなら密度モード 4 種も見る。
+**どこまで見るか。** ライトとダーク、既定のテーマに加えて別のテーマを 2 つ以上（設定の
+`colorTheme`。手順の `settings` で変える）。既定だけ見て「崩れていない」と言わない。
+レイアウトを変えたなら密度モード 4 種も見る。
+
+**端末を見るとき。** 砂場の tmux は `/tmp/cvdt.*/tmux-<uid>/default`（起動の行に出る）。
+画面に出す中身は、アプリで開いたシェルに `type` の手順で打ち込むか、そのソケットで
+`env -u TMUX tmux -S <ソケット> send-keys …` を送る。マウスが有効な tmux・分割したペインを
+見るなら、設定ファイルを `-f` で渡してシェルの中で `tmux` を起こす。ui-check の Chrome は
+WebGL を CPU で描くので、端末の文字は DOM に無い（`.xterm-rows` が空）。文字は画像で見る。
+DOM の行から文字を読みたいなら Chrome に `--disable-webgl` を渡す（ヘルプの撮影がそうしている）
+
+**片付け。** 砂場のサーバは起こしたシェルを止めれば止まる。止めるのは自分が起こした pid
+だけ。tmux は止めない（`agents.md` の 10）。
 
 ## 報告の書式
 
