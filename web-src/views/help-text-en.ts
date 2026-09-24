@@ -1281,7 +1281,6 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   " from the right-click menu to scroll back to the line.",
                 ],
                 "Move the shelf to the right, left, bottom, or top with the ⋯ on its header, and drag its inner edge to resize it.",
-                "Paste an image (⌘V / Ctrl+V) to hand it to the agent: it is saved in the project as .code-viewer/pasted/pasted-image-<date>-<time>.png (not tracked by git), that path is typed at the prompt without sending, and the image shows on the shelf.",
                 "Hover a URL, file path, or image path on the screen for Open and Copy buttons, or click it to open. When tmux handles the mouse, hold ⌘/Ctrl while clicking.",
                 [
                   "The terminal is drawn dark even when the page is light. To change this, pick ",
@@ -1295,6 +1294,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               ],
             },
             more(
+              "Paste an image (⌘V / Ctrl+V) to hand it to the agent. It is saved in the project under .code-viewer/pasted/ with the date and time as its name (git ignores it), and its path is typed without sending.",
               [
                 "If some colors are still hard to read after matching a light page, switch the agent's own colors to a light theme too (",
                 code("/theme"),
