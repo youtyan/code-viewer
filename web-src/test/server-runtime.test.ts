@@ -227,7 +227,12 @@ describe("server runtime compatibility helpers", () => {
     }));
     try {
       const pending = run();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // 起こした側が子の終わりを待ち始めてから終わらせる。固定の待ち (10ms) では、
+      // 負荷の高いマシンでモジュールの読み込みが間に合わず、待ち始める前に close が
+      // 出て、永遠に待って時間切れになっていた。
+      await vi.waitFor(() =>
+        expect(child.listenerCount("close")).toBeGreaterThan(0),
+      );
       child.stdout.end();
       child.stderr.end();
       child.emit("close", 0);
