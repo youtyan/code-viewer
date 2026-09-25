@@ -13,7 +13,7 @@
 // - POST   /_agent/statusline/apply       確認した計画を実行する
 // - DELETE /_agent/statusline/failures    包むスクリプトの失敗の記録を消す
 
-import { realpathSync, statSync, unlinkSync } from "node:fs";
+import { mkdirSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import {
   type AccountAgent,
   type AccountEntry,
@@ -52,6 +52,7 @@ import {
 import { launchStatusLineArgs } from "./project-statusline";
 import {
   AccountError,
+  type AccountPaths,
   applyCreateAccount,
   applyRegisterAccount,
   applyRemoveAccount,
@@ -275,13 +276,20 @@ export async function handleLoginPost(
 }
 
 /**
+ * 確かめるで claude を起こすフォルダ。見ているプロジェクトではなく確認専用の
+ * フォルダ (registry.ts の usageCheckDir) にする。どの画面で押しても同じ場所で、
+ * 信頼の確認はアカウントごとに最初の 1 回だけ。無ければ作る。
+ */
+export function usageCheckFolder(paths: AccountPaths): string {
+  mkdirSync(paths.usageCheckDir, { recursive: true, mode: 0o700 });
+  return paths.usageCheckDir;
+}
+
+/**
  * 「使用量を確かめる」。確かめた結果 (取れた・止まった理由) は 200 で返し、
  * 画面がカードに理由と次の手順を出す。要求そのものが誤りなら 4xx。
  */
-export async function handleUsageCheckPost(
-  req: Request,
-  cwd: string,
-): Promise<Response> {
+export async function handleUsageCheckPost(req: Request): Promise<Response> {
   const body = await parseBoundedJsonBody(
     req,
     MAX_ACCOUNT_BODY_BYTES,
@@ -291,7 +299,8 @@ export async function handleUsageCheckPost(
   const id = (body as Record<string, unknown> | null)?.id;
   if (typeof id !== "string") return textError("invalid id", 400);
   try {
-    return json(await sharedUsageChecker().check(findAccount(id), cwd));
+    const folder = usageCheckFolder(sharedAccountService().paths);
+    return json(await sharedUsageChecker().check(findAccount(id), folder));
   } catch (error) {
     return errorResponse(error);
   }

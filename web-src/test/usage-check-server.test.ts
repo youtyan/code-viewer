@@ -3,7 +3,13 @@
 // claude も起こさない)。偽の tmux は受け取った引数を記録し、画面と使用量は
 // 手順ごとに決めた値を返す。時計は偽物で、眠ると進む。
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -13,6 +19,7 @@ import {
   agentTmuxPanes,
   USAGE_CHECK_SESSION_PREFIX,
 } from "../core/agent-accounts";
+import { usageCheckFolder } from "../server/accounts/handle";
 import { AccountError, accountPaths } from "../server/accounts/registry";
 import { createAccountService } from "../server/accounts/service";
 import {
@@ -553,5 +560,26 @@ describe("the check's sessions are not agents", () => {
     expect(agentTmuxPanes(sessions).map((item) => item.id)).toEqual(
       shown ? ["%1", "%2"] : ["%1"],
     );
+  });
+});
+
+describe("usageCheckFolder", () => {
+  // 見ているプロジェクトではなく確認専用のフォルダで起こす。どの画面で押しても
+  // 同じ場所で、信頼の確認はアカウントごとに最初の 1 回だけで済む。
+  test("is the dedicated folder under the state directory, created private", () => {
+    const state = mkdtempSync(join(tmpdir(), "cv-usage-folder-"));
+    try {
+      const paths = accountPaths(
+        { CODE_VIEWER_TEST_STATE_DIR: state },
+        "/home/sample",
+      );
+      const folder = usageCheckFolder(paths);
+      expect(folder).toBe(join(state, "usage-check"));
+      expect(statSync(folder).isDirectory()).toBe(true);
+      expect(statSync(folder).mode & 0o777).toBe(0o700);
+      expect(usageCheckFolder(paths)).toBe(folder);
+    } finally {
+      rmSync(state, { recursive: true, force: true });
+    }
   });
 });

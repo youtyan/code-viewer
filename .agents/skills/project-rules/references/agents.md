@@ -550,8 +550,12 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 ボタンを出し、押すと裏で `claude --model haiku "<一言>"` を起こして新しい記録を待つ（わずかに
 使用量を使う。利用者が了承済み。確認の画面は出さず、ボタンの title に書く）。
 
-- 起動は「新しいエージェント」と同じ部品（`tmuxLaunchArgs`・`agentCommandArgv`）。作業場所は
-  サーバのプロジェクトのルート。セッションは確認ごとに作る `code-viewer-usage-<id>-<時刻>`
+- 起動は「新しいエージェント」と同じ部品（`tmuxLaunchArgs`・`agentCommandArgv`）。**作業場所は
+  確認専用のフォルダ `<状態>/usage-check`**（`AccountPaths.usageCheckDir`、空・0700、
+  `handle.ts` の `usageCheckFolder` が作る）。以前は見ているプロジェクトのルートで起こしていて、
+  そのアカウントで信頼していないプロジェクトでは信頼の確認で止まり、見ている画面で結果が変わった
+  （2026-09-25、利用者の指摘）。ここならアカウントごとに最初の 1 回だけ答えれば済み、プロジェクトの
+  設定（フック・CLAUDE.md）も読まない。セッションは確認ごとに作る `code-viewer-usage-<id>-<時刻>`
 - **包んだ statusLine を `--settings` で渡す**（`usageCheckArgs`。包むスクリプトに、ユーザーの設定の
   元のコマンドを渡した形）。プロジェクトの `.claude/settings.json` に statusLine があると、ユーザーの
   設定の（包んだ）ものより優先され、使用量が保存されない（利用者の実プロジェクトで起きた）。

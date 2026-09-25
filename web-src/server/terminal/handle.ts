@@ -953,7 +953,7 @@ export function handleAgentRoute(
       "/_agent/accounts/usage-check": {
         methods: ["POST"],
         sideEffect: true,
-        handler: () => handleUsageCheckPost(req, cwd),
+        handler: () => handleUsageCheckPost(req),
       },
       "/_agent/launch": {
         methods: ["POST"],

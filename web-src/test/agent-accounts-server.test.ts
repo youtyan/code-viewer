@@ -113,6 +113,7 @@ describe("paths", () => {
     expect(out.registry).toBe(`${expected}/accounts.json`);
     expect(out.managedRoot).toBe(`${expected}/accounts`);
     expect(out.usageDir).toBe(`${expected}/agent-usage`);
+    expect(out.usageCheckDir).toBe(`${expected}/usage-check`);
   });
 });
 

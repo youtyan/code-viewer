@@ -220,7 +220,9 @@ Requires Node.js 20 or newer. Development uses
   invented; when one config directory holds records from two accounts, the card
   keeps the newest values and adds a Mixed note that says how to separate them.
   When a claude card has no value yet or an old one, Check usage starts claude
-  with that account in a background tmux session, sends one short message (this
+  with that account in a background tmux session, in a folder kept only for this
+  check (`usage-check` in code-viewer's state directory, so the folder trust
+  question comes once per account), sends one short message (this
   uses a little usage), waits for the new value and closes that session; if
   claude stops at its first-run setup, the folder trust question or sign-in,
   the card says so and what to do next.
