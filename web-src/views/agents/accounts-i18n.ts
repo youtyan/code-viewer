@@ -6,6 +6,7 @@ import type {
   BlockedReason,
   HandoffLanguage,
   StatusLineState,
+  UsageCheckFailure,
   UsageUnavailableReason,
   UsageWindow,
 } from "../../core/agent-accounts";
@@ -48,6 +49,14 @@ export type AccountsText = {
   usagePopoverManage: string;
   usagePopoverOpen: string;
   resetsIn: (duration: string) => string;
+  /** 窓が戻る時刻 (全体ボードのカード)。when は resetClock (usage-meter.ts) が作る。 */
+  resetsAt: (when: string) => string;
+  /** 曜日の短い名前 (日曜から)。 */
+  weekdays: readonly string[];
+  /** 24 時間以上先の日付。 */
+  resetDate: (month: number, day: number) => string;
+  /** カードの 2 行目: ログイン済みだがメールアドレスが分からない。 */
+  cardNoEmail: string;
   resetPassed: string;
   duration: (ms: number) => string;
   warn: string;
@@ -62,6 +71,41 @@ export type AccountsText = {
   /** その説明。others = 別の記録の値 (枠と割合とリセット)。 */
   usageMixedHint: (others: string) => string;
   usageReason: Record<UsageUnavailableReason, string>;
+  /** カードの［使用量の取得を有効にする…］(statusLine の確認の画面を開く)。 */
+  usageEnable: string;
+  /** 最下段の使用量: 有効にするボタンのある全体ボードへ移る。 */
+  usagePopoverEnable: string;
+  // 使用量を確かめる (views/agents/usage-check.ts。カードと設定の使用量の行)
+  usageCheck: string;
+  /** 設定の行で複数のアカウントが並ぶときのボタン。 */
+  usageCheckFor: (name: string) => string;
+  /** ボタンと ⋯ の項目の title。わずかに使用量を使うことを書く。 */
+  usageCheckTitle: string;
+  usageChecking: string;
+  /** 止まった理由 (見出しの 1 行)。 */
+  usageCheckFailed: Record<UsageCheckFailure, string>;
+  /** 利用者の次の手順。 */
+  usageCheckNext: Record<
+    Exclude<UsageCheckFailure, "onboarding" | "trust" | "login">,
+    string
+  >;
+  /** 画面で止まったときの「このアカウントで開く」と、その title。 */
+  usageCheckOpenHere: string;
+  usageCheckOpenHereTitle: (folder: string) => string;
+  usageCheckAgain: string;
+  /** 開いた後の文。again は「もう一度確かめる」の文字。 */
+  usageCheckAfterOpen: (
+    kind: "answer" | "login" | "look",
+    again: string,
+  ) => string;
+  /** 起動に失敗したとき、設定の起動コマンドの欄へ移るボタン。 */
+  usageCheckOpenCommands: string;
+  usageCheckOpenFailed: string;
+  usageCheckRequestFailed: string;
+  usageCheckCloseFailed: string;
+  /** 畳んだ根拠の欄の見出し。 */
+  usageCheckMore: string;
+  usageCheckEvidence: string;
   agentsCount: (count: number) => string;
   hooksShort: (state: string) => string;
   registerUnregistered: string;
@@ -79,6 +123,8 @@ export type AccountsText = {
   unknownWhy: (detail: string) => string;
   /** ログイン済みなのにメールアドレスが無い理由。 */
   noEmailWhy: (detail: string) => string;
+  /** 初回の案内を済ませた印を足せなかった (対話で開くと案内とログインをやり直させる)。 */
+  onboardingMarkFailed: (detail: string) => string;
   checkedAgo: (ago: string) => string;
   checkedJustNow: string;
   checking: string;
@@ -143,10 +189,19 @@ export type AccountsText = {
   shareBlocked: (count: number) => string;
   /** 「選べば共有できる」の見出しの下に 1 回だけ添える、既定でオフの理由。 */
   shareOptionalWhy: string;
+  /** 「選べば共有できる」の行の［場所をコピー］と、その結果。 */
+  copyLocation: string;
+  copiedLocation: string;
+  copyLocationFailed: string;
   blockedWhy: Record<BlockedReason, string>;
   shareNone: string;
   createAuthKeys: (keys: string) => string;
   createAfter: string;
+  /** 作り終えた後の画面: 見出し・本文・主のボタン (ログイン)・後にする。 */
+  createdTitle: (name: string) => string;
+  createdBody: string;
+  createdSignIn: string;
+  createdLater: string;
   createRun: string;
   registerTitle: (name: string) => string;
   registerMissing: (path: string) => string;
@@ -171,11 +226,14 @@ export type AccountsText = {
   statusLineUninstall: string;
   statusLineDialogTitle: (action: "install" | "uninstall") => string;
   statusLineFile: string;
-  statusLineLinkTarget: string;
-  statusLineBefore: string;
   statusLineAfter: string;
   statusLineNone: string;
   statusLineNothing: string;
+  /** 書けないファイルの確認の画面: 写す内容をコピーするボタンと、その結果。 */
+  statusLineCopy: string;
+  statusLineCopied: string;
+  /** 差分の見た目の部品が読み込めず、差分を文字で出すとき。 */
+  statusLineDiffFailed: string;
   statusLineBackup: (path: string) => string;
   statusLineNewFile: string;
   statusLineFormatting: string;
@@ -217,6 +275,8 @@ export type AccountsText = {
   launchRun: string;
   launchStarted: (session: string) => string;
   launchRememberFailed: string;
+  /** 起動はしたが、プロジェクトの statusLine を読めず使用量を記録できない。 */
+  launchStatusLineFailed: string;
   launchNeedsLogin: string;
   launchNotSetUp: string;
   launchLoginUnknown: (detail: string) => string;
@@ -309,6 +369,11 @@ export const ACCOUNTS_EN: AccountsText = {
   usagePopoverManage: "Manage accounts",
   usagePopoverOpen: "Show usage for every account",
   resetsIn: (duration) => `resets in ${duration}`,
+  resetsAt: (when) => `resets ${when}`,
+  weekdays: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+  resetDate: (month, day) =>
+    `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month - 1]} ${day}`,
+  cardNoEmail: "Email unknown",
   resetPassed: "window has reset; waiting for a new value",
   duration: durationFormatter({ minute: "m", hour: "h", day: "d", join: " " }),
   warn: "High",
@@ -322,7 +387,7 @@ export const ACCOUNTS_EN: AccountsText = {
     `Session logs in this config directory report limits of more than one account (also seen: ${others}). Sign in to each account in its own config directory so the numbers do not mix.`,
   usageReason: {
     "not-wrapped":
-      "claude reports usage only to the status line. Turn on usage collection in Settings > Accounts.",
+      "claude reports usage only to the status line, and usage collection is off for this account.",
     "no-data":
       "No value yet. It arrives after a claude session with this account gets its first response.",
     "no-limits":
@@ -333,6 +398,45 @@ export const ACCOUNTS_EN: AccountsText = {
     unreadable:
       "The saved data could not be read (the format is not a public contract).",
   },
+  usageCheck: "Check usage",
+  usageCheckFor: (name) => `Check usage (${name})`,
+  usageCheckTitle:
+    "Starts claude with this account in the background, sends one short message and reads the usage that comes back. This uses a little of your usage.",
+  usageChecking: "Checking…",
+  usageCheckFailed: {
+    "not-wrapped": "Usage is not being received for this account",
+    onboarding: "claude's first-run setup is not finished for this account",
+    trust: "This account does not trust this folder yet",
+    login: "This account is not signed in yet",
+    timeout: "No usage arrived in time",
+    "start-failed": "claude could not be started",
+  },
+  usageCheckNext: {
+    "not-wrapped": "Once usage collection is on, the usage can be checked.",
+    timeout:
+      "claude may be waiting for something on its screen (accounts without Pro or Max report no limits).",
+    "start-failed":
+      "The launch command in Settings could not start claude. The reason is under Details.",
+  },
+  usageCheckOpenHere: "Open with this account",
+  usageCheckOpenHereTitle: (folder) =>
+    `Starts claude with this account in ${folder} and brings its terminal tab to the front.`,
+  usageCheckAgain: "Check again",
+  usageCheckAfterOpen: (kind, again) =>
+    kind === "login"
+      ? `Sign in in the tab that opened, then press ${again}.`
+      : kind === "look"
+        ? `Look at what claude waits for in the tab that opened, answer it, then press ${again}.`
+        : `Answer in the tab that opened, then press ${again}.`,
+  usageCheckOpenCommands: "Open the launch command",
+  usageCheckOpenFailed: "Could not open it with this account",
+  usageCheckRequestFailed: "Could not check the usage",
+  usageCheckCloseFailed:
+    "The tmux session opened for the check could not be closed",
+  usageCheckMore: "Details",
+  usageCheckEvidence: "Last lines of the claude screen:",
+  usageEnable: "Turn on usage collection…",
+  usagePopoverEnable: "Turn it on from the account card",
   agentsCount: (count) => `${count} running`,
   hooksShort: (state) => `Hooks: ${state}`,
   registerUnregistered: "Register",
@@ -351,6 +455,8 @@ export const ACCOUNTS_EN: AccountsText = {
   noEmail: "—",
   unknownWhy: (detail) => `Could not check: ${detail}`,
   noEmailWhy: (detail) => `No email: ${detail}`,
+  onboardingMarkFailed: (detail) =>
+    `Opening claude will run the first-run setup and ask you to sign in again, because code-viewer could not record that setup is done: ${detail}`,
   checkedAgo: (ago) => `${ago} ago`,
   checkedJustNow: "just now",
   checking: "Checking…",
@@ -414,7 +520,7 @@ export const ACCOUNTS_EN: AccountsText = {
   createLinkMissing: (names) =>
     `Not in the default directory, so not linked: ${names}`,
   usageReasonShort: {
-    "not-wrapped": "Turn on usage collection in Settings",
+    "not-wrapped": "Usage collection is off",
     "no-data": "No value yet",
     "no-limits": "No rate limits in the status line data",
     "no-sessions": "No codex session yet",
@@ -425,7 +531,10 @@ export const ACCOUNTS_EN: AccountsText = {
   shareOptional: "Can be shared if you choose (off by default)",
   shareBlocked: (count) => `Cannot be shared (${count})`,
   shareOptionalWhy:
-    "Not in the documented settings and its contents are not checked. Turn it on only after confirming it holds no credentials.",
+    "Not in the official list of settings, and code-viewer cannot check what is inside, so these are off. Copy location copies where each one is; if it holds no credentials, turning it on shares it.",
+  copyLocation: "Copy location",
+  copiedLocation: "Copied",
+  copyLocationFailed: "Could not copy",
   blockedWhy: {
     auth: "sign-in credentials",
     identity: "account identity",
@@ -439,7 +548,12 @@ export const ACCOUNTS_EN: AccountsText = {
   createAuthKeys: (keys) =>
     `The shared settings contain sign-in related keys (${keys}). They apply to this account too. Values were not read.`,
   createAfter:
-    "After creating, use Sign in on its row. Nothing is sent anywhere until you do.",
+    "After it is created, the next screen offers to sign in. Nothing is sent anywhere until you sign in.",
+  createdTitle: (name) => `Created ${name}`,
+  createdBody:
+    "Sign in and this account is ready to use. The official sign-in opens in a terminal tab and your browser.",
+  createdSignIn: "Sign in",
+  createdLater: "Later",
   createRun: "Create",
   registerTitle: (name) => `Register "${name}"`,
   registerMissing: (path) => `${path} does not exist.`,
@@ -478,11 +592,14 @@ export const ACCOUNTS_EN: AccountsText = {
       ? "Collect claude usage from the status line"
       : "Restore the original status line",
   statusLineFile: "Settings file",
-  statusLineLinkTarget: "Link target (written)",
-  statusLineBefore: "statusLine now",
   statusLineAfter: "statusLine after",
   statusLineNone: "(none)",
   statusLineNothing: "Nothing to change.",
+  statusLineCopy: "Copy what to paste",
+  statusLineCopied:
+    "Copied. Once it is pasted into the file this settings file is generated from, the next generated file receives the usage.",
+  statusLineDiffFailed:
+    "The diff view could not be loaded, so the change is shown as text.",
   statusLineBackup: (path) => `The current file is copied to ${path} first.`,
   statusLineNewFile: "The file does not exist yet; it is created.",
   statusLineFormatting:
@@ -500,7 +617,7 @@ export const ACCOUNTS_EN: AccountsText = {
   },
   statusLineUnchanged: "Nothing changed.",
   statusLineBlocked:
-    "This settings file cannot be written (it is generated elsewhere). Change statusLine in its source:",
+    "This settings file is generated elsewhere, so code-viewer cannot write it. Copy the part below and paste it into its source to receive usage:",
   backupAt: (path) => `Backup: ${path}`,
   usageFailures: (count) =>
     `The status line wrapper could not save usage ${count} time${count === 1 ? "" : "s"}`,
@@ -530,6 +647,8 @@ export const ACCOUNTS_EN: AccountsText = {
   launchRun: "Launch",
   launchStarted: (session) => `Started in ${session}.`,
   launchRememberFailed: "Started, but the choice could not be remembered:",
+  launchStatusLineFailed:
+    "Started, but this session will not record usage because the project's statusLine could not be read:",
   launchNeedsLogin:
     "This account is not signed in. The agent will ask you to sign in.",
   launchNotSetUp:
@@ -601,6 +720,10 @@ export const ACCOUNTS_JA: AccountsText = {
   usagePopoverManage: "アカウントを管理",
   usagePopoverOpen: "すべてのアカウントの使用量を見る",
   resetsIn: (duration) => `あと${duration}でリセット`,
+  resetsAt: (when) => `${when} に戻る`,
+  weekdays: ["日", "月", "火", "水", "木", "金", "土"],
+  resetDate: (month, day) => `${month}/${day}`,
+  cardNoEmail: "メールアドレスが分かりません",
   resetPassed: "リセット済み・新しい値を待っています",
   duration: durationFormatter({
     minute: "分",
@@ -619,7 +742,7 @@ export const ACCOUNTS_JA: AccountsText = {
     `同じ設定ディレクトリの記録に、別のアカウントの上限が混ざっています (ほかに ${others})。アカウントごとに設定ディレクトリを分けてログインすると混ざりません。`,
   usageReason: {
     "not-wrapped":
-      "claude は使用量をステータスラインにだけ渡します。設定 > アカウント で使用量の取得を有効にしてください。",
+      "claude は使用量をステータスラインにだけ渡します。このアカウントでは受け取りが無効です。",
     "no-data":
       "まだ値がありません。このアカウントの claude が最初の応答を受け取ると届きます。",
     "no-limits":
@@ -630,6 +753,45 @@ export const ACCOUNTS_JA: AccountsText = {
     unreadable:
       "保存されたデータを読めません（公式に約束された書式ではありません）。",
   },
+  usageCheck: "使用量を確かめる",
+  usageCheckFor: (name) => `使用量を確かめる（${name}）`,
+  usageCheckTitle:
+    "このアカウントの claude を裏で起こして短い一言を送り、返ってきた使用量を読みます。わずかに使用量を使います。",
+  usageChecking: "確かめています…",
+  usageCheckFailed: {
+    "not-wrapped": "このアカウントの使用量を受け取っていません",
+    onboarding: "このアカウントの claude の初回の案内がまだ済んでいません",
+    trust: "このフォルダをこのアカウントでまだ信頼していません",
+    login: "このアカウントはまだログインしていません",
+    timeout: "時間内に使用量が届きませんでした",
+    "start-failed": "claude を起動できませんでした",
+  },
+  usageCheckNext: {
+    "not-wrapped": "使用量の受け取りを有効にすると、確かめられます。",
+    timeout:
+      "claude が画面で何かを待っているのかもしれません（Pro / Max 以外のアカウントには上限の情報がありません）。",
+    "start-failed":
+      "設定の起動コマンドで claude を起こせませんでした。理由は「詳しく」にあります。",
+  },
+  usageCheckOpenHere: "このアカウントで開く",
+  usageCheckOpenHereTitle: (folder) =>
+    `このアカウントで ${folder} の claude を起こし、ターミナルのタブで前に出します。`,
+  usageCheckAgain: "もう一度確かめる",
+  usageCheckAfterOpen: (kind, again) =>
+    kind === "login"
+      ? `開いたタブでログインしてから、「${again}」を押してください。`
+      : kind === "look"
+        ? `開いたタブで claude が待っているものに答えてから、「${again}」を押してください。`
+        : `開いたタブで答えてから、「${again}」を押してください。`,
+  usageCheckOpenCommands: "起動コマンドを開く",
+  usageCheckOpenFailed: "このアカウントで開けませんでした",
+  usageCheckRequestFailed: "使用量を確かめられませんでした",
+  usageCheckCloseFailed:
+    "確認のために開いた tmux のセッションを閉じられませんでした",
+  usageCheckMore: "詳しく",
+  usageCheckEvidence: "claude の画面の最後の行:",
+  usageEnable: "使用量の取得を有効にする…",
+  usagePopoverEnable: "アカウントのカードで有効にする",
   agentsCount: (count) => `${count} 件実行中`,
   hooksShort: (state) => `フック: ${state}`,
   registerUnregistered: "登録",
@@ -648,6 +810,8 @@ export const ACCOUNTS_JA: AccountsText = {
   noEmail: "—",
   unknownWhy: (detail) => `確かめられませんでした: ${detail}`,
   noEmailWhy: (detail) => `メールアドレスを出せません: ${detail}`,
+  onboardingMarkFailed: (detail) =>
+    `claude を開くと初回の案内とログインをやり直させます。初回の案内を済ませた印を付けられませんでした: ${detail}`,
   checkedAgo: (ago) => `${ago}前`,
   checkedJustNow: "たった今",
   checking: "確かめています…",
@@ -711,7 +875,7 @@ export const ACCOUNTS_JA: AccountsText = {
   createLinkMissing: (names) =>
     `既定のディレクトリに無いためリンクしないもの: ${names}`,
   usageReasonShort: {
-    "not-wrapped": "設定で使用量の取得を有効にしてください",
+    "not-wrapped": "使用量の受け取りが無効です",
     "no-data": "まだ値がありません",
     "no-limits": "ステータスラインのデータに上限の情報がありません",
     "no-sessions": "codex のセッションがまだありません",
@@ -722,7 +886,10 @@ export const ACCOUNTS_JA: AccountsText = {
   shareOptional: "選べば共有できる（既定でオフ）",
   shareBlocked: (count) => `共有できない（${count} 件）`,
   shareOptionalWhy:
-    "公式の設定の一覧に無く、中身を確かめられないため。認証情報が入っていないことを確かめてからオンにしてください。",
+    "公式の設定の一覧に無く、中身を code-viewer では確かめられないため、既定でオフです。［場所をコピー］で場所を写せます。認証情報が入っていなければ、オンにすると共有します。",
+  copyLocation: "場所をコピー",
+  copiedLocation: "コピーしました",
+  copyLocationFailed: "コピーできませんでした",
   blockedWhy: {
     auth: "ログインの認証情報",
     identity: "アカウントの識別情報",
@@ -736,7 +903,12 @@ export const ACCOUNTS_JA: AccountsText = {
   createAuthKeys: (keys) =>
     `共有する設定に、ログインに関わる項目（${keys}）があります。このアカウントでも使われます。値は読んでいません。`,
   createAfter:
-    "作った後、その行の「ログイン」を押してください。押すまでどこにも何も送りません。",
+    "作ったら、続けてログインの画面を出します。ログインするまで、どこにも何も送りません。",
+  createdTitle: (name) => `「${name}」を作りました`,
+  createdBody:
+    "ログインすると、このアカウントで使えます。公式のログインがターミナルのタブとブラウザで開きます。",
+  createdSignIn: "ログインする",
+  createdLater: "あとで",
   createRun: "作る",
   registerTitle: (name) => `「${name}」を登録`,
   registerMissing: (path) => `${path} がありません。`,
@@ -775,11 +947,14 @@ export const ACCOUNTS_JA: AccountsText = {
       ? "claude の使用量をステータスラインから取る"
       : "元のステータスラインに戻す",
   statusLineFile: "設定ファイル",
-  statusLineLinkTarget: "リンク先（ここに書きます）",
-  statusLineBefore: "今の statusLine",
   statusLineAfter: "変更後の statusLine",
   statusLineNone: "（なし）",
   statusLineNothing: "変えるものはありません。",
+  statusLineCopy: "写す内容をコピー",
+  statusLineCopied:
+    "コピーしました。この設定ファイルの生成元に貼ると、次に生成したファイルから使用量を受け取れます。",
+  statusLineDiffFailed:
+    "差分の画面の部品を読み込めなかったので、変わる所を文字で出しています。",
   statusLineBackup: (path) => `書く前に今のファイルを ${path} に写します。`,
   statusLineNewFile: "ファイルがまだ無いので作ります。",
   statusLineFormatting:
@@ -797,7 +972,7 @@ export const ACCOUNTS_JA: AccountsText = {
   },
   statusLineUnchanged: "変更はありませんでした。",
   statusLineBlocked:
-    "この設定ファイルは別の場所から生成されているため書き込めません。生成元の statusLine を変えてください:",
+    "この設定ファイルは別の場所から生成されているため、code-viewer からは書き込めません。下の内容をコピーして生成元に貼ると、使用量を受け取れます:",
   backupAt: (path) => `バックアップ: ${path}`,
   usageFailures: (count) =>
     `ステータスラインの包みが使用量を保存できなかったことが ${count} 件あります`,
@@ -828,6 +1003,8 @@ export const ACCOUNTS_JA: AccountsText = {
   launchRun: "起動",
   launchStarted: (session) => `${session} で起動しました。`,
   launchRememberFailed: "起動しましたが、選んだものを覚えられませんでした:",
+  launchStatusLineFailed:
+    "起動しましたが、プロジェクトの statusLine を読めなかったので、このセッションの使用量は記録されません:",
   launchNeedsLogin:
     "このアカウントは未ログインです。起動したエージェントがログインを求めます。",
   launchNotSetUp:

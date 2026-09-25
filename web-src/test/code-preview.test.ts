@@ -13,6 +13,7 @@ import {
   type CodePreviewRequest,
   createCodePreview,
 } from "../views/code-preview";
+import { codePreviewText } from "../views/code-preview-i18n";
 import { deferred, q, waitFor } from "./_test-helpers";
 
 const originalFetch = globalThis.fetch;
@@ -78,7 +79,7 @@ function installFetch(
   return requests;
 }
 
-function createPreview(options: { stale?: boolean } = {}) {
+function createPreview(options: { stale?: boolean | (() => boolean) } = {}) {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const tracked: Promise<unknown>[] = [];
@@ -97,7 +98,10 @@ function createPreview(options: { stale?: boolean } = {}) {
       textValue
         .split("\n")
         .map((line) => `<span class="token">${line || " "}</span>`),
-    isStaleGeneration: () => options.stale === true,
+    isStaleGeneration: () =>
+      typeof options.stale === "function"
+        ? options.stale()
+        : options.stale === true,
   });
   return { host, preview, tracked };
 }
@@ -240,6 +244,29 @@ describe("code preview", () => {
     );
 
     expect(document.querySelector(".gdp-source-table")).toBeNull();
+  });
+
+  test("the changed-file notice reloads this context only (no need to move the selection)", async () => {
+    const requests = installFetch(async () => rangeResponse());
+    let stale = true;
+    const { preview } = createPreview({ stale: () => stale });
+    preview.show(SAMPLE_REQUEST);
+    await waitFor(() =>
+      q(document, ".gdp-code-preview-message").textContent.includes(
+        codePreviewText("en").fileChanged,
+      ),
+    );
+    const reload = q<HTMLButtonElement>(document, ".gdp-code-preview-reload");
+    expect(reload.textContent).toBe(codePreviewText("en").reload);
+    stale = false;
+    reload.click();
+    await waitFor(
+      () =>
+        document.querySelectorAll(".gdp-source-line-code.shiki").length === 3,
+    );
+    // 同じ範囲を読み直した。
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.url.search).toBe(requests[0]?.url.search);
   });
 
   test("keeps HTTP status and response body in the visible error", async () => {

@@ -24,7 +24,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   AGENT_HOOK_MARKER,
   type AgentHookFailure,
@@ -41,6 +41,7 @@ import {
   serializeHookFile,
 } from "../../core/agent-hooks";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
+import { unifiedDiff } from "../../core/text-diff";
 import { shellSingleQuote } from "../cli-helpers";
 import { ROOT } from "../root";
 import { codeViewerStateDir } from "../user-state-dir";
@@ -346,6 +347,13 @@ export function planAgentHooks(
     changed: plan.changed,
     backupPath:
       plan.changed && read.kind === "ok" ? backupPathFor(path, now) : null,
+    diff: plan.changed
+      ? unifiedDiff(
+          original,
+          serializeHookFile(plan.next, original),
+          basename(path),
+        )
+      : "",
     formattingChanged:
       original !== null && serializeHookFile(root, original) !== original,
     launcher: {

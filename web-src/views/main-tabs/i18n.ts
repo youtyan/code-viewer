@@ -85,8 +85,8 @@ const EN: MainTabsText = {
     "End this shell (Close only hides the tab and keeps the shell running)",
   splitBlocked: {
     split: "Split right: already two sides",
-    "no-front": "Split right: open a file, terminal or image tab first",
-    page: "Split right: this screen stays on the left. Bring a file, terminal or image tab to the front",
+    "no-front": "Split right: works when a file, terminal or image tab is open",
+    page: "Split right: this screen stays on the left; works when a file, terminal or image tab is in front",
     narrow: "Split right: the window is too narrow for two sides",
   },
   unsplit:
@@ -145,8 +145,8 @@ const JA: MainTabsText = {
   splitBlocked: {
     split: "右に分割: もう 2 面です",
     "no-front":
-      "右に分割: 先にファイル・ターミナル・画像のタブを開いてください",
-    page: "右に分割: この画面は左の面だけに置きます。ファイル・ターミナル・画像のタブを前面にしてください",
+      "右に分割: ファイル・ターミナル・画像のタブが開いているときに使えます",
+    page: "右に分割: この画面は左の面だけに置きます。ファイル・ターミナル・画像のタブが前面のときに使えます",
     narrow: "右に分割: 窓が 2 面を置ける幅より狭いです",
   },
   unsplit:

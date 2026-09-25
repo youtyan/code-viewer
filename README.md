@@ -219,6 +219,16 @@ Requires Node.js 20 or newer. Development uses
   with a copy button. Missing windows are not
   invented; when one config directory holds records from two accounts, the card
   keeps the newest values and adds a Mixed note that says how to separate them.
+  When a claude card has no value yet or an old one, Check usage starts claude
+  with that account in a background tmux session, in a folder kept only for this
+  check (`usage-check` in code-viewer's state directory, so the folder trust
+  question comes once per account), sends one short message (this
+  uses a little usage), waits for the new value and closes that session; if
+  claude stops at its first-run setup, the folder trust question or sign-in,
+  the card says so and what to do next.
+  When a project has its own status line in `.claude/settings.json` or
+  `.claude/settings.local.json`, claude started from code-viewer is given that
+  status line wrapped with `--settings`, so its usage is still recorded.
   New agent lists each account with its 5-hour and weekly usage and how old
   the values are, so you can pick one with room left. To move an agent's work
   to another account without signing in again, right-click the agent (or its

@@ -1,13 +1,17 @@
 // エージェント一覧の上に出す「アカウントの帯」。アカウント 1 つが 1 枚の
-// カード (4 列): 種類・表示名・5 時間枠と週枠のバー・いつの値か・そのアカウント
-// で動いているエージェントの数。ログインの状態とフックの状態はツールチップ。
+// カード: 利用者が付けた名前・種類とプランの札・ログイン中のメールアドレス・
+// 5 時間枠と週枠 (棒・割合・戻る時刻)・いつの値か・そのアカウントで動いている
+// エージェントの数。フックの状態と設定ディレクトリは名前のツールチップ。
 //
 //   Accounts 4 ▾                                                  Manage
-//   ┌ claude       Default ┐ ┌ codex        Personal ┐
-//   │ 5h    42%   ▰▰▱▱▱▱   │ │ Not signed in          │
-//   │ week  81% High ▰▰▰▰▱ │ │ [Sign in]              │
-//   │ as of 15m ago  1 run │ │ Checked just now       │
+//   ┌ work  [claude] [Max]          ⋯ ┐ ┌ Default  [codex]            ┐
+//   │ user@example.com                │ │ Not signed in               │
+//   │ 5h    ▰▰▱▱▱▱   16%  resets 06:10│ │ [Sign in]                   │
+//   │ week  ▰▱▱▱▱▱    3%  resets Thu …│ │                             │
+//   │ as of 3m ago             0 run  │ │ Checked just now    0 run   │
 //
+// claude のカードは、値が無い・古いとき「使用量を確かめる」を出す (部品は
+// usage-check.ts。設定の使用量の行と同じ)。⋯ のメニューにも同じ項目を置く。
 // 何も登録していない (既定だけ) で使用量も取れていないときは、帯を出さずに
 // 「アカウントと使用量」への 1 行の入口だけにする (押し付けがましくしない)。
 // 80% 以上は注意の色と「注意」の文字の両方で示す。値には必ず「いつの値か」
@@ -32,10 +36,12 @@ import {
   type AccountDialogs,
   accountDisplayName,
   el,
+  planLabel,
   resultLine,
   runningCount,
 } from "./accounts-dialogs";
 import type { AccountsText } from "./accounts-i18n";
+import { usageCheckBlock, usageCheckMenuItem } from "./usage-check";
 import {
   usageMeterRow,
   usageMixedText,
@@ -54,6 +60,10 @@ export type AccountsBandDeps = {
   openSettings(): void;
   /** 描き直しを頼む (結果の文を出した後など)。 */
   requestRender(): void;
+  /** 設定のアカウントの起動コマンドの欄へ移り、焦点を当てる。 */
+  openLaunchCommands(): void;
+  /** 今の時刻 (テストで差し替える)。 */
+  now?(): number;
 };
 
 export type AccountsBand = {
@@ -114,6 +124,23 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
     ].filter(Boolean);
   }
 
+  /**
+   * 2 行目: ログイン中のメールアドレス。無ければログインの状態を短く書く
+   * (全文はツールチップ)。
+   */
+  function whoLine(account: AccountStatus): HTMLElement {
+    const t = text();
+    const login = account.login;
+    const signedIn = login.state === "logged-in";
+    const line = el(
+      "span",
+      `agents-account-who${signedIn ? "" : ` agents-account-login-${login.state}`}`,
+      signedIn ? login.who || t.cardNoEmail : t.login[login.state],
+    );
+    line.title = loginLines(account).join("\n");
+    return line;
+  }
+
   function usageBlock(account: AccountStatus, now: number): HTMLElement {
     const t = text();
     const box = el("div", "agents-account-usage");
@@ -122,8 +149,7 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       state === "logged-out" ||
       (state === "no-config-dir" && account.builtin)
     ) {
-      // 未ログインには値を作らない (0% や空のバーで代用しない)。
-      box.appendChild(el("span", "agents-account-status", t.login[state]));
+      // 未ログインには値を作らない (0% や空のバーで代用しない)。状態は 2 行目。
       const login = el(
         "button",
         "agents-secondary agents-account-login-button",
@@ -139,15 +165,6 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       box.appendChild(login);
       return box;
     }
-    if (state !== "logged-in") {
-      const line = el(
-        "span",
-        `agents-account-status agents-account-login-${state}`,
-        t.login[state],
-      );
-      line.title = loginLines(account).join("\n");
-      box.appendChild(line);
-    }
     const usage = account.usage;
     if (usage.status !== "ok") {
       const line = el("span", "agents-account-status", t.usageUnavailable);
@@ -162,10 +179,33 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       );
       why.title = line.title;
       box.append(line, why);
+      // 包んでいない: その場で statusLine の確認の画面 (差分つき) を開く。
+      // 有効にしたら一覧を読み直すので、カードは値を待つ形に替わる。
+      const status = account.statusLine;
+      if (
+        usage.reason === "not-wrapped" &&
+        status &&
+        status.state !== "unreadable" &&
+        status.state !== "no-config-dir"
+      ) {
+        const enable = el(
+          "button",
+          "agents-secondary agents-account-enable-usage",
+          t.usageEnable,
+        );
+        enable.type = "button";
+        enable.title = t.statusLineDialogTitle("install");
+        enable.disabled = busy;
+        enable.addEventListener(
+          "click",
+          () => void run(() => deps.dialogs.statusLine(account, "install")),
+        );
+        box.appendChild(enable);
+      }
       return box;
     }
     for (const view of usageWindowViews(usage, now)) {
-      box.appendChild(usageMeterRow(view, now, t, { showReset: false }));
+      box.appendChild(usageMeterRow(view, now, t, { reset: "clock" }));
     }
     const mixed = usageMixedText(usage, now, t);
     if (mixed) {
@@ -189,8 +229,8 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       usageWindowViews(account.usage, now).some((view) => view.warn);
     box.classList.toggle("warn", warn);
 
+    // 1 行目: 利用者が付けた名前 (既定は「既定」)・種類とプランの札・⋯。
     const head = el("div", "agents-account-card-head");
-    head.appendChild(el("span", "agents-account-kind", account.agent));
     const name = el(
       "button",
       "agents-account-name",
@@ -205,12 +245,21 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
     ].join("\n");
     name.addEventListener("click", () => deps.openSettings());
     head.appendChild(name);
-    // 登録したアカウントだけ: 名前の変更・外す (既定のアカウントは変えられない)。
-    if (!account.builtin) {
+    head.appendChild(
+      el("span", "agents-chip agents-account-kind", account.agent),
+    );
+    const plan = planLabel(account.login.plan);
+    if (account.login.state === "logged-in" && plan) {
+      head.appendChild(el("span", "agents-chip agents-account-plan", plan));
+    }
+    head.appendChild(el("span", "agents-spacer"));
+    // ⋯: claude なら使用量を確かめる。登録したアカウントなら名前の変更・
+    // 外す (既定のアカウントは変えられない)。どちらも無ければ出さない。
+    if (account.agent === "claude" || !account.builtin) {
       const menu = el("button", "agents-icon-action agents-account-menu");
       menu.type = "button";
       menu.innerHTML = iconSvg("octicon-kebab-horizontal", KEBAB_16_PATH);
-      menu.title = t.bandMenu(account.name);
+      menu.title = t.bandMenu(accountDisplayName(account, t));
       menu.setAttribute("aria-label", menu.title);
       menu.setAttribute("aria-haspopup", "menu");
       menu.disabled = busy;
@@ -218,23 +267,34 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
         // 文書全体の click で閉じる処理に、開いたばかりのメニューを閉じさせない
         // (全体ボードのプロジェクトの ⋯ と同じ)。
         event.stopPropagation();
+        const check = usageCheckMenuItem(account, deps.client, t);
         showContextMenu(menu, [
-          {
-            label: `${t.rename}…`,
-            title: t.renameTitle(account.name),
-            onSelect: () => void run(() => deps.dialogs.rename(account)),
-          },
-          {
-            label: `${t.remove}…`,
-            title: t.removeTitle(account.name),
-            danger: true,
-            onSelect: () => void run(() => deps.dialogs.remove(account)),
-          },
+          ...(check ? [check] : []),
+          ...(account.builtin
+            ? []
+            : [
+                {
+                  label: `${t.rename}…`,
+                  title: t.renameTitle(account.name),
+                  onSelect: () => void run(() => deps.dialogs.rename(account)),
+                },
+                {
+                  label: `${t.remove}…`,
+                  title: t.removeTitle(account.name),
+                  danger: true,
+                  onSelect: () => void run(() => deps.dialogs.remove(account)),
+                },
+              ]),
         ]);
       });
       head.appendChild(menu);
     }
-    box.append(head, usageBlock(account, now));
+    box.append(head, whoLine(account), usageBlock(account, now));
+    const check = usageCheckBlock(account, now, deps.client, t, {
+      ...deps.dialogs,
+      openLaunchCommands: deps.openLaunchCommands,
+    });
+    if (check) box.appendChild(check);
 
     const foot = el("div", "agents-account-foot");
     const observed = usageObservedText(account.usage, account.login, now, t);
@@ -313,7 +373,7 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
   function render(): void {
     const t = text();
     const { data, error } = deps.client.snapshot();
-    const now = Date.now();
+    const now = (deps.now ?? Date.now)();
     element.replaceChildren();
     const unregistered = unregisteredCards();
     const visible = accountsBandVisible(data) || unregistered.length > 0;
@@ -382,6 +442,9 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       return JSON.stringify([
         data,
         error,
+        (data?.accounts ?? []).map((account) =>
+          deps.client.usageCheck(account.id),
+        ),
         message,
         busy,
         deps.isCollapsed(),

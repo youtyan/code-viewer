@@ -3464,6 +3464,11 @@ void pruneDeadServerRegistry().then(
         `code-viewer removed ${pruned.removed.length} server registry entries of servers that are gone`,
       );
     }
+    for (const legacy of pruned.removedLegacy) {
+      console.log(
+        `code-viewer removed a server registry entry that has no per-start token or version (it cannot be verified, so hooks never report to it): ${legacy.file} root=${legacy.root} port=${new URL(legacy.url).port}`,
+      );
+    }
     for (const failure of pruned.errors) {
       console.error(
         `code-viewer could not clean up the server registry entry ${failure.file}:\n${formatErrorDetail(failure.error)}`,

@@ -92,6 +92,7 @@ function response(accounts: AccountStatus[]): AccountsResponse {
 type Harness = {
   root: HTMLElement;
   logins: string[];
+  boards: number;
   loads: number;
   setSnapshot(next: AccountsSnapshot): void;
   failNextLoad: string;
@@ -109,6 +110,7 @@ function mount(accounts: AccountStatus[]): void {
   const h: Harness = {
     root,
     logins: [],
+    boards: 0,
     loads: 0,
     failNextLoad: "",
     setSnapshot(next) {
@@ -134,6 +136,9 @@ function mount(accounts: AccountStatus[]): void {
     },
     getText: () => agentsText("en"),
     openSettings: () => undefined,
+    openBoard: () => {
+      h.boards += 1;
+    },
     login: async (target) => {
       h.logins.push(target.id);
       return "Sign-in opened";
@@ -384,5 +389,35 @@ describe("the usage popover", () => {
     expect(popover()?.textContent).toContain(
       "GET /_agent/accounts failed: 500",
     );
+  });
+});
+
+describe("usage collection that is off", () => {
+  test("the popover links to the account card, where it can be turned on", () => {
+    const text = agentsText("en").accounts;
+    mount([
+      account({ id: "claude:default" }),
+      account({
+        id: "claude:work",
+        builtin: false,
+        name: "Work",
+        usage: {
+          status: "unavailable",
+          reason: "not-wrapped",
+          detail: "",
+          observedAt: 0,
+        },
+      }),
+    ]);
+    const panel = openPopover();
+    const link = panel.querySelector<HTMLButtonElement>(
+      ".usage-popover-enable",
+    );
+    expect(link?.textContent).toBe(`${text.usagePopoverEnable} →`);
+    expect(panel.textContent).toContain(text.usageReason["not-wrapped"]);
+    link?.click();
+    expect(harness.boards).toBe(1);
+    // 移ったら小窓は閉じる。
+    expect(popover()).toBeNull();
   });
 });

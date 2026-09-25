@@ -332,6 +332,12 @@ export type FormDialogOptions<T> = {
   // 確定ボタンを破壊的アクション (赤系) として表示する。
   danger?: boolean;
   focusTarget?: HTMLElement | null;
+  /** 確定の操作が無い画面 (読むだけ、または本文のボタンで済む)。cancelLabel の
+   * ボタン 1 つだけを出し、Enter も閉じるだけにする。 */
+  closeOnly?: boolean;
+  /** focusTarget が無いとき、本文のボタンではなく［取り消し］に最初の焦点を置く
+   * (本文に副作用のあるボタンがあり、Enter で押されては困るとき)。 */
+  focusCancel?: boolean;
   focusReturnTarget?: HTMLElement | null;
   /** 本文に整形済みの長い中身 (JSON など) を出すとき、横幅を広げる。 */
   wide?: boolean;
@@ -364,7 +370,7 @@ export function showFormDialog<T>(
         ),
       ).filter((element) => element.offsetParent !== null),
       cancel,
-      submit,
+      ...(opts.closeOnly ? [] : [submit]),
     ];
     const done = (value: T | null) => {
       document.removeEventListener("keydown", onKeydown);
@@ -374,6 +380,10 @@ export function showFormDialog<T>(
     };
     const trySubmit = async () => {
       if (busy) return;
+      if (opts.closeOnly) {
+        done(null);
+        return;
+      }
       const validationError = opts.validate?.() ?? null;
       if (validationError) {
         error.textContent = validationError;
@@ -425,7 +435,7 @@ export function showFormDialog<T>(
     const { backdrop, body } = createDialogShell(
       opts.title,
       undefined,
-      [cancel, submit],
+      opts.closeOnly ? [cancel] : [cancel, submit],
       {
         label: cancel.textContent ?? "",
         run: () => {
@@ -449,6 +459,8 @@ export function showFormDialog<T>(
       if (event.target === backdrop && !busy) done(null);
     });
     document.addEventListener("keydown", onKeydown);
-    (opts.focusTarget ?? focusables()[0])?.focus();
+    (
+      opts.focusTarget ?? (opts.focusCancel ? cancel : focusables()[0])
+    )?.focus();
   });
 }

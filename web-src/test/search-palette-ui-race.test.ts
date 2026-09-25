@@ -6,6 +6,7 @@ import type {
   FileSearchListResponse,
   GrepResponse,
 } from "../core/types";
+import { searchPaletteText } from "../views/search-palette-i18n";
 import { deferred, q, waitFor } from "./_test-helpers";
 
 beforeAll(() => {
@@ -403,6 +404,8 @@ async function setupGrep(
     paletteHeight?: number;
     language?: "en" | "ja";
     openSearchResults?: (query: string) => void;
+    /** 結果の件数の代わりに待つ状態の文 (古い応答で結果が出ないとき)。 */
+    waitForStatus?: string;
   } = {},
 ) {
   const urls: string[] = [];
@@ -550,16 +553,17 @@ async function setupGrep(
   input.dispatchEvent(new Event("input", { bubbles: true }));
   const expectedResultCount = options.matches?.length ?? 2;
   const expectedResultText =
-    options.language === "ja"
+    options.waitForStatus ??
+    (options.language === "ja"
       ? `${expectedResultCount} 件`
-      : `${expectedResultCount} results`;
+      : `${expectedResultCount} results`);
   await waitFor(
     () =>
       q(document, ".gdp-palette-status").textContent?.includes(
         expectedResultText,
       ) === true,
   );
-  if (options.waitForPreview !== false) {
+  if (options.waitForPreview !== false && !options.waitForStatus) {
     await waitFor(
       () => document.querySelectorAll(".gdp-source-table tr").length === 5,
     );
@@ -597,6 +601,31 @@ describe("grep search palette master/detail behavior", () => {
         ).map((button) => button.textContent),
       ).toEqual(["ファイル", "GREP"]);
       expect(q(document, ".gdp-palette-status").textContent).toContain("2 件");
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+
+  test("when the repository changed while searching, a button searches again with the same words", async () => {
+    const { palette, urls } = await setupGrep({
+      serverGeneration: 2,
+      grepGeneration: 1,
+      waitForStatus: searchPaletteText("en").repositoryChanged,
+    });
+    try {
+      const status = q(document, ".gdp-palette-status");
+      expect(status.textContent).toContain(
+        searchPaletteText("en").repositoryChanged,
+      );
+      const again = status.querySelector<HTMLButtonElement>(
+        ".gdp-palette-status-action",
+      );
+      expect(again?.textContent).toBe(searchPaletteText("en").searchAgain);
+      const greps = () => urls.filter((url) => url.startsWith("/_grep?"));
+      const before = greps();
+      again?.click();
+      await waitFor(() => greps().length > before.length);
+      expect(greps()[greps().length - 1]).toBe(before[before.length - 1]);
     } finally {
       palette.closeSearchPalette();
     }

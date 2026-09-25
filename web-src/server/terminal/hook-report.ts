@@ -14,6 +14,8 @@
 // (`--standalone`)。入口の裏のプロセス (登録簿の backend) は状態を持たない
 // ので送らない。入口・単体サーバとも起動ごとの本人確認が一致した相手だけに
 // 送る。古い版のように token / version が無い相手へ prompt を渡さない。
+// token も version も無い古い形の登録は、確かめようがないので候補にもしない
+// (失敗として数えない。サーバの起動時に登録簿から消える)。
 
 import {
   type AgentHookFailure,
@@ -35,6 +37,7 @@ import {
   verifyServerIdentity,
 } from "../entry/entry-file";
 import {
+  isLegacyServerRegistry,
   listServerRegistry,
   parseServerRegistryUrl,
   registryDir,
@@ -299,7 +302,7 @@ export async function reportAgentHook(
 }
 
 /**
- * 申告の候補: 入口と、登録簿のうち裏のプロセスでないもの。同じ URL は 1 つ
+ * 申告の候補: 入口と、登録簿のうち裏のプロセスでも古い形でもないもの。同じ URL は 1 つ
  * (末尾の `/` なし)。この後 `verifyReportTargetIdentity` を通った候補だけに送る。
  */
 export function reportTargets(
@@ -312,7 +315,9 @@ export function reportTargets(
     targets.set(url, { ...entry, url, role: "entry" });
   }
   for (const server of listing.servers) {
-    if (server.backend) continue;
+    // 古い形の登録は確かめられないので送らない (失敗としても数えない)。
+    // サーバが起きたときに消える (server-registry.ts の isLegacyServerRegistry)。
+    if (server.backend || isLegacyServerRegistry(server)) continue;
     const url = parseServerRegistryUrl(server.url).href.replace(/\/$/, "");
     if (targets.has(url)) continue;
     targets.set(url, {

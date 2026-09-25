@@ -1434,7 +1434,18 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
           if (responseGenerationIsStale(response.generation)) {
             state.items = [];
             state.selected = -1;
-            state.status.textContent = text().repositoryChanged;
+            // 同じ語・同じ条件で検索し直すボタンを添える。
+            const again = document.createElement("button");
+            again.type = "button";
+            again.className = "gdp-palette-status-action";
+            again.textContent = text().searchAgain;
+            again.addEventListener("click", () =>
+              updateGrepPalette(state, query),
+            );
+            state.status.replaceChildren(
+              document.createTextNode(`${text().repositoryChanged} `),
+              again,
+            );
             renderPalette(state);
             return;
           }

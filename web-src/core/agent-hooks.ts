@@ -476,6 +476,11 @@ export type AgentHookPlanResponse = {
   changed: boolean;
   /** 書く前の中身を残す場所。書き換えないなら null。時刻は書く瞬間のもの。 */
   backupPath: string | null;
+  /**
+   * 書く前と後の unified diff (core/text-diff.ts)。確認の画面が差分の見た目で
+   * 出す。変わらないなら空。ファイルが無ければ全部が足す行。
+   */
+  diff: string;
   /** 元の字下げ・並びのままでは書けない (書き直すと空白が変わる)。 */
   formattingChanged: boolean;
   launcher: { path: string; write: boolean };

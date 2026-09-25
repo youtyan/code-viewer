@@ -71,6 +71,13 @@ export type AccountPaths = {
   managedRoot: string;
   /** statusLine を包むスクリプトが使用量を保存する場所。 */
   usageDir: string;
+  /**
+   * 「使用量を確かめる」で claude を起こす確認専用のフォルダ (空)。見ている
+   * プロジェクトで起こすと、そのアカウントで信頼していないフォルダでは信頼の
+   * 確認で止まり、見ている画面で結果が変わった。ここならアカウントごとに最初の
+   * 1 回だけ答えれば済み、プロジェクトの設定 (フック・CLAUDE.md) も読まない。
+   */
+  usageCheckDir: string;
 };
 
 export function accountPaths(
@@ -84,6 +91,7 @@ export function accountPaths(
     registry: join(stateDir, "accounts.json"),
     managedRoot: join(stateDir, "accounts"),
     usageDir: join(stateDir, "agent-usage"),
+    usageCheckDir: join(stateDir, "usage-check"),
   };
 }
 

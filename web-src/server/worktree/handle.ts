@@ -5,6 +5,7 @@
 // - GET  /_worktree/file    変更されたメディアの before / after
 // - POST /_worktree/add     作業ツリーを 1 本増やす
 // - POST /_worktree/remove  作業ツリーを 1 本外す
+// - POST /_worktree/unlock  作業ツリーのロックを外す (git worktree unlock)
 // - POST /_worktree/open    その作業ツリーで code-viewer を開く
 //
 // 書き込み系が触るのは git のリポジトリ状態とプロセスなので、パスを素通しに
@@ -58,6 +59,7 @@ import {
   worktreeListResultAsync,
   worktreePruneResultAsync,
   worktreeRemoveResultAsync,
+  worktreeUnlockResultAsync,
 } from "../git";
 import { collectByteRangeFromStream, parseHttpByteRange } from "../range";
 import { rawFileHeaders } from "../raw-file-headers";
@@ -603,6 +605,25 @@ async function handleRemovePost(req: Request, cwd: string): Promise<Response> {
 }
 
 /**
+ * ロックを外す。ロックされた登録は git が消さない (remove は断り、prune は黙って
+ * 飛ばす) ので、消す画面から外せるようにする。
+ */
+async function handleUnlockPost(req: Request, cwd: string): Promise<Response> {
+  const parsed = await parseBoundedJsonBody(
+    req,
+    BODY_MAX_BYTES,
+    "body too large",
+  );
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as Record<string, unknown>;
+  const resolved = await resolveListedPath(cwd, bodyString(body, "path"));
+  if (resolved instanceof Response) return resolved;
+  const result = await worktreeUnlockResultAsync(resolved.root, resolved.path);
+  if (result.error) return textError(result.error, result.status ?? 500);
+  return actionJson({});
+}
+
+/**
  * 「開く」で起こしたサーバを止める。起こす口だけあって止める口が無いと、
  * 開いた本人にも止め方が分からないまま増え続ける。
  */
@@ -703,6 +724,11 @@ export function handleWorktreeRoute(
         methods: ["POST"],
         sideEffect: true,
         handler: () => handleRemovePost(req, cwd),
+      },
+      "/_worktree/unlock": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleUnlockPost(req, cwd),
       },
       "/_worktree/open": {
         methods: ["POST"],

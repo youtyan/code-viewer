@@ -113,6 +113,7 @@ describe("paths", () => {
     expect(out.registry).toBe(`${expected}/accounts.json`);
     expect(out.managedRoot).toBe(`${expected}/accounts`);
     expect(out.usageDir).toBe(`${expected}/agent-usage`);
+    expect(out.usageCheckDir).toBe(`${expected}/usage-check`);
   });
 });
 
@@ -1034,6 +1035,7 @@ describe("login status (asked from the CLI itself)", () => {
         return rpcOk(line);
       },
       now: () => 0,
+      markOnboarded: async () => ({ status: "already" as const }),
     });
     await expect(checker.status(codexAccount, "codex")).resolves.toMatchObject({
       state: "logged-in",
@@ -1071,6 +1073,7 @@ describe("login status (asked from the CLI itself)", () => {
         throw new Error("spawn /bin/sample-shell ENOENT");
       },
       now: () => 0,
+      markOnboarded: async () => ({ status: "already" as const }),
     });
     const login = await checker.status(codexAccount, "codex");
     expect(login).toMatchObject({ state: "logged-in", who: "" });
@@ -1244,6 +1247,7 @@ describe("login status (asked from the CLI itself)", () => {
             );
           },
           now: () => AT,
+          markOnboarded: async () => ({ status: "already" as const }),
         }),
       );
       const body = JSON.stringify(
@@ -1303,6 +1307,7 @@ describe("login status (asked from the CLI itself)", () => {
         throw new Error("claude does not use app-server");
       },
       now: () => 0,
+      markOnboarded: async () => ({ status: "already" as const }),
     });
     const account = {
       id: "claude:default",

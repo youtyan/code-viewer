@@ -121,7 +121,7 @@ export const PROJECTS_EN: ProjectsText = {
   stopServer: "Stop its code-viewer…",
   stopServerTitle: "Stop the code-viewer server that code-viewer started",
   stopServerNotLaunched:
-    "Started outside code-viewer (or this screen) — stop it where it was started",
+    "Started outside code-viewer (or it is this screen), so it can be stopped from the terminal that started it",
   registeredMark: "Registered project",
   starting: "Starting…",
   startingTitle: (name) => `Starting the code-viewer server for ${name}`,
@@ -228,7 +228,7 @@ export const PROJECTS_JA: ProjectsText = {
   stopServer: "code-viewer を止める…",
   stopServerTitle: "code-viewer が起こしたサーバを止めます",
   stopServerNotLaunched:
-    "code-viewer の外で起動したサーバ (またはこの画面) です。起動した場所で止めてください",
+    "code-viewer の外で起動したサーバ (またはこの画面) なので、起動したターミナルで止められます",
   registeredMark: "登録したプロジェクト",
   starting: "起動中…",
   startingTitle: (name) => `${name} の code-viewer を起動しています`,

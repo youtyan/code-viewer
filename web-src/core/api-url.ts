@@ -28,6 +28,10 @@ const API_ENDPOINTS = {
   agentAccounts: { path: "/_agent/accounts", zone: "entry" },
   agentAccountsLogin: { path: "/_agent/accounts/login", zone: "entry" },
   agentAccountsPlan: { path: "/_agent/accounts/plan", zone: "entry" },
+  agentAccountsUsageCheck: {
+    path: "/_agent/accounts/usage-check",
+    zone: "entry",
+  },
   agentCapture: { path: "/_agent/capture", zone: "entry" },
   agentHooks: { path: "/_agent/hooks", zone: "entry" },
   agentHooksApply: { path: "/_agent/hooks/apply", zone: "entry" },
@@ -153,6 +157,7 @@ const API_ENDPOINTS = {
   worktreeOpen: { path: "/_worktree/open", zone: "entry" },
   worktreeRemove: { path: "/_worktree/remove", zone: "project" },
   worktreeStop: { path: "/_worktree/stop", zone: "entry" },
+  worktreeUnlock: { path: "/_worktree/unlock", zone: "project" },
   diffJson: { path: "/diff.json", zone: "project" },
   entryBackend: { path: "/_entry/backend", zone: "entry" },
   entryRestart: { path: "/_entry/restart", zone: "entry" },

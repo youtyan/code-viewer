@@ -3,7 +3,7 @@
 // 包むスクリプトは本物の /bin/sh で動かし、元のコマンドの出力と終了コードが
 // そのまま返ること・保存に失敗しても返ることを見る。
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -17,19 +17,23 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { unifiedDiff } from "../core/text-diff";
 import { claudeUsageFile } from "../server/accounts/usage";
 import {
   applyStatusLine,
+  maintainStatusLineWrapper,
   parseWrappedCommand,
   planStatusLine,
   StatusLineError,
   statusLineStatus,
   statusLineWrapperPath,
+  statusLineWrapperScript,
   wrappedCommand,
 } from "../server/terminal/statusline";
 
@@ -429,5 +433,126 @@ describe("the wrapper script", () => {
   }) => {
     const wrapped = await install({});
     expect(run(wrapped, {}, input).stdout).toBe(expected);
+  });
+});
+
+describe("the wrapper is interrupted", () => {
+  // Claude Code は、走っている statusLine を次の更新が来ると打ち切る。打ち切りの
+  // たびに一時ファイルが 1 つずつ残り、実際に数百個溜まっていた。
+  test("a TERM while the original command runs leaves no temporary file", async () => {
+    mkdirSync(usageDir, { recursive: true });
+    const script = join(usageDir, "code-viewer-statusline");
+    writeFileSync(script, statusLineWrapperScript(usageDir), { mode: 0o755 });
+    const child = spawn(script, ["sleep 1; cat >/dev/null"], {
+      stdio: ["pipe", "ignore", "ignore"],
+      env: { ...process.env, CLAUDE_CONFIG_DIR: "/home/sample/accounts/a" },
+    });
+    child.stdin.end('{"session_id":"sample"}');
+    const temps = () =>
+      readdirSync(usageDir).filter((name) => name.startsWith(".claude-"));
+    for (let i = 0; i < 50 && temps().length === 0; i++)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(temps()).toHaveLength(1);
+    const exited = new Promise((resolve) => child.once("exit", resolve));
+    child.kill("SIGTERM");
+    await exited;
+    expect(temps()).toEqual([]);
+  });
+});
+
+describe("maintainStatusLineWrapper", () => {
+  const NOW_MS = 1_790_000_000_000;
+  const at = (path: string, ms: number) =>
+    utimesSync(path, new Date(ms), new Date(ms));
+
+  test("removes only stale temporary files of the wrapper", () => {
+    mkdirSync(usageDir, { recursive: true });
+    const files = {
+      stale: ".claude-4294967295.12345",
+      fresh: ".claude-4294967295.23456",
+      saved: "claude-4294967295.json",
+      other: ".claude-notes",
+    };
+    for (const name of Object.values(files))
+      writeFileSync(join(usageDir, name), "{}");
+    at(join(usageDir, files.stale), NOW_MS - 11 * 60 * 1000);
+    at(join(usageDir, files.fresh), NOW_MS - 60 * 1000);
+    at(join(usageDir, files.saved), NOW_MS - 24 * 60 * 60 * 1000);
+    at(join(usageDir, files.other), NOW_MS - 24 * 60 * 60 * 1000);
+    expect(maintainStatusLineWrapper(usageDir, NOW_MS)).toEqual([]);
+    expect(readdirSync(usageDir).sort()).toEqual(
+      [files.fresh, files.other, files.saved].sort(),
+    );
+  });
+
+  test.each([
+    {
+      name: "an older wrapper is rewritten",
+      before: "#!/bin/sh\n# older wrapper\n",
+      after: () => statusLineWrapperScript(usageDir),
+    },
+    {
+      name: "a current wrapper is left as is",
+      before: null,
+      after: () => statusLineWrapperScript(usageDir),
+    },
+  ])("$name", ({ before, after }) => {
+    mkdirSync(usageDir, { recursive: true });
+    writeFileSync(
+      statusLineWrapperPath(usageDir),
+      before ?? statusLineWrapperScript(usageDir),
+      { mode: 0o755 },
+    );
+    expect(maintainStatusLineWrapper(usageDir, NOW_MS)).toEqual([]);
+    expect(readFileSync(statusLineWrapperPath(usageDir), "utf8")).toBe(after());
+  });
+
+  test("does not create a missing wrapper or directory", () => {
+    expect(maintainStatusLineWrapper(usageDir, NOW_MS)).toEqual([]);
+    expect(existsSync(usageDir)).toBe(false);
+  });
+});
+
+describe("the diff shown before writing", () => {
+  // 確認の画面の差分は、サーバが実際に書く中身から作る。
+  test.each([
+    {
+      name: "install over a user's statusLine",
+      start: "own",
+      action: "install",
+    },
+    { name: "install into a missing file", start: "none", action: "install" },
+    { name: "uninstall", start: "wrapped", action: "uninstall" },
+    { name: "nothing changes", start: "wrapped", action: "install" },
+  ] as const)("$name", async ({ start, action }) => {
+    if (start !== "none") {
+      write({
+        model: "sample",
+        statusLine: { type: "command", command: ORIGINAL },
+      });
+    }
+    if (start === "wrapped") await roundTrip("install");
+    const before = existsSync(settingsPath())
+      ? readFileSync(settingsPath(), "utf8")
+      : null;
+    const plan = planStatusLine(configDir, action, usageDir, NOW);
+    await applyStatusLine(configDir, action, usageDir, plan, NOW);
+    const after = existsSync(settingsPath())
+      ? readFileSync(settingsPath(), "utf8")
+      : null;
+    if (!plan.changed) {
+      expect(plan.diff).toBe("");
+      expect(after).toBe(before);
+      return;
+    }
+    expect(plan.diff).toBe(unifiedDiff(before, after ?? "", "settings.json"));
+    const lines = plan.diff.split("\n");
+    // 変わるのは statusLine の command の行だけ (ほかの行は前後の文脈)。
+    if (start === "own") {
+      expect(lines.filter((line) => /^[+-][^+-]/.test(line))).toEqual([
+        `-    "command": ${JSON.stringify(ORIGINAL)}`,
+        `+    "command": ${JSON.stringify(wrappedCommand(statusLineWrapperPath(usageDir), ORIGINAL))}`,
+      ]);
+    }
   });
 });

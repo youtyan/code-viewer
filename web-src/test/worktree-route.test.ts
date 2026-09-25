@@ -132,6 +132,7 @@ describe("worktree route dispatch", () => {
     { name: "rejects GET on remove", path: "/_worktree/remove" },
     { name: "rejects GET on open", path: "/_worktree/open" },
     { name: "rejects GET on stop", path: "/_worktree/stop" },
+    { name: "rejects GET on unlock", path: "/_worktree/unlock" },
   ])("$name", async ({ path }) => {
     const res = await call(path);
     expect(res?.status).toBe(405);
@@ -142,6 +143,7 @@ describe("worktree route dispatch", () => {
     { name: "guards remove", path: "/_worktree/remove", body: { path: "/x" } },
     { name: "guards open", path: "/_worktree/open", body: { path: "/x" } },
     { name: "guards stop", path: "/_worktree/stop", body: { path: "/x" } },
+    { name: "guards unlock", path: "/_worktree/unlock", body: { path: "/x" } },
   ])("$name against cross-origin writes", async ({ path, body }) => {
     const res = await post(path, body, () => false);
     expect(res?.status).toBe(403);
@@ -649,6 +651,57 @@ describe("worktree remove", () => {
 
     const body = await listWorktrees();
     expect(body.worktrees.map((entry) => entry.name)).toContain("feature-x");
+  });
+});
+
+describe("worktree unlock", () => {
+  test.each([
+    {
+      name: "a locked worktree whose folder is gone: unlock, then remove",
+      lock: true,
+      removeFolder: true,
+    },
+    {
+      name: "a locked worktree with its folder: unlock, then remove",
+      lock: true,
+      removeFolder: false,
+    },
+  ])("$name", async ({ lock, removeFolder }) => {
+    await post("/_worktree/add", { name: "feature-x" });
+    const added = await listedPath((entry) => entry.name === "feature-x");
+    if (lock) runGit(repo, ["worktree", "lock", added]);
+    if (removeFolder) rmSync(added, { recursive: true, force: true });
+    const locked = await listWorktrees();
+    expect(
+      locked.worktrees.find((entry) => entry.name === "feature-x")?.locked,
+    ).toBe(true);
+
+    const res = await post("/_worktree/unlock", { path: added });
+    expect(res?.status).toBe(200);
+    const unlocked = await listWorktrees();
+    expect(
+      unlocked.worktrees.find((entry) => entry.name === "feature-x")?.locked,
+    ).toBe(false);
+    // 外したら、そのまま消せる (消す画面の続き)。
+    const removed = await post("/_worktree/remove", { path: added });
+    expect(removed?.status).toBe(200);
+    expect(
+      (await listWorktrees()).worktrees.map((entry) => entry.name),
+    ).not.toContain("feature-x");
+  });
+
+  test("a failure returns git's own words, not a summary", async () => {
+    await post("/_worktree/add", { name: "feature-x" });
+    const added = await listedPath((entry) => entry.name === "feature-x");
+    // ロックされていない作業ツリーを外そうとすると git が断る。その文を丸めずに返す。
+    const res = await post("/_worktree/unlock", { path: added });
+    expect(res?.status).toBe(500);
+    expect(await res?.text()).toMatch(/fatal: '.*feature-x' is not locked/);
+  });
+
+  test("refuses a path that is not a listed worktree", async () => {
+    const res = await post("/_worktree/unlock", { path: join(repo, "nope") });
+    expect(res?.status).not.toBe(200);
   });
 });
 

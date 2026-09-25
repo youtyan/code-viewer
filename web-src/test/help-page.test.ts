@@ -750,7 +750,11 @@ describe("help page text uses each screen's names", () => {
       agents: {
         ...labels.agents,
         sidebar: { ...labels.agents.sidebar, newAgent: "Sample new agent" },
-        accounts: { ...labels.agents.accounts, loginButton: "Sample sign in" },
+        accounts: {
+          ...labels.agents.accounts,
+          loginButton: "Sample sign in",
+          createdSignIn: "Sample sign in now",
+        },
       },
     };
   }
@@ -759,7 +763,7 @@ describe("help page text uses each screen's names", () => {
     ["en", "getting-started", "Sample new agent"],
     ["en", "getting-started", "Sample sign in"],
     ["ja", "start-agent", "Sample new agent"],
-    ["ja", "add-account", "Sample sign in"],
+    ["ja", "add-account", "Sample sign in now"],
   ])("in %s the %s section shows a renamed button %j", (lang, section, name) => {
     renderHelpPage(lang, section, { helpLabels: renamed });
     const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
@@ -812,7 +816,7 @@ describe("help page text uses each screen's names", () => {
         "新しく作る",
         "既にあるディレクトリを使う",
         "内容を確認…",
-        "ログイン",
+        "ログインする",
         "別のアカウントで続ける…",
         "起動して引き継ぐ",
       ],

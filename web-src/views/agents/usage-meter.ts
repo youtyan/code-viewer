@@ -21,11 +21,39 @@ export function usageBarPercent(usedPercent: number): number {
   return Math.min(100, usedPercent);
 }
 
+/**
+ * 窓が戻る時刻の書き方 (全体ボードのカード)。今日なら時刻だけ、今日でなく
+ * 24 時間より先でなければ曜日つき、24 時間以上先なら日付つき。時刻は利用者の
+ * 時計 (ブラウザの時間帯) で書く。
+ */
+export function resetClock(
+  resetsAt: number,
+  now: number,
+  t: AccountsText,
+): string {
+  const at = new Date(resetsAt);
+  const today = new Date(now);
+  const time = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+  const sameDay =
+    at.getFullYear() === today.getFullYear() &&
+    at.getMonth() === today.getMonth() &&
+    at.getDate() === today.getDate();
+  if (sameDay) return t.resetsAt(time);
+  if (resetsAt - now < 24 * 60 * 60_000) {
+    return t.resetsAt(`${t.weekdays[at.getDay()] ?? ""} ${time}`);
+  }
+  return t.resetsAt(`${t.resetDate(at.getMonth() + 1, at.getDate())} ${time}`);
+}
+
+/**
+ * reset: 右端に書くもの。remaining = 「あと 1時間58分でリセット」(最下段・起動の
+ * 画面)、clock = 「06:10 に戻る」(全体ボードのカード。棒を % の前に置く)、none = 書かない。
+ */
 export function usageMeterRow(
   view: UsageWindowView,
   now: number,
   t: AccountsText,
-  options: { showReset: boolean },
+  options: { reset: "remaining" | "clock" | "none" },
 ): HTMLElement {
   const row = document.createElement("div");
   row.className = "usage-meter";
@@ -52,13 +80,20 @@ export function usageMeterRow(
   fill.className = "usage-meter-fill";
   fill.style.width = `${usageBarPercent(view.window.usedPercent)}%`;
   bar.appendChild(fill);
-  row.append(name, value, bar);
+  if (options.reset === "clock") {
+    row.classList.add("usage-meter-clock");
+    row.append(name, bar, value);
+  } else {
+    row.append(name, value, bar);
+  }
   const reset = view.expired
     ? t.resetPassed
-    : view.window.resetsAt > 0
-      ? t.resetsIn(t.duration(view.window.resetsAt - now))
-      : "";
-  if (options.showReset) {
+    : view.window.resetsAt <= 0
+      ? ""
+      : options.reset === "clock"
+        ? resetClock(view.window.resetsAt, now, t)
+        : t.resetsIn(t.duration(view.window.resetsAt - now));
+  if (options.reset !== "none") {
     const resetEl = document.createElement("span");
     resetEl.className = "usage-meter-reset";
     resetEl.textContent = reset;

@@ -224,6 +224,7 @@ function mount(
     handoff: {
       handoff: () => undefined,
       openHookHelp: () => undefined,
+      hookState: () => null,
     },
     openBoard: () => undefined,
     getCollapsed: () => [],

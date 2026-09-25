@@ -17,10 +17,12 @@ import {
   handoffArgs,
   handoffPrompt,
   isAccountAgent,
+  type LaunchResponse,
   launchCommandLine,
   type RegisterAccountPlan,
   renameAccount,
   type ShareEntry,
+  type StatusLinePlanResponse,
   tmuxSessionName,
   usageWindowViews,
 } from "../../core/agent-accounts";
@@ -35,6 +37,7 @@ import { CHEVRON_DOWN_16_PATH, COPY_16_PATHS, iconSvg } from "../../core/icons";
 import { showFormDialog } from "../ui-dialog";
 import type { AccountsClient } from "./accounts-client";
 import type { AccountsText } from "./accounts-i18n";
+import { settingsDiffBlock } from "./settings-diff";
 import { usageMeterRow, usageObservedText } from "./usage-meter";
 
 export type AccountDialogDeps = {
@@ -260,6 +263,11 @@ export function accountDisplayName(
   return account.builtin ? text.defaultName : account.name;
 }
 
+/** プランの表示 (max → Max)。無ければ空。 */
+export function planLabel(plan: string): string {
+  return plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : "";
+}
+
 /** そのアカウントで動いているペインの数。 */
 export function runningCount(
   overview: AgentOverviewResponse | null,
@@ -279,7 +287,38 @@ export type AccountDialogs = {
   rename(account: AccountStatus): Promise<string | null>;
   login(account: AccountEntry): Promise<string>;
   launch(options?: LaunchOptions): Promise<string | null>;
+  /**
+   * そのアカウント・そのフォルダでエージェントを起こし、ターミナルのタブで
+   * 前面に出す (確認の画面を出さない。「使用量を確かめる」が止まったとき)。
+   */
+  /** 戻り値は、このセッションの使用量を記録できない理由 (無ければ空)。 */
+  openHere(account: AccountEntry, folder: string): Promise<string>;
+  /** statusLine を包む・戻す確認の画面。戻り値は結果の文 (やめたら null)。 */
+  statusLine(
+    account: AccountStatus,
+    action: "install" | "uninstall",
+  ): Promise<string | null>;
 };
+
+/** 書けないファイルのとき、生成元に写す statusLine (JSON の欄 1 つ)。 */
+export function statusLineCopyText(
+  plan: Pick<StatusLinePlanResponse, "after">,
+): string {
+  return `"statusLine": ${JSON.stringify(plan.after ?? null, null, 2)}`;
+}
+
+/**
+ * 起動はしたが、プロジェクトの statusLine を読めず使用量を記録できない
+ * ことの知らせ (起動の結果に添える)。無ければ空。
+ */
+export function statusLineNotice(
+  result: Pick<LaunchResponse, "statusLineError">,
+  t: AccountsText,
+): string[] {
+  return result.statusLineError
+    ? [t.launchStatusLineFailed, result.statusLineError]
+    : [];
+}
 
 export type LaunchOptions = {
   /** 選んでおくプロジェクト。 */
@@ -341,7 +380,36 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
         const name = el("span", "terminal-mono", displayName(entry));
         name.title = abbreviateHome(entry.target, home);
         item.append(input, name);
-        list.appendChild(item);
+        if (entry.category !== "optional") {
+          list.appendChild(item);
+          continue;
+        }
+        // 中身を確かめられないもの: その場で場所 (絶対パス) を写せるようにする。
+        const row = el("div", "agent-accounts-share-row");
+        const copy = el("button", "gdp-btn gdp-btn-sm", t.copyLocation);
+        copy.type = "button";
+        copy.title = entry.target;
+        const copied = el("span", "agent-accounts-share-copied");
+        copied.setAttribute("role", "status");
+        copy.addEventListener("click", () => {
+          navigator.clipboard.writeText(entry.target).then(
+            () => {
+              copied.textContent = t.copiedLocation;
+            },
+            (error: unknown) => {
+              showCopyFailure(
+                copy,
+                "copying the location failed",
+                error,
+                entry.target,
+                1500,
+              );
+              copied.textContent = `${t.copyLocationFailed}: ${formatErrorDetail(error)}`;
+            },
+          );
+        });
+        row.append(item, copy, copied);
+        list.appendChild(row);
       }
       box.appendChild(list);
       return box;
@@ -505,12 +573,18 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
         wide: true,
         submitLabel: t.createRun,
         cancelLabel: t.cancel,
-        submit: async () => {
-          await deps.client.create(plan, view.selected());
-          return t.added(plan.name);
-        },
+        submit: async () => deps.client.create(plan, view.selected()),
       });
-      return done;
+      if (!done) return null;
+      // 作り終えたら、その場でログインへ進める (カードの行を探させない)。
+      const signIn = await showFormDialog({
+        title: t.createdTitle(done.name),
+        body: notes([t.createdBody]),
+        submitLabel: t.createdSignIn,
+        cancelLabel: t.createdLater,
+        submit: () => login({ ...done, builtin: false }),
+      });
+      return signIn ? `${t.added(done.name)}\n${signIn}` : t.added(done.name);
     }
     const plan = choice.plan;
     if (!plan.exists || !plan.isDirectory) {
@@ -612,6 +686,132 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
         return t.renamed(account.name, renamed.name);
       },
     });
+  }
+
+  /**
+   * 起動先の tmux のセッションの既定: そのプロジェクトのペインがあるセッション、
+   * 無ければ前回そのプロジェクトで使ったもの、それも無ければフォルダの名前。
+   */
+  function launchSessionFor(
+    project: string,
+    last: AccountsResponse["lastLaunch"],
+  ): string {
+    const panes = deps.getOverview()?.panes ?? [];
+    const name = project.split("/").filter(Boolean).pop() ?? "agents";
+    const fallback =
+      last?.project === project && last.session
+        ? last.session
+        : tmuxSessionName(name);
+    return defaultLaunchSession(project, panes, fallback).session;
+  }
+
+  /** statusLine を包む・戻す確認の画面の中身。 */
+  function statusLineBody(plan: StatusLinePlanResponse): HTMLElement {
+    const t = text();
+    const home = deps.client.snapshot().data?.home ?? "";
+    const short = (path: string) => abbreviateHome(path, home);
+    const body = el("div", "agent-hooks-dialog");
+    if (plan.writeBlocked && plan.changed) {
+      // 書けない (別の場所から生成される) ファイル: 写す内容を出し、確認の
+      // ボタンでコピーする (フックの同じ画面と同じ作り)。
+      body.appendChild(el("p", "", t.statusLineBlocked));
+      body.appendChild(
+        labeled(t.statusLineAfter, statusLineCopyText(plan), true),
+      );
+      body.appendChild(labeled("", plan.writeBlocked, true));
+      return body;
+    }
+    // 書き込む先と、書く前と後の差分 (サーバが plan で作ったもの) が主役。
+    body.append(
+      ...settingsDiffBlock(plan, home, {
+        file: t.statusLineFile,
+        unchanged: t.statusLineNothing,
+        drawFailed: t.statusLineDiffFailed,
+      }),
+    );
+    const notes: string[] = [];
+    if (plan.changed) {
+      notes.push(
+        plan.backupPath
+          ? t.statusLineBackup(
+              short(plan.backupPath).replace(
+                /-\d{8}-\d{6}$/,
+                "-<YYYYMMDD-HHMMSS>",
+              ),
+            )
+          : t.statusLineNewFile,
+      );
+      if (plan.formattingChanged) notes.push(t.statusLineFormatting);
+    }
+    if (plan.action === "install") {
+      if (plan.wrapper.write)
+        notes.push(t.statusLineWrapper(short(plan.wrapper.path)));
+      notes.push(t.statusLineSaves(short(plan.usageDir)));
+      notes.push(t.statusLineRestore);
+    }
+    notes.push(t.statusLineEffect);
+    const list = el("ul", "agent-hooks-dialog-notes");
+    for (const note of notes) list.appendChild(el("li", "", note));
+    body.appendChild(list);
+    return body;
+  }
+
+  /**
+   * statusLine を包む・戻す確認の画面 (設定の使用量の行・全体ボードのカード)。
+   * 書いたら一覧を読み直す (applyStatusLine)。書けないファイルなら、写す内容を
+   * コピーする。
+   */
+  async function statusLine(
+    account: AccountStatus,
+    action: "install" | "uninstall",
+  ): Promise<string | null> {
+    const t = text();
+    const plan = await deps.client.planStatusLine(account.id, action);
+    const blocked = plan.writeBlocked !== "" && plan.changed;
+    return showFormDialog({
+      title: t.statusLineDialogTitle(action),
+      body: statusLineBody(plan),
+      wide: true,
+      danger: false,
+      submitLabel: blocked
+        ? t.statusLineCopy
+        : action === "install"
+          ? t.statusLineInstall.replace(/…$/, "")
+          : t.statusLineUninstall.replace(/…$/, ""),
+      cancelLabel: blocked ? t.close : t.cancel,
+      submit: async () => {
+        if (blocked) {
+          await navigator.clipboard.writeText(statusLineCopyText(plan));
+          return t.statusLineCopied;
+        }
+        const result = await deps.client.applyStatusLine(plan, account.id);
+        const lines = [
+          result.changed ? t.statusLineApplied[action] : t.statusLineUnchanged,
+        ];
+        if (result.backupPath) lines.push(t.backupAt(result.backupPath));
+        if (result.wrapperWritten)
+          lines.push(t.statusLineWrapper(plan.wrapper.path));
+        return lines.join("\n");
+      },
+    });
+  }
+
+  async function openHere(
+    account: AccountEntry,
+    folder: string,
+  ): Promise<string> {
+    // 起動の画面の「起動」と同じ経路 (POST /_agent/launch → そのペインを開く)。
+    const result = await deps.client.launch({
+      accountId: account.id,
+      project: folder,
+      session: launchSessionFor(
+        folder,
+        deps.client.snapshot().data?.lastLaunch ?? null,
+      ),
+    });
+    deps.openPane(result.paneId);
+    await Promise.all([deps.refreshOverview(), deps.client.load()]);
+    return statusLineNotice(result, text()).join("\n");
   }
 
   async function login(account: AccountEntry): Promise<string> {
@@ -876,7 +1076,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
         return box;
       }
       for (const view of usageWindowViews(usage, now)) {
-        box.appendChild(usageMeterRow(view, now, t, { showReset: true }));
+        box.appendChild(usageMeterRow(view, now, t, { reset: "remaining" }));
       }
       return box;
     }
@@ -895,14 +1095,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
 
     function syncSession() {
       if (sessionTouched) return;
-      const project = projectSelect.value;
-      const panes = deps.getOverview()?.panes ?? [];
-      const name = project.split("/").filter(Boolean).pop() ?? "agents";
-      const fallback =
-        last?.project === project && last.session
-          ? last.session
-          : tmuxSessionName(name);
-      session.value = defaultLaunchSession(project, panes, fallback).session;
+      session.value = launchSessionFor(projectSelect.value, last);
     }
 
     /** 引き継ぎのときに起動コマンドの後ろに足す引数 (最初の指示など)。 */
@@ -1026,13 +1219,16 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
         });
         deps.openPane(result.paneId);
         await Promise.all([deps.refreshOverview(), deps.client.load()]);
-        const message = t.launchStarted(result.session);
-        return result.rememberError
-          ? `${message}\n${t.launchRememberFailed}\n${result.rememberError}`
-          : message;
+        return [
+          t.launchStarted(result.session),
+          ...(result.rememberError
+            ? [t.launchRememberFailed, result.rememberError]
+            : []),
+          ...statusLineNotice(result, t),
+        ].join("\n");
       },
     }).finally(unsubscribe);
   }
 
-  return { add, remove, rename, login, launch };
+  return { add, remove, rename, login, launch, openHere, statusLine };
 }

@@ -4,10 +4,12 @@
 // 引き継ぎの形で開く。
 //
 // 次の担当に渡すのは、フックが知らせた会話記録の場所だけ
-// (AgentPane.conversation)。フックが無い・まだ申告が来ていないペインでは
-// 場所が分からないので押せなくし、フックの入れ方へ送る項目を並べる。
+// (AgentPane.conversation)。場所が分からないペインでは押せなくし、理由を
+// 次の項目に書く。フックが入っていればまだ申告が来ていないだけなので
+// 話しかけるよう伝え、入っていない (・まだ分からない) ならフックの入れ方へ送る。
 
 import { isAccountAgent } from "../../core/agent-accounts";
+import type { AgentHookState, HookAgent } from "../../core/agent-hooks";
 import type { AgentPane } from "../../core/agent-overview";
 import type { ContextMenuItem } from "../context-menu";
 import type { AgentsText } from "./i18n";
@@ -17,6 +19,8 @@ export type HandoffMenuActions = {
   handoff(pane: AgentPane): void;
   /** フックの入れ方の案内へ。 */
   openHookHelp(): void;
+  /** その種類のフックの状態 (設定の節と同じもの)。まだ取っていなければ null。 */
+  hookState(agent: HookAgent): AgentHookState | null;
 };
 
 /** 引き継げるか: claude / codex で、フックが会話記録の場所を知らせている。 */
@@ -46,6 +50,23 @@ export function handoffMenuItems(
   }
   // 押せない項目にはツールチップが出ないブラウザがあるので、理由は次の
   // 項目の文字そのものに書く。
+  if (actions.hookState(pane.kind) === "installed") {
+    return [
+      { kind: "separator" },
+      {
+        label: t.handoff,
+        title: t.handoffWaitingTitle,
+        disabled: true,
+        onSelect: () => undefined,
+      },
+      {
+        label: t.handoffWaiting,
+        title: t.handoffWaitingTitle,
+        disabled: true,
+        onSelect: () => undefined,
+      },
+    ];
+  }
   return [
     { kind: "separator" },
     {

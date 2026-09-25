@@ -2,7 +2,8 @@
 //
 // 1. フックの入力 (claude・codex の公式の共通欄 session_id・transcript_path・
 //    cwd) から会話の場所を取り出し、申告に載せる
-// 2. 申告を受けたサーバがペインの状態の記録に持ち、/_agent/overview のペインに
+// 2. 申告を受けたサーバがペインの会話の場所として持ち (状態の記録とは別。
+//    保存と読み戻しは agent-conversations.test.ts)、/_agent/overview のペインに
 //    載せる (セッションが終われば外す)
 // 3. 起動の経路 (/_agent/launch の handoff) が、次の担当に渡す最初の指示と
 //    --add-dir を、send-keys ではなく起動の引数の配列で組む
@@ -37,6 +38,7 @@ import {
 import { agentCommandArgv } from "../server/accounts/launch";
 import {
   clearAgentStates,
+  getAgentConversation,
   getAgentState,
   listAgentStates,
   recordAgentState,
@@ -238,6 +240,7 @@ function overviewDeps(ids: string[]): AgentOverviewDeps {
     listPanes: async () =>
       tmuxPanes(ids, { command: "claude", path: "/work/sample-app" }),
     listStates: listAgentStates,
+    conversationOf: getAgentConversation,
     activityObservedAt: () => 0,
     observationErrors: () => [],
     listShells: () => [],
@@ -287,23 +290,33 @@ describe("申告の会話の場所 → 状態の記録 → overview", () => {
       source: "screen",
       override: true,
     });
-    expect(getAgentState("%3")?.conversation).toEqual(conversation);
+    expect(getAgentConversation("%3")?.conversation).toEqual(conversation);
     expect(await conversationOf("%3")).toEqual(conversation);
   });
 
   test("会話の場所の無い申告 (read など) は前の値を残す", async () => {
-    await post("/_agent/state", { target: "%3", event: "stop", conversation });
+    await post("/_agent/state", {
+      target: "%3",
+      event: "stop",
+      agent: "claude",
+      conversation,
+    });
     await post("/_agent/state", { target: "%3", event: "read" });
     expect(await conversationOf("%3")).toEqual(conversation);
   });
 
   test("セッションの終わり (exit) で外し、overview にも載せない", async () => {
-    await post("/_agent/state", { target: "%3", event: "stop", conversation });
+    await post("/_agent/state", {
+      target: "%3",
+      event: "stop",
+      agent: "claude",
+      conversation,
+    });
     await post("/_agent/state", { target: "%3", event: "exit" });
-    expect([
-      getAgentState("%3")?.conversation,
-      await conversationOf("%3"),
-    ]).toEqual([undefined, undefined]);
+    expect([getAgentConversation("%3"), await conversationOf("%3")]).toEqual([
+      null,
+      undefined,
+    ]);
   });
 
   test("フックの申告が無いペインには欄が無い", async () => {

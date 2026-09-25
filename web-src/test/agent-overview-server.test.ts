@@ -176,6 +176,7 @@ function deps(over: Partial<AgentOverviewDeps> = {}): AgentOverviewDeps {
         { id: "%4", path: "/work/notes", command: "zsh" },
       ]),
     listStates: () => states,
+    conversationOf: () => null,
     activityObservedAt: () => 4321,
     observationErrors: () => [],
     listShells: () => [],
@@ -201,6 +202,33 @@ function deps(over: Partial<AgentOverviewDeps> = {}): AgentOverviewDeps {
 }
 
 describe("buildAgentOverview", () => {
+  test("使用量を確かめる裏のセッションの claude は一覧に出さない (件数・通知もこの一覧から数える)", async () => {
+    const listed = panesResponse([
+      { id: "%1", path: "/work/sample-repo", command: "claude" },
+    ]);
+    const check = panesResponse([
+      { id: "%9", path: "/work/sample-repo", command: "claude" },
+    ]).sessions.map((session) => ({
+      ...session,
+      name: "code-viewer-usage-claude-defau-mufyzju1",
+    }));
+    const login = panesResponse([
+      { id: "%8", path: "/work/sample-repo", command: "claude" },
+    ]).sessions.map((session) => ({ ...session, name: "code-viewer-login" }));
+    const overview = await buildAgentOverview(
+      deps({
+        listPanes: async () => ({
+          ...listed,
+          sessions: [...listed.sessions, ...check, ...login],
+        }),
+      }),
+    );
+    expect(overview.panes.map((item) => [item.id, item.session])).toEqual([
+      ["%1", "sample-session"],
+      ["%8", "code-viewer-login"],
+    ]);
+  });
+
   test("claude / codex の行にアカウントを付け、それ以外の行は null", async () => {
     const asked: string[] = [];
     const overview = await buildAgentOverview(

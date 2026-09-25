@@ -941,22 +941,24 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 },
                 {
                   text: [
-                    "確認の画面で、書き込むファイルと足す中身を見てから ",
+                    "確認の画面で、書き込むファイルと、変わる所の差分（足す行は緑・消す行は赤）を見てから ",
                     ui(hooks.run.install),
                     " を押します。",
                   ],
                   figures: [
                     fig(
                       "hooks-dialog",
-                      "フックを入れる前の確認の画面。書き込むファイル・足すもの・残るフックの数が出ています。",
+                      "フックを入れる前の確認の画面。書き込むファイルと、書く前と後の差分が出ています。",
                     ),
                   ],
                 },
                 {
                   text: [
-                    "codex だけは、codex の中で ",
+                    "codex だけは、入れた後に出る ",
+                    ui(hooks.openAgent.codex),
+                    " で開いたタブの ",
                     code("/hooks"),
-                    " を開き、code-viewer のフックを信頼します。信頼するまで動きません。",
+                    " で、code-viewer のフックを信頼します。信頼するまで動きません。",
                   ],
                 },
               ],
@@ -1095,8 +1097,8 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 },
                 {
                   text: [
-                    "増えた行の ",
-                    ui(accounts.loginButton),
+                    "作り終えた画面の ",
+                    ui(accounts.createdSignIn),
                     " を押し、開いたブラウザで許可します。",
                   ],
                   figures: [
@@ -1147,7 +1149,19 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 ],
               ],
             },
-            more("codex の使用量は、設定しなくても出ます。"),
+            more(
+              "codex の使用量は、設定しなくても出ます。",
+              [
+                "claude のカードの ",
+                ui(accounts.usageEnable),
+                " でも集め始められます。",
+              ],
+              [
+                "claude のカードに値が無い・古いときは、",
+                ui(accounts.usageCheck),
+                " を押すと、裏で claude に短い一言を送って今の値を取りに行きます（わずかに使用量を使います）。",
+              ],
+            ),
           ],
         },
         {
@@ -1291,8 +1305,8 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               "powerline の記号やファイルのアイコンは、ブラウザの動く機械に Nerd Font があれば出ます。",
               [
                 "シェルを開けないときは、",
-                ui(l.doctor.title),
-                " の Terminal の行を見てください。",
+                ui(l.terminal.newShell),
+                " を押すと、入れ直すコマンド（コピーできます）が出ます。",
               ],
             ),
           ],

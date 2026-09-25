@@ -44,11 +44,16 @@ async function mountBoard(
   lang: "en" | "ja" = "en",
   preview?: PanePreview,
   projects?: AgentProjectInfo[],
+  extra: {
+    permission?: "granted" | "denied" | "default" | "unsupported";
+    tmux?: AgentOverviewResponse["tmux"];
+  } = {},
 ) {
   document.body.innerHTML = '<main id="content"></main>';
   const calls: string[] = [];
+  const base = projects ? overviewWith(panes, projects) : overview(panes);
   const snapshot = {
-    overview: projects ? overviewWith(panes, projects) : overview(panes),
+    overview: extra.tmux ? { ...base, tmux: extra.tmux } : base,
     error: "",
     notifyError: "",
     unread: new Map(),
@@ -61,7 +66,7 @@ async function mountBoard(
     snapshot: () => snapshot,
     subscribe: () => () => undefined,
     markRead: () => undefined,
-    permission: () => "granted",
+    permission: () => extra.permission ?? "granted",
     requestPermission: async () => "granted",
   };
   const actions: ProjectActions = {
@@ -89,6 +94,15 @@ async function mountBoard(
     syncHeaderMenu: () => undefined,
     openPane: () => undefined,
     openNotificationSettings: () => undefined,
+    reloadPage: () => {
+      calls.push("reload");
+    },
+    tmuxInstallHelp: () => {
+      calls.push("tmux-help");
+      const box = document.createElement("div");
+      box.className = "sample-install-help";
+      return box;
+    },
     getHookStatus: () => null,
     refreshHookStatus: async () => undefined,
     hookHintDismissed: () => true,
@@ -110,6 +124,7 @@ async function mountBoard(
       openHookHelp: () => {
         calls.push("hook-help");
       },
+      hookState: () => null,
     },
     onVisibilityChange: () => undefined,
     projects: actions,
@@ -303,5 +318,35 @@ describe("the board row context menu", () => {
     ]).toEqual([true, labels]);
     items.find((item) => item.textContent === click)?.click();
     expect(calls).toEqual(expected);
+  });
+});
+
+describe("entries next to the words", () => {
+  test("blocked notifications: says a page cannot change it, and offers Reload", async () => {
+    const { calls } = await mountBoard([], "ja", undefined, undefined, {
+      permission: "denied",
+    });
+    const text = agentsText("ja");
+    expect(document.querySelector(".agents-notify-help")?.textContent).toBe(
+      text.notifyDeniedHelp,
+    );
+    const reload = document.querySelector<HTMLButtonElement>(
+      ".agents-notify-reload",
+    );
+    expect(reload?.textContent).toBe(text.notifyReload);
+    reload?.click();
+    expect(calls).toContain("reload");
+  });
+
+  test("tmux not found: the board adds how to install it under the words", async () => {
+    const { calls } = await mountBoard([], "en", undefined, undefined, {
+      tmux: { available: false, running: false, error: "" },
+    });
+    expect(calls).toContain("tmux-help");
+    const empty = document.querySelector(".empty-state");
+    expect(empty?.textContent).toContain(
+      agentsText("en").emptyNotInstalledBody,
+    );
+    expect(empty?.nextElementSibling?.className).toBe("sample-install-help");
   });
 });

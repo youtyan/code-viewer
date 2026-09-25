@@ -56,6 +56,9 @@ export type TerminalText = {
   tmuxWindowSmaller: (cols: number, rows: number, shared: boolean) => string;
   /** シェルを開けなかった。 */
   shellCreateFailed: string;
+  /** シェルを開けない (node-pty が無い) ときの画面の見出し・閉じるボタン。 */
+  shellUnavailableTitle: string;
+  shellUnavailableClose: string;
   shellCloseFailed: string;
   /** 同時に開ける数の上限に達した。 */
   shellLimitReached: string;
@@ -199,7 +202,7 @@ const EN: TerminalText = {
   newShell: "New shell",
   newShellTitle: "open a new shell in this repository",
   shellUnavailable:
-    "Opening shells needs the optional node-pty package. Reinstall dependencies to enable it.",
+    "Opening shells needs the optional package @lydell/node-pty, which is not installed. Reinstalling code-viewer with it opens shells:",
   noShells: "No shell is open yet.",
   shellExited: (exitCode) =>
     exitCode === null
@@ -216,8 +219,11 @@ const EN: TerminalText = {
       ? `The tmux window is ${cols}×${rows} (sized to another terminal attached to the same session).`
       : `The tmux window is ${cols}×${rows} (smaller than this terminal; set by the tmux window-size option).`,
   shellCreateFailed: "Could not open a shell.",
+  shellUnavailableTitle: "Shells cannot be opened",
+  shellUnavailableClose: "Close",
   shellCloseFailed: "Could not close the shell.",
-  shellLimitReached: "Too many shells are open. Close one first.",
+  shellLimitReached:
+    "The limit of open shells is reached. Closing a shell tab makes room for a new one.",
   readOnly: "Read only",
   readOnlyTitle: "input is not sent",
   writable: "Input on",
@@ -322,7 +328,7 @@ const JA: TerminalText = {
   newShell: "新しいシェル",
   newShellTitle: "このリポジトリで新しいシェルを開きます",
   shellUnavailable:
-    "シェルを開くには任意依存の node-pty が必要です。依存を入れ直すと使えるようになります。",
+    "シェルを開くには任意の依存 @lydell/node-pty が要りますが、入っていません。入れ直すと開けます:",
   noShells: "開いているシェルはありません。",
   shellExited: (exitCode) =>
     exitCode === null
@@ -339,8 +345,11 @@ const JA: TerminalText = {
       ? `tmux のウインドウは ${cols}×${rows} です（同じセッションを開いている別の端末の大きさに合わせています）`
       : `tmux のウインドウは ${cols}×${rows} です（tmux の window-size の設定で、この端末より小さくなっています）`,
   shellCreateFailed: "シェルを開けませんでした。",
+  shellUnavailableTitle: "シェルを開けません",
+  shellUnavailableClose: "閉じる",
   shellCloseFailed: "シェルを閉じられませんでした。",
-  shellLimitReached: "開いているシェルが多すぎます。どれかを閉じてください。",
+  shellLimitReached:
+    "開いているシェルが上限に達しています。シェルのタブを閉じると、新しく開けます。",
   readOnly: "閲覧のみ",
   readOnlyTitle: "キー入力を送りません",
   writable: "入力する",

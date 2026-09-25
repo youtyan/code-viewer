@@ -33,6 +33,7 @@ function setup(lang: "en" | "ja") {
     openHelp: () => {
       opened.push(AGENT_HOOKS_HELP_SECTION);
     },
+    openAgent: () => Promise.reject(new Error("openAgent is not used here")),
   });
   return { section, opened };
 }

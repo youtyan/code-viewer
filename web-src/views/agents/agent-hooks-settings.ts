@@ -31,6 +31,7 @@ import { BACKGROUND_REQUEST_HEADER } from "../../core/network-activity";
 import { showFormDialog } from "../ui-dialog";
 import { responseFailure } from "./accounts-client";
 import type { AgentHooksText } from "./i18n";
+import { settingsDiffBlock } from "./settings-diff";
 
 export type AgentHooksSettingsDeps = {
   getText(): AgentHooksText;
@@ -44,6 +45,12 @@ export type AgentHooksSettingsDeps = {
    */
   helpLink(): { label: string; href: string };
   openHelp(): void;
+  /**
+   * 既定のアカウントで今のプロジェクトのフォルダのエージェントを起こし、
+   * ターミナルのタブで前に出す (入れた後の「開く」)。戻り値は、使用量を
+   * 記録できないなどの知らせ (無ければ空)。
+   */
+  openAgent(agent: HookAgent): Promise<string>;
 };
 
 export type AgentHooksSettings = {
@@ -61,7 +68,13 @@ export const AGENT_HOOKS_SECTION_ID = "agent-hooks-section-title";
 /** 説明の下のリンクが開くヘルプの節 (フックの入れ方と、状態の決め方)。 */
 export const AGENT_HOOKS_HELP_SECTION = "agent-hooks";
 
-type RowResult = { ok: boolean; text: string };
+type RowResult = {
+  ok: boolean;
+  text: string;
+  /** 入れた後: 「開く」を出す。opened はそれを押した結果。 */
+  open?: boolean;
+  opened?: { ok: boolean; text: string };
+};
 
 /** 足す・消すものを、設定ファイルの hooks と同じ形にまとめて見せる。 */
 function changesJson(changes: HookChange[]): string {
@@ -257,8 +270,54 @@ export function createAgentHooksSettings(
       );
       out.setAttribute("role", result.ok ? "status" : "alert");
       box.appendChild(out);
+      if (result.open) box.appendChild(openAgentRow(row.agent, result));
     }
     return box;
+  }
+
+  /** 入れた結果の下の「claude を開く」「codex を開く」と、押した結果。 */
+  function openAgentRow(agent: HookAgent, result: RowResult): HTMLElement {
+    const text = deps.getText();
+    const line = document.createElement("div");
+    line.className = "agent-hooks-open";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "gdp-btn gdp-btn-sm";
+    button.textContent = text.openAgent[agent];
+    button.title = text.openAgentTitle(agent);
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const notice = await deps.openAgent(agent);
+        results.set(agent, {
+          ...result,
+          opened: {
+            ok: true,
+            text: [text.openedAgent(agent), notice].filter(Boolean).join("\n"),
+          },
+        });
+      } catch (error) {
+        console.error("[code-viewer] could not open the agent", error);
+        results.set(agent, {
+          ...result,
+          opened: {
+            ok: false,
+            text: `${text.openAgentFailed(agent)}\n${formatErrorDetail(error)}`,
+          },
+        });
+      }
+      render();
+    });
+    line.appendChild(button);
+    if (result.opened) {
+      const out = paragraph(
+        result.opened.text,
+        `agent-hooks-result ${result.opened.ok ? "agent-hooks-result-ok" : "agent-hooks-result-error"}`,
+      );
+      out.setAttribute("role", result.opened.ok ? "status" : "alert");
+      line.appendChild(out);
+    }
+    return line;
   }
 
   function renderFailures(): void {
@@ -353,9 +412,11 @@ export function createAgentHooksSettings(
         true,
       ),
     );
+    const home = status?.home ?? "";
+    const short = (path: string) => (home ? abbreviateHome(path, home) : path);
     const notes = [text.dialogKept(plan.kept)];
     if (plan.action === "install") {
-      notes.push(text.guideLauncher(plan.launcher.path));
+      notes.push(text.guideLauncher(short(plan.launcher.path)));
     }
     body.appendChild(notesList(notes));
     const details = document.createElement("details");
@@ -364,9 +425,9 @@ export function createAgentHooksSettings(
     summary.textContent = text.guideDetails;
     details.append(
       summary,
-      labeled(text.dialogFile, plan.path, false),
+      labeled(text.dialogFile, short(plan.path), false),
       ...(plan.symlink
-        ? [labeled(text.dialogLinkTarget, plan.realPath, false)]
+        ? [labeled(text.dialogLinkTarget, short(plan.realPath), false)]
         : []),
       labeled("", plan.writeBlocked, true),
     );
@@ -379,20 +440,17 @@ export function createAgentHooksSettings(
     const text = deps.getText();
     const body = document.createElement("div");
     body.className = "agent-hooks-dialog";
-    body.appendChild(labeled(text.dialogFile, plan.path, false));
-    if (plan.symlink)
-      body.appendChild(labeled(text.dialogLinkTarget, plan.realPath, false));
-    if (plan.added.length > 0) {
-      body.appendChild(
-        labeled(text.dialogAdded, changesJson(plan.added), true),
-      );
-    }
-    if (plan.removed.length > 0) {
-      body.appendChild(
-        labeled(text.dialogRemoved, changesJson(plan.removed), true),
-      );
-    }
-    if (!plan.changed) body.appendChild(paragraph(text.dialogNothing));
+    // パスは ~ で縮める (statusLine の確認の画面と同じ)。
+    const home = status?.home ?? "";
+    const short = (path: string) => (home ? abbreviateHome(path, home) : path);
+    // 書き込む先と、書く前と後の差分 (サーバが plan で作ったもの) が主役。
+    body.append(
+      ...settingsDiffBlock(plan, home, {
+        file: text.dialogFile,
+        unchanged: text.dialogNothing,
+        drawFailed: text.dialogDiffFailed,
+      }),
+    );
     const notes: string[] = [];
     if (plan.changed) {
       notes.push(
@@ -400,7 +458,10 @@ export function createAgentHooksSettings(
           ? text.dialogBackup(
               // 名前の時刻は書いた瞬間のものになる。確認した時点の時刻を
               // 出すと結果と食い違うので伏せる。
-              plan.backupPath.replace(/-\d{8}-\d{6}$/, "-<YYYYMMDD-HHMMSS>"),
+              short(plan.backupPath).replace(
+                /-\d{8}-\d{6}$/,
+                "-<YYYYMMDD-HHMMSS>",
+              ),
             )
           : text.dialogNewFile,
       );
@@ -409,7 +470,7 @@ export function createAgentHooksSettings(
     if (plan.changed && plan.formattingChanged)
       notes.push(text.dialogFormatting);
     if (plan.launcher.write)
-      notes.push(text.dialogLauncher(plan.launcher.path));
+      notes.push(text.dialogLauncher(short(plan.launcher.path)));
     notes.push(text.effect[plan.agent][plan.action]);
     body.appendChild(notesList(notes));
     return body;
@@ -444,13 +505,23 @@ export function createAgentHooksSettings(
       const lines = launcherOnly
         ? [text.dialogCopied]
         : [result.changed ? text.applied[plan.action] : text.unchanged];
-      if (result.backupPath) lines.push(text.backupAt(result.backupPath));
+      // 確認の画面と同じく、ホームの下は ~ で見せる。
+      const home = status?.home ?? "";
+      const short = (path: string) =>
+        home ? abbreviateHome(path, home) : path;
+      if (result.backupPath)
+        lines.push(text.backupAt(short(result.backupPath)));
       if (result.launcherWritten)
-        lines.push(text.launcherWritten(plan.launcher.path));
-      if (!launcherOnly && (result.changed || result.launcherWritten)) {
+        lines.push(text.launcherWritten(short(plan.launcher.path)));
+      const installed =
+        !launcherOnly &&
+        plan.action === "install" &&
+        (result.changed || result.launcherWritten);
+      if (installed) lines.push(text.afterInstall[plan.agent]);
+      else if (!launcherOnly && (result.changed || result.launcherWritten)) {
         lines.push(text.effect[plan.agent][plan.action]);
       }
-      return { ok: true, text: lines.join("\n") };
+      return { ok: true, text: lines.join("\n"), open: installed };
     } catch (error) {
       console.error("[code-viewer] agent hook change failed", error);
       return { ok: false, text: formatErrorDetail(error) };

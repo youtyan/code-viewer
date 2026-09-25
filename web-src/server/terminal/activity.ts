@@ -16,6 +16,7 @@
 // 順に巡回する。ブラウザシェルは溜め置きを覗くだけでプロセスが要らないので、
 // 毎周すべて見る。
 
+import { agentTmuxPanes } from "../../core/agent-accounts";
 import {
   type AgentScreenRuleSet,
   detectAgentScreen,
@@ -28,12 +29,17 @@ import {
 import { formatErrorDetail } from "../../core/error-detail";
 // 画面とタイトルの同一性を見るだけなので、差分取得と同じハッシュで足りる。
 import { hashLine } from "../../core/terminal-capture";
-import { flattenTmuxPanes } from "../../core/tmux";
 import { listShellSessions, readShellBuffer } from "../shell/session";
 import { captureTmuxPane } from "../tmux/capture";
 import { readTmuxServerGeneration } from "../tmux/command";
 import { type ListTmuxPanesOptions, listTmuxPanes } from "../tmux/panes";
 import { mapWithConcurrency } from "../worktree/list";
+import {
+  getConversationStoreErrors,
+  restoreSavedConversations,
+  startConversationPersistence,
+  stopConversationPersistence,
+} from "./agent-conversations";
 import {
   agentTargetKey,
   getAgentState,
@@ -325,7 +331,7 @@ function deferredCaptureError(
 }
 
 export function getAgentActivityErrors(): AgentStateObservationError[] {
-  return [...activityErrors.values()]
+  return [...activityErrors.values(), ...getConversationStoreErrors()]
     .sort((a, b) => a.at - b.at)
     .map((error) => ({ ...error }));
 }
@@ -380,7 +386,7 @@ async function sweepOnce(
     ]);
     activityErrors.delete(activityErrorKey("list_terminals", ""));
     const shells = listShellSessions();
-    const allPanes = panes.running ? flattenTmuxPanes(panes.sessions) : [];
+    const allPanes = panes.running ? agentTmuxPanes(panes.sessions) : [];
 
     if (
       generation.status === "error" ||
@@ -420,6 +426,8 @@ async function sweepOnce(
     // 棚卸しできたものだけを残す。tmux が落ちているときにペインの状態を
     // 消してしまうと、復帰した瞬間に全部が「初めて見た」に戻る。
     if (panes.running && generation.status === "ok") {
+      // 保存した会話の場所は、世代とペインが分かった最初の巡回で 1 度だけ戻す。
+      restoreSavedConversations(generation.generation, allPanes);
       const known = new Set<string>([
         ...allPanes.map((pane) => pane.id),
         ...shells.map((session) => session.id),
@@ -560,6 +568,8 @@ export function startAgentActivityWatch(
 ): void {
   if (watching) return;
   watching = { cwd, options: paneListOptions };
+  // 巡回するサーバ (入口・--standalone) だけが会話の場所を保存する。
+  startConversationPersistence();
   // 起動した直後は見られている扱い (開いたタブがすぐ取りに来る)。
   lastWatchedAt = Date.now();
   // 読めなければ既定のルールで始め、理由を出す (投げっぱなしにすると入口ごと終わる)。
@@ -598,6 +608,7 @@ export function stopAgentActivityWatch(): void {
   seen.clear();
   captureProgress.clear();
   activityErrors.clear();
+  stopConversationPersistence();
   sweepOffset = 0;
   lastSweepAt = 0;
 }

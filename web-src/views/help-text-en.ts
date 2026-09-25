@@ -958,22 +958,24 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 },
                 {
                   text: [
-                    "Check the file it will write and what it adds, then select ",
+                    "Check the file it will write and the diff of what changes (added lines in green, removed in red), then select ",
                     ui(hooks.run.install),
                     ".",
                   ],
                   figures: [
                     fig(
                       "hooks-dialog",
-                      "The confirmation before writing the hooks: the file, what is added and how many other hooks stay.",
+                      "The confirmation before writing the hooks: the file and the diff before and after.",
                     ),
                   ],
                 },
                 {
                   text: [
-                    "For codex only, open ",
+                    "For codex only, select ",
+                    ui(hooks.openAgent.codex),
+                    " after installing and trust the code-viewer hooks under ",
                     code("/hooks"),
-                    " in codex and trust the code-viewer hooks. They do not run until you do.",
+                    " in that tab. They do not run until you do.",
                   ],
                 },
               ],
@@ -1113,9 +1115,9 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 },
                 {
                   text: [
-                    "On the new row, select ",
-                    ui(accounts.loginButton),
-                    " and approve it in the browser that opens.",
+                    "Select ",
+                    ui(accounts.createdSignIn),
+                    " on the screen after creating and approve it in the browser that opens.",
                   ],
                   figures: [
                     fig(
@@ -1165,7 +1167,19 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 ],
               ],
             },
-            more("codex usage shows without any setup."),
+            more(
+              "codex usage shows without any setup.",
+              [
+                "On a claude card, ",
+                ui(accounts.usageEnable),
+                " starts collecting it too.",
+              ],
+              [
+                "When a claude card has no value or an old one, ",
+                ui(accounts.usageCheck),
+                " starts claude in the background and sends one short message to get the current value (it uses a little usage).",
+              ],
+            ),
           ],
         },
         {
@@ -1308,9 +1322,9 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               ],
               "Powerline symbols and file icons show when a Nerd Font is installed on the machine running the browser.",
               [
-                "If shells do not open, check the Terminal row of the ",
-                ui(l.doctor.title),
-                ".",
+                "If shells cannot be opened, ",
+                ui(l.terminal.newShell),
+                " shows the command to reinstall them (with a copy button).",
               ],
             ),
           ],

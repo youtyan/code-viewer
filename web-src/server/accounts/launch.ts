@@ -33,8 +33,13 @@ export function interactiveShell(env: NodeJS.ProcessEnv = process.env): string {
   return env.SHELL || "/bin/sh";
 }
 
-async function sessionExists(session: string, cwd: string): Promise<boolean> {
-  const result = await runTmux(["has-session", "-t", `=${session}`], cwd);
+/** tmux のセッションがあるか。run は差し替え用 (テスト)。 */
+export async function sessionExists(
+  session: string,
+  cwd: string,
+  run: typeof runTmux = runTmux,
+): Promise<boolean> {
+  const result = await run(["has-session", "-t", `=${session}`], cwd);
   if (result.status === "ok") return true;
   if (result.status === "no-server" || result.status === "no-target")
     return false;
@@ -146,6 +151,19 @@ export function agentCommandArgv(
   if (args.length === 0 && !then) return [shell, "-i", "-c", command];
   const script = `${command} "$@"${then ? `; ${then}` : ""}`;
   return [shell, "-i", "-c", script, shell, ...args];
+}
+
+/**
+ * claude に statusLine を渡す引数 (`--settings '{"statusLine":…}'`)。コマンド
+ * ラインの設定はプロジェクト・ユーザーの設定より優先される
+ * (https://code.claude.com/docs/en/settings の優先順位)。引数は "$@" で渡る
+ * (agentCommandArgv) ので、JSON をシェルの文字列に埋め込まない。使用量を
+ * 確かめる (usage-check.ts) と起動 (project-statusline.ts) が使う。
+ */
+export function statusLineSettingsArgs(
+  statusLine: Record<string, unknown>,
+): string[] {
+  return ["--settings", JSON.stringify({ statusLine })];
 }
 
 /** codex app-server (account/read で誰としてかを訊く。server/accounts/login.ts)。 */

@@ -110,6 +110,9 @@ function client(
     planStatusLine: unused("planStatusLine"),
     applyStatusLine: unused("applyStatusLine"),
     clearUsageFailures: unused("clearUsageFailures"),
+    usageCheck: () => null,
+    checkUsage: unused("checkUsage"),
+    noteUsageCheckOpened: unused("noteUsageCheckOpened"),
   };
 }
 

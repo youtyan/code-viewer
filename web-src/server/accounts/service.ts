@@ -9,6 +9,7 @@ import {
   type AccountRegistry,
   type AccountStatus,
   type AccountsResponse,
+  type AccountUsage,
   accountEntries,
   accountForEnv,
   defaultConfigDir,
@@ -26,8 +27,12 @@ import {
 } from "../terminal/hooks";
 import { errno } from "../terminal/settings-file";
 import {
+  maintainStatusLineWrapper,
   readStatusLineFailures,
+  STATUSLINE_TEMP_STALE_MS,
   statusLineStatus,
+  statusLineWrapperPath,
+  wrappedCommand,
 } from "../terminal/statusline";
 import { createLoginChecker, type LoginChecker } from "./login";
 import {
@@ -57,6 +62,14 @@ export type AccountService = {
   }): Promise<AccountsResponse>;
   /** 種類ごとの起動コマンド (設定されていなければ種類の名前)。 */
   launchCommands(): AccountsResponse["launchCommands"];
+  /**
+   * そのアカウントの今の使用量と、包んだ statusLine のコマンド (包むスクリプトに
+   * 設定の元のコマンドを渡した形)。包んでいない・包むスクリプトが無いなら null。
+   */
+  usage(entry: AccountEntry): {
+    usage: AccountUsage;
+    statusLineCommand: string | null;
+  };
   paneAccounts(
     targets: readonly PaneAccountTarget[],
   ): Promise<Map<string, PaneAccount>>;
@@ -92,6 +105,9 @@ export function createAccountService(
   prober: ProcessEnvProber = createProcessEnvProber(),
   login: LoginChecker = createLoginChecker(),
 ): AccountService {
+  /** 包むスクリプトの手入れを最後にした時刻 (一覧のたびには回さない)。 */
+  let maintainedAt = Number.NEGATIVE_INFINITY;
+
   function entries() {
     const read = readAccountRegistryCached(paths.registry);
     const registry = read.ok ? read.registry : emptyAccountRegistry();
@@ -100,6 +116,23 @@ export function createAccountService(
       registryError: read.ok === false ? read.error : null,
       registry,
     };
+  }
+
+  function usageOf(entry: AccountEntry) {
+    const statusLine =
+      entry.agent === "claude"
+        ? statusLineStatus(entry.configDir, paths.usageDir)
+        : null;
+    const wrapped =
+      statusLine?.state === "wrapped" || statusLine?.state === "added";
+    const usage = readAccountUsage(entry.agent, entry.configDir, {
+      usageDir: paths.usageDir,
+      claudeEnvValues: entry.builtin
+        ? ["", defaultConfigDir("claude", paths.home)]
+        : [entry.configDir],
+      wrapped,
+    });
+    return { usage, statusLine, wrapped };
   }
 
   async function status(
@@ -117,19 +150,7 @@ export function createAccountService(
       launcher.launcher,
       launcher.health,
     ).state;
-    const statusLine =
-      entry.agent === "claude"
-        ? statusLineStatus(entry.configDir, paths.usageDir)
-        : null;
-    const wrapped =
-      statusLine?.state === "wrapped" || statusLine?.state === "added";
-    const usage = readAccountUsage(entry.agent, entry.configDir, {
-      usageDir: paths.usageDir,
-      claudeEnvValues: entry.builtin
-        ? ["", defaultConfigDir("claude", paths.home)]
-        : [entry.configDir],
-      wrapped,
-    });
+    const { usage, statusLine } = usageOf(entry);
     const loginState = exists
       ? await login.status(entry, command, forceLogin)
       : {
@@ -154,6 +175,19 @@ export function createAccountService(
     },
     launchCommands() {
       return launchCommandsOf(entries().registry);
+    },
+    usage(entry) {
+      const { usage, wrapped, statusLine } = usageOf(entry);
+      return {
+        usage,
+        statusLineCommand:
+          wrapped && statusLine && !statusLine.wrapperMissing
+            ? wrappedCommand(
+                statusLineWrapperPath(paths.usageDir),
+                statusLine.command || null,
+              )
+            : null,
+      };
     },
     async overview(options) {
       const { entries: list, registryError, registry } = entries();
@@ -181,6 +215,20 @@ export function createAccountService(
           recent: [`cannot read the failure log: ${formatErrorDetail(error)}`],
           log: paths.usageDir,
         };
+      }
+      const now = Date.now();
+      if (now - maintainedAt >= STATUSLINE_TEMP_STALE_MS) {
+        maintainedAt = now;
+        const problems = maintainStatusLineWrapper(paths.usageDir, now);
+        if (problems.length > 0) {
+          for (const problem of problems)
+            console.error(`[code-viewer] statusLine upkeep: ${problem}`);
+          usageFailures = {
+            ...usageFailures,
+            total: usageFailures.total + problems.length,
+            recent: [...usageFailures.recent, ...problems],
+          };
+        }
       }
       return {
         home: paths.home,

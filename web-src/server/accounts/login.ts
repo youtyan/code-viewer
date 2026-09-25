@@ -35,6 +35,7 @@ import {
   stopProcess,
 } from "../runtime";
 import { accountReadArgv, loginStatusArgv } from "./launch";
+import { markClaudeOnboarded, type OnboardingMark } from "./onboarding";
 
 export const LOGIN_CACHE_MS = 60_000;
 const LOGIN_TIMEOUT_MS = 8000;
@@ -83,6 +84,11 @@ export type LoginDeps = {
     done: (line: string) => boolean,
   ): Promise<RpcResult>;
   now(): number;
+  /**
+   * code-viewer が作った claude のアカウントに、初回の案内を済ませた印を足す
+   * (onboarding.ts)。ログイン済みと分かったときだけ呼ぶ。
+   */
+  markOnboarded(configDir: string): Promise<OnboardingMark>;
 };
 
 function runRpc(
@@ -161,6 +167,7 @@ export const DEFAULT_LOGIN_DEPS: LoginDeps = {
   run: (args, env) => runAsync(args, "/", { env, timeout: LOGIN_TIMEOUT_MS }),
   rpc: runRpc,
   now: Date.now,
+  markOnboarded: markClaudeOnboarded,
 };
 
 /** そのアカウントを選ぶ環境。既定のアカウントなら変数を外す。 */
@@ -427,7 +434,18 @@ export function createLoginChecker(
       };
     }
     if (account.agent === "claude") {
-      return parseClaudeAuthStatus(result, deps.now(), command);
+      const login = parseClaudeAuthStatus(result, deps.now(), command);
+      // `claude auth login` は初回の案内の印を付けないので、対話で開くと案内と
+      // ログインをやり直させる (onboarding.ts)。code-viewer が作ったアカウントに
+      // だけ足す (既定や登録しただけのディレクトリは利用者のもの)。
+      if (login.state !== "logged-in" || !account.managed || account.builtin)
+        return login;
+      const mark = await deps.markOnboarded(account.configDir);
+      if (mark.status !== "failed") return login;
+      console.error(
+        `[code-viewer] could not mark the claude account ${account.id} as onboarded: ${mark.detail}`,
+      );
+      return { ...login, setupDetail: mark.detail };
     }
     return codexWho(
       parseCodexLoginStatus(result, deps.now(), command),
