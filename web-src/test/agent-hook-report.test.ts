@@ -472,15 +472,15 @@ describe("launcher -> CLI (real processes)", () => {
     expect(readHookFailures(launcher.failureLog).total).toBe(0);
   });
 
-  test("does not send to an old registry without an identity and records the version mismatch", async () => {
+  test("does not ask an old registry without an identity at all: the report goes to the others and nothing fails", async () => {
     await startIdentityServer("old-registry", { registryIdentity: false });
+    const port = await startIdentityServer("current");
 
     const result = await runHook("claude", STOP);
 
     expect(result.code).toBe(0);
-    expect(received).toEqual([]);
-    const failures = readHookFailures(launcher.failureLog);
-    expect(failures.recent[0]?.detail).toContain("version mismatch");
+    expect(received.map((item) => item.port)).toEqual([port]);
+    expect(readHookFailures(launcher.failureLog).total).toBe(0);
   });
 
   test("with no server it exits 0 at once and logs why", async () => {
@@ -522,6 +522,15 @@ describe("where hook reports go", () => {
     pid: 1,
     root: "/work/a",
     started_at: "x",
+    token: SAMPLE_TOKEN,
+    version: PACKAGE_VERSION,
+  };
+  /** token も版も無い古い形 (server-registry.ts の isLegacyServerRegistry)。 */
+  const legacy: ServerRegistryEntry = {
+    url: "http://127.0.0.1:64400/",
+    pid: 3,
+    root: "/work/c",
+    started_at: "x",
   };
   const backend: ServerRegistryEntry = {
     url: "http://127.0.0.1:64300/",
@@ -542,6 +551,19 @@ describe("where hook reports go", () => {
     ],
     ["a project process of the entry is skipped", entry, [backend], [entry]],
     ["only project processes", null, [backend], []],
+    [
+      "an old-form registry is skipped",
+      entry,
+      [legacy, standalone],
+      [entry, "http://127.0.0.1:64200"],
+    ],
+    ["only an old-form registry", null, [legacy], []],
+    [
+      "a registry with only a version is still asked (and fails identity)",
+      null,
+      [{ ...legacy, version: PACKAGE_VERSION }],
+      ["http://127.0.0.1:64400"],
+    ],
     [
       "the entry registered twice is sent once",
       `${entry}/`,

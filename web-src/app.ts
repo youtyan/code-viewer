@@ -5073,7 +5073,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     openHookHelp: () =>
       openHelpSection(helpSectionDeps(), AGENT_HOOKS_HELP_SECTION),
+    hookState: (agent) =>
+      AGENT_HOOK_STATUS?.agents.find((row) => row.agent === agent)?.state ??
+      null,
   };
+  // 右クリックのメニューはどの画面にも出るサイドバーから開くので、フックの
+  // 状態を起動時に 1 度取っておく (入っているのに「入れると使えます」と
+  // 出さないため)。取れなければ節と同じく理由を console に出す。
+  void AGENT_HOOKS_SETTINGS.refresh();
   const ACCOUNTS_SETTINGS = createAccountsSettings({
     client: ACCOUNTS_CLIENT,
     dialogs: ACCOUNT_DIALOGS,

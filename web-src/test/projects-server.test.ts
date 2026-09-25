@@ -773,19 +773,27 @@ describe("doctor: projects", () => {
 });
 
 describe("relayAgentRead", () => {
-  function server(pid: number, port: number): ServerRegistryEntry {
+  function server(
+    pid: number,
+    port: number,
+    identity: Partial<ServerRegistryEntry> = {
+      token: "0123456789abcdef",
+      version: "0.0.0-sample",
+    },
+  ): ServerRegistryEntry {
     return {
       url: `http://127.0.0.1:${port}/`,
       pid,
       root: `/work/repo-${port}`,
       started_at: "x",
+      ...identity,
     };
   }
   const refused = Object.assign(new Error("fetch failed"), {
     cause: { code: "ECONNREFUSED" },
   });
 
-  test("tells every other server, skips itself and servers that are gone, reports the rest", async () => {
+  test("tells every other server, skips itself, old-form registries and servers that are gone, reports the rest", async () => {
     const posted: { url: string; body: unknown }[] = [];
     const result = await relayAgentRead("%3", 1234, {
       selfPid: 10,
@@ -795,6 +803,8 @@ describe("relayAgentRead", () => {
           server(11, 64002),
           server(12, 64003),
           server(13, 64004),
+          // token も版も無い古い形 (hook-report.ts の reportTargets が外す)。
+          server(14, 64005, {}),
         ],
         errors: [
           { file: "/state/servers/broken.json", error: new Error("bad JSON") },

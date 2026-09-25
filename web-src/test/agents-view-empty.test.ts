@@ -124,6 +124,7 @@ async function mountBoard(
       openHookHelp: () => {
         calls.push("hook-help");
       },
+      hookState: () => null,
     },
     onVisibilityChange: () => undefined,
     projects: actions,

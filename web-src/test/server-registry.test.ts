@@ -152,12 +152,21 @@ describe("pruneDeadServerRegistry", () => {
     return child.pid;
   }
 
-  function entry(root: string, pid: number): string {
+  /** 今の形の登録 (token と版がある)。identity を外すと古い形。 */
+  function entry(
+    root: string,
+    pid: number,
+    identity: Record<string, unknown> = {
+      token: "0123456789abcdef",
+      version: "0.0.0-sample",
+    },
+  ): string {
     return JSON.stringify({
       url: "http://127.0.0.1:4321/",
       pid,
       root,
       started_at: "2026-08-11T00:00:00.000Z",
+      ...identity,
     });
   }
 
@@ -174,6 +183,19 @@ describe("pruneDeadServerRegistry", () => {
       removed: true,
       error: false,
     },
+    {
+      name: "a project process of the entry (no token by design)",
+      raw: () => entry("/sample/backend", process.pid, { backend: true }),
+      removed: false,
+      error: false,
+    },
+    {
+      name: "only a token (not the old form)",
+      raw: () =>
+        entry("/sample/token", process.pid, { token: "0123456789abcdef" }),
+      removed: false,
+      error: false,
+    },
     { name: "broken JSON", raw: () => "{", removed: false, error: true },
     {
       name: "missing fields",
@@ -188,6 +210,22 @@ describe("pruneDeadServerRegistry", () => {
     expect(result.removed).toEqual(removed ? [file] : []);
     expect(existsSync(file)).toBe(!removed);
     expect(result.errors.map((item) => item.file)).toEqual(error ? [file] : []);
+  });
+
+  test.each([
+    { name: "whose pid is reused by a live process", pid: () => process.pid },
+    { name: "whose process is gone", pid: deadPid },
+  ])("an old-form entry without a token or version $name is removed as legacy", async ({
+    pid,
+  }) => {
+    const file = join(registryDir, "old.json");
+    writeFileSync(file, entry("/sample/old", pid(), {}), "utf8");
+    const result = await pruneDeadServerRegistry();
+    expect([result.removed, result.removedLegacy, existsSync(file)]).toEqual([
+      [],
+      [{ file, root: "/sample/old", url: "http://127.0.0.1:4321/" }],
+      false,
+    ]);
   });
 
   test("a mixed registry keeps live and unreadable entries and other files", async () => {
@@ -216,6 +254,7 @@ describe("pruneDeadServerRegistry", () => {
     );
     expect(await pruneDeadServerRegistry()).toEqual({
       removed: [],
+      removedLegacy: [],
       kept: 0,
       errors: [],
     });

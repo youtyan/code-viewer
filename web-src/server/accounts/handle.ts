@@ -33,7 +33,7 @@ import {
   parseBoundedJsonBody,
   textError,
 } from "../database/handle-shared";
-import { getAgentState } from "../terminal/agent-state";
+import { getAgentConversation } from "../terminal/agent-state";
 import { terminalKindOf } from "../terminal/capture";
 import { rememberSignInPane } from "../terminal/open";
 import {
@@ -415,9 +415,9 @@ function handoffLaunchArgs(value: unknown, agent: AccountAgent): string[] {
   ) {
     throw new AccountError("invalid handoff account name", "invalid");
   }
-  const record = getAgentState(pane);
-  const transcriptPath = record?.conversation?.transcriptPath ?? "";
-  if (!record?.agent || !transcriptPath) {
+  const record = getAgentConversation(pane);
+  const transcriptPath = record?.conversation.transcriptPath ?? "";
+  if (!record || !transcriptPath) {
     throw new AccountError(
       `${pane} has no conversation log reported by a hook (install the agent hooks, then use the agent once)`,
       "conflict",

@@ -18,6 +18,7 @@ import {
   test,
   vi,
 } from "vitest";
+import type { AgentHookState, HookAgent } from "../core/agent-hooks";
 import type { AgentOverviewResponse, AgentPane } from "../core/agent-overview";
 import type { AgentState } from "../core/agent-state";
 import { BACKGROUND_REQUEST_HEADER } from "../core/network-activity";
@@ -130,7 +131,11 @@ function mount(
   data: AgentOverviewResponse,
   actions = fakeActions(),
   openPane: AgentsSidebarDeps["openPane"] = () => undefined,
-  notify: Parameters<typeof fakeMonitor>[1] & { dismissed?: boolean } = {},
+  notify: Parameters<typeof fakeMonitor>[1] & {
+    dismissed?: boolean;
+    /** 設定の節と同じフックの状態 (種類ごと)。無い種類はまだ取っていない (null)。 */
+    hookStates?: Partial<Record<HookAgent, AgentHookState>>;
+  } = {},
 ) {
   document.body.innerHTML =
     '<nav><a class="app-menu-item active" href="/history">History</a></nav><div id="nav-projects"></div>';
@@ -153,6 +158,7 @@ function mount(
     handoff: {
       handoff: (target) => handoffs.push(`handoff:${target.id}`),
       openHookHelp: () => handoffs.push("hook-help"),
+      hookState: (agent) => notify.hookStates?.[agent] ?? null,
     },
     openBoard: () => undefined,
     getCollapsed: () => [],
@@ -400,34 +406,71 @@ describe("agents sidebar actions", () => {
   });
 
   // 「別のアカウントで続ける…」は、フックが会話記録の場所を知らせたペインだけ
-  // 押せる。知らせていなければ押せず、フックの入れ方へ送る項目を並べる。
+  // 押せる。知らせていなければ押せず、次の行に理由を書く: その種類のフックが
+  // 入っていれば「一度話しかけると使えます」(押せない。入れ方へは送らない)、
+  // 入っていない・まだ分からなければフックの入れ方へ送る。
   // エージェントでないペインには出さない。
+  const LOCATION = {
+    conversation: {
+      sessionId: "abc123",
+      transcriptPath: "/home/sample/log/sample.jsonl",
+      cwd: "/work/sample-app",
+    },
+  };
+  const NEEDS_HOOKS = "Needs the agent hooks — show how to install";
+  const WAITING = "Send the agent one message first";
+  const HANDOFF = "Continue with another account…";
   test.each([
-    {
-      name: "会話記録の場所があれば押せる",
-      over: {
-        conversation: {
-          sessionId: "abc123",
-          transcriptPath: "/home/sample/log/sample.jsonl",
-          cwd: "/work/sample-app",
-        },
-      },
-      items: [["Continue with another account…", false]],
-      click: "Continue with another account…",
+    ...(
+      [
+        ["installed", "installed"],
+        ["not installed", "none"],
+        ["not known yet", undefined],
+      ] as const
+    ).map(([hooks, state]) => ({
+      name: `会話記録の場所があれば押せる (フック: ${hooks})`,
+      over: LOCATION,
+      hookStates: state ? { claude: state } : {},
+      items: [[HANDOFF, false]],
+      click: HANDOFF,
       called: ["handoff:%1"],
-    },
+    })),
     {
-      name: "フックが無ければ押せず、入れ方へ送る",
+      name: "場所が無く、フックが入っていれば「一度話しかけると使えます」(入れ方へは送らない)",
       over: {},
+      hookStates: { claude: "installed" } as const,
       items: [
-        ["Continue with another account…", true],
-        ["Needs the agent hooks — show how to install", false],
+        [HANDOFF, true],
+        [WAITING, true],
       ],
-      click: "Needs the agent hooks — show how to install",
-      called: ["hook-help"],
+      click: WAITING,
+      called: [],
     },
-    {
-      name: "codex の transcript_path が null (空) なら押せない",
+    ...(
+      [
+        ["not installed", { claude: "none" }],
+        ["partly installed", { claude: "partial" }],
+        ["not known yet", {}],
+        ["installed only for codex", { codex: "installed" }],
+      ] as const
+    ).map(([hooks, hookStates]) => ({
+      name: `場所が無く、フックが ${hooks} なら押せず、入れ方へ送る`,
+      over: {},
+      hookStates,
+      items: [
+        [HANDOFF, true],
+        [NEEDS_HOOKS, false],
+      ],
+      click: NEEDS_HOOKS,
+      called: ["hook-help"],
+    })),
+    ...(
+      [
+        ["installed", "installed", WAITING, true, []],
+        ["not installed", "none", NEEDS_HOOKS, false, ["hook-help"]],
+      ] as const
+    ).map(([hooks, state, reason, disabled, called]) => ({
+      name: `codex の transcript_path が null (空) なら押せない (フック: ${hooks})`,
       over: {
         kind: "codex" as const,
         command: "codex",
@@ -437,22 +480,25 @@ describe("agents sidebar actions", () => {
           cwd: "/work/sample-app",
         },
       },
+      hookStates: { codex: state },
       items: [
-        ["Continue with another account…", true],
-        ["Needs the agent hooks — show how to install", false],
+        [HANDOFF, true],
+        [reason, disabled],
       ],
-      click: "Needs the agent hooks — show how to install",
-      called: ["hook-help"],
-    },
+      click: reason,
+      called: [...called],
+    })),
     {
       name: "エージェントでないペインには出さない",
       over: { kind: null, command: "zsh" },
+      hookStates: { claude: "installed" } as const,
       items: [],
       click: null,
       called: [],
     },
   ])("右クリックの「別のアカウントで続ける…」: $name", ({
     over,
+    hookStates,
     items,
     click,
     called,
@@ -461,7 +507,9 @@ describe("agents sidebar actions", () => {
       [{ ...pane("%1", "work:0.0", "/work/sample-app", "idle"), ...over }],
       REGISTERED,
     );
-    const { root, handoffs } = mount(data);
+    const { root, handoffs } = mount(data, undefined, undefined, {
+      hookStates,
+    });
     root
       .querySelector<HTMLElement>('[data-nav-item="pane:%1"]')
       ?.dispatchEvent(

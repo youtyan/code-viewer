@@ -69,6 +69,9 @@ export type AgentsText = {
   /** 会話記録の場所が分からないとき。押せない項目の下に出す、フックの案内。 */
   handoffNeedsHooks: string;
   handoffNeedsHooksTitle: string;
+  /** フックは入っているが、まだ会話の場所が届いていない (押せない項目の次の行)。 */
+  handoffWaiting: string;
+  handoffWaitingTitle: string;
   openServer: string;
   openServerTitle: (url: string) => string;
   currentServer: string;
@@ -517,6 +520,9 @@ const EN: AgentsText = {
   handoffNeedsHooks: "Needs the agent hooks — show how to install",
   handoffNeedsHooksTitle:
     "The hooks tell code-viewer where the conversation log is. After installing them, send the agent one message.",
+  handoffWaiting: "Send the agent one message first",
+  handoffWaitingTitle:
+    "The conversation log location has not arrived yet. Send the agent one message, and this becomes available.",
   openServer: "Open",
   openServerTitle: (url) =>
     `Open the code-viewer running for this project (${url})`,
@@ -663,6 +669,9 @@ const JA: AgentsText = {
   handoffNeedsHooks: "フックを入れると使えます（入れ方を見る）",
   handoffNeedsHooksTitle:
     "会話記録の場所はフックから受け取ります。入れた後、そのエージェントに一度話しかけると使えます。",
+  handoffWaiting: "一度話しかけると使えます",
+  handoffWaitingTitle:
+    "まだ会話の場所が届いていません。そのエージェントに一度話しかけると使えます。",
   openServer: "開く",
   openServerTitle: (url) =>
     `このプロジェクトを開いている code-viewer へ移動 (${url})`,

@@ -211,8 +211,6 @@ export type AgentStateRecord = {
   note: string;
   /** フックが名乗った種類。名乗っていなければ無い。 */
   agent?: ReportedAgent;
-  /** フックが渡した会話の場所。フックが無い・まだ申告が来ていなければ無い。 */
-  conversation?: AgentConversation;
   /**
    * 最後の申告がセッションの終了 (exit) だった。そのペインではもう
    * エージェントが動いていないので、一覧では種類を持たないペインに戻す。
@@ -229,7 +227,11 @@ export type AgentStateObservationError = {
     /** エージェント一覧: ペインの cwd から git のルートを求められなかった。 */
     | "resolve_project"
     /** エージェント一覧: プロジェクトを開いているサーバを確かめられなかった。 */
-    | "find_server";
+    | "find_server"
+    /** 保存した会話の場所を読めなかった (server/terminal/agent-conversations.ts)。 */
+    | "restore_conversations"
+    /** 会話の場所を保存できなかった。 */
+    | "save_conversations";
   target: string;
   at: number;
   /** Error の cause と独自フィールドを保持した表示用詳細。 */

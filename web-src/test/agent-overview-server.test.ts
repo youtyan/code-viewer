@@ -176,6 +176,7 @@ function deps(over: Partial<AgentOverviewDeps> = {}): AgentOverviewDeps {
         { id: "%4", path: "/work/notes", command: "zsh" },
       ]),
     listStates: () => states,
+    conversationOf: () => null,
     activityObservedAt: () => 4321,
     observationErrors: () => [],
     listShells: () => [],

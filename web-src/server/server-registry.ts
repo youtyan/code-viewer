@@ -31,6 +31,22 @@ export type ServerRegistryEntry = {
 
 export type ServerStartLock = FileLock;
 
+/**
+ * 起動ごとの token も版も無い登録。token が入る前の版のサーバか、その頃の
+ * テストが残したもの。今の code-viewer では相手を確かめられず、pid が別の
+ * プロセスに使い回されると生きて見えるので、フックの送り先にしない
+ * (hook-report.ts の reportTargets) で、サーバの起動時に消す
+ * (pruneDeadServerRegistry)。裏 (backend) は token を持たない決まりなので
+ * 含めない。token か版のどちらかがあるものの扱いは変えない。
+ */
+export function isLegacyServerRegistry(entry: ServerRegistryEntry): boolean {
+  return (
+    entry.backend !== true &&
+    entry.token === undefined &&
+    entry.version === undefined
+  );
+}
+
 const SERVER_START_LOCK_STALE_MS = 30_000;
 
 export function registryDir(): string {
@@ -213,6 +229,8 @@ export function listServerRegistry(): ServerRegistryListing {
 export type ServerRegistryPruneResult = {
   /** プロセスが居ないと確かめて消した登録。 */
   removed: string[];
+  /** 古い形 (isLegacyServerRegistry) なので消した登録。ログに 1 行ずつ出す。 */
+  removedLegacy: { file: string; root: string; url: string }[];
   /** 残した登録の数 (プロセスが居るもの)。 */
   kept: number;
   /** 読めない・消せなかった登録。消していない。 */
@@ -227,15 +245,17 @@ export type ServerRegistryPruneResult = {
  * フックが呼ばれるたびの全件の読み込みが遅くなる。起動したサーバが
  * ここを呼んで片付ける。
  *
- * 消すのは「その pid のプロセスが存在しない」(ESRCH) と確かめられた登録
- * だけ。pid が別のプロセスに使い回されて生きて見える登録、読めない登録は
- * 残す (読めないのは書いている途中かもしれない)。消す直前に読み直し、
- * pid が変わっていたら (同じリポジトリのサーバが起動し直した) 消さない。
+ * 消すのは「その pid のプロセスが存在しない」(ESRCH) と確かめられた登録と、
+ * 古い形の登録 (isLegacyServerRegistry。pid が使い回されて生きて見えても消す)
+ * だけ。読めない登録は残す (読めないのは書いている途中かもしれない)。消す
+ * 直前に読み直し、pid が変わっていたり token が入っていたり (同じリポジトリの
+ * サーバが起動し直した) すれば消さない。
  */
 export async function pruneDeadServerRegistry(): Promise<ServerRegistryPruneResult> {
   const dir = registryDir();
   const result: ServerRegistryPruneResult = {
     removed: [],
+    removedLegacy: [],
     kept: 0,
     errors: [],
   };
@@ -247,24 +267,29 @@ export async function pruneDeadServerRegistry(): Promise<ServerRegistryPruneResu
     result.errors.push({ file: dir, error });
     return result;
   }
-  const readPid = async (file: string): Promise<number> =>
-    parseServerRegistryEntry(JSON.parse(await readFile(file, "utf8")), file)
-      .pid;
+  const readEntry = async (file: string): Promise<ServerRegistryEntry> =>
+    parseServerRegistryEntry(JSON.parse(await readFile(file, "utf8")), file);
   for (const name of names.sort()) {
     if (!name.endsWith(".json")) continue;
     const file = join(dir, name);
     try {
-      const pid = await readPid(file);
-      if (processAlive(pid)) {
+      const entry = await readEntry(file);
+      const legacy = isLegacyServerRegistry(entry);
+      if (!legacy && processAlive(entry.pid)) {
         result.kept += 1;
         continue;
       }
-      if ((await readPid(file)) !== pid) {
+      const again = await readEntry(file);
+      if (again.pid !== entry.pid || isLegacyServerRegistry(again) !== legacy) {
         result.kept += 1;
         continue;
       }
       await unlink(file);
-      result.removed.push(file);
+      if (legacy) {
+        result.removedLegacy.push({ file, root: entry.root, url: entry.url });
+      } else {
+        result.removed.push(file);
+      }
     } catch (error) {
       // 読んでいる間に消えた (そのサーバが自分で片付けた) のは失敗ではない。
       if (errno(error) === "ENOENT") continue;

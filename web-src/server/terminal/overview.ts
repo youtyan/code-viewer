@@ -50,7 +50,11 @@ import { listTmuxClients } from "../tmux/clients";
 import { listTmuxPanes } from "../tmux/panes";
 import { runningServerResult } from "../worktree/open";
 import { agentActivityObservedAt, getAgentActivityErrors } from "./activity";
-import { listAgentStates } from "./agent-state";
+import {
+  type AgentConversationEntry,
+  getAgentConversation,
+  listAgentStates,
+} from "./agent-state";
 
 export type ProjectResolution =
   | { kind: "root"; root: string; toplevel: string }
@@ -66,6 +70,11 @@ export type AgentOverviewDeps = {
   serverRoot: string;
   listPanes(): Promise<TmuxPanesResponse>;
   listStates(): AgentStateRecord[];
+  /**
+   * フックが知らせた会話の場所 (terminal/agent-state.ts)。状態の記録とは別に
+   * 持つ (状態は保存しないが、場所は起動を跨いで戻す)。
+   */
+  conversationOf(target: string): AgentConversationEntry | null;
   /** terminal/activity.ts が最後に巡回を完了した時刻。 */
   activityObservedAt(): number;
   observationErrors(): AgentStateObservationError[];
@@ -219,6 +228,7 @@ export async function buildAgentOverview(
     }
     const record = states.get(pane.id);
     const source = record?.source ?? null;
+    const conversation = deps.conversationOf(pane.id);
     // tmuxPanes は同じ木を平らにしたものなので、必ず見つかる。
     const place = placeOf.get(pane.id);
     if (!place) throw new Error(`tmux pane ${pane.id} is not in the pane tree`);
@@ -251,9 +261,7 @@ export async function buildAgentOverview(
             reason: "the account of this pane was not resolved",
           })
         : null,
-      ...(record?.conversation && !record.ended
-        ? { conversation: record.conversation }
-        : {}),
+      ...(conversation ? { conversation: conversation.conversation } : {}),
     });
   }
 
@@ -386,6 +394,7 @@ export function defaultAgentOverviewDeps(cwd: string): AgentOverviewDeps {
     // 「このリポジトリか」の判定は使わないので、作業ツリーの一覧を引かない。
     listPanes: () => listTmuxPanes(cwd, { worktreePaths: async () => [] }),
     listStates: listAgentStates,
+    conversationOf: getAgentConversation,
     activityObservedAt: agentActivityObservedAt,
     observationErrors: getAgentActivityErrors,
     listShells: listShellSessionsForMatching,

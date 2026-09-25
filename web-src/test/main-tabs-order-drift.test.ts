@@ -105,6 +105,7 @@ function overviewDeps(
     serverRoot: ALPHA,
     listPanes: async () => panesAt(panes),
     listStates: () => [],
+    conversationOf: () => null,
     activityObservedAt: () => 0,
     observationErrors: () => [],
     listShells: () => [],
