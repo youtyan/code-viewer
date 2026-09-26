@@ -79,6 +79,11 @@ describe("resolvePaneSession", () => {
       stdout: "\n",
       expected: { status: "gone" },
     },
+    {
+      name: "無いペインへの空のフィールド (tmux 3.7) は gone",
+      stdout: "\u001f\n",
+      expected: { status: "gone" },
+    },
   ])("$name", async ({ stdout, expected }) => {
     runTmux.mockResolvedValue({ status: "ok", stdout });
 

@@ -86,7 +86,8 @@ export async function resolvePaneSession(
   if (result.status === "error") return result;
   if (result.status !== "ok") return { status: "gone" };
   const line = result.stdout.replace(/\n$/, "");
-  if (!line) return { status: "gone" };
+  // tmux 3.7 は無いペインを -t に渡しても失敗せず、空のフィールドを返す。
+  if (!line || line === TMUX_FIELD_SEP) return { status: "gone" };
   // セッション名は区切りの文字を含みうるので、最後の区切りで分ける。
   const at = line.lastIndexOf(TMUX_FIELD_SEP);
   const session = line.slice(0, at);
