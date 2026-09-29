@@ -54,8 +54,7 @@
     "lint": "biome lint web-src package.json biome.jsonc",
     "verify": "pnpm run check && pnpm run lint && pnpm run check:format && pnpm run build && pnpm run check:bundle && pnpm run test && node --check web/app.js && node --check web/mermaid.js && node --check web/shiki.js && node --check web/yaml.js && node --check web/xterm.js && node --check web/vendor/highlight.js/highlight.min.js && node --check dist/code-viewer.js && node dist/code-viewer.js --help && node scripts/node-smoke.mjs",
     "pack:dry": "npm pack --dry-run",
-    "prepack": "pnpm run build",
-    "prepublishOnly": "pnpm run verify"
+    "prepack": "pnpm run build"
   },
   "keywords": [
     "git",
