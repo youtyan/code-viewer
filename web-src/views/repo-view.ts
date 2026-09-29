@@ -728,6 +728,7 @@ export function createRepoView(deps: RepoViewDeps) {
     return nav;
   }
 
+  let projectGeneration = 0;
   let REPO_RENDER_SIGNATURE = "";
   let REPO_RENDER_SEQ = 0;
   let REPO_RENDER_LOCATION = "";
@@ -1079,15 +1080,21 @@ export function createRepoView(deps: RepoViewDeps) {
   }
 
   function renderRepoBlobSidebar(currentPath: string, ref: string) {
+    const project = projectGeneration;
     syncRepoTargetInput(ref);
     const normalizedRef = ref || "worktree";
-    if (!isActiveRepoTreeRef(normalizedRef)) return Promise.resolve();
+    if (project !== projectGeneration || !isActiveRepoTreeRef(normalizedRef))
+      return Promise.resolve();
     if (isRepoSidebarReusable(normalizedRef)) {
       return activateRepoSidebarPath(currentPath);
     }
     if (REPO_SIDEBAR_LOAD && REPO_SIDEBAR_LOAD_REF === normalizedRef) {
       return REPO_SIDEBAR_LOAD.then(() => {
-        if (!isActiveRepoTreeRef(normalizedRef)) return;
+        if (
+          project !== projectGeneration ||
+          !isActiveRepoTreeRef(normalizedRef)
+        )
+          return;
         if (!isRepoSidebarReusable(normalizedRef)) {
           invalidateRepoSidebar();
           return renderRepoBlobSidebar(currentPath, normalizedRef);
@@ -1112,7 +1119,11 @@ export function createRepoView(deps: RepoViewDeps) {
       ),
     )
       .then(async (meta) => {
-        if (!isActiveRepoTreeRef(normalizedRef)) return;
+        if (
+          project !== projectGeneration ||
+          !isActiveRepoTreeRef(normalizedRef)
+        )
+          return;
         const files = repoTreeEntriesToSidebarItems(
           meta.entries,
           normalizedRef,
@@ -1139,7 +1150,11 @@ export function createRepoView(deps: RepoViewDeps) {
         await activateRepoSidebarPath(currentPath);
       })
       .catch((error) => {
-        if (!isActiveRepoTreeRef(normalizedRef)) return;
+        if (
+          project !== projectGeneration ||
+          !isActiveRepoTreeRef(normalizedRef)
+        )
+          return;
         console.error(
           "[code-viewer] repository tree load failed",
           normalizedRef,
@@ -1180,29 +1195,36 @@ export function createRepoView(deps: RepoViewDeps) {
   }
 
   async function loadRepoSidebarAncestors(currentPath: string) {
+    const project = projectGeneration;
     let loaded = false;
     for (const dirPath of sidebarAncestorDirs(currentPath)) {
       const row = getSidebarRowByPath(dirPath);
       if (row?.kind !== "dir" || !row.dir) continue;
       if (!shouldLazyLoadSidebarDir(row.dir)) continue;
       await ensureVirtualSidebarDirLoaded(row.dir);
+      if (project !== projectGeneration) return;
       loaded = true;
     }
     if (loaded) rerenderVirtualSidebar();
   }
 
   async function activateRepoSidebarPath(currentPath: string) {
+    const project = projectGeneration;
     // 同じ path の再 activate (SSE リフレッシュや同一ディレクトリの再描画)
     // ではユーザーが動かしたサイドバーのスクロール位置を奪わない。reveal は
     // ナビゲーションで path が変わったときだけ。
     const reveal = getSidebarVirtualActivePath() !== currentPath;
     await loadRepoSidebarAncestors(currentPath);
+    if (project !== projectGeneration) return;
     markActive(currentPath, { reveal });
     applyFilter();
     const row = getSidebarRowByPath(currentPath);
     if (row?.kind === "dir" && row.dir && shouldLazyLoadSidebarDir(row.dir))
       ensureVirtualSidebarDirLoaded(row.dir).then(() => {
-        if (getSidebarVirtualActivePath() === currentPath) {
+        if (
+          project === projectGeneration &&
+          getSidebarVirtualActivePath() === currentPath
+        ) {
           rerenderVirtualSidebar();
           if (reveal) scrollVirtualSidebarPathIntoView(currentPath);
         }
@@ -1643,6 +1665,7 @@ export function createRepoView(deps: RepoViewDeps) {
   // 既存 DOM とスクロール位置を温存したままサーバーの最新ツリーに合わせる。
   // 進行中に次の更新が来たら完了後にもう一度だけ走らせ、取りこぼさない。
   async function refreshRepoSidebar(): Promise<void> {
+    const project = projectGeneration;
     const ref = activeRepoTreeRef();
     if (ref == null) return;
     if (!isRepoSidebarReusable(ref)) {
@@ -1675,11 +1698,23 @@ export function createRepoView(deps: RepoViewDeps) {
         }),
       );
       // fetch 中に ref 切替や画面遷移で前提が崩れていたら適用しない
-      if (!isActiveRepoTreeRef(ref) || !isRepoSidebarReusable(ref)) return;
+      if (
+        project !== projectGeneration ||
+        !isActiveRepoTreeRef(ref) ||
+        !isRepoSidebarReusable(ref)
+      )
+        return;
       await refreshRepoSidebarTree(
         repoTreeEntriesToSidebarItems(meta.entries, ref),
       );
     } catch (error) {
+      if (project !== projectGeneration && isAbortError(error)) {
+        console.info(
+          "[code-viewer] repository refresh cancelled after project switch",
+          error,
+        );
+        return;
+      }
       // 取り直しは次の SSE か手動更新で追いつくので、今のツリーはそのまま
       // 残す。ただし失敗した事実と理由は捨てない。
       console.error(
@@ -1688,10 +1723,12 @@ export function createRepoView(deps: RepoViewDeps) {
         error,
       );
     } finally {
-      REPO_SIDEBAR_REFRESHING = false;
-      if (REPO_SIDEBAR_REFRESH_QUEUED) {
-        REPO_SIDEBAR_REFRESH_QUEUED = false;
-        void refreshRepoSidebar();
+      if (project === projectGeneration) {
+        REPO_SIDEBAR_REFRESHING = false;
+        if (REPO_SIDEBAR_REFRESH_QUEUED) {
+          REPO_SIDEBAR_REFRESH_QUEUED = false;
+          void refreshRepoSidebar();
+        }
       }
     }
   }
@@ -1709,6 +1746,17 @@ export function createRepoView(deps: RepoViewDeps) {
     handleSidebarContextMenu,
     fileEntryIcon,
     invalidateRepoSidebar,
+    resetProject() {
+      projectGeneration++;
+      REPO_SIDEBAR_REFRESHING = false;
+      REPO_SIDEBAR_REFRESH_QUEUED = false;
+      repoLoadSequence++;
+      REPO_RENDER_SEQ++;
+      REPO_RENDER_SIGNATURE = "";
+      REPO_RENDER_LOCATION = "";
+      RAW_FILE_INFO_IN_FLIGHT.clear();
+      invalidateRepoSidebar();
+    },
     refreshRepoSidebar,
     showTrashError,
   };

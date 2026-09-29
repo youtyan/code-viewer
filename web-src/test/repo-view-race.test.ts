@@ -150,7 +150,8 @@ function makeRepoView(
         ? state.route.ref
         : null,
     trackLoad: (promise) => promise,
-    isAbortError: () => false,
+    isAbortError: (error) =>
+      error instanceof DOMException && error.name === "AbortError",
     setRepoSidebarRef(ref) {
       repoSidebarRef = ref;
     },
@@ -239,6 +240,39 @@ function makeRepoView(
 }
 
 describe("repo view route races", () => {
+  test.each([
+    {
+      name: "file list",
+      load: (view: ReturnType<typeof makeRepoView>["view"]) =>
+        view.renderRepoBlobSidebar("README.md", "worktree"),
+    },
+    {
+      name: "folder",
+      load: (view: ReturnType<typeof makeRepoView>["view"]) => view.loadRepo(),
+    },
+  ])("project change drops a previous project's response for the same ref and path: $name", async ({
+    load,
+  }) => {
+    installNullDocument();
+    const pending = deferred<Response>();
+    globalThis.fetch = (() => pending.promise) as typeof fetch;
+    const { view, calls } = makeRepoView({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range,
+    });
+    const loading = load(view);
+    view.resetProject();
+    pending.resolve(jsonResponse(treeResponse("old.txt")));
+    await loading;
+    expect([
+      calls.sidebarRenders,
+      calls.projectNames,
+      calls.headerSyncs,
+    ]).toEqual([[], [], 0]);
+  });
+
   test("loadRepo drops a tree response when the route leaves repo before fetch resolves", async () => {
     const pending = deferred<Response>();
     globalThis.fetch = (() => pending.promise) as unknown as typeof fetch;
@@ -445,6 +479,37 @@ describe("the file list on screens other than Files", () => {
 });
 
 describe("repo sidebar refresh failures", () => {
+  test.each([
+    {
+      name: "navigation cancellation",
+      error: new DOMException("cancelled by user", "AbortError"),
+      level: "info" as const,
+    },
+    {
+      name: "request failure",
+      error: new Error("sample failure"),
+      level: "error" as const,
+    },
+  ])("retains the reason for $name after project reset", async ({
+    error,
+    level,
+  }) => {
+    installFilelistDocument(() => true);
+    const pending = deferred<Response>();
+    globalThis.fetch = (() => pending.promise) as typeof fetch;
+    const log = vi.spyOn(console, level);
+    const { view } = makeRepoView(
+      { screen: "repo", ref: "worktree", path: "", range },
+      { repoMode: true, repoSidebarRef: "worktree", repoSidebarDomReady: true },
+    );
+    const refreshing = view.refreshRepoSidebar();
+    view.resetProject();
+    pending.reject(error);
+    await refreshing;
+    expect(log.mock.calls.flat()).toContain(error);
+    log.mockRestore();
+  });
+
   // 直す前は catch が引数を受け取らず、console にも画面にも理由が残らなかった
   // (同じファイルのほかの 3 か所は理由を出していた)。
   test("木の読み込みに失敗したら、理由を console とファイル一覧の件数 (#file-list-totals) の title に出す", async () => {

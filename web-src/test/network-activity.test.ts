@@ -46,6 +46,31 @@ describe("network activity tracker", () => {
     expect(await (await request).text()).toBe("ok");
   });
 
+  test("project cancellation leaves the terminal request running", async () => {
+    const pending = deferred<Response>();
+    const signals: AbortSignal[] = [];
+    const target = {
+      fetch: ((_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.signal) signals.push(init.signal);
+        return pending.promise;
+      }) as typeof fetch,
+    };
+    const tracker = createNetworkActivityTracker();
+    tracker.installFetch(target);
+    const requests = [
+      target.fetch("/p/sample/_tree"),
+      target.fetch("/_shell/list"),
+    ];
+    expect(
+      tracker.cancelAll("project switch", (input) =>
+        String(input).startsWith("/p/"),
+      ),
+    ).toBe(1);
+    expect(signals.map((signal) => signal.aborted)).toEqual([true, false]);
+    pending.resolve(new Response("ok"));
+    await Promise.all(requests);
+  });
+
   test("cancels active fetch calls", async () => {
     let requestSignal: AbortSignal | undefined;
     const target = {

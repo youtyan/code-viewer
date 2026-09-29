@@ -130,6 +130,22 @@ describe("search results sheet", () => {
     );
   });
 
+  test("changing project clears results and repeats the same query against the new project", async () => {
+    const { view, urls } = setup();
+    view.open("needle");
+    await waitFor(
+      () => document.querySelectorAll(".gdp-palette-row").length === 3,
+    );
+    view.close();
+    view.resetProject();
+    expect(document.querySelectorAll(".gdp-palette-row")).toHaveLength(0);
+    view.open("needle");
+    await waitFor(
+      () => document.querySelectorAll(".gdp-palette-row").length === 3,
+    );
+    expect(urls).toHaveLength(2);
+  });
+
   test("clicking a hit opens the file at that line with the hit text to mark", async () => {
     const { view, opened } = setup();
     view.open("needle");

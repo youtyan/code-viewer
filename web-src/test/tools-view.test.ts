@@ -191,6 +191,52 @@ afterEach(() => {
 });
 
 describe("tools overlay shell", () => {
+  test("switching projects waits for drafts to save, then loads fresh drafts", async () => {
+    storedState = {
+      version: 1,
+      activeTool: "markdown",
+      drafts: { markdown: "first draft" },
+    };
+    const view = createView();
+    await view.open();
+    textareaFor("markdown").value = "edited draft";
+    textareaFor("markdown").dispatchEvent(new Event("input"));
+    deferPatch = true;
+    let reset = false;
+    const switching = view.resetProject().then(() => {
+      reset = true;
+    });
+    await settle();
+    expect(reset).toBe(false);
+    expect(patches[0]?.body).toEqual({
+      activeTool: "markdown",
+      drafts: { markdown: "edited draft" },
+    });
+    resolvePatch?.();
+    await switching;
+    storedState = {
+      version: 1,
+      activeTool: "markdown",
+      drafts: { markdown: "second draft" },
+    };
+    await view.open();
+    expect(textareaFor("markdown").value).toBe("second draft");
+    expect(getCalls).toBe(2);
+  });
+
+  test.each([
+    400, 503,
+  ])("failed draft save (%i) prevents project reset", async (status) => {
+    storedState = { version: 1, activeTool: "markdown" };
+    const view = createView();
+    await view.open();
+    textareaFor("markdown").value = "unsaved draft";
+    textareaFor("markdown").dispatchEvent(new Event("input"));
+    patchStatus = status;
+    await expect(view.resetProject()).rejects.toThrow("saving tools drafts");
+    expect(textareaFor("markdown").value).toBe("unsaved draft");
+  });
+
   test("opening reveals the drawer and its overlay", async () => {
     const view = createView();
     await view.open();

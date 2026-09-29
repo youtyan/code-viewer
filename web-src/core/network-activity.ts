@@ -74,7 +74,10 @@ export function createNetworkActivityTracker(
 ) {
   let inFlight = 0;
   let nextRequestId = 0;
-  const cancellableRequests = new Map<number, AbortController>();
+  const cancellableRequests = new Map<
+    number,
+    { controller: AbortController; input: RequestInfo | URL }
+  >();
 
   const state = (): NetworkActivityState => ({
     inFlight,
@@ -143,7 +146,10 @@ export function createNetworkActivityTracker(
       const requestController = new AbortController();
       const cleanup: Array<() => void> = [];
 
-      cancellableRequests.set(requestId, requestController);
+      cancellableRequests.set(requestId, {
+        controller: requestController,
+        input,
+      });
       linkSignal(requestSignalFromInput(input), requestController, cleanup);
       linkSignal(init?.signal, requestController, cleanup);
       notify();
@@ -178,11 +184,14 @@ export function createNetworkActivityTracker(
     };
   }
 
-  function cancelAll(message = "cancelled by user"): number {
+  function cancelAll(
+    message = "cancelled by user",
+    matches?: (input: RequestInfo | URL) => boolean,
+  ): number {
     const reason = abortReason(message);
     let count = 0;
-    for (const controller of cancellableRequests.values()) {
-      if (controller.signal.aborted) continue;
+    for (const { controller, input } of cancellableRequests.values()) {
+      if (controller.signal.aborted || (matches && !matches(input))) continue;
       controller.abort(reason);
       count++;
     }

@@ -2,9 +2,8 @@ import { apiUrl, PROJECT_HEADER } from "../../core/api-url";
 // メインの面 (左 / 右) のターミナルのタブの中身。映すのは PTY のシェルで、
 // tmux はその中で普通に動く。
 //
-// xterm の枠は面ごとに 1 つ (tabs.left / tabs.right)。タブを切り替えても
-// 枠は作り直さず、映すシェルを付け替える。反対側へ移したタブは枠ごと
-// 入れ替える (attach し直さない)。
+// 左右の枠と、直前に見ていた 2 つの枠を保持する。戻ったときは出力を
+// 流し直さず、その端末を付け替える。保持数を制限し、接続とメモリを増やし続けない。
 //
 // シェルの一覧はここが最後に取ったものを覚えておく (knownShells)。タブ列の
 // 「＋」のメニューとパレットがそれを読み、開く直前に取り直す。
@@ -72,8 +71,8 @@ export type TerminalViewDeps = {
   /**
    * そのシェルが終わった (exit・tmux から抜けた・映していたペインが終わった)。
    * タブを閉じて知らせてもらう。「セッションを止める」で止めたシェルには呼ばない
-   * (止めた人は知っている)。前面でないタブのシェルの終わりはここには来ない
-   * (購読していない)。app が全画面共通の取り直しで拾う。
+   * (止めた人は知っている)。保持中の枠は背面でも通知を受ける。保持していない
+   * タブの終了は app が全画面共通の取り直しで拾う。
    */
   onShellEnded(id: ShellSessionId): void;
   /**
@@ -191,6 +190,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   };
   /** 面ごとの attach の世代。待つ間に別のタブへ切り替わったら、後から来た結果を捨てる。 */
   const tabGeneration: Record<TabSide, number> = { left: 0, right: 0 };
+  const parked: ScreenSlot[] = [];
   let shells: ShellListResponse | null = null;
   /**
    * 一覧取得の世代。最後に始めた取得の応答だけを反映する。これが無いと、
@@ -227,7 +227,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   }
 
   function slots(): ScreenSlot[] {
-    return [tabs.left, tabs.right].filter(
+    return [...parked, tabs.left, tabs.right].filter(
       (slot): slot is ScreenSlot => slot !== null,
     );
   }
@@ -297,7 +297,29 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   }
 
   /** その面の枠 (まだ無ければ作る)。 */
-  function tabSlot(side: TabSide): ScreenSlot {
+  function tabSlot(side: TabSide, id?: ShellSessionId): ScreenSlot {
+    const current = tabs[side];
+    const index = id
+      ? parked.findIndex((slot) => slot.screen.getAttached()?.id === id)
+      : -1;
+    if (
+      index >= 0 ||
+      (id &&
+        current?.screen.getAttached() &&
+        current.screen.getAttached()?.id !== id)
+    ) {
+      const next =
+        index >= 0
+          ? parked.splice(index, 1)[0]
+          : parked.length >= 2
+            ? parked.shift()
+            : undefined;
+      if (current) {
+        current.el.remove();
+        parked.push(current);
+      }
+      tabs[side] = next ?? createSlot();
+    }
     const existing = tabs[side];
     if (existing) {
       // 終わったシェルの案内を出していた面は枠に戻す。
@@ -515,8 +537,9 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       tabs[side]?.screen.focus();
       return;
     }
-    const slot = tabSlot(side);
+    const slot = tabSlot(side, id);
     if (slot.screen.getAttached()?.id === id) {
+      slot.screen.refit();
       slot.screen.focus();
       return;
     }
@@ -539,6 +562,9 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
 
   function releaseTab(id: ShellSessionId): void {
     ended.delete(id);
+    for (const slot of parked) {
+      if (slot.screen.getAttached()?.id === id) slot.screen.detach();
+    }
     for (const side of ["left", "right"] as const) {
       if (showing[side] === id) showing[side] = null;
       const slot = tabs[side];
@@ -587,6 +613,9 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
 
   function markEnded(id: ShellSessionId): void {
     ended.add(id);
+    for (const slot of parked) {
+      if (slot.screen.getAttached()?.id === id) slot.screen.detach();
+    }
     forgetShell(id);
     for (const side of ["left", "right"] as const)
       if (showing[side] === id) showEnded(side, id);
@@ -617,6 +646,9 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     const body = (await res.json()) as { session: ShellSession };
     if (disposed) return "revived";
     addShell(body.session);
+    for (const slot of parked) {
+      if (slot.screen.getAttached()?.id === id) slot.screen.detach();
+    }
     // 映していた面の購読は前のサーバで切れている (読み直した直後なら、シェルが
     // 無いので付いていない)。新しいシェルに付け直す。
     for (const side of ["left", "right"] as const) {

@@ -22,6 +22,8 @@ const terminalScreenState = vi.hoisted(() => ({
   screens: [] as Array<{
     attached: ShellSession | null;
     focusCount: number;
+    attachCount: number;
+    disposed: boolean;
     deps: TerminalScreenDeps;
   }>,
 }));
@@ -31,6 +33,8 @@ vi.mock("../views/terminal/terminal-screen", () => ({
     const state = {
       attached: null as ShellSession | null,
       focusCount: 0,
+      attachCount: 0,
+      disposed: false,
       deps,
     };
     terminalScreenState.screens.push(state);
@@ -38,6 +42,7 @@ vi.mock("../views/terminal/terminal-screen", () => ({
       el: document.createElement("div"),
       attach: async (session: ShellSession) => {
         state.attached = session;
+        state.attachCount++;
       },
       detach: () => {
         state.attached = null;
@@ -52,7 +57,9 @@ vi.mock("../views/terminal/terminal-screen", () => ({
       setInputEnabled: () => undefined,
       localize: () => undefined,
       updateTmuxCover: () => undefined,
-      dispose: () => undefined,
+      dispose: () => {
+        state.disposed = true;
+      },
     };
   },
 }));
@@ -146,6 +153,56 @@ describe("terminal view: シェルの作成と停止", () => {
       attached: session,
       focusCount: 2,
     });
+  });
+
+  test.each([
+    { name: "same pane", side: "left" as const },
+    { name: "opposite pane", side: "right" as const },
+  ])("returning to a recent shell preserves its screen: $name", async ({
+    side,
+  }) => {
+    const first = shell("shell-a1");
+    const second = shell("shell-a2");
+    const { view } = setup([
+      () => json({ available: true, sessions: [first, second] }),
+    ]);
+    await view.loadShells();
+    await view.showInTab(first.id, "left");
+    const firstElement = view.tabPaneFor("left").firstElementChild;
+    await view.showInTab(second.id, "left");
+    await view.showInTab(first.id, side);
+    expect(terminalScreenState.screens[0]).toMatchObject({
+      attached: first,
+      attachCount: 1,
+    });
+    expect(view.tabPaneFor(side).firstElementChild).toBe(firstElement);
+    view.releaseTab(first.id);
+    expect(terminalScreenState.screens[0]?.attached).toBeNull();
+    view.dispose();
+    expect(terminalScreenState.screens.every((screen) => screen.disposed)).toBe(
+      true,
+    );
+  });
+
+  test("many shell switches keep a bounded number of screens and preserve the opposite pane", async () => {
+    const sessions = Array.from({ length: 8 }, (_, i) => shell(`shell-${i}`));
+    const { view } = setup([() => json({ available: true, sessions })]);
+    await view.loadShells();
+    await view.showInTab(sessions[0].id, "right");
+    for (const session of sessions.slice(1))
+      await view.showInTab(session.id, "left");
+    expect(terminalScreenState.screens).toHaveLength(4);
+    expect(terminalScreenState.screens[0]).toMatchObject({
+      attached: sessions[0],
+      attachCount: 1,
+    });
+    await view.showInTab(sessions[6].id, "left");
+    expect(
+      terminalScreenState.screens.filter(
+        (screen) => screen.attached?.id === sessions[6].id,
+      ),
+    ).toHaveLength(1);
+    view.dispose();
   });
 
   // その面でまだターミナルを映していなければ寸法は測れないので送らない

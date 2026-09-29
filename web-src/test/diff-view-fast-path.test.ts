@@ -102,6 +102,16 @@ function makeMeta(files: FileMeta[]): DiffMeta {
 
 const defaultDiffText: DiffViewText = DIFF_SCREEN_TEXT.en;
 
+test("project reset clears the previous project's diff summary", () => {
+  setupDiffDom();
+  const { view } = createDiffViewForShellTest();
+  view.renderShell(makeMeta([]));
+  expect(window._lastMeta).not.toBeNull();
+  view.resetProject();
+  expect(window._lastMeta).toBeNull();
+  expect(document.querySelector("#meta")?.textContent).toBe("");
+});
+
 function createDiffViewForShellTest(
   text: DiffViewText = defaultDiffText,
   overrides: Partial<

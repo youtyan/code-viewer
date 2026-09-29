@@ -2514,6 +2514,15 @@ export function createDiffView(deps: DiffViewDeps) {
     highlightInsertedSpans,
     setFileCollapsed,
     clearLoadQueue,
+    resetProject() {
+      window._lastMeta = null;
+      renderMeta(null);
+      resetLoadScheduling();
+      lazyObserver?.disconnect();
+      prevListSignature = "";
+      prevCardSignatures.clear();
+      CARD_METRICS.clear();
+    },
     persistViewedFiles,
   };
 }

@@ -1,4 +1,4 @@
-import { apiUrl } from "../core/api-url";
+import { apiUrl, projectKey } from "../core/api-url";
 import { showCopyFailure, showHighlightFailure } from "../core/copy-failure";
 import {
   errorWithCause,
@@ -288,7 +288,7 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function sourceCursorKey(target: SourceFileTarget): string {
-    return `${target.ref}\0${target.path}`;
+    return `${projectKey() ?? ""}\0${target.ref}\0${target.path}`;
   }
 
   function sourceCursorMatches(
@@ -3038,6 +3038,12 @@ export function createSourceView(deps: SourceViewDeps) {
     renderStandaloneSource,
     applySourceRouteToShell,
     removeStandaloneSource,
+    resetProject() {
+      cancelActiveSourceLoad("navigation");
+      removeStandaloneSource();
+      SOURCE_CURSOR = null;
+      SOURCE_CURSOR_ROWS = [];
+    },
     cancelActiveSourceLoad,
     finishSourceLoad,
     sourceTargetsEqual,

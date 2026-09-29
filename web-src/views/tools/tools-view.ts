@@ -46,6 +46,7 @@ export type ToolsViewDeps = {
 
 export type ToolsViewHandle = {
   open(tool?: ToolId): Promise<void>;
+  resetProject(): Promise<void>;
   close(): void;
   isOpen(): boolean;
   getActiveTool(): ToolId;
@@ -70,6 +71,8 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
   // PATCH は 1 本ずつ。並走させると到着順が保証されず、古い本文が後から
   // 上書きしてしまう。送信中の変更は dirty に溜めて完了後に送る。
   let saveInFlight = false;
+  let saveOperation: Promise<void> | null = null;
+  let saveError: unknown = null;
   /** 送信中の保存を離脱時に打ち切るためのハンドル。 */
   let saveController: AbortController | null = null;
   /** 「保存できません」を出したペイン。保存が通ったらそこだけ消す。 */
@@ -177,7 +180,7 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
       saveInFlight = true;
       saveController = controller;
     }
-    void deps
+    saveOperation = deps
       .trackLoad(
         fetch(apiUrl("stateTools"), {
           method: "PATCH",
@@ -189,12 +192,14 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
       )
       .then(async (res) => {
         if (res.ok) {
+          saveError = null;
           clearSaveFailure();
           return;
         }
         const failure = new Error(
           await responseErrorMessage(res, "saving tools drafts"),
         );
+        saveError = failure;
         if (isPermanentSaveFailure(res.status)) {
           // 送り直しても通らない。書きかけを抱え続けず、理由を出して諦める。
           reportSaveFailure(failure);
@@ -204,6 +209,7 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
       })
       .catch((error) => {
         if (disposed) return;
+        saveError = error;
         dirty = true;
         saveRetries += 1;
         if (saveRetries > SAVE_RETRY_LIMIT) {
@@ -222,6 +228,7 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
       .finally(() => {
         if (options.keepalive) return;
         saveInFlight = false;
+        saveOperation = null;
         if (saveController === controller) saveController = null;
         if (disposed) return;
         // 送信中に増えた変更をここで送る。
@@ -436,6 +443,26 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
 
   return {
     open,
+    async resetProject() {
+      save();
+      while (saveOperation) await saveOperation;
+      if (saveError !== null) throw saveError;
+      close();
+      if (saveRetryTimer) clearTimeout(saveRetryTimer);
+      saveRetryTimer = null;
+      if (panes) for (const id of TOOL_IDS) panes[id].dispose();
+      panes = null;
+      tabs = null;
+      for (const id of TOOL_IDS) delete drafts[id];
+      stateLoaded = false;
+      savedActiveTool = null;
+      activeTool = DEFAULT_TOOL_ID;
+      toolTouched = false;
+      loadFailed = null;
+      saveFailed = null;
+      saveRetries = 0;
+      getMount()?.replaceChildren();
+    },
     close,
     isOpen,
     getActiveTool: () => activeTool,

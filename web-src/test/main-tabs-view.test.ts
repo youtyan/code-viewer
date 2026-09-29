@@ -487,6 +487,37 @@ describe("main tabs view: プロジェクトのグループ", () => {
       return `${child.getAttribute("data-group") ?? "-"}(${tabs.join(" ")})`;
     });
 
+  test("changing project in place preserves tabs and changes which files belong to the page", async () => {
+    const { handle } = setup(
+      async () => saved,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      APP,
+      groupDeps(),
+    );
+    await handle.restore();
+    const before = handle.layout();
+    const app = before.panes.left.tabs.find((tab) => tab.id === "a1") ?? null;
+    const lib = before.panes.left.tabs.find((tab) => tab.id === "l1") ?? null;
+    expect([handle.isRouteTab(app), handle.isRouteTab(lib)]).toEqual([
+      true,
+      false,
+    ]);
+    handle.setCurrentProject(LIB);
+    expect([
+      handle.currentProject(),
+      handle.isRouteTab(app),
+      handle.isRouteTab(lib),
+    ]).toEqual([LIB, false, true]);
+    expect(handle.layout()).toEqual(before);
+    handle.setCurrentProject(APP);
+    expect([handle.isRouteTab(app), handle.isRouteTab(lib)]).toEqual([
+      true,
+      false,
+    ]);
+  });
+
   test("グループは左の一覧の並び、＋は最後のグループのタブの右、どのプロジェクトのものでもないタブは右端", async () => {
     const { handle, mount } = setup(
       async () => saved,
