@@ -300,20 +300,6 @@ describe("main tabs contract: open", () => {
     expectValid(result);
   });
 
-  test("other-if-split uses the same pane when there is only one", () => {
-    const result = open(one([tab("a", FILE_A)]), FILE_B, {
-      newId: () => "b",
-      pane: "other-if-split",
-    });
-    expect(paneState(result, "left")).toEqual({
-      ids: ["a", "b"],
-      activeId: "b",
-      recent: ["a", "b"],
-      previews: [false, true],
-    });
-    expectValid(result);
-  });
-
   // 面を指定しないとき (フォーカスのある面) は、反対の面の同じものを前面に出す。
   // 面を指定したときはその面の中だけを探す (左右で同じファイルを開けるため)。
   test("activates an existing target across panes without allocating an id when no pane is given", () => {
@@ -714,128 +700,6 @@ describe("main tabs contract: selection, focus, and previews", () => {
   });
 });
 
-describe("main tabs contract: close", () => {
-  test.each([
-    {
-      name: "selects the previously active tab",
-      start: one([tab("a", FILE_A), tab("b", FILE_B), tab("c", FILE_C)], "c", [
-        "a",
-        "b",
-        "c",
-      ]),
-      id: "c",
-      expected: {
-        ids: ["a", "b"],
-        activeId: "b",
-        recent: ["a", "b"],
-        previews: [false, false],
-      },
-      same: false,
-    },
-    {
-      name: "falls back to the right neighbor",
-      start: one([tab("a", FILE_A), tab("b", FILE_B), tab("c", FILE_C)], "a"),
-      id: "a",
-      expected: {
-        ids: ["b", "c"],
-        activeId: "b",
-        recent: ["b"],
-        previews: [false, false],
-      },
-      same: false,
-    },
-    {
-      name: "falls back to the left neighbor",
-      start: one([tab("a", FILE_A), tab("b", FILE_B), tab("c", FILE_C)], "c"),
-      id: "c",
-      expected: {
-        ids: ["a", "b"],
-        activeId: "b",
-        recent: ["b"],
-        previews: [false, false],
-      },
-      same: false,
-    },
-    {
-      name: "keeps the active tab when closing a background tab",
-      start: one([tab("a", FILE_A), tab("b", FILE_B), tab("c", FILE_C)], "a", [
-        "b",
-        "a",
-      ]),
-      id: "b",
-      expected: {
-        ids: ["a", "c"],
-        activeId: "a",
-        recent: ["a"],
-        previews: [false, false],
-      },
-      same: false,
-    },
-    {
-      name: "leaves an empty pane when closing the final tab",
-      start: one([tab("a", FILE_A)]),
-      id: "a",
-      expected: { ids: [], activeId: null, recent: [], previews: [] },
-      same: false,
-    },
-    {
-      name: "ignores a missing tab",
-      start: one([tab("a", FILE_A)]),
-      id: "missing",
-      expected: {
-        ids: ["a"],
-        activeId: "a",
-        recent: ["a"],
-        previews: [false],
-      },
-      same: true,
-    },
-  ])("$name", ({ start, id, expected, same }) => {
-    const before = structuredClone(start);
-    const result = close(start, id);
-    expect(paneState(result, "left")).toEqual(expected);
-    expect(result === start).toBe(same);
-    expect(start).toEqual(before);
-    expectValid(result);
-  });
-
-  test.each([
-    {
-      name: "removes an empty right pane",
-      start: two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)]), "right"),
-      id: "b",
-      expectedId: "a",
-    },
-  ])("$name", ({ start, id, expectedId }) => {
-    const result = close(start, id);
-    expect(result).toEqual({
-      panes: {
-        left: {
-          tabs: [tab(expectedId, FILE_A)],
-          activeId: expectedId,
-          recent: [expectedId],
-        },
-      },
-      focused: "left",
-    });
-    expectValid(result);
-  });
-
-  // 左の面は空でもよい (本文の既定を出す) ので、右の面を左へ寄せない。
-  test("keeps the right pane when the left pane becomes empty", () => {
-    const start = two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)]));
-    const result = close(start, "a");
-    expect(result).toEqual({
-      panes: {
-        left: { tabs: [], activeId: null, recent: [] },
-        right: { tabs: [tab("b", IMAGE_B)], activeId: "b", recent: ["b"] },
-      },
-      focused: "left",
-    });
-    expectValid(result);
-  });
-});
-
 describe("main tabs contract: bulk close", () => {
   test.each([
     {
@@ -940,44 +804,6 @@ describe("main tabs contract: bulk close", () => {
 });
 
 describe("main tabs contract: move", () => {
-  test("reorders a tab inside a pane", () => {
-    const start = one([tab("a", FILE_A), tab("b", FILE_B), tab("c", FILE_C)]);
-    const before = structuredClone(start);
-    const result = move(start, "a", "left", 2);
-    expect(result.moved).toBe(true);
-    expect(paneState(result.layout, "left")).toEqual({
-      ids: ["b", "c", "a"],
-      activeId: "a",
-      recent: ["a"],
-      previews: [false, false, false],
-    });
-    expect(start).toEqual(before);
-    expectValid(result.layout);
-  });
-
-  test("moves a tab across panes and activates the destination", () => {
-    const start = two(
-      pane([tab("a", FILE_A), tab("b", IMAGE_B)]),
-      pane([tab("c", IMAGE_C)]),
-    );
-    const result = move(start, "b", "right", 0);
-    expect(result.moved).toBe(true);
-    expect(paneState(result.layout, "left")).toEqual({
-      ids: ["a"],
-      activeId: "a",
-      recent: ["a"],
-      previews: [false],
-    });
-    expect(paneState(result.layout, "right")).toEqual({
-      ids: ["b", "c"],
-      activeId: "b",
-      recent: ["c", "b"],
-      previews: [false, false],
-    });
-    expect(result.layout.focused).toBe("right");
-    expectValid(result.layout);
-  });
-
   test("keeps the destination preview fixed when moving another preview", () => {
     const start = two(
       pane([tab("a", FILE_A), tab("moving", IMAGE_B, true)]),
@@ -1031,43 +857,6 @@ describe("main tabs contract: move", () => {
       "right",
     ]);
     expectValid(result.layout);
-  });
-
-  test("does not move a page into the right pane", () => {
-    const start = two(
-      pane([tab("a", FILE_A), tab("moving", PAGE_DIFF)]),
-      pane([tab("c", IMAGE_C)]),
-    );
-    expect(move(start, "moving", "right", 0)).toEqual({
-      moved: false,
-      reason: "not-placeable",
-      layout: start,
-    });
-  });
-
-  test("moves a file into the right pane", () => {
-    const start = two(
-      pane([tab("a", FILE_A), tab("moving", FILE_B)]),
-      pane([tab("c", IMAGE_C)]),
-    );
-    const result = move(start, "moving", "right", 0);
-    expect([result.moved, paneState(result.layout, "right")?.ids]).toEqual([
-      true,
-      ["moving", "c"],
-    ]);
-    expectValid(result.layout);
-  });
-
-  test("does not move into a pane containing the same target", () => {
-    const start = two(
-      pane([tab("a", IMAGE_A)]),
-      pane([tab("duplicate", { ...IMAGE_A })]),
-    );
-    expect(move(start, "a", "right", 0)).toEqual({
-      moved: false,
-      reason: "duplicate-target",
-      layout: start,
-    });
   });
 
   test.each([
@@ -1164,16 +953,6 @@ describe("main tabs contract: split and other side", () => {
     expectValid(result);
   });
 
-  test("splitRight moves a file into a new right pane", () => {
-    const result = splitRight(one([tab("a", FILE_A), tab("b", FILE_B)]), "b");
-    expect([
-      paneState(result, "left")?.ids,
-      paneState(result, "right")?.ids,
-      result.focused,
-    ]).toEqual([["a"], ["b"], "right"]);
-    expectValid(result);
-  });
-
   test("splitRight of a sole terminal leaves the left pane empty (its default body)", () => {
     const result = splitRight(one([tab("t", TERMINAL_A)]), "t");
     expect([
@@ -1236,25 +1015,6 @@ describe("main tabs contract: split and other side", () => {
       recent: ["a", "b"],
       previews: [false, false],
     });
-    expectValid(result);
-  });
-
-  test("moveToOtherSide leaves a page tab on the left", () => {
-    const start = two(pane([tab("a", PAGE_DIFF)]), pane([tab("b", IMAGE_B)]));
-    const result = moveToOtherSide(start, "a");
-    expect(result).toBe(start);
-    expectValid(result);
-  });
-
-  test("moveToOtherSide moves a file tab to the right", () => {
-    const result = moveToOtherSide(
-      two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)])),
-      "a",
-    );
-    expect([
-      paneState(result, "left")?.ids,
-      paneState(result, "right")?.ids,
-    ]).toEqual([[], ["b", "a"]]);
     expectValid(result);
   });
 

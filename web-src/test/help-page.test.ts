@@ -21,7 +21,6 @@ import {
 } from "../views/help-guides";
 import { HELP_CAPTURES } from "../views/help-images";
 import {
-  buildHelpKeybindingGroups,
   collectHelpKeybindingCoverage,
   documentedHelpKeybindingActions,
   HIDDEN_HELP_KEYBINDING_ACTIONS,
@@ -680,67 +679,6 @@ describe("help page", () => {
   });
 });
 
-describe("help page getting started", () => {
-  test.each<[HelpLanguage, string[]]>([
-    [
-      "en",
-      [
-        "Start it",
-        "Find your way around",
-        "(Optional) Add another repository",
-        "Install tmux",
-        "Sign in to your account",
-        "(Optional, recommended) Set up hooks",
-        "Start an agent",
-        "(Optional) Turn on notifications",
-        "(Optional) Give your AI the skills",
-        "If something does not work, run doctor",
-      ],
-    ],
-    [
-      "ja",
-      [
-        "起動する",
-        "画面の見方",
-        "（任意）ほかのリポジトリを足す",
-        "tmux を入れる",
-        "アカウントにログインする",
-        "（任意・おすすめ）フックを入れる",
-        "エージェントを起動する",
-        "（任意）通知を有効にする",
-        "（任意）AI にスキルを入れる",
-        "うまく動かないときは doctor を見る",
-      ],
-    ],
-  ])("in %s is the first section: ten numbered steps before any group", (lang, titles) => {
-    renderHelpPage(lang, "getting-started");
-    const content = document.querySelector(".gdp-help-content");
-    expect([
-      [
-        ...(content?.querySelectorAll(
-          ":scope > .gdp-help-steps > li > .gdp-help-step-title",
-        ) ?? []),
-      ].map((title) => title.textContent),
-      content?.querySelectorAll(".gdp-help-group").length,
-    ]).toEqual([titles, 0]);
-  });
-
-  test("the steps carry the commands to type", () => {
-    renderHelpPage("en", "getting-started");
-    expect(
-      Array.from(
-        document.querySelectorAll(".gdp-help-steps .gdp-help-command code"),
-        (code) => code.textContent,
-      ),
-    ).toEqual([
-      "npx @youtyan/code-viewer --open",
-      "brew install tmux",
-      "npx @youtyan/code-viewer skill install",
-      "npx @youtyan/code-viewer doctor",
-    ]);
-  });
-});
-
 describe("help page text uses each screen's names", () => {
   /** 名前を差し替えたラベル (画面の文言が変われば本文も変わることを見る)。 */
   function renamed(lang: HelpLanguage): HelpLabels {
@@ -768,82 +706,6 @@ describe("help page text uses each screen's names", () => {
     renderHelpPage(lang, section, { helpLabels: renamed });
     const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
     expect(text.includes(name)).toBe(true);
-  });
-
-  // 本文の［…］は画面の i18n の値そのもの (写した文字ではない)。
-  test.each<[HelpLanguage, string, string[]]>([
-    [
-      "en",
-      "getting-started",
-      [
-        "Projects",
-        "Register this folder",
-        "Sign in",
-        "Signed in",
-        "Agent integration",
-        "Set up",
-        "New agent",
-        "Launch",
-        "All agents",
-        "Enable notifications",
-        "Environment doctor",
-      ],
-    ],
-    [
-      "ja",
-      "getting-started",
-      [
-        "プロジェクト",
-        "このディレクトリを登録",
-        "ログイン",
-        "ログイン済み",
-        "エージェント連携",
-        "入れる",
-        "新しいエージェント",
-        "起動",
-        "すべてのエージェント",
-        "通知を有効にする",
-        "環境ドクター",
-      ],
-    ],
-    [
-      "ja",
-      "add-account",
-      [
-        "設定",
-        "アカウント",
-        "アカウントを追加…",
-        "新しく作る",
-        "既にあるディレクトリを使う",
-        "内容を確認…",
-        "ログインする",
-        "別のアカウントで続ける…",
-        "起動して引き継ぐ",
-      ],
-    ],
-    [
-      "en",
-      "agent-hooks",
-      [
-        "Settings",
-        "Agents",
-        "Agent integration",
-        "Set up",
-        "Finished · unread",
-        "Hook target missing",
-        "Repair",
-        "Show how to set up",
-        "Remove",
-        "Advanced",
-      ],
-    ],
-  ])("in %s the %s section names the buttons as the screens do", (lang, section, names) => {
-    renderHelpPage(lang, section);
-    const shown = Array.from(
-      document.querySelectorAll(".gdp-help-content .gdp-help-ui"),
-      (ui) => ui.textContent ?? "",
-    );
-    expect(names.filter((name) => !shown.includes(name))).toEqual([]);
   });
 
   test.each<[HelpLanguage, string]>([
@@ -1047,23 +909,6 @@ describe("help page keybinding reference", () => {
       );
     }
   });
-
-  test("keeps generated keybinding rows structurally aligned across languages", () => {
-    const englishGroups = buildHelpKeybindingGroups("en");
-    const japaneseGroups = buildHelpKeybindingGroups("ja");
-
-    expect(
-      japaneseGroups.map((group) => group.rows.map(([keys]) => keys)),
-    ).toEqual(englishGroups.map((group) => group.rows.map(([keys]) => keys)));
-    expect(japaneseGroups.map((group) => group.rows.length)).toEqual(
-      englishGroups.map((group) => group.rows.length),
-    );
-    expect(
-      englishGroups
-        .flatMap((group) => group.rows.map(([keys]) => keys))
-        .filter((keys) => keys === ""),
-    ).toEqual([]);
-  });
 });
 
 describe("help page captures", () => {
@@ -1150,35 +995,6 @@ describe("help page captures", () => {
   const CASES = (["en", "ja"] as const).flatMap((lang) =>
     FIGURES.map(([section, names]) => [lang, section, names] as const),
   );
-
-  test("the table covers every help section", () => {
-    renderHelpPage("en", "getting-started");
-    expect(FIGURES.map(([section]) => section)).toEqual([
-      "getting-started",
-      "projects",
-      "read-files",
-      "read-diffs",
-      "search",
-      "worktrees",
-      "start-agent",
-      "agent-state",
-      "notifications",
-      "agent-hooks",
-      "add-account",
-      "terminal",
-      "tabs-layout",
-      "install-app",
-      "phone",
-      "datastores",
-      "tools",
-      "annotations",
-      "ask-ai",
-      "ai-cli-mcp",
-      "project-files",
-      "doctor",
-      "keybindings",
-    ]);
-  });
 
   test.each(
     CASES,

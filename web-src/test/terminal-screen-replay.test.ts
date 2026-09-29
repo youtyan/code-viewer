@@ -61,7 +61,8 @@ describe("xterm の答えが出る時点 (本物の xterm)", () => {
 
 // ---- 流し直しの印 (xterm を差し替える) ----
 
-vi.mock("../core/xterm-loader", () => {
+vi.mock("../core/xterm-loader", async () => {
+  const { FakeWebglAddon } = await import("./_fake-dom");
   const noop = () => undefined;
   const disposable = () => ({ dispose: noop });
   /**
@@ -128,7 +129,11 @@ vi.mock("../core/xterm-loader", () => {
   }
   return {
     loadXterm: () =>
-      Promise.resolve({ Terminal: FakeTerminal, FitAddon: FakeFitAddon }),
+      Promise.resolve({
+        Terminal: FakeTerminal,
+        FitAddon: FakeFitAddon,
+        WebglAddon: FakeWebglAddon,
+      }),
   };
 });
 
@@ -176,7 +181,10 @@ describe("流し直しの印を読んで、端末の答えを送るか決める"
 
   beforeEach(async () => {
     fetchMock = vi.fn(
-      async () => new Response(JSON.stringify({ images: [], rejected: [] })),
+      async () =>
+        new Response(
+          JSON.stringify({ images: [], rejected: [], candidates: [] }),
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
     outputHandlers = [];

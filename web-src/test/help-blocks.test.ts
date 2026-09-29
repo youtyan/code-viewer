@@ -21,7 +21,11 @@ import {
 import { helpFigure } from "../views/help-images";
 
 beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
+  GlobalRegistrator.register({
+    url: "http://localhost/",
+    // クリックをブラウザへ渡すことを確認し、リンク先の通信は行わない。
+    settings: { navigation: { disableChildPageNavigation: true } },
+  });
 });
 afterAll(() => {
   GlobalRegistrator.unregister();

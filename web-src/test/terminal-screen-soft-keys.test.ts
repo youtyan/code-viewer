@@ -28,7 +28,8 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-vi.mock("../core/xterm-loader", () => {
+vi.mock("../core/xterm-loader", async () => {
+  const { FakeWebglAddon } = await import("./_fake-dom");
   const noop = () => undefined;
   const disposable = () => ({ dispose: noop });
   class FakeTerminal {
@@ -77,7 +78,11 @@ vi.mock("../core/xterm-loader", () => {
   }
   return {
     loadXterm: () =>
-      Promise.resolve({ Terminal: FakeTerminal, FitAddon: FakeFitAddon }),
+      Promise.resolve({
+        Terminal: FakeTerminal,
+        FitAddon: FakeFitAddon,
+        WebglAddon: FakeWebglAddon,
+      }),
   };
 });
 
@@ -119,7 +124,10 @@ describe("端末の操作札", () => {
 
   beforeEach(async () => {
     fetchMock = vi.fn(
-      async () => new Response(JSON.stringify({ images: [], rejected: [] })),
+      async () =>
+        new Response(
+          JSON.stringify({ images: [], rejected: [], candidates: [] }),
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal(

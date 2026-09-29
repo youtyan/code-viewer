@@ -62,7 +62,8 @@ function fakeState(): FakeTerminalState {
   ] as FakeTerminalState;
 }
 
-vi.mock("../core/xterm-loader", () => {
+vi.mock("../core/xterm-loader", async () => {
+  const { FakeWebglAddon } = await import("./_fake-dom");
   const noop = () => undefined;
   const disposable = () => ({ dispose: noop });
   const state: FakeTerminalState = {
@@ -183,6 +184,7 @@ vi.mock("../core/xterm-loader", () => {
       Promise.resolve({
         Terminal: FakeTerminal,
         FitAddon: FakeFitAddon,
+        WebglAddon: FakeWebglAddon,
       }),
   };
 });

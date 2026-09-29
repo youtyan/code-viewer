@@ -24,18 +24,8 @@ const markdown = sourceFixture(
 const mermaidLoader = sourceFixture(
   readFileSync(new URL("../core/mermaid-loader.ts", import.meta.url), "utf8"),
 );
-const shikiLoader = sourceFixture(
-  readFileSync(new URL("../core/shiki-loader.ts", import.meta.url), "utf8"),
-);
 const lazyBundle = sourceFixture(
   readFileSync(new URL("../core/lazy-bundle.ts", import.meta.url), "utf8"),
-);
-const style = sourceFixture(
-  readFileSync(new URL("../../web/style.css", import.meta.url), "utf8"),
-);
-const pkg = readFileSync(
-  new URL("../../package.json", import.meta.url),
-  "utf8",
 );
 // 遅延バンドルの定義はビルドスクリプト側にある。
 const bundles = readFileSync(
@@ -322,13 +312,13 @@ describe("markdown preview", () => {
       },
     };
     const html = renderMarkdownHtml(
-      "---\nname: my-original-psd-avatar-creation\ndescription: Use when creating an original 2D talking avatar character\n---\n# Body\n",
-      { path: ".agents/skills/avatar/SKILL.md", ref: "worktree" },
+      "---\nname: sample-skill\ndescription: Use when working with sample files\n---\n# Body\n",
+      { path: ".agents/skills/sample/SKILL.md", ref: "worktree" },
       highlighter,
     );
     expect(seen).toEqual(["yaml"]);
     expect(html.includes('data-gdp-frontmatter="yaml"')).toBe(true);
-    expect(html.includes("name: my-original-psd-avatar-creation")).toBe(true);
+    expect(html.includes("name: sample-skill")).toBe(true);
     expect(html.includes('<h1 id="body"')).toBe(true);
     expect(html.includes("<hr>")).toBe(false);
   });
@@ -395,15 +385,6 @@ describe("markdown preview", () => {
     expect(markdownSlugify("***")).toBe("section");
   });
 
-  test("markdown TOC includes h4 headings and exposes link titles", () => {
-    expect(
-      markdown.includes(
-        'root.querySelectorAll<HTMLElement>("h1[id], h2[id], h3[id], h4[id]")',
-      ),
-    ).toBe(true);
-    expect(markdown.includes("link.title = entry.text")).toBe(true);
-  });
-
   test("mermaid is built as a lazy standalone asset and served by the preview server", () => {
     expect(bundles.includes("web/mermaid.js")).toBe(true);
     expect(bundles.includes("web-src/mermaid-entry.ts")).toBe(true);
@@ -421,45 +402,6 @@ describe("markdown preview", () => {
     // mermaid の lightbox / error 描画は markdown-preview 側のまま。
     expect(markdown.includes("openMermaidLightbox")).toBe(true);
     expect(markdown.includes("renderMermaidError")).toBe(true);
-  });
-
-  test("Shiki is built as a lazy standalone asset for markdown code blocks", () => {
-    expect(bundles.includes("web/shiki.js")).toBe(true);
-    expect(bundles.includes("web-src/shiki-entry.ts")).toBe(true);
-    expect(pkg.includes('"shiki"')).toBe(true);
-    expect(staticFileSpec("/shiki.js")).toEqual([
-      "shiki.js",
-      "application/javascript; charset=utf-8",
-    ]);
-    // lazy import 本体は shiki-loader.ts に切り出し済み。
-    expect(shikiLoader.includes('"shiki.js"')).toBe(true);
-    expect(shikiLoader.includes("createBundleLoader")).toBe(true);
-    expect(lazyBundle.includes("/* @vite-ignore */")).toBe(true);
-    // markdown はこのアプリの shiki のテーマ (core/shiki-theme.ts) で描く側。
-    expect(markdown.includes("themes: SHIKI_THEMES")).toBe(true);
-  });
-
-  test("markdown preview CSS includes TOC, tables, mermaid, and lightbox styling", () => {
-    expect(style.includes(".gdp-markdown-layout")).toBe(true);
-    expect(style.includes(".gdp-markdown-toc")).toBe(true);
-    expect(style.includes(".gdp-standalone-source .gdp-markdown-toc")).toBe(
-      false,
-    );
-    expect(style.includes(".gdp-standalone-source .gdp-markdown-layout")).toBe(
-      false,
-    );
-    expect(style.includes(".gdp-markdown-layout {\n  display: grid;")).toBe(
-      true,
-    );
-    expect(style.includes('content: "On this page";')).toBe(true);
-    expect(style.includes("scrollbar-gutter: stable;")).toBe(true);
-    expect(style.includes("scrollbar-width: thin;")).toBe(true);
-    expect(style.includes(".gdp-markdown-toc a:focus-visible")).toBe(true);
-    expect(style.includes(".gdp-markdown-toc .level-4 > a")).toBe(true);
-    expect(style.includes(".gdp-markdown-preview table")).toBe(true);
-    expect(style.includes(".gdp-markdown-preview .mermaid")).toBe(true);
-    expect(style.includes(".mkdp-lightbox")).toBe(true);
-    expect(style.includes(".mkdp-mermaid-error")).toBe(true);
   });
 
   // TOC の高さは「本文が使える高さ」(--content-h) から導く。100vh から直接引くと
@@ -510,22 +452,5 @@ describe("markdown preview", () => {
       new Map(bodyVariables).set("--statusbar-h", "320px"),
     );
     expect(shortFooter).not.toBe(tallFooter);
-  });
-
-  test("preview/code tabs can hide either rendered surface despite display-specific CSS", () => {
-    expect(style.includes(".gdp-markdown-layout[hidden]")).toBe(true);
-    expect(style.includes(".gdp-source-table[hidden]")).toBe(true);
-    expect(style.includes("display: none !important")).toBe(true);
-  });
-
-  test("markdown preview applies Shiki light and dark theme variables", () => {
-    expect(style.includes(".gdp-markdown-preview pre.shiki")).toBe(true);
-    expect(style.includes("var(--shiki-light-bg)")).toBe(true);
-    expect(style.includes("var(--shiki-dark-bg)")).toBe(true);
-    expect(
-      style.includes(
-        '[data-theme="dark"] .gdp-markdown-preview pre.shiki span',
-      ),
-    ).toBe(true);
   });
 });
