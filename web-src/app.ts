@@ -2029,6 +2029,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   function syncLineRefPill() {
     // 右の面のファイルにフォーカスがあれば、札はその面の行を指す。
     const view = MAIN_TABS.panes();
+    const front = view.fronts[view.focused];
+    if (front && !MAIN_TABS.isRouteTab(front)) {
+      DIFF_LINE_SELECT.clear();
+      return;
+    }
     const right =
       view.focused === "right" && view.fronts.right?.target.kind === "file"
         ? MAIN_TABS.paneRoute("right")
