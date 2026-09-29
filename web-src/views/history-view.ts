@@ -1715,6 +1715,11 @@ export function createHistoryView(deps: HistoryViewDeps) {
   return {
     enterHistory,
     leaveHistory,
+    resetProject() {
+      leaveHistory();
+      commits = [];
+      ref = "";
+    },
     onRefPicked,
     localize: () => {
       syncRefreshButton(activeMount.refreshButton);

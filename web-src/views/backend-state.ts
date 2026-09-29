@@ -312,5 +312,13 @@ export function createBackendState(deps: BackendStateDeps) {
       );
   }
 
-  return { inspect, checkStarting };
+  return {
+    inspect,
+    checkStarting,
+    resetProject() {
+      failure = null;
+      projectAnswered = false;
+      if (surface) surface.hidden = true;
+    },
+  };
 }

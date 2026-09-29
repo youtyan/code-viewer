@@ -271,7 +271,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   key("p"),
                   ") to find a project by name.",
                 ],
-                "Your tabs, terminals and unread marks stay when you switch.",
+                "Switching updates the screen without reloading the page. Your tabs, terminals and unread marks stay.",
                 [
                   ui(l.agents.sidebar.detected),
                   " lists projects you have not registered where agents are running.",
@@ -1250,6 +1250,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ").",
                 ],
                 "Selecting an agent in the sidebar also opens its pane in a terminal tab.",
+                "The last two hidden terminals stay connected for quicker switching.",
               ],
             },
             {

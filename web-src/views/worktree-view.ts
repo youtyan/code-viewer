@@ -128,6 +128,7 @@ export type WorktreeAgent = {
 };
 
 export type WorktreeView = PageView & {
+  resetProject(): void;
   /** topbar Reload: mounted 済みでも一覧と差分を取り直す。 */
   reload(): Promise<void>;
   /** 統合/分割・構文・テスト非表示が変わったとき、表示中のカードへ反映する。 */
@@ -506,8 +507,14 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     if (!mounted || !route()) return Promise.resolve();
     refreshRequested = true;
     if (refreshLoop) return refreshLoop;
+    const viewGen = viewGeneration;
     const loop = (async () => {
-      while (refreshRequested && mounted && route()) {
+      while (
+        refreshRequested &&
+        mounted &&
+        route() &&
+        viewGen === viewGeneration
+      ) {
         refreshRequested = false;
         await refreshOnce();
       }
@@ -2418,6 +2425,17 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       await refresh();
     },
     suspend,
+    resetProject() {
+      suspend();
+      data = null;
+      acceptedServerGeneration = 0;
+      refreshLoop = null;
+      message = "";
+      messageIsError = false;
+      busyPath = "";
+      worktreeFilter = "";
+      fileFilter = "";
+    },
     reload(): Promise<void> {
       if (!mounted) return this.enter();
       return refresh();

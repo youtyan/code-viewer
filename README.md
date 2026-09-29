@@ -244,8 +244,8 @@ Requires Node.js 20 or newer. Development uses
 - Register your projects so they stay in the Agents list (in your order) even
   with no agent running, and switch between them from the project name at
   the head of the list column (`p`) or from the left sidebar on any screen. One
-  code-viewer serves every project on one port: switching reloads the page at
-  `/p/<key>/…` on the same address, so notification permission, the terminal
+  code-viewer serves every project on one port: switching updates the screen at
+  `/p/<key>/…` without reloading the page. Notification permission, terminal
   shells and unread marks carry over, and reload, back/forward and bookmarks
   return to the same project and screen; CLI commands that print a screen
   URL (`annotate`, `query diff tables`) print that address too. Each project
@@ -346,7 +346,9 @@ Requires Node.js 20 or newer. Development uses
   when you only want to watch, changes the text size, and has Stop session,
   which ends the shell after asking; closing the tab never stops the shell or
   the agent. The same terminal moves to the other side with its screen and
-  half-typed input. Images the agent writes are listed on a shelf beside the
+  half-typed input. The two most recently hidden terminal screens also stay
+  connected, so returning to them avoids replaying their output. Older screens
+  reconnect when opened again. Images the agent writes are listed on a shelf beside the
   terminal (right, left, below or above; move it from the shelf's ⋯), grouped by
   the pane they came from; hovering one shows its path and size in the shelf's
   header and highlights where it appears on the screen. A click opens them in an

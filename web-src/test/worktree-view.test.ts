@@ -2201,6 +2201,17 @@ describe("page level state", () => {
       "stale worktree response generation 1; current is 2",
     );
   });
+
+  test("switching projects accepts the new server generation and replaces the list", async () => {
+    const mounted = await mountWith(
+      response([item({ name: "first" })], { generation: 8 }),
+    );
+    stubFetch(response([item({ name: "second" })], { generation: 1 }));
+    mounted.view.resetProject();
+    await mounted.view.enter();
+    expect(texts(mounted.panel, ".history-item .subject")).toEqual(["second"]);
+    expect(mounted.panel.textContent).not.toContain("stale worktree response");
+  });
 });
 
 describe("sidebar tree view", () => {

@@ -118,7 +118,7 @@ export type JournalViewDeps = {
   setStatus(status: "live" | "refreshing" | "error" | null): void;
 };
 
-export type JournalView = PageView;
+export type JournalView = PageView & { resetProject(): void };
 
 type ActiveTab = "journal" | "tasks";
 type EditorMode = "write" | "preview" | "split";
@@ -2297,5 +2297,23 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     if (panel) applyTaskEditorWidth(panel.getBoundingClientRect().width, false);
   });
 
-  return { enter, suspend, handleSse, localize };
+  return {
+    enter,
+    suspend,
+    handleSse,
+    localize,
+    resetProject() {
+      suspend();
+      data = null;
+      selectedEntryId = "";
+      selectedTaskId = "";
+      creatingEntry = false;
+      githubIssues = [];
+      githubIssuesLoading = false;
+      githubIssuesError = "";
+      githubIssueGeneration++;
+      githubIssuesLoaded = false;
+      githubIssuesAutoRequested = false;
+    },
+  };
 }

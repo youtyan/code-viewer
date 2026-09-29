@@ -2805,7 +2805,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           error,
         );
       }
-      applyDbUiState(state);
+      if (operation === dbUiLoadPromise) applyDbUiState(state);
     })();
     dbUiLoadPromise = operation;
     try {
@@ -3038,6 +3038,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       tabs.push(entry.pane.getState());
     }
     if (tabs.length === 0) return;
+    const url = apiUrl("dbTabs");
     const body: TabsState = { version: 1, tabs, activeTabId };
     const raw = JSON.stringify(body);
     if (raw === lastSavedTabsRaw) return;
@@ -3046,7 +3047,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     abortActiveSave();
     if (options.keepalive) {
       try {
-        const response = await fetch(apiUrl("dbTabs"), {
+        const response = await fetch(url, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -3059,7 +3060,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           response,
           outerText().failure.saveDatabaseTabsOnUnload,
         );
-        lastSavedTabsRaw = raw;
+        if (url === apiUrl("dbTabs")) lastSavedTabsRaw = raw;
       } catch (error) {
         reportActivePaneError(
           "Failed to save database tabs on unload",
@@ -3083,7 +3084,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         const controller = new AbortController();
         saveController = controller;
         try {
-          const response = await fetch(apiUrl("dbTabs"), {
+          const response = await fetch(url, {
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
@@ -3096,7 +3097,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
             response,
             outerText().failure.saveDatabaseTabs,
           );
-          lastSavedTabsRaw = raw;
+          if (url === apiUrl("dbTabs")) lastSavedTabsRaw = raw;
         } catch (error) {
           if (!isAbortError(error)) {
             reportActivePaneError(
@@ -3945,7 +3946,6 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   }
 
   function leave(): void {
-    if (!mounted) return;
     lifecycleSeq++;
     flushPendingSave();
     for (const [, entry] of tabsById) {
@@ -3953,6 +3953,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }
     tabsById.clear();
     dbFilesCache = null;
+    lastSavedTabsRaw = null;
+    dbUiLoadPromise = null;
+    dbUiState = { version: 1, columnWidths: {} };
     tabsList.innerHTML = "";
     tabHost.innerHTML = "";
     activeTabId = null;

@@ -476,6 +476,7 @@ export type MainTabsHandle = {
   isRouteTab(tab: Tab | null): boolean;
   /** このページのプロジェクトの根 (読み戻す前・知らなければ null)。 */
   currentProject(): string | null;
+  setCurrentProject(root: string): void;
   /** タブのグループ (プロジェクトの根。どれでもなければ null)。 */
   groupOf(tab: Tab): string | null;
   /** タブの今の route (ファイル・画面のタブ。ほかは null)。 */
@@ -3174,6 +3175,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     },
     isRouteTab: (tab) => routeTab(tab),
     currentProject: () => currentRoot,
+    setCurrentProject(root) {
+      currentRoot = root;
+      lastHome = null;
+      render();
+    },
     groupOf: keyOf,
     tabRoute: (tab) => (isRouteTab(tab) ? routeOf(tab) : null),
     setTabRoute(id, route) {

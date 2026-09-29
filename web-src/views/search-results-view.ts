@@ -53,6 +53,7 @@ export type SearchResultsViewHandle = {
   close(): void;
   isOpen(): boolean;
   getQuery(): string;
+  resetProject(): void;
   localize(): void;
 };
 
@@ -432,6 +433,15 @@ export function createSearchResultsView(
       controller = null;
     },
     isOpen,
+    resetProject() {
+      generation++;
+      controller?.abort();
+      controller = null;
+      lastResponse = null;
+      query = "";
+      activeKey = "";
+      renderResults();
+    },
     getQuery: () => query,
     localize,
   };

@@ -553,8 +553,26 @@ window.GdpExpandLogic = GdpExpandLogic;
     cancelButton.setAttribute("aria-label", cancelTitle);
   }
 
-  function cancelInFlightRequests(): void {
-    NETWORK_ACTIVITY.cancelAll();
+  function cancelInFlightRequests(projectOnly = false): void {
+    NETWORK_ACTIVITY.cancelAll(
+      "cancelled by user",
+      projectOnly
+        ? (input) => {
+            const prepared = projectRequest(input).input;
+            const url =
+              prepared instanceof Request ? prepared.url : String(prepared);
+            const pathname = new URL(url, location.href).pathname;
+            // Tab layouts are shared by every project; let their synchronization finish.
+            if (
+              [apiUrl("stateTabs"), apiUrl("stateTabsBackup")].includes(
+                pathname,
+              )
+            )
+              return false;
+            return projectKey(pathname) === projectKey();
+          }
+        : undefined,
+    );
     updateNetworkActivity();
   }
 
@@ -737,7 +755,8 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 色なし。
    */
   function renderProjectHead(): void {
-    const look = PROJECT_LOOKS.current();
+    const root = MAIN_TABS.currentProject();
+    const look = root ? PROJECT_LOOKS.get(root) : PROJECT_LOOKS.current();
     const name = look?.name || PROJECT_NAME;
     if (!name) return;
     const title = document.querySelector<HTMLElement>("#project-title");
@@ -964,7 +983,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let pendingViewPatch: ViewPatch | null = null;
   let pendingViewTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingViewKeepalive = false;
-  let viewPatchInFlight = false;
+  let viewPatchInFlight: Promise<void> | null = null;
 
   function mergePathDelta(
     next: ViewPatch,
@@ -1040,35 +1059,39 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   async function sendPendingViewPatch(): Promise<void> {
-    if (viewPatchInFlight || !pendingViewPatch) return;
+    if (viewPatchInFlight) {
+      await viewPatchInFlight;
+      if (pendingViewPatch) await sendPendingViewPatch();
+      return;
+    }
+    if (!pendingViewPatch) return;
     const patch = pendingViewPatch;
     const keepalive = pendingViewKeepalive;
     pendingViewPatch = null;
     pendingViewKeepalive = false;
-    viewPatchInFlight = true;
-    let saved = false;
-    try {
-      const response = await trackLoad(
-        fetch(apiUrl("stateView"), {
-          method: "PATCH",
-          headers: actionHeaders(),
-          body: JSON.stringify(patch),
-          keepalive,
-        }),
-      );
-      if (!response.ok) {
+    const operation = trackLoad(
+      fetch(apiUrl("stateView"), {
+        method: "PATCH",
+        headers: actionHeaders(),
+        body: JSON.stringify(patch),
+        keepalive,
+      }),
+    ).then(async (response) => {
+      if (!response.ok)
         throw new Error(
           await responseErrorMessage(response, "save viewer state"),
         );
-      }
-      saved = true;
+    });
+    viewPatchInFlight = operation;
+    try {
+      await operation;
     } catch (error) {
       pendingViewPatch = mergeViewPatch(patch, pendingViewPatch || {});
-      reportPersistenceError("save viewer state", error);
+      throw error;
     } finally {
-      viewPatchInFlight = false;
+      if (viewPatchInFlight === operation) viewPatchInFlight = null;
     }
-    if (saved && pendingViewPatch) void sendPendingViewPatch();
+    if (pendingViewPatch) await sendPendingViewPatch();
   }
 
   function patchViewState(
@@ -1080,7 +1103,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     const send = (keepalive = false) => {
       if (!pendingViewPatch) return;
       pendingViewKeepalive ||= keepalive;
-      void sendPendingViewPatch();
+      void sendPendingViewPatch().catch((error: unknown) =>
+        reportPersistenceError("save viewer state", error),
+      );
     };
     if (options.keepalive) {
       if (pendingViewTimer !== null) clearTimeout(pendingViewTimer);
@@ -1101,12 +1126,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     }, 300);
   }
 
-  function flushViewStatePatch(keepalive = false): void {
-    if (!pendingViewPatch) return;
+  async function flushViewStatePatch(keepalive = false): Promise<void> {
     if (pendingViewTimer !== null) clearTimeout(pendingViewTimer);
     pendingViewTimer = null;
     pendingViewKeepalive ||= keepalive;
-    void sendPendingViewPatch();
+    await sendPendingViewPatch();
   }
 
   function savedScopeOmitDirs(): string[] | null {
@@ -1282,7 +1306,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function repoFileCacheKey(ref: string): string {
     const omit = savedScopeOmitDirs();
     const exclude = savedScopeExcludeNames();
-    return `${ref}\0${omit ? omit.join("\0") : "server"}\0${exclude ? exclude.join("\0") : "server"}`;
+    return `${projectKey() ?? ""}\0${ref}\0${omit ? omit.join("\0") : "server"}\0${exclude ? exclude.join("\0") : "server"}`;
   }
 
   async function loadSettings(): Promise<SettingsResponse> {
@@ -1298,6 +1322,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     } catch (error) {
       throw errorWithCause("settings response is not valid JSON", error);
     }
+    applyServerSettings(settings);
+    return settings;
+  }
+
+  function applyServerSettings(settings: SettingsResponse): void {
+    const key = projectKey();
+    if (key) PROJECT_KEYS.set(settings.server.root, key);
     setProjectName(settings.project || "");
     setProjectBranch(settings.branch || "");
     REPO_WEB_URL = settings.repo_web_url;
@@ -1321,7 +1352,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       SERVER_SCOPE_WATCH_LIMIT_MAX = settings.scope.watch_limit_max;
     if (typeof settings.scope.watch_recursive === "boolean")
       SERVER_SCOPE_WATCH_RECURSIVE = settings.scope.watch_recursive;
-    return settings;
   }
 
   function agentScreenRuleErrorsText(errors: AgentScreenRuleIssue[]): string {
@@ -1536,6 +1566,10 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   async function loadInitialState(): Promise<void> {
     await Promise.all([loadSettings(), loadPersistedState()]);
+    applyInitialState();
+  }
+
+  function applyInitialState(): void {
     applyPersistedStateToState();
     applySidebarFontSize();
     applyCodeFontSize();
@@ -1711,6 +1745,7 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 本文が 2 回動いた)。
    */
   let RESTORING_TABS = true;
+  let applyingProjectNavigation = false;
   /** 控えに書いた 2 面か (rememberSplitForFirstScreen)。まだ書いていなければ null。 */
   let EARLY_SPLIT: boolean | null = null;
   /**
@@ -7674,17 +7709,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     path: string,
     project: string | null = null,
   ): Promise<{ image: TerminalImageRef; images: TerminalImageRef[] }> {
-    const cacheKey = project === null ? path : `${project}\u0000${path}`;
+    const cacheKey = `${project ?? projectKey() ?? ""}\u0000${path}`;
     const known = IMAGE_REFS.get(cacheKey);
     if (known) return known;
     // 別のプロジェクトの画像は、そのプロジェクトの鍵で引く (パスはその根から)。
     // 木の並びはこのページのプロジェクトのものなので、前後の並びにしない。
-    const foreignKey = project === null ? null : await projectKeyFor(project);
+    const foreignKey =
+      project === null ? projectKey() : await projectKeyFor(project);
     const folder = path.includes("/")
       ? path.slice(0, path.lastIndexOf("/"))
       : "";
     const siblings =
-      path.startsWith("/") || foreignKey !== null
+      path.startsWith("/") || project !== null
         ? [path]
         : FILE_LIST.getSidebarFiles()
             .map((item) => item.path)
@@ -7733,10 +7769,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     project: string | null = null,
   ): void {
     const host = PANE_HOSTS[side];
+    const tabId = MAIN_TABS.panes().fronts[side]?.id;
     void resolveImage(path, project).then(
       ({ image, images }) => {
         const front = MAIN_TABS.panes().fronts[side];
-        if (front?.target.kind !== "image" || front.target.path !== path)
+        if (
+          front?.id !== tabId ||
+          front?.target.kind !== "image" ||
+          front.target.path !== path
+        )
           return;
         let view = IMAGE_VIEWS[side];
         if (view) view.setImage(image, images);
@@ -7759,7 +7800,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       (error: unknown) => {
         console.error("[code-viewer] image tab could not be shown", error);
         const front = MAIN_TABS.panes().fronts[side];
-        if (front?.target.kind !== "image" || front.target.path !== path)
+        if (
+          front?.id !== tabId ||
+          front?.target.kind !== "image" ||
+          front.target.path !== path
+        )
           return;
         const message = document.createElement("p");
         message.className = "main-pane-message";
@@ -8455,7 +8500,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       } else if (tab.target.kind === "file") {
         showSourceInRight();
       } else if (tab.target.kind === "terminal") {
-        host.replaceChildren(TERMINAL_VIEW.tabPaneFor(side));
+        const pane = TERMINAL_VIEW.tabPaneFor(side);
+        if (host.firstElementChild !== pane) host.replaceChildren(pane);
         void TERMINAL_VIEW.showInTab(
           tab.target.session as ShellSessionId,
           side,
@@ -8482,14 +8528,16 @@ window.GdpExpandLogic = GdpExpandLogic;
         FILE_LIST.markActive(focusedRoute.path);
     }
     if (how !== "navigate")
-      syncFocusedPaneUrl(how === "stay" ? "push" : "replace");
+      syncFocusedPaneUrl(
+        how === "stay" && !applyingProjectNavigation ? "push" : "replace",
+      );
     const front = view.fronts[view.focused];
     const session =
       front?.target.kind === "terminal" ? front.target.session : null;
     const path = window.location.pathname + window.location.search;
     if (session) {
       if (parseTerminalOverlay(window.location.search) !== session)
-        history.pushState(
+        history[applyingProjectNavigation ? "replaceState" : "pushState"](
           history.state,
           "",
           withTerminalOverlay(path, session) + window.location.hash,
@@ -8499,7 +8547,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (how !== "stay") return;
     const next = withTerminalOverlay(path, null);
     if (next !== path)
-      history.pushState(history.state, "", next + window.location.hash);
+      history[applyingProjectNavigation ? "replaceState" : "pushState"](
+        history.state,
+        "",
+        next + window.location.hash,
+      );
   }
 
   /**
@@ -8676,6 +8728,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         `[code-viewer] cannot switch to the project ${JSON.stringify(root)}: it is not in the project list yet`,
       );
       setStatus("error");
+      return;
+    }
+    const key = PROJECT_KEYS.get(root);
+    if (
+      info.server.status === "current" &&
+      root !== MAIN_TABS.currentProject() &&
+      key
+    ) {
+      void navigateProject(`/p/${key}${path}`);
       return;
     }
     void PROJECT_ACTIONS.open(info, path, { confirmRegister });
@@ -9123,13 +9184,130 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   ACCOUNTS_CLIENT.subscribe(() => AGENTS_VIEW?.localize());
 
+  let projectNavigation: Promise<void> = Promise.resolve();
+  let projectNavigationGeneration = 0;
+  let loadedProjectKey = projectKey();
+
+  /** Load the next project's state before replacing the current project. */
+  function navigateProject(url: string, replace = false): Promise<void> {
+    const destination = new URL(url, window.location.href);
+    const key = projectKey(destination.pathname);
+    if (destination.origin !== location.origin || !key || !loadedProjectKey) {
+      window.location.assign(url);
+      return Promise.resolve();
+    }
+    const generation = ++projectNavigationGeneration;
+    const operation = projectNavigation.then(async () => {
+      if (generation !== projectNavigationGeneration) return;
+      await flushSettingsPatch();
+      await flushViewStatePatch();
+      const [settings, preferences, view] = await Promise.all([
+        loadStateResponse<SettingsResponse>(
+          projectApiUrl(apiUrl("settings"), key),
+          "load project settings",
+        ),
+        loadStateResponse<AppSettingsState>(
+          projectApiUrl(apiUrl("stateSettings"), key),
+          "load project preferences",
+        ),
+        loadStateResponse<ViewState>(
+          projectApiUrl(apiUrl("stateView"), key),
+          "load project view state",
+        ),
+      ]);
+      if (generation !== projectNavigationGeneration) return;
+      await flushSettingsPatch();
+      await flushViewStatePatch();
+      if (generation !== projectNavigationGeneration) return;
+      await TOOLS_VIEW.resetProject();
+      if (generation !== projectNavigationGeneration) return;
+      // Every project-owned view invalidates its pending work before the URL changes.
+      disconnectEventSource();
+      cancelInFlightRequests(true);
+      diffLoadGeneration++;
+      if (sseTimer) clearTimeout(sseTimer);
+      sseTimer = null;
+      pendingSseChangedPaths = new Set();
+      DATABASE_VIEW.leave();
+      JOURNAL_VIEW?.resetProject();
+      WORKTREE_VIEW?.resetProject();
+      AGENTS_VIEW?.suspend();
+      leaveToolOrSearchPage("search");
+      SEARCH_RESULTS_VIEW.resetProject();
+      SEARCH_PALETTE.closeSearchPalette();
+      SEARCH_PALETTE.clearRepoFileCache();
+      HISTORY_VIEW.resetProject();
+      SOURCE_VIEW.resetProject();
+      BLAME_VIEW.removeBlamePage();
+      removeFileHistoryShell();
+      RIGHT_SOURCE?.source.resetProject();
+      RIGHT_SOURCE?.root.remove();
+      if (RIGHT_SOURCE) RIGHT_SOURCE.rendered = null;
+      for (const side of ["left", "right"] as const) {
+        FOREIGN_PANES[side]?.source.resetProject();
+        FOREIGN_PANES[side]?.root.remove();
+        const foreign = FOREIGN_PANES[side];
+        if (foreign) foreign.rendered = null;
+      }
+      DIFF_VIEW.resetProject();
+      REPO_VIEW.resetProject();
+      FILE_LIST.renderSidebar([]);
+      SIDEBAR.renderSidebar([]);
+      UNDO_STACK.length = 0;
+      IMAGE_REFS.clear();
+      STATE.files = [];
+      STATE.activeFile = null;
+      SERVER_GENERATION = 0;
+      preHistoryRange = null;
+      activeHistoryPathFilter = null;
+      $("#diff").replaceChildren();
+      APP_SETTINGS = preferences;
+      VIEW_STATE = view;
+      history[replace ? "replaceState" : "pushState"](
+        null,
+        "",
+        destination.href,
+      );
+      loadedProjectKey = key;
+      BACKEND_STATE.resetProject();
+      PROJECT_ACTIONS.dismiss(settings.server.root);
+      applyingProjectNavigation = true;
+      try {
+        MAIN_TABS.setCurrentProject(settings.server.root);
+        applyServerSettings(settings);
+        applyInitialState();
+        for (const link of document.querySelectorAll<HTMLAnchorElement>(
+          ROUTE_LINK_SELECTOR,
+        )) {
+          const href = link.getAttribute("href");
+          if (href?.startsWith("/p/"))
+            link.setAttribute("href", pageUrl(withoutProjectPrefix(href)));
+        }
+        applyRouteFromLocation();
+        showPanes(MAIN_TABS.panes(), "navigate");
+      } finally {
+        applyingProjectNavigation = false;
+      }
+      void ANNOTATIONS_UI?.resetProject();
+      void AGENT_MONITOR.refresh().then(() => AGENT_MONITOR.refresh());
+      openedOnce = false;
+      connectEventSource();
+      const pane = parseOpenPaneOverlay(destination.search);
+      if (pane) openAgentPaneHere(pane);
+    });
+    projectNavigation = operation.catch((error: unknown) => {
+      reportPersistenceError("switch project", error);
+    });
+    return projectNavigation;
+  }
+
   const PROJECT_ACTIONS = createProjectActions({
     getText: () => agentsText(STATE.language).projects,
     trackLoad,
     actionHeaders,
     refresh: () => AGENT_MONITOR.refresh(),
-    navigate: (url) => window.location.assign(url),
-    currentRoot: () => PROJECT_LOOKS.current()?.root ?? null,
+    navigate: (url) => void navigateProject(url),
+    currentRoot: () => MAIN_TABS.currentProject(),
   });
 
   const AGENT_PANE_OPENER = createAgentPaneOpener({
@@ -9691,6 +9869,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     load();
   }
   window.addEventListener("popstate", () => {
+    if (loadedProjectKey && projectKey() !== loadedProjectKey) {
+      const destination = location.href;
+      history.replaceState(
+        history.state,
+        "",
+        `/p/${loadedProjectKey}${withoutProjectPrefix(location.pathname)}${location.search}${location.hash}`,
+      );
+      void navigateProject(destination, true);
+      return;
+    }
     // 戻る・進むは本文 (URL) だけを動かし、タブの配置は変えない。そのファイル
     // のタブが右の面にだけあるなら、左の面に仮のタブを作らずに右の面の前面に
     // 出す (分割した後の戻るで、左に同じファイルが開き直っていた)。
@@ -9724,7 +9912,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     { capture: true, passive: true },
   );
   window.addEventListener("pagehide", () => {
-    flushViewStatePatch(true);
+    void flushViewStatePatch(true).catch((error: unknown) =>
+      reportPersistenceError("save viewer state", error),
+    );
     MAIN_TABS.flush(true);
   });
 
@@ -10139,7 +10329,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   document
     .getElementById("cancel-requests")
-    ?.addEventListener("click", cancelInFlightRequests);
+    ?.addEventListener("click", () => cancelInFlightRequests());
   applyAutoUpdateButton();
 
   function shouldAutoLoadCurrentRoute(route = STATE.route): boolean {

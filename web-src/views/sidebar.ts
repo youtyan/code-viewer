@@ -844,6 +844,7 @@ export function createSidebar(deps: SidebarDeps) {
     if (existing) return existing;
     const load = fetchSidebarDirEntries(dir)
       .then((entries) => {
+        if (SIDEBAR_LAZY_LOADING_DIRS.get(dir.path) !== load) return;
         mergeSidebarTreeEntries(entries);
         SIDEBAR_LAZY_LOADED_DIRS.add(dir.path);
         SIDEBAR_LAZY_DIR_SIGNATURES.set(
@@ -852,7 +853,8 @@ export function createSidebar(deps: SidebarDeps) {
         );
       })
       .finally(() => {
-        SIDEBAR_LAZY_LOADING_DIRS.delete(dir.path);
+        if (SIDEBAR_LAZY_LOADING_DIRS.get(dir.path) === load)
+          SIDEBAR_LAZY_LOADING_DIRS.delete(dir.path);
       });
     SIDEBAR_LAZY_LOADING_DIRS.set(dir.path, load);
     return load;

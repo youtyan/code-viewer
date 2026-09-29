@@ -1,4 +1,4 @@
-import { apiUrl } from "../core/api-url";
+import { apiUrl, projectKey } from "../core/api-url";
 // Code annotations (AI walkthrough) UI.
 //
 // Agents post explanations for code locations through the CLI
@@ -98,6 +98,7 @@ export type AnnotationsUi = {
   applyInlineAnnotations(): void;
   /** Fetch state from the server and re-render panel + inline rows. */
   refreshAnnotations(): Promise<void>;
+  resetProject(): Promise<void>;
   /** Handle a raw `annotations` SSE payload. */
   handleSse(raw: string): void;
   /** Append/remove annotation panel and selection query params on a URL. */
@@ -988,10 +989,12 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
 
   async function doRefreshAnnotations(): Promise<void> {
     const revision = dataRevision;
+    const project = projectKey();
     const res = await fetch(apiUrl("annotations"));
     if (!res.ok)
       throw new Error(await responseErrorMessage(res, "Load annotations"));
     const state = (await res.json()) as AnnotationsState;
+    if (project !== projectKey()) return;
     // A GET started before a successful save must not overwrite that save.
     if (revision !== dataRevision) return doRefreshAnnotations();
     ANNOTATIONS = state;
@@ -1826,6 +1829,20 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     localize,
     applyInlineAnnotations,
     refreshAnnotations,
+    async resetProject() {
+      dataRevision++;
+      openEntrySeq++;
+      editor = null;
+      ANNOTATIONS = { version: 1, sessions: [] };
+      activeSessionId = null;
+      activeAnnotationId = null;
+      annotationsLoaded = false;
+      refreshAnnotationsInFlight = null;
+      inlineExpanded.clear();
+      updateAnnotationBadge();
+      renderAnnotationPanel();
+      await refreshAnnotations();
+    },
     handleSse,
     withSessionParam,
     restoreSessionFromUrl,
