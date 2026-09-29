@@ -563,7 +563,11 @@ window.GdpExpandLogic = GdpExpandLogic;
               prepared instanceof Request ? prepared.url : String(prepared);
             const pathname = new URL(url, location.href).pathname;
             // Tab layouts are shared by every project; let their synchronization finish.
-            if (withoutProjectPrefix(pathname).startsWith("/_state/tabs"))
+            if (
+              [apiUrl("stateTabs"), apiUrl("stateTabsBackup")].includes(
+                pathname,
+              )
+            )
               return false;
             return projectKey(pathname) === projectKey();
           }

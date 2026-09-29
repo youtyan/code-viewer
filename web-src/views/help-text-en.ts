@@ -1250,7 +1250,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ").",
                 ],
                 "Selecting an agent in the sidebar also opens its pane in a terminal tab.",
-                "The two most recently hidden terminal screens stay connected, so returning to them avoids replaying their output. Older screens reconnect when opened again.",
+                "The last two hidden terminals stay connected for quicker switching.",
               ],
             },
             {
