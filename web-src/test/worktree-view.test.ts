@@ -205,7 +205,7 @@ type CommitPayload = CommitMeta[] | { status: number; body: string };
 
 function stubFetch(
   list: WorktreesResponse | { status: number; body: string },
-  diff?: DiffPayload | { status: number; body: string },
+  diff: DiffPayload | { status: number; body: string } = { diff: "" },
   postResponse: Record<string, unknown> = {},
   commits: CommitPayload = [],
 ): {
@@ -247,7 +247,6 @@ function stubFetch(
       }
       if (url.startsWith("/_worktree/diff")) {
         diffUrls.push(url);
-        if (!diff) return new Response("no diff stubbed", { status: 500 });
         if ("status" in diff) {
           return new Response(diff.body, { status: diff.status });
         }
@@ -533,30 +532,24 @@ describe("worktree list panel", () => {
     });
   });
 
-  test("shows the folder path on its own line, in full, not relative", async () => {
+  test.each([
+    {
+      name: "feature-x",
+      path: "/repo/.worktrees/feature-x",
+      displayPath: ".worktrees/feature-x",
+    },
+    { name: "repo", path: "/repo", displayPath: "." },
+  ])("shows the full folder path for $name", async ({
+    name,
+    path,
+    displayPath,
+  }) => {
     const { panel } = await mountWith(
-      response([
-        item({
-          name: "feature-x",
-          path: "/repo/.worktrees/feature-x",
-          displayPath: ".worktrees/feature-x",
-        }),
-      ]),
+      response([item({ name, path, displayPath })]),
     );
-    // 相対パスだと、リポジトリがどこにあるかを知っている人にしか読めない。
     const line = panel.querySelector<HTMLElement>(".worktree-row-path");
-    expect(line?.textContent).toBe("/repo/.worktrees/feature-x");
-    expect(line?.title).toBe("/repo/.worktrees/feature-x");
-  });
-
-  test("shows a real path for the main worktree too, not a bare dot", async () => {
-    const { panel } = await mountWith(
-      response([item({ name: "repo", path: "/repo", displayPath: "." })]),
-    );
-    // displayPath はリポジトリルート自身に "." を返す。それを出すと、
-    // 本体の行だけ場所が分からない行になる。
-    const line = panel.querySelector<HTMLElement>(".worktree-row-path");
-    expect(line?.textContent).toBe("/repo");
+    expect(line?.textContent).toBe(path);
+    expect(line?.title).toBe(path);
   });
 
   test("explains each badge on hover", async () => {

@@ -1838,7 +1838,13 @@ describe("database view SQL error rendering", () => {
       }
       if (url.startsWith("/_db/s3/objects")) {
         s3Requests.push(url);
-        return jsonResponse({ objects: [], truncated: false });
+        return jsonResponse({
+          objects: [],
+          truncated: false,
+          scannedObjects: 0,
+          scannedPages: 1,
+          sort: "updated-desc",
+        });
       }
       if (url.startsWith("/_db/schemas")) {
         sqlRequests.push(url);

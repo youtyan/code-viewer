@@ -37,6 +37,10 @@ export default defineConfig({
     ],
   },
   test: {
+    reporters:
+      process.env.GITHUB_ACTIONS === "true"
+        ? ["default", "github-actions"]
+        : ["default"],
     include: ["web-src/test/**/*.test.ts"],
     environment: "node",
     // CLI を起動するテストが使う dist/code-viewer.js を先に焼く。

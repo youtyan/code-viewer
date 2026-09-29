@@ -5,30 +5,8 @@ on:
     types: [published]
 
 jobs:
-  ci:
-    name: CI
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Verify
-        run: pnpm run verify
-
-      - name: Pack dry run
-        run: npm pack --dry-run
-
   publish:
     name: Publish
-    needs: [ci]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -48,6 +26,9 @@ jobs:
 
       - name: Verify
         run: pnpm run verify
+
+      - name: Pack dry run
+        run: npm pack --dry-run
 
       - name: Verify version
         run: |
