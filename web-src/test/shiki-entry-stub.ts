@@ -3,3 +3,5 @@
 export function createHighlighter(): Promise<never> {
   return new Promise<never>(() => undefined);
 }
+
+export { bundledThemes } from "shiki/bundle/full";
