@@ -70,6 +70,11 @@ export type AccountService = {
     usage: AccountUsage;
     statusLineCommand: string | null;
   };
+  recordUsage(
+    entry: AccountEntry,
+    command: string,
+    usage: Extract<AccountUsage, { status: "ok" }>,
+  ): void;
   paneAccounts(
     targets: readonly PaneAccountTarget[],
   ): Promise<Map<string, PaneAccount>>;
@@ -107,6 +112,14 @@ export function createAccountService(
 ): AccountService {
   /** 包むスクリプトの手入れを最後にした時刻 (一覧のたびには回さない)。 */
   let maintainedAt = Number.NEGATIVE_INFINITY;
+  const checkedUsage = new Map<
+    string,
+    {
+      configDir: string;
+      command: string;
+      usage: Extract<AccountUsage, { status: "ok" }>;
+    }
+  >();
 
   function entries() {
     const read = readAccountRegistryCached(paths.registry);
@@ -125,13 +138,22 @@ export function createAccountService(
         : null;
     const wrapped =
       statusLine?.state === "wrapped" || statusLine?.state === "added";
-    const usage = readAccountUsage(entry.agent, entry.configDir, {
+    const saved = readAccountUsage(entry.agent, entry.configDir, {
       usageDir: paths.usageDir,
       claudeEnvValues: entry.builtin
         ? ["", defaultConfigDir("claude", paths.home)]
         : [entry.configDir],
       wrapped,
     });
+    const checked = checkedUsage.get(entry.id);
+    const valid =
+      checked &&
+      checked.configDir === entry.configDir &&
+      checked.command === launchCommandsOf(entries().registry)[entry.agent];
+    const usage =
+      valid && checked.usage.observedAt >= saved.observedAt
+        ? checked.usage
+        : saved;
     return { usage, statusLine, wrapped };
   }
 
@@ -175,6 +197,13 @@ export function createAccountService(
     },
     launchCommands() {
       return launchCommandsOf(entries().registry);
+    },
+    recordUsage(entry, command, usage) {
+      checkedUsage.set(entry.id, {
+        configDir: entry.configDir,
+        command,
+        usage,
+      });
     },
     usage(entry) {
       const { usage, wrapped, statusLine } = usageOf(entry);

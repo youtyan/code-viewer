@@ -120,6 +120,7 @@ function client(
     planStatusLine: unused("planStatusLine"),
     applyStatusLine: unused("applyStatusLine"),
     clearUsageFailures: unused("clearUsageFailures"),
+    checkAllUsage: unused("checkAllUsage"),
     usageCheck: () => null,
     checkUsage: unused("checkUsage"),
     noteUsageCheckOpened: unused("noteUsageCheckOpened"),

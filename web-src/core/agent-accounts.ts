@@ -584,7 +584,8 @@ export type UsageUnavailableReason =
  * - onboarding / trust / login: claude が初回の案内・フォルダの信頼の確認・
  *   ログインを求める画面で止まった (待たずに止めた)
  * - timeout: 時間内に新しい使用量が届かなかった
- * - start-failed: tmux のセッションを作れない・claude がすぐ終わった
+ * - start-failed: tmux のセッションを作れない・claude がすぐ終わった (旧サーバ)
+ * - read-failed: 使用量専用のコマンド・API が失敗した、または値を読めなかった
  */
 export type UsageCheckFailure =
   | "not-wrapped"
@@ -592,13 +593,14 @@ export type UsageCheckFailure =
   | "trust"
   | "login"
   | "timeout"
-  | "start-failed";
+  | "start-failed"
+  | "read-failed";
 
 type UsageCheckBase = {
   accountId: string;
   /**
-   * claude を起こした (起こそうとした) フォルダ = サーバのプロジェクトの
-   * ルート。画面で止まったときに「このアカウントでここを開く」に使う。
+   * 使用量を確かめるための専用フォルダ。旧サーバの画面待ちの応答では、
+   * 「このアカウントでここを開く」に使う。
    */
   cwd: string;
   /** この確認のために作った tmux のセッション。作らなかったら空。 */
@@ -1036,13 +1038,12 @@ export function codexAuthKeys(text: string): string[] {
 export const LOGIN_SESSION = "code-viewer-login";
 
 /**
- * 「使用量を確かめる」(server/accounts/usage-check.ts) が確認のたびに作る
- * tmux のセッションの名前の頭。
+ * 旧方式の「使用量を確かめる」が作った tmux セッションの名前の頭。
  */
 export const USAGE_CHECK_SESSION_PREFIX = "code-viewer-usage-";
 
 /**
- * エージェントとして見るペイン。使用量を確かめる裏のセッションの claude は
+ * エージェントとして見るペイン。旧方式の使用量確認のセッションの claude は
  * 利用者の作業ではないので、一覧・全体ボード・最下段の件数・通知
  * (terminal/overview.ts) と巡回 (terminal/activity.ts) から除く。判定は
  * ここ 1 か所 (セッション名の頭)。ログインのウィンドウは除かない。

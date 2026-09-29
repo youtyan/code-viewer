@@ -26,7 +26,7 @@
 
 import type { AccountEntry, AccountLogin } from "../../core/agent-accounts";
 import { ACCOUNT_ENV } from "../../core/agent-accounts";
-import { formatErrorDetail } from "../../core/error-detail";
+import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import {
   onStdinWriteFailure,
   type RunResult,
@@ -82,6 +82,7 @@ export type LoginDeps = {
     env: NodeJS.ProcessEnv,
     requests: readonly string[],
     done: (line: string) => boolean,
+    waitForInitialize?: boolean,
   ): Promise<RpcResult>;
   now(): number;
   /**
@@ -96,6 +97,7 @@ function runRpc(
   env: NodeJS.ProcessEnv,
   requests: readonly string[],
   done: (line: string) => boolean,
+  waitForInitialize = false,
 ): Promise<RpcResult> {
   return new Promise((resolve, reject) => {
     const child = spawnProcess(args[0] as string, args.slice(1), {
@@ -109,6 +111,8 @@ function runRpc(
     let stderr = "";
     let timedOut = false;
     let tooMuchOutput = false;
+    let callbackError: unknown;
+    let initialized = !waitForInitialize;
     const timer = setTimeout(() => {
       timedOut = true;
       stopProcess(child, "SIGKILL");
@@ -127,13 +131,34 @@ function runRpc(
         const line = pending.slice(0, at);
         pending = pending.slice(at + 1);
         lines.push(line);
-        if (done(line)) child.stdin.end();
+        try {
+          if (!initialized) {
+            const message = jsonIn(line, true);
+            if (message?.id === 1) {
+              if (message.error !== undefined)
+                throw Object.assign(new Error("Codex initialize failed"), {
+                  response: message,
+                });
+              initialized = true;
+              child.stdin.write(`${requests.slice(1).join("\n")}\n`);
+            }
+          }
+          if (done(line)) child.stdin.end();
+        } catch (error) {
+          callbackError = error;
+          stopProcess(child, "SIGKILL");
+          return;
+        }
         at = pending.indexOf("\n");
       }
     });
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
-      if (stderr.length < 4096) stderr += chunk;
+      stderr += chunk;
+      if (stderr.length > RPC_MAX_BYTES) {
+        tooMuchOutput = true;
+        stopProcess(child, "SIGKILL");
+      }
     });
     // 入力が届かなかったら子を止め、子が 0 で終わっても失敗 (exit 1) にして
     // 理由を stderr に添える。先に終わった子への EPIPE は失敗にしない
@@ -151,6 +176,10 @@ function runRpc(
     child.on("close", (code) => {
       clearTimeout(timer);
       if (pending) lines.push(pending);
+      if (callbackError !== undefined) {
+        reject(callbackError);
+        return;
+      }
       resolve({
         code: timedOut || tooMuchOutput ? null : stdinFailed ? 1 : code,
         lines,
@@ -159,7 +188,9 @@ function runRpc(
         tooMuchOutput,
       });
     });
-    child.stdin.write(`${requests.join("\n")}\n`);
+    child.stdin.write(
+      `${(waitForInitialize ? requests.slice(0, 1) : requests).join("\n")}\n`,
+    );
   });
 }
 
@@ -199,7 +230,10 @@ function isNotFound(result: { code: number | null; stderr: string }): boolean {
  * 出力の中の JSON のオブジェクト 1 つ。前後に端末向けの文字列があっても読む。
  * 読めなければ null (理由は呼び出し側が出力の中身を載せずに書く)。
  */
-export function jsonIn(text: string): Record<string, unknown> | null {
+export function jsonIn(
+  text: string,
+  strict = false,
+): Record<string, unknown> | null {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end < start) return null;
@@ -208,7 +242,8 @@ export function jsonIn(text: string): Record<string, unknown> | null {
     return typeof value === "object" && value !== null && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : null;
-  } catch {
+  } catch (error) {
+    if (strict) throw errorWithCause("Cannot decode CLI JSON", error);
     // JSON.parse のエラー文は入力 (メールアドレスを含む) を引用するので捨て、
     // null を「読めない」の意味で返す。呼び出し側が理由を書く。
     return null;
@@ -322,7 +357,7 @@ export function parseCodexAccountRead(
   const asked = `${command} app-server (account/read)`;
   const none = (whoDetail: string) => ({ who: "", plan: "", whoDetail });
   const answer = result.lines
-    .map(jsonIn)
+    .map((line) => jsonIn(line))
     .find((record) => record?.id === ACCOUNT_READ_ID);
   if (!answer) {
     const how = result.timedOut

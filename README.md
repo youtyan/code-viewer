@@ -212,20 +212,17 @@ Requires Node.js 20 or newer. Development uses
   and `codex app-server`), never from reading tokens. Sign in once per account
   with the official command, opened in a new tmux window. The Agents list then
   shows which account each agent runs with, a band of account cards with every
-  quota window present in the latest record and its reset time (codex from its
-  session logs; claude through an optional status line wrapper that returns
-  your status line unchanged), and New agent starts claude or codex with a
+  quota window present in the latest record and its reset time, and New agent
+  starts claude or codex with a
   chosen account and project in a new tmux window, showing the exact command
   with a copy button. Missing windows are not
   invented; when one config directory holds records from two accounts, the card
   keeps the newest values and adds a Mixed note that says how to separate them.
-  When a claude card has no value yet or an old one, Check usage starts claude
-  with that account in a background tmux session, in a folder kept only for this
-  check (`usage-check` in code-viewer's state directory, so the folder trust
-  question comes once per account), sends one short message (this
-  uses a little usage), waits for the new value and closes that session; if
-  claude stops at its first-run setup, the folder trust question or sign-in,
-  the card says so and what to do next.
+  Usage refreshes every five minutes while the account view is open; Refresh all
+  checks immediately. Claude uses its local `/usage` command and Codex reads
+  `account/rateLimits/read`, without starting a model turn. Errors stay visible
+  with copyable details and a retry button. Newer values from Codex session logs
+  or the optional Claude status line wrapper are also shown.
   When a project has its own status line in `.claude/settings.json` or
   `.claude/settings.local.json`, claude started from code-viewer is given that
   status line wrapped with `--settings`, so its usage is still recorded.

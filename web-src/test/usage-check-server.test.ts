@@ -1,8 +1,3 @@
-// 「使用量を確かめる」のサーバの部品 (server/accounts/usage-check.ts)。
-// tmux・claude・プロセスへの信号は全部差し替える (本物の tmux のセッションも
-// claude も起こさない)。偽の tmux は受け取った引数を記録し、画面と使用量は
-// 手順ごとに決めた値を返す。時計は偽物で、眠ると進む。
-
 import {
   mkdirSync,
   mkdtempSync,
@@ -12,430 +7,251 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   type AccountEntry,
-  type AccountUsage,
   agentTmuxPanes,
   USAGE_CHECK_SESSION_PREFIX,
 } from "../core/agent-accounts";
 import { usageCheckFolder } from "../server/accounts/handle";
-import { AccountError, accountPaths } from "../server/accounts/registry";
+import { accountPaths } from "../server/accounts/registry";
 import { createAccountService } from "../server/accounts/service";
-import {
-  CLAUDE_BLOCKING_SCREENS,
-  classifyUsageCheckScreen,
-  createUsageChecker,
-  USAGE_CHECK_MODEL,
-  USAGE_CHECK_PROMPT,
-  USAGE_CHECK_TIMEOUT_MS,
-  usageCheckSessionName,
-} from "../server/accounts/usage-check";
+import { createUsageChecker } from "../server/accounts/usage-check";
 import {
   statusLineWrapperPath,
   wrappedCommand,
   writeStatusLineWrapper,
 } from "../server/terminal/statusline";
-import type { TmuxRunResult } from "../server/tmux/command";
-
-const START = 1_800_000_000_000;
-const PANE = "%7";
-const PID = 4242;
 
 const ACCOUNT: AccountEntry = {
-  id: "5d2c8a4e-0000-4000-8000-000000000001",
+  id: "sample",
   agent: "claude",
   name: "sample",
-  configDir: "/home/sample/.local/state/code-viewer/accounts/claude-sample",
+  configDir: "/sample/config",
   builtin: false,
   managed: true,
 };
-
-/** 包んだ statusLine のコマンド (包むスクリプト + 元のコマンド)。 */
-const WRAPPED =
-  "/home/sample/.local/state/code-viewer/agent-usage/code-viewer-statusline 'sample-statusline --flag \"x\"'";
-
-const NO_DATA: AccountUsage = {
-  status: "unavailable",
-  reason: "no-data",
-  detail: "",
-  observedAt: 0,
+const START = 1_800_000_000_000;
+const REPORT = {
+  type: "assistant",
+  usage_report: {
+    rate_limits: {
+      limits: [
+        { kind: "session", percent: 12, resets_at: "2027-01-15T12:00:00Z" },
+        { kind: "weekly_all", percent: 45, resets_at: "2027-01-20T00:00:00Z" },
+      ],
+    },
+  },
 };
-
-type Scenario = {
-  wrapped?: boolean;
-  /** capture-pane が返す画面 (呼ばれた順。尽きたら最後のもの)。 */
-  screens?: readonly string[];
-  /** 使用量が新しい値になる時刻 (START からの ms)。無ければ届かない。 */
-  usageAfterMs?: number;
-  /** new-session の結果を差し替える。 */
-  newSession?: TmuxRunResult;
-  /** 信号を送ってもセッションが残る。 */
-  stuck?: boolean;
+const RESULT = {
+  type: "result",
+  local_command: "usage",
+  subtype: "success",
+  is_error: false,
+  num_turns: 0,
+  total_cost_usd: 0,
+  duration_api_ms: 0,
 };
-
-function harness(scenario: Scenario) {
-  let now = START;
-  const calls: string[][] = [];
-  const signals: Array<{ pid: number; signal: string }> = [];
-  let open = false;
-  let screen = 0;
-  const usageAt = (): AccountUsage =>
-    scenario.usageAfterMs !== undefined && now >= START + scenario.usageAfterMs
-      ? {
-          status: "ok",
-          windows: [
-            { kind: "five_hour", minutes: 300, usedPercent: 12, resetsAt: 0 },
-          ],
-          observedAt: START + scenario.usageAfterMs,
-        }
-      : NO_DATA;
+function harness(lines: unknown[] = [REPORT, RESULT]) {
+  const run = vi.fn(async () => ({
+    code: 0,
+    stdout: lines.map((line) => JSON.stringify(line)).join("\n"),
+    stderr: "",
+    failure: null,
+  }));
+  const rpc = vi.fn(async () => ({
+    code: 0,
+    lines: [
+      JSON.stringify({
+        id: 2,
+        result: {
+          rateLimits: {
+            primary: {
+              usedPercent: 17,
+              windowDurationMins: 300,
+              resetsAt: 1800010000,
+            },
+            secondary: null,
+          },
+        },
+      }),
+    ],
+    stderr: "",
+    timedOut: false,
+    tooMuchOutput: false,
+  }));
+  const publish = vi.fn();
   const checker = createUsageChecker({
-    async runTmux(args) {
-      calls.push(args);
-      const [command] = args;
-      if (command === "new-session") {
-        const result = scenario.newSession ?? {
-          status: "ok",
-          stdout: `${PANE}\n`,
-        };
-        if (result.status === "ok") open = true;
-        return result;
-      }
-      if (command === "display-message") {
-        return { status: "ok", stdout: `${PID}\n` };
-      }
-      if (command === "set-option") return { status: "ok", stdout: "" };
-      if (command === "capture-pane") {
-        const screens = scenario.screens ?? [""];
-        const text = screens[Math.min(screen, screens.length - 1)] ?? "";
-        screen += 1;
-        return { status: "ok", stdout: text };
-      }
-      if (command === "has-session") {
-        return open ? { status: "ok", stdout: "" } : { status: "no-target" };
-      }
-      throw new Error(`unexpected tmux command: ${args.join(" ")}`);
-    },
-    usage: () => ({
-      usage: usageAt(),
-      statusLineCommand: (scenario.wrapped ?? true) ? WRAPPED : null,
-    }),
-    launchCommand: () => "sample-claude",
-    signalGroup(pid, signal) {
-      signals.push({ pid, signal });
-      if (!scenario.stuck) open = false;
-    },
-    now: () => now,
-    async sleep(ms) {
-      now += ms;
-    },
+    run,
+    rpc,
+    publish,
+    launchCommand: (a) => a.agent,
+    now: () => START,
     env: { SHELL: "/bin/sh" },
   });
-  return {
-    checker,
-    calls,
-    signals,
-    commands: () => calls.map((args) => args[0]),
-    isOpen: () => open,
-  };
+  return { checker, run, rpc, publish };
 }
 
-const TRUST_SCREEN = [
-  "╭──────────────────────────────────────────╮",
-  "│ Accessing workspace:                     │",
-  "│ /home/sample/work/sample-app             │",
-  "│ Quick safety check: Is this a project    │",
-  "│ you created or one you trust?            │",
-  "│ ❯ 1. Yes, I trust this folder            │",
-  "│   2. No, exit                            │",
-  "╰──────────────────────────────────────────╯",
-].join("\n");
-
-describe("checking the usage", () => {
-  test.each([
-    {
-      name: "the status line is not wrapped",
-      scenario: { wrapped: false },
-      status: "failed",
-      reason: "not-wrapped",
-      created: false,
-    },
-    {
-      name: "the first-run screen (theme)",
-      scenario: {
-        screens: [
-          "",
-          " Let's get started.\n\n Choose the text style that looks best with your\n terminal\n ❯ 1. Dark mode",
-        ],
-      },
-      status: "failed",
-      reason: "onboarding",
-      created: true,
-    },
-    {
-      name: "the folder trust question",
-      scenario: { screens: [TRUST_SCREEN] },
-      status: "failed",
-      reason: "trust",
-      created: true,
-    },
-    {
-      name: "the sign-in screen",
-      scenario: {
-        screens: [
-          " Select login method:\n ❯ 1. Claude account with subscription",
-        ],
-      },
-      status: "failed",
-      reason: "login",
-      created: true,
-    },
-    {
-      name: "a signed-out footer",
-      scenario: {
-        screens: [" > Reply with just: ok\n Not logged in · Run /login"],
-      },
-      status: "failed",
-      reason: "login",
-      created: true,
-    },
-    {
-      name: "claude exits (the launch command fails)",
-      scenario: {
-        screens: [
-          "sh: sample-claude: not found\n\n[code-viewer] usage check: claude exited with 127\n",
-        ],
-      },
-      status: "failed",
-      reason: "start-failed",
-      created: true,
-    },
-    {
-      name: "tmux cannot start the session",
-      scenario: {
-        newSession: {
-          status: "error",
-          error: new Error("tmux exited with 1\nstderr: sample failure"),
-        },
-      },
-      status: "failed",
-      reason: "start-failed",
-      created: false,
-    },
-    {
-      name: "nothing arrives in time",
-      scenario: { screens: [" > Reply with just: ok\n ✻ Thinking…"] },
-      status: "failed",
-      reason: "timeout",
-      created: true,
-    },
-    {
-      name: "the usage arrives",
-      scenario: { usageAfterMs: 4000, screens: [" > Reply with just: ok"] },
+describe("token-free usage checks", () => {
+  test("Claude reads structured limits without a model turn or status line", async () => {
+    const { checker, run, publish } = harness();
+    const result = await checker.check(ACCOUNT, "/sample/check");
+    expect(result).toMatchObject({
       status: "ok",
-      reason: null,
-      created: true,
-    },
-  ] as const)("$name", async ({ scenario, status, reason, created }) => {
-    const h = harness(scenario);
-    const out = await h.checker.check(ACCOUNT, "/home/sample/work/sample-app");
-    expect(out.status).toBe(status);
-    expect(out.status === "failed" ? out.reason : null).toBe(reason);
-    expect(out.closeError).toBe("");
-    expect(out.joined).toBe(false);
-    if (!created) {
-      // 起こしていないものは閉じない (信号を送らない)。
-      expect(h.signals).toEqual([]);
-      expect(h.commands()).not.toContain("has-session");
-      return;
-    }
-    const session = usageCheckSessionName(ACCOUNT.id, START);
-    expect(out.session).toBe(session);
-    // 作ったセッションは、どう終わっても閉じた: 信号は自分のペインの pid だけ。
-    expect(h.signals).toEqual([{ pid: PID, signal: "SIGHUP" }]);
-    expect(h.isOpen()).toBe(false);
-    const checks = h.calls.filter((args) => args[0] === "has-session");
-    expect(checks[checks.length - 1]).toEqual([
-      "has-session",
-      "-t",
-      `=${session}`,
-    ]);
-    // tmux に何かを終了させる命令は使わない (ペインのプロセスを止めるだけ)。
-    expect(
-      h.commands().filter((command) => /^kill-/.test(command ?? "")),
-    ).toEqual([]);
-  });
-
-  test("evidence and details say why it stopped", async () => {
-    const timeout = await harness({
-      screens: ["line one\n\n > Reply with just: ok\n ✻ Thinking…\n"],
-    }).checker.check(ACCOUNT, "/home/sample/work/sample-app");
-    expect(timeout).toMatchObject({
-      status: "failed",
-      reason: "timeout",
-      evidence: ["line one", " > Reply with just: ok", " ✻ Thinking…"],
-    });
-    expect(timeout.status === "failed" && timeout.detail).toBe(
-      `no new usage arrived within ${USAGE_CHECK_TIMEOUT_MS / 1000}s\nlatest saved usage: unavailable (no-data), observed at never`,
-    );
-    expect(timeout.finishedAt - timeout.startedAt).toBeGreaterThanOrEqual(
-      USAGE_CHECK_TIMEOUT_MS,
-    );
-
-    const failed = await harness({
-      newSession: {
-        status: "error",
-        error: new Error("tmux exited with 1\nstderr: sample failure"),
+      usage: {
+        observedAt: START,
+        windows: [
+          {
+            kind: "five_hour",
+            minutes: 300,
+            usedPercent: 12,
+            resetsAt: 1800014400000,
+          },
+          {
+            kind: "seven_day",
+            minutes: 10080,
+            usedPercent: 45,
+            resetsAt: 1800403200000,
+          },
+        ],
       },
-    }).checker.check(ACCOUNT, "/home/sample/work/sample-app");
-    // 元のエラーの全文 (stderr まで) を 1 行に丸めずに返す。
-    expect(failed.status === "failed" && failed.detail).toContain(
-      "stderr: sample failure",
-    );
-  });
-
-  test("starts the launch command with the account's environment, haiku and one short prompt", async () => {
-    const h = harness({ usageAfterMs: 0 });
-    await h.checker.check(ACCOUNT, "/home/sample/work/sample-app");
-    const start = h.calls.find((args) => args[0] === "new-session") ?? [];
-    const session = usageCheckSessionName(ACCOUNT.id, START);
-    expect(start.slice(0, start.indexOf("--"))).toEqual([
-      "new-session",
-      "-d",
-      "-s",
-      session,
-      "-n",
-      "usage-check",
-      "-P",
-      "-F",
-      "#{pane_id}",
-      "-c",
-      "/home/sample/work/sample-app",
-    ]);
-    const argv = start.slice(start.indexOf("--") + 1);
-    expect(argv.slice(0, 5)).toEqual([
-      "env",
-      `CLAUDE_CONFIG_DIR=${ACCOUNT.configDir}`,
-      "/bin/sh",
-      "-i",
-      "-c",
-    ]);
-    expect(argv[5]).toMatch(/^sample-claude "\$@"; rc=\$\?; /);
-    // 包んだ statusLine を --settings で渡す (プロジェクトの statusLine より
-    // 優先される)。引数は "$@" で渡るので、引用符を含むコマンドもそのまま。
-    expect(argv.slice(6)).toEqual([
-      "/bin/sh",
-      "--settings",
-      JSON.stringify({ statusLine: { type: "command", command: WRAPPED } }),
-      "--model",
-      USAGE_CHECK_MODEL,
-      USAGE_CHECK_PROMPT,
-    ]);
-    expect(JSON.parse(argv[8] ?? "")).toEqual({
-      statusLine: { type: "command", command: WRAPPED },
     });
-    // このペインだけ remain-on-exit を外す (シェルが終われば閉じる)。
-    expect(h.calls).toContainEqual([
-      "set-option",
-      "-p",
-      "-t",
-      PANE,
-      "remain-on-exit",
-      "off",
-    ]);
-  });
-
-  test("the default account unsets the variable", async () => {
-    const h = harness({ usageAfterMs: 0 });
-    await h.checker.check(
-      { ...ACCOUNT, id: "claude:default", builtin: true, managed: false },
-      "/home/sample/work/sample-app",
+    expect(run).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        "--safe-mode",
+        "--print",
+        "/usage",
+        "--output-format",
+        "stream-json",
+      ]),
+      "/sample/check",
+      expect.objectContaining({
+        CLAUDE_CONFIG_DIR: "/sample/config",
+        ANTHROPIC_BASE_URL: "http://127.0.0.1:1",
+      }),
     );
-    const start = h.calls.find((args) => args[0] === "new-session") ?? [];
-    const argv = start.slice(start.indexOf("--") + 1);
-    expect(argv.slice(0, 3)).toEqual(["env", "-u", "CLAUDE_CONFIG_DIR"]);
+    expect(publish).toHaveBeenCalledOnce();
   });
-
-  test("a second press while one runs waits for it instead of starting another", async () => {
-    const h = harness({ usageAfterMs: 3000 });
-    const [first, second] = await Promise.all([
-      h.checker.check(ACCOUNT, "/home/sample/work/sample-app"),
-      h.checker.check(ACCOUNT, "/home/sample/work/sample-app"),
-    ]);
-    expect(
-      h.commands().filter((command) => command === "new-session"),
-    ).toHaveLength(1);
-    expect(first).toMatchObject({ status: "ok", joined: false });
-    expect(second).toMatchObject({ status: "ok", joined: true });
-    // 終わった後に押せば、また起こす。
-    await h.checker.check(ACCOUNT, "/home/sample/work/sample-app");
-    expect(
-      h.commands().filter((command) => command === "new-session"),
-    ).toHaveLength(2);
-  });
-
-  test("a session that does not go away is reported, not hidden", async () => {
-    const h = harness({ usageAfterMs: 0, stuck: true });
-    const out = await h.checker.check(ACCOUNT, "/home/sample/work/sample-app");
-    expect(out.status).toBe("ok");
-    expect(h.signals).toEqual([
-      { pid: PID, signal: "SIGHUP" },
-      { pid: PID, signal: "SIGKILL" },
-    ]);
-    expect(out.closeError).toContain(
-      `the tmux session ${usageCheckSessionName(ACCOUNT.id, START)} is still open`,
+  test("Codex asks for rate limits without creating a thread", async () => {
+    const { checker, rpc } = harness();
+    const result = await checker.check(
+      { ...ACCOUNT, agent: "codex" },
+      "/sample/check",
+    );
+    expect(result).toMatchObject({
+      status: "ok",
+      usage: {
+        windows: [
+          { kind: "five_hour", usedPercent: 17, resetsAt: 1800010000000 },
+        ],
+      },
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      expect.arrayContaining(["app-server"]),
+      expect.objectContaining({ CODEX_HOME: "/sample/config" }),
+      expect.arrayContaining(['{"id":2,"method":"account/rateLimits/read"}']),
+      expect.any(Function),
+      true,
     );
   });
-
-  test("codex accounts are refused", async () => {
-    const h = harness({});
-    await expect(
-      h.checker.check(
-        { ...ACCOUNT, agent: "codex" },
-        "/home/sample/work/sample-app",
-      ),
-    ).rejects.toBeInstanceOf(AccountError);
-    expect(h.calls).toEqual([]);
-  });
-});
-
-describe("telling the claude screens apart", () => {
-  test("every marker of the table is recognised, even when wrapped in a box", () => {
-    for (const { reason, markers } of CLAUDE_BLOCKING_SCREENS) {
-      for (const marker of markers) {
-        const boxed = `│ ${marker.split(" ").join(" │\n│ ")} │`;
-        expect(classifyUsageCheckScreen(boxed)).toEqual({
-          kind: "blocked",
-          reason,
-          marker,
-        });
-      }
-    }
-  });
-
   test.each([
-    { screen: "", verdict: null },
-    { screen: " > Reply with just: ok\n ⏺ ok", verdict: null },
+    { name: "missing usage report", lines: [RESULT] },
     {
-      screen: "[code-viewer] usage check: claude exited with 0",
-      verdict: { kind: "exited", code: "0" },
+      name: "missing current limits",
+      lines: [
+        { type: "assistant", usage_report: { rate_limits: { limits: null } } },
+        RESULT,
+      ],
     },
-  ])("$screen", ({ screen, verdict }) => {
-    expect(classifyUsageCheckScreen(screen)).toEqual(verdict);
+    {
+      name: "invalid percentage",
+      lines: [
+        {
+          type: "assistant",
+          usage_report: {
+            rate_limits: {
+              limits: [{ kind: "session", percent: "12", resets_at: null }],
+            },
+          },
+        },
+        RESULT,
+      ],
+    },
+    {
+      name: "unexpected model turn",
+      lines: [REPORT, { ...RESULT, num_turns: 1 }],
+    },
+    {
+      name: "command failure",
+      lines: [
+        REPORT,
+        {
+          ...RESULT,
+          is_error: true,
+          errors: [
+            { code: "first" },
+            { code: "second", details: { field: "sample" } },
+          ],
+        },
+      ],
+    },
+  ])("$name fails and does not publish fresh data", async ({ lines }) => {
+    const { checker, publish } = harness(lines);
+    expect(await checker.check(ACCOUNT, "/sample/check")).toMatchObject({
+      status: "failed",
+      reason: "read-failed",
+    });
+    expect(publish).not.toHaveBeenCalled();
   });
-
-  test("the session name says code-viewer made it and fits tmux", () => {
-    expect(usageCheckSessionName("claude:default", START)).toBe(
-      `${USAGE_CHECK_SESSION_PREFIX}claude-defau-${START.toString(36)}`,
+  test("retains every RPC error field", async () => {
+    const h = harness();
+    h.rpc.mockResolvedValue({
+      code: 0,
+      lines: [
+        '{"id":2,"error":{"code":-1,"message":"unavailable","data":{"errors":[{"code":"first"},{"code":"second","field":"sample"}]}}}',
+      ],
+      stderr: "",
+      timedOut: false,
+      tooMuchOutput: false,
+    });
+    const result = await h.checker.check(
+      { ...ACCOUNT, agent: "codex" },
+      "/sample/check",
     );
-    expect(usageCheckSessionName(ACCOUNT.id, START)).toBe(
-      `${USAGE_CHECK_SESSION_PREFIX}5d2c8a4e-000-${START.toString(36)}`,
+    expect(result).toMatchObject({
+      status: "failed",
+      detail: expect.stringContaining('"second"'),
+    });
+    expect(h.publish).not.toHaveBeenCalled();
+  });
+  test("joins duplicate checks and permits retry after a failure", async () => {
+    const h = harness();
+    let fail: (error: Error) => void = () => {
+      throw new Error("not running");
+    };
+    h.run.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
     );
+    const a = h.checker.check(ACCOUNT, "/sample/check");
+    const b = h.checker.check(ACCOUNT, "/sample/check");
+    fail(new Error("sample process failed"));
+    expect(await a).toMatchObject({
+      status: "failed",
+      joined: false,
+      detail: expect.stringContaining("sample process failed"),
+    });
+    expect(await b).toMatchObject({ status: "failed", joined: true });
+    expect(await h.checker.check(ACCOUNT, "/sample/check")).toMatchObject({
+      status: "ok",
+    });
+    expect(h.run).toHaveBeenCalledTimes(2);
   });
 });
 
-describe("the status line the check passes with --settings", () => {
+describe("the wrapped status line used when launching an agent", () => {
   // 本物のファイルで: ユーザーの設定の statusLine の状態から、包むスクリプトに
   // 元のコマンドを渡した形を作る。包んでいない・包むスクリプトが無いなら null。
   const dirs: string[] = [];
@@ -521,7 +337,7 @@ describe("the check's sessions are not agents", () => {
   // 一覧・件数・通知 (terminal/overview.ts) と巡回 (terminal/activity.ts) は
   // agentTmuxPanes を通したペインだけを見る。判定はセッション名の頭だけ。
   test.each([
-    { session: usageCheckSessionName("claude:default", START), shown: false },
+    { session: `${USAGE_CHECK_SESSION_PREFIX}default-check`, shown: false },
     { session: `${USAGE_CHECK_SESSION_PREFIX}sample`, shown: false },
     { session: "sample-app", shown: true },
     { session: "code-viewer-login", shown: true },

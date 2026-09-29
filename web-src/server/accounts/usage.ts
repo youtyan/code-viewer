@@ -1,8 +1,8 @@
 // アカウントごとの使用量 (5 時間枠・週枠) を、エージェントがディスクに
 // 書いたものから読む。API は呼ばない。
 //
-// - claude: statusLine に渡される JSON にしか上限の情報が無い
-//   (https://code.claude.com/docs/en/statusline の rate_limits)。statusLine
+// - claude: statusLine に渡される JSON の rate_limits を読む
+//   (https://code.claude.com/docs/en/statusline)。statusLine
 //   を包むスクリプト (terminal/statusline.ts) が、受け取った JSON を
 //   `<状態ディレクトリ>/agent-usage/claude-<鍵>.json` に保存する。鍵は
 //   そのセッションの CLAUDE_CONFIG_DIR の値 (既定なら空文字) の POSIX cksum。

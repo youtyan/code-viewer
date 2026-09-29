@@ -239,6 +239,7 @@ export const KNOWN_SNAKE_CASE_IDENTIFIERS: readonly string[] = [
   "users_ai",
   "users_name_idx",
   "weak_input_request",
+  "weekly_all",
   "whole_recent",
   "window_height",
   "window_id",

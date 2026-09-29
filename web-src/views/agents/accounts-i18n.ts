@@ -77,9 +77,11 @@ export type AccountsText = {
   usagePopoverEnable: string;
   // 使用量を確かめる (views/agents/usage-check.ts。カードと設定の使用量の行)
   usageCheck: string;
+  usageRefreshAll: string;
+  usageRefreshAuto: string;
   /** 設定の行で複数のアカウントが並ぶときのボタン。 */
   usageCheckFor: (name: string) => string;
-  /** ボタンと ⋯ の項目の title。わずかに使用量を使うことを書く。 */
+  /** ボタンと ⋯ の項目の title。取得方法の説明。 */
   usageCheckTitle: string;
   usageChecking: string;
   /** 止まった理由 (見出しの 1 行)。 */
@@ -105,6 +107,7 @@ export type AccountsText = {
   usageCheckCloseFailed: string;
   /** 畳んだ根拠の欄の見出し。 */
   usageCheckMore: string;
+  usageCheckCopy: string;
   usageCheckEvidence: string;
   agentsCount: (count: number) => string;
   hooksShort: (state: string) => string;
@@ -387,7 +390,7 @@ export const ACCOUNTS_EN: AccountsText = {
     `Session logs in this config directory report limits of more than one account (also seen: ${others}). Sign in to each account in its own config directory so the numbers do not mix.`,
   usageReason: {
     "not-wrapped":
-      "claude reports usage only to the status line, and usage collection is off for this account.",
+      "Automatic status line collection is off. You can still check usage directly.",
     "no-data":
       "No value yet. It arrives after a claude session with this account gets its first response.",
     "no-limits":
@@ -399,9 +402,11 @@ export const ACCOUNTS_EN: AccountsText = {
       "The saved data could not be read (the format is not a public contract).",
   },
   usageCheck: "Check usage",
+  usageRefreshAll: "Refresh all",
+  usageRefreshAuto: "Refreshes every 5 minutes while this view is open",
   usageCheckFor: (name) => `Check usage (${name})`,
   usageCheckTitle:
-    "Starts claude with this account in the background, sends one short message and reads the usage that comes back. This uses a little of your usage.",
+    "Reads subscription limits through the CLI without using model tokens.",
   usageChecking: "Checking…",
   usageCheckFailed: {
     "not-wrapped": "Usage is not being received for this account",
@@ -410,8 +415,11 @@ export const ACCOUNTS_EN: AccountsText = {
     login: "This account is not signed in yet",
     timeout: "No usage arrived in time",
     "start-failed": "claude could not be started",
+    "read-failed": "Could not refresh usage",
   },
   usageCheckNext: {
+    "read-failed":
+      "Check the details, CLI version and sign-in state, then retry.",
     "not-wrapped": "Once usage collection is on, the usage can be checked.",
     timeout:
       "claude may be waiting for something on its screen (accounts without Pro or Max report no limits).",
@@ -434,6 +442,7 @@ export const ACCOUNTS_EN: AccountsText = {
   usageCheckCloseFailed:
     "The tmux session opened for the check could not be closed",
   usageCheckMore: "Details",
+  usageCheckCopy: "Copy details",
   usageCheckEvidence: "Last lines of the claude screen:",
   usageEnable: "Turn on usage collection…",
   usagePopoverEnable: "Turn it on from the account card",
@@ -564,8 +573,8 @@ export const ACCOUNTS_EN: AccountsText = {
   added: (name) => `Added ${name}.`,
   usageTitle: "Usage",
   usageIntro: [
-    "claude reports its 5-hour and weekly usage only to the status line. code-viewer can wrap the status line command: it keeps the data it receives, runs your command with the same input and returns its output unchanged.",
-    "codex usage is read from its session logs and needs no setting.",
+    "Usage is refreshed every 5 minutes while the account view is open. Refresh all checks immediately. Claude uses /usage and Codex reads account/rateLimits/read; neither starts a model turn.",
+    "Usage received from the Claude status line or Codex session logs is also shown when newer. Status line collection is optional.",
   ],
   usageHow: "How it works",
   usageReceiving: (when) =>
@@ -742,7 +751,7 @@ export const ACCOUNTS_JA: AccountsText = {
     `同じ設定ディレクトリの記録に、別のアカウントの上限が混ざっています (ほかに ${others})。アカウントごとに設定ディレクトリを分けてログインすると混ざりません。`,
   usageReason: {
     "not-wrapped":
-      "claude は使用量をステータスラインにだけ渡します。このアカウントでは受け取りが無効です。",
+      "ステータスラインからの受け取りは無効です。「使用量を確かめる」で直接取得できます。",
     "no-data":
       "まだ値がありません。このアカウントの claude が最初の応答を受け取ると届きます。",
     "no-limits":
@@ -754,9 +763,11 @@ export const ACCOUNTS_JA: AccountsText = {
       "保存されたデータを読めません（公式に約束された書式ではありません）。",
   },
   usageCheck: "使用量を確かめる",
+  usageRefreshAll: "すべて更新",
+  usageRefreshAuto: "表示中は5分ごとに自動更新",
   usageCheckFor: (name) => `使用量を確かめる（${name}）`,
   usageCheckTitle:
-    "このアカウントの claude を裏で起こして短い一言を送り、返ってきた使用量を読みます。わずかに使用量を使います。",
+    "CLI から契約の使用量を取得します。モデルのトークンは消費しません。",
   usageChecking: "確かめています…",
   usageCheckFailed: {
     "not-wrapped": "このアカウントの使用量を受け取っていません",
@@ -765,8 +776,11 @@ export const ACCOUNTS_JA: AccountsText = {
     login: "このアカウントはまだログインしていません",
     timeout: "時間内に使用量が届きませんでした",
     "start-failed": "claude を起動できませんでした",
+    "read-failed": "使用量を更新できませんでした",
   },
   usageCheckNext: {
+    "read-failed":
+      "詳細と CLI のバージョン・ログイン状態を確認して、もう一度お試しください。",
     "not-wrapped": "使用量の受け取りを有効にすると、確かめられます。",
     timeout:
       "claude が画面で何かを待っているのかもしれません（Pro / Max 以外のアカウントには上限の情報がありません）。",
@@ -789,6 +803,7 @@ export const ACCOUNTS_JA: AccountsText = {
   usageCheckCloseFailed:
     "確認のために開いた tmux のセッションを閉じられませんでした",
   usageCheckMore: "詳しく",
+  usageCheckCopy: "詳細をコピー",
   usageCheckEvidence: "claude の画面の最後の行:",
   usageEnable: "使用量の取得を有効にする…",
   usagePopoverEnable: "アカウントのカードで有効にする",
@@ -919,8 +934,8 @@ export const ACCOUNTS_JA: AccountsText = {
   added: (name) => `${name} を追加しました。`,
   usageTitle: "使用量",
   usageIntro: [
-    "claude は 5時間枠と週枠の使用量をステータスラインにだけ渡します。code-viewer はステータスラインのコマンドを包み、受け取ったデータを保存してから、あなたのコマンドに同じ入力を渡し、その出力をそのまま返します。",
-    "codex の使用量はセッションの記録から読むので、設定は要りません。",
+    "アカウント画面の表示中は5分ごとに取得します。「すべて更新」で即時取得もできます。Claude は /usage、Codex は account/rateLimits/read を使い、モデルのトークンを消費しません。",
+    "Claude のステータスラインや Codex のセッション記録に、より新しい使用量があれば表示します。ステータスラインからの取得は任意です。",
   ],
   usageHow: "仕組み",
   usageReceiving: (when) =>

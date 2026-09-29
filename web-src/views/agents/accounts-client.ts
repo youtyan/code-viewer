@@ -23,6 +23,7 @@ import { BACKGROUND_REQUEST_HEADER } from "../../core/network-activity";
 
 /** 周期の取り直しの間隔。使用量とログインの状態はそう速く変わらない。 */
 const ACCOUNTS_POLL_MS = 10_000;
+const USAGE_REFRESH_MS = 5 * 60_000;
 /** ログインを始めてから、状態を強く取り直し続ける時間。 */
 const LOGIN_WATCH_MS = 5 * 60_000;
 
@@ -99,6 +100,7 @@ export type AccountsClient = {
    * 結果は usageCheck に置き、失敗も投げずにそこへ残す。
    */
   checkUsage(id: string): Promise<void>;
+  checkAllUsage(): Promise<void>;
   /** 止まった確認の後で、そのアカウントで開いた (開けなかった理由)。 */
   noteUsageCheckOpened(id: string, error: string, notice?: string): void;
 };
@@ -147,6 +149,8 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
   let holders = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let loginWatchUntil = 0;
+  let nextUsageRefreshAt = Date.now() + USAGE_REFRESH_MS;
+  let refreshingAll: Promise<void> | null = null;
   const listeners = new Set<() => void>();
   const checks = new Map<string, UsageCheckState>();
 
@@ -192,7 +196,12 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
       void load({
         background: true,
         refreshLogin: Date.now() < loginWatchUntil,
-      }).finally(schedule);
+      })
+        .then(async () => {
+          if (holders > 0 && Date.now() >= nextUsageRefreshAt)
+            await checkAllUsage(true);
+        })
+        .finally(schedule);
     }, ACCOUNTS_POLL_MS);
   }
 
@@ -200,14 +209,19 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
     url: string,
     body: unknown,
     operation: string,
+    background = false,
   ): Promise<T> {
-    const res = await deps.trackLoad(
-      fetch(url, {
-        method: "POST",
-        headers: deps.actionHeaders(),
-        body: JSON.stringify(body),
-      }),
-    );
+    const request = fetch(url, {
+      method: "POST",
+      headers: background
+        ? {
+            ...Object.fromEntries(new Headers(deps.actionHeaders())),
+            [BACKGROUND_REQUEST_HEADER]: "1",
+          }
+        : deps.actionHeaders(),
+      body: JSON.stringify(body),
+    });
+    const res = await (background ? request : deps.trackLoad(request));
     if (!res.ok) throw await responseFailure(res, operation);
     return (await res.json()) as T;
   }
@@ -216,6 +230,55 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
     const res = await deps.trackLoad(fetch(url));
     if (!res.ok) throw await responseFailure(res, operation);
     return (await res.json()) as T;
+  }
+
+  async function checkUsage(
+    id: string,
+    background = false,
+    reload = true,
+  ): Promise<void> {
+    if (checks.get(id)?.running) return;
+    checks.set(id, { running: true });
+    emit();
+    let response: UsageCheckResponse;
+    try {
+      response = await post<UsageCheckResponse>(
+        apiUrl("agentAccountsUsageCheck"),
+        { id },
+        "check the usage",
+        background,
+      );
+    } catch (cause) {
+      console.error("[code-viewer] usage check failed", cause);
+      checks.set(id, { running: false, error: formatErrorDetail(cause) });
+      emit();
+      return;
+    }
+    if (response.status === "ok" && !response.closeError) checks.delete(id);
+    else checks.set(id, { running: false, response });
+    // 新しい値 (または届いていない理由) を一覧に出す。load が知らせる。
+    if (reload) await load({ background });
+    else emit();
+  }
+
+  function checkAllUsage(background = false): Promise<void> {
+    if (refreshingAll) return refreshingAll;
+    nextUsageRefreshAt = Date.now() + USAGE_REFRESH_MS;
+    const accounts =
+      data?.accounts.filter(
+        (account) =>
+          account.login.state !== "logged-out" &&
+          account.login.state !== "no-config-dir",
+      ) ?? [];
+    const pending = Promise.all(
+      accounts.map((account) => checkUsage(account.id, background, false)),
+    )
+      .then(() => load({ background }))
+      .finally(() => {
+        if (refreshingAll === pending) refreshingAll = null;
+      });
+    refreshingAll = pending;
+    return pending;
   }
 
   return {
@@ -355,27 +418,7 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
       });
       emit();
     },
-    async checkUsage(id) {
-      if (checks.get(id)?.running) return;
-      checks.set(id, { running: true });
-      emit();
-      let response: UsageCheckResponse;
-      try {
-        response = await post<UsageCheckResponse>(
-          apiUrl("agentAccountsUsageCheck"),
-          { id },
-          "check the usage",
-        );
-      } catch (cause) {
-        console.error("[code-viewer] usage check failed", cause);
-        checks.set(id, { running: false, error: formatErrorDetail(cause) });
-        emit();
-        return;
-      }
-      if (response.status === "ok" && !response.closeError) checks.delete(id);
-      else checks.set(id, { running: false, response });
-      // 新しい値 (または届いていない理由) を一覧に出す。load が知らせる。
-      await load();
-    },
+    checkUsage,
+    checkAllUsage: () => checkAllUsage(),
   };
 }

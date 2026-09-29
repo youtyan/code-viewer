@@ -1140,26 +1140,21 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               kind: "list",
               items: [
                 "アカウントを足すと、エージェントの一覧の上に、アカウントごとの使用量が出ます。",
-                [
-                  "claude の使用量は、",
-                  ui(accounts.usageTitle),
-                  " の ",
-                  ui(accounts.statusLineInstall),
-                  " を押すと集め始めます。",
-                ],
+                [ui(accounts.usageRefreshAll), " で今の使用量を取得します。"],
               ],
             },
             more(
-              "codex の使用量は、設定しなくても出ます。",
+              "アカウント画面の表示中は、5 分おきに自動更新します。",
+              "Claude・Codex とも、使用量の取得ではモデルにメッセージを送らず、トークンを消費しません。",
               [
                 "claude のカードの ",
                 ui(accounts.usageEnable),
-                " でも集め始められます。",
+                " は任意です。有効にすると、作業中に届く使用量も表示に反映します。",
               ],
               [
-                "claude のカードに値が無い・古いときは、",
+                "カードに値が無い・古いときは、",
                 ui(accounts.usageCheck),
-                " を押すと、裏で claude に短い一言を送って今の値を取りに行きます（わずかに使用量を使います）。",
+                " でそのアカウントだけ更新できます。失敗した場合は、エラーの詳細をコピーできます。",
               ],
             ),
           ],

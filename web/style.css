@@ -19502,15 +19502,14 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   transform: rotate(45deg);
   box-shadow: 0 0 8px color-mix(in srgb, var(--color-waiting) 45%, transparent);
 }
-/* 作業中は回さない (欠けた輪と作業中の色で示す)。エージェントが作業している間は
-   ずっと出ているので、回すとその間ページが毎秒 60 回描き直され、端末の打鍵が
-   画面に出るまでが遅れた。コマ送り (steps) でも描き直しの要求は毎フレーム残った。 */
+/* 作業中の弧は transform だけを動かし、レイアウトや色の再計算を避ける。 */
 .terminal-mark-working {
   border: 1.75px solid var(--color-working);
   border-top-color: transparent;
   border-right-color: transparent;
   border-radius: 50%;
-  transform: rotate(-45deg);
+  animation: gdp-spin 0.9s linear infinite;
+  will-change: transform;
 }
 .terminal-mark-done {
   width: var(--icon-sm);
@@ -19523,6 +19522,10 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 .terminal-mark-idle {
   border: 1.5px solid var(--color-idle);
   border-radius: 50%;
+}
+.agent-status:not(.agent-status-busy) .terminal-mark-working {
+  animation: none;
+  will-change: auto;
 }
 @media (prefers-reduced-motion: reduce) {
   .terminal-mark-working {
@@ -21384,7 +21387,21 @@ button.agents-section-title:focus-visible {
   border-radius: var(--radius-md);
   background: var(--color-doc);
 }
-/* 1 行目: 利用者が付けた名前 (太字・本文の色)・種類とプランの札・⋯。 */
+.agents-account-kind {
+  flex: none;
+  color: var(--color-text);
+  font-size: var(--ui-font-section);
+  font-weight: 600;
+  line-height: 1.2;
+  text-transform: capitalize;
+}
+.agents-account-card[data-agent="claude"] .agents-account-kind {
+  color: var(--project-orange);
+}
+.agents-account-card[data-agent="codex"] .agents-account-kind {
+  color: var(--project-blue);
+}
+/* 1 行目: 種類・利用者が付けた名前・プラン・⋯。 */
 .agents-account-card-head {
   display: flex;
   align-items: center;
@@ -21398,10 +21415,10 @@ button.agents-section-title:focus-visible {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--color-text);
+  color: var(--color-text-2);
   font: inherit;
-  font-size: var(--ui-font-section);
-  font-weight: 600;
+  font-size: var(--ui-font-lg);
+  font-weight: 500;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -21410,8 +21427,10 @@ button.agents-section-title:focus-visible {
 button.agents-account-name:hover {
   text-decoration: underline;
 }
-.agents-account-card-head > .agents-chip {
+.agents-account-plan {
   flex: none;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
 }
 /* 2 行目: ログイン中のメールアドレス (無ければログインの状態)。本文より一段小さく、
    薄い灰色にはしない。 */

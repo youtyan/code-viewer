@@ -5,7 +5,7 @@
 // - GET    /_agent/accounts/plan          作る・登録すると何が起きるか (書かない)
 // - POST   /_agent/accounts               作る・登録する・外す・起動コマンドを変える
 // - POST   /_agent/accounts/login         ログインを tmux の新しいウィンドウで始める
-// - POST   /_agent/accounts/usage-check   claude を裏で起こして使用量を確かめる
+// - POST   /_agent/accounts/usage-check   モデルを使わず使用量を確かめる
 //                                          (usage-check.ts。終わるまで待って結果を返す)
 // - POST   /_agent/launch                 エージェントを tmux の新しいウィンドウで起動する
 //                                          (handoff を付けると「別のアカウントで続ける」)

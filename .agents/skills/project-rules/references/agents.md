@@ -543,8 +543,8 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 
 | 種類 | 出どころ | 注意 |
 |---|---|---|
-| claude | statusLine に渡される JSON にしか上限の情報が無い。settings.json の `statusLine.command` を包み、受け取った JSON を `<状態ディレクトリ>/agent-usage/` に保存してから元のコマンドにそのまま渡す（`server/terminal/statusline.ts`） | 包む・戻すは 4 の部品と同じ約束・同じ確認画面。**包むスクリプトは元の出力と終了コードを必ず返す**（保存に失敗しても。失敗は同じ場所の `failures.log`）。動いているセッションが無いと更新されない |
-| codex | `<CODEX_HOME>/sessions/` のセッション記録の `token_count` の上限情報（`server/accounts/usage.ts`） | **公式に約束された書式ではない。** 読めなければ理由つきで「取得できません」にし、0% や空欄にしない。mtime は読む候補を有界に絞るためだけに使い、解析後の新旧はイベントの `observedAt` で決める。大きなファイルは末尾だけ読む |
+| claude | ローカルの `/usage` コマンド。任意で settings.json の `statusLine.command` を包み、受け取った JSON を `<状態ディレクトリ>/agent-usage/` に保存してから元のコマンドにそのまま渡す（`server/terminal/statusline.ts`） | 包む・戻すは 4 の部品と同じ約束・同じ確認画面。**包むスクリプトは元の出力と終了コードを必ず返す**（保存に失敗しても。失敗は同じ場所の `failures.log`）。動いているセッションが無いと更新されない |
+| codex | app-server の `account/rateLimits/read`。あわせて `<CODEX_HOME>/sessions/` のセッション記録の `token_count` の上限情報（`server/accounts/usage.ts`） | **セッション記録は公式に約束された書式ではない。** 読めなければ理由つきで「取得できません」にし、0% や空欄にしない。mtime は読む候補を有界に絞るためだけに使い、解析後の新旧はイベントの `observedAt` で決める。大きなファイルは末尾だけ読む |
 
 **プロジェクトの statusLine に負けない起動**（`server/accounts/project-statusline.ts`）。プロジェクトの
 `.claude/settings.local.json`・`.claude/settings.json` に statusLine があると、ユーザーの設定の（包んだ）
@@ -552,7 +552,7 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 起きた）。code-viewer が claude を起こす経路（`POST /_agent/launch`: 新しいエージェント・別の
 アカウントで続ける・このアカウントで開く）では、そのアカウントで使用量を記録しているときだけ、
 起動するフォルダで効くプロジェクトの statusLine を包んで `--settings` で渡す（表示はそのプロジェクトの
-まま。padding などの欄も引き継ぐ。既に包みなら足さない）。引数の作り方は使用量を確かめると同じ
+まま。padding などの欄も引き継ぐ。既に包みなら足さない）。引数は
 `statusLineSettingsArgs`（`launch.ts`）。どのファイルが効くかは Claude Code の読み方に合わせる
 （公式の settings の説明）: 1) git のルート（worktree なら本体のルート。git の外・ルートがホームなら
 起動したフォルダ）の `settings.local.json`、2) 起動したフォルダの `settings.local.json`（以前の版の置き場）、
@@ -560,45 +560,30 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 （`LaunchResponse.statusLineError`）とサーバのログに出す。**利用者が自分の端末で起こした claude は
 今も負けたまま**（code-viewer は起動にしか手を入れない）
 
-**使用量には必ず「いつの値か」を添える。** claude の値はセッションが動いているときにしか
-更新されないので、古い値を今の値のように見せると使い切りを見誤る。
+**使用量には必ず「いつの値か」を添える。** 取得に失敗したときも保存済みの値と
+取得時刻を残し、エラーを別に表示する。
 
 **使用量を確かめる**（`server/accounts/usage-check.ts`・`views/agents/usage-check.ts`。
-`POST /_agent/accounts/usage-check`）。claude の `rate_limits` はセッションで最初の API の応答が
-返った後にしか statusLine に入らないので、値が無い・古いカード（と設定の使用量の行、同じ部品）に
-ボタンを出し、押すと裏で `claude --model haiku "<一言>"` を起こして新しい記録を待つ（わずかに
-使用量を使う。利用者が了承済み。確認の画面は出さず、ボタンの title に書く）。
+`POST /_agent/accounts/usage-check`）。モデルへのメッセージ送信をせず、CLI 自身の認証で取得する。
 
-- 起動は「新しいエージェント」と同じ部品（`tmuxLaunchArgs`・`agentCommandArgv`）。**作業場所は
-  確認専用のフォルダ `<状態>/usage-check`**（`AccountPaths.usageCheckDir`、空・0700、
-  `handle.ts` の `usageCheckFolder` が作る）。以前は見ているプロジェクトのルートで起こしていて、
-  そのアカウントで信頼していないプロジェクトでは信頼の確認で止まり、見ている画面で結果が変わった
-  （2026-09-25、利用者の指摘）。ここならアカウントごとに最初の 1 回だけ答えれば済み、プロジェクトの
-  設定（フック・CLAUDE.md）も読まない。セッションは確認ごとに作る `code-viewer-usage-<id>-<時刻>`
-- **包んだ statusLine を `--settings` で渡す**（`usageCheckArgs`。包むスクリプトに、ユーザーの設定の
-  元のコマンドを渡した形）。プロジェクトの `.claude/settings.json` に statusLine があると、ユーザーの
-  設定の（包んだ）ものより優先され、使用量が保存されない（利用者の実プロジェクトで起きた）。
-  コマンドラインの設定はプロジェクトの設定より優先される。包んでいない・包むスクリプトが無いなら
-  起こさずに断る（not-wrapped）。**普段のセッションはこの影響を受けたまま**（プロジェクトに
-  statusLine があるプロジェクトで動く claude からは値が届かない）
-- 成功は、起こした時刻以降の `observedAt` で `status: "ok"` の記録が読めたとき（上限 60 秒）。
-  その間 2 秒ごとにペインの画面を読み、初回の案内・信頼の確認・ログインの画面なら待たずに止める。
-  claude が終わったら対話シェルが印の行を出して眠るので、起動に失敗した理由も画面に残る
-- **閉じるのは、作ったペインの pid のプロセスグループへの SIGHUP（残れば SIGKILL）だけ。**
-  tmux の `kill-*` は使わない（9 の事故）。シェルが終われば端末が閉じ、tmux がペインと
-  セッションを片付ける（このペインだけ `remain-on-exit off`）。消えなければ `closeError` で返す
-- 同じアカウントで走っている間の 2 回目は起こさず、走っている確認の結果を返す（`joined`）
-- 確認のセッションの claude は利用者の作業ではないので、エージェントの一覧・全体ボード・最下段の
-  件数・通知・巡回から除く。判定は `core/agent-accounts.ts` の `agentTmuxPanes`（セッション名の頭
-  `USAGE_CHECK_SESSION_PREFIX`）1 か所で、`terminal/overview.ts` と `terminal/activity.ts` がこれを通す。
-  ログインのウィンドウ（`code-viewer-login`）は除かない
-- claude の画面（初回の案内・信頼の確認・ログイン）で止まったら、カードに理由・フォルダ（応答の `cwd`）・
-  ［このアカウントで開く］［もう一度確かめる］を出す。開くのは起動の画面と同じ経路
-  （`accounts-dialogs.ts` の `openHere` → `POST /_agent/launch` → そのペインをターミナルのタブで開く）。
-  ログインで止まったときは既存の「ログイン」（`claude auth login` のウィンドウ）にする
-- 止まった理由は 6 種類（`UsageCheckFailure`）。応答は理由・元のエラーの全文・画面の最後の行。
-  次の手順の文は画面の言語で i18n に 1 か所（`usageCheckNext`）
-- statusLine を包んでいない・未ログインのカードにはボタンを出さない（⋯ からは押せ、理由が返る）
+- Claude は `--safe-mode --print /usage --output-format stream-json --verbose`。
+  構造化された `usage_report.rate_limits.limits` を読み、ローカルコマンドの成功と
+  ターン数・費用・API 処理時間がすべて 0 であることを確認する。モデル API の接続先は
+  接続できないローカルポートに固定する。構造化された値が無い場合は失敗にする
+- Codex は既存の `login.ts` の RPC で app-server を起動する。initialize の応答を待ってから
+  initialized と `account/rateLimits/read` を送る。シェルの制御文字が付く行も `jsonIn` で読む
+- 起動コマンドと環境は `agentCommandArgv`・`accountEnv` を使う。Claude の作業場所は
+  確認専用の `<状態>/usage-check`（`AccountPaths.usageCheckDir`、`usageCheckFolder` が作る）。
+  tmux のセッション作成や statusLine の設定は不要
+- 同じアカウント・設定ディレクトリ・起動コマンドの確認が実行中なら、その結果を待つ（`joined`）
+- 成功した値だけ `AccountService.recordUsage` に保存する。保存済みの記録より新しく、
+  設定ディレクトリと起動コマンドが一致するときに使う。サーバの再起動でこのキャッシュは消える
+- `accounts-client.ts` の既存の画面ポーリングで、アカウント画面を開いている間は 5 分ごとに
+  更新する。「すべて更新」は即時取得。未ログイン・設定ディレクトリ無しは対象から除く
+- 失敗は `read-failed` と元のエラー全文で返す。カードと設定で詳細のコピー・再試行ができる。
+  旧サーバの画面待ちの応答も表示できるよう、旧理由・応答フィールドは残す
+- 旧方式の確認用 tmux セッションが残っていても一覧や通知に出ないよう、
+  `agentTmuxPanes` の `USAGE_CHECK_SESSION_PREFIX` による除外は残す
 
 同じ設定ディレクトリの codex 記録を「別アカウントの値が混在」とするのは、同じ窓で新しい
 reset が古い reset より許容差を超えて前へ戻るか、古い窓が新しい観測時刻にも終わっていない
@@ -1022,8 +1007,8 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 | worktree の 2 段表示 | worktree は本体のプロジェクトにまとめ、行に worktree 名を出すだけ |
 | 通知はタブを開いている間だけ | ブラウザの通知なので、code-viewer のタブが 1 つも無ければ出ない。長く裏にあるタブはブラウザがタイマーを間引くので遅れる（ブラウザの仕様。遅れの幅は測っていない） |
 | `ps` の出力の切り方 | `ps eww` は区切りを持たないので、値の終わりを「空白 + `名前=`」で決めている。パスに ` NAME=` の並びがあると切り損なう。起動後に環境が変わった場合やセッション中のアカウント切替は見えない |
-| 内部形式に頼っている箇所 | codex のセッション記録（使用量）、エージェントの画面の文言（状態）、claude の `.claude.json` の `hasCompletedOnboarding`（初回の案内の印。5 のログイン）、Claude Code の初回の案内・信頼の確認・ログインの画面の文言（使用量を確かめる。`server/accounts/usage-check.ts` の `CLAUDE_BLOCKING_SCREENS` の 1 か所）、Claude Code がプロジェクトの設定ファイルを読む場所と順（起動のときの statusLine。`server/accounts/project-statusline.ts` の `projectSettingsFiles`。公式の説明にあるが、版で変わってきた: 以前は settings.local.json を起動したフォルダに置いていた）。どれも版が上がれば壊れうる。壊れたら理由つきで「取得できません」・画面ルールの修正（2）・使用量を確かめるは画面で止まらず時間切れになる（応答の画面の最後の行を見て表を直す） |
-| 使用量を確かめる途中でサーバが落ちた | 作ったセッションは閉じられずに残る。claude が既に終わっていれば眠りの 10 分後にシェルが終わって消えるが、claude が動いたままなら利用者が閉じるまで残る（名前 `code-viewer-usage-…` で分かる） |
+| 内部形式に頼っている箇所 | codex のセッション記録（使用量）、エージェントの画面の文言（状態）、claude の `.claude.json` の `hasCompletedOnboarding`（初回の案内の印。5 のログイン）、Claude Code の `/usage` の構造化出力（`server/accounts/usage-check.ts` の `claudeWindows`）、Claude Code がプロジェクトの設定ファイルを読む場所と順（起動のときの statusLine。`server/accounts/project-statusline.ts` の `projectSettingsFiles`。公式の説明にあるが、版で変わってきた: 以前は settings.local.json を起動したフォルダに置いていた）。どれも版が上がれば壊れうる。壊れたら理由つきで「取得できません」・画面ルールの修正（2）・使用量を確かめるはエラーの詳細を表示する |
+| 使用量の取得と CLI の版 | Claude の構造化された `/usage` に対応していない版では取得に失敗する。モデルへの送信による代替取得はしない |
 | 画面ルールの保存済み上書き | ユーザー単位に移した（8）。`--standalone` のサーバもユーザー単位のものを読むので、並んでいても同じルールで判定する |
 | xterm の代替画面の行数の上限（上流の不具合。6.0.0 と上流の main で同じ） | xterm は、一度も使っていない代替画面（tmux・vim・less が使う画面）を縮めても、その画面の行数の上限を縮めない。上限が画面より大きいまま tmux が代替画面へ入ると、画面に無いはずの行が溜まり、次に行数が変わったときに画面の起点がずれて、最後の行が重複して並ぶ。回避は `terminal-screen.ts` の `attach` で「寸法を合わせてから `reset`」の順にすること（`reset` は今の寸法で両方の画面を作り直す。順番は `terminal-screen-resize.test.ts` が見る）。**残る限界**: tmux を使わない素のシェルで、代替画面に入っていない間に下のパネルを低くしてから vim などを起動すると、同じ崩れが起きうる（公開 API では上限を直せない）。開き直す（タブを行き来する・再読み込み）と `attach` が作り直すので直る |
 

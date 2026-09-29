@@ -3,7 +3,15 @@
 // 状態を持つ AccountsClient。パス・名前はすべて架空。
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import {
   type AccountStatus,
   type AccountsResponse,
@@ -134,6 +142,7 @@ function fakeClient(
     planStatusLine: unused("planStatusLine"),
     applyStatusLine: unused("applyStatusLine"),
     clearUsageFailures: unused("clearUsageFailures"),
+    checkAllUsage: unused("checkAllUsage"),
     usageCheck: (id) => states[id] ?? null,
     async checkUsage(id) {
       pressed.push(id);
@@ -204,7 +213,7 @@ describe("when the check is offered", () => {
       button: null,
     },
     {
-      name: "claude whose status line is not wrapped (turn it on first)",
+      name: "claude whose status line is not wrapped",
       account: account({
         usage: {
           status: "unavailable",
@@ -213,7 +222,7 @@ describe("when the check is offered", () => {
           observedAt: 0,
         },
       }),
-      button: null,
+      button: BUTTON,
     },
     {
       name: "claude that is signed out (the card offers Sign in)",
@@ -221,7 +230,7 @@ describe("when the check is offered", () => {
       button: null,
     },
     {
-      name: "codex (read from its session logs)",
+      name: "codex without session logs",
       account: account({
         agent: "codex",
         statusLine: null,
@@ -232,16 +241,13 @@ describe("when the check is offered", () => {
           observedAt: 0,
         },
       }),
-      button: null,
+      button: BUTTON,
     },
   ])("$name", ({ account: row, button }) => {
     const { client } = fakeClient();
     const block = shown(usageCheckBlock(row, NOW, client, t, NO_OPENERS));
     expect(block?.button ?? null).toEqual(button);
-    // ⋯ のメニューは claude なら値に関係なくある (理由は押した結果で返る)。
-    expect(usageCheckMenuItem(row, client, t)?.label ?? null).toBe(
-      row.agent === "claude" ? t.usageCheck : null,
-    );
+    expect(usageCheckMenuItem(row, client, t)?.label).toBe(t.usageCheck);
   });
 
   test("pressing starts the check at once (no confirmation)", () => {
@@ -393,21 +399,21 @@ describe("stopped at a claude screen", () => {
   test.each([
     {
       reason: "onboarding",
-      buttons: [t.usageCheckOpenHere, t.usageCheckAgain],
+      buttons: [t.usageCheckOpenHere, t.usageCheckAgain, t.usageCheckCopy],
       opens: "openHere claude-sample /home/sample/work/sample-app",
       next: "",
       after: t.usageCheckAfterOpen("answer", t.usageCheckAgain),
     },
     {
       reason: "trust",
-      buttons: [t.usageCheckOpenHere, t.usageCheckAgain],
+      buttons: [t.usageCheckOpenHere, t.usageCheckAgain, t.usageCheckCopy],
       opens: "openHere claude-sample /home/sample/work/sample-app",
       next: "",
       after: t.usageCheckAfterOpen("answer", t.usageCheckAgain),
     },
     {
       reason: "login",
-      buttons: [t.loginButton, t.usageCheckAgain],
+      buttons: [t.loginButton, t.usageCheckAgain, t.usageCheckCopy],
       opens: "login claude-sample",
       next: "",
       after: t.usageCheckAfterOpen("login", t.usageCheckAgain),
@@ -415,7 +421,7 @@ describe("stopped at a claude screen", () => {
     {
       // 時間切れも同じ形。画面の最後の行は「詳しく」、状況の 1 行は残す。
       reason: "timeout",
-      buttons: [t.usageCheckOpenHere, t.usageCheckAgain],
+      buttons: [t.usageCheckOpenHere, t.usageCheckAgain, t.usageCheckCopy],
       opens: "openHere claude-sample /home/sample/work/sample-app",
       next: t.usageCheckNext.timeout,
       after: `${t.usageCheckAfterOpen("look", t.usageCheckAgain)}\n${t.usageCheckNext.timeout}`,
@@ -456,7 +462,7 @@ describe("stopped at a claude screen", () => {
     expect(stopShown(failed.element)).toMatchObject({
       reason: t.usageCheckFailed["start-failed"],
       folder: "",
-      buttons: [t.usageCheckOpenCommands, t.usageCheckAgain],
+      buttons: [t.usageCheckOpenCommands, t.usageCheckAgain, t.usageCheckCopy],
       next: t.usageCheckNext["start-failed"],
     });
     // 上の「使用量を確かめる」は出さない (下の「もう一度確かめる」が同じ役)。
@@ -509,7 +515,7 @@ describe("stopped at a claude screen", () => {
     const ja = stopShown(block("trust", {}, ACCOUNTS_JA).element);
     expect(ja).toMatchObject({
       reason: "このフォルダをこのアカウントでまだ信頼していません",
-      buttons: ["このアカウントで開く", "もう一度確かめる"],
+      buttons: ["このアカウントで開く", "もう一度確かめる", "詳細をコピー"],
     });
     expect(
       stopShown(block("trust", { opened: { error: "" } }, ACCOUNTS_JA).element)
@@ -586,10 +592,12 @@ describe("the same part in the card and in Settings", () => {
       reason: t.usageCheckFailed.login,
       folder: "~/work/sample-app",
       folderTitle: "/home/sample/work/sample-app",
-      buttons: [t.loginButton, t.usageCheckAgain],
+      buttons: [t.loginButton, t.usageCheckAgain, t.usageCheckCopy],
       next: "",
     });
-    expect(codex?.querySelector(".usage-check")).toBeNull();
+    expect(codex?.querySelector(".usage-check-button")?.textContent).toBe(
+      t.usageCheck,
+    );
   });
 
   test("the built-in claude card gets a ⋯ menu with only the check", () => {
@@ -655,8 +663,39 @@ describe("the same part in the card and in Settings", () => {
   });
 });
 
+test("copies the complete error detail", async () => {
+  const write = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+  try {
+    const { client } = fakeClient({
+      "claude-sample": {
+        running: false,
+        response: failed("read-failed", {
+          detail: "first reason\nsecond reason with nested details",
+        }),
+      },
+    });
+    const block = usageCheckBlock(
+      account({ usage: FRESH }),
+      NOW,
+      client,
+      t,
+      NO_OPENERS,
+    );
+    if (!block) throw new Error("Missing error details");
+    document.body.appendChild(block);
+    block?.querySelector<HTMLButtonElement>(".usage-check-copy")?.click();
+    await vi.waitFor(() => expect(write).toHaveBeenCalledOnce());
+    expect(write).toHaveBeenCalledWith(
+      block?.querySelector(".usage-check-detail")?.textContent,
+    );
+    expect(block?.textContent).toContain(t.copiedLocation);
+  } finally {
+    write.mockRestore();
+  }
+});
+
 describe("the client keeps the state of each check", () => {
-  function harness() {
+  function harness(rows = [account()]) {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const replies: Array<() => Promise<Response>> = [];
     const original = globalThis.fetch;
@@ -671,7 +710,7 @@ describe("the client keeps the state of each check", () => {
         if (!reply) throw new Error("no reply prepared");
         return reply();
       }
-      return new Response(JSON.stringify(response([account()])), {
+      return new Response(JSON.stringify(response(rows)), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -752,6 +791,107 @@ describe("the client keeps the state of each check", () => {
       expect(h.requests.length - posts.length).toBe(reloads);
     } finally {
       h.restore();
+    }
+  });
+  test("refresh all sends one check per signed-in account and retains individual failures", async () => {
+    const h = harness([
+      account(),
+      account({ id: "codex-sample", agent: "codex" }),
+      account({
+        id: "signed-out",
+        login: { ...account().login, state: "logged-out" },
+      }),
+    ]);
+    try {
+      await h.client.load();
+      const gate = deferred<void>();
+      h.replies.push(async () => {
+        await gate.promise;
+        return new Response(
+          JSON.stringify({
+            ...failed("read-failed"),
+            status: "ok",
+            usage: FRESH,
+          }),
+        );
+      });
+      h.replies.push(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ...failed("read-failed"),
+              accountId: "codex-sample",
+            }),
+          ),
+      );
+      const first = h.client.checkAllUsage();
+      const second = h.client.checkAllUsage();
+      expect(
+        h.requests
+          .filter((r) => r.init?.method === "POST")
+          .map((r) => JSON.parse(String(r.init?.body))),
+      ).toEqual([{ id: "claude-sample" }, { id: "codex-sample" }]);
+      gate.resolve();
+      await Promise.all([first, second]);
+      expect(h.client.usageCheck("claude-sample")).toBeNull();
+      expect(h.client.usageCheck("codex-sample")).toMatchObject({
+        running: false,
+        response: { status: "failed", reason: "read-failed" },
+      });
+    } finally {
+      h.restore();
+    }
+  });
+
+  test("automatic usage refresh runs every five minutes only while retained", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    const release = h.client.retain();
+    try {
+      await h.client.load();
+      h.replies.push(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ...failed("read-failed"),
+              status: "ok",
+              usage: FRESH,
+            }),
+          ),
+      );
+      await vi.advanceTimersByTimeAsync(299_999);
+      expect(h.requests.filter((r) => r.init?.method === "POST")).toHaveLength(
+        0,
+      );
+      await vi.advanceTimersByTimeAsync(1);
+      const posts = h.requests.filter((r) => r.init?.method === "POST");
+      expect(posts).toHaveLength(1);
+      expect(
+        new Headers(posts[0]?.init?.headers).get("X-Code-Viewer-Action"),
+      ).toBe("1");
+      h.replies.push(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ...failed("read-failed"),
+              status: "ok",
+              usage: FRESH,
+            }),
+          ),
+      );
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(h.requests.filter((r) => r.init?.method === "POST")).toHaveLength(
+        2,
+      );
+      release();
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(h.requests.filter((r) => r.init?.method === "POST")).toHaveLength(
+        2,
+      );
+    } finally {
+      release();
+      h.restore();
+      vi.useRealTimers();
     }
   });
 });

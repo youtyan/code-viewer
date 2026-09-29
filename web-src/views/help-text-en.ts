@@ -1159,25 +1159,23 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               items: [
                 "Once you add an account, usage per account shows above the agent list.",
                 [
-                  "For claude, select ",
-                  ui(accounts.statusLineInstall),
-                  " under ",
-                  ui(accounts.usageTitle),
-                  " to start collecting it.",
+                  "Select ",
+                  ui(accounts.usageRefreshAll),
+                  " to fetch current usage.",
                 ],
               ],
             },
             more(
-              "codex usage shows without any setup.",
+              "Usage refreshes every 5 minutes while the account view is open. Neither Claude nor Codex sends a model message or consumes tokens to fetch usage.",
               [
                 "On a claude card, ",
                 ui(accounts.usageEnable),
-                " starts collecting it too.",
+                " is optional. It also collects usage received during your work.",
               ],
               [
-                "When a claude card has no value or an old one, ",
+                "When a card has no value or an old one, ",
                 ui(accounts.usageCheck),
-                " starts claude in the background and sends one short message to get the current value (it uses a little usage).",
+                " refreshes that account alone. If it fails, you can copy the error details.",
               ],
             ),
           ],

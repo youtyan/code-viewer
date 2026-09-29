@@ -110,6 +110,14 @@ export function createAccountsSettings(
   addButton.type = "button";
   addRow.appendChild(addButton);
   const usageTitle = el("strong", "agent-accounts-subtitle");
+  const usageHead = el("div", "agent-accounts-subtitle-row");
+  const refreshUsage = el("button", "gdp-btn gdp-btn-sm agents-usage-refresh");
+  refreshUsage.type = "button";
+  refreshUsage.addEventListener(
+    "click",
+    () => void deps.client.checkAllUsage(),
+  );
+  usageHead.append(usageTitle, refreshUsage);
   const usageRows = el("div", "agent-accounts-usage");
   const usageHow = el("details", "agent-accounts-how");
   const usageHowSummary = el("summary");
@@ -155,7 +163,7 @@ export function createAccountsSettings(
     table,
     addRow,
     sectionResult,
-    usageTitle,
+    usageHead,
     usageRows,
     usageHow,
     failures,
@@ -568,6 +576,13 @@ export function createAccountsSettings(
     addButton.textContent = t.add;
     addButton.disabled = busy;
     usageTitle.textContent = t.usageTitle;
+    const refreshing =
+      data?.accounts.some(
+        (account) => deps.client.usageCheck(account.id)?.running,
+      ) === true;
+    refreshUsage.textContent = refreshing ? t.usageChecking : t.usageRefreshAll;
+    refreshUsage.title = t.usageRefreshAuto;
+    refreshUsage.disabled = refreshing || !data;
     usageHowSummary.textContent = t.usageHow;
     commandsTitle.textContent = t.commandsTitle;
     commandsUnsaved.textContent = t.commandsUnsaved;

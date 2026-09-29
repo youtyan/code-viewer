@@ -122,6 +122,7 @@ function render(
     planStatusLine: unused("planStatusLine"),
     applyStatusLine: unused("applyStatusLine"),
     clearUsageFailures: unused("clearUsageFailures"),
+    checkAllUsage: unused("checkAllUsage"),
     usageCheck: () => null,
     checkUsage: unused("checkUsage"),
     noteUsageCheckOpened: unused("noteUsageCheckOpened"),
@@ -162,7 +163,7 @@ function render(
       card,
       name: card.querySelector(".agents-account-name")?.textContent ?? "",
       chips: [
-        ...card.querySelectorAll(".agents-account-card-head > .agents-chip"),
+        ...card.querySelectorAll(".agents-account-kind, .agents-account-plan"),
       ].map((chip) => chip.textContent),
       who: card.querySelector(".agents-account-who")?.textContent ?? null,
       whoTitle:

@@ -1,10 +1,10 @@
 // エージェント一覧の上に出す「アカウントの帯」。アカウント 1 つが 1 枚の
-// カード: 利用者が付けた名前・種類とプランの札・ログイン中のメールアドレス・
+// カード: 種類・利用者が付けた名前・プラン・ログイン中のメールアドレス・
 // 5 時間枠と週枠 (棒・割合・戻る時刻)・いつの値か・そのアカウントで動いている
 // エージェントの数。フックの状態と設定ディレクトリは名前のツールチップ。
 //
 //   Accounts 4 ▾                                                  Manage
-//   ┌ work  [claude] [Max]          ⋯ ┐ ┌ Default  [codex]            ┐
+//   ┌ Claude  work           Max  ⋯ ┐ ┌ Codex  Default              ┐
 //   │ user@example.com                │ │ Not signed in               │
 //   │ 5h    ▰▰▱▱▱▱   16%  resets 06:10│ │ [Sign in]                   │
 //   │ week  ▰▱▱▱▱▱    3%  resets Thu …│ │                             │
@@ -224,12 +224,13 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
     const t = text();
     const box = el("div", "agents-account-card");
     box.dataset.account = account.id;
+    box.dataset.agent = account.agent;
     const warn =
       account.usage.status === "ok" &&
       usageWindowViews(account.usage, now).some((view) => view.warn);
     box.classList.toggle("warn", warn);
 
-    // 1 行目: 利用者が付けた名前 (既定は「既定」)・種類とプランの札・⋯。
+    // 1 行目: 種類・利用者が付けた名前 (既定は「既定」)・プラン・⋯。
     const head = el("div", "agents-account-card-head");
     const name = el(
       "button",
@@ -244,15 +245,12 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       t.bandManage,
     ].join("\n");
     name.addEventListener("click", () => deps.openSettings());
-    head.appendChild(name);
-    head.appendChild(
-      el("span", "agents-chip agents-account-kind", account.agent),
-    );
+    head.append(el("span", "agents-account-kind", account.agent), name);
+    head.appendChild(el("span", "agents-spacer"));
     const plan = planLabel(account.login.plan);
     if (account.login.state === "logged-in" && plan) {
-      head.appendChild(el("span", "agents-chip agents-account-plan", plan));
+      head.appendChild(el("span", "agents-account-plan", plan));
     }
-    head.appendChild(el("span", "agents-spacer"));
     // ⋯: claude なら使用量を確かめる。登録したアカウントなら名前の変更・
     // 外す (既定のアカウントは変えられない)。どちらも無ければ出さない。
     if (account.agent === "claude" || !account.builtin) {
@@ -337,6 +335,7 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
         "div",
         "agents-account-card agents-account-card-unregistered",
       );
+      box.dataset.agent = info.agent;
       const head = el("div", "agents-account-card-head");
       head.append(
         el("span", "agents-account-kind", info.agent),
@@ -418,6 +417,20 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       head.appendChild(problem);
     }
     head.appendChild(el("span", "agents-spacer"));
+    const refreshing =
+      data?.accounts.some(
+        (account) => deps.client.usageCheck(account.id)?.running,
+      ) === true;
+    const refresh = el(
+      "button",
+      "agents-text-action agents-usage-refresh",
+      refreshing ? t.usageChecking : t.usageRefreshAll,
+    );
+    refresh.type = "button";
+    refresh.title = t.usageRefreshAuto;
+    refresh.disabled = refreshing || !data;
+    refresh.addEventListener("click", () => void deps.client.checkAllUsage());
+    head.appendChild(refresh);
     const manage = el("button", "agents-text-action", t.bandManage);
     manage.type = "button";
     manage.addEventListener("click", () => deps.openSettings());
