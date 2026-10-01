@@ -387,6 +387,44 @@ export function readParagraphs(
   return out;
 }
 
+/** 作業中の印の行: 回る印・語・「…」 (`✻ Twisting… (1m 40s · …)`)。 */
+const SPINNER_LINE = /^[·✢✳✶✻✽*+]\s+\S+…(?:\s|$)/;
+/** 道具の実行を待っている間だけ出る行。 */
+const TOOL_WAITING_LINE = /^⎿\s+(?:Waiting|Running)…$/;
+
+/** 行の文字だけ (色の区切りを繋ぐ)。 */
+export function lineText(line: ReflowLine): string {
+  return line.runs.map((run) => run.text).join("");
+}
+
+/** エージェントが作業中だけ出す表示の行か (過去の行に残っても中身ではない)。 */
+function transientLine(line: ReflowLine): boolean {
+  // 入力欄の上下の罫線は左端から引く (文の中の罫線は字下げする)。
+  if (line.rule) return line.runs[0]?.text.startsWith("─") ?? false;
+  const text = lineText(line).trim();
+  return (
+    text === "❯" || SPINNER_LINE.test(text) || TOOL_WAITING_LINE.test(text)
+  );
+}
+
+/**
+ * 過去の行から、エージェント (Claude Code) が作業中だけ出す表示を外す: 作業中の
+ * 印の行、入力欄の上下の罫線と空の入力行、道具の「Waiting…」。PC のペインが
+ * 低いと、書き換えのたびに押し出されて過去の行に溜まり、読む画面がこれで
+ * 埋まった (4 割以上)。外した後に続く空行は 1 つにまとめる。
+ */
+export function withoutTransient(lines: ReflowLine[]): ReflowLine[] {
+  const out: ReflowLine[] = [];
+  for (const line of lines) {
+    if (transientLine(line)) continue;
+    const prev = out[out.length - 1];
+    const blank = lineText(line).trim() === "";
+    if (blank && prev && lineText(prev).trim() === "") continue;
+    out.push(line);
+  }
+  return out;
+}
+
 /** y 行目を含む段落 (readParagraphs の 1 行) の先頭の行。 */
 export function paragraphStart(
   buffer: XtermBuffer,

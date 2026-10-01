@@ -496,7 +496,8 @@ output, and the field at the bottom pastes what you type and presses Enter
 the field attaches a photo or screenshot: it is saved like an image pasted
 into a terminal, and its path is added to the field.
 Scrolling to the top adds earlier output (up to 3,000 lines of the pane's
-history). Back (‹ or the browser's back) returns to where the pane was opened
+history); the agent's working status lines and input box borders are left out
+of it. Back (‹ or the browser's back) returns to where the pane was opened
 from: the sidebar or the + menu opens again. A terminal tab that shows a pane
 then shows the pane's name and state, with **Open the pane** and **Close this
 tab**.

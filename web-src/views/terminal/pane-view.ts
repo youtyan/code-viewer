@@ -30,6 +30,7 @@ import { UNINTERRUPTIBLE_REQUEST_HEADER } from "../../core/network-activity";
 import {
   DEFAULT_COLOR,
   findChoices,
+  lineText,
   logicalLineStart,
   paragraphStart,
   type ReflowColors,
@@ -38,6 +39,7 @@ import {
   readParagraphs,
   runCss,
   terminalPalette,
+  withoutTransient,
 } from "../../core/pane-reflow";
 import {
   PASTE_IMAGE_TYPES,
@@ -151,10 +153,6 @@ function lineHtml(line: ReflowLine, colors: ReflowColors): string {
   // 折り返した 2 行目以降を文の始まり (箇条書きなら頭の後ろ) に揃える。
   const hang = line.hang ? ` style="--pane-hang: ${line.hang}ch"` : "";
   return `<div class="pane-line${line.rule ? " pane-line-rule" : ""}"${hang}>${body}</div>`;
-}
-
-function lineText(line: ReflowLine): string {
-  return line.runs.map((run) => run.text).join("");
 }
 
 export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
@@ -412,7 +410,7 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
   ): void {
     if (!term) return;
     stable?.marker?.dispose();
-    const lines = linesIn(buffer, from, end);
+    const lines = historyLinesIn(buffer, from, end);
     readStable.innerHTML = linesHtml(lines, palette);
     stable = {
       term,
@@ -455,7 +453,7 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     }
     const first = stable.starts[0] ?? stable.end;
     if (from >= first) return;
-    const lines = linesIn(buffer, from, first);
+    const lines = historyLinesIn(buffer, from, first);
     readStable.prepend(linesFragment(lines, palette));
     stable.starts.unshift(...lines.map((line) => line.start));
   }
@@ -473,7 +471,7 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     }
     extendStableFront(buffer, from, palette);
     if (stable.end === end) return;
-    const lines = linesIn(buffer, stable.end, end);
+    const lines = historyLinesIn(buffer, stable.end, end);
     readStable.append(linesFragment(lines, palette));
     stable.starts.push(...lines.map((line) => line.start));
     stable.end = end;
@@ -488,6 +486,16 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     return currentView === "read" && term
       ? readParagraphs(buffer, from, to, term.cols)
       : readLogicalLines(buffer, from, to);
+  }
+
+  /**
+   * 確定した行 (過去の行) に描く行。読む画面では、エージェントが作業中だけ出す
+   * 表示 (作業中の印・入力欄の罫線) を外す: PC のペインが低いと過去の行がそれで
+   * 埋まった。今の画面の行と「PC と同じ」は全部出す。
+   */
+  function historyLinesIn(buffer: XtermBuffer, from: number, to: number) {
+    const lines = linesIn(buffer, from, to);
+    return currentView === "read" ? withoutTransient(lines) : lines;
   }
 
   /** y 行目を含む、描く行 (linesIn の 1 行) の先頭。 */
