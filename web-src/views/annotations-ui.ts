@@ -888,8 +888,9 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       });
   }
 
-  // A paste-ready reference for AI agents: identifies the annotation and
-  // shows the exact CLI commands to revise it or post a follow-up answer.
+  // A paste-ready reference for AI agents: a one-line request header, then the
+  // annotation id, its location and its session (id and title). It holds no
+  // CLI commands.
   function annotationAiReference(
     session: AnnotationSession,
     entry: AnnotationEntry,
