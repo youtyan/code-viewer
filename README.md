@@ -481,8 +481,8 @@ section, and the row at the top goes back. Browser notifications
 need a secure page (https, or localhost on the same machine), so they are not
 available when the page is opened over plain http from another device.
 
-Opening an agent there shows only its pane, full screen, without attaching to
-tmux: other panes of a split window stay hidden, and the PC's window size and
+Opening an agent there, or a terminal tab that shows a tmux pane, shows only
+that pane, full screen, without attaching to tmux: other panes of a split window stay hidden, and the PC's window size and
 layout do not change. Long lines wrap to the phone's width; **Screen** shows
 the grid as it is for full-screen apps such as vim (pinch to change its text
 size). Numbered choices on the screen become buttons that send the number,
