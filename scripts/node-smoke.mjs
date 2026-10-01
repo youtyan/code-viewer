@@ -135,11 +135,13 @@ try {
   const reader = events.body.getReader();
   const first = await withTimeout(reader.read(), "/events read timed out");
   controller.abort();
-  if (
-    first.done ||
-    !new TextDecoder().decode(first.value).includes("event: open")
-  ) {
-    throw new Error("/events did not emit the open event");
+  // 最初の塊は retry と注釈 (": ok")。`event: open` は送らない (preview.ts の
+  // /events: 送ると EventSource が open を 2 度配り、画面が繋ぎ直しと読む)。
+  const firstText = first.done ? "" : new TextDecoder().decode(first.value);
+  if (!/^retry: \d+\n: ok\n\n/.test(firstText)) {
+    throw new Error(
+      `/events did not start with its first message (retry and ": ok"): ${JSON.stringify(firstText)}`,
+    );
   }
 
   settled = true;
