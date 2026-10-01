@@ -718,14 +718,14 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
           ],
         },
         {
-          title: "From a tab group",
+          title: "From the project menu",
           blocks: [
             {
               kind: "paragraph",
               text: [
                 "Choose ",
                 ui(l.mainTabs.newAgentHere),
-                " from a tab group's ▾ to open the same dialog with that project chosen.",
+                " from the + next to a project in the left sidebar or a tab group's ▾ to open the same dialog with that project chosen.",
               ],
             },
           ],

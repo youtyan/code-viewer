@@ -145,6 +145,7 @@ function mount(
   const saved: string[][] = [];
   /** 「別のアカウントで続ける…」の呼び出し (handoff.ts)。 */
   const handoffs: string[] = [];
+  const projectMenus: { root: string; anchor: HTMLElement }[] = [];
   let dismissed = notify.dismissed ?? false;
   let stoppedOpen = false;
   mountAgentsSidebar({
@@ -154,7 +155,7 @@ function mount(
     getText: () => agentsText("en"),
     openPane,
     viewingPane: () => null,
-    launch: () => undefined,
+    openProjectMenu: (root, anchor) => projectMenus.push({ root, anchor }),
     handoff: {
       handoff: (target) => handoffs.push(`handoff:${target.id}`),
       openHookHelp: () => handoffs.push("hook-help"),
@@ -175,6 +176,7 @@ function mount(
   });
   return {
     root,
+    projectMenus,
     publish,
     actions,
     saved,
@@ -286,6 +288,33 @@ describe("agents sidebar actions", () => {
     ],
     [...REGISTERED, info("/work/sample-tools", null)],
   );
+
+  test.each([
+    {
+      name: "the current project",
+      project: "sample-app",
+      target: "/work/sample-app",
+    },
+    {
+      name: "another project",
+      project: "sample-lib",
+      target: "/work/sample-lib",
+    },
+    {
+      name: "an unregistered project",
+      project: "sample-tools",
+      target: "/work/sample-tools",
+    },
+  ])("the + opens the project menu for $name", ({ project, target }) => {
+    const { root, projectMenus, actions, saved } = mount(withAgents);
+    const button = head(root, project).querySelector<HTMLButtonElement>(
+      ".nav-project-open",
+    );
+    button?.click();
+    expect(projectMenus).toEqual([{ root: target, anchor: button }]);
+    expect(button?.getAttribute("aria-haspopup")).toBe("menu");
+    expect([actions.opened, saved]).toEqual([[], []]);
+  });
 
   test.each<{
     name: string;
@@ -876,7 +905,7 @@ describe("agents sidebar focus across redraws", () => {
   });
 
   test.each<[string, () => AgentOverviewResponse, string]>([
-    ["new agent (+)", WITH_AGENT, "launch:/work/sample-lib"],
+    ["project screens (+)", WITH_AGENT, "open:/work/sample-lib"],
     ["project menu (⋯)", WITH_AGENT, "menu:/work/sample-lib"],
     ["chevron", WITH_AGENT, "twisty:/work/sample-lib"],
     ["register the current repository", NO_PROJECTS, "register-current"],

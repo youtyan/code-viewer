@@ -708,12 +708,12 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
           ],
         },
         {
-          title: "タブのグループから",
+          title: "プロジェクトのメニューから",
           blocks: [
             {
               kind: "paragraph",
               text: [
-                "タブのグループの ▾ から ",
+                "左のプロジェクトの ＋ か、タブのグループの ▾ から ",
                 ui(l.mainTabs.newAgentHere),
                 " を選ぶと、そのプロジェクトを選んだ状態で同じ画面が開きます。",
               ],

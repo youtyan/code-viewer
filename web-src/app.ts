@@ -9439,7 +9439,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         getText: () => agentsText(STATE.language),
         openPane: openAgentPane,
         viewingPane: viewingAgentPane,
-        launch: launchAgent,
+        openProjectMenu: (root, anchor) =>
+          MAIN_TABS.openProjectMenu(root, anchor),
         handoff: HANDOFF_ACTIONS,
         openBoard: () =>
           navigateToRoute({ screen: "agents", range: currentRange() }),

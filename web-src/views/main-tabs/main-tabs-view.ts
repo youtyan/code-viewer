@@ -385,6 +385,8 @@ export type MainTabsHandle = {
   openImage(path: string, pane?: OpenOptions["pane"]): void;
   /** フォーカスのある面の＋のメニューを開く (キー操作・パレットから)。 */
   openNewTabMenu(): void;
+  /** サイドバーの＋から、フォーカスのある面のプロジェクトのメニューを開く。 */
+  openProjectMenu(root: string, anchor: HTMLElement): void;
   /** 左の面の選択を外して本文の既定 (フォルダ表示) を出す (Files の入口)。 */
   showHome(): void;
   /** フォーカスのある面の前面のタブ。 */
@@ -2481,9 +2483,12 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     menu.innerHTML = iconSvg("main-tab-group-menu-icon", CHEVRON_DOWN_12_PATH);
     const openMenu = (at?: { x: number; y: number }) => {
       const rect = menu.getBoundingClientRect();
-      showContextMenu(menu, groupMenuFor(side, key, isCollapsed, count), {
-        at: at ?? { x: rect.left, y: rect.bottom + 4 },
-      });
+      openProjectMenu(
+        key,
+        menu,
+        side,
+        at ?? { x: rect.left, y: rect.bottom + 4 },
+      );
     };
     menu.addEventListener("click", () => openMenu());
     head.addEventListener("contextmenu", (event) => {
@@ -2492,6 +2497,18 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     });
     head.append(toggle, menu);
     return head;
+  }
+
+  function openProjectMenu(
+    root: string,
+    anchor: HTMLElement,
+    side: PaneSide = layout.panes.right ? layout.focused : "left",
+    at?: { x: number; y: number },
+  ): void {
+    const count =
+      layout.panes[side]?.tabs.filter((tab) => keyOf(tab) === root).length ?? 0;
+    const collapsed = count > 0 && (layout.collapsed ?? []).includes(root);
+    showContextMenu(anchor, groupMenuFor(side, root, collapsed, count), { at });
   }
 
   /**
@@ -3025,6 +3042,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     openNewTabMenu() {
       openNewTabMenuIn(layout.panes.right ? layout.focused : "left");
     },
+    openProjectMenu,
     front: () => activeTab(layout),
     panes: () => panesView(layout, currentRoot),
     hasTerminal: (session) => findTerminal(session) !== undefined,

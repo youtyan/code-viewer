@@ -165,6 +165,8 @@ Requires Node.js 20 or newer. Development uses
   on it, or use Move up / Move down in its right-click menu; the order is saved
   with the project list, so every browser and window shows the same one. Each project is a
   bold heading with its state mark and agent count (＋ and … on hover); its
+  ＋ opens the same menu as the tab group's ▾: a new shell, a new agent, or
+  that project's Files / Diff / History / Worktrees / Data / Work log screens. Its
   agents sit under it as indented two-line cards: the task title (or the kind)
   with a badge when it started waiting or finished while you were away, then
   the kind, state, elapsed time and worktree. Click a project name to switch
