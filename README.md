@@ -481,6 +481,15 @@ section, and the row at the top goes back. Browser notifications
 need a secure page (https, or localhost on the same machine), so they are not
 available when the page is opened over plain http from another device.
 
+Opening an agent there shows only its pane, full screen, without attaching to
+tmux: other panes of a split window stay hidden, and the PC's window size and
+layout do not change. Long lines wrap to the phone's width; **Screen** shows
+the grid as it is for full-screen apps such as vim (pinch to change its text
+size). Numbered choices on the screen become buttons that send the number,
+the soft keys sit under the output, and the field at the bottom pastes what
+you type and presses Enter (**Send** with an empty field presses Enter only).
+Back (‹ or the browser's back) returns to the list.
+
 ## Usage
 
 From inside a git repository, run it without installing:

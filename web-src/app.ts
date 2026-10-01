@@ -390,6 +390,7 @@ import {
   STATUS_LABEL_TEXT,
 } from "./views/status-label";
 import { terminalText } from "./views/terminal/i18n";
+import { createPaneView } from "./views/terminal/pane-view";
 import {
   DEFAULT_IMAGE_SHELF_LAYOUT,
   type ImageShelfLayout,
@@ -7847,8 +7848,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     true,
   );
 
-  relocalizeTerminal = () => TERMINAL_VIEW.localize();
-
   // title を持つ要素に速く出る吹き出し (アプリ全体で 1 つ)。
   installTitleTooltips();
 
@@ -7878,6 +7877,36 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   // 電話の段に出入りすると、端末の文字の大きさの出所 (電話の値と設定) が替わる。
   PHONE_QUERY.addEventListener("change", () => TERMINAL_VIEW.applyFontSize());
+
+  // SP の 1 ペイン表示。電話の段でエージェントを開くと、attach せずにそのペイン
+  // だけを全画面で映す (分割したウインドウ全体では狭すぎる)。
+  const PANE_VIEW = createPaneView({
+    getText: () => terminalText(STATE.language),
+    describePane: (id) => {
+      const pane = AGENT_MONITOR.snapshot().overview?.panes.find(
+        (item) => item.id === id,
+      );
+      if (!pane) return null;
+      const described = paneText(pane, agentsText(STATE.language));
+      return {
+        title: described.kind,
+        detail: described.detail,
+        state: pane.state,
+      };
+    },
+    actionHeaders,
+    trackLoad,
+    onClose: (pane) => AGENT_MONITOR.markRead(pane),
+  });
+  document.body.append(PANE_VIEW.el);
+  // デスクトップの幅へ戻ったら閉じる (1 ペイン表示は電話の段だけの形)。
+  PHONE_QUERY.addEventListener("change", () => {
+    if (!PHONE_QUERY.matches) PANE_VIEW.close();
+  });
+  relocalizeTerminal = () => {
+    TERMINAL_VIEW.localize();
+    PANE_VIEW.localize();
+  };
 
   /**
    * URL の ?terminal= (映しているシェル) に合わせる。そのシェルのタブを開いて
@@ -8839,8 +8868,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     return (
       document.visibilityState === "visible" &&
       document.hasFocus() &&
-      pane.shownInShell !== "" &&
-      viewedShells().includes(pane.shownInShell)
+      (PANE_VIEW.currentPane() === pane.id ||
+        (pane.shownInShell !== "" &&
+          viewedShells().includes(pane.shownInShell)))
     );
   }
 
@@ -9111,6 +9141,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   /** この画面のメインの面のタブで開く。サイドバーの修飾操作だけ反対面。 */
   function openAgentPaneHere(pane: string, destination?: "opposite"): void {
     AGENT_MONITOR.markRead(pane);
+    if (PHONE_QUERY.matches) {
+      PANE_VIEW.open(pane);
+      return;
+    }
     const panes = MAIN_TABS.panes();
     const side: PaneSide =
       destination === "opposite"
@@ -9151,6 +9185,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     onNotificationClick: (pane) => openAgentPane(pane.id),
     actionHeaders,
   });
+  AGENT_MONITOR.subscribe(() => PANE_VIEW.refreshHeader());
 
   const agentStatusButton =
     document.querySelector<HTMLButtonElement>("#agent-status");
@@ -9883,6 +9918,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     load();
   }
   window.addEventListener("popstate", () => {
+    // 1 ペイン表示を開いていれば、戻るはそれを閉じるだけ (URL は動いていない)。
+    if (PANE_VIEW.handlePopState()) return;
     if (loadedProjectKey && projectKey() !== loadedProjectKey) {
       const destination = location.href;
       history.replaceState(

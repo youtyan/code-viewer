@@ -8,7 +8,11 @@ const runAsync = vi.hoisted(() => vi.fn());
 
 vi.mock("../server/runtime", () => ({ runAsync }));
 
-import { readTmuxServerGeneration, runTmux } from "../server/tmux/command";
+import {
+  readTmuxServerGeneration,
+  runTmux,
+  tmuxLiteralArg,
+} from "../server/tmux/command";
 
 describe("runTmux error details", () => {
   beforeEach(() => {
@@ -158,5 +162,20 @@ describe("tmux server generation", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+// tmux は `;` で終わる引数をコマンドの区切りとして読み、`\;` で終わる引数は
+// `;` で終わる文字として読む (cmd-parse.y)。利用者の文字はこれで包んで渡す。
+describe("tmuxLiteralArg", () => {
+  test.each([
+    { name: "; を含まない", value: "hello", expected: "hello" },
+    { name: "途中の ; はそのまま", value: "a;b", expected: "a;b" },
+    { name: "末尾の ;", value: "a;", expected: "a\\;" },
+    { name: "; だけ", value: ";", expected: "\\;" },
+    { name: "末尾が \\;", value: "a\\;", expected: "a\\\\;" },
+    { name: "空", value: "", expected: "" },
+  ])("$name", ({ value, expected }) => {
+    expect(tmuxLiteralArg(value)).toBe(expected);
   });
 });

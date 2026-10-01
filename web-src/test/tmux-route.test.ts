@@ -3,9 +3,10 @@
 // (ペイン一覧の中身は tmux-panes.test.ts、クライアント一覧は
 // tmux-clients.test.ts でパーサ単体を検証している)。
 //
-// ドロワーは tmux の画面を自分で描かないので、ここに在るのは 3 つだけ。
-// 一覧 2 つ (panes / clients) と、ペインを開く 1 つ (open)。画面の購読も
-// キー送信も /_shell/* が持つ。
+// デスクトップのターミナルは tmux の画面を自分で描かない。一覧 2 つ (panes /
+// clients) と、ペインを開く 1 つ (open) だけで、キー送信は /_shell/* が持つ。
+// SP の 1 ペイン表示だけは、1 つのペインを流す pane-stream と、そこへ送る
+// pane-input をここに持つ (送ったときの tmux の結果は tmux-pane-input.test.ts)。
 
 import { describe, expect, test } from "vitest";
 import { handleTmuxRoute } from "../server/tmux/handle";
@@ -32,14 +33,87 @@ describe("tmux route dispatch", () => {
   test.each([
     { name: "rejects POST on the pane list", path: "/_tmux/panes" },
     { name: "rejects POST on the client list", path: "/_tmux/clients" },
+    { name: "rejects POST on the pane stream", path: "/_tmux/pane-stream" },
   ])("$name", async ({ path }) => {
     const res = await call(path, { method: "POST" });
     expect(res?.status).toBe(405);
   });
 
-  test("rejects GET on the open endpoint", async () => {
-    const res = await call("/_tmux/open");
+  test.each([
+    { name: "rejects GET on the open endpoint", path: "/_tmux/open" },
+    { name: "rejects GET on the pane input", path: "/_tmux/pane-input" },
+  ])("$name", async ({ path }) => {
+    const res = await call(path);
     expect(res?.status).toBe(405);
+  });
+});
+
+describe("tmux pane stream: ペインの id の検証", () => {
+  // 有効な id を渡すと control mode のクライアントを繋いでしまうので、弾かれる値だけを見る。
+  test.each([
+    { name: "rejects a missing pane", query: "" },
+    { name: "rejects an empty pane", query: "?pane=" },
+    { name: "rejects a pane without the prefix", query: "?pane=3" },
+    { name: "rejects a shell id", query: "?pane=shell-abc123" },
+    { name: "rejects a command separator", query: "?pane=%253%3Bid" },
+  ])("$name", async ({ query }) => {
+    const res = await call(`/_tmux/pane-stream${query}`);
+    expect(res?.status).toBe(400);
+  });
+});
+
+describe("tmux pane input guards", () => {
+  const postInput = (
+    body: unknown,
+    sideEffectAllowed?: (req: Request) => boolean,
+  ) => postRoute(handleTmuxRoute, "/_tmux/pane-input", body, sideEffectAllowed);
+
+  test("refuses a request that is not marked as a user action", async () => {
+    const res = await postInput({ pane: "%1", keys: "x" }, DENY_SIDE_EFFECTS);
+    expect(res?.status).toBe(403);
+  });
+
+  test.each([
+    { name: "refuses a body that is not JSON", body: "not json", status: 400 },
+    { name: "refuses a missing pane", body: { keys: "x" }, status: 400 },
+    {
+      name: "refuses a session target",
+      body: { pane: "a:0", keys: "x" },
+      status: 400,
+    },
+    {
+      name: "refuses keys that are not a string",
+      body: { pane: "%1", keys: 1 },
+      status: 400,
+    },
+    {
+      name: "refuses text that is not a string",
+      body: { pane: "%1", text: [] },
+      status: 400,
+    },
+    {
+      name: "refuses enter that is not a boolean",
+      body: { pane: "%1", enter: "yes" },
+      status: 400,
+    },
+    {
+      name: "refuses a fractional generation",
+      body: { pane: "%1", keys: "x", generation: 1.5 },
+      status: 400,
+    },
+    {
+      name: "refuses nothing to send",
+      body: { pane: "%1", keys: "", enter: false },
+      status: 400,
+    },
+    {
+      name: "refuses input over the limit",
+      body: { pane: "%1", text: "x".repeat(100_001) },
+      status: 413,
+    },
+  ])("$name", async ({ body, status }) => {
+    const res = await postInput(body);
+    expect(res?.status).toBe(status);
   });
 });
 

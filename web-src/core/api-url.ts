@@ -145,6 +145,8 @@ const API_ENDPOINTS = {
   stateView: { path: "/_state/view", zone: "project" },
   tmuxClients: { path: "/_tmux/clients", zone: "entry" },
   tmuxOpen: { path: "/_tmux/open", zone: "entry" },
+  tmuxPaneInput: { path: "/_tmux/pane-input", zone: "entry" },
+  tmuxPaneStream: { path: "/_tmux/pane-stream", zone: "entry" },
   tmuxPanes: { path: "/_tmux/panes", zone: "entry" },
   trashPath: { path: "/_trash_path", zone: "project" },
   tree: { path: "/_tree", zone: "project" },

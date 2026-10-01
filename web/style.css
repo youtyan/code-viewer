@@ -26779,6 +26779,221 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
       transform: rotate(135deg);
     }
   }
+
+  /* ---- 1 ペイン表示 (views/terminal/pane-view.ts) ----
+     エージェントのペインを 1 つだけ全画面で映す。上から 見出し・本文・選択肢・
+     操作札・返事の欄。下端はソフトキーボードの上 (--sp-keyboard-h は
+     mobile-shell.ts)。面ごと端末の色 ([data-terminal-surface]) で塗る。 */
+  .pane-view:not([hidden]) {
+    position: fixed;
+    inset: 0 0 var(--sp-keyboard-h, 0px) 0;
+    z-index: 80;
+    display: flex;
+    flex-direction: column;
+    padding: var(--sp-safe-top) var(--sp-safe-right) var(--sp-safe-bottom) var(--sp-safe-left);
+    background: var(--color-term);
+    color: var(--color-term-text);
+  }
+  /* キーボードが出ている間は、下の安全領域もキーボードの下にある。 */
+  body.mobile-keyboard-open .pane-view:not([hidden]) {
+    padding-bottom: 0;
+  }
+  /* 縮むのは本文だけ。本文の元の高さ (履歴の全文) で縮み方を割り振ると、
+     本文が長いほど札や返事の欄まで潰れる。 */
+  .pane-view-head,
+  .pane-view-choices,
+  .pane-view-keys,
+  .pane-view-compose {
+    flex: none;
+  }
+  .pane-view-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--pad-face);
+    background: var(--color-ground);
+    color: var(--color-text);
+    border-bottom: 1px solid var(--color-line-soft);
+  }
+  .pane-view-back {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--sp-touch);
+    height: var(--sp-touch);
+    margin-left: calc(var(--pad-face) * -1);
+    border: 0;
+    background: none;
+    color: inherit;
+  }
+  .pane-view-back-icon {
+    width: var(--space-4);
+    height: var(--space-4);
+  }
+  .pane-view-titles {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .pane-view-title,
+  .pane-view-detail {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .pane-view-title {
+    font-weight: 600;
+  }
+  .pane-view-detail {
+    color: var(--color-text-3);
+    font-size: var(--ui-font-sm);
+  }
+  /* .seg は高さを決め打ちして中を切るので、指で押せる高さのボタンに合わせて外す。 */
+  .pane-view-mode {
+    flex: none;
+    height: auto;
+  }
+  .pane-view-mode button {
+    min-height: var(--sp-touch);
+  }
+  .pane-view-body {
+    position: relative;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: var(--space-2) var(--pad-face);
+    font-family: var(--font-mono);
+    font-size: var(--ui-font-md);
+    line-height: 1.45;
+  }
+  /* 端末の 1 行 (折り返しを繋いだもの) を幅で折り返す。枠の線だけの行は折り返さずに切る。 */
+  .pane-line {
+    min-height: 1.45em;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .pane-line-rule {
+    white-space: pre;
+    overflow: hidden;
+  }
+  .pane-view-screen {
+    overflow-x: auto;
+  }
+  .pane-view-older:not([hidden]) {
+    display: block;
+    min-height: var(--sp-touch);
+    margin: 0 auto var(--space-2);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    background: var(--color-raised);
+    color: var(--color-text);
+  }
+  .pane-view-latest:not([hidden]) {
+    position: sticky;
+    bottom: var(--space-2);
+    display: block;
+    min-height: var(--sp-touch);
+    margin: var(--space-2) auto 0;
+    padding: 0 var(--space-4);
+    border: 0;
+    border-radius: var(--radius-lg);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    font-family: var(--font-ui);
+  }
+  .pane-view-status:not([hidden]) {
+    position: sticky;
+    top: 0;
+    margin-bottom: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    background: var(--color-raised);
+    color: var(--color-text);
+    font-family: var(--font-ui);
+    white-space: pre-wrap;
+  }
+  /* 選択肢は 1 列で横にスクロールする (本文の高さを削らない)。全文は本文に出ている。 */
+  .pane-view-choices:not([hidden]) {
+    display: flex;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--pad-face) 0;
+    overflow-x: auto;
+    background: var(--color-ground);
+    scrollbar-width: none;
+  }
+  .pane-view-choice {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    max-width: 70%;
+    min-height: var(--sp-touch);
+    padding: 0 var(--space-3) 0 var(--space-1);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    background: var(--color-raised);
+    color: var(--color-text);
+  }
+  .pane-view-choice-key {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--space-5);
+    height: var(--space-5);
+    border-radius: var(--radius-sm);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    font-weight: 700;
+  }
+  .pane-view-choice-label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .pane-view-keys {
+    display: flex;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--pad-face);
+    overflow-x: auto;
+    background: var(--color-ground);
+    scrollbar-width: none;
+  }
+  .pane-view-compose {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-2);
+    padding: 0 var(--pad-face) var(--space-2);
+    background: var(--color-ground);
+  }
+  .pane-view-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: var(--sp-touch);
+    max-height: calc(var(--sp-touch) * 3);
+    box-sizing: border-box;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    background: var(--color-inset);
+    color: var(--color-text);
+    resize: none;
+    field-sizing: content;
+  }
+  .pane-view-send {
+    flex: none;
+    min-width: var(--sp-touch);
+    min-height: var(--sp-touch);
+    padding: 0 var(--space-3);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    font-weight: 600;
+  }
+  .pane-view :disabled {
+    opacity: 0.5;
+  }
 }
 
 /* ---- 1'. 横向きの電話 (core/mobile-layout.ts の PHONE_LANDSCAPE_MEDIA_QUERY):

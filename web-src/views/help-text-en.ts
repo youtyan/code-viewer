@@ -1524,6 +1524,29 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
             ),
           ],
         },
+        {
+          title: "Open an agent",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                "Tap an agent to open only its pane, full screen. Other panes in a split tmux window are not shown, and the PC's window size and layout stay as they are.",
+                [
+                  "Long lines wrap to the phone's width. For full-screen apps such as vim, switch to ",
+                  ui(l.terminal.paneView.screen),
+                  " to see the grid as it is.",
+                ],
+                "When choices are shown, numbered buttons appear. Tap one to send that number.",
+                [
+                  "Type in the field at the bottom and tap ",
+                  ui(l.terminal.paneView.send),
+                  " to paste it and press Enter. Tapping it with the field empty sends only Enter.",
+                ],
+                "Go back (‹ at the top left, or the browser's back) to return to the list.",
+              ],
+            },
+          ],
+        },
       ],
     },
     "remote-access": {

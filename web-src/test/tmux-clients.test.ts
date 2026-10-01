@@ -156,7 +156,28 @@ describe("parseTmuxClients", () => {
       "#{status-position}",
       "#{session_attached}",
       "#{window_id}",
+      "#{client_control_mode}",
     ]);
+  });
+
+  // SP の 1 ペイン表示は tty の無い control mode のクライアントを繋ぐ。
+  // #{session_attached} には入るが画面を持たないので、端末の数から引く。
+  test.each([
+    { name: "control mode が無い", controls: [], expected: 3 },
+    { name: "同じセッションに 1 本", controls: ["work"], expected: 2 },
+    { name: "同じセッションに 2 本", controls: ["work", "work"], expected: 1 },
+    { name: "別のセッションの分は引かない", controls: ["other"], expected: 3 },
+  ])("端末の数: $name", ({ controls, expected }) => {
+    const size = ["80", "24", "80", "23", "on", "bottom", "3"];
+    const stdout = [
+      [line("/dev/ttys001", "work", "%3"), ...size, "@1", "0"].join(SEP),
+      ...controls.map((session) =>
+        [line("", session, "%3"), ...size, "@1", "1"].join(SEP),
+      ),
+    ].join("\n");
+    expect(
+      parseTmuxClients(stdout).map((client) => client.window?.sessionClients),
+    ).toEqual([expected]);
   });
 
   test.each([

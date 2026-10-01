@@ -395,6 +395,10 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
       run: async () => (await import("../shell/handle")).closeShellStreams(),
     },
     {
+      label: "code-viewer tmux pane stream close",
+      run: async () => (await import("../tmux/pane-stream")).closePaneStreams(),
+    },
+    {
       label: "code-viewer shell session close",
       run: async () => {
         const closed = await (

@@ -3498,6 +3498,10 @@ const shutdown = createProcessShutdown([
     run: async () => (await shellHandleModule).closeShellStreams(),
   },
   {
+    label: "code-viewer tmux pane stream close",
+    run: async () => (await import("./tmux/pane-stream")).closePaneStreams(),
+  },
+  {
     label: "code-viewer shell session close",
     run: async () => {
       // ブラウザから開いたシェルはこのサーバの子。残したまま終わらない。

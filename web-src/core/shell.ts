@@ -77,6 +77,9 @@ export const MAX_SHELL_COLS = 1000;
 export const MIN_SHELL_ROWS = 5;
 export const MAX_SHELL_ROWS = 500;
 
+/** 1 回の送信で受け付ける入力の長さ (シェルと SP の 1 ペイン表示)。貼り付けを想定して広めに取る。 */
+export const MAX_KEY_INPUT_LENGTH = 100_000;
+
 // 同時に開ける数の上限は持たない。tmux のセッション 1 つにつきシェル 1 本と
 // いう対応にしてあるので、本数はユーザーが立てているセッションの数で決まる
 // (数十個立てる使い方が普通にある)。上限を置くと、渡り歩いているうちに

@@ -122,6 +122,53 @@ export type TmuxScreen = {
   historyLines: number;
 };
 
+/**
+ * SP の 1 ペイン表示 (views/terminal/pane-view.ts) が流しの始めと大きさが
+ * 変わったときに受け取る、ペインの今。content は capture-pane -e -J の出力
+ * (折り返しを 1 行に繋いだもの。同じ桁数で書き直せば同じ所で折り返る)。
+ * 続きの出力をそのまま流し込めるよう、画面だけでなく端末の状態も持つ。
+ */
+export type TmuxPaneSnapshot = TmuxScreen & {
+  cursorVisible: boolean;
+  /** 別画面 (vim・全画面のアプリ) を使っている。 */
+  alternate: boolean;
+  /** 矢印キーをアプリ向けの形 (ESC O A) で送る。 */
+  appCursorKeys: boolean;
+  appKeypad: boolean;
+  insert: boolean;
+  wrap: boolean;
+  origin: boolean;
+  /** スクロールする範囲の上端と下端 (0 始まり、画面の行)。 */
+  scrollTop: number;
+  scrollBottom: number;
+};
+
+const ESC = String.fromCharCode(27);
+
+/**
+ * TmuxPaneSnapshot を、同じ桁数・行数の空の端末に書き戻す文字列。書いた後の端末は
+ * そのペインと同じ画面・カーソル・状態になり、続きの出力をそのまま流し込める。
+ * スクロールの範囲と原点のモードはカーソルを左上へ動かすので、カーソルより先に置く。
+ */
+export function paneSnapshotSequence(snapshot: TmuxPaneSnapshot): string {
+  const csi = `${ESC}[`;
+  const parts: string[] = [];
+  if (snapshot.alternate) parts.push(`${csi}?1049h`);
+  parts.push(snapshot.content.split("\n").join("\r\n"));
+  parts.push(`${csi}${snapshot.scrollTop + 1};${snapshot.scrollBottom + 1}r`);
+  if (snapshot.origin) parts.push(`${csi}?6h`);
+  const row = snapshot.origin
+    ? snapshot.cursorY - snapshot.scrollTop
+    : snapshot.cursorY;
+  parts.push(`${csi}${row + 1};${snapshot.cursorX + 1}H`);
+  if (snapshot.appCursorKeys) parts.push(`${csi}?1h`);
+  if (snapshot.appKeypad) parts.push(`${ESC}=`);
+  if (snapshot.insert) parts.push(`${csi}4h`);
+  if (!snapshot.wrap) parts.push(`${csi}?7l`);
+  if (!snapshot.cursorVisible) parts.push(`${csi}?25l`);
+  return parts.join("");
+}
+
 /** ドロワー幅 (px) の許容範囲。サーバ側の sanitize とクライアント側のドラッグ
  * クランプが同じ値を見るように core に置く。 */
 export const MIN_TERMINAL_SHEET_WIDTH = 480;
