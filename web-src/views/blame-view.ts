@@ -14,6 +14,7 @@ import { SOURCE_READING_TEXT } from "./source-preview-i18n";
 import {
   BLAME_TIME_BIN_COUNT,
   type BlameCommit,
+  type BlameGroup,
   type BlameResponse,
   blameShortSha,
   blameTimeBins,
@@ -33,6 +34,7 @@ import {
   mountFileShellCard,
   type SourceBlobTab,
 } from "./file-shell";
+import type { VirtualSourceGutter } from "./source-view";
 
 type SourceShikiHighlighter = {
   codeToHtml: (
@@ -86,6 +88,12 @@ export type BlameViewDeps = {
     activeTab: FileViewTab,
   ): HTMLElement | null;
   removeStandaloneSource(): void;
+  /** 仮想で描く大きさなら、左に Blame の欄を付けた仮想の行 (source-view.ts)。小さければ null。 */
+  renderVirtualSourceWithGutter(
+    target: SourceFileTarget,
+    textValue: string,
+    gutter: VirtualSourceGutter,
+  ): Promise<HTMLElement | null>;
   placeSidebarToggle(): void;
   escapeHtml(s: unknown): string;
   // Repository サイドバーを再描画するためのフック。null/undefined を返すと
@@ -196,6 +204,95 @@ export function createBlameView(deps: BlameViewDeps) {
     );
   }
 
+  /** まとまり (同じコミットの続く行) の 1 段目: 時刻・作者・コミット (押すと履歴へ)。 */
+  function blameMeta(group: BlameGroup, target: SourceFileTarget): HTMLElement {
+    const meta = document.createElement("div");
+    meta.className = "gdp-blame-meta";
+    const time = document.createElement("span");
+    time.className = "gdp-blame-time";
+    time.textContent = group.commit.isUncommitted
+      ? SOURCE_READING_TEXT[pageLanguage()].blameUncommitted
+      : relativeTimeText(group.commit.authorTime, pageLanguage());
+    meta.appendChild(time);
+    const author = document.createElement("span");
+    author.className = "gdp-blame-author";
+    author.textContent = group.commit.author;
+    meta.appendChild(author);
+    const sha = document.createElement("span");
+    sha.className = "gdp-blame-sha";
+    sha.textContent = blameShortSha(group.sha);
+    if (!group.commit.isUncommitted) {
+      sha.dataset.sha = group.sha;
+      sha.title = SOURCE_READING_TEXT[pageLanguage()].blameOpenCommit;
+      sha.style.cursor = "pointer";
+      sha.addEventListener("click", () => {
+        const ref =
+          target.ref && target.ref !== "worktree" ? target.ref : "HEAD";
+        deps.setRoute({
+          screen: "history",
+          ref,
+          commit: group.sha,
+          range: deps.currentRange(),
+        });
+        deps.applyRouteFromLocation?.();
+      });
+    }
+    meta.appendChild(sha);
+    return meta;
+  }
+
+  /** まとまりの 2 段目: コミットの件名。 */
+  function blameCommitSummary(group: BlameGroup): HTMLElement {
+    const summary = document.createElement("div");
+    summary.className = "gdp-blame-summary";
+    summary.textContent = group.commit.summary;
+    summary.title = group.commit.summary;
+    return summary;
+  }
+
+  /**
+   * 大きなファイルの Blame の左の欄。仮想の行は 1 行の高さで並ぶので、表の
+   * 1 つの升 (rowSpan) に入れていた 2 段を、まとまりの 1 行目 (時刻・作者・
+   * コミット) と 2 行目 (件名) に分ける。1 行だけのまとまりは 1 行目に件名も置く。
+   */
+  function virtualBlameGutter(
+    target: SourceFileTarget,
+    response: BlameResponse,
+  ): VirtualSourceGutter {
+    const groups = groupBlameLines(response.lines, response.commits);
+    const bins = blameTimeBins(response.commits, BLAME_TIME_BIN_COUNT);
+    const groupOfLine: BlameGroup[] = [];
+    for (const group of groups)
+      for (let line = group.startLine; line <= group.endLine; line++)
+        groupOfLine[line] = group;
+    return {
+      rowClass: "gdp-blame-virtual-row",
+      fullView: () => deps.applyRouteFromLocation?.(),
+      cell(line) {
+        const cell = document.createElement("span");
+        cell.className = "gdp-blame-cell";
+        const group = groupOfLine[line];
+        if (!group) return cell;
+        cell.appendChild(
+          colourBarFor(
+            group.commit,
+            bins[group.sha] ?? 0,
+            BLAME_TIME_BIN_COUNT,
+          ),
+        );
+        if (line === group.startLine) {
+          cell.classList.add("gdp-blame-cell-start");
+          cell.appendChild(blameMeta(group, target));
+          if (group.endLine === group.startLine)
+            cell.appendChild(blameCommitSummary(group));
+        } else if (line === group.startLine + 1) {
+          cell.appendChild(blameCommitSummary(group));
+        }
+        return cell;
+      },
+    };
+  }
+
   function buildBlameTable(
     card: HTMLElement,
     target: SourceFileTarget,
@@ -255,44 +352,7 @@ export function createBlameView(deps: BlameViewDeps) {
               BLAME_TIME_BIN_COUNT,
             ),
           );
-          const meta = document.createElement("div");
-          meta.className = "gdp-blame-meta";
-          const time = document.createElement("span");
-          time.className = "gdp-blame-time";
-          time.textContent = group.commit.isUncommitted
-            ? SOURCE_READING_TEXT[pageLanguage()].blameUncommitted
-            : relativeTimeText(group.commit.authorTime, pageLanguage());
-          meta.appendChild(time);
-          const author = document.createElement("span");
-          author.className = "gdp-blame-author";
-          author.textContent = group.commit.author;
-          meta.appendChild(author);
-          const sha = document.createElement("span");
-          sha.className = "gdp-blame-sha";
-          sha.textContent = blameShortSha(group.sha);
-          if (!group.commit.isUncommitted) {
-            sha.dataset.sha = group.sha;
-            sha.title = SOURCE_READING_TEXT[pageLanguage()].blameOpenCommit;
-            sha.style.cursor = "pointer";
-            sha.addEventListener("click", () => {
-              const ref =
-                target.ref && target.ref !== "worktree" ? target.ref : "HEAD";
-              deps.setRoute({
-                screen: "history",
-                ref,
-                commit: group.sha,
-                range: deps.currentRange(),
-              });
-              deps.applyRouteFromLocation?.();
-            });
-          }
-          meta.appendChild(sha);
-          info.appendChild(meta);
-          const summary = document.createElement("div");
-          summary.className = "gdp-blame-summary";
-          summary.textContent = group.commit.summary;
-          summary.title = group.commit.summary;
-          info.appendChild(summary);
+          info.append(blameMeta(group, target), blameCommitSummary(group));
           tr.appendChild(info);
         }
         const num = document.createElement("td");
@@ -385,13 +445,18 @@ export function createBlameView(deps: BlameViewDeps) {
     }
     const [blameResp, srcText, highlighter] = loaded;
     if (generation !== activeGeneration || !blameResp) return;
-    body.replaceChildren();
     if (!blameResp.lines.length && blameResp.error) {
-      body.appendChild(blameError(blameResp.error));
+      body.replaceChildren(blameError(blameResp.error));
       return;
     }
-    body.appendChild(
-      buildBlameTable(card, target, blameResp, srcText, highlighter),
+    const virtual = await deps.renderVirtualSourceWithGutter(
+      target,
+      srcText,
+      virtualBlameGutter(target, blameResp),
+    );
+    if (generation !== activeGeneration) return;
+    body.replaceChildren(
+      virtual ?? buildBlameTable(card, target, blameResp, srcText, highlighter),
     );
   }
 

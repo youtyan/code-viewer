@@ -2328,6 +2328,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     createRepositoryWebLink: createFileRepositoryWebLink,
     createRevisionNav: createFileRevisionNav,
     removeStandaloneSource,
+    renderVirtualSourceWithGutter: (target, textValue, gutter) =>
+      SOURCE_VIEW.renderVirtualSourceWithGutter(target, textValue, gutter),
     placeSidebarToggle,
     escapeHtml,
     repoFileTargetFromRoute,
@@ -7296,6 +7298,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       setRoute: (next, replace) => setRightPaneRoute(next, replace),
       setPageMode: noop,
       removeStandaloneSource: () => pane.source.removeStandaloneSource(),
+      renderVirtualSourceWithGutter: (target, textValue, gutter) =>
+        pane.source.renderVirtualSourceWithGutter(target, textValue, gutter),
       placeSidebarToggle: noop,
       repoFileTargetFromRoute: () => pane.route.ref,
       renderRepoBlobSidebar: noop,

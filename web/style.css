@@ -16004,6 +16004,44 @@ body.db-resizing {
   text-overflow: ellipsis;
   margin-top: 2px;
 }
+/* 大きなファイルの Blame (source-view.ts の仮想の行に、左の欄を足したもの)。
+   欄の幅は表の .gdp-blame-info と同じ。横に送っても欄と行番号は左に残す。 */
+.gdp-source-virtual-row.gdp-blame-virtual-row {
+  --blame-cell-w: 240px;
+  grid-template-columns: var(--blame-cell-w) minmax(50px, max-content) minmax(0, 1fr);
+}
+.gdp-blame-virtual-row > .gdp-source-virtual-line-number {
+  left: var(--blame-cell-w);
+}
+.gdp-blame-cell {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 8px 0 10px;
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow: inset -1px 0 0 var(--border);
+}
+.gdp-blame-cell-start {
+  box-shadow: inset -1px 0 0 var(--border), inset 0 1px 0 var(--border);
+}
+.gdp-blame-cell > .gdp-blame-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.gdp-blame-cell > .gdp-blame-summary {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-top: 0;
+}
+/* 件名の無い 1 行目 (2 行以上のまとまり) は、コミットを欄の右端に寄せる。 */
+.gdp-blame-cell > .gdp-blame-meta:only-of-type {
+  flex: 1 1 auto;
+}
 .gdp-blame-loading,
 .gdp-blame-error {
   padding: 16px;

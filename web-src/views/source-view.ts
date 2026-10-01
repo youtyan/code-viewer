@@ -85,6 +85,16 @@ export type VirtualSourcePagingKeyboardEvent = KeyboardEvent & {
   __gdpVirtualSourcePagingHandled?: boolean;
 };
 
+/**
+ * 仮想の行の左に足す欄 (大きなファイルの Blame が使う)。行番号は 1 から。
+ * 「全部を描く」の後は fullView で描き直す (無ければ本文の表示)。
+ */
+export type VirtualSourceGutter = {
+  rowClass: string;
+  cell(line: number): HTMLElement;
+  fullView(): void;
+};
+
 export type SourceViewDeps = {
   STATE: {
     route: AppRoute;
@@ -1095,9 +1105,7 @@ export function createSourceView(deps: SourceViewDeps) {
     textValue: string,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    const lines = textValue.length
-      ? textValue.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n")
-      : [""];
+    const lines = splitSourceLines(textValue);
     SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), lines.length);
     resetSourceCursorForTarget(target, lines.length);
     const body = card.querySelector<HTMLElement>(
@@ -1373,6 +1381,37 @@ export function createSourceView(deps: SourceViewDeps) {
         signal,
       );
     return true;
+  }
+
+  function splitSourceLines(textValue: string): string[] {
+    return textValue.length
+      ? textValue.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n")
+      : [""];
+  }
+
+  /**
+   * 仮想で描く大きさなら、左の欄つきの仮想の行で描く (大きなファイルの Blame。
+   * 全部の行を表に組むと、2.7 万行で 3 秒止まった)。小さければ null。
+   */
+  async function renderVirtualSourceWithGutter(
+    target: SourceFileTarget,
+    textValue: string,
+    gutter: VirtualSourceGutter,
+  ): Promise<HTMLElement | null> {
+    const lines = splitSourceLines(textValue);
+    if (!shouldVirtualizeSource(textValue, lines) || isVirtualSourceDisabled())
+      return null;
+    const hljsRef = STATE.syntaxHighlight
+      ? await loadSyntaxHighlighter()
+      : null;
+    return renderVirtualSource(
+      target,
+      textValue,
+      lines,
+      hljsRef,
+      inferLang(target.path),
+      gutter,
+    );
   }
 
   function shouldVirtualizeSource(textValue: string, lines: string[]): boolean {
@@ -1848,6 +1887,7 @@ export function createSourceView(deps: SourceViewDeps) {
     lines: string[],
     hljsRef: HljsApi | null,
     lang: string | null,
+    gutter?: VirtualSourceGutter,
   ): HTMLElement {
     const wrap = document.createElement("div") as VirtualSourceSearchRoot;
     wrap.className = "gdp-source-virtual";
@@ -1898,7 +1938,8 @@ export function createSourceView(deps: SourceViewDeps) {
       e.preventDefault();
       const url = new URL(full.href, window.location.origin);
       setRoute(parseRoute(url.pathname, url.search, currentRange()), true);
-      renderStandaloneSource(target, { refresh: true });
+      if (gutter) gutter.fullView();
+      else renderStandaloneSource(target, { refresh: true });
     });
     actions.append(copy, full);
     info.append(badge, summary, actions);
@@ -2004,7 +2045,12 @@ export function createSourceView(deps: SourceViewDeps) {
         } else {
           code.textContent = line;
         }
-        row.append(num, code);
+        if (gutter) {
+          row.classList.add(gutter.rowClass);
+          row.append(gutter.cell(index + 1), num, code);
+        } else {
+          row.append(num, code);
+        }
         fragment.appendChild(row);
       }
       windowEl.appendChild(fragment);
@@ -3074,6 +3120,7 @@ export function createSourceView(deps: SourceViewDeps) {
     loadSourceShikiHighlighter,
     sourceShikiLines,
     shouldVirtualizeSource,
+    renderVirtualSourceWithGutter,
     inferLang,
     localize,
     /** この実体のスクロール先 (キー操作のスクロールが使う)。 */
