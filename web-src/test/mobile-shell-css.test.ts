@@ -21,6 +21,7 @@ import {
   type CssRule,
   cascadedDeclarations,
   loadStyleSheet,
+  resolvePx,
   resolveVar,
 } from "./_css-fixture";
 
@@ -426,6 +427,35 @@ describe("1 ペイン表示", () => {
       declarationsOf(rules, [".pane-view:not([hidden])"]).get("inset"),
     ).toBe("0 0 var(--sp-keyboard-h, 0px) 0");
   });
+
+  // 幅の広いペインの色付きの帯 (数百桁の空白) を iPhone の Safari がはみ出しと
+  // 数え、本文ごと横にずれて左が切れた。「画面」の升目は中の箱が横に送る。
+  test("本文は縦にだけ送り、「画面」の升目は中の箱が横に送る", () => {
+    const body = declarationsOf(rules, [".pane-view-body"]);
+    expect({
+      body: [body.get("overflow-x"), body.get("overflow-y")],
+      screen: declarationsOf(rules, [".pane-view-screen"]).get("overflow-x"),
+    }).toEqual({ body: ["hidden", "auto"], screen: "auto" });
+  });
+});
+
+// iPhone の Safari は横向きにすると長い文章の文字を勝手に大きくする (1 ペイン
+// 表示の「読む」が大きくなりすぎた)。指の画面では決めた大きさのまま出す。
+describe("横向きでも文字を勝手に大きくしない", () => {
+  test.each([
+    {
+      name: "電話の段・指の画面",
+      rules: withTiers(SOFT_KEYS),
+      expected: "100%",
+    },
+    { name: "デスクトップ", rules: baseRules(sheet), expected: undefined },
+  ])("$name", ({ rules, expected }) => {
+    const root = declarationsOf(rules, ["html"]);
+    expect([
+      root.get("-webkit-text-size-adjust"),
+      root.get("text-size-adjust"),
+    ]).toEqual([expected, expected]);
+  });
 });
 
 describe("指の画面の押せる大きさ", () => {
@@ -512,6 +542,31 @@ describe("指の画面の押せる大きさ", () => {
     const actions = declarationsOf(rules, [".nav-project-actions"]);
     expect(actions.get("opacity")).toBe("1");
     expect(actions.get("pointer-events")).toBe("auto");
+  });
+
+  // 44px の＋と ⋯ が 48px の場所に入らず、⋯ が引き出しの外へはみ出して、
+  // 引き出しの一覧ごと横に動いた。
+  test("行の操作 (＋と ⋯) は 2 つとも予約した場所に入り、名前はその手前で切る", () => {
+    const head = new Map([
+      ...vars,
+      ...[...declarationsOf(rules, [".nav-project-head"])].filter(([name]) =>
+        name.startsWith("--"),
+      ),
+    ]);
+    const px = (selector: string, prop: string) =>
+      resolvePx(declarationsOf(rules, [selector]).get(prop) ?? "", head);
+    expect({
+      fits:
+        px(".nav-project-actions", "width") -
+          2 * px(".nav-row-action", "min-width") >=
+        0,
+      name: declarationsOf(rules, [".nav-project-toggle"]).get("padding"),
+      count: declarationsOf(rules, [".nav-project-count"]).get("visibility"),
+    }).toEqual({
+      fits: true,
+      name: "0 var(--nav-project-actions-w) 0 0",
+      count: "hidden",
+    });
   });
 });
 
@@ -604,35 +659,169 @@ describe("on a phone the History list sits in the sheet", () => {
     GlobalRegistrator.unregister();
   });
 
-  test("fixed at the sheet's top, stopping where the changed files start", () => {
+  const onPhone = () => [
+    ...baseRules(sheet),
+    ...sheet.filter(
+      (rule) =>
+        rule.atRule !== null &&
+        [
+          "@media (max-width: 900px)",
+          "@media (max-width: 640px)",
+          PHONE,
+          SOFT_KEYS,
+          TOUCH,
+        ].includes(rule.atRule),
+    ),
+  ];
+  const won = (el: Element) =>
+    cascadedDeclarations(
+      onPhone(),
+      (selector) => !selector.includes("::") && el.matches(selector),
+    );
+
+  // コミットを選ぶまでは下の段 (変更ファイル) が空なので、一覧が面の全部を使う
+  // (半分では 3 件ほどしか見えなかった)。
+  test.each([
+    {
+      name: "no commit chosen: the list takes the whole sheet",
+      rows: '<li class="history-item"></li>',
+      expected: { bottom: "var(--chrome-bottom)", files: "none !important" },
+    },
+    {
+      name: "a commit chosen: the list stops where the changed files start",
+      rows: '<li class="history-item active"></li>',
+      expected: {
+        bottom: "calc(100dvh - var(--sp-sheet-mid))",
+        files: "block !important",
+      },
+    },
+  ])("$name", ({ rows, expected }) => {
     document.body.className = "gdp-history-page";
     document.body.dataset.listColumn = "history";
-    document.body.innerHTML = '<aside id="history-panel"></aside>';
+    document.body.innerHTML = `<aside id="history-panel"><ul class="history-list">${rows}</ul></aside><aside id="sidebar"></aside>`;
     const panel = document.getElementById("history-panel");
-    if (!panel) throw new Error("missing #history-panel");
-    const onPhone = [
-      ...baseRules(sheet),
-      ...sheet.filter(
-        (rule) =>
-          rule.atRule !== null &&
-          [
-            "@media (max-width: 900px)",
-            "@media (max-width: 640px)",
-            PHONE,
-            SOFT_KEYS,
-            TOUCH,
-          ].includes(rule.atRule),
+    const files = document.getElementById("sidebar");
+    if (!panel || !files) throw new Error("missing the sheet");
+    const list = won(panel);
+    expect({
+      at: [list.get("position"), list.get("top")],
+      bottom: list.get("bottom"),
+      files: won(files).get("display"),
+    }).toEqual({ at: ["fixed", "var(--panel-body-top)"], ...expected });
+  });
+
+  // 1 段に並べると件名が「Add the sa…」まで切れた。グラフは 2 段にまたがる。
+  test("a commit row is two lines: the subject and the refs, then when / author / sha", () => {
+    document.body.innerHTML = `<aside id="history-panel"><ul><li class="history-item">
+      <span class="history-graph-cell"></span>
+      <span class="history-title"></span>
+      <span class="meta2"><span class="sha"></span><span class="author"></span><span class="when"></span></span>
+    </li></ul></aside>`;
+    const part = (selector: string) => {
+      const el = document.querySelector(`#history-panel ${selector}`);
+      if (!el) throw new Error(`missing ${selector}`);
+      return won(el);
+    };
+    expect({
+      row: part(".history-item").get("display"),
+      graph: part(".history-graph-cell").get("grid-row"),
+      title: part(".history-title").get("grid-row"),
+      meta: [part(".meta2").get("grid-row"), part(".meta2").get("display")],
+      shown: [".when", ".author", ".sha"].map((selector) => [
+        part(selector).get("order"),
+        part(selector).get("display") === "none",
+      ]),
+    }).toEqual({
+      row: "grid",
+      graph: "1 / 3",
+      title: "1",
+      meta: ["2", "flex"],
+      shown: [
+        ["1", false],
+        ["2", false],
+        ["3", false],
+      ],
+    });
+  });
+});
+
+// 電話の段のタブ列は前面のタブ 1 つだけ (並べると 1 枚半しか入らず、端で切れて
+// 名前が読めなかった)。グループの札は前面のタブのグループのものだけ、＋ は
+// 前面のタブの右。デスクトップは並べたまま。
+describe("the phone tab strip shows only the front tab", () => {
+  beforeAll(() => {
+    GlobalRegistrator.register();
+  });
+  afterAll(() => {
+    GlobalRegistrator.unregister();
+  });
+
+  function strip(): Record<string, HTMLElement> {
+    document.body.innerHTML = `
+      <div class="main-tabs-strip">
+        <div class="main-tab-group main-tab-group-front" id="front-group"></div>
+        <div class="main-tabs-list main-tabs-group-list">
+          <div class="main-tab main-tab-active" id="front"></div>
+          <div class="main-tab" id="behind"></div>
+        </div>
+        <div class="main-tab-group" id="other-group"></div>
+        <div class="main-tabs-list main-tabs-group-list">
+          <div class="main-tab" id="other"></div>
+        </div>
+        <button class="main-tabs-action main-tabs-new" id="new"></button>
+      </div>`;
+    return Object.fromEntries(
+      ["front-group", "front", "behind", "other-group", "other", "new"].map(
+        (id) => [id, document.getElementById(id) as HTMLElement],
       ),
-    ];
-    const won = cascadedDeclarations(
-      onPhone,
-      (selector) => !selector.includes("::") && panel.matches(selector),
     );
-    expect([won.get("position"), won.get("top"), won.get("bottom")]).toEqual([
-      "fixed",
-      "var(--panel-body-top)",
-      "calc(100dvh - var(--sp-sheet-mid))",
-    ]);
+  }
+
+  function won(rules: CssRule[], el: HTMLElement): Map<string, string> {
+    return cascadedDeclarations(
+      rules,
+      (selector) => !selector.includes("::") && el.matches(selector),
+    );
+  }
+
+  test.each([
+    {
+      name: "phone",
+      rules: withTiers(SOFT_KEYS, PHONE),
+      expected: {
+        shown: ["front-group", "front", "new"],
+        front: ["1 1 auto", "none"],
+        newOrder: "1",
+      },
+    },
+    {
+      name: "desktop",
+      rules: baseRules(sheet),
+      expected: {
+        shown: [
+          "front-group",
+          "front",
+          "behind",
+          "other-group",
+          "other",
+          "new",
+        ],
+        front: ["0 0 auto", "calc(var(--space-unit) * 50)"],
+        newOrder: undefined,
+      },
+    },
+  ])("$name", ({ rules, expected }) => {
+    const els = strip();
+    expect({
+      shown: Object.keys(els).filter(
+        (id) => won(rules, els[id]).get("display") !== "none",
+      ),
+      front: [
+        won(rules, els.front).get("flex"),
+        won(rules, els.front).get("max-width"),
+      ],
+      newOrder: won(rules, els.new).get("order"),
+    }).toEqual(expected);
   });
 });
 

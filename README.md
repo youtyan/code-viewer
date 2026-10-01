@@ -462,16 +462,19 @@ reading diffs and files, and switching projects. A bar at the bottom opens
 edge), **Files**, **Diff**, **Agents** and **List** (the file tree or the
 current screen's list, as a sheet from the bottom; on History and a worktree
 the sheet shows the list on top and the chosen commit's changed files below).
-The bar marks the current screen, and **Agents** shows how many agents wait
-for input. Split view is off (a saved split comes back on a wide window).
-Diffs default to one column there, and **Wrap** at the end of the Diff bar
-wraps long lines. Opening an agent from a notification, the bottom counter or
-the All agents board closes the sidebar and the sheet. On a touch screen,
+History opens with its commit list in the sheet, two lines per commit, and the
+list fills the sheet until a commit is chosen. The bar marks the current
+screen, and **Agents** shows how many agents wait for input; the All agents
+board lists the agents before the accounts. Split view is off (a saved split
+comes back on a wide window). Diffs default to one column with long lines
+wrapped; **Wrap** at the end of the Diff bar turns wrapping off. Opening an
+agent from a notification, the bottom counter or the All agents board closes
+the sidebar and the sheet. On a touch screen,
 buttons, tabs, rows and the file tree are at least 44px tall, and a terminal
 tab shows the keys an on-screen keyboard lacks (Esc, Tab, ⇧Tab, Ctrl+C, ↑, ↓,
-Enter, and ⌨ to bring up or put away the keyboard). The square with a number
-at the right end of the tab strip lists every open tab, including those of a
-saved right side (opening one moves it to the left). Swiping up from the
+Enter, and ⌨ to bring up or put away the keyboard). The tab strip shows only
+the tab in front; the square with a number at its right end lists every open
+tab, including those of a saved right side (opening one moves it to the left). Swiping up from the
 bottom bar opens **List**, and swiping down on a sheet's header closes it.
 Holding a finger on an agent, a tab or a file row opens its right-click menu.
 Pinching on a terminal changes its text size for this browser (the phone
@@ -483,12 +486,20 @@ available when the page is opened over plain http from another device.
 
 Opening an agent there, or a terminal tab that shows a tmux pane, shows only
 that pane, full screen, without attaching to tmux: other panes of a split window stay hidden, and the PC's window size and
-layout do not change. Long lines wrap to the phone's width; **Screen** shows
-the grid as it is for full-screen apps such as vim (pinch to change its text
-size). Numbered choices on the screen become buttons that send the number,
-the soft keys sit under the output, and the field at the bottom pastes what
-you type and presses Enter (**Send** with an empty field presses Enter only).
-Back (‹ or the browser's back) returns to the list.
+layout do not change. Long lines, and text the agent folded at the PC pane's
+width, wrap to the phone's width; **As on PC** wraps
+them at the PC pane's width in small text and shows full-screen apps such as
+vim as the terminal itself (pinch to change its text size). Numbered choices on
+the screen become buttons that send the number, the soft keys sit under the
+output, and the field at the bottom pastes what you type and presses Enter
+(**Send** with an empty field presses Enter only). The image button left of
+the field attaches a photo or screenshot: it is saved like an image pasted
+into a terminal, and its path is added to the field.
+Scrolling to the top adds earlier output (up to 3,000 lines of the pane's
+history). Back (‹ or the browser's back) returns to where the pane was opened
+from: the sidebar or the + menu opens again. A terminal tab that shows a pane
+then shows the pane's name and state, with **Open the pane** and **Close this
+tab**.
 
 ## Usage
 

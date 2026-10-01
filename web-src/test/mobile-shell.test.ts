@@ -508,31 +508,33 @@ describe("dispose", () => {
 });
 
 describe("差分の折り返し (Diff の上の帯の端)", () => {
-  test("電話の段だけに出し、押すと body の印と押した状態が切り替わる", () => {
+  // 既定は折り返す (幅 390 では長い行を横に送って読むことになった)。
+  test("電話の段だけに出し、既定は折り返す。押すと body の印と押した状態が切り替わる", () => {
     install(PHONE);
     const toggle = q<HTMLButtonElement>(
       document,
       "#topbar .mobile-wrap-toggle",
     );
-    const shown = !toggle.hidden;
-    toggle.click();
-    const on = [
+    const state = () => [
       document.body.classList.contains("mobile-diff-wrap"),
       toggle.getAttribute("aria-pressed"),
     ];
+    const shown = !toggle.hidden;
+    const initial = state();
+    toggle.click();
+    const off = state();
     toggle.click();
     expect({
       shown,
-      on,
-      off: [
-        document.body.classList.contains("mobile-diff-wrap"),
-        toggle.getAttribute("aria-pressed"),
-      ],
+      initial,
+      off,
+      on: state(),
       label: toggle.textContent,
     }).toEqual({
       shown: true,
-      on: [true, "true"],
+      initial: [true, "true"],
       off: [false, "false"],
+      on: [true, "true"],
       label: "Wrap",
     });
   });
@@ -643,6 +645,20 @@ describe("引き出しは指に付いて動く", () => {
     expect(nav.style.transform).toBe("");
     touch("touchend", 20, 300);
   });
+
+  test("縦で動き始めた指は、途中で左へ流れても引き出しを動かさず閉じない", () => {
+    install(PHONE).openDrawer();
+    const nav = q<HTMLElement>(document, "#app-nav");
+    touch("touchstart", 200, 100);
+    touch("touchmove", 200, 130);
+    touch("touchmove", 150, 135);
+    const moved = nav.style.transform;
+    touch("touchend", 100, 135);
+    expect({
+      moved,
+      open: document.body.classList.contains("mobile-nav-open"),
+    }).toEqual({ moved: "", open: true });
+  });
 });
 
 /**
@@ -705,6 +721,7 @@ describe("開いているタブの一覧の面", () => {
     front: false,
     preview: false,
     parked: false,
+    project: null,
     ...extra,
   });
   const rows = () =>
@@ -738,6 +755,46 @@ describe("開いているタブの一覧の面", () => {
       focus: "b",
       current: "true",
     });
+  });
+
+  // どのプロジェクトのタブか分からなかった。タブ列のグループと同じく、
+  // プロジェクトの色と頭文字と名前の見出しでまとめる。どのプロジェクトの
+  // ものでもないタブ (エージェントの一覧・設定など) は最後に「共通」。
+  test("プロジェクトごとに見出しを付けてまとめ、どれでもないタブは最後", () => {
+    const app = {
+      root: "/work/sample-app",
+      name: "sample-app",
+      initials: "SA",
+      color: "green" as const,
+    };
+    const lib = {
+      root: "/work/sample-lib",
+      name: "sample-lib",
+      initials: "SL",
+      color: null,
+    };
+    const tabs = fakeTabs([
+      entry("a", { project: app }),
+      entry("b"),
+      entry("c", { project: lib }),
+      entry("d", { project: app, front: true }),
+      entry("e", { project: lib, parked: true }),
+    ]);
+    install(PHONE, { tabs: tabs.deps }).openTabs();
+    expect(
+      [...document.querySelectorAll("#mobile-tabs .mobile-tabs-group")].map(
+        (group) => [
+          group.querySelector(".mobile-tabs-group-head")?.textContent,
+          [...group.querySelectorAll(".mobile-tabs-row")].map((row) =>
+            row.getAttribute("data-tab-id"),
+          ),
+        ],
+      ),
+    ).toEqual([
+      ["SAsample-app", ["a", "d"]],
+      ["SLsample-lib", ["c", "e"]],
+      ["Shared", ["b"]],
+    ]);
   });
 
   test("行を押すとそのタブを前面に出して面を閉じ、×は閉じて面を開いたまま描き直す", () => {

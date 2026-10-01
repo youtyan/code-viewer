@@ -7,9 +7,11 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
   DEFAULT_COLOR,
   findChoices,
+  paragraphStart,
   type ReflowLine,
   readableColor,
   readLogicalLines,
+  readParagraphs,
   runCss,
   STYLE,
   terminalPalette,
@@ -110,6 +112,122 @@ describe("readLogicalLines", () => {
     ).toEqual([
       { text: "red", fg: 1, bold: true },
       { text: " plain", fg: DEFAULT_COLOR, bold: false },
+    ]);
+  });
+});
+
+// エージェント (Claude Code など) はペインの幅で自分で改行を入れて書く。読む画面は
+// それをスマホの幅でもう一度折るので、行の端が細切れになった (「回数が 4」「回」)。
+// ペインの幅で入れた改行だけを見分けて、元の 1 文に繋ぎ直す。
+describe("readParagraphs", () => {
+  test.each([
+    {
+      name: "語の折り返しは空白で繋ぐ",
+      data: "  hello world this\r\n  wraps here",
+      expected: ["  hello world this wraps here"],
+    },
+    {
+      name: "長い語の途中で切れた行は空白なしで繋ぐ",
+      data: "  /very/long/path/na\r\n  me/rest",
+      expected: ["  /very/long/path/name/rest"],
+    },
+    {
+      name: "全角で右端まで詰まった行は空白なしで繋ぐ",
+      data: "  日本語の文章がここ\r\n  で続きます",
+      expected: ["  日本語の文章がここで続きます"],
+    },
+    {
+      name: "全角の字の後ろで半角から続く行は空白で繋ぐ",
+      data: "  日本語の文章がここ\r\n  → next",
+      expected: ["  日本語の文章がここ → next"],
+    },
+    {
+      name: "箇条書きの続きは、頭の後ろの字下げなら繋ぐ",
+      data: "  - item text here\r\n    continues",
+      expected: ["  - item text here continues"],
+    },
+    {
+      name: "右端に次の語が入る余りがあれば繋がない",
+      data: "  short line\r\n  next line",
+      expected: ["  short line", "  next line"],
+    },
+    {
+      name: "字下げが続きと違えば繋がない",
+      data: "  hello world this\r\n    wraps",
+      expected: ["  hello world this", "    wraps"],
+    },
+    {
+      name: "次の行が箇条書きの頭なら繋がない",
+      data: "  - item text here\r\n  - second",
+      expected: ["  - item text here", "  - second"],
+    },
+    {
+      name: "… で切った行は繋がない",
+      data: "  a long line here…\r\n  next",
+      expected: ["  a long line here…", "  next"],
+    },
+    {
+      name: "罫線の行は繋がない",
+      data: "────────────────────\r\n  text",
+      expected: ["────────────────────", "  text"],
+    },
+  ])("$name", async ({ data, expected }) => {
+    // 行の数は中身と同じ (空いた行を並べない)。
+    const term = await terminal(20, 2, data);
+    const buffer = term.buffer.active;
+    expect(texts(readParagraphs(buffer, 0, buffer.length, 20))).toEqual(
+      expected,
+    );
+  });
+
+  // ペインの幅は後から変わる (PC で 59 桁だったペインが 210 桁に)。過去の行は書いた
+  // ときの幅で改行されているので、今の幅で詰まり方を見ると繋がらなかった。
+  // Claude Code が入力欄の上下に引く、幅いっぱいの罫線の長さを、その行を書いた
+  // ときの幅とみなす。
+  test.each([
+    {
+      name: "後ろの罫線が書いたときの幅を教える",
+      data: "  hello world this\r\n  wraps here\r\n────────────────────",
+      expected: ["  hello world this wraps here", "────────────────────"],
+    },
+    {
+      name: "後ろに無ければ前の罫線",
+      data: "────────────────────\r\n  hello world this\r\n  wraps here",
+      expected: ["────────────────────", "  hello world this wraps here"],
+    },
+    {
+      name: "罫線が無ければ今の幅で見る",
+      data: "  hello world this\r\n  wraps here",
+      expected: ["  hello world this", "  wraps here"],
+    },
+  ])("幅が変わったペイン: $name", async ({ data, expected }) => {
+    const term = await terminal(40, 3, data);
+    const buffer = term.buffer.active;
+    expect(
+      texts(readParagraphs(buffer, 0, buffer.length, 40)).filter(Boolean),
+    ).toEqual(expected);
+  });
+
+  // スマホの幅で折り返した 2 行目以降を、文の始まり (箇条書きなら頭の後ろ) に揃える。
+  test.each([
+    { name: "箇条書き", data: "  - item text here\r\n    continues", hang: 4 },
+    { name: "字下げだけ", data: "  plain text", hang: 2 },
+    { name: "字下げなし", data: "top", hang: 0 },
+  ])("揃える桁: $name", async ({ data, hang }) => {
+    const term = await terminal(20, 2, data);
+    const buffer = term.buffer.active;
+    expect(readParagraphs(buffer, 0, buffer.length, 20)[0]?.hang).toBe(hang);
+  });
+
+  test("段落の続きの行からは、段落の頭の行までさかのぼる", async () => {
+    const term = await terminal(
+      20,
+      6,
+      "top\r\n  hello world this\r\n  wraps here",
+    );
+    const buffer = term.buffer.active;
+    expect([0, 1, 2].map((y) => paragraphStart(buffer, y, 20))).toEqual([
+      0, 1, 1,
     ]);
   });
 });

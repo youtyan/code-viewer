@@ -2245,6 +2245,35 @@ describe("sidebar tree view", () => {
     ).toBe(true);
   });
 
+  // 木はフォルダを先に寄せず、ファイルの並び (差分のカードの順) のまま出す。
+  // フォルダを先にすると、一覧を上から読む順とカードの順が食い違った。
+  test("lists the tree in the same order as the diff cards", async () => {
+    const { filelist, diff } = await mountWith(
+      response([
+        item({
+          name: "repo",
+          files: [
+            file({ path: "README.md" }),
+            file({ path: "web-src/app.ts" }),
+            file({ path: "web/style.css" }),
+          ],
+        }),
+      ]),
+      {
+        route: { wt: "/repo" },
+        sidebarView: "tree",
+        diff: { diff: "@@ -1 +1 @@\n-a\n+b\n" },
+      },
+    );
+    expect({
+      tree: texts(filelist, ".tree-dir > .name, .tree-file[data-key] .name"),
+      cards: texts(diff, ".gdp-shell-header .path"),
+    }).toEqual({
+      tree: ["README.md", "web-src", "app.ts", "web", "style.css"],
+      cards: ["README.md", "web-src/app.ts", "web/style.css"],
+    });
+  });
+
   test("keeps full paths when the flat view is picked", async () => {
     const { filelist } = await mountWith(nested(), {
       route: { wt: "/repo" },

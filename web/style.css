@@ -17905,6 +17905,8 @@ html[data-nav-collapsed] #app-nav {
   margin-top: var(--space-3);
 }
 .nav-project-head {
+  /* 右端の操作 (＋と ⋯) と件数が使う幅。名前の右はこの幅だけ空けておく (T3)。 */
+  --nav-project-actions-w: var(--space-7);
   position: relative;
   display: flex;
   align-items: center;
@@ -18003,7 +18005,7 @@ html[data-nav-collapsed] #app-nav {
   gap: var(--space-2);
   height: 100%;
   /* hover / focus で出る 2 操作ぶんを常に予約し、名前を動かさない。 */
-  padding: 0 var(--space-7) 0 0;
+  padding: 0 var(--nav-project-actions-w) 0 0;
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
@@ -18165,7 +18167,7 @@ html[data-nav-collapsed] #app-nav {
   top: 0;
   right: 0;
   bottom: 0;
-  width: var(--space-7);
+  width: var(--nav-project-actions-w);
   display: flex;
   align-items: center;
   gap: 0;
@@ -18186,7 +18188,7 @@ html[data-nav-collapsed] #app-nav {
   top: 0;
   right: 0;
   bottom: 0;
-  width: var(--space-7);
+  width: var(--nav-project-actions-w);
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -21298,8 +21300,10 @@ button.agents-section-title:focus-visible {
   white-space: nowrap;
 }
 .agents-hook-hint-open {
+  flex: none;
   padding: 0 var(--space-2);
   height: var(--ui-control-sm);
+  white-space: nowrap;
   border: 0;
   border-radius: var(--radius-md);
   background: none;
@@ -26032,6 +26036,12 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body:has(.main-pane-host[data-side="left"][data-kind="terminal"].is-shown) {
     --sp-keys-visible-h: var(--sp-keys-h);
   }
+  /* iPhone の Safari は横向きにすると長い文章の文字を勝手に大きくする (1 ペイン
+     表示の「読む」が大きくなりすぎて読みにくかった)。決めた大きさのまま出す。 */
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
   /* 面の箱 (端末) の下端を操作札の帯の上にする (T2 に 1 項)。 */
   body {
     --main-bottom: calc(var(--chrome-bottom) + var(--sp-keys-visible-h));
@@ -26367,6 +26377,60 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body[data-list-column="worktree"] #sidebar-resizer {
     display: none;
   }
+  /* コミットを選ぶまでは下の段 (変更ファイル) が空なので、一覧に面の全部を使う
+     (半分では 3 件ほどしか見えなかった)。 */
+  body[data-list-column="history"]:not(:has(.history-item.active)) #history-panel {
+    bottom: var(--chrome-bottom);
+  }
+  body[data-list-column="history"]:not(:has(.history-item.active)) #sidebar {
+    display: none !important;
+  }
+  /* コミットの行は 2 段: 1 段目の全幅に件名と枝の札、2 段目に時刻・作者・
+     ハッシュ。1 段に並べると件名が「Add the sa…」まで切れた。グラフの線は
+     行の高さの割合で引くので (history-graph.ts)、2 段の行でもつながる。 */
+  #history-panel .history-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-3);
+    row-gap: calc(var(--space-1) / 2);
+    height: auto;
+  }
+  #history-panel .history-item .history-graph-cell {
+    grid-row: 1 / 3;
+  }
+  /* グラフは行の高さを決めない (高さの指定の無い SVG は 150px として行を
+     押し広げた)。行が決まってから、その高さいっぱいに描く。 */
+  #history-panel .history-item .history-graph {
+    height: 0;
+    min-height: 100%;
+  }
+  /* 上下の余白は段の中に取る (行に取るとグラフの線が行の間で途切れる)。 */
+  #history-panel .history-item .history-title {
+    grid-row: 1;
+    grid-column: 2;
+    padding-top: var(--space-1);
+  }
+  #history-panel .history-item .meta2 {
+    grid-row: 2;
+    grid-column: 2;
+    padding-bottom: var(--space-1);
+    display: flex;
+    min-width: 0;
+    column-gap: var(--space-2);
+  }
+  #history-panel .history-item .when {
+    order: 1;
+  }
+  #history-panel .history-item .author {
+    order: 2;
+    flex: 0 1 auto;
+    display: block;
+    min-width: 0;
+  }
+  #history-panel .history-item .sha {
+    order: 3;
+    display: inline;
+  }
   body.gdp-history-page main#content,
   body.gdp-history-page.gdp-sidebar-hidden main#content,
   body.gdp-worktree-page:not([data-worktree-overview]) main#content,
@@ -26394,6 +26458,22 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   /* 全体ボード: 左右の余白を詰め、見出しの行 (題名と操作) を折り返す。 */
   .agents-board {
     padding: 0 var(--space-3);
+  }
+  /* エージェントの一覧を先に、アカウントは後ろへ (アカウントのカードの下に
+     埋もれ、入力待ちに返事するまでに 2 画面ぶん送っていた)。キーの案内は
+     キーボードの無い画面では出さない。 */
+  .agents-page {
+    display: flex;
+    flex-direction: column;
+  }
+  .agents-page > * {
+    flex: none;
+  }
+  .agents-page > .agents-accounts {
+    order: 1;
+  }
+  .agents-hint {
+    display: none;
   }
   .agents-header {
     flex-wrap: wrap;
@@ -26589,6 +26669,26 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     font-size: var(--sp-input-font) !important;
   }
 
+  /* ---- タブ列は前面のタブ 1 つだけ ----
+     並べると幅 390 に 1 枚半しか入らず、端で切れて名前が読めなかった。前面の
+     タブに残りの幅を渡し、ほかのタブは右端の「開いているタブ」の一覧から替える。
+     グループの札は前面のタブのグループのものだけ。 */
+  .main-tab:not(.main-tab-active),
+  .main-tab-group:not(.main-tab-group-front) {
+    display: none;
+  }
+  .main-tab.main-tab-active {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
+  /* ＋ は前面のタブの右 (グループがあるとデスクトップではグループの後ろ・
+     グループに属さないタブの前に置くので、前面のタブ次第で左右に動いた)。 */
+  .main-tabs-strip > .main-tabs-new {
+    order: 1;
+  }
+
   /* ---- 開いているタブの一覧 ----
      入口はタブ列の右端 (分割のボタンの代わり。枚数を枠に入れる)。一覧は下から
      出す面 (#mobile-tabs。mobile-shell.ts)。場所は一覧の面 (#file-list・#sidebar) と同じ。 */
@@ -26666,6 +26766,31 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     padding: 0 var(--pad-face) var(--space-2);
     overflow-y: auto;
     overscroll-behavior: contain;
+    list-style: none;
+  }
+  /* プロジェクトごとのまとまり: 見出し (色の四角と頭文字・名前) とそのタブ。 */
+  .mobile-tabs-group + .mobile-tabs-group {
+    margin-top: var(--space-3);
+  }
+  .mobile-tabs-group-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: var(--ui-control-sm);
+    padding: 0 var(--space-2);
+    color: var(--color-text-2);
+    font-size: var(--ui-font-sm);
+    font-weight: 600;
+  }
+  .mobile-tabs-group-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mobile-tabs-group-list {
+    margin: 0;
+    padding: 0;
     list-style: none;
   }
   .mobile-tabs-row {
@@ -26855,11 +26980,15 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .pane-view-mode button {
     min-height: var(--sp-touch);
   }
+  /* 横には送らない: 幅の広いペインの色付きの帯 (数百桁の空白) を iPhone の
+     Safari ははみ出しとして数え、本文ごと横にずれて左が切れた。「画面」の升目は
+     中の箱 (.pane-view-screen) が横に送る。 */
   .pane-view-body {
     position: relative;
     flex: 1 1 0;
     min-height: 0;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     overscroll-behavior: contain;
     padding: var(--space-2) var(--pad-face);
     font-family: var(--font-mono);
@@ -26867,14 +26996,29 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     line-height: 1.45;
   }
   /* 端末の 1 行 (折り返しを繋いだもの) を幅で折り返す。枠の線だけの行は折り返さずに切る。 */
+  /* 2 行目以降は文の始まりに揃える (--pane-hang。pane-view.ts の lineHtml)。 */
   .pane-line {
     min-height: 1.45em;
+    padding-left: var(--pane-hang, 0);
+    text-indent: calc(0px - var(--pane-hang, 0px));
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
   .pane-line-rule {
     white-space: pre;
     overflow: hidden;
+  }
+  /* 「画面」の通常の画面: 読む画面と同じ行を PC のペインの桁で折り返し、その桁が
+     幅に入る字の大きさで出す (pane-view.ts の fitScreenFont)。ピンチで大きく
+     したら、この箱が横に送る。 */
+  .pane-view-read.is-grid {
+    overflow-x: auto;
+    font-size: var(--pane-grid-font, var(--ui-font-sm));
+    line-height: 1.25;
+  }
+  .pane-view-read.is-grid .pane-line {
+    width: calc(var(--pane-cols, 80) * 1ch);
+    min-height: 1.25em;
   }
   .pane-view-screen {
     overflow-x: auto;
@@ -26979,6 +27123,27 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     color: var(--color-text);
     resize: none;
     field-sizing: content;
+  }
+  .pane-view-attach {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--sp-touch);
+    height: var(--sp-touch);
+    padding: 0;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    background: var(--color-raised);
+    color: var(--color-text-2);
+    touch-action: manipulation;
+  }
+  .pane-view-attach:active {
+    background: var(--color-select);
+  }
+  .pane-view-attach-icon {
+    width: var(--icon-md);
+    height: var(--icon-md);
+    fill: currentColor;
   }
   .pane-view-send {
     flex: none;
@@ -27137,11 +27302,19 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .main-pane-host[data-kind="terminal"] {
     touch-action: pan-x pan-y;
   }
-  /* hover の無い画面では、行の操作を最初から見せる (場所は最初から取っている)。 */
+  /* hover の無い画面では、行の操作を最初から見せる。場所は指の大きさの 2 つぶん
+     (44px の＋と ⋯ が 48px に入らず、⋯ が引き出しの外へはみ出して一覧ごと横に
+     動いた)。件数は hover の間と同じく操作に場所を譲る。 */
+  .nav-project-head {
+    --nav-project-actions-w: calc(var(--sp-touch) * 2);
+  }
   .nav-project-actions {
     opacity: 1;
     pointer-events: auto;
     background: transparent;
+  }
+  .nav-project-count {
+    visibility: hidden;
   }
   #topbar .controls > button,
   #topbar .seg > button {

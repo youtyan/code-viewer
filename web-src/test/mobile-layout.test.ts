@@ -8,6 +8,7 @@ import {
   drawerDragOffset,
   EDGE_SWIPE_START_MAX_X,
   edgeSwipeAction,
+  gestureAxis,
   LONG_PRESS_MOVE_TOLERANCE,
   longPressMoved,
   mobileBarCurrent,
@@ -319,6 +320,22 @@ describe("softKeySequence", () => {
 // 指を動かしている間、引き出しが指に付いて動く (以前は離したときに開くか閉じる
 // かだけだった)。閉じた位置は -幅、開いた位置は 0。縦のスクロールや本文の横の
 // 送りでは動かさない。
+// 引き出しの一覧を縦にスクロールしている途中で指が横にぶれても、引き出しを
+// 動かさない (向きは最初に決まったものを離すまで使う。mobile-shell.ts)。
+describe("gestureAxis", () => {
+  test.each([
+    { name: "動いていない", dx: 0, dy: 0, expected: null },
+    { name: "境界: 7 横はまだ決めない", dx: 7, dy: 0, expected: null },
+    { name: "境界: 8 横で横", dx: 8, dy: 0, expected: "x" },
+    { name: "境界: 8 上で縦", dx: 0, dy: -8, expected: "y" },
+    { name: "同じだけ動いたら縦", dx: -8, dy: 8, expected: "y" },
+    { name: "左へ、少し下へ", dx: -20, dy: 5, expected: "x" },
+    { name: "下へ、少し左へ", dx: -5, dy: 20, expected: "y" },
+  ] as const)("$name", ({ dx, dy, expected }) => {
+    expect(gestureAxis(dx, dy)).toBe(expected);
+  });
+});
+
 describe("drawerDragOffset", () => {
   const W = 320;
   const edge = EDGE_SWIPE_START_MAX_X;

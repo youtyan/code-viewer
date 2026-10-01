@@ -367,6 +367,8 @@ export type TabListEntry = {
   preview: boolean;
   /** 右の面 (電話では預けていて見えない) のタブ。 */
   parked: boolean;
+  /** タブ列のグループと同じプロジェクト。どのプロジェクトのものでもなければ null。 */
+  project: ProjectLook | null;
 };
 
 export type MainTabsHandle = {
@@ -2362,10 +2364,19 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
           renderTab(tab, tab.id === pane.activeId, side, true),
         ),
       );
-      grouped.push(
-        renderGroupHead(side, key, look, isCollapsed, group.tabs.length),
-        tabs,
+      const head = renderGroupHead(
+        side,
+        key,
+        look,
+        isCollapsed,
+        group.tabs.length,
       );
+      // 前面のタブのグループ (電話の段は、この札と前面のタブだけを出す)。
+      head.classList.toggle(
+        "main-tab-group-front",
+        group.tabs.some((tab) => tab.id === pane.activeId),
+      );
+      grouped.push(head, tabs);
     }
     // 並びが変わるときだけ ＋ と並びを動かす (動かすと ＋ のフォーカスが外れる)。
     const hasGroups = grouped.length > 0;
@@ -3142,8 +3153,13 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     localize: relayout,
     refit: () => followGeometry(),
     tabList() {
-      const entry = (tab: Tab, front: boolean, isParked: boolean) => {
+      const entry = (
+        tab: Tab,
+        front: boolean,
+        isParked: boolean,
+      ): TabListEntry => {
         const name = nameOf(tab.target).full;
+        const key = keyOf(tab);
         return {
           id: tab.id,
           name,
@@ -3152,6 +3168,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
           front,
           preview: tab.preview,
           parked: isParked,
+          project: key === null ? null : lookOf(key),
         };
       };
       const right = parked?.pane ?? layout.panes.right;

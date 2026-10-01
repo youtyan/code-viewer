@@ -26,9 +26,18 @@ export type TerminalText = {
     choices: string;
     gone: string;
     failed: string;
-    /** SP でペインを映しているシェルのタブ。1 ペイン表示を閉じた後の面に出す。 */
+    /**
+     * SP でペインを映しているシェルのタブ。1 ペイン表示を閉じた後の面に出す
+     * (見出しはペインの名前。エージェントの一覧に無いときだけこの文)。
+     */
     tabShowsPane: string;
     openPane: string;
+    closeTab: string;
+    /** 返事の欄の左の、画像を添付するボタン。 */
+    attach: string;
+    attaching: (name: string) => string;
+    attachUnsupported: (name: string) => string;
+    attachFailed: string;
   };
   /** 選んだペインが閉じられていた。 */
   paneClosed: string;
@@ -212,7 +221,7 @@ const EN: TerminalText = {
   paneView: {
     back: "Back",
     read: "Read",
-    screen: "Screen",
+    screen: "As on PC",
     modeLabel: "How to show the pane",
     latest: "Latest",
     older: "Show earlier output",
@@ -224,6 +233,12 @@ const EN: TerminalText = {
     failed: "Could not show the pane.",
     tabShowsPane: "This tab shows a tmux pane.",
     openPane: "Open the pane",
+    closeTab: "Close this tab",
+    attach: "Attach an image",
+    attaching: (name) => `Sending ${name}…`,
+    attachUnsupported: (name) =>
+      `${name}: only PNG, JPEG, GIF and WebP images can be attached.`,
+    attachFailed: "Could not attach the image.",
   },
   paneClosed: "This pane has been closed.",
   paneOpenFailed: "Could not open this pane.",
@@ -354,7 +369,7 @@ const JA: TerminalText = {
   paneView: {
     back: "戻る",
     read: "読む",
-    screen: "画面",
+    screen: "PC と同じ",
     modeLabel: "表示のしかた",
     latest: "最新へ",
     older: "前の出力を表示",
@@ -366,6 +381,12 @@ const JA: TerminalText = {
     failed: "ペインを映せませんでした。",
     tabShowsPane: "このタブは tmux のペインを映しています。",
     openPane: "ペインを開く",
+    closeTab: "このタブを閉じる",
+    attach: "画像を添付",
+    attaching: (name) => `${name} を送っています…`,
+    attachUnsupported: (name) =>
+      `${name}: 添付できるのは PNG・JPEG・GIF・WebP の画像だけです。`,
+    attachFailed: "画像を添付できませんでした。",
   },
   paneClosed: "このペインは閉じられました。",
   paneOpenFailed: "このペインを開けませんでした。",

@@ -24,8 +24,12 @@ import { closeLineColors } from "./capture";
 import { runTmux, tmuxArgs } from "./command";
 import { type ControlEvent, createControlParser } from "./control-protocol";
 
-/** 流しの始めに渡す過去の行数 (折り返しを繋いだ行で数える前の、tmux の行数)。 */
-export const PANE_WATCH_HISTORY_LINES = 1000;
+/**
+ * 流しの始めに渡す過去の行数 (折り返しを繋いだ行で数える前の、tmux の行数)。
+ * 1000 では狭いペインの Claude Code の会話が 2〜3 回の返事ぶんしか読めなかった。
+ * 3000 行で 300KB ほど (1 ペイン表示の見えない端末の過去の行 5000 に収まる)。
+ */
+export const PANE_WATCH_HISTORY_LINES = 3000;
 
 /** 子の標準エラーを理由に残す上限。 */
 const STDERR_LIMIT = 4096;

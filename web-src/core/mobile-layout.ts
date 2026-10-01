@@ -107,6 +107,16 @@ export function edgeSwipeAction(facts: SwipeFacts): "open" | "close" | null {
 /** 指に付いて引き出しを動かし始める横の移動量 (px)。これ未満はタップとして待つ。 */
 export const DRAWER_DRAG_START = 8;
 
+/**
+ * 1 回の指の動きの向き。DRAWER_DRAG_START 動くまでは決めない (null)。呼ぶ側は
+ * 最初に決まった向きを指を離すまで変えない: 縦にスクロールしている途中で指が
+ * 少し横にぶれても、引き出しを動かさない (動かすと一覧が上下と左右に揺れた)。
+ */
+export function gestureAxis(dx: number, dy: number): "x" | "y" | null {
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < DRAWER_DRAG_START) return null;
+  return Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+}
+
 export type DrawerDragFacts = {
   startX: number;
   startY: number;

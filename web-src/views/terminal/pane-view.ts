@@ -20,7 +20,7 @@ import {
   responseErrorMessage,
 } from "../../core/error-detail";
 import { escapeHtml } from "../../core/html-escape";
-import { CHEVRON_LEFT_16_PATH, iconSvg } from "../../core/icons";
+import { CHEVRON_LEFT_16_PATH, IMAGE_16_PATH, iconSvg } from "../../core/icons";
 import {
   pinchFontSize,
   softKeySequence,
@@ -31,12 +31,18 @@ import {
   DEFAULT_COLOR,
   findChoices,
   logicalLineStart,
+  paragraphStart,
   type ReflowColors,
   type ReflowLine,
   readLogicalLines,
+  readParagraphs,
   runCss,
   terminalPalette,
 } from "../../core/pane-reflow";
+import {
+  PASTE_IMAGE_TYPES,
+  pasteImageExtension,
+} from "../../core/terminal-paste";
 import {
   paneSnapshotSequence,
   type TmuxPaneId,
@@ -45,11 +51,14 @@ import {
 import {
   loadXterm,
   type XtermApi,
+  type XtermBuffer,
   type XtermDisposable,
+  type XtermMarker,
   type XtermTerminal,
 } from "../../core/xterm-loader";
 import { SOFT_KEY_CAPS } from "../mobile-shell-i18n";
 import type { TerminalText } from "./i18n";
+import { uploadPastedImage } from "./paste-upload";
 import {
   TERMINAL_MINIMUM_CONTRAST_RATIO,
   terminalTheme,
@@ -61,8 +70,20 @@ const PANE_VIEW_SCROLLBACK = 5000;
 const READ_LINES_STEP = 600;
 /** 続けて出力が来ている間に描き直す間隔の下限。 */
 const RENDER_INTERVAL_MS = 100;
-/** 一番下にいるとみなす、下端からの距離。 */
-const AT_BOTTOM_PX = 32;
+/**
+ * 一番下にいるとみなす、下端からの距離。広くすると、指で少しだけ上へ送って
+ * 離したときにも一番下とみなして引き戻した (32px で起きた)。
+ */
+const AT_BOTTOM_PX = 4;
+/** 上端からこの距離まで読み進めて止まったら、押さなくても前の出力を足す。 */
+const AT_TOP_PX = 200;
+/**
+ * スクロールが止まったとみなす間。動いている間に前を足すと、iOS の慣性の
+ * スクロールが止まって跳ぶ。
+ */
+const SCROLL_SETTLE_MS = 150;
+/** 選択肢を探す、末尾からの行数 (端末の行で数える)。 */
+const CHOICE_TAIL_ROWS = 40;
 /** 「画面」の文字の大きさの範囲。幅に合わせて決め、読めないほど小さくしない。 */
 const GRID_FONT_MIN = 7;
 const GRID_FONT_MAX = 14;
@@ -72,6 +93,8 @@ const GRID_FONT_PINCH_MAX = 24;
 const MONO_WIDTH_RATIO = 0.6;
 
 export type PaneViewMode = "read" | "screen";
+/** 出し方: 読む (幅で折り返す)・升目の文 (PC の桁で折り返す)・端末 (xterm)。 */
+type PaneView = "read" | "grid" | "terminal";
 
 export type PaneDescription = {
   title: string;
@@ -91,7 +114,11 @@ export type PaneViewDeps = {
 
 export type PaneViewHandle = {
   el: HTMLElement;
-  open(pane: TmuxPaneId): void;
+  /**
+   * returnTo は戻る (戻るのボタン・ブラウザの戻る) で閉じた後に呼ぶ: 開いた
+   * 場所 (引き出し・＋のメニュー) を出し直す。別のペインへ開き直したときは呼ばない。
+   */
+  open(pane: TmuxPaneId, returnTo?: () => void): void;
   close(): void;
   currentPane(): TmuxPaneId | null;
   /** エージェントの一覧が変わった。見出しの名前と状態を描き直す。 */
@@ -121,7 +148,9 @@ function lineHtml(line: ReflowLine, colors: ReflowColors): string {
         : `<span style="${runCss(run.style, colors)}">${escapeHtml(run.text)}</span>`,
     )
     .join("");
-  return `<div class="pane-line${line.rule ? " pane-line-rule" : ""}">${body}</div>`;
+  // 折り返した 2 行目以降を文の始まり (箇条書きなら頭の後ろ) に揃える。
+  const hang = line.hang ? ` style="--pane-hang: ${line.hang}ch"` : "";
+  return `<div class="pane-line${line.rule ? " pane-line-rule" : ""}"${hang}>${body}</div>`;
 }
 
 function lineText(line: ReflowLine): string {
@@ -174,6 +203,11 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
   older.hidden = true;
   const read = document.createElement("div");
   read.className = "pane-view-read";
+  // 確定した行 (端末の過去の行) と、まだ書き換わる行 (端末の画面)。続きが
+  // 来たときに描き直すのは後者だけ。
+  const readStable = document.createElement("div");
+  const readLive = document.createElement("div");
+  read.append(readStable, readLive);
   const screen = document.createElement("div");
   screen.className = "pane-view-screen";
   screen.hidden = true;
@@ -226,7 +260,19 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
   sendButton.className = "pane-view-send";
   // 押しても返事の欄から焦点を外さない (ソフトキーボードを閉じない)。
   sendButton.addEventListener("pointerdown", (event) => event.preventDefault());
-  compose.append(input, sendButton);
+  // 画像の添付 (写真・スクショ)。選んだ画像は PC のターミナルに貼ったときと
+  // 同じ場所に保存してもらい、パスを返事の欄に足す。
+  const attach = document.createElement("button");
+  attach.type = "button";
+  attach.className = "pane-view-attach";
+  attach.innerHTML = iconSvg("pane-view-attach-icon", IMAGE_16_PATH);
+  const picker = document.createElement("input");
+  picker.type = "file";
+  picker.className = "pane-view-picker";
+  picker.accept = Object.keys(PASTE_IMAGE_TYPES).join(",");
+  picker.multiple = true;
+  picker.hidden = true;
+  compose.append(attach, picker, input, sendButton);
 
   el.append(head, body, choices, keys, compose);
 
@@ -237,12 +283,21 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
   let term: XtermTerminal | null = null;
   let termSubscriptions: XtermDisposable[] = [];
   let mode: PaneViewMode = "read";
+  /** いま出している形。null は当て直しが要る (新しい端末)。 */
+  let currentView: PaneView | null = null;
   let colors: ReflowColors | null = null;
   let readLines = READ_LINES_STEP;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let lastRender = 0;
   /** 上へスクロールしている間に届いた続き。一番下へ戻ったら描く。 */
   let behind = false;
+  /**
+   * 一番下に付いて、続きを追いかけているか。利用者のスクロールでだけ変わる
+   * (こちらが動かした位置・箱の大きさの変化では変えない)。
+   */
+  let following = true;
+  /** こちらが最後に動かした位置 (その scroll の知らせは利用者のものではない)。 */
+  let ownScrollTop = -1;
   let ended = false;
   let sending: Promise<unknown> = Promise.resolve();
   let inputSequence = 0;
@@ -250,6 +305,29 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
   let screenFontSize: number | null = null;
   /** 開いたときに履歴を 1 つ積んだか (戻るで閉じる)。 */
   let pushedHistory = false;
+  /** 戻るで閉じた後に出し直す、開いた場所 (open の returnTo)。 */
+  let returnTo: (() => void) | null = null;
+  /**
+   * 「読む」に描いた確定した行の控え。作業中の印が 1 秒に何度も書き換わる
+   * たびに全部の行 (数百〜数千) を描き直し、スマホが固まった。書き換わるのは
+   * 端末の画面の行だけなので、確定した行は足す・外すだけにする。
+   */
+  let stable: {
+    term: XtermTerminal;
+    type: XtermBuffer["type"];
+    /** readStable の子と同じ並びの、各行の先頭のバッファの行番号。 */
+    starts: number[];
+    /** 確定した行の終わり (画面の行の始まり)。 */
+    end: number;
+    /** end の行の印。古い行が捨てられると、その分だけ line が減る。 */
+    marker: XtermMarker | undefined;
+  } | null = null;
+  let olderTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * 指が本文に触れている間。続きが届くたびに一番下へ寄せると、指でゆっくり
+   * 上へ送ろうとしても 0.1 秒ほどで引き戻された。触れている間は寄せない。
+   */
+  let touching = false;
 
   function showStatus(message: string): void {
     status.textContent = message;
@@ -262,6 +340,7 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     for (const control of [
       input,
       sendButton,
+      attach,
       ...keys.querySelectorAll("button"),
     ])
       (control as HTMLButtonElement | HTMLTextAreaElement).disabled = true;
@@ -273,6 +352,7 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     for (const control of [
       input,
       sendButton,
+      attach,
       ...keys.querySelectorAll("button"),
     ])
       (control as HTMLButtonElement | HTMLTextAreaElement).disabled = false;
@@ -286,6 +366,8 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
 
   function scrollToBottom(): void {
     body.scrollTop = body.scrollHeight;
+    ownScrollTop = body.scrollTop;
+    following = true;
   }
 
   function scheduleRender(): void {
@@ -298,28 +380,164 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     }, wait);
   }
 
+  function linesHtml(lines: ReflowLine[], palette: ReflowColors): string {
+    return lines.map((line) => lineHtml(line, palette)).join("");
+  }
+
+  /** 行の並びを 1 つの断片にする (前にも後ろにも、並びのまま入れられる)。 */
+  function linesFragment(
+    lines: ReflowLine[],
+    palette: ReflowColors,
+  ): DocumentFragment {
+    const template = document.createElement("template");
+    template.innerHTML = linesHtml(lines, palette);
+    return template.content;
+  }
+
+  function placeMarker(buffer: XtermBuffer): void {
+    if (!stable || !term) return;
+    stable.marker?.dispose();
+    stable.marker =
+      buffer.type === "normal"
+        ? term.registerMarker(stable.end - (buffer.baseY + buffer.cursorY))
+        : undefined;
+  }
+
+  /** 確定した行を from から end まで描き直す。 */
+  function rebuildStable(
+    buffer: XtermBuffer,
+    from: number,
+    end: number,
+    palette: ReflowColors,
+  ): void {
+    if (!term) return;
+    stable?.marker?.dispose();
+    const lines = linesIn(buffer, from, end);
+    readStable.innerHTML = linesHtml(lines, palette);
+    stable = {
+      term,
+      type: buffer.type,
+      starts: lines.map((line) => line.start),
+      end,
+      marker: undefined,
+    };
+    placeMarker(buffer);
+  }
+
+  /**
+   * 前に描いてから捨てられた古い行の数だけ、控えの行番号をずらす。追えない
+   * (別の端末・別画面への切替・印の行まで捨てられた) なら false。
+   */
+  function shiftStable(buffer: XtermBuffer): boolean {
+    if (!stable || stable.term !== term || stable.type !== buffer.type)
+      return false;
+    const marker = stable.marker;
+    if (!marker || marker.isDisposed) return false;
+    const shift = stable.end - marker.line;
+    if (shift < 0) return false;
+    if (shift > 0) {
+      stable.starts = stable.starts.map((start) => start - shift);
+      stable.end -= shift;
+    }
+    return true;
+  }
+
+  /** 確定した行の前に from までの行を足し、from より前に出た行を外す。 */
+  function extendStableFront(
+    buffer: XtermBuffer,
+    from: number,
+    palette: ReflowColors,
+  ): void {
+    if (!stable) return;
+    while (stable.starts.length > 0 && stable.starts[0] < from) {
+      readStable.firstElementChild?.remove();
+      stable.starts.shift();
+    }
+    const first = stable.starts[0] ?? stable.end;
+    if (from >= first) return;
+    const lines = linesIn(buffer, from, first);
+    readStable.prepend(linesFragment(lines, palette));
+    stable.starts.unshift(...lines.map((line) => line.start));
+  }
+
+  /** 確定した行を from から end までにそろえる (足せないときだけ描き直す)。 */
+  function syncStable(
+    buffer: XtermBuffer,
+    from: number,
+    end: number,
+    palette: ReflowColors,
+  ): void {
+    if (!shiftStable(buffer) || !stable || stable.end > end) {
+      rebuildStable(buffer, from, end, palette);
+      return;
+    }
+    extendStableFront(buffer, from, palette);
+    if (stable.end === end) return;
+    const lines = linesIn(buffer, stable.end, end);
+    readStable.append(linesFragment(lines, palette));
+    stable.starts.push(...lines.map((line) => line.start));
+    stable.end = end;
+    placeMarker(buffer);
+  }
+
+  /**
+   * 描く行の並び。読む画面は段落 (アプリがペインの幅で入れた改行を繋ぐ。スマホ
+   * の幅でもう一度折ると行の端が細切れになった)、升目の文はペインの行のまま。
+   */
+  function linesIn(buffer: XtermBuffer, from: number, to: number) {
+    return currentView === "read" && term
+      ? readParagraphs(buffer, from, to, term.cols)
+      : readLogicalLines(buffer, from, to);
+  }
+
+  /** y 行目を含む、描く行 (linesIn の 1 行) の先頭。 */
+  function lineStartAt(buffer: XtermBuffer, y: number): number {
+    return currentView === "read" && term
+      ? paragraphStart(buffer, y, term.cols)
+      : logicalLineStart(buffer, y);
+  }
+
+  function readFrom(buffer: XtermBuffer): number {
+    return lineStartAt(buffer, Math.max(0, buffer.length - readLines));
+  }
+
   function render(): void {
     if (!term || !colors) return;
+    applyView();
     const buffer = term.buffer.active;
-    const from = logicalLineStart(
+    const from = readFrom(buffer);
+    // 端末の画面の行 (まだ書き換わる)。その前は過去の行で、もう変わらない。
+    const liveStart = Math.max(from, lineStartAt(buffer, buffer.baseY));
+    // 選択肢はペインの行のまま探す (段落に繋ぐと番号の行が混ざりうる)。
+    const tail = readLogicalLines(
       buffer,
-      Math.max(0, buffer.length - readLines),
+      Math.min(
+        liveStart,
+        logicalLineStart(
+          buffer,
+          Math.max(from, buffer.length - CHOICE_TAIL_ROWS),
+        ),
+      ),
+      buffer.length,
     );
-    const lines = readLogicalLines(buffer, from, buffer.length);
-    while (lines.length > 0 && lines[lines.length - 1].runs.length === 0)
-      lines.pop();
-    renderChoices(lines.slice(-30).map(lineText));
-    if (mode !== "read") return;
-    if (!atBottom()) {
+    while (tail.length > 0 && tail[tail.length - 1].runs.length === 0)
+      tail.pop();
+    renderChoices(tail.slice(-30).map(lineText));
+    if (currentView === "terminal") return;
+    if (touching || !following) {
       behind = true;
-      latest.hidden = false;
+      latest.hidden = following;
       return;
     }
     behind = false;
     latest.hidden = true;
     older.hidden = from === 0;
     const palette = colors;
-    read.innerHTML = lines.map((line) => lineHtml(line, palette)).join("");
+    syncStable(buffer, from, liveStart, palette);
+    const live = linesIn(buffer, liveStart, buffer.length);
+    while (live.length > 0 && live[live.length - 1].runs.length === 0)
+      live.pop();
+    readLive.innerHTML = linesHtml(live, palette);
     scrollToBottom();
   }
 
@@ -352,20 +570,73 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     choices.hidden = found.length === 0;
   }
 
-  function fitScreenFont(): void {
-    if (!term || mode !== "screen") return;
-    const width = screen.clientWidth;
-    if (width < 1) return;
+  /** 「画面」の字の大きさ: ペインの桁が幅に入る大きさ (ピンチで決めたらそれ)。 */
+  function screenFont(width: number): number | null {
+    if (!term || width < 1) return null;
     const fit = Math.floor(width / (term.cols * MONO_WIDTH_RATIO));
-    term.options.fontSize =
-      screenFontSize ?? Math.min(GRID_FONT_MAX, Math.max(GRID_FONT_MIN, fit));
+    return (
+      screenFontSize ?? Math.min(GRID_FONT_MAX, Math.max(GRID_FONT_MIN, fit))
+    );
+  }
+
+  /** 今の出し方 (読む・升目の文・端末) に「画面」の字の大きさを当てる。 */
+  function fitScreenFont(): void {
+    if (!term) return;
+    if (currentView === "terminal") {
+      const size = screenFont(screen.clientWidth);
+      if (size !== null) term.options.fontSize = size;
+      return;
+    }
+    if (currentView !== "grid") return;
+    const size = screenFont(read.clientWidth);
+    if (size === null) return;
+    read.style.setProperty("--pane-grid-font", `${size}px`);
+    read.style.setProperty("--pane-cols", String(term.cols));
   }
 
   function openScreen(): void {
-    if (!term || mode !== "screen") return;
+    if (!term) return;
     if (!term.element) {
       screen.replaceChildren();
       term.open(screen);
+    }
+  }
+
+  /**
+   * 「画面」で端末 (xterm の升目) を出すのは、別画面 (vim など全画面のアプリ) の
+   * ときだけ。通常の画面は、読む画面と同じ行を PC のペインの桁で折り返して出す
+   * (端末だけでは、高さの低いペインは入力欄と状態の数行しか見えず、過去の行も
+   * 読めなかった)。
+   */
+  function viewFor(): PaneView {
+    if (mode === "read") return "read";
+    return term?.buffer.active.type === "alternate" ? "terminal" : "grid";
+  }
+
+  /** 出し方が変わったときだけ、出す箱と字の大きさを替える。 */
+  function applyView(): void {
+    const next = viewFor();
+    if (next === currentView) return;
+    // 読む画面と升目の文では行のまとめ方が違うので、確定した行を描き直す。
+    if (currentView !== null) {
+      stable?.marker?.dispose();
+      stable = null;
+    }
+    currentView = next;
+    read.hidden = next === "terminal";
+    read.classList.toggle("is-grid", next === "grid");
+    if (next !== "grid") {
+      read.style.removeProperty("--pane-grid-font");
+      read.style.removeProperty("--pane-cols");
+    }
+    screen.hidden = next !== "terminal";
+    if (next === "terminal") {
+      older.hidden = true;
+      latest.hidden = true;
+      openScreen();
+      // 読む画面の長い中身が隠れて箱が短くなっても、iPhone の Safari は
+      // スクロールの位置を戻さず、何も無い所を映して真っ黒になった。
+      body.scrollTop = 0;
     }
     fitScreenFont();
   }
@@ -377,18 +648,14 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
       button.classList.toggle("active", active);
       button.setAttribute("aria-pressed", String(active));
     }
-    read.hidden = next !== "read";
-    older.hidden = next !== "read" || older.hidden;
-    screen.hidden = next !== "screen";
     latest.hidden = true;
-    if (next === "screen") openScreen();
-    else {
-      behind = false;
-      requestAnimationFrame(() => {
-        scrollToBottom();
-        render();
-      });
-    }
+    applyView();
+    if (currentView === "terminal") return;
+    behind = false;
+    requestAnimationFrame(() => {
+      scrollToBottom();
+      render();
+    });
   }
 
   function applySnapshot(snapshot: TmuxPaneSnapshot): void {
@@ -416,7 +683,9 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
       created.onData((data) => void send({ keys: data })),
     ];
     created.write(paneSnapshotSequence(snapshot));
-    openScreen();
+    // 新しい端末: 出し方を当て直す (端末なら開き直す)。
+    currentView = null;
+    applyView();
     showStatus("");
   }
 
@@ -541,6 +810,8 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     choices.setAttribute("aria-label", t.choices);
     input.placeholder = t.placeholder;
     input.setAttribute("aria-label", t.placeholder);
+    attach.title = t.attach;
+    attach.setAttribute("aria-label", t.attach);
     sendButton.textContent = t.send;
   }
 
@@ -553,6 +824,8 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
       return;
     }
     const closed = pane;
+    const reopen = returnTo;
+    returnTo = null;
     generation += 1;
     pane = null;
     source?.close();
@@ -563,32 +836,43 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     termSubscriptions = [];
     term?.dispose();
     term = null;
-    read.replaceChildren();
+    if (olderTimer) clearTimeout(olderTimer);
+    olderTimer = null;
+    stable?.marker?.dispose();
+    stable = null;
+    readStable.replaceChildren();
+    readLive.replaceChildren();
     screen.replaceChildren();
     choices.replaceChildren();
     delete choices.dataset.signature;
     el.hidden = true;
     document.body.classList.remove("pane-view-open");
     deps.onClose(closed);
+    reopen?.();
   }
 
-  function open(target: TmuxPaneId): void {
+  function open(target: TmuxPaneId, reopen?: () => void): void {
     if (pane === target) return;
     if (pane) {
-      // 開いたまま別のペインへ: 積んだ履歴はそのまま使う。
+      // 開いたまま別のペインへ: 積んだ履歴はそのまま使う。前のペインを開いた
+      // 場所へは戻さない (戻るで閉じたのではない)。
       const keep = pushedHistory;
       pushedHistory = false;
+      returnTo = null;
       close();
       pushedHistory = keep;
     } else {
       history.pushState(history.state, "");
       pushedHistory = true;
     }
+    returnTo = reopen ?? null;
     pane = target;
     generation += 1;
     const myGen = generation;
     readLines = READ_LINES_STEP;
     behind = false;
+    following = true;
+    touching = false;
     resetControls();
     input.value = "";
     refreshHeader();
@@ -612,32 +896,93 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
   }
 
   back.addEventListener("click", () => close());
-  older.addEventListener("click", () => {
+  /** 前の出力を READ_LINES_STEP だけ足す (「前の出力」・上端で止まったとき)。 */
+  function showOlder(): void {
     readLines += READ_LINES_STEP;
-    const height = body.scrollHeight;
-    const top = body.scrollTop;
-    behind = false;
     const palette = colors;
     if (!term || !palette) return;
     const buffer = term.buffer.active;
-    const from = logicalLineStart(
-      buffer,
-      Math.max(0, buffer.length - readLines),
-    );
-    read.innerHTML = readLogicalLines(buffer, from, buffer.length)
-      .map((line) => lineHtml(line, palette))
-      .join("");
+    // 前に足すだけにできなければ (古い行が捨てられた・画面が消えた)、一番下を
+    // 描き直す。
+    if (!shiftStable(buffer)) {
+      behind = false;
+      render();
+      return;
+    }
+    const height = body.scrollHeight;
+    const top = body.scrollTop;
+    const from = readFrom(buffer);
+    extendStableFront(buffer, from, palette);
     older.hidden = from === 0;
     // 読んでいた所をそのままにする (上に足した分だけ下げる)。
     body.scrollTop = top + (body.scrollHeight - height);
-  });
+  }
+  older.addEventListener("click", showOlder);
   latest.addEventListener("click", () => {
     scrollToBottom();
     render();
   });
+  body.addEventListener(
+    "touchstart",
+    () => {
+      touching = true;
+    },
+    { passive: true },
+  );
+  // 離したときに一番下なら続きを描く (慣性で動いている間は scroll が見る)。
+  const releaseTouch = () => {
+    touching = false;
+    if (behind && following) render();
+  };
+  body.addEventListener("touchend", releaseTouch, { passive: true });
+  body.addEventListener("touchcancel", releaseTouch, { passive: true });
   body.addEventListener("scroll", () => {
-    if (behind && atBottom()) render();
+    if (body.scrollTop !== ownScrollTop) following = atBottom();
+    if (behind && following && !touching) render();
+    if (olderTimer) clearTimeout(olderTimer);
+    olderTimer = null;
+    if (older.hidden || body.scrollTop >= AT_TOP_PX) return;
+    olderTimer = setTimeout(() => {
+      olderTimer = null;
+      if (!older.hidden && body.scrollTop < AT_TOP_PX) showOlder();
+    }, SCROLL_SETTLE_MS);
   });
+  attach.addEventListener("click", () => picker.click());
+  picker.addEventListener("change", () => {
+    const files = [...(picker.files ?? [])];
+    picker.value = "";
+    void attachImages(files);
+  });
+
+  /** 選んだ画像を 1 枚ずつ保存してもらい、パスを返事の欄の後ろに足す。 */
+  async function attachImages(files: File[]): Promise<void> {
+    const myGen = generation;
+    const t = text();
+    for (const file of files) {
+      if (!pasteImageExtension(file.type)) {
+        showStatus(t.attachUnsupported(file.name));
+        return;
+      }
+      showStatus(t.attaching(file.name));
+      const result = await uploadPastedImage(file, {
+        actionHeaders: deps.actionHeaders,
+        trackLoad: deps.trackLoad,
+        failedText: t.attachFailed,
+      });
+      if (myGen !== generation) return;
+      if (result.status === "failed") {
+        console.error("[code-viewer] attaching an image failed", result.error);
+        showStatus(result.message);
+        return;
+      }
+      const before = input.value;
+      const gap = before === "" || /\s$/.test(before) ? "" : " ";
+      // パスに空白は入らない命名だが、引用しておけば将来変えても壊れない。
+      input.value = `${before}${gap}'${result.saved.path}' `;
+    }
+    showStatus("");
+  }
+
   compose.addEventListener("submit", (event) => {
     event.preventDefault();
     const value = input.value;
@@ -649,6 +994,11 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
   });
   const onResize = () => fitScreenFont();
   window.addEventListener("resize", onResize);
+  // 追いかけている間は、箱が縮んでも (キーボードが出た) 一番下に付いたまま。
+  const bodyResize = new ResizeObserver(() => {
+    if (following && currentView !== "terminal") scrollToBottom();
+  });
+  bodyResize.observe(body);
 
   // 「画面」は 2 本の指のピンチで文字の大きさを変える (横は箱がスクロールする)。
   let pinch: { startSize: number; startDistance: number } | null = null;
@@ -657,18 +1007,20 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
       event.touches[0].clientX - event.touches[1].clientX,
       event.touches[0].clientY - event.touches[1].clientY,
     );
-  screen.addEventListener(
+  body.addEventListener(
     "touchstart",
     (event) => {
-      if (event.touches.length !== 2 || !term) return;
+      if (mode !== "screen" || event.touches.length !== 2 || !term) return;
+      const width =
+        currentView === "terminal" ? screen.clientWidth : read.clientWidth;
       pinch = {
-        startSize: term.options.fontSize ?? GRID_FONT_MIN,
+        startSize: screenFont(width) ?? GRID_FONT_MIN,
         startDistance: fingers(event),
       };
     },
     { passive: true },
   );
-  screen.addEventListener(
+  body.addEventListener(
     "touchmove",
     (event) => {
       if (!pinch || event.touches.length !== 2 || !term) return;
@@ -679,11 +1031,11 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
         min: GRID_FONT_MIN,
         max: GRID_FONT_PINCH_MAX,
       });
-      term.options.fontSize = screenFontSize;
+      fitScreenFont();
     },
     { passive: false },
   );
-  screen.addEventListener("touchend", (event) => {
+  body.addEventListener("touchend", (event) => {
     if (event.touches.length < 2) pinch = null;
   });
 
@@ -704,8 +1056,10 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     },
     localize,
     dispose() {
+      returnTo = null;
       close();
       window.removeEventListener("resize", onResize);
+      bodyResize.disconnect();
       el.remove();
     },
   };
