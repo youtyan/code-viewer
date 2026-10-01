@@ -2412,6 +2412,30 @@ describe("runQueryCli integration", () => {
     ]);
   });
 
+  // DynamoDB の CLI は無い。SQL の schema / exec 行は 400 で落ちるので出さない。
+  test("query sources --commands emits no SQL commands for a DynamoDB source", async () => {
+    const file = {
+      id: "docker:sample-svc",
+      path: "docker:sample-svc",
+      name: "sample-svc (dynamodb)",
+      sizeBytes: 0,
+      kind: "dynamodb",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ files: [file] }) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([
+      "# source 1: docker:sample-svc (dynamodb)",
+      "# dynamodb: no CLI commands; browse it in the Data screen",
+      "",
+    ]);
+  });
+
   test("query exec --schema forwards schema in the query body", async () => {
     const harness = installRunHarness([
       { body: JSON.stringify({ files: [] }) },

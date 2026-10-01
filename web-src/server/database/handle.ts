@@ -407,18 +407,17 @@ async function expandDockerServicesForFiles(
 ): Promise<{ entries: DockerDbInfo[]; errors: string[] }> {
   const chunks = await Promise.all(
     dockerServices.map(async (svc) => {
-      if (
-        svc.kind === "redis" ||
-        svc.kind === "elasticsearch" ||
-        svc.kind === "s3"
-      ) {
+      // データベースを列挙して分けるのは PostgreSQL と MySQL だけ。ほかの種類
+      // (LocalStack の DynamoDB など) を mysql の経路で数えない。
+      const kind = svc.kind;
+      if (kind !== "postgresql" && kind !== "mysql") {
         return { entries: [svc], errors: [] };
       }
       let dbs: string[];
       try {
         dbs = await listDockerDatabases(
           svc.serviceName,
-          svc.kind as "postgresql" | "mysql",
+          kind,
           svc.env,
           svc.composeDir,
           signal,
