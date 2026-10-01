@@ -1,6 +1,8 @@
 // Diff の画面の文言。カードの見出し・置き札・帯は描くときに文言を入れるので、
 // 言語を切り替えたら diff-view の relocalize で描き直す。
 
+import type { FileStatusMark } from "../core/types";
+
 export type DiffViewText = {
   files(count: number): string;
   updated(time: string): string;
@@ -11,6 +13,8 @@ export type DiffViewText = {
   kindHeavy: string;
   kindBinary: string;
   kindMedia: string;
+  /** ファイル一覧の印の title (diff-view の fileBadge と作業ツリーの一覧)。 */
+  fileStatus: Record<FileStatusMark, string>;
   viewedProgress(viewed: number, total: number): string;
   viewedProgressTitle: string;
   nextUnviewed: string;
@@ -97,6 +101,15 @@ const EN: DiffScreenText = {
   kindHeavy: "heavy",
   kindBinary: "binary",
   kindMedia: "media",
+  fileStatus: {
+    M: "modified",
+    A: "added",
+    D: "deleted",
+    R: "renamed",
+    C: "conflicted (merge conflict)",
+    U: "untracked",
+    I: "ignored",
+  },
   viewedProgress: (viewed, total) => `${viewed}/${total} viewed`,
   viewedProgressTitle: "review progress",
   nextUnviewed: "next unviewed",
@@ -171,6 +184,15 @@ const JA: DiffScreenText = {
   kindHeavy: "大容量",
   kindBinary: "バイナリ",
   kindMedia: "メディア",
+  fileStatus: {
+    M: "変更",
+    A: "追加",
+    D: "削除",
+    R: "名前の変更",
+    C: "衝突（マージの衝突）",
+    U: "未追跡",
+    I: "無視",
+  },
   viewedProgress: (viewed, total) => `${viewed}/${total} 確認済み`,
   viewedProgressTitle: "確認進捗",
   nextUnviewed: "次の未確認",

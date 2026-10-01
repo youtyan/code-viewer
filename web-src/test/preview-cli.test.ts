@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -19,8 +19,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import {
+  type DiffMeta,
   type RepoTreeResponse,
   TREE_WITHOUT_COMMIT_DATES,
+  type WorktreesResponse,
 } from "../core/types";
 import {
   readServerRegistry,
@@ -1793,6 +1795,79 @@ describe("preview CLI", () => {
         expect(body.error).toBeUndefined();
         expect(body.files).toHaveLength(1);
         expect(body.files[0]?.path).toBe("sample.txt");
+      } finally {
+        await stopTestPreview(preview.proc, preview.exited);
+      }
+    },
+  );
+
+  // マージの衝突は、Files のツリー・Diff の変更ファイル・作業ツリーの一覧の
+  // どれでも C。`git diff HEAD` は衝突中のファイルを M と答えるので、Diff と
+  // 作業ツリーの一覧はそのままだと M だった。
+  runOrSkip(
+    "a file left conflicted by a merge is marked C in the tree, the diff and the worktree list",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-merge-conflict-"));
+      tmpRoots.push(root);
+      git(root, ["init", "-b", "main"]);
+      git(root, ["config", "user.email", "sample-author"]);
+      git(root, ["config", "user.name", "sample-author"]);
+      writeFileSync(join(root, "both.txt"), "base\n");
+      writeFileSync(join(root, "calm.txt"), "base\n");
+      git(root, ["add", "both.txt", "calm.txt"]);
+      git(root, ["commit", "-m", "sample initial commit"]);
+      git(root, ["checkout", "-b", "side"]);
+      writeFileSync(join(root, "both.txt"), "side\n");
+      git(root, ["commit", "-am", "sample side commit"]);
+      git(root, ["checkout", "main"]);
+      writeFileSync(join(root, "both.txt"), "main\n");
+      writeFileSync(join(root, "calm.txt"), "changed\n");
+      git(root, ["commit", "-m", "sample main commit", "both.txt"]);
+      // 衝突で止まる (exit 1) のが前提。
+      expect(
+        spawnSync("git", ["merge", "side"], { cwd: root, encoding: "utf8" })
+          .status,
+      ).toBe(1);
+      const preview = await startTestPreview(root);
+      try {
+        const get = async (path: string) => {
+          const response = await fetchWithTimeout(
+            new URL(path, preview.url).toString(),
+            10000,
+          );
+          expect(response.status).toBe(200);
+          return response.json();
+        };
+        const tree = (await get(
+          `/_tree?ref=worktree&${TREE_WITHOUT_COMMIT_DATES.join("=")}`,
+        )) as RepoTreeResponse;
+        const diff = (await get(
+          "/diff.json?from=HEAD&to=worktree&nocache=1",
+        )) as DiffMeta;
+        const list = (await get("/_worktree/list")) as WorktreesResponse;
+        const marks = (files: { path: string; status?: string }[]) =>
+          files.map(({ path, status }) => ({ path, status }));
+        expect({
+          tree: marks(tree.entries),
+          diff: marks(diff.files),
+          diffError: diff.error,
+          worktree: marks(list.worktrees[0]?.files ?? []),
+        }).toEqual({
+          tree: [
+            { path: ".git", status: undefined },
+            { path: "both.txt", status: "C" },
+            { path: "calm.txt", status: "M" },
+          ],
+          diff: [
+            { path: "both.txt", status: "C" },
+            { path: "calm.txt", status: "M" },
+          ],
+          diffError: undefined,
+          worktree: [
+            { path: "both.txt", status: "C" },
+            { path: "calm.txt", status: "M" },
+          ],
+        });
       } finally {
         await stopTestPreview(preview.proc, preview.exited);
       }

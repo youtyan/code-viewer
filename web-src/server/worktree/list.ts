@@ -27,6 +27,7 @@ import {
   fileMetaResultAsync,
   type GitFileMeta,
   type GitFileMetaResult,
+  markUnmergedAsync,
   mergePreviewResultAsync,
   repoRoot,
   worktreeDivergenceResultAsync,
@@ -129,13 +130,17 @@ export async function collectFiles(
         )
       : Promise.resolve<GitFileMetaResult>({ files: [] }),
   ]);
+  // 衝突中のファイルを C にする (コミット同士の差には衝突は無い)。
+  const conflicts = await markUnmergedAsync(uncommitted.files, ref.path);
   const files = [
     ...uncommitted.files.map((meta) => toFileChange(meta, "uncommitted")),
     ...committed.files.map((meta) => toFileChange(meta, "committed")),
   ];
   return {
     files,
-    error: joinErrors(uncommitted.error, committed.error) || undefined,
+    error:
+      joinErrors(uncommitted.error, conflicts?.error, committed.error) ||
+      undefined,
   };
 }
 

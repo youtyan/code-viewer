@@ -40,6 +40,7 @@ import type {
   DiffMeta,
   FileDiffResponse,
   FileMeta,
+  FileStatusMark,
   HljsApi,
   SidebarItem,
 } from "../core/types";
@@ -178,6 +179,32 @@ function collectDiffCardsByKey(target: Element): Map<string, DiffCardElement> {
   return cards;
 }
 
+/**
+ * ファイル一覧の印 (色の付いた 1 文字。Files のツリー・フォルダ表示・変更ファイル)。
+ * title はその言語の名前で、知らない文字はその文字のまま。言語を切り替えたら
+ * relocalize が data-file-status から付け直す。
+ */
+export function fileStatusBadge(
+  status: string | undefined,
+  titles: Record<FileStatusMark, string>,
+): HTMLElement {
+  const ch = (status || "M")[0].toUpperCase();
+  const span = document.createElement("span");
+  span.className = `badge ${ch}`;
+  span.textContent = ch;
+  span.dataset.fileStatus = ch;
+  span.title = fileStatusTitle(ch, titles);
+  return span;
+}
+
+function fileStatusTitle(
+  ch: string,
+  titles: Record<FileStatusMark, string>,
+): string {
+  const byMark: Partial<Record<string, string>> = titles;
+  return byMark[ch] ?? ch;
+}
+
 export function createDiffView(deps: DiffViewDeps) {
   const {
     $,
@@ -262,6 +289,11 @@ export function createDiffView(deps: DiffViewDeps) {
     for (const card of expanded) {
       if (card._file) void expandAllFileContext(card, card._file);
     }
+    const titles = deps.diffText().fileStatus;
+    for (const badge of document.querySelectorAll<HTMLElement>(
+      "[data-file-status]",
+    ))
+      badge.title = fileStatusTitle(badge.dataset.fileStatus ?? "", titles);
   }
 
   function shouldSyncSourceRouteToShell(): boolean {
@@ -296,22 +328,7 @@ export function createDiffView(deps: DiffViewDeps) {
   }
 
   function fileBadge(status?: string) {
-    const ch = (status || "M")[0].toUpperCase();
-    const span = document.createElement("span");
-    span.className = `badge ${ch}`;
-    span.textContent = ch;
-    span.title =
-      {
-        M: "modified",
-        A: "added",
-        D: "deleted",
-        R: "renamed",
-        // Outside version control: U is in the worktree but not tracked by
-        // git, I is excluded by a .gitignore rule.
-        U: "untracked",
-        I: "ignored",
-      }[ch] || ch;
-    return span;
+    return fileStatusBadge(status, deps.diffText().fileStatus);
   }
 
   function setFileViewed(path: string, viewed: boolean) {

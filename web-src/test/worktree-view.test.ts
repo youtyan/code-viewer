@@ -1775,16 +1775,28 @@ describe("diffs", () => {
     );
   });
 
-  test("marks an untracked file so the server compares against nothing", async () => {
-    const { diffUrls } = await mountWith(
+  // 未追跡だけをサーバに「何とも比べない」と伝える。衝突 (C) は追跡中のファイル。
+  test.each([
+    { status: "U", untracked: "1", title: "untracked" },
+    { status: "C", untracked: null, title: "conflicted (merge conflict)" },
+  ])("a $status file: untracked=$untracked, badge titled $title", async ({
+    status,
+    untracked,
+    title,
+  }) => {
+    const { diffUrls, filelist } = await mountWith(
       response([
-        item({ name: "repo", files: [file({ path: "new.ts", status: "U" })] }),
+        item({ name: "repo", files: [file({ path: "new.ts", status })] }),
       ]),
       { route: { wt: "/repo" }, diff: { diff: "@@ -0,0 +1 @@\n+a\n" } },
     );
-    expect(
-      new URLSearchParams(diffUrls[0].split("?")[1]).get("untracked"),
-    ).toBe("1");
+    expect({
+      untracked: new URLSearchParams(diffUrls[0].split("?")[1]).get(
+        "untracked",
+      ),
+      title: filelist.querySelector<HTMLElement>(".tree-file[data-key] .badge")
+        ?.title,
+    }).toEqual({ untracked, title });
   });
 
   test("hands each diff text to the renderer", async () => {
@@ -1807,7 +1819,12 @@ describe("diffs", () => {
     ["deleted media shows only before", "D", "uncommitted", ["before"]],
     ["untracked media shows only after", "U", "uncommitted", ["after"]],
     ["renamed media shows only the new path", "R", "committed", ["after"]],
-    ["copied media shows only the new path", "C", "committed", ["after"]],
+    [
+      "conflicted media shows before and after",
+      "C",
+      "uncommitted",
+      ["before", "after"],
+    ],
   ] as const)("%s", async (_name, status, origin, sides) => {
     const { diff } = await mountWith(
       response([

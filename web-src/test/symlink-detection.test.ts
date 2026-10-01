@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -14,6 +15,7 @@ import {
   gitSymlinkTargetMetadataAsync,
   ignoredPathsAsync,
   listTreeAsync,
+  parseStatusPorcelainZ,
   repoStatusForPath,
   repoStatusMapAsync,
   resolveSymlinkPath,
@@ -24,6 +26,16 @@ function initGitIdentity(dir: string) {
   runGit(dir, ["init"]);
   runGit(dir, ["config", "user.email", "test@example.com"]);
   runGit(dir, ["config", "user.name", "Test"]);
+}
+
+async function statusMapOf(
+  dir: string,
+  now?: number,
+): Promise<Map<string, string>> {
+  const result = await repoStatusMapAsync(dir, now);
+  if (result.ok === false)
+    throw new Error(`git status failed in ${dir}: ${result.error}`);
+  return result.map;
 }
 
 describe("resolveSymlinkPath", () => {
@@ -362,7 +374,7 @@ describe("repoStatusMapAsync", () => {
     writeFileSync(join(dir, "new-dir", "inside.txt"), "nested new file\n");
     writeFileSync(join(dir, "new-dir", "nested", "deep.txt"), "deeper\n");
 
-    statusMap = await repoStatusMapAsync(dir);
+    statusMap = await statusMapOf(dir);
   });
 
   afterAll(() => {
@@ -436,6 +448,83 @@ describe("repoStatusMapAsync", () => {
   });
 });
 
+// git status の XY を一覧の印 (core/types.ts の FileStatusMark) に寄せる。
+// マージの衝突 (unmerged の 7 通り) は C。直す前は U (未追跡と同じ印) だった。
+describe("parseStatusPorcelainZ", () => {
+  test.each([
+    { name: "both modified (UU)", out: "UU both.txt\0", mark: "C" },
+    { name: "both added (AA)", out: "AA both.txt\0", mark: "C" },
+    { name: "both deleted (DD)", out: "DD both.txt\0", mark: "C" },
+    { name: "added by us (AU)", out: "AU both.txt\0", mark: "C" },
+    { name: "added by them (UA)", out: "UA both.txt\0", mark: "C" },
+    { name: "deleted by us (DU)", out: "DU both.txt\0", mark: "C" },
+    { name: "deleted by them (UD)", out: "UD both.txt\0", mark: "C" },
+    { name: "untracked (??)", out: "?? both.txt\0", mark: "U" },
+    { name: "modified in the worktree", out: " M both.txt\0", mark: "M" },
+    { name: "staged add", out: "A  both.txt\0", mark: "A" },
+    { name: "deleted in the worktree", out: " D both.txt\0", mark: "D" },
+    {
+      name: "staged rename (the old path is skipped)",
+      out: "R  both.txt\0old.txt\0",
+      mark: "R",
+    },
+    {
+      name: "staged copy is folded into R (C is the conflict mark)",
+      out: "C  both.txt\0old.txt\0",
+      mark: "R",
+    },
+  ])("$name is $mark", ({ out, mark }) => {
+    expect([...parseStatusPorcelainZ(out)]).toEqual([["both.txt", mark]]);
+  });
+});
+
+// 本物の衝突で git が出す XY が C になる (Files のツリーの印)。
+test("a file left conflicted by a merge is marked C, not U (untracked)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "code-viewer-merge-conflict-"));
+  try {
+    initGitIdentity(dir);
+    writeFileSync(join(dir, "both.txt"), "base\n");
+    runGit(dir, ["add", "-A"]);
+    runGit(dir, ["commit", "-m", "base"]);
+    runGit(dir, ["checkout", "-b", "side"]);
+    writeFileSync(join(dir, "both.txt"), "side\n");
+    runGit(dir, ["commit", "-am", "side"]);
+    runGit(dir, ["checkout", "-"]);
+    writeFileSync(join(dir, "both.txt"), "main\n");
+    runGit(dir, ["commit", "-am", "main"]);
+    // 衝突で止まる (exit 1) のが前提。
+    expect(
+      spawnSync("git", ["merge", "side"], { cwd: dir, encoding: "utf8" })
+        .status,
+    ).toBe(1);
+    expect([...(await statusMapOf(dir))]).toEqual([["both.txt", "C"]]);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+// 失敗を空の結果 (= 何も変わっていない・何も無視していない) にすると、印が
+// 黙って消える・無視したファイルが未追跡に見える。
+test.each([
+  { name: "git status", ask: (dir: string) => repoStatusMapAsync(dir) },
+  {
+    name: "git check-ignore",
+    ask: (dir: string) => ignoredPathsAsync(["sample.txt"], dir),
+  },
+])("a $name that fails is returned with git's reason, not as empty", async ({
+  ask,
+}) => {
+  const dir = mkdtempSync(join(tmpdir(), "code-viewer-not-a-repo-"));
+  try {
+    expect(await ask(dir)).toEqual({
+      ok: false,
+      error: expect.stringMatching(/^fatal: not a git repository/),
+    });
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
 describe("ignoredPathsAsync", () => {
   let dir: string;
   let ignored: Set<string>;
@@ -454,10 +543,13 @@ describe("ignoredPathsAsync", () => {
     writeFileSync(join(dir, "build", "out.js"), "generated\n");
     writeFileSync(join(dir, "fresh.txt"), "new\n");
 
-    ignored = await ignoredPathsAsync(
+    const result = await ignoredPathsAsync(
       ["tracked.txt", "secret.txt", "build", "build/out.js", "fresh.txt"],
       dir,
     );
+    if (result.ok === false)
+      throw new Error(`git check-ignore failed in ${dir}: ${result.error}`);
+    ignored = result.paths;
   });
 
   afterAll(() => {
@@ -487,7 +579,10 @@ describe("ignoredPathsAsync", () => {
   });
 
   test("an empty request skips the git call and returns nothing", async () => {
-    expect(await ignoredPathsAsync([], dir)).toEqual(new Set());
+    expect(await ignoredPathsAsync([], dir)).toEqual({
+      ok: true,
+      paths: new Set(),
+    });
   });
 });
 
@@ -501,20 +596,14 @@ describe("repoStatusMapAsync caching", () => {
       runGit(dir, ["commit", "-m", "initial"]);
 
       const t0 = 1_700_000_000_000;
-      const beforeChange = await repoStatusMapAsync(dir, t0);
+      const beforeChange = await statusMapOf(dir, t0);
       expect(beforeChange.has("tracked.txt")).toBe(false);
 
       writeFileSync(join(dir, "tracked.txt"), "changed\n");
-      const staleAfterChange = await repoStatusMapAsync(
-        dir,
-        t0 + CACHE_TTL_MS - 1,
-      );
+      const staleAfterChange = await statusMapOf(dir, t0 + CACHE_TTL_MS - 1);
       expect(staleAfterChange.has("tracked.txt")).toBe(false);
 
-      const freshAfterTtl = await repoStatusMapAsync(
-        dir,
-        t0 + CACHE_TTL_MS + 1,
-      );
+      const freshAfterTtl = await statusMapOf(dir, t0 + CACHE_TTL_MS + 1);
       expect(freshAfterTtl.get("tracked.txt")).toBe("M");
     } finally {
       rmSync(dir, { force: true, recursive: true });
@@ -536,8 +625,8 @@ describe("repoStatusMapAsync caching", () => {
       runGit(dirB, ["add", "-A"]);
       runGit(dirB, ["commit", "-m", "initial"]);
 
-      const statusA = await repoStatusMapAsync(dirA);
-      const statusB = await repoStatusMapAsync(dirB);
+      const statusA = await statusMapOf(dirA);
+      const statusB = await statusMapOf(dirB);
       expect(statusA.get("only-in-a.txt")).toBe("M");
       expect(statusB.has("only-in-a.txt")).toBe(false);
       expect(statusB.has("only-in-b.txt")).toBe(false);
