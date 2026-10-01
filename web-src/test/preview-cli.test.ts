@@ -1115,7 +1115,7 @@ describe("preview CLI", () => {
           error?: string;
         };
         expect(diff.files).toEqual([]);
-        expect(diff.range).toBe("HEAD");
+        expect(diff.range).toBe("HEAD .. worktree");
         expect(diff.error).toBeUndefined();
 
         const panesRes = await fetchWithTimeout(`${url}_tmux/panes`, 5000);
