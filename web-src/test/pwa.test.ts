@@ -492,7 +492,8 @@ describe("the tab keys of an installed window", () => {
   });
 
   // ⌘← / ⌘→ (mac 以外は Ctrl) で隣のタブへ。PWA の窓だけ。入力欄では行の先頭・
-  // 末尾へ動く今の働きのまま (ページは受けない)、端末の中ではタブを移る。
+  // 末尾へ動く今の働きのまま (ページは受けない)。端末の中では ⌘ のときだけタブを
+  // 移り、Ctrl+← / → はシェルの単語移動に渡す。
   test.each<[boolean, boolean, PwaKeyTarget, string, PwaKeyOutcome]>([
     [true, true, "page", "ArrowLeft", run("main-tab-previous") as KeyOutcome],
     [true, true, "page", "ArrowRight", run("main-tab-next") as KeyOutcome],
@@ -512,7 +513,8 @@ describe("the tab keys of an installed window", () => {
     [true, false, "terminal", "ArrowRight", null],
     [false, true, "page", "ArrowLeft", run("main-tab-previous") as KeyOutcome],
     [false, true, "page", "ArrowRight", run("main-tab-next") as KeyOutcome],
-    [false, true, "terminal", "ArrowRight", run("main-tab-next") as KeyOutcome],
+    [false, true, "terminal", "ArrowLeft", null],
+    [false, true, "terminal", "ArrowRight", null],
     [false, true, "input", "ArrowRight", null],
     [false, false, "page", "ArrowRight", null],
   ])("mac %s, installed window %s, %s: the primary key + %s", (mac, standalone, target, key, expected) => {

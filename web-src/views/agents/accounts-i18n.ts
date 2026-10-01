@@ -403,7 +403,8 @@ export const ACCOUNTS_EN: AccountsText = {
   },
   usageCheck: "Check usage",
   usageRefreshAll: "Refresh all",
-  usageRefreshAuto: "Refreshes every 5 minutes while this view is open",
+  usageRefreshAuto:
+    "Refreshes every 5 minutes while any code-viewer page is open",
   usageCheckFor: (name) => `Check usage (${name})`,
   usageCheckTitle:
     "Reads subscription limits through the CLI without using model tokens.",
@@ -573,7 +574,7 @@ export const ACCOUNTS_EN: AccountsText = {
   added: (name) => `Added ${name}.`,
   usageTitle: "Usage",
   usageIntro: [
-    "Usage is refreshed every 5 minutes while the account view is open. Refresh all checks immediately. Claude uses /usage and Codex reads account/rateLimits/read; neither starts a model turn.",
+    "Usage is refreshed every 5 minutes while any code-viewer page is open, because the status bar always shows it. Refresh all checks immediately. Claude uses /usage and Codex reads account/rateLimits/read; neither starts a model turn.",
     "Usage received from the Claude status line or Codex session logs is also shown when newer. Status line collection is optional.",
   ],
   usageHow: "How it works",
@@ -764,7 +765,7 @@ export const ACCOUNTS_JA: AccountsText = {
   },
   usageCheck: "使用量を確かめる",
   usageRefreshAll: "すべて更新",
-  usageRefreshAuto: "表示中は5分ごとに自動更新",
+  usageRefreshAuto: "code-viewer の画面を開いている間は5分ごとに自動更新",
   usageCheckFor: (name) => `使用量を確かめる（${name}）`,
   usageCheckTitle:
     "CLI から契約の使用量を取得します。モデルのトークンは消費しません。",
@@ -934,7 +935,7 @@ export const ACCOUNTS_JA: AccountsText = {
   added: (name) => `${name} を追加しました。`,
   usageTitle: "使用量",
   usageIntro: [
-    "アカウント画面の表示中は5分ごとに取得します。「すべて更新」で即時取得もできます。Claude は /usage、Codex は account/rateLimits/read を使い、モデルのトークンを消費しません。",
+    "code-viewer の画面を開いている間は、5 分ごとに取得します。「すべて更新」ですぐ取得できます。Claude は /usage、Codex は account/rateLimits/read を使い、トークンを消費しません。",
     "Claude のステータスラインや Codex のセッション記録に、より新しい使用量があれば表示します。ステータスラインからの取得は任意です。",
   ],
   usageHow: "仕組み",

@@ -865,6 +865,8 @@ const BLOCKED_NAMES: Record<AccountAgent, Record<string, BlockedReason>> = {
     ".claude.json": "identity",
     "remote-settings.json": "identity",
     "policy-limits.json": "identity",
+    // policy-limits.json がどのアカウント・API キーのものかの記録。
+    "policy-limits.json.stamp.json": "identity",
     // ~/.claude.json の写し。
     backups: "identity",
     "history.jsonl": "history",

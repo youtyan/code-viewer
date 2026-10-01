@@ -311,6 +311,11 @@ const dir = process.env.CLAUDE_CONFIG_DIR || process.env.CODEX_HOME || "";
 const signedIn = !dir || existsSync(dir + "/.sample-signed-in");
 // 既定のアカウントは user@、ほかは設定ディレクトリの名前から (claude-personal → personal@)。
 const email = (dir ? basename(dir).replace(/^\\.?(claude|codex)-/, "") : "user") + "@example.com";
+// doctor の Agent CLIs が訊く。答えないと画面を描き続け、doctor が打ち切りまで待つ。
+if (args[0] === "--version") {
+  console.log(kind === "claude" ? "0.0.0 (Claude Code)" : "codex-cli 0.0.0");
+  process.exit(0);
+}
 if (kind === "claude" && args[0] === "auth" && args[1] === "status") {
   console.log(JSON.stringify(signedIn
     ? { loggedIn: true, email, authMethod: "claude.ai", subscriptionType: "max" }

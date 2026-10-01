@@ -16,7 +16,7 @@ import {
   highlightToInnerHtml,
   loadShikiHighlighter,
 } from "../core/shiki-loader";
-import type { HelpFigure } from "./help-images";
+import { HELP_CAPTURE_WIDTH, type HelpFigure } from "./help-images";
 import type { HelpLanguage } from "./help-page";
 import { terminalText } from "./terminal/i18n";
 import { openImageLightbox } from "./terminal/image-lightbox";
@@ -152,6 +152,11 @@ function figure(lang: HelpLanguage, item: HelpFigure): HTMLAnchorElement {
   link.href = item.src;
   link.target = "_blank";
   link.rel = "noopener";
+  // 縦横の比で、画像が届く前から箱を取る (style.css の .gdp-help-figure)。
+  link.style.setProperty(
+    "--help-figure-ratio",
+    String(HELP_CAPTURE_WIDTH / item.height),
+  );
   const img = document.createElement("img");
   img.src = item.src;
   img.alt = item.alt;

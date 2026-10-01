@@ -301,15 +301,19 @@ can review what you queried.
 
 - code-viewer must be running. When this repository's project process is not
   running, the CLI asks the running code-viewer to start it (stderr says so).
-- Only SELECT, PRAGMA, EXPLAIN, WITH queries are allowed (for exec).
+- exec runs read-only queries only. SQLite and D1 allow SELECT, PRAGMA,
+  EXPLAIN, WITH; PostgreSQL and MySQL allow SELECT, EXPLAIN, WITH, SHOW,
+  DESCRIBE.
 - Results are persisted and visible to the human.
 
 ## Workflow: SQL Query
 
 1. Discover datastore IDs without opening the browser. This lists every
-   SQLite / PostgreSQL / MySQL / Redis / Elasticsearch / S3 source the
-   running server has discovered, with credentials stripped. Use the id
-   field as --db on the following commands:
+   SQLite / PostgreSQL / MySQL / Cloudflare D1 / Redis / Elasticsearch /
+   S3 / DynamoDB source the running server has discovered or has saved,
+   with credentials stripped. D1 takes the SQL commands; DynamoDB has no
+   CLI commands (browse it in the Data screen). Use the id field as --db
+   on the following commands:
    code-viewer query sources --json
    To skip the per-SQL-source "what command should I run next?" step, use
    the shortcut that emits shell-pasteable schema/exec lines for SQL sources,
@@ -517,7 +521,8 @@ object bytes (text-shaped objects are previewable via \`s3 text\`).
   redis databases/keys lines, elasticsearch sources emit
   elasticsearch indices/docs lines, and s3 sources emit s3 buckets/objects
   lines with --bucket as a <bucket-name> placeholder so AI can step into
-  a specific bucket discovered via buckets;
+  a specific bucket discovered via buckets; dynamodb sources have no CLI
+  commands and emit only a "# dynamodb: no CLI commands" comment line;
   every emitted SQL command line pins --server
   <quoted-url> so the suggestion never falls back to auto-discovery in a
   different shell; db ids and the server URL are wrapped in POSIX
@@ -2403,6 +2408,8 @@ function commentText(value: string): string {
 //   - s3 source: s3 buckets / objects の調査入口を生成 (bucket は
 //     placeholder。source id だけからは bucket 名を一意に切り出せない
 //     形式もあるので、buckets を一度叩いて差し替える前提にする)
+//   - dynamodb source: CLI が無いので comment 1 行だけ (SQL の行を出すと
+//     schema / exec は 400 で落ち、list / snapshot list は意味が無い)
 // db id と server URL は常に shellSingleQuote で囲む。空白/シングルクォート
 // /コロン/スラッシュ が含まれていても bash/zsh にそのまま貼れる形を保証する。
 // --server を毎行に prefix することで、--commands 起動時の resolved server
@@ -2417,6 +2424,10 @@ function buildSourceCommands(
   const quotedServer = shellSingleQuote(serverUrl);
   const cli = `code-viewer query --server ${quotedServer}`;
   lines.push(`# source ${ordinal}: ${commentText(file.id)} (${file.kind})`);
+  if (file.kind === "dynamodb") {
+    lines.push("# dynamodb: no CLI commands; browse it in the Data screen");
+    return lines;
+  }
   if (file.kind === "redis") {
     // SQL の schema/exec とは API 形が違うので別系統。AI は --commands を見て
     // 「Redis に対しては databases/keys/value を読む」と判別できる。dbIndex 0

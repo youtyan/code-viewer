@@ -101,15 +101,20 @@ export function filterOrderByColumns<T extends { column: string }>(
 // ORDER BY 句を組み立てる。orderBy が空/未指定なら空文字列。kind 省略時は
 // sqlite 既定 (sanitizeIdentifier の方言切替に影響)。adapters/sqlite.ts と
 // adapters/docker.ts の両方から使う。
+// NULL はどの方言でも「いちばん小さい値」として並べる (SQLite・MySQL の既定)。
+// PostgreSQL の既定は逆 (降順で NULL が先頭) で、「新しい順」(updated_at の
+// 降順) にすると時刻の無い行が先頭に並んでいた。
 export function buildOrderClause(
   orderBy: DbOrder[] | undefined,
   kind: SqlKind = "sqlite",
 ): string {
   if (!orderBy?.length) return "";
-  const parts = orderBy.map(
-    (o) =>
-      `${sanitizeIdentifier(o.column, kind)} ${o.direction === "desc" ? "DESC" : "ASC"}`,
-  );
+  const parts = orderBy.map((o) => {
+    const desc = o.direction === "desc";
+    const nulls =
+      kind === "postgresql" ? (desc ? " NULLS LAST" : " NULLS FIRST") : "";
+    return `${sanitizeIdentifier(o.column, kind)} ${desc ? "DESC" : "ASC"}${nulls}`;
+  });
   return ` ORDER BY ${parts.join(", ")}`;
 }
 

@@ -59,6 +59,7 @@ import {
   setTimedCacheEntry,
   type TimedCacheEntry,
 } from "./cache";
+import type { ServerUrlResult } from "./cli-helpers";
 import {
   configureExternalCommands,
   type ExternalCommandOverride,
@@ -71,6 +72,7 @@ import {
 } from "./database/handle-shared";
 import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
+import { unsupportedArgumentsError } from "./entry/args";
 import {
   ENTRY_OUTDATED_EXIT_CODE,
   ENTRY_VERSION_REFUSED,
@@ -174,7 +176,6 @@ import {
 
 const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
   .version as string;
-const DEFAULT_ARGS = ["HEAD"];
 const PREVIEW_HUNKS_DEFAULT = 3;
 const PREVIEW_LINES_DEFAULT = 1200;
 const WATCHED_ASSET_FILES = ["index.html", "style.css", "app.js"];
@@ -235,7 +236,6 @@ const SAFE_UPLOAD_EXTENSIONS = new Set([
 
 let generation = 1;
 let cwd = process.cwd();
-let cliArgs = DEFAULT_ARGS;
 let listenPort = 0;
 let openAfterStart = false;
 const commandOverrides: ExternalCommandOverride[] = [];
@@ -296,14 +296,14 @@ const blobBytesCache = new Map<string, Uint8Array>();
 let blobLineCacheBytes = 0;
 
 function parseCli() {
-  const rest: string[] = [];
+  const unsupported: string[] = [];
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i];
     if (arg === "--help" || arg === "-h") {
       console.log(`code-viewer ${VERSION}
 
 Usage:
-  code-viewer [--cwd <repo>] [--port <port>] [--open] [--idle-stop <seconds>] [--remote-access <file>] [--standalone] [--bin <name>=<path>] [git-diff-args...]
+  code-viewer [--cwd <repo>] [--port <port>] [--open] [--idle-stop <seconds>] [--remote-access <file>] [--standalone] [--bin <name>=<path>] [--scope-omit-dir <name>]
   code-viewer status [--cwd <repo>] [--bin git=<path>] [--ref <ref>] [--limit <N>] [--json]
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
   code-viewer journal <list|add|edit|tasks|task-add|task-update|task-next|github-issues|task-link-issue|task-claim|task-done|task-delete> [options]
@@ -341,8 +341,6 @@ code-viewer doctor.
 Examples:
   code-viewer --open
   code-viewer --cwd /path/to/repo --open
-  code-viewer HEAD~1 HEAD
-  code-viewer --staged
   code-viewer status --json
   code-viewer annotate --help
   code-viewer query --help
@@ -394,8 +392,7 @@ Examples:
       );
       process.exit(1);
     } else if (arg === "--idle-stop") {
-      // 入口だけの引数。git の差分の引数として渡ると、分かりにくい git の
-      // 失敗になるので、ここで断る。
+      // 入口だけの引数。知らない引数として断るより、何が違うかを言う。
       console.error(
         "--idle-stop applies to the entry server only; it cannot be used with --standalone",
       );
@@ -432,6 +429,8 @@ Examples:
       commandOverrides.push(parsed.override);
     } else if (arg === "--allow-upload") {
       // Deprecated no-op: uploads are enabled for worktree folders by default.
+    } else if (arg === "--") {
+      // 位置引数を取らないので区切る相手が無い (`pnpm dev -- --standalone` で pnpm がそのまま渡す)。
     } else if (arg === "--scope-omit-dir") {
       const next = process.argv[++i];
       if (!next) {
@@ -443,10 +442,13 @@ Examples:
         next,
       ]);
     } else {
-      rest.push(arg);
+      unsupported.push(arg);
     }
   }
-  if (rest.length) cliArgs = rest;
+  if (unsupported.length > 0) {
+    console.error(unsupportedArgumentsError(unsupported));
+    process.exit(1);
+  }
   if (backendMode && (entryPid === null || entryToken === null)) {
     console.error("--backend requires --entry-pid and --entry-token");
     process.exit(1);
@@ -757,22 +759,12 @@ async function handleEntryAdopt(req: Request): Promise<Response> {
   return json({ ok: true, adopted: true });
 }
 
-function buildRangeArgs(range: { from?: string; to?: string }) {
+/** 差分の両端を git diff の引数にする。来なければ画面の既定 (HEAD → 作業ツリー)。 */
+function buildRangeArgs(range: { from?: string; to?: string }): string[] {
   const refs = [];
   if (range.from && range.from !== "worktree") refs.push(range.from);
   if (range.to && range.to !== "worktree") refs.push(range.to);
-  return { args: refs.length ? refs : cliArgs, refs };
-}
-
-function includeUntracked(
-  range: { from?: string; to?: string },
-  refs: string[],
-) {
-  const toWorktree = !range.to || range.to === "worktree";
-  if (refs.length > 0) return toWorktree && refs.length < 2;
-  return (
-    cliArgs.length === 0 || (cliArgs.length === 1 && cliArgs[0] === "HEAD")
-  );
+  return refs.length ? refs : ["HEAD"];
 }
 
 function guessMediaKind(path: string) {
@@ -889,12 +881,11 @@ async function computePayload(
 ): Promise<DiffMeta> {
   if (isSameWorktreeRange(range))
     return emptyDiffPayload("worktree .. worktree", responseGeneration);
-  const { args, refs } = buildRangeArgs(range);
-  const toWorktree = !range.to || range.to === "worktree";
-  const label =
-    (refs.length
-      ? `${refs.join(" .. ")}${toWorktree && refs.length === 1 ? " .. worktree" : ""}`
-      : cliArgs.join(" ")) || "HEAD";
+  const args = buildRangeArgs(range);
+  // 片方が作業ツリーなら、未追跡のファイルも差分に入れる。
+  const againstWorktree =
+    (!range.to || range.to === "worktree") && args.length === 1;
+  const label = `${args.join(" .. ")}${againstWorktree ? " .. worktree" : ""}`;
   // git 管理外のディレクトリに diff は無く、そこで `git diff` を呼ぶと usage
   // 全文が stderr に出る (読み込みと SSE の tick のたびに)。git を起動せずに
   // 空で答える。
@@ -906,11 +897,18 @@ async function computePayload(
   const metaResult = await git.fileMetaResultAsync(fullArgs, cwd, false);
   const files = metaResult.files;
   let metaError = metaResult.error;
-  if (!metaResult.error && includeUntracked(range, refs)) {
+  if (!metaResult.error && againstWorktree) {
     const untracked = await git.untrackedMetaAsync(cwd);
     files.push(...untracked.files);
     metaError = untracked.error;
   }
+  // 作業ツリーと比べるとき (ref が 1 つ) は、衝突中のファイルを C にする。
+  const conflicts =
+    args.length === 1 ? await git.markUnmergedAsync(files, cwd) : null;
+  if (conflicts)
+    metaError = metaError
+      ? `${metaError}\n${conflicts.error}`
+      : conflicts.error;
   // A trailing "/" means "everything under this directory" (folder history);
   // otherwise the filter names exactly one file (or its pre-rename path).
   const filteredFiles = pathFilter
@@ -1408,16 +1406,31 @@ async function handleTree(url: URL) {
   // changes, so the status map (and its `git status` call) is worktree-only.
   // Ignore rules are worktree-only for the same reason: a committed ref
   // holds only tracked content by definition.
+  // A folder outside git has no marks (not a failure). Inside git a failed
+  // `git status` / `git check-ignore` fails the listing with its reason:
+  // listed without marks, a changed or deleted file would read as unchanged
+  // or be missing, and an ignored file as untracked.
   const worktreeTarget = target === "worktree" || target === "";
-  const [statusMap, ignoredPaths] = worktreeTarget
-    ? await Promise.all([
-        git.repoStatusMapAsync(cwd),
-        git.ignoredPathsAsync(
-          entries.map((entry) => entry.path),
-          cwd,
-        ),
-      ])
-    : [null, null];
+  const [statusResult, ignoredResult] =
+    worktreeTarget && currentGitRepositoryState() !== "outside"
+      ? await Promise.all([
+          git.repoStatusMapAsync(cwd),
+          git.ignoredPathsAsync(
+            entries.map((entry) => entry.path),
+            cwd,
+          ),
+        ])
+      : [null, null];
+  const gitFailures = [statusResult, ignoredResult].flatMap((result) =>
+    result?.ok === false ? [result] : [],
+  );
+  if (gitFailures.length > 0)
+    return text(
+      gitFailures.map((failure) => failure.error).join("\n"),
+      gitFailures[0].status ?? 500,
+    );
+  const statusMap = statusResult?.ok ? statusResult.map : null;
+  const ignoredPaths = ignoredResult?.ok ? ignoredResult.paths : null;
   const withStatus = (entry: git.GitTreeEntry): git.GitTreeEntry => {
     const found = statusMap && git.repoStatusForPath(statusMap, entry.path);
     // A status record naming this entry wins. A code merely inherited from
@@ -1479,7 +1492,7 @@ async function handleSettings() {
       currentGitRepositoryState() === "inside"
         ? await git.remoteWebUrlAsync(cwd)
         : null,
-    server: { pid: process.pid, root: cwd },
+    server: { pid: process.pid, root: cwd, version: VERSION },
     scope: {
       omit_dirs_effective: scopeOmitDirNames,
       omit_dirs_built_in: git.DEFAULT_WORKTREE_OMIT_DIR_NAMES,
@@ -1802,7 +1815,7 @@ async function handleFileDiff(url: URL) {
       generation: responseGeneration,
     });
   }
-  const { args } = buildRangeArgs(range);
+  const args = buildRangeArgs(range);
   const oldPath = url.searchParams.get("old_path");
   let cacheKey: string;
   try {
@@ -2666,6 +2679,18 @@ function annotationSse(
 const MCP_MAX_BODY_BYTES = 1_048_576;
 const MCP_INSTRUCTIONS = buildMcpInstructions();
 
+// 裏はターミナルの状態を持たない (巡回・フックの受け口・シェルは入口)。MCP の
+// terminal 系の道具は、画面と `code-viewer terminal` と同じく持ち主の入口に聞く。
+function entryTerminalServer(): ServerUrlResult {
+  if (entryUrl !== null) {
+    return { status: "ok", url: entryUrl.replace(/\/+$/, "") };
+  }
+  return {
+    status: "error",
+    message: `the terminal state is held by the code-viewer entry server that started this project process (pid ${entryPid}), but its URL has not been verified yet${lastEntryOwnerFailure ? `:\n${lastEntryOwnerFailure}` : ""}`,
+  };
+}
+
 async function handleMcp(req: Request): Promise<Response> {
   if (req.method !== "POST") {
     return new Response("method not allowed", {
@@ -2695,6 +2720,9 @@ async function handleMcp(req: Request): Promise<Response> {
       cwd,
       omitDirNames: scopeOmitDirNames,
       generation,
+      ...(backendMode
+        ? { terminalServer: entryTerminalServer, signal: req.signal }
+        : {}),
     }),
     instructions: MCP_INSTRUCTIONS,
   });
@@ -3388,9 +3416,10 @@ const server = await startServer({
           start(controller) {
             ctrl = controller;
             sseClients.add(controller);
-            controller.enqueue(
-              enc.encode(`retry: ${SSE_RETRY_MS}\nevent: open\ndata: ok\n\n`),
-            );
+            // 最初の行は注釈 (": ok") にする。`event: open` だと EventSource は
+            // 自分の open に続けてもう 1 度 open を配り、画面は繋ぎ直しと読んで
+            // 開くたびに全部を取り直していた (app.ts の connectEventSource)。
+            controller.enqueue(enc.encode(`retry: ${SSE_RETRY_MS}\n: ok\n\n`));
             if (watchLimitReached !== null) {
               controller.enqueue(
                 enc.encode(

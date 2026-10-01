@@ -407,6 +407,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               kind: "list",
               items: [
                 "M は変更、A は追加（ステージ済み）、D は削除、R は名前の変更です。",
+                "C はマージで衝突しているファイルです。",
                 "U はまだ git add していないファイル、I は .gitignore で無視しているファイルです。",
               ],
             },
@@ -488,11 +489,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
           blocks: [
             {
               kind: "paragraph",
-              text: "起動するときに、git diff と同じ引数を渡せます。",
-            },
-            {
-              kind: "command",
-              command: "code-viewer HEAD~1 HEAD\ncode-viewer --staged",
+              text: "画面の上の 2 つの ref を変えます（初めは HEAD → worktree）。どちらも worktree・HEAD・--staged を選べ、ブランチ・タグ・コミットも並びます。",
             },
             {
               kind: "paragraph",
@@ -1144,7 +1141,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               ],
             },
             more(
-              "アカウント画面の表示中は、5 分おきに自動更新します。",
+              "code-viewer のページを開いている間は、5 分おきに自動更新します。",
               "Claude・Codex とも、使用量の取得ではモデルにメッセージを送らず、トークンを消費しません。",
               [
                 "claude のカードの ",
@@ -1266,7 +1263,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   ui(l.terminal.readOnly),
                   " にします。",
                 ],
-                "エージェントが書き出した画像は右の棚に並び、押すと画像のタブで開きます。",
+                "ターミナルにパスが出た画像は右の棚に並び、押すと画像のタブで開きます。",
                 [
                   "棚の画像は出たペインごとにまとまり、カーソルを載せるとそのペインが枠で囲まれ、棚の見出しにパスが出ます。右クリックの ",
                   ui(l.terminal.imageShowInTerminal),
@@ -2164,7 +2161,37 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   ui(l.database.edit.editMode),
                   " にすると、セルを直して、まとめて書き込めます。",
                 ],
-                "外部キーのセルを押すと、関係する行をたどれます。",
+                "外部キーのセルを押すと、下に関係する行が出ます。左の一覧は「参照している」と「参照されている」に分かれ、件数も出ます。",
+                [
+                  "セルをドラッグして範囲を選び、",
+                  key("⌘C"),
+                  " でコピーすると Excel にそのまま貼れます。",
+                  key("Shift"),
+                  " も押すと列名つきです。",
+                ],
+                "NULL は塗りの札、空文字は点線の枠の札で出ます。",
+              ],
+            },
+          ],
+        },
+        {
+          title: "最近の変化を見る",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                [
+                  "テーブルは新しい行から並びます。表の上の ",
+                  ui(l.database.grid.newestLabel),
+                  " を押すと、元の順に戻ります。",
+                ],
+                [
+                  "行番号の右の ",
+                  ui(l.database.grid.recencyHeader),
+                  " に、行が足された（＋）・変わった（鉛筆）のが何分前かが出ます。created_at・updated_at などの列から読みます。",
+                ],
+                "再読み込みすると、前回から新しく出た行・変わった行に色の印が付きます。",
+                "表の上のタイムゾーンの欄で、日時の列を別のタイムゾーンで表示できます (tokyo・+9 などで探せます)。書き出しは元の値のままです。",
               ],
             },
           ],
@@ -2406,13 +2433,15 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
             {
               kind: "list",
               items: [
-                "code-viewer が動いている間、読むだけの MCP のサーバとして使えます。",
+                "code-viewer が動いている間、MCP のサーバとしても使えます。",
                 [
-                  "起動したときに出る URL のポートで、",
-                  code("http://127.0.0.1:<port>/_mcp"),
+                  "起動したときに出るプロジェクトの URL の後ろに ",
+                  code("_mcp"),
+                  " を付けた ",
+                  code("http://127.0.0.1:<port>/p/<key>/_mcp"),
                   " に繋ぎます。",
                 ],
-                "ファイル・検索・git の履歴・データストアを読む道具が使えます。",
+                "ファイル・検索・git の履歴・データストア・ターミナルを読む道具が使えます。",
               ],
             },
             more(
@@ -2450,9 +2479,15 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   " を足します。",
                 ],
                 [
-                  "注釈を人と共有したいときは、",
+                  "注釈を人と共有したいときは、代わりに ",
+                  code(".code-viewer/*"),
+                  " と ",
+                  code("!.code-viewer/annotations.json"),
+                  " を ",
+                  code(".gitignore"),
+                  " に書き、",
                   code("annotations.json"),
-                  " だけをコミットします。",
+                  " をコミットします。",
                 ],
                 "フォルダごと消すと、そのリポジトリの状態を全部やり直せます。",
               ],
@@ -2515,6 +2550,10 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   "tmux を入れ、tmux の中でエージェントを動かします",
                 ],
                 ["状態が違って出る", "フックを入れます"],
+                [
+                  "claude や codex を上げてから動きがおかしい",
+                  "doctor の Agent CLIs に、手元の版と code-viewer が確かめた版が並びます",
+                ],
                 [
                   "SQLite が開けない",
                   [

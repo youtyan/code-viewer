@@ -4,7 +4,8 @@
 // これ。ここが黙って壊れると、受け渡しが成立していないことに誰も気付けない。
 // tmux は環境依存なので、実際にペインを叩かない範囲だけを見る。
 
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { errorWithCause } from "../core/error-detail";
 import type { McpTool } from "../server/mcp";
 import { defaultMcpTools } from "../server/mcp";
 import {
@@ -123,6 +124,194 @@ describe("code_viewer_terminal_list", () => {
   test("returns an empty list when nothing has reported", async () => {
     const result = await runTool("code_viewer_terminal_list", {});
     expect(parseText(result.text)).toEqual({ states: [], errors: [] });
+  });
+});
+
+// 入口の裏では、状態を持つ入口に聞く (経路そのものは entry-server.test.ts)。
+// 入口が分からないとき、このプロセスの空の記録に黙って落ちない。
+describe("when the server holding the terminal state is not known", () => {
+  const unknown = defaultMcpTools({
+    terminalServer: () => ({ status: "error", message: "sample reason" }),
+  });
+  test.each([
+    {
+      name: "code_viewer_terminal_list",
+      input: {},
+      operation: "terminal list",
+    },
+    {
+      name: "code_viewer_terminal_capture",
+      input: { target: SHELL },
+      operation: "terminal capture",
+    },
+    {
+      name: "code_viewer_terminal_state",
+      input: { target: PANE, event: "ask" },
+      operation: "terminal state",
+    },
+  ])("$name says why", async ({ name, input, operation }) => {
+    const found = unknown.find((entry) => entry.name === name);
+    expect(await found?.run(input)).toEqual({
+      text: `${operation}: sample reason`,
+      isError: true,
+    });
+    expect(getAgentState(PANE)).toBeNull();
+  });
+});
+
+// 聞いた先が答えないとき・形の違う答えを返したときも、どの要求で何が
+// 起きたかを全部残す。空の一覧や空の本文として読まない。
+describe("when asking the server that holds the terminal state", () => {
+  const SERVER = "http://127.0.0.1:9";
+  const STATES = `${SERVER}/_agent/states`;
+  const tools = (signal?: AbortSignal) =>
+    defaultMcpTools({
+      terminalServer: () => ({ status: "ok", url: SERVER }),
+      signal,
+    });
+  const run = (signal: AbortSignal | undefined, name: string, input: unknown) =>
+    tools(signal)
+      .find((entry) => entry.name === name)
+      ?.run(input);
+  const neverTimesOut = () => new AbortController().signal;
+  const timedOut = () =>
+    AbortSignal.abort(
+      new DOMException(
+        "The operation was aborted due to timeout",
+        "TimeoutError",
+      ),
+    );
+  const rejectWithSignalReason = async (
+    _url: string,
+    init: RequestInit,
+  ): Promise<Response> => {
+    throw init.signal?.reason;
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  test.each([
+    {
+      name: "a refused connection keeps the whole cause chain",
+      timeout: neverTimesOut,
+      request: undefined,
+      answer: async (): Promise<Response> => {
+        throw errorWithCause(
+          "fetch failed",
+          Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:9"), {
+            code: "ECONNREFUSED",
+          }),
+        );
+      },
+      expected: `Error: terminal list: GET ${STATES} failed\nCaused by: Error: fetch failed\nCaused by: Error: connect ECONNREFUSED 127.0.0.1:9\nDetails: {"code":"ECONNREFUSED"}`,
+    },
+    {
+      name: "no answer within the time limit names the request",
+      timeout: timedOut,
+      request: undefined,
+      answer: rejectWithSignalReason,
+      expected: `Error: terminal list: GET ${STATES} did not finish within 10 seconds\nCaused by: TimeoutError: The operation was aborted due to timeout`,
+    },
+    {
+      name: "the MCP client going away stops the request",
+      timeout: neverTimesOut,
+      request: AbortSignal.abort(),
+      answer: rejectWithSignalReason,
+      expected: `Error: terminal list: GET ${STATES} failed\nCaused by: AbortError: This operation was aborted`,
+    },
+    {
+      name: "a 2xx body that is not JSON",
+      timeout: neverTimesOut,
+      request: undefined,
+      answer: async () => new Response("<html>"),
+      expected: `Error: terminal list: GET ${STATES} answered HTTP 200 with a body that is not JSON: <html>\nCaused by: SyntaxError: Unexpected token '<', "<html>" is not valid JSON`,
+    },
+    {
+      name: "a list without the states and errors arrays",
+      timeout: neverTimesOut,
+      request: undefined,
+      answer: async () => Response.json({ states: [] }),
+      expected: `terminal list: GET ${STATES} answered without states and errors lists: {"states":[]}`,
+    },
+  ])("$name", async ({ timeout, request, answer, expected }) => {
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeout());
+    vi.stubGlobal("fetch", vi.fn(answer));
+    expect(await run(request, "code_viewer_terminal_list", {})).toEqual({
+      text: expected,
+      isError: true,
+    });
+  });
+
+  test.each([
+    {
+      name: "history above the maximum is clamped, the cursor is forwarded",
+      input: { target: SHELL, cursor: "c1", history: 99999 },
+      url: `${SERVER}/_agent/capture?target=shell-abc123&cursor=c1&history=5000`,
+    },
+    {
+      name: "history below zero is clamped to zero",
+      input: { target: SHELL, history: -3 },
+      url: `${SERVER}/_agent/capture?target=shell-abc123&history=0`,
+    },
+    {
+      name: "a fractional history is truncated",
+      input: { target: SHELL, history: 12.7 },
+      url: `${SERVER}/_agent/capture?target=shell-abc123&history=12`,
+    },
+    {
+      name: "an omitted history is left to the server",
+      input: { target: SHELL },
+      url: `${SERVER}/_agent/capture?target=shell-abc123`,
+    },
+  ])("capture: $name", async ({ input, url }) => {
+    const body = {
+      target: SHELL,
+      kind: "shell",
+      content: "sample output",
+      cursor: "c2",
+      reset: false,
+    };
+    const fetchMock = vi.fn(async (_url: string) => Response.json(body));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await run(undefined, "code_viewer_terminal_capture", input)).toEqual(
+      { text: JSON.stringify(body, null, 2) },
+    );
+    expect(fetchMock.mock.calls.map(([called]) => called)).toEqual([url]);
+  });
+
+  // 入口の申告の口は本文を 32 KB で断る。長い指示文で、入口の下でだけ 413 に
+  // ならないよう、サーバと同じ長さに切ってから送る。
+  test("state: long texts are clipped to the server's limit before sending", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) =>
+      Response.json({ ok: true }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await run(undefined, "code_viewer_terminal_state", {
+      target: PANE,
+      event: "ask",
+      lastPrompt: "p".repeat(40_000),
+      note: "n".repeat(40_000),
+    });
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => ({
+        url,
+        body: JSON.parse(String(init.body)),
+      })),
+    ).toEqual([
+      {
+        url: `${SERVER}/_agent/state`,
+        body: {
+          target: PANE,
+          event: "ask",
+          at: expect.any(Number),
+          lastPrompt: "p".repeat(2000),
+          note: "n".repeat(2000),
+        },
+      },
+    ]);
   });
 });
 

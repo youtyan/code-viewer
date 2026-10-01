@@ -138,7 +138,12 @@ export async function describeShellAvailability(): Promise<ShellAvailability> {
   };
 }
 
-/** ログインシェル。ユーザーの環境をそのまま使う。 */
+/**
+ * 利用者の `$SHELL` (無ければ /bin/sh)。引数を付けずに PTY の上で起こすので、
+ * ログインシェルではない対話シェルになる (`-l` を付けない。.zprofile・
+ * .bash_profile は読まれず、.zshrc・.bashrc は読まれる)。環境はこのサーバの
+ * プロセスのものを引き継ぐ。
+ */
 function resolveShellCommand(): string {
   return process.env.SHELL || "/bin/sh";
 }

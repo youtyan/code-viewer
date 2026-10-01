@@ -57,7 +57,7 @@ export type WorktreeFileChange = {
   path: string;
   /** rename/copy 前のパス。重なり検出では path と同じく数える。 */
   oldPath?: string;
-  /** git の status 文字 (M / A / D / R / C)。未追跡は "U"。 */
+  /** 一覧の印 (core/types.ts の FileStatusMark): git diff の文字 (M / A / D / R)、未追跡は "U"、衝突は "C"。 */
   status: string;
   additions: number;
   deletions: number;

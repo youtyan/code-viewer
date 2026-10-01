@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   ENTRY_WAKE_TIMEOUT_MS,
+  extractErrorDetail,
   resolveRepoRootSafe,
   resolveServerUrl,
   type ServerProbe,
@@ -121,6 +122,67 @@ describe("takeGlobalCliOption", () => {
   ])("keeps shared validation behavior: $name", ({ value, expected }) => {
     expect(validateRefValue(value, "--value")).toBe(expected);
     expect(validateRepoRelativePathValue(value, "--value")).toBe(expected);
+  });
+});
+
+// サーバのエラーの JSON は error の文だけでなく、入口の欄 (code・detail・log・
+// project・route・waitedSeconds) も持つ。直す前は error の文だけを残し、残りの
+// 欄を捨てていた。
+describe("extractErrorDetail", () => {
+  test.each([
+    {
+      name: "空の本文は HTTP の状態",
+      body: "",
+      isJson: true,
+      expected: "HTTP 502",
+    },
+    {
+      name: "JSON でない本文はそのまま",
+      body: "bad gateway",
+      isJson: false,
+      expected: "bad gateway",
+    },
+    {
+      name: "error だけの JSON は文だけ",
+      body: '{"error":"target is gone"}',
+      isJson: true,
+      expected: "target is gone",
+    },
+    {
+      name: "入口の取り次ぎの失敗は code・project・detail を続けて出す (空の log は出さない)",
+      body: '{"error":"forwarding failed","code":"proxy-failed","project":{"key":"k","root":"/sample"},"detail":"Error: refused\\n  cause: ECONNREFUSED","log":""}',
+      isJson: true,
+      expected:
+        'forwarding failed\ncode: proxy-failed\ndetail: Error: refused\n  cause: ECONNREFUSED\nproject: {"key":"k","root":"/sample"}',
+    },
+    {
+      name: "裏が起きないときは log も出す",
+      body: '{"error":"could not start","code":"backend-start-failed","project":{"key":"k","root":"/sample"},"detail":"Error: exited","log":"server output (/tmp/sample.log):\\nboom"}',
+      isJson: true,
+      expected:
+        'could not start\ncode: backend-start-failed\ndetail: Error: exited\nlog: server output (/tmp/sample.log):\nboom\nproject: {"key":"k","root":"/sample"}',
+    },
+    {
+      name: "入口の時間切れは route・waitedSeconds も出す",
+      body: '{"error":"the project process did not start responding within 120 seconds","code":"backend-timeout","route":{"method":"GET","path":"/_status"},"project":{"key":"k","root":"/sample"},"waitedSeconds":120,"detail":"TimeoutError: timed out"}',
+      isJson: true,
+      expected:
+        'the project process did not start responding within 120 seconds\ncode: backend-timeout\ndetail: TimeoutError: timed out\nproject: {"key":"k","root":"/sample"}\nroute: {"method":"GET","path":"/_status"}\nwaitedSeconds: 120',
+    },
+    {
+      name: "クエリの失敗のデータの欄は出さない",
+      body: '{"dbId":"sample.db","columns":[],"rows":[],"error":"sample failure"}',
+      isJson: true,
+      expected: "sample failure",
+    },
+    {
+      name: "error の無い JSON は本文そのまま",
+      body: '{"message":"x"}',
+      isJson: true,
+      expected: '{"message":"x"}',
+    },
+  ])("$name", ({ body, isJson, expected }) => {
+    expect(extractErrorDetail(body, isJson, 502)).toBe(expected);
   });
 });
 

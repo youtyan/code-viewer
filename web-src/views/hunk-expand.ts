@@ -239,15 +239,21 @@ export function createHunkExpand(deps: HunkExpandDeps) {
     // twice when row-height drift makes another base "see" the same
     // candidate as its closest neighbour.
     const usedTrs = new WeakSet();
+    // 位置は組み合わせる前に全部読む。下の classList の書き込みと交互に読むと、
+    // 読むたびに表全体の配置をやり直す (ハンク 300 の差分で 2 秒止まった)。
+    const tops = new Map<HTMLTableRowElement, number>();
+    for (const arr of perTable)
+      for (const item of arr)
+        tops.set(item.tr, item.tr.getBoundingClientRect().top);
     base.forEach((baseItem) => {
-      const top = baseItem.tr.getBoundingClientRect().top;
+      const top = tops.get(baseItem.tr) ?? 0;
       const group = perTable
         .map((arr, tableIndex) => {
           let best: HunkSibling | null = null,
             bestD = Infinity;
           for (const item of arr) {
             if (usedTrs.has(item.tr)) continue;
-            const d = Math.abs(item.tr.getBoundingClientRect().top - top);
+            const d = Math.abs((tops.get(item.tr) ?? 0) - top);
             if (d < bestD) {
               best = item;
               bestD = d;
@@ -516,21 +522,35 @@ export function createHunkExpand(deps: HunkExpandDeps) {
     }
   }
 
+  // 同じフレームに頼まれた行をまとめて合わせる。行ごとに「読んで書く」を
+  // 繰り返すと、書くたびに次の読みが表全体の配置をやり直す。
+  let rowHeightBatch: {
+    rows: HTMLTableRowElement[];
+    stackRow: HTMLTableRowElement;
+  }[] = [];
   function syncExpandRowHeights(
     rows: HTMLTableRowElement[],
     stackRow: HTMLTableRowElement,
   ) {
-    const syncHeight = () => {
-      const stack = stackRow.querySelector(".gdp-expand-stack");
-      const targetH = stack
-        ? Math.max(20, stack.getBoundingClientRect().height)
-        : 20;
-      rows.forEach((row) => {
-        row.style.setProperty("height", `${targetH}px`, "important");
+    rowHeightBatch.push({ rows, stackRow });
+    if (rowHeightBatch.length > 1) return;
+    const batch = rowHeightBatch;
+    const syncHeights = () => {
+      const heights = batch.map(({ stackRow }) => {
+        const stack = stackRow.querySelector(".gdp-expand-stack");
+        return stack ? Math.max(20, stack.getBoundingClientRect().height) : 20;
+      });
+      batch.forEach(({ rows }, index) => {
+        rows.forEach((row) => {
+          row.style.setProperty("height", `${heights[index]}px`, "important");
+        });
       });
     };
-    requestAnimationFrame(syncHeight);
-    setTimeout(syncHeight, 100);
+    requestAnimationFrame(() => {
+      if (rowHeightBatch === batch) rowHeightBatch = [];
+      syncHeights();
+    });
+    setTimeout(syncHeights, 100);
   }
 
   function attachTrailingExpandControls(

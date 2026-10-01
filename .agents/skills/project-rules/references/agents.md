@@ -284,9 +284,10 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 - claude の `Notification` は `permission_prompt` と `elicitation_dialog` だけ。`idle_prompt`
   （入力欄で待っているだけ）は完了・未読を入力待ちで上書きしてしまう
 - `SessionStart` の `compact` は除く。作業の途中で起きるので、待機に倒すと作業中が消える
-- claude は `SessionEnd` 以外を `async` にして待たせない。**codex には async が無い**ので、
+- claude は `SessionEnd` 以外を `async` にして待たせない。codex には入れた当時 async が無かったので、
   ツールごとに呼ばれる出来事（`PostToolUse`）は入れない。許可の後に作業へ戻ったことは
-  画面の観測に任せる
+  画面の観測に任せる（2026-10-02 の公式では codex も `SessionEnd` 以外で async を受ける。
+  `PostToolUse` を足すかは未決）
 
 ### 出来事を足す・変えるとき
 
@@ -302,6 +303,8 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
    実行しない**（下の「codex の信頼」）
 5. 動かして確かめるのは 10 の手順。設定ファイルに書かれたコマンドを、公式どおりの入力で
    手で実行して一覧の状態が変わることを見る
+6. `.agents/skills/project-agent-cli-upgrade/references/checklist.md` の H1・H2（受け取る欄なら H3）
+   の行を同じ変更で直す
 
 ### 起動スクリプトを挟む理由
 
@@ -578,8 +581,10 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 - 同じアカウント・設定ディレクトリ・起動コマンドの確認が実行中なら、その結果を待つ（`joined`）
 - 成功した値だけ `AccountService.recordUsage` に保存する。保存済みの記録より新しく、
   設定ディレクトリと起動コマンドが一致するときに使う。サーバの再起動でこのキャッシュは消える
-- `accounts-client.ts` の既存の画面ポーリングで、アカウント画面を開いている間は 5 分ごとに
-  更新する。「すべて更新」は即時取得。未ログイン・設定ディレクトリ無しは対象から除く
+- `accounts-client.ts` の既存の画面ポーリングで 5 分ごとに更新する。最下段に常に出すので
+  `app.ts` が起動時に `retain` して離さず、code-viewer の画面を開いている間はずっと回る
+  (アカウント画面を開いている間だけではない)。「すべて更新」は即時取得。未ログイン・
+  設定ディレクトリ無しは対象から除く
 - 失敗は `read-failed` と元のエラー全文で返す。カードと設定で詳細のコピー・再試行ができる。
   旧サーバの画面待ちの応答も表示できるよう、旧理由・応答フィールドは残す
 - 旧方式の確認用 tmux セッションが残っていても一覧や通知に出ないよう、
@@ -1007,7 +1012,7 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 | worktree の 2 段表示 | worktree は本体のプロジェクトにまとめ、行に worktree 名を出すだけ |
 | 通知はタブを開いている間だけ | ブラウザの通知なので、code-viewer のタブが 1 つも無ければ出ない。長く裏にあるタブはブラウザがタイマーを間引くので遅れる（ブラウザの仕様。遅れの幅は測っていない） |
 | `ps` の出力の切り方 | `ps eww` は区切りを持たないので、値の終わりを「空白 + `名前=`」で決めている。パスに ` NAME=` の並びがあると切り損なう。起動後に環境が変わった場合やセッション中のアカウント切替は見えない |
-| 内部形式に頼っている箇所 | codex のセッション記録（使用量）、エージェントの画面の文言（状態）、claude の `.claude.json` の `hasCompletedOnboarding`（初回の案内の印。5 のログイン）、Claude Code の `/usage` の構造化出力（`server/accounts/usage-check.ts` の `claudeWindows`）、Claude Code がプロジェクトの設定ファイルを読む場所と順（起動のときの statusLine。`server/accounts/project-statusline.ts` の `projectSettingsFiles`。公式の説明にあるが、版で変わってきた: 以前は settings.local.json を起動したフォルダに置いていた）。どれも版が上がれば壊れうる。壊れたら理由つきで「取得できません」・画面ルールの修正（2）・使用量を確かめるはエラーの詳細を表示する |
+| 内部形式に頼っている箇所 | claude / codex の振る舞いに頼っている所の全部（公式のものと内部形式の両方）は `.agents/skills/project-agent-cli-upgrade/references/checklist.md` の点検表 1 か所に置き、確かめた版は `core/agent-cli-versions.ts` の `CHECKED_AGENT_CLI_VERSIONS`（doctor の Agent CLIs が手元の版と並べる）。版が変わったらそのスキルの手順で確かめる。**頼る所を新しく足したら、点検表に行を足す**（場所の名前は `agent-cli-checklist.test.ts` が実在を確かめる） |
 | 使用量の取得と CLI の版 | Claude の構造化された `/usage` に対応していない版では取得に失敗する。モデルへの送信による代替取得はしない |
 | 画面ルールの保存済み上書き | ユーザー単位に移した（8）。`--standalone` のサーバもユーザー単位のものを読むので、並んでいても同じルールで判定する |
 | xterm の代替画面の行数の上限（上流の不具合。6.0.0 と上流の main で同じ） | xterm は、一度も使っていない代替画面（tmux・vim・less が使う画面）を縮めても、その画面の行数の上限を縮めない。上限が画面より大きいまま tmux が代替画面へ入ると、画面に無いはずの行が溜まり、次に行数が変わったときに画面の起点がずれて、最後の行が重複して並ぶ。回避は `terminal-screen.ts` の `attach` で「寸法を合わせてから `reset`」の順にすること（`reset` は今の寸法で両方の画面を作り直す。順番は `terminal-screen-resize.test.ts` が見る）。**残る限界**: tmux を使わない素のシェルで、代替画面に入っていない間に下のパネルを低くしてから vim などを起動すると、同じ崩れが起きうる（公開 API では上限を直せない）。開き直す（タブを行き来する・再読み込み）と `attach` が作り直すので直る |

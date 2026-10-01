@@ -137,9 +137,10 @@ Exit codes:
 export const SEARCH_AGENT_HELP = `code-viewer search — agent guide
 
 You are an AI coding agent. Use this command to grep the repository through
-the running code-viewer server. The search uses ripgrep when available and
-falls back to git grep / fixed-string scanning, so output is stable across
-environments. Results are NOT persisted on the server; this is a pure read.
+the running code-viewer server. The working tree is searched with ripgrep, or
+a built-in fixed-string scanner when rg is missing (a regex search then fails
+and says rg is needed); other refs use git grep. Results are NOT persisted on
+the server; this is a pure read.
 
 ## When to use
 
@@ -221,9 +222,10 @@ Parse failures and unreachable servers exit 1.
   about why a match ranked where it did before opening it.
 - search code: truncated=true means more matches exist beyond --max.
   Re-run with a tighter --path or a higher --max (capped at ${GREP_ABSOLUTE_MAX}).
-- search code: engine=fallback with regex=true returns zero matches by
-  design — the fallback path does not support regex. Install ripgrep or
-  use a fixed string instead.
+- search code: --regex on the working tree needs ripgrep (rg) on the
+  server. Without it the command fails (exit 1) and says so. Install
+  ripgrep (or start code-viewer with --bin rg=/absolute/path), or search
+  a fixed string instead.
 - search code: matching is case-insensitive on every engine unless you
   pass --case-sensitive; --word requires the hit to sit on word
   boundaries. --path accepts globs ("src/**/*.ts", "*.md") as well as

@@ -10,6 +10,17 @@ import type {
   WorktreeOverlap,
 } from "./worktree";
 
+/**
+ * ファイル一覧の印 (サイドバー・Files のフォルダ表示・変更ファイル・作業ツリー)。
+ * 下の `status` の欄の値: M 変更・A 追加 (ステージ済み)・D 削除・R 名前の変更・
+ * C 衝突・U 未追跡・I 無視。git の文字の U (unmerged) と C (copy) の意味では使わない。
+ * Files のツリーの印は server/git.ts の parseStatusPorcelainZ が git status を
+ * この 7 つに寄せる (unmerged の 7 通りは C、コピーは R)。変更ファイルの一覧
+ * (Diff・作業ツリー) は `git diff` の文字で、作業ツリーと比べるときだけ
+ * markUnmergedAsync が衝突中のファイル (git は M と答える) を C にする。
+ */
+export type FileStatusMark = "M" | "A" | "D" | "R" | "C" | "U" | "I";
+
 export type FileMeta = {
   order?: number;
   key?: string;
@@ -116,6 +127,8 @@ export type SettingsResponse = {
   server: {
     pid: number;
     root: string;
+    /** この server の code-viewer の版 (package.json)。ヘルプのページの見出しに出す。 */
+    version: string;
   };
   scope: {
     omit_dirs_effective: string[];
@@ -305,6 +318,12 @@ export type DbUiPrefs = {
   // 推測し、🔗 表示や関連パネル経由でナビゲートできるようにする。
   // default false (DB の真実を尊重)。
   inferFkRails?: boolean;
+  // Data の表を開いたとき、新しい行を先頭に並べる (updated_at / created_at /
+  // 整数の主キーの降順)。表の上の「新しい順」で切り替えた値を覚える。default true。
+  newestFirst?: boolean;
+  // Data の表の日時の列を表示し直すタイムゾーン。"local" は画面の PC の
+  // タイムゾーン、ほかは IANA の名前 ("UTC"・"Asia/Tokyo")。無ければ元の値のまま。
+  timeZone?: string;
 };
 
 export type DbUiState = {

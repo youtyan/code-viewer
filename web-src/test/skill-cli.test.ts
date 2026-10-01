@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { installSkill, parseSkillArgs } from "../server/skill-cli";
 
@@ -214,6 +214,39 @@ describe("installSkill", () => {
     expect(result.results.map((r) => r.target)).toEqual(
       BUNDLED_SKILLS.map((skill) => join(other, ".claude", "skills", skill)),
     );
+  });
+
+  // 途中で失敗したら、それまでに入れたもの (書き換わったもの) も言う。
+  test.each([
+    {
+      name: "the agent's directory is a file: nothing was copied before",
+      blocked: ".claude",
+      message: (skills: string) =>
+        `could not copy the code-viewer-annotate skill for claude into ${skills}/code-viewer-annotate; nothing was copied before it`,
+      cause: { code: "ENOTDIR", syscall: "mkdir" },
+    },
+    {
+      name: "the third skill's directory is a file: the first two are listed",
+      blocked: ".claude/skills/code-viewer-query",
+      message: (skills: string) =>
+        `could not copy the code-viewer-query skill for claude into ${skills}/code-viewer-query; copied before it:\n  installed (claude/code-viewer-annotate): ${skills}/code-viewer-annotate\n  installed (claude/code-viewer-journal): ${skills}/code-viewer-journal`,
+      cause: { code: "EEXIST", syscall: "mkdir" },
+    },
+  ])("$name", ({ blocked, message, cause }) => {
+    const dirs = makeDirs();
+    const blockedPath = join(dirs.projectDir, blocked);
+    mkdirSync(dirname(blockedPath), { recursive: true });
+    writeFileSync(blockedPath, "");
+    let thrown: unknown;
+    try {
+      installSkill({ agents: ["claude"], global: false }, dirs);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({
+      message: message(join(dirs.projectDir, ".claude", "skills")),
+      cause,
+    });
   });
 
   test("missing bundled skills directory fails with an error", () => {

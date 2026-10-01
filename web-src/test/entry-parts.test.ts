@@ -260,7 +260,7 @@ describe("the project processes the entry starts", () => {
           pid: 777,
           backend: options.backend ?? true,
         })),
-      serverArgs: () => ["--staged"],
+      serverArgs: () => ["--scope-omit-dir", "vendor"],
       idleStopMs: options.idleStopMs ?? IDLE_MS,
       now: () => clock.now,
       log: (line) => {
@@ -295,7 +295,7 @@ describe("the project processes the entry starts", () => {
         logFile: "/state/server-logs/sample.log",
         backendOf: 4242,
         backendToken: "0123456789abcdef",
-        serverArgs: ["--staged"],
+        serverArgs: ["--scope-omit-dir", "vendor"],
       },
     ]);
   });

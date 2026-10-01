@@ -1037,6 +1037,51 @@ describe("diff view fast path", () => {
     }
   });
 
+  // ファイルの画面の裏の Diff は display: none で箱が全部 0。画面の中に数えると
+  // 変更ファイル全部を読み込んでいた。
+  test.each([
+    { rendered: true, requests: 1 },
+    { rendered: false, requests: 0 },
+  ])("loads a card on first render only when it is rendered: $rendered", async ({
+    rendered,
+    requests: expected,
+  }) => {
+    setupDiffDom();
+    const originalObserver = globalThis.IntersectionObserver;
+    const originalRects = HTMLElement.prototype.getClientRects;
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    globalThis.IntersectionObserver = class {
+      observe() {
+        /* noop */
+      }
+      disconnect() {
+        /* noop */
+      }
+      unobserve() {
+        /* noop */
+      }
+    } as unknown as typeof IntersectionObserver;
+    if (!rendered)
+      HTMLElement.prototype.getClientRects = () => [] as unknown as DOMRectList;
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return deferred<Response>().promise;
+    }) as typeof fetch;
+    try {
+      const { view } = createDiffViewForShellTest();
+      view.renderShell(
+        makeMeta([makeFile("README.md", 1, 0, "/file_diff?path=README.md")]),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(requests.length).toBe(expected);
+    } finally {
+      globalThis.IntersectionObserver = originalObserver;
+      HTMLElement.prototype.getClientRects = originalRects;
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("focuses every diff row in a line range", () => {
     setupDiffDom();
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;

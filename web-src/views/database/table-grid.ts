@@ -1,4 +1,9 @@
 import { apiUrl } from "../../core/api-url";
+import { relativeTimeText } from "../../core/blame";
+import { showCopyFailure } from "../../core/copy-failure";
+import { inCellRange } from "../../core/database/cell-range";
+import { isFutureTime } from "../../core/database/recency";
+import { formatInZone } from "../../core/database/time-zone";
 import type {
   DbCellInput,
   DbColumn,
@@ -13,6 +18,7 @@ import { formatErrorDetail } from "../../core/error-detail";
 import { isEditableKeyTarget } from "../../core/focus-scope";
 import {
   DOWNLOAD_16_PATHS,
+  HISTORY_16_PATH,
   iconSvg,
   LINK_16_PATH,
   SEARCH_16_PATH,
@@ -30,12 +36,27 @@ import {
   writeStoredSize,
 } from "../../core/stored-size";
 import type { AnnotationDatabaseDataState } from "../../core/types";
+import { pageLanguage } from "../page-language";
 import { currentRowHeight } from "../shell/row-height";
 import { showConfirmDialog } from "../ui-dialog";
-import { createDetailTable } from "./detail-table";
 import { createDetailTabs } from "./detail-tabs";
+import { createGridRangeSelect } from "./grid-range-select";
+import {
+  createGridRecency,
+  createRefreshMarks,
+  RECENCY_COLUMN_WIDTH,
+} from "./grid-recency";
 import { type DbText, dbText } from "./i18n";
+import { fillNullOrEmpty } from "./query-value";
+import {
+  type RelatedCount,
+  type RelatedEntry,
+  renderRelatedHead,
+  renderRelatedList as renderRelatedListView,
+} from "./related-list";
 import { reportDatastoreFailure } from "./report-failure";
+import { renderRowDetail } from "./row-detail";
+import { createTimeZonePicker } from "./time-zone-picker";
 
 // 行の高さは一覧の行と同じ表示密度の値 (views/shell/row-height.ts)。CSS の
 // .db-grid-row は同じ値を --ui-row-h で読む。
@@ -63,13 +84,18 @@ const DETAIL_PANEL_MIN_HEIGHT = 40;
 const PANEL_MAX_RESERVE = 20;
 // 関連パネル左リストの幅。既定 / 下限 / 上限はここが出所で、CSS 側は
 // var(--db-related-list-w, ...) の fallback だけを持つ (JS 実行前の初回描画用)。
-const RELATED_LIST_DEFAULT_WIDTH = 200;
+const RELATED_LIST_DEFAULT_WIDTH = 280;
+// 関連の一覧の件数を同時に数える本数 (表の多い DB で一度に投げすぎない)。
+const RELATED_COUNT_CONCURRENCY = 4;
 const RELATED_LIST_MIN_WIDTH = 120;
 const RELATED_LIST_MAX_WIDTH = 480;
 const RELATED_LIST_WIDTH_KEY = "code-viewer:db-related-list-width";
 
 // 矢印キー 1 打あたりの移動量。データセル間だけを動き、行番号列と
 // 新規行ドラフトには入らない。
+// コピーの結果を表の下の行に出しておく時間 (失敗は次の操作まで残す)。
+const COPY_NOTICE_MS = 6000;
+
 const ARROW_STEP: Record<string, { row: number; col: number }> = {
   ArrowUp: { row: -1, col: 0 },
   ArrowDown: { row: 1, col: 0 },
@@ -158,6 +184,14 @@ export type TableGridCallbacks = {
    * 関連パネルに入ったキーボード操作が出られなくなるのを防ぐ。
    */
   onFocusParentGrid?: () => void;
+  /** 表を開いたときに新しい行を先頭に並べるか (利用者の設定。既定は親が決める)。 */
+  getNewestFirst?: () => boolean;
+  /** 「新しい順」を切り替えたとき、次に開く表のために覚える。失敗は throw。 */
+  setNewestFirst?: (on: boolean) => Promise<void>;
+  /** 日時の列を出し直すタイムゾーンの設定 ("" = 元の値、"local"、IANA の名前)。 */
+  getTimeZone?: () => string;
+  /** タイムゾーンを選んだとき、覚える (null = 元の値に戻す)。失敗は throw。 */
+  setTimeZone?: (pref: string | null) => Promise<void>;
   /** ユーザー操作のリロードが成功したとき、親ビューへ件数同期の機会を通知する。 */
   onRefreshComplete?: (event: {
     table: string;
@@ -175,7 +209,17 @@ export type TableGrid = {
   el: HTMLElement;
   /** グリッド本体へフォーカスを移す (矢印キーの受け手を切り替える)。 */
   focusGrid: () => void;
-  load: (table: string, initialData?: DbTableDataResponse) => void;
+  /**
+   * 表を描く。`fetchedSort` は initialData を取ったときの並べ方 (null = 並べて
+   * いない)。省略すると表が自分で決め、取った並びと違えば取り直す。
+   */
+  load: (
+    table: string,
+    initialData?: DbTableDataResponse,
+    fetchedSort?: GridSort | null,
+  ) => void;
+  /** この列の表を開くときの並べ方 (「新しい順」の設定で決まる)。 */
+  initialSortFor: (columns: DbColumn[]) => GridSort | null;
   refresh: () => Promise<void>;
   showError: (message: string) => void;
   applyState: (state: AnnotationDatabaseDataState) => Promise<void>;
@@ -320,9 +364,42 @@ export function createTableGrid(
   editStatus.className = "db-grid-edit-status";
   editWrap.append(newRowBtn, commitBtn, discardBtn, editStatus);
 
+  // 最近の変化: 行番号の右の「変更」の列と、再読み込みで変わった行の印。
+  const recency = createGridRecency({ text });
+  const refreshMarks = createRefreshMarks();
+  // 「新しい順」。押せるかどうかは表の列で決まる (時刻の列か整数の主キー)。
+  const newestBtn = document.createElement("button");
+  newestBtn.type = "button";
+  newestBtn.className = "db-btn db-btn-sm db-grid-newest";
+  newestBtn.hidden = true;
+  newestBtn.setAttribute("aria-pressed", "false");
+  newestBtn.innerHTML = iconSvg("octicon-history", HISTORY_16_PATH);
+  const newestLabel = document.createElement("span");
+  newestLabel.className = "db-grid-newest-label";
+  newestBtn.appendChild(newestLabel);
+
+  // 日時の列を出し直すタイムゾーン。関連パネルの表は設定を読むだけで、
+  // 選択欄は出さない。
+  const timeZone = createTimeZonePicker({
+    text,
+    get: () => callbacks.getTimeZone?.() ?? "",
+    set: (pref) => callbacks.setTimeZone?.(pref) ?? Promise.resolve(),
+    onChange: () => {
+      timeZone.sync();
+      renderHeader();
+      renderViewport();
+    },
+  });
+
   const filterActions = document.createElement("div");
   filterActions.className = "db-grid-filter-actions";
-  filterActions.append(refreshBtn, refreshResult, exportWrap);
+  filterActions.append(
+    timeZone.el,
+    newestBtn,
+    refreshBtn,
+    refreshResult,
+    exportWrap,
+  );
 
   filterBar.append(
     filterIcon,
@@ -424,6 +501,38 @@ export function createTableGrid(
   viewport.append(spacer, body, filteredEmpty);
   el.append(filterBar, headerWrap, filterRowWrap, viewport, detailPanel);
 
+  // セルの範囲を選んでコピーする (ドラッグ・Shift・⌘/Ctrl+A・⌘/Ctrl+C)。
+  const rangeSelect = createGridRangeSelect({
+    body,
+    viewport,
+    enabled: () => !editMode && currentTable !== "",
+    renderStartRow: () => renderStartRow,
+    totalRows: () => totalRows,
+    columnNames: () => columnNames,
+    leadingCellCount,
+    rowHeight: currentRowHeight,
+    active: () =>
+      activeCellRowIndex >= 0 && activeCellColIndex >= 0
+        ? { row: activeCellRowIndex, col: activeCellColIndex }
+        : null,
+    setActive: (point, scroll) => {
+      setActiveCell(point.row, point.col);
+      setSelectedRow(
+        point.row,
+        (body.children[point.row - renderStartRow] as HTMLElement) ?? null,
+      );
+      if (scroll) scrollCellIntoView(point.row, point.col);
+    },
+    generation: () => loadGeneration,
+    rowsBetween,
+    cellText: cellCopyText,
+    text,
+    notice: showCopyNotice,
+    table: () => currentTable,
+  });
+  let copyNotice = "";
+  let copyNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+
   // セル詳細フッタの高さ (関連パネルと同じ persist 経路)。embedded の埋め込み
   // グリッドでは詳細フッタは出ないので初期化のみで参照されない。
   // pane の MAX は実機の el の高さに合わせて毎回算出する (window resize にも
@@ -453,6 +562,14 @@ export function createTableGrid(
   // 更新したあと、現在 body 上にいる古い active class を外して新しい
   // セルに付け直す。virtualized 再描画でも renderViewport が state を
   // 見てクラスを再付与するので、スクロール後の表示も維持される。
+  // 行の先頭に固定する列: 行番号と、時刻の列がある表では「変更」の列。
+  function leadingCellCount(): number {
+    return recency.shown() ? 2 : 1;
+  }
+  function pinnedWidth(): number {
+    return ROWNUM_WIDTH + (recency.shown() ? RECENCY_COLUMN_WIDTH : 0);
+  }
+
   function setActiveCell(rowIndex: number, colIndex: number) {
     activeCellRowIndex = rowIndex;
     activeCellColIndex = colIndex;
@@ -465,11 +582,11 @@ export function createTableGrid(
     }
     activeCellElement = null;
     if (rowIndex < 0 || colIndex < 0) return;
-    // colIndex+1: rowNum cell が先頭にあるので 1 ずれる。
+    // 先頭の固定の列 (行番号と「変更」) の分だけずれる。
     const targetRow = body.children[rowIndex - renderStartRow] as
       | HTMLElement
       | undefined;
-    const targetCell = targetRow?.children[colIndex + 1];
+    const targetCell = targetRow?.children[colIndex + leadingCellCount()];
     if (!targetCell) return;
     targetCell.classList.add("db-grid-cell-active");
     activeCellElement = targetCell;
@@ -522,6 +639,8 @@ export function createTableGrid(
       | HTMLElement
       | undefined;
     focusCell(rowIndex, rendered ?? null, colIndex);
+    // 矢印キーで動いたら、選んでいた範囲は今のセルだけに戻す。
+    rangeSelect.collapse();
     scrollCellIntoView(rowIndex, colIndex);
     showDetailForActiveCell();
   }
@@ -541,12 +660,14 @@ export function createTableGrid(
     }
     const viewWidth = viewport.clientWidth;
     if (viewWidth <= 0) return;
-    let left = ROWNUM_WIDTH;
+    const pinned = pinnedWidth();
+    let left = pinned;
     for (let c = 0; c < colIndex; c++) left += getColWidth(columnNames[c]);
     const right = left + getColWidth(columnNames[colIndex]);
-    if (left < viewport.scrollLeft + ROWNUM_WIDTH) {
-      // 固定した行番号の右側まで戻し、選択セルがその裏に隠れないようにする。
-      viewport.scrollLeft = left - ROWNUM_WIDTH;
+    if (left < viewport.scrollLeft + pinned) {
+      // 固定した行番号 (と「変更」の列) の右側まで戻し、選択セルがその裏に
+      // 隠れないようにする。
+      viewport.scrollLeft = left - pinned;
     } else if (right > viewport.scrollLeft + viewWidth) {
       viewport.scrollLeft = right - viewWidth;
     }
@@ -665,6 +786,11 @@ export function createTableGrid(
     // ときは既定のフォーカス移動に任せる (グリッドから出られなくしない)。
     if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (moveGridFocus(e.shiftKey)) e.preventDefault();
+      return;
+    }
+    // 範囲の選択とコピー (Shift+矢印・⌘/Ctrl+A・⌘/Ctrl+C・範囲を戻す Escape)。
+    if (rangeSelect.handleKey(e)) {
+      e.preventDefault();
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
@@ -842,6 +968,8 @@ export function createTableGrid(
     direction: RelatedDirection;
     fk: DbForeignKey;
     value: string;
+    /** 行の数 (一覧に出す)。開いたあとに数える。 */
+    count: RelatedCount;
   };
   // ドリルの 1 段。sourceTable の行が持つ FK 参照群と選択中の参照。
   type RelatedLevel = {
@@ -856,6 +984,12 @@ export function createTableGrid(
   let relatedGridHost: HTMLElement | null = null;
   // 参照先が 0 件のときに出す空表示。
   let relatedEmptyEl: HTMLElement | null = null;
+  // 右の表の上の見出し (何の行か・条件・件数)。
+  let relatedHeadEl: HTMLElement | null = null;
+  // 0 件の関係を一覧から隠すか (一覧の下の切り替え)。
+  let relatedHideEmpty = true;
+  // 一覧の件数を数えている取得。階層が変わったら止める。
+  let relatedCountController: AbortController | null = null;
   // ヘッダーのパンくず（ドリル経路）を表示する要素。
   let relatedCrumbEl: HTMLElement | null = null;
   let embeddedGrid: TableGrid | null = null;
@@ -989,7 +1123,7 @@ export function createTableGrid(
     const rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
     for (const row of rows) {
       const cells = row.querySelectorAll<HTMLElement>(
-        ".db-grid-cell:not(.db-grid-rownum)",
+        ".db-grid-cell:not(.db-grid-rownum):not(.db-grid-recency)",
       );
       const cell = cells[colIndex];
       if (cell) {
@@ -1118,6 +1252,7 @@ export function createTableGrid(
   function resetSelectionAndDetail() {
     selectedRowIndex = -1;
     selectedRowElement = null;
+    rangeSelect.reset();
     // active セルも落とす。並べ替え / 再読込で同じ行 index が別の行を
     // 指すので、残すと「フッタは閉じているのにセルだけ光っている」状態
     // になり、矢印キーの現在地も前のデータの位置から始まってしまう。
@@ -1142,6 +1277,7 @@ export function createTableGrid(
   function invalidateData(): Promise<void> {
     pageCache = new Map();
     pendingPages = new Map();
+    refreshMarks.clear();
     clearRefreshResult();
     startNewLoadGeneration();
     viewport.scrollTop = 0;
@@ -1167,6 +1303,8 @@ export function createTableGrid(
       clearTimeout(filterTimer);
       filterTimer = null;
     }
+    // 読み直す前の行を控え、届いた行と比べて新しく出た行・変わった行に印を付ける。
+    refreshMarks.begin(pageCache.entries(), rowKeyFor);
     pageCache = new Map();
     pendingPages = new Map();
     startNewLoadGeneration();
@@ -1178,6 +1316,7 @@ export function createTableGrid(
       await ensurePage(pageStart);
     } finally {
       const endedInError = statusEl?.classList.contains("db-pane-error");
+      if (endedInError) refreshMarks.clear();
       isRefreshing = false;
       refreshBtn.classList.remove("spinning");
       refreshBtn.disabled = false;
@@ -1208,6 +1347,10 @@ export function createTableGrid(
     columnNames = [];
     totalRows = 0;
     sort = null;
+    recency.reset([]);
+    refreshMarks.clear();
+    rangeSelect.reset();
+    timeZone.setShown(false);
     isRefreshing = false;
     columnFilters.clear();
     globalSearchValue = "";
@@ -1275,7 +1418,12 @@ export function createTableGrid(
         if (idx >= 0) {
           const value = relatedLookupValue(rowData[idx]);
           if (value !== null) {
-            targets.push({ direction: "outgoing", fk, value });
+            targets.push({
+              direction: "outgoing",
+              fk,
+              value,
+              count: { state: "loading" },
+            });
           }
         }
       }
@@ -1284,7 +1432,12 @@ export function createTableGrid(
         if (idx >= 0) {
           const value = relatedLookupValue(rowData[idx]);
           if (value !== null) {
-            targets.push({ direction: "incoming", fk, value });
+            targets.push({
+              direction: "incoming",
+              fk,
+              value,
+              count: { state: "loading" },
+            });
           }
         }
       }
@@ -1422,6 +1575,9 @@ export function createTableGrid(
     });
     relatedGridHost = document.createElement("div");
     relatedGridHost.className = "db-related-grid-host";
+    relatedHeadEl = document.createElement("div");
+    relatedHeadEl.className = "db-related-head";
+    relatedGridHost.appendChild(relatedHeadEl);
 
     embeddedGrid = createTableGrid(
       {
@@ -1492,6 +1648,8 @@ export function createTableGrid(
     relatedGen++;
     relatedFirstPageController?.abort();
     relatedFirstPageController = null;
+    relatedCountController?.abort();
+    relatedCountController = null;
     embeddedGrid?.clear();
   }
 
@@ -1556,7 +1714,85 @@ export function createTableGrid(
   function renderRelated() {
     renderRelatedCrumbs();
     renderRelatedList();
+    renderRelatedHeadNow();
     void loadRelatedTarget();
+    void loadRelatedCounts();
+  }
+
+  function relatedEntry(target: RelatedTarget): RelatedEntry {
+    return {
+      direction: target.direction,
+      table: relatedDrillTable(target),
+      column: relatedDrillEqColumn(target),
+      ownColumn:
+        target.direction === "outgoing"
+          ? target.fk.fromColumn
+          : target.fk.toColumn,
+      value: target.value,
+      inferred: !!target.fk.inferred,
+      count: target.count,
+    };
+  }
+
+  function renderRelatedHeadNow() {
+    const target = currentRelatedTarget();
+    if (!relatedHeadEl || !target) return;
+    renderRelatedHead(relatedHeadEl, relatedEntry(target), text());
+  }
+
+  // 一覧の関係ごとに行の数を数える (同時に RELATED_COUNT_CONCURRENCY 本まで)。
+  // 開いている階層が変わったら止める。失敗は件数の所に「!」と理由を出す。
+  async function loadRelatedCounts() {
+    const level = currentRelatedLevel();
+    const fetchRelated = callbacks.fetchRelatedPage;
+    if (!level || !fetchRelated) return;
+    relatedCountController?.abort();
+    const controller = new AbortController();
+    relatedCountController = controller;
+    // 選んでいる関係は右の表を読むときに数が分かるので、ここでは数えない。
+    const selected = level.targets[level.selectedIndex];
+    const queue = level.targets.filter(
+      (t) => t.count.state === "loading" && t !== selected,
+    );
+    const worker = async () => {
+      for (let target = queue.shift(); target; target = queue.shift()) {
+        if (controller.signal.aborted) return;
+        const table = relatedDrillTable(target);
+        const eq = [
+          { column: relatedDrillEqColumn(target), value: target.value },
+        ];
+        try {
+          const data = await fetchRelated(
+            table,
+            0,
+            1,
+            null,
+            [],
+            eq,
+            controller.signal,
+          );
+          target.count = { state: "done", rows: data.totalRows };
+        } catch (error) {
+          if (controller.signal.aborted || isAbortError(error)) return;
+          target.count = {
+            state: "failed",
+            detail: reportDatastoreFailure(
+              "SQL",
+              "count related rows",
+              error,
+              table,
+              eq,
+            ),
+          };
+        }
+        if (currentRelatedLevel() !== level) return;
+        renderRelatedList();
+        if (target === currentRelatedTarget()) renderRelatedHeadNow();
+      }
+    };
+    await Promise.all(
+      Array.from({ length: RELATED_COUNT_CONCURRENCY }, () => worker()),
+    );
   }
 
   function renderRelatedCrumbs() {
@@ -1594,47 +1830,16 @@ export function createTableGrid(
   function renderRelatedList() {
     const level = currentRelatedLevel();
     if (!relatedListEl || !level) return;
-    relatedListEl.innerHTML = "";
-    level.targets.forEach((target, i) => {
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = "db-related-list-item";
-      item.classList.add(`db-related-list-${target.direction}`);
-      // Rails 規約からの推測 FK は実 FK と見た目で区別する (ラベル + 色)。
-      if (target.fk.inferred) item.classList.add("db-related-list-inferred");
-      if (i === level.selectedIndex) item.classList.add("active");
-      const name = document.createElement("span");
-      name.className = "db-related-list-name";
-      // outgoing は参照先テーブル、incoming は参照元テーブル。
-      // テーブル名は別要素にする。span 直下のテキストのままだと、幅が
-      // 足りないときに省略記号を出せず、語の途中で折り返してしまう。
-      const tableName = document.createElement("span");
-      tableName.className = "db-related-list-table";
-      tableName.textContent = relatedDrillTable(target);
-      tableName.title = relatedDrillTable(target);
-      name.appendChild(tableName);
-      if (target.fk.inferred) {
-        const badge = document.createElement("span");
-        badge.className = "db-related-list-inferred-badge";
-        badge.textContent = text().nav.inferredBadge;
-        badge.title = text().nav.inferredBadgeTitle;
-        name.appendChild(badge);
-      }
-      const via = document.createElement("span");
-      via.className = "db-related-list-via";
-      // outgoing: this row's FK 列 = value (= parent の PK)
-      // incoming: parent の側で column = value となる行を見せる、ので
-      //   "<fromTable>.<fromColumn> = <value>" と完全形で出す。
-      const condition =
-        target.direction === "outgoing"
-          ? `${target.fk.fromColumn} = ${target.value}`
-          : `${target.fk.fromTable}.${target.fk.fromColumn} = ${target.value}`;
-      via.textContent = condition;
-      // 1 行に収まらないときは省略表示になるので、全文は tooltip で出す。
-      via.title = condition;
-      item.append(name, via);
-      item.addEventListener("click", () => selectRelatedTarget(i));
-      relatedListEl?.appendChild(item);
+    renderRelatedListView(relatedListEl, {
+      entries: level.targets.map(relatedEntry),
+      selected: level.selectedIndex,
+      hideEmpty: relatedHideEmpty,
+      text: text(),
+      onSelect: selectRelatedTarget,
+      onToggleHideEmpty: () => {
+        relatedHideEmpty = !relatedHideEmpty;
+        renderRelatedList();
+      },
     });
   }
 
@@ -1652,6 +1857,7 @@ export function createTableGrid(
     relatedFirstPageController = controller;
     grid.clear();
     if (relatedEmptyEl) relatedEmptyEl.hidden = true;
+    relatedGridHost?.classList.remove("is-empty");
     try {
       // 1 ページ目を取得して列情報ごとグリッドへ渡す（埋め込みグリッドの
       // 以降のスクロール/フィルタ/ソートは fetchRelatedPage 経由で eq を保つ）。
@@ -1666,19 +1872,39 @@ export function createTableGrid(
       );
       if (gen !== relatedGen) return;
       grid.load(drillTable, data);
-      // 参照先が 0 件なら空表示を出す（孤立 FK 等）。
-      if (relatedEmptyEl) relatedEmptyEl.hidden = data.totalRows > 0;
+      target.count = { state: "done", rows: data.totalRows };
+      renderRelatedList();
+      renderRelatedHeadNow();
+      // 0 件なら表の代わりに空表示を出す (孤立した外部キー・推測の外れなど)。
+      const empty = data.totalRows === 0;
+      relatedGridHost?.classList.toggle("is-empty", empty);
+      if (relatedEmptyEl) {
+        relatedEmptyEl.hidden = !empty;
+        const t = text().grid;
+        relatedEmptyEl.textContent =
+          target.direction === "outgoing"
+            ? t.relatedEmpty
+            : t.relatedEmptyIncoming;
+        if (target.fk.inferred) {
+          const note = document.createElement("span");
+          note.className = "db-related-empty-note";
+          note.textContent = t.relatedInferredNote;
+          relatedEmptyEl.appendChild(note);
+        }
+      }
     } catch (err) {
       if (gen !== relatedGen || isAbortError(err)) return;
-      grid.showError(
-        reportDatastoreFailure(
-          "SQL",
-          "related rows",
-          err,
-          drillTable,
-          relatedEq,
-        ),
+      const detail = reportDatastoreFailure(
+        "SQL",
+        "related rows",
+        err,
+        drillTable,
+        relatedEq,
       );
+      target.count = { state: "failed", detail };
+      renderRelatedList();
+      renderRelatedHeadNow();
+      grid.showError(detail);
     }
   }
 
@@ -1688,8 +1914,8 @@ export function createTableGrid(
   let jsonHighlighterRequested = false;
   // いまフッタに出している JSON。非同期ロードが終わった時点でも「まだ同じ値を
   // 出しているか」を見てから塗り直す (矢印キーで既に別セルへ移っていることがある)。
-  let detailJsonPre: HTMLElement | null = null;
-  let detailJsonText = "";
+  // 行全体の詳細では JSON の値がいくつも並ぶので、塗る先を全部覚えておく。
+  let detailJsonTargets: { pre: HTMLElement; json: string }[] = [];
 
   function paintJsonHighlight(pre: HTMLElement, json: string): boolean {
     if (json.length > DETAIL_JSON_HIGHLIGHT_MAX_CHARS) return false;
@@ -1700,8 +1926,7 @@ export function createTableGrid(
   }
 
   function showJsonDetail(pre: HTMLElement, json: string) {
-    detailJsonPre = pre;
-    detailJsonText = json;
+    detailJsonTargets.push({ pre, json });
     if (paintJsonHighlight(pre, json)) return;
     // ロード前・ロード失敗・巨大すぎるときは素のテキストで出す。色が付かない
     // だけで中身は欠けない。
@@ -1717,9 +1942,27 @@ export function createTableGrid(
       langs: ["json"],
     }).then((highlighter) => {
       jsonHighlighter = highlighter;
-      if (!highlighter || !detailJsonPre?.isConnected) return;
-      paintJsonHighlight(detailJsonPre, detailJsonText);
+      if (!highlighter) return;
+      for (const target of detailJsonTargets)
+        if (target.pre.isConnected) paintJsonHighlight(target.pre, target.json);
     });
+  }
+
+  // 行全体の詳細の日時: 表に出しているタイムゾーンの文字と、何分前か。
+  function rowDetailTime(
+    row: DbValue[],
+    col: number,
+  ): { shown: string; relative: string } | null {
+    const at = recency.timeOf(row, col);
+    if (at === null) return null;
+    const zone = timeZone.zone();
+    const now = Date.now();
+    return {
+      shown: zone ? formatInZone(at, zone) : String(row[col]),
+      relative: isFutureTime(at, now)
+        ? ""
+        : relativeTimeText(at / 1000, pageLanguage(), now),
+    };
   }
 
   function showCellDetail(colIndex: number, value: DbValue) {
@@ -1729,9 +1972,8 @@ export function createTableGrid(
     const t = text().detail;
 
     // 前のセルの JSON への参照を切る (遅れて届くハイライトが古い pre を
-    // 塗るのを防ぐ)。JSON セルならこの後 showJsonDetail が入れ直す。
-    detailJsonPre = null;
-    detailJsonText = "";
+    // 塗るのを防ぐ)。JSON の値ならこの後 showJsonDetail が入れ直す。
+    detailJsonTargets = [];
     // 単一値詳細とは排他。関連パネルを閉じるだけでなく、進行中の関連ロードも
     // 中断する（hideRelatedPanel が abort + stack クリア + 埋め込み grid.clear）。
     hideRelatedPanel();
@@ -1803,21 +2045,49 @@ export function createTableGrid(
     content.classList.add("db-grid-detail-content");
 
     if (detailMode === "row" && row) {
-      content.classList.add("db-grid-row-detail");
-      content.appendChild(
-        createDetailTable(
-          [t.column, t.value],
-          columnNames.map((name, index) => [
-            name,
-            row[index] === null
-              ? "NULL"
-              : row[index] === ""
-                ? t.emptyString
-                : formatValueForCopy(row[index]),
-          ]),
-          "",
-        ),
-      );
+      const rowValues = row;
+      renderRowDetail(content, {
+        columns,
+        row: rowValues,
+        activeColumn: colIndex,
+        text: text(),
+        time: (col) => rowDetailTime(rowValues, col),
+        isForeignKey: (col) => fkColumns.has(columnNames[col]),
+        openRelated: (col) => {
+          if (embedded)
+            callbacks.onForeignKeyCellClick?.(
+              currentTable,
+              columnNames,
+              rowValues,
+              columnNames[col],
+            );
+          else
+            openRelatedForRow(
+              currentTable,
+              columnNames,
+              rowValues,
+              columnNames[col],
+            );
+        },
+        showJson: showJsonDetail,
+        copy: (value, button) => {
+          navigator.clipboard.writeText(value).then(
+            () => {
+              button.classList.add("copied");
+              setTimeout(() => button.classList.remove("copied"), 1200);
+            },
+            (error: unknown) =>
+              showCopyFailure(
+                button,
+                "copy a value of the row",
+                error,
+                button.title,
+                4000,
+              ),
+          );
+        },
+        copyText: (col) => cellCopyText(rowValues, col),
+      });
     } else if (value === null) {
       content.textContent = "NULL";
       content.classList.add("null");
@@ -1856,6 +2126,8 @@ export function createTableGrid(
     rowNum.className = "db-grid-cell db-grid-rownum-header";
     rowNum.textContent = "#";
     headerRow.appendChild(rowNum);
+    if (recency.shown())
+      headerRow.appendChild(recency.headerCell(ROWNUM_WIDTH));
     for (let i = 0; i < columns.length; i++) {
       const col = columns[i];
       const cell = document.createElement("div");
@@ -1869,6 +2141,12 @@ export function createTableGrid(
       const label = document.createElement("span");
       label.className = "db-grid-header-label";
       label.textContent = col.name;
+      if (timeZone.zone() && recency.isTimeColumn(i)) {
+        const zoneBadge = document.createElement("span");
+        zoneBadge.className = "db-grid-header-tz";
+        zoneBadge.textContent = timeZone.shortName();
+        label.appendChild(zoneBadge);
+      }
 
       if (fkColumns.has(col.name)) {
         cell.classList.add("db-grid-header-fk");
@@ -1960,6 +2238,10 @@ export function createTableGrid(
     rowNumSpacer.className =
       "db-grid-cell db-grid-rownum-header db-grid-filter-spacer";
     filterRow.appendChild(rowNumSpacer);
+    if (recency.shown())
+      filterRow.appendChild(
+        recency.spacerCell(ROWNUM_WIDTH, "db-grid-filter-spacer"),
+      );
     for (let i = 0; i < columns.length; i++) {
       const col = columns[i];
       const cell = document.createElement("div");
@@ -2054,18 +2336,74 @@ export function createTableGrid(
   }
 
   function handleSort(column: string) {
-    if (sort?.column === column) {
-      sort = sort.direction === "asc" ? { column, direction: "desc" } : null;
-    } else {
-      sort = { column, direction: "asc" };
-    }
+    applySort(
+      sort?.column === column
+        ? sort.direction === "asc"
+          ? { column, direction: "desc" }
+          : null
+        : { column, direction: "asc" },
+    );
+  }
+
+  function applySort(next: GridSort | null) {
+    sort = next;
     pageCache = new Map();
     pendingPages = new Map();
+    refreshMarks.clear();
     startNewLoadGeneration();
     resetSelectionAndDetail();
     renderHeader();
+    syncNewestButton();
     renderViewport();
   }
+
+  function sameSort(a: GridSort | null, b: GridSort | null): boolean {
+    return a?.column === b?.column && a?.direction === b?.direction;
+  }
+
+  // 「新しい順」で並べているか。押した状態はこの並びから決め、別に持たない。
+  function sortedNewest(): boolean {
+    const newest = recency.newestSort();
+    return newest !== null && sameSort(sort, newest);
+  }
+
+  function initialSortFor(cols: DbColumn[]): GridSort | null {
+    if (embedded || callbacks.getNewestFirst?.() !== true) return null;
+    const probe = createGridRecency({ text });
+    probe.reset(cols);
+    return probe.newestSort();
+  }
+
+  function syncNewestButton(): void {
+    const newest = recency.newestSort();
+    newestBtn.hidden = embedded || !currentTable || newest === null;
+    if (newestBtn.hidden || !newest) return;
+    const t = text().grid;
+    const on = sortedNewest();
+    newestBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    newestLabel.textContent = t.newestLabel;
+    if (newestBtn.dataset.saveFailed) return;
+    newestBtn.title = on ? t.newestOffAction : t.newestOnAction(newest.column);
+  }
+
+  newestBtn.addEventListener("click", () => {
+    const newest = recency.newestSort();
+    if (!newest) return;
+    const on = !sortedNewest();
+    delete newestBtn.dataset.saveFailed;
+    viewport.scrollTop = 0;
+    applySort(on ? newest : null);
+    callbacks.setNewestFirst?.(on).catch((error: unknown) => {
+      const detail = reportDatastoreFailure(
+        "SQL",
+        "remember newest-first order",
+        error,
+        on,
+      );
+      newestBtn.dataset.saveFailed = "1";
+      newestBtn.title = text().grid.newestSaveFailed(detail);
+    });
+  });
 
   function ensurePage(pageStart: number): Promise<void> {
     if (getCachedPage(pageStart) !== undefined) return Promise.resolve();
@@ -2078,6 +2416,8 @@ export function createTableGrid(
       .fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters, signal)
       .then((data) => {
         if (gen !== loadGeneration) return;
+        recency.notePage(data.rows);
+        refreshMarks.notePage(pageStart, data.rows);
         rememberPage(pageStart, data.rows);
         totalRows = data.totalRows;
         syncSpacer();
@@ -2153,9 +2493,8 @@ export function createTableGrid(
     // ---- 表示モード: read-only 風のテキスト表示。ダブルクリックで input 化。
     if (!opts.editing) {
       cell.classList.add("db-grid-cell-display");
-      cell.textContent = value === null ? "NULL" : value === "" ? "" : value;
-      if (value === null) cell.classList.add("null");
-      else if (value === "") cell.classList.add("empty");
+      if (!fillNullOrEmpty(cell, value, text().grid.emptyValue))
+        cell.textContent = value ?? "";
       if (opts.readonly) {
         cell.classList.add("readonly");
       }
@@ -2241,6 +2580,52 @@ export function createTableGrid(
   }
 
   // 既存データ行 (read-only もしくは編集モード) を 1 行ぶん組み立てる。
+  // first〜last の行。読み込んでいないページは読む (コピーの範囲が画面の外まで
+  // 伸びているとき)。読めなかったページは理由をつけて投げる。
+  async function rowsBetween(
+    first: number,
+    last: number,
+  ): Promise<DbValue[][]> {
+    const out: DbValue[][] = [];
+    const generation = loadGeneration;
+    for (
+      let pageStart = Math.floor(first / PAGE_SIZE) * PAGE_SIZE;
+      pageStart <= last;
+      pageStart += PAGE_SIZE
+    ) {
+      if (!pageCache.has(pageStart)) await ensurePage(pageStart);
+      const page = pageCache.get(pageStart);
+      if (!page || generation !== loadGeneration)
+        throw new Error(
+          `rows ${pageStart + 1}-${pageStart + PAGE_SIZE} of ${currentTable} could not be loaded`,
+        );
+      const end = Math.min(last, pageStart + page.length - 1);
+      for (let i = Math.max(first, pageStart); i <= end; i++)
+        out.push(page[i - pageStart]);
+    }
+    return out;
+  }
+
+  // 貼り付け用の 1 つのセルの文字。NULL は空、日時はいま表示しているタイムゾーン。
+  function cellCopyText(row: DbValue[], col: number): string {
+    const zone = timeZone.zone();
+    const shown = zone ? recency.displayTime(row, col, zone) : null;
+    return shown ?? formatValueForCopy(row[col]);
+  }
+
+  function showCopyNotice(message: string, failed: boolean): void {
+    copyNotice = message;
+    if (copyNoticeTimer) clearTimeout(copyNoticeTimer);
+    copyNoticeTimer = null;
+    if (!failed)
+      copyNoticeTimer = setTimeout(() => {
+        copyNotice = "";
+        copyNoticeTimer = null;
+        updateStatus();
+      }, COPY_NOTICE_MS);
+    updateStatus();
+  }
+
   function buildDataRow(i: number): HTMLElement {
     const pageStart = Math.floor(i / PAGE_SIZE) * PAGE_SIZE;
     const pageRows = getCachedPage(pageStart);
@@ -2259,6 +2644,20 @@ export function createTableGrid(
     rowNum.className = "db-grid-cell db-grid-rownum";
     rowNum.textContent = String(i + 1);
     row.appendChild(rowNum);
+    if (recency.shown())
+      row.appendChild(
+        rowData
+          ? recency.cell(rowData, ROWNUM_WIDTH)
+          : recency.spacerCell(ROWNUM_WIDTH, "loading"),
+      );
+    const refreshMark = rowData ? refreshMarks.markOf(rowData) : null;
+    if (refreshMark) {
+      row.classList.add("db-grid-row-refreshed", `is-${refreshMark}`);
+      rowNum.title =
+        refreshMark === "added"
+          ? text().grid.refreshMarkAdded
+          : text().grid.refreshMarkChanged;
+    }
 
     if (!rowData) {
       for (let c = 0; c < columnNames.length; c++) {
@@ -2405,16 +2804,24 @@ export function createTableGrid(
     row.addEventListener("click", () => {
       setSelectedRow(rowIndex, row);
     });
+    const range = rangeSelect.multiRange();
     for (let c = 0; c < columnNames.length; c++) {
       const cell = document.createElement("div");
       cell.className = "db-grid-cell";
       cell.style.width = `${getColWidth(columnNames[c])}px`;
       const val = rowData[c];
-      cell.textContent = formatValue(val);
-      if (val === null) cell.classList.add("null");
-      else if (val instanceof Uint8Array) cell.classList.add("blob");
-      else if (typeof val === "string" && val === "")
-        cell.classList.add("empty");
+      const zone = timeZone.zone();
+      const shownTime = zone ? recency.displayTime(rowData, c, zone) : null;
+      // NULL と空文字は札にする (以前はどちらも本文と同じ色で、空文字は共通の
+      // .empty (空の画面の案内) の規則まで当たって真ん中に寄っていた)。
+      if (!fillNullOrEmpty(cell, val, text().grid.emptyValue))
+        cell.textContent = shownTime ?? formatValue(val);
+      if (shownTime !== null) {
+        cell.classList.add("db-grid-cell-time");
+        cell.title = text().grid.timeZoneCellTitle(String(val));
+      }
+      if (val instanceof Uint8Array) cell.classList.add("blob");
+      if (range && inCellRange(range, i, c)) cell.classList.add("in-range");
       cell.style.cursor = "pointer";
       const cellValue = val;
       const cellColIndex = c;
@@ -2430,6 +2837,9 @@ export function createTableGrid(
       }
       cell.addEventListener("click", (e) => {
         e.stopPropagation();
+        // Shift+クリックは範囲を伸ばすだけ (mousedown で済んでいる)。詳細も
+        // 関連パネルも開かない。
+        if (e.shiftKey) return;
         // 詳細フッタ / 関連パネルに表示する対象セルを覚えておく。
         focusCell(rowIndex, row, cellColIndex);
         // FK セルは関連テーブルをパネルに開く（埋め込みは親へ通知して
@@ -2484,6 +2894,10 @@ export function createTableGrid(
       renderViewport();
     });
     row.appendChild(rowNum);
+    if (recency.shown())
+      row.appendChild(
+        recency.spacerCell(ROWNUM_WIDTH, "db-grid-recency-draft"),
+      );
     for (let c = 0; c < columnNames.length; c++) {
       const dv: string | null = draft.has(c)
         ? (draft.get(c) as string | null)
@@ -2707,11 +3121,16 @@ export function createTableGrid(
     syncPager();
     const t = text().grid;
     const parts: string[] = [t.statusRows(totalRows.toLocaleString())];
-    if (sort)
+    if (sort && sortedNewest()) parts.push(t.statusNewest(sort.column));
+    else if (sort)
       parts.push(t.statusSort(sort.column, sort.direction.toUpperCase()));
     const filterCount = activeFilterCount();
     if (filterCount > 0) parts.push(t.statusFilters(filterCount));
     if (isRefreshing) parts.push(t.statusRefreshing(filterCount));
+    const marked = refreshMarks.counts();
+    if (!isRefreshing && marked.added + marked.changed > 0)
+      parts.push(t.statusRefreshMarks(marked.added, marked.changed));
+    if (copyNotice) parts.push(copyNotice);
     const textNode = statusEl.firstChild;
     if (textNode && textNode.nodeType === Node.TEXT_NODE) {
       textNode.textContent = `${parts.join(" | ")} `;
@@ -2732,28 +3151,50 @@ export function createTableGrid(
     el.appendChild(statusEl);
   }
 
-  function load(table: string, initialData?: DbTableDataResponse) {
+  function load(
+    table: string,
+    initialData?: DbTableDataResponse,
+    fetchedSort?: GridSort | null,
+  ) {
     clear();
     currentTable = table;
     if (initialData) {
       columns = initialData.columns;
       columnNames = columns.map((c) => c.name);
       totalRows = initialData.totalRows;
-      rememberPage(0, initialData.rows);
     } else {
       columns = [];
       columnNames = [];
       totalRows = 0;
     }
+    recency.reset(columns);
+    // 呼び出し側が並べ方を決めずに取った表は、ここで決める。取った並びと
+    // 違えば、その行は使わずに決めた並びで取り直す。
+    sort =
+      fetchedSort !== undefined
+        ? fetchedSort
+        : initialData
+          ? initialSortFor(columns)
+          : null;
+    const usable = initialData && sameSort(sort, fetchedSort ?? null);
+    if (initialData && usable) {
+      recency.notePage(initialData.rows);
+      rememberPage(0, initialData.rows);
+    }
+    timeZone.sync();
+    timeZone.setShown(
+      !embedded && columns.some((_, index) => recency.isTimeColumn(index)),
+    );
     rebuildFkColumnsForCurrentTable();
     loadColWidths();
     syncSpacer();
     renderHeader();
     updateStatus();
+    syncNewestButton();
     // テーブルが変わったので編集 UI の出し分け (書き込み対応 + PK 有無) を更新。
     refreshEditButtons();
     showPendingStatus();
-    if (!initialData) {
+    if (!usable) {
       ensurePage(0);
     } else {
       renderViewport();
@@ -2775,6 +3216,7 @@ export function createTableGrid(
     sort = state.sort || null;
     const targetRowIndex = state.row && state.row > 0 ? state.row - 1 : -1;
     renderHeader();
+    syncNewestButton();
     const firstPage = invalidateData();
     if (targetRowIndex >= 0) {
       await firstPage;
@@ -2871,7 +3313,15 @@ export function createTableGrid(
     attributeFilter: ["data-sidebar-font-size"],
   });
 
+  // 「〜分前」は時間が経つと古くなるので、1 分ごとに描いてある分だけ合わせる。
+  const recencyTimer = setInterval(() => {
+    if (recency.shown() && el.isConnected) recency.refreshLabels(body);
+  }, 60_000);
+
   function destroy() {
+    clearInterval(recencyTimer);
+    rangeSelect.destroy();
+    if (copyNoticeTimer) clearTimeout(copyNoticeTimer);
     densityObserver.disconnect();
     clear();
     embeddedGrid?.destroy();
@@ -2901,6 +3351,9 @@ export function createTableGrid(
     newRowBtn.textContent = t.edit.newRow;
     commitBtn.textContent = t.edit.commit;
     discardBtn.textContent = t.edit.discard;
+    syncNewestButton();
+    timeZone.sync();
+    recency.refreshLabels(body);
     showPendingStatus();
     if (relatedEmptyEl) relatedEmptyEl.textContent = t.grid.relatedEmpty;
     if (relatedCopyBtn) relatedCopyBtn.textContent = t.detail.copy;
@@ -3235,6 +3688,7 @@ export function createTableGrid(
     el,
     focusGrid: () => viewport.focus({ preventScroll: true }),
     load,
+    initialSortFor,
     refresh: refreshCurrentTable,
     showError,
     applyState,

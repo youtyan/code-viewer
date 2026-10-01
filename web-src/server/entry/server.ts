@@ -277,19 +277,21 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
           `code-viewer is already running at ${decision.url}. Stop that entry server and restart it with --remote-access; remote settings were not applied.`,
         );
       const url = await delegateOpen(decision.url, launchRoot);
-      if (args.port !== 0 && new URL(decision.url).port !== String(args.port)) {
+      // 動いている入口へ送るのはパスだけ。この起動のサーバの引数は、入口にも
+      // このプロジェクトの裏にも (後で起きるときも) 効かない。
+      const unused = [
+        ...(args.port !== 0 && new URL(decision.url).port !== String(args.port)
+          ? [`--port ${args.port}`]
+          : []),
+        ...(args.idleStopSeconds !== DEFAULT_IDLE_STOP_SECONDS
+          ? [`--idle-stop ${args.idleStopSeconds}`]
+          : []),
+        ...args.bins.map((bin) => `--bin ${bin}`),
+        ...args.backendArgs,
+      ];
+      if (unused.length > 0) {
         console.warn(
-          `code-viewer is already running at ${decision.url}; --port ${args.port} was not used.`,
-        );
-      }
-      if (args.idleStopSeconds !== DEFAULT_IDLE_STOP_SECONDS) {
-        console.warn(
-          `code-viewer is already running at ${decision.url}; --idle-stop ${args.idleStopSeconds} was not used.`,
-        );
-      }
-      if (args.backendArgs.length > 0 || args.bins.length > 0) {
-        console.warn(
-          `code-viewer is already running; the server options (${[...args.bins.map((b) => `--bin ${b}`), ...args.backendArgs].join(" ")}) apply only when that project's process starts.`,
+          `code-viewer is already running at ${decision.url}; these options were not used: ${unused.join(" ")}`,
         );
       }
       console.log(url);

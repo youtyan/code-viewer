@@ -10,7 +10,7 @@ import {
 } from "../../core/error-detail";
 import { iconSvg, SYNC_16_PATH } from "../../core/icons";
 import { type DbText, dbText } from "./i18n";
-import { formatQueryValue } from "./query-value";
+import { fillNullOrEmpty, formatQueryValue } from "./query-value";
 
 export type QueryHistoryViewCallbacks = {
   getDbId: () => string | null;
@@ -484,8 +484,8 @@ export function createQueryHistoryView(
       tr.appendChild(tdNum);
       for (const value of row) {
         const td = document.createElement("td");
-        td.textContent = formatQueryValue(value);
-        if (value === null) td.classList.add("null");
+        if (!fillNullOrEmpty(td, value, text().grid.emptyValue))
+          td.textContent = formatQueryValue(value);
         tr.appendChild(td);
       }
       tbody.appendChild(tr);

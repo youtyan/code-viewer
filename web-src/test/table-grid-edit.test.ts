@@ -429,12 +429,18 @@ describe("table-grid edit mode", () => {
     expect(filterActions.parentElement).toBe(
       q<HTMLElement>(grid.el, ".db-grid-filter-bar"),
     );
-    expect(filterActions.children).toHaveLength(3);
-    expect(filterActions.children[0]).toBe(refreshButton);
+    expect(filterActions.children).toHaveLength(5);
+    expect(filterActions.children[0]).toBe(
+      q<HTMLElement>(grid.el, ".db-grid-tz"),
+    );
     expect(filterActions.children[1]).toBe(
+      q<HTMLElement>(grid.el, ".db-grid-newest"),
+    );
+    expect(filterActions.children[2]).toBe(refreshButton);
+    expect(filterActions.children[3]).toBe(
       q<HTMLElement>(grid.el, ".db-grid-refresh-result"),
     );
-    expect(filterActions.children[2]).toBe(
+    expect(filterActions.children[4]).toBe(
       q<HTMLElement>(grid.el, ".db-grid-export"),
     );
 

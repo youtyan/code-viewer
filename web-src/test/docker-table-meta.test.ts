@@ -370,6 +370,67 @@ describe("docker table meta queries", () => {
     expect(result.totalRows).toBe(2);
   });
 
+  // psql -A は NULL を空文字で書く。行を読む問い合わせだけ NULL の印を頼み、
+  // NULL と空文字と、文字列の "NULL" / "\\N" を見分ける。
+  test("tells PostgreSQL NULL from the empty string and from NULL-looking text", async () => {
+    const PG_NULL = "\x1c";
+    activeHarness = installSpawnHarness((sql) => {
+      if (sql.includes("information_schema.columns"))
+        return [
+          ["id", "integer", "NO", "", "YES"].join(PG_US),
+          ["note", "text", "YES", "", "NO"].join(PG_US),
+        ].join(PG_RS);
+      if (sql.includes("COUNT(*)")) return `4${PG_RS}`;
+      return [
+        ["1", PG_NULL].join(PG_US),
+        ["2", ""].join(PG_US),
+        ["3", "NULL"].join(PG_US),
+        ["4", "\\N"].join(PG_US),
+      ].join(PG_RS);
+    });
+    const adapter = createPostgresAdapter("public");
+
+    const result = await adapter.getTablePageWithMeta("sample_table", {
+      offset: 0,
+      limit: 25,
+    });
+
+    expect(result.rows).toEqual([
+      ["1", null],
+      ["2", ""],
+      ["3", "NULL"],
+      ["4", "\\N"],
+    ]);
+    const nullFlags = activeHarness.calls.map((call) =>
+      call.args.includes(`null=${PG_NULL}`),
+    );
+    // 列の問い合わせと件数は印なし、行を読む問い合わせだけ印あり。
+    expect(nullFlags).toEqual([false, false, true]);
+  });
+
+  test("reads MySQL CLI NULL, which the batch output cannot tell from the text NULL", async () => {
+    activeHarness = installSpawnHarness((sql) => {
+      if (sql.includes("information_schema.columns"))
+        return [
+          "column_name\tcolumn_type\tis_nullable\tcolumn_default\tcolumn_key",
+          "id\tint\tNO\tNULL\tPRI",
+          "note\ttext\tYES\tNULL\t",
+        ].join("\n");
+      if (sql.includes("COUNT(*)")) return ["cnt", "2"].join("\n");
+      return ["id\tnote", "1\tNULL", "2\t"].join("\n");
+    });
+
+    const result = await createMysqlAdapter().getTablePageWithMeta(
+      "sample_table",
+      { offset: 0, limit: 25 },
+    );
+
+    expect(result.rows).toEqual([
+      ["1", null],
+      ["2", ""],
+    ]);
+  });
+
   test("keeps PostgreSQL markup text with newlines and tabs in one column", async () => {
     activeHarness = installSpawnHarness((sql) => {
       if (sql.includes("information_schema.columns"))

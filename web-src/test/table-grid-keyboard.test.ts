@@ -132,10 +132,10 @@ describe("table-grid arrow-key cell navigation", () => {
     clickCell(grid.el, 0, 2);
     q<HTMLButtonElement>(grid.el, ".db-detail-tab:nth-child(2)").click();
     const values = () =>
-      Array.from(
-        grid.el.querySelectorAll(".db-grid-row-detail tbody tr"),
-        (row) => Array.from(row.children, (cell) => cell.textContent),
-      );
+      Array.from(grid.el.querySelectorAll(".db-row-detail-item"), (item) => [
+        item.querySelector(".db-row-detail-name")?.textContent,
+        item.querySelector(".db-row-detail-value")?.textContent,
+      ]);
     expect(values()).toEqual([
       ["id", "1"],
       ["owner_id", "10"],
@@ -159,7 +159,7 @@ describe("table-grid arrow-key cell navigation", () => {
 
   test.each([
     [null, "NULL"],
-    ["", "(empty string)"],
+    ["", "empty"],
     [false, "false"],
     [0, "0"],
   ])("row details preserve %s as %s", async (value, expected) => {
@@ -177,7 +177,7 @@ describe("table-grid arrow-key cell navigation", () => {
     clickCell(grid.el, 0, 2);
     q<HTMLButtonElement>(grid.el, ".db-detail-tab:nth-child(2)").click();
     expect(
-      q(grid.el, ".db-grid-row-detail tbody tr:last-child td:last-child")
+      q(grid.el, ".db-row-detail-item:last-child .db-row-detail-value")
         .textContent,
     ).toBe(expected);
     grid.destroy();
@@ -278,14 +278,10 @@ describe("table-grid arrow-key cell navigation", () => {
     }
   });
 
-  // Ctrl / Meta / Alt / Shift 付きの矢印はアプリ側のスクロール等に予約されて
-  // いるので、グリッドは触らない。
-  for (const modifier of [
-    "ctrlKey",
-    "metaKey",
-    "altKey",
-    "shiftKey",
-  ] as const) {
+  // Ctrl / Meta / Alt 付きの矢印はアプリ側のスクロール等に予約されて
+  // いるので、グリッドは触らない。Shift 付きは範囲を伸ばす
+  // (table-grid-range.test.ts)。
+  for (const modifier of ["ctrlKey", "metaKey", "altKey"] as const) {
     test(`${modifier} + ArrowDown does not move the cell`, async () => {
       const { grid } = setup();
       await tick();

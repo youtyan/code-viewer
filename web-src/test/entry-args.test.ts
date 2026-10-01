@@ -1,10 +1,21 @@
 // 入口として起動するときの引数と、起動の分かれ道 (server/entry/args.ts)。
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import {
   decideEntryLaunch,
   parseEntryArgs,
   runsStandaloneServer,
 } from "../server/entry/args";
+
+const REPO_ROOT = join(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "..",
+);
+/** 配布物と同じバンドル。vitest の globalSetup が焼いてある。 */
+const CLI_BUNDLE = join(REPO_ROOT, "dist", "code-viewer.js");
 
 describe("which server `code-viewer` starts", () => {
   test.each([
@@ -53,7 +64,7 @@ describe("parseEntryArgs", () => {
       },
     ],
     [
-      ["--bin", "git=/usr/bin/git", "--staged", "--scope-omit-dir", "vendor"],
+      ["--bin", "git=/usr/bin/git", "--", "--scope-omit-dir", "vendor"],
       {
         remoteAccess: null,
         port: 0,
@@ -61,7 +72,7 @@ describe("parseEntryArgs", () => {
         cwd: null,
         open: false,
         bins: ["git=/usr/bin/git"],
-        backendArgs: ["--staged", "--scope-omit-dir", "vendor"],
+        backendArgs: ["--scope-omit-dir", "vendor"],
       },
     ],
     [
@@ -138,6 +149,50 @@ describe("parseEntryArgs", () => {
     [["--idle-stop", "Infinity"], IDLE_STOP_ERROR],
   ])("%j is refused", (argv, error) => {
     expect(parseEntryArgs(argv)).toEqual({ ok: false, error });
+  });
+});
+
+// 以前は git diff に渡していた引数。黙って捨てず、ほかの引数の誤りと同じく 1 で止める。
+const GIT_DIFF_GUIDANCE =
+  "git diff arguments are no longer supported: pick what the Diff screen compares with its from / to pickers (options: code-viewer --help)";
+
+describe.each([
+  { server: "the entry server", prefix: [] },
+  { server: "--standalone", prefix: ["--standalone"] },
+])("$server refuses git diff arguments", ({ prefix }) => {
+  test.each([
+    {
+      name: "a commit range",
+      argv: ["HEAD~1", "HEAD"],
+      listed: '"HEAD~1" "HEAD"',
+    },
+    { name: "--staged", argv: ["--staged"], listed: '"--staged"' },
+    {
+      name: "a path after --, which is not itself refused",
+      argv: ["--port", "0", "--", "src/"],
+      listed: '"src/"',
+    },
+  ])("$name", ({ argv, listed }) => {
+    const result = spawnSync(
+      process.execPath,
+      [CLI_BUNDLE, ...prefix, ...argv],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        timeout: 20_000,
+        killSignal: "SIGKILL",
+      },
+    );
+    expect({
+      error: result.error,
+      status: result.status,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    }).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: `code-viewer does not accept: ${listed}\n${GIT_DIFF_GUIDANCE}\n`,
+    });
   });
 });
 

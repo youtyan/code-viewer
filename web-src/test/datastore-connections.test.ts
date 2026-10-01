@@ -1,6 +1,7 @@
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -8,7 +9,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inspect } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
+import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import { __setD1FetchForTest } from "../server/database/adapters/d1";
 import {
   __setSqlDriverFactoriesForTest,
@@ -27,6 +30,7 @@ import {
   loadDatastoreConnections,
   publicConnection,
   saveDatastoreConnection,
+  validateDatastoreConnection,
 } from "../server/database/connections-store";
 import {
   __setKeychainEnabledForTest,
@@ -35,6 +39,7 @@ import {
 import {
   createDbFilesResponse,
   handleDatabaseRoute,
+  probeDatastoreConnection,
 } from "../server/database/handle";
 
 const CASES = [
@@ -671,6 +676,11 @@ describe("connection test route", () => {
         },
       }),
     });
+    const originalError = console.error;
+    const logged: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
     try {
       const request = new Request("http://localhost/_db/connections/test", {
         method: "POST",
@@ -693,9 +703,44 @@ describe("connection test route", () => {
 
       expect(response?.status).toBe(400);
       expect(await response?.text()).toBe("connection failed");
+      // 理由はサーバの記録に残すが、秘密の値は伏せる。
+      const log = logged
+        .flat()
+        .map((arg) => formatErrorDetail(arg))
+        .join(" ");
+      expect(log).toContain("authentication rejected: ***");
+      expect(log).not.toContain("example-password");
     } finally {
+      console.error = originalError;
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // 閉じる失敗で読み取りの失敗を置き換えない (読み取りを先に、両方を持つ)。
+  test("keeps the read failure when closing after it also fails", async () => {
+    __setSqlDriverFactoriesForTest({
+      pg: () => ({
+        connect: () => Promise.reject(new Error("sample read failure")),
+        end: () => {
+          throw new Error("sample close failure");
+        },
+      }),
+    });
+    const connection = validateDatastoreConnection({
+      ...CASES[0].input,
+      name: "Example datastore",
+    });
+
+    const error = await probeDatastoreConnection(
+      connection,
+      new AbortController().signal,
+    ).then(
+      () => null,
+      (rejected: unknown) => rejected,
+    );
+    expect(formatErrorDetail(error)).toMatch(
+      /sample read failure[\s\S]*sample close failure/,
+    );
   });
 
   test("reuses an existing runtime password when edit test omits it", async () => {
@@ -759,6 +804,133 @@ describe("connection test route", () => {
       expect(response?.status).toBe(200);
       expect(receivedPassword).toBe("example-password");
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// 保存した接続の失敗は、どのルートの応答・サーバのログ・残すファイルにも秘密の
+// 値を出さない (素の形・URL の形・JSON の形)。種類と status は保つ。
+describe("saved connection failures over the Data screen routes", () => {
+  const secret = 'example p@ss/"word';
+  const forms = [
+    secret,
+    encodeURIComponent(secret),
+    JSON.stringify(secret).slice(1, -1),
+  ];
+  const failure = errorWithCause(
+    `sample login to db.example.test with ${forms.join(" ")}`,
+    new Error(`sample cause with ${forms.join(" ")}`),
+  );
+  const postQuery = (id: string) =>
+    new Request("http://localhost/_db/query", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Code-Viewer-Action": "1",
+      },
+      body: JSON.stringify({ db: id, sql: "SELECT 1", saveHistory: true }),
+    });
+  const get = (path: string) => (id: string) =>
+    new Request(`http://localhost${path}?db=${encodeURIComponent(id)}`);
+  const failingPg = () =>
+    __setSqlDriverFactoriesForTest({
+      pg: () => ({
+        connect: () => Promise.reject(failure),
+        end: () => Promise.resolve(),
+      }),
+    });
+  test.each([
+    {
+      name: "a SQL query",
+      id: "connection:a1a1a1a1a1a1a1a1",
+      saved: { ...CASES[0].input, password: secret },
+      request: postQuery,
+      setup: failingPg,
+    },
+    {
+      name: "the SQL schema",
+      id: "connection:a2a2a2a2a2a2a2a2",
+      saved: { ...CASES[0].input, password: secret },
+      request: get("/_db/schema"),
+      setup: failingPg,
+    },
+    {
+      name: "the Redis databases",
+      id: "connection:a3a3a3a3a3a3a3a3",
+      saved: { ...CASES[2].input, password: secret },
+      request: get("/_db/redis/databases"),
+      setup: () =>
+        __setRedisClientFactoryForTest(() => {
+          const client = {
+            on: () => client,
+            connect: () => Promise.reject(failure),
+            sendCommand: () => Promise.reject(failure),
+            withAbortSignal: () => client,
+            destroy: () => undefined,
+          };
+          return client;
+        }),
+    },
+    {
+      name: "the S3 buckets (HTTP 403)",
+      id: "connection:a4a4a4a4a4a4a4a4",
+      saved: { ...CASES[4].input, secretAccessKey: secret },
+      request: get("/_db/s3/buckets"),
+      setup: () => {
+        globalThis.fetch = (async () =>
+          new Response(`sample denied with ${forms.join(" ")}`, {
+            status: 403,
+          })) as typeof fetch;
+      },
+      status: 403,
+    },
+  ])("masks the secret in $name", async ({
+    id,
+    saved,
+    request,
+    setup,
+    status,
+  }) => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-connections-"));
+    const originals = [console.error, console.log, console.warn];
+    const logged: string[] = [];
+    const capture = (...args: unknown[]) => {
+      logged.push(args.map((arg) => inspect(arg, { depth: 8 })).join(" "));
+    };
+    console.error = capture;
+    console.log = capture;
+    console.warn = capture;
+    try {
+      setup();
+      await saveDatastoreConnection(dir, { id, name: "Example", ...saved });
+      const req = request(id);
+      const response = await handleDatabaseRoute(
+        req,
+        new URL(req.url),
+        dir,
+        [],
+        () => true,
+      );
+      const body = (await response?.text()) ?? "";
+      const stored = readdirSync(join(dir, ".code-viewer"), {
+        recursive: true,
+        encoding: "utf8",
+      })
+        .map((path) => join(dir, ".code-viewer", path))
+        .filter((path) => statSync(path).isFile())
+        .map((path) => readFileSync(path, "utf8"))
+        .join("\n");
+
+      if (status) expect(response?.status).toBe(status);
+      expect(body).toContain("***");
+      for (const form of forms) {
+        expect(body).not.toContain(form);
+        expect(logged.join("\n")).not.toContain(form);
+        expect(stored).not.toContain(form);
+      }
+    } finally {
+      [console.error, console.log, console.warn] = originals;
       rmSync(dir, { recursive: true, force: true });
     }
   });

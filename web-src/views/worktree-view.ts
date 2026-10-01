@@ -2271,10 +2271,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           {
             path: file.path,
             status:
-              file.status === "A" ||
-              file.status === "U" ||
-              file.status === "R" ||
-              file.status === "C"
+              file.status === "A" || file.status === "U" || file.status === "R"
                 ? "A"
                 : file.status,
           },

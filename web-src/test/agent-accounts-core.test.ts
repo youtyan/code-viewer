@@ -881,6 +881,13 @@ describe("what a new account may share", () => {
       category: "blocked",
       reason: "identity",
     },
+    // policy-limits.json がどのアカウントのものかを記録する添えのファイル。
+    {
+      agent: "claude",
+      name: "policy-limits.json.stamp.json",
+      category: "blocked",
+      reason: "identity",
+    },
     {
       agent: "claude",
       name: "backups",

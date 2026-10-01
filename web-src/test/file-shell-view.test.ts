@@ -233,6 +233,8 @@ function testDeps(
         el.remove();
       });
     },
+    // 小さいファイル (表で描く)。大きいファイルの仮想の行は下の専用のテスト。
+    renderVirtualSourceWithGutter: () => Promise.resolve(null),
     placeSidebarToggle() {
       document.body.dataset.sidebarPlaced = "1";
     },
@@ -330,6 +332,74 @@ describe("file view shell routing", () => {
       document.querySelector("#filelist [data-path='README.md']"),
     ).toBeTruthy();
     expect(sidebarCalls).toEqual([{ path: "README.md", ref: "worktree" }]);
+  });
+
+  // 大きいファイルは表を組まず、仮想の行の左の欄に Blame を出す。まとまりの
+  // 1 行目に時刻・作者・コミット、2 行目に件名。1 行だけのまとまりは 1 行目に両方。
+  test("a large file's blame goes to the virtual rows with a blame column", async () => {
+    const state: { route: AppRoute } = {
+      route: {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blame",
+        range: RANGE,
+      } satisfies AppRoute,
+    };
+    const other = "b".repeat(40);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) =>
+      new URL(String(input), "http://localhost").pathname === "/_file_blame"
+        ? json({
+            lines: [1, 2, 3, 4].map((lineNo) => ({
+              lineNo,
+              sha: lineNo < 4 ? SHA : other,
+              isUncommitted: false,
+            })),
+            commits: Object.fromEntries(
+              [SHA, other].map((sha) => [
+                sha,
+                {
+                  sha,
+                  author: "Alice",
+                  authorMail: "alice@example.com",
+                  authorTime: 1_700_000_000,
+                  summary: `summary ${sha.slice(0, 1)}`,
+                  isUncommitted: false,
+                },
+              ]),
+            ),
+          })
+        : originalFetch(input)) as typeof fetch;
+    try {
+      const blame = createBlameView({
+        ...testDeps(state, []),
+        renderVirtualSourceWithGutter: (_target, _text, gutter) => {
+          const rows = document.createElement("div");
+          rows.className = "virtual-rows";
+          for (const line of [1, 2, 3, 4]) rows.append(gutter.cell(line));
+          return Promise.resolve(rows);
+        },
+      });
+      await blame.renderBlamePage({ path: "README.md", ref: "worktree" });
+      await waitFor(() => !!document.querySelector(".virtual-rows"));
+      expect({
+        table: !!document.querySelector(".gdp-blame-table"),
+        cells: [...document.querySelectorAll(".gdp-blame-cell")].map((cell) =>
+          [...cell.children].map((child) => child.className),
+        ),
+      }).toEqual({
+        table: false,
+        cells: [
+          ["gdp-blame-bar", "gdp-blame-meta"],
+          ["gdp-blame-bar", "gdp-blame-summary"],
+          ["gdp-blame-bar"],
+          ["gdp-blame-bar", "gdp-blame-meta", "gdp-blame-summary"],
+        ],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test("file view tabs push canonical URLs when moving blame to history to code", async () => {

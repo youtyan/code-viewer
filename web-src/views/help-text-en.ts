@@ -407,6 +407,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               kind: "list",
               items: [
                 "M is modified, A is added (staged), D is deleted and R is renamed.",
+                "C is a file with a merge conflict.",
                 "U is a file you have never run git add on, and I is a file your .gitignore ignores.",
               ],
             },
@@ -491,11 +492,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
           blocks: [
             {
               kind: "paragraph",
-              text: "Pass the same arguments as git diff when you start code-viewer.",
-            },
-            {
-              kind: "command",
-              command: "code-viewer HEAD~1 HEAD\ncode-viewer --staged",
+              text: "Change the two refs at the top of the screen (HEAD → worktree at first). Each offers worktree, HEAD and --staged, and lists branches, tags and commits.",
             },
             {
               kind: "paragraph",
@@ -1166,7 +1163,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               ],
             },
             more(
-              "Usage refreshes every 5 minutes while the account view is open. Neither Claude nor Codex sends a model message or consumes tokens to fetch usage.",
+              "Usage refreshes every 5 minutes while a code-viewer page is open. Neither Claude nor Codex sends a model message or consumes tokens to fetch usage.",
               [
                 "On a claude card, ",
                 ui(accounts.usageEnable),
@@ -1287,7 +1284,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(l.terminal.readOnly),
                   " from the tab's right-click menu.",
                 ],
-                "Images the agent writes are listed on the shelf at the right; select one to open it in an image tab.",
+                "Images whose paths appear in the terminal are listed on the shelf at the right; select one to open it in an image tab.",
                 [
                   "The shelf groups images by the pane they came from; hover one to outline that pane and show its path in the shelf header. Choose ",
                   ui(l.terminal.imageShowInTerminal),
@@ -1614,7 +1611,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
             },
             {
               kind: "paragraph",
-              text: "Access is in Zero Trust; Tunnel is under Network → Tunnels in the account dashboard. cloudflared connects your Mac to the Tunnel.",
+              text: "Access is in Zero Trust; Tunnel is under Networking → Tunnels in the account dashboard. cloudflared connects your Mac to the Tunnel.",
             },
             {
               kind: "paragraph",
@@ -1842,7 +1839,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   items: [
                     {
                       title: "Create a new Tunnel (Cloudflare)",
-                      text: "From the account dashboard, open Networks → Tunnels → Create tunnel. Select cloudflared if asked for a type, and name the new Tunnel code-viewer.",
+                      text: "From the account dashboard, open Networking → Tunnels → Create tunnel. Select cloudflared if asked for a type, and name the new Tunnel code-viewer.",
                     },
                     {
                       title: "Install the connector (Mac)",
@@ -2190,7 +2187,36 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(l.database.edit.editMode),
                   " to change cells and write them all at once.",
                 ],
-                "Select a foreign-key cell to follow it to the related rows.",
+                "Select a foreign-key cell to see the related rows below. The list on the left splits what this row refers to from what refers to it, with row counts.",
+                [
+                  "Drag across cells to select a range and press ",
+                  key("⌘C"),
+                  " to copy it; it pastes straight into Excel. Add ",
+                  key("Shift"),
+                  " to include the column names.",
+                ],
+                "NULL shows as a filled tag and an empty string as a dashed one.",
+              ],
+            },
+          ],
+        },
+        {
+          title: "See what changed recently",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                [
+                  "Tables open with the newest rows first. ",
+                  ui(l.database.grid.newestLabel),
+                  " above the grid switches back to the table's own order.",
+                ],
+                [
+                  ui(l.database.grid.recencyHeader),
+                  " next to the row number shows when a row was added (+) or changed (pencil), from columns such as created_at and updated_at.",
+                ],
+                "After a reload, rows that are new or changed since the last load get a colored mark.",
+                "The time zone menu above the grid shows date and time columns in another zone (search by tokyo, +9 and so on). Export keeps the stored values.",
               ],
             },
           ],
@@ -2430,13 +2456,15 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
             {
               kind: "list",
               items: [
-                "While code-viewer is running, it is also a read-only MCP server.",
+                "While code-viewer is running, it is also an MCP server.",
                 [
                   "Connect to ",
-                  code("http://127.0.0.1:<port>/_mcp"),
-                  ", with the port from the URL it printed at start.",
+                  code("http://127.0.0.1:<port>/p/<key>/_mcp"),
+                  ": the project URL it printed at start, followed by ",
+                  code("_mcp"),
+                  ".",
                 ],
-                "Its tools read files, search, look at git history and read datastores.",
+                "Its tools read files, search, look at git history, and read datastores and terminals.",
               ],
             },
             more(
@@ -2470,7 +2498,13 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ".",
                 ],
                 [
-                  "To share annotations with others, commit only ",
+                  "To share annotations with others, put ",
+                  code(".code-viewer/*"),
+                  " and ",
+                  code("!.code-viewer/annotations.json"),
+                  " in ",
+                  code(".gitignore"),
+                  " instead, and commit ",
                   code("annotations.json"),
                   ".",
                 ],
@@ -2535,6 +2569,10 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   "Install tmux and run your agents inside it",
                 ],
                 ["The state looks wrong", "Set up hooks"],
+                [
+                  "Something broke after claude or codex updated",
+                  "Agent CLIs in the doctor shows your version next to the one code-viewer was checked with",
+                ],
                 [
                   "SQLite does not open",
                   [

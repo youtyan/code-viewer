@@ -2,6 +2,7 @@
 // 同じ値で切り替える。切替時のライブ反映は worktree-view の localize() が担当。
 
 import type { WorktreeNameError } from "../core/worktree";
+import { DIFF_SCREEN_TEXT } from "./diff-view-i18n";
 
 export type WorktreeLang = "en" | "ja";
 
@@ -224,24 +225,6 @@ export type WorktreeText = {
   nameErrors: Record<WorktreeNameError, string>;
 };
 
-const EN_STATUS_TITLES: Record<string, string> = {
-  M: "modified",
-  A: "added",
-  D: "deleted",
-  R: "renamed",
-  C: "copied",
-  U: "untracked",
-};
-
-const JA_STATUS_TITLES: Record<string, string> = {
-  M: "変更",
-  A: "追加",
-  D: "削除",
-  R: "リネーム",
-  C: "コピー",
-  U: "未追跡",
-};
-
 const TEXT: Record<WorktreeLang, WorktreeText> = {
   en: {
     title: "Worktrees",
@@ -295,7 +278,8 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       // 行の中に置くので短くする。誰と重なっているかは title に入る。
       overlapMark: "shared",
       overlapTitle: (others) => `Also changed in: ${others.join(", ")}`,
-      statusTitles: EN_STATUS_TITLES,
+      // 印の名前は Diff の一覧と同じ表 (diff-view-i18n.ts の fileStatus)。
+      statusTitles: DIFF_SCREEN_TEXT.en.fileStatus,
     },
     commits: {
       heading: (base) => `Commits ahead of ${base}`,
@@ -487,7 +471,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       overlapMark: "重複",
       overlapTitle: (others) =>
         `同じファイルを触っている: ${others.join("、")}`,
-      statusTitles: JA_STATUS_TITLES,
+      statusTitles: DIFF_SCREEN_TEXT.ja.fileStatus,
     },
     commits: {
       heading: (base) => `${base} に未マージのコミット`,

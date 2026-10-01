@@ -1,1566 +1,653 @@
 # code-viewer
 
-Local browser-based code and git diff viewer.
+A local, browser-based viewer for your repository's code and git diffs, with a
+place to run and watch AI coding agents (claude, codex) in tmux.
 
-Requires Node.js 20 or newer. Development uses
-[pnpm](https://pnpm.io/) (the version is pinned in `packageManager`).
+English | [日本語](README_ja.md)
 
-## Features
+![code-viewer: projects and agents on the left, the file list and changed files in the middle, a diff on the right](web/help-images/overview.en.webp)
 
-- Browse repository files and folders in the file list, shown on every screen
-  next to the left sidebar, with live worktree change updates over SSE. Its
-  filter takes plain text
-  (substring), `/pattern/` (regex), `~text` (fuzzy, same matcher as the file
-  palette) and globs such as `*.ts` or `src/**`, and shows
-  `matching / all` file counts in the header while it is active. Rows are
-  real links: Cmd/Ctrl+click or middle-click opens a file in a new tab.
-- Keep files and screens open as tabs in the top row (there is no header row
-  above it). The head of the list column, at the left end of the top row, has
-  two rows: the project you are looking at (a colored square with its
-  initials, its name — the project switcher, also `p` — and its branch on the
-  right), and below it the six view icons (Files / Diff / History / Worktrees /
-  Data / Work log, with the name and key on hover) with the button that folds
-  the file list. The tab row starts to its right; switching tabs or screens,
-  splitting, folding a column or showing the lists never moves or hides the
-  head. In a narrow head the branch keeps its whole name up to about 40% of the
-  width and the project name is shortened into the rest (hover for the whole
-  name). The left
-  sidebar holds the projects and agents; the list column to its right shows the
-  file list on every screen and, next to it, the list you pick the main area
-  from (Diff's changed files, History's commits and a selected worktree's list,
-  with the changed files of History and a selected worktree next to the list).
-  The columns follow the tab in front: with a terminal in front only the file
-  list stays. The list keeps the width you drag it to (320px at first); when the
-  main area would be narrower than 480px it narrows to 240px, then the changed
-  files fold to a strip, then the file list folds away. Every column folds by
-  hand (the file list with its button, the lists with the handle on their right
-  edge), and a column you open yourself stays open until a reload. While the
-  file list is folded, the view icons and its open button stand as a narrow
-  strip down the left edge under the project row. History's branch labels keep
-  their whole name up to about 40% of the room they share with the subject. The tabs are
-  shared by all projects and grouped by project: each group starts with a label in
-  the project's color (its initials and ▾ for New shell / New agent… in that
-  project, its Files / Diff / History / Worktrees / Data / Work log screens,
-  Switch to this project / Collapse / Close this group; the name is in the
-  tooltip) and its tabs are underlined in that color, in the order of the
-  sidebar; tabs of no project (agent board, Tools, Settings, Help) sit at the right
-  end, and a terminal belongs to the project of its folder. Click a label to
-  collapse a group. Files, terminals and images of another project open in place;
-  its Diff / History / Worktrees / Search / Data / Work log switch to that project
-  first. Clicking a project heading in the sidebar (or ⌘⇧↑ / ⌘⇧↓, Ctrl+Shift+↑ / ↓
-  elsewhere) switches to it and brings back the tab of its group you last had in
-  front. Two windows share the tabs without overwriting each other. A terminal
-  tab outside a group showing an agent from another project reads `project · title`,
-  and a narrow tab shortens the project name first. A single click opens a file in a preview tab (italic)
-  that the next file replaces; double-click or **Keep open** keeps it. Middle-click,
-  ⌘/Ctrl+click (tree, Diff / History file lists, Search results, palette rows),
-  Shift+Enter in the palette, or **Open in new tab** on a tree file opens it in a kept
-  tab of its own (an open one comes to the front and is kept); Shift+click still opens a
-  new browser window. A file at another version (a commit from History, HEAD, a branch)
-  is a separate tab named like `a.ts @ 1a2b3c4`. Diff /
-  History / Worktrees / Data / Work log each have one tab per project that comes
-  back as you left it. Files is not a tab: the folder view is what the left side shows
-  when no tab is selected (the Files icon, `g r`, or a folder in the tree).
-  Right-click a tab to close it, the others or those to its right, or copy its
-  path (Shift+F10 on a tab opens the same menu); drag to reorder; `g t` / `g T` /
-  `g x` / `g 1`–`g 9` move and close from the keyboard. On the tab row, ←/→,
-  Home and End move, Enter brings a tab to the front, Delete closes it and
-  Ctrl+Shift+PageUp / PageDown (or Ctrl+Shift+←/→, ⌘+Shift+←/→, **Move left** /
-  **Move right**) reorders it. With two sides, the focused side's tab row is
-  underlined across its width. A tab is as wide as its name (up to 200px); tabs that do
-  not fit all shrink by the same ratio but keep about eight letters of their name, then
-  the row scrolls sideways and keeps the front tab in view. Collapsing a group never
-  moves the tabs before it. The tabs are saved once for all projects. Files and screens
-  stay on the left side; split the area to put a terminal or an image on the
-  right (the split button — its tooltip says why when it cannot split —,
-  **Split right**, Alt+click, **Open to the right**, or drag one onto the
-  dashed area on the right half),
-  resize by dragging the line between, and press `g o` to switch sides. When
-  the two sides would be narrower than 480px each, the list column makes room
-  in the same order while split (with a mark on the file list button when it
-  folds) and comes back on one side, and the right side is set aside if two
-  sides still do not fit. The main area
-  scrolls in its own box (the page never scrolls, and Back / Forward return to
-  the scroll position), and a breadcrumb too long for its row folds its middle
-  folders into `…` (hover for the full path; click it, or Tab to it and press
-  Enter, to pick a folded folder). Image
-  files open in an image tab (zoom, previous / next, copy path, open folder).
-  The annotations, Copy AI context, auto-update, cancel-requests, theme and
-  repository-page buttons are at the right of the bottom bar.
-- Install it as an app from Chrome: the install icon at the right of the
-  address bar, ⋮ → Cast, save, and share → Install page as app, or the
-  Install code-viewer button in Help → Getting Started → Install
-  as an app. It opens in its own window, whose title bar follows the app
-  theme, and there the browser's tab keys work on these tabs: ⌘W / Ctrl+W
-  closes the front tab (never the window; ⌘⇧W / Ctrl+Shift+W still closes
-  the window), ⌘T / Ctrl+T opens the `+` menu, ⌘⇧T / Ctrl+Shift+T reopens
-  the last closed tab, ⌘1–8 / Ctrl+1–8 pick a tab and ⌘9 / Ctrl+9 the last,
-  Ctrl+Tab / Ctrl+Shift+Tab (⌘⇧] / ⌘⇧[ on a Mac) and ⌘← / ⌘→ (Ctrl+← /
-  Ctrl+→ on Windows and Linux) move to the previous / next tab of the
-  focused side, and ⌘N / Ctrl+N does nothing. In a text field ⌘← / ⌘→ still
-  move within the line; in a terminal tab they move between tabs, and the
-  other Ctrl keys still go to the terminal. In an ordinary browser tab
-  nothing changes (⌘← / ⌘→ stay Back / Forward). To try it, start
-  `code-viewer`, open its address in Chrome and install it; in the new
-  window open a few files, then press ⌘T (the `+` menu opens), ⌘1, ⌘9 and
-  Ctrl+Tab (the front tab changes) and ⌘W (the front tab closes, the window
-  stays).
-- View git diffs with unified or split layout, lazy loading, viewed-file
-  state, ignore-whitespace and hide-tests toggles, and dismissible per-line
-  "reference pills" that copy `@path#start-end` for AI agents. View File on
-  a diff card shows the full source in place while the file list stays on
-  screen; View Diff returns to the diff. On a long card the horizontal
-  scrollbar sticks to the bottom of the main area while the card is on screen
-  (one per side in split layout). A diff box that scrolls sideways is a Tab
-  stop, and ←/→ scroll it once it has focus.
-- Browse commit history per branch and open any commit's changed files and
-  diff, with shareable `/history?ref=<branch>&commit=<sha>` links
-  (`&source=<path>` while a file is open with View File; the commit list
-  stays). The
-  filter understands message words (`"quoted"` keeps spaces), sha prefixes,
-  `author:<name>`, `path:<part>`, `since:`/`after:`/`until:`/`before:<date>`,
-  `code:<text>` (lines added or removed, `git log -S`) and `merges:no` /
-  `merges:only`; kinds combine with AND, `author:` offers the repository's
-  authors as suggestions, and the text rides in the URL (`?q=`). Rows carry
-  branch / tag labels and a merge marker. The selected commit has a copy-sha
-  button and an "Open on GitHub" link; Shift+click a second commit to diff the
-  whole range between them (`?compare=<sha>`), and a merge commit lets you
-  pick the parent to compare against. `↑` / `↓` step commits anywhere on the
-  screen, `j` / `k` do when the commit list has focus, `g h` opens the
-  history of the ref you are viewing, and every folder page has a History
-  button that opens the log restricted to that folder
-  (`/history?path=<dir>/`). Select lines in a file and the line-reference
-  pill offers **Line history**: the History tab restricted to commits that
-  changed those lines (`git log -L`, `?lines=<start>-<end>`). File pages
-  carry older / newer revision buttons that step through the commits that
-  touched that file, and the ref picker remembers the refs you picked last
-  as quick chips.
-- Open per-file Blame and History tabs on a file detail page (GitHub-style):
-  Blame groups consecutive lines from the same commit with an Older→Newer
-  colour bar and lets you jump to the originating commit; History embeds the
-  same commit list and diff renderer used by `/history` inside the file's
-  tab shell, filtered to that path. Both tabs keep the file list visible.
-- Browse every worktree of the repository from the `Worktrees` icon at the
-  head of the list column, in the same shape as History: worktrees on the left,
-  the picked one's changed files in the middle, the diff on the right. Changed
-  images, video, and audio show a before / after preview there too, with the
-  same media card as the Diff Viewer, read from that worktree. Each row
-  shows how far its branch has drifted from the base branch (ahead / behind) and
-  whether it still merges cleanly — checked with `git merge-tree`, so no working
-  tree is touched — or which files would conflict. For a branch ahead of its
-  base, the middle pane lists those commits above the changed files, with their
-  subjects, authors, and timestamps. Files are split into uncommitted work and
-  commits made since the branch point, and a banner lists every file that more
-  than one worktree is changing, which is the conflict you would otherwise only
-  find at merge time. Each row carries the folder it lives in, when its files
-  were last touched, and a "…" holding every action for that worktree — open the
-  folder, copy its path, view it in a new tab, stop the server it started, copy
-  the command that merges it back, or delete it. Create a worktree under
-  `.worktrees/` (the dialog shows the exact path before you commit to it);
-  deleting one removes its folder from disk and keeps the branch.
-- Keep your projects and their agents in the left sidebar on every screen:
-  registered projects first, in your order, then projects found in tmux that
-  are not registered. Rows never reorder when states change. Drag a registered
-  project's heading (its agents move with it) to reorder, or press Alt+↑ / Alt+↓
-  on it, or use Move up / Move down in its right-click menu; the order is saved
-  with the project list, so every browser and window shows the same one. Each project is a
-  bold heading with its state mark and agent count (＋ and … on hover); its
-  ＋ opens the same menu as the tab group's ▾: a new shell, a new agent, or
-  that project's Files / Diff / History / Worktrees / Data / Work log screens. Its
-  agents sit under it as indented two-line cards: the task title (or the kind)
-  with a badge when it started waiting or finished while you were away, then
-  the kind, state, elapsed time and worktree. Click a project name to switch
-  to it in the same tab (an unregistered one is registered first), or click an
-  agent to open its pane in a terminal tab of the main area. Alt+click or the
-  row menu opens it in the opposite pane, splitting a single pane to the right.
-  Rest the pointer on an agent (or reach it with the keyboard) to see the last
-  lines of its screen in a read-only preview that refreshes every second;
-  Escape closes it.
-  The sidebar folds away and its width and folding follow you across
-  projects.
-- See every coding agent running in tmux on this machine on the All agents
-  board (the button next to Projects in the sidebar, or `g a`), grouped by
-  project (the git repository of each pane's folder; worktrees fold into their
-  repository). Each agent is the same two-line card as in the sidebar, with
-  the account and the tmux location added to its second line. Projects follow
-  the same order as the sidebar; inside each, needs-input rows come first, and
-  Enter opens the pane in a terminal tab. The same screen preview appears under
-  a row you rest the pointer on. A counter in the bottom
-  bar shows needs-input and working agents on every screen, next to each
-  account's usage, changed rows get an
-  unread dot and the tab title an unread count, and desktop notifications can
-  be enabled from that screen or from the note the left sidebar shows the
-  first time an agent needs input (choose which changes notify under
-  Settings).
-- Turn on reliable finish detection from Settings → Agent integration. It adds
-  hooks to claude (`settings.json` in `CLAUDE_CONFIG_DIR` or `~/.claude`) and
-  codex (`hooks.json` in `CODEX_HOME` or `~/.codex`) after showing the exact
-  file, what is added, where the backup goes, and how many existing hooks stay
-  (other hooks are never removed or reordered). The hooks run
-  `code-viewer terminal hook`, which reports to every running code-viewer and
-  always exits 0; reports that did not arrive are listed in the same section.
-  Finished turns then show as "Finished · unread", and agents that cannot be
-  recognized by process name are listed too. codex runs a new hook only after
-  you trust it in `/hooks`.
-- Keep several claude and codex accounts from Settings → Accounts. An account
-  is a settings directory (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`); code-viewer can
-  create one that links your settings from the default directory (you choose
-  what to share; sign-in, account identity, history and caches can never be
-  shared) or register one you already
-  have, showing what will be created and linked first. Each account is one row
-  with its email (claude also shows the plan), its state (Signed in, Not signed
-  in, or Unknown with the reason) and when it was last checked; the state and
-  email come from the CLI itself (`claude auth status`, `codex login status`
-  and `codex app-server`), never from reading tokens. Sign in once per account
-  with the official command, opened in a new tmux window. The Agents list then
-  shows which account each agent runs with, a band of account cards with every
-  quota window present in the latest record and its reset time, and New agent
-  starts claude or codex with a
-  chosen account and project in a new tmux window, showing the exact command
-  with a copy button. Missing windows are not
-  invented; when one config directory holds records from two accounts, the card
-  keeps the newest values and adds a Mixed note that says how to separate them.
-  Usage refreshes every five minutes while the account view is open; Refresh all
-  checks immediately. Claude uses its local `/usage` command and Codex reads
-  `account/rateLimits/read`, without starting a model turn. Errors stay visible
-  with copyable details and a retry button. Newer values from Codex session logs
-  or the optional Claude status line wrapper are also shown.
-  When a project has its own status line in `.claude/settings.json` or
-  `.claude/settings.local.json`, claude started from code-viewer is given that
-  status line wrapped with `--settings`, so its usage is still recorded.
-  New agent lists each account with its 5-hour and weekly usage and how old
-  the values are, so you can pick one with room left. To move an agent's work
-  to another account without signing in again, right-click the agent (or its
-  tab) → Continue with another account…: it starts claude or codex with the
-  account you pick in a new window of the same tmux session, and its first
-  message says where the previous agent's conversation log is (the hooks
-  report the location; code-viewer does not read the log). The previous agent
-  keeps running.
-  The same steps run from the terminal with `code-viewer accounts`
-  (`list`, `plan`, `create`, `register`, `login`, `wait`, `rename`, `remove`),
-  so an AI agent with the bundled `code-viewer-accounts` skill can add accounts
-  for you; you still approve each sign-in in your browser.
-- Register your projects so they stay in the Agents list (in your order) even
-  with no agent running, and switch between them from the project name at
-  the head of the list column (`p`) or from the left sidebar on any screen. One
-  code-viewer serves every project on one port: switching updates the screen at
-  `/p/<key>/…` without reloading the page. Notification permission, terminal
-  shells and unread marks carry over, and reload, back/forward and bookmarks
-  return to the same project and screen; CLI commands that print a screen
-  URL (`annotate`, `query diff tables`) print that address too. Each project
-  is shown by its own
-  process that code-viewer starts the first time you open it (and stops when
-  code-viewer exits or after the configured idle period); processes it started
-  can be stopped from the list. If you update or reinstall code-viewer while
-  it keeps running, it can no longer start project processes and says so on
-  the screen and in its terminal: stop it (Ctrl+C) and run `code-viewer`
-  again. Theme,
-  language, font sizes, key bindings and notifications are shared by all
-  projects, so switching does not change how it looks.
-- Each registered project gets a color and two initials (`code-viewer` →
-  CV), shown as a square before its name in the left sidebar, at the head of
-  the list column, on the All agents board and in the project switcher. The
-  project on screen has its heading tinted with that color, notifications put
-  the initials before the project name, and an installed window's title bar
-  takes the color. A new
-  project gets a color nobody else uses; change it with **Color…** in the
-  heading's ⋯ or right-click menu.
-- Open files directly from the repository or diff view, including text-like
-  config/prompt files and large generated files (virtualized source viewer
-  with copy/open-full-view).
-- Preview Markdown with a table of contents, task lists, Mermaid diagrams
-  (click to enlarge), and Shiki code highlighting.
-- Preview browser-safe media and show metadata for binary files that cannot
-  be rendered.
-- Find files and grep across the repository with `Ctrl+K` (file palette) and
-  `Ctrl+G` (text palette), or from the Search box at the top of the
-  left sidebar (plain click: files, Shift+click: grep). The two palettes
-  share one window: `Ctrl+K` /
-  `Ctrl+G` (or the Files / Grep buttons in its label row) switch modes while
-  keeping what you typed, and reopening a palette restores its last query,
-  selected so typing replaces it. With an empty query the file palette lists
-  the files you opened most recently, and its result count says when the
-  ranking was cut at 50 (`50 of 1,234 results`). The text palette has
-  match-case (`Alt+C`) and whole-word (`Alt+W`) toggles next to the regex
-  one, and `path:<dir or glob>` tokens in the query narrow the search
-  (`path:src/ path:*.md needle`); matching is case-insensitive on every
-  engine unless you turn match-case on. Opening a hit marks the matched
-  text on the target line (`?hl=`), and in large virtualized files it
-  pre-fills the in-file find bar with it. **Pin** (or `Ctrl+Enter`) moves
-  the query into a **Search** tab, where the grouped result list stays
-  open while you browse files; the query rides in the URL
-  (`/search?q=<query>`) so a reload re-runs it, the tab remembers it even
-  while another tab is in front, and the Search tab can
-  also be opened from the tab row's `+` menu or the palette.
-- Jump from a function, class, or variable in source and diff code to its
-  definition with `Cmd/Ctrl+click` or `g .`; choose from ranked candidates when
-  several definitions match — a code preview of the highlighted candidate
-  appears beside the menu — with references available as a fallback.
-- Switch the viewer UI between English and Japanese from Settings —
-  the language toggle live-updates every screen including the datastore
-  viewer.
-- Browse SQLite, PostgreSQL, MySQL, Cloudflare D1, Redis, Elasticsearch,
-  DynamoDB, and S3-compatible object storage (MinIO, LocalStack, Cloudflare R2)
-  with a built-in datastore viewer.
-  Local Supabase CLI (`supabase start`) Postgres projects are auto-discovered
-  too, without needing a `docker-compose.yml`.
-  Table descriptions appear inside expanded table entries and in the Schema
-  tab header when the database provides them.
-- Settings and Help are two pages, both at the bottom of the left sidebar
-  (`/settings` and `/help`; an old `/help?section=settings` link opens
-  Settings). Help covers getting started, step-by-step guides (add an
-  account, start an agent, add a project, let your AI agent do it with the
-  bundled skills and `code-viewer accounts`), the `.code-viewer/` project
-  files, AI annotations, datastores, the agent skill, MCP, and every key.
-  Press `?` anywhere, or Keyboard shortcuts at the top of Help, for a small
-  window with the keys for the common actions.
-- Change any shortcut in Settings → Shortcuts: every action of the app is
-  listed with a filter; open one, press Add key and then the key. An action
-  can have several keys, a key another action uses asks before it is moved,
-  and each key can work in text fields, in terminals, or only in the
-  installed app window (keys a browser tab keeps for itself, such as ⌘W or
-  ⌘T, are marked as app-window only). Restore one action or all of them,
-  and export, import or edit the changes as JSON (a mistake is shown by line
-  and column and nothing is saved). The keys are saved with the settings
-  shared by every project, the browser and the app window.
-- Scratch on pasted text in a Tools tab (the tab row's `+` menu, the
-  palette, or `/tools?tool=<tool>`): Markdown
-  preview (same renderer as file preview, so table of contents, task lists,
-  frontmatter, code highlighting and ` ```mermaid ` fences all work),
-  Mermaid preview with zoom and drag-pan, and a JSON / YAML tool that
-  auto-detects the input and re-emits it as formatted JSON or YAML (also a
-  validator and a JSON⇄YAML converter). Each tool keeps its own draft in
-  `.code-viewer/tools.json`, the tab remembers the open tool even while
-  another tab is in front, and the split between input and output is
-  draggable (in a pane under 560px wide the input sits above the output,
-  without the divider).
-- Run a real shell in the browser as a tab of the main area. The ＋ just
-  after the last tab opens a menu with Open a file, New shell, and the
-  existing sessions — the shells of this server and the tmux panes of this
-  project, with ● on unread ones that are not in a tab (``Ctrl+` ``
-  opens the same menu). It is an ordinary login shell on a PTY, rendered with
-  xterm.js, so `tmux` inside it behaves exactly as it does in any other
-  terminal. `?terminal=<shell>` on any URL brings that shell's tab to the
-  front (creating it if needed). The tab's right-click menu turns input off
-  when you only want to watch, changes the text size, and has Stop session,
-  which ends the shell after asking; closing the tab never stops the shell or
-  the agent. The same terminal moves to the other side with its screen and
-  half-typed input. The two most recently hidden terminal screens also stay
-  connected, so returning to them avoids replaying their output. Older screens
-  reconnect when opened again. Images the agent writes are listed on a shelf beside the
-  terminal (right, left, below or above; move it from the shelf's ⋯), grouped by
-  the pane they came from; hovering one shows its path and size in the shelf's
-  header and highlights where it appears on the screen. A click opens them in an
-  image tab (on the other side when split), a middle-click or ⌘/Ctrl+click in a
-  kept one, Alt+click in the full-screen viewer. Pasting an image (⌘V /
-  Ctrl+V) hands it to the agent: it is saved in the project as
-  `.code-viewer/pasted/pasted-image-<date>-<time>.png` (not tracked by git), its
-  path is typed at the prompt without sending, and a note says where it went.
-  URLs, image paths and paths of
-  files in the project on the terminal screen are links: hovering one
-  highlights it with Open and Copy buttons, and a click opens it (a file opens
-  at its line on the other side). With tmux mouse mode on, a plain click still
-  opens it; hold ⌘/Ctrl to keep the click from tmux. The palette (`Ctrl+K`) lists agents
-  under Agents, and shells and plain tmux panes under Sessions.
-- Terminal status combines lifecycle reports with priority-based matching of
-  the live terminal title and recent visible lines. Matching rules can report
-  working, waiting, idle, or keep the previous state. A target is tracked only
-  after a lifecycle report or a visible rule identifies it; screen motion is
-  then used as a fallback. A working match expires when its title and screen
-  stop changing, so a stale status line does not stay active. Edit the complete
-  JSON rule set under Settings → Advanced; the rules are
-  saved with the page's Save changes, like every other setting. Its regular
-  expressions use a bounded safe subset; combine conditions with `all` /
-  `any`. Invalid changes list every validation error and do not replace the
-  active rules; Use built-in rules followed by Save changes removes the saved
-  override so later releases can supply updated defaults. If the saved rules cannot be read again (for example,
-  another code-viewer holds their lock), the rules in use stay and Settings
-  shows why, instead of falling back to the built-in set. The editor includes an expandable field guide, a valid
-  example, and live JSON syntax highlighting.
-- Choosing a tmux pane takes you to it in a tab. If a shell already has that
-  session open, that shell's tab comes forward and the pane becomes current;
-  otherwise a shell is opened and attached for you, so you end up with one
-  shell per tmux session rather than one per pane. This also works from a
-  shell that is inside tmux or whose startup starts tmux (the attach runs
-  with `TMUX` unset, so the pane shows up nested). That tab shows the pane's
-  tmux window: when the pane ends and other panes are left in that window, the
-  tab stays and follows the pane tmux brings to the front. It closes when the
-  window ends (it does not move on to another window of the session) and when
-  you leave tmux (the session ends or you detach); a short note at the bottom
-  right names what ended. A shell ended with `exit` closes its tab
-  the same way. When the same session is also open in a smaller terminal, tmux
-  shrinks the window and fills the rest with dots; the tab covers that area
-  and shows the window size and why. Powerline separators and
-  file icons render when a Nerd Font is installed — the terminal asks for the
-  common Nerd Font families before falling back to the usual monospace stack,
-  so no font ships with the package. Panes need `tmux` on `PATH`; shells work
-  without it.
-  Opening shells needs the optional `@lydell/node-pty` package.
-- Terminal size follows the screen you operate: click, tap or type on a phone
-  to use its size, then operate on the PC to switch back. Idle browser screens
-  cannot reclaim the size through background resizing. Size and input are sent
-  together, so returning to a screen also works when its container has not changed.
-  Views of the same tmux pane still share one size.
-- One tmux caveat worth knowing: a tmux window can only have one size, so when
-  the same session is attached from both a terminal tab and another terminal, they
-  share it. With tmux's default `window-size latest` the window snaps to
-  whichever terminal you touched last, and the smaller one gets its right and
-  bottom edges cut off. `set -g window-size smallest` makes every attached
-  terminal show the whole window at the cost of some empty space in the larger
-  one.
-- Inspect the runtime with the Environment Doctor (right-side sheet,
-  toggled by the pulse icon in the bottom bar): runtime (Node / Bun / ABI),
-  `@youtyan/code-viewer` version and execution origin (npx cache vs
-  local), SQLite driver and snapshot store, Git, `rg`, GitHub CLI, discovery summary,
-  per-source datastore connectivity (each discovered SQLite / docker
-  SQL / Supabase CLI / Redis / Elasticsearch / S3 source gets one row
-  with a 2s minimal-read probe; failure rows include a paste-safe retry
-  hint),
-  Docker / Compose health (config dry-parse + `compose ps` per service),
-  terminal dependencies (`tmux` and `@lydell/node-pty`), and the listening
-  port. Useful when `npx` cache mismatch (e.g.
-  `NODE_MODULE_VERSION` errors) needs a remediation hint, or when a
-  docker compose datastore is discovered but unreachable.
-- Open repository folders (and parent folders of files) in the OS file
-  manager, create folders, and trash/restore files from localhost-only
-  actions.
-- Upload files into worktree folders. Uploads are enabled by default for
-  worktree targets; toggle them off from Settings.
-- Expose a local, read-only MCP endpoint (`/_mcp`) on the running server so
-  AI agents can call status, file, search, and datastore tools directly
-  over JSON-RPC instead of spawning CLI subprocesses.
+- Read files, diffs, commit history, blame and every worktree of a repository.
+- Start claude or codex in tmux, see which ones need input, and answer them in a terminal tab.
+- Keep several claude / codex accounts and see their usage.
+- Browse SQLite, PostgreSQL, MySQL, Redis, Elasticsearch, DynamoDB, S3-compatible storage and Cloudflare D1.
+- Let AI agents use it through a CLI, an MCP server and bundled skills.
 
-## Getting started
+One code-viewer serves every project from one port. It listens on `127.0.0.1` only.
 
-1. From inside a git repository, run `npx @youtyan/code-viewer --open`. It
-   prints a local URL (`http://127.0.0.1:<port>/p/<key>/`) and opens it. The
-   repository is registered and listed under **Projects** at the top of the
-   left sidebar. A folder outside git is shown but not registered; use the
-   **+** next to **Projects** to add a repository.
-2. To add another repository, choose its folder with the **+** next to
-   **Projects** (or **Add project…** in ⌘K), or run `code-viewer` inside it:
-   the running code-viewer adds it and prints its URL instead of starting a
-   second server.
-3. Agents need [tmux](https://github.com/tmux/tmux). **New agent** at the
-   bottom of the sidebar starts claude or codex in a new tmux session (tmux is
-   started for you). Its state (Needs input, Working) shows in the sidebar, the
-   bottom bar and the tab title; **Enable notifications** on the Agents screen
-   turns on desktop notifications.
-4. **Settings → Accounts** signs in (the default `~/.claude` and `~/.codex`
-   are created on the first sign-in or start) and adds more accounts. Or ask
-   your AI agent to add them (`code-viewer skill install`, then "add a claude
-   account"); it runs `code-viewer accounts` and you approve each sign-in.
-5. When something does not work, `code-viewer doctor` lists what is missing
-   (git, tmux, an old code-viewer still running, …) and how to fix it.
+## Contents
 
-### Phone controls
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Running it](#running-it)
+- [Features](#features)
+- [Datastore viewer](#datastore-viewer)
+- [CLI for AI agents](#cli-for-ai-agents)
+- [MCP server](#mcp-server)
+- [Bundled agent skills](#bundled-agent-skills)
+- [Files code-viewer writes](#files-code-viewer-writes)
+- [Connect from outside](#connect-from-outside)
+- [Development](#development)
+- [License](#license)
 
-In a window 640px wide or less (or a phone turned sideways) the layout is
-reduced to three tasks: checking agents and answering one that needs input,
-reading diffs and files, and switching projects. A bar at the bottom opens
-**Projects** (the left sidebar; it also follows your finger in from the left
-edge), **Files**, **Diff**, **Agents** and **List** (the file tree or the
-current screen's list, as a sheet from the bottom; on History and a worktree
-the sheet shows the list on top and the chosen commit's changed files below).
-History opens with its commit list in the sheet, two lines per commit, and the
-list fills the sheet until a commit is chosen. The bar marks the current
-screen, and **Agents** shows how many agents wait for input; the All agents
-board lists the agents before the accounts. Split view is off (a saved split
-comes back on a wide window). Diffs default to one column with long lines
-wrapped; **Wrap** at the end of the Diff bar turns wrapping off. Opening an
-agent from a notification, the bottom counter or the All agents board closes
-the sidebar and the sheet. On a touch screen,
-buttons, tabs, rows and the file tree are at least 44px tall, and a terminal
-tab shows the keys an on-screen keyboard lacks (Esc, Tab, ⇧Tab, Ctrl+C, ↑, ↓,
-Enter, and ⌨ to bring up or put away the keyboard). The tab strip shows only
-the tab in front; the square with a number at its right end lists every open
-tab, including those of a saved right side (opening one moves it to the left). Swiping up from the
-bottom bar opens **List**, and swiping down on a sheet's header closes it.
-Holding a finger on an agent, a tab or a file row opens its right-click menu.
-Pinching on a terminal changes its text size for this browser (the phone
-starts at 12px; the desktop size is kept). A phone turned sideways hides the
-status bar and thins the bottom bar. Settings open as contents first; pick a
-section, and the row at the top goes back. Browser notifications
-need a secure page (https, or localhost on the same machine), so they are not
-available when the page is opened over plain http from another device.
+## Requirements
 
-Opening an agent there, or a terminal tab that shows a tmux pane, shows only
-that pane, full screen, without attaching to tmux: other panes of a split window stay hidden, and the PC's window size and
-layout do not change. Long lines, and text the agent folded at the PC pane's
-width, wrap to the phone's width; **As on PC** wraps
-them at the PC pane's width in small text and shows full-screen apps such as
-vim as the terminal itself (pinch to change its text size). Numbered choices on
-the screen become buttons that send the number, the soft keys sit under the
-output, and the field at the bottom pastes what you type and presses Enter
-(**Send** with an empty field presses Enter only). The image button left of
-the field attaches a photo or screenshot: it is saved like an image pasted
-into a terminal, and its path is added to the field.
-Scrolling to the top adds earlier output (up to 3,000 lines of the pane's
-history); the agent's working status lines and input box borders are left out
-of it. Back (‹ or the browser's back) returns to where the pane was opened
-from: the sidebar or the + menu opens again. A terminal tab that shows a pane
-then shows the pane's name and state, with **Open the pane** and **Close this
-tab**.
+| What | Needed for |
+|---|---|
+| Node.js 20 or newer, git | Everything |
+| [tmux](https://github.com/tmux/tmux) | Agents, account sign-in and tmux panes (shells work without it) |
+| claude and / or codex CLI | Running agents |
+| `better-sqlite3` (optional dependency, installed with the package) | SQLite viewer, snapshots and `code-viewer query` |
+| `@lydell/node-pty` (optional dependency, installed with the package) | Terminal tabs (shells, and agents opened in a tab) |
+| Chrome | Installing it as an app (optional) |
 
-## Usage
+## Quick start
 
-From inside a git repository, run it without installing:
+1. In a git repository, run:
+
+   ```sh
+   npx @youtyan/code-viewer --open
+   ```
+
+   It prints `http://127.0.0.1:<port>/p/<key>/` and opens it. The repository is listed under **Projects** in the left sidebar.
+2. Add more repositories with the **+** next to **Projects**, or run `npx @youtyan/code-viewer` in their folders.
+3. Install tmux (`brew install tmux`, or your package manager on Linux).
+4. **Settings → Accounts**: select **Sign in** on the claude or codex row.
+5. (Recommended) **Settings → Agents → Agent integration**: select **Set up** to install hooks, so agent states are reliable.
+6. **New agent** at the bottom of the sidebar: choose claude or codex, the account and the project, then **Launch**.
+7. (Optional) **Enable notifications** on the **All agents** screen (`g a`).
+8. (Optional) Give your AI the bundled skills: `npx @youtyan/code-viewer skill install`.
+
+If something does not work, run `npx @youtyan/code-viewer doctor`. The in-app **Help** (bottom of the left sidebar) covers each step with screenshots.
+
+## Running it
 
 ```sh
-npx @youtyan/code-viewer
-```
-
-The server prints a local URL. Running `code-viewer` again in another
-repository adds that repository to the running code-viewer and prints its URL
-instead of starting a second server (if a code-viewer of another version is
-running, it tells you where and does not start). Add `--open` if you want the
-browser opened automatically:
-
-```sh
-npx @youtyan/code-viewer --open
-```
-
-To inspect another repository, pass `--cwd`:
-
-```sh
-npx @youtyan/code-viewer --cwd /path/to/repo
-```
-
-The equivalent one-shot command with pnpm also works:
-
-```sh
-pnpm dlx @youtyan/code-viewer
-```
-
-Or install it globally:
-
-```sh
-npm install -g @youtyan/code-viewer
+npx @youtyan/code-viewer                  # run without installing
+pnpm dlx --allow-build=better-sqlite3 @youtyan/code-viewer   # same, with pnpm
+npm install -g @youtyan/code-viewer       # or install it
 code-viewer
 ```
 
-The published CLI runs on Node.js 20 or newer.
+- Running `code-viewer` again in another repository adds it to the running code-viewer and prints its URL. It does not start a second server.
+- If a code-viewer of another version is running, it says where and does not start. Stop the old one with Ctrl+C.
+- If you update or reinstall code-viewer while it runs, it can no longer start projects. Stop it (Ctrl+C) and run it again.
+- The Diff screen compares `HEAD` with the working tree. Pick another range with the from / to pickers above the diff.
 
-SQLite features (the data viewer and snapshots) use `better-sqlite3`, an
-optional dependency with a native build step. With npm 11 or newer, installing
-may print an `allow-scripts` warning that `better-sqlite3` has install scripts
-not yet covered by `allowScripts`. To use SQLite, approve it with
-`npm approve-scripts better-sqlite3` (the command the warning names) and
-install again, or run `npm rebuild better-sqlite3` where code-viewer is
-installed. If you do not use SQLite, you can ignore the warning; everything
-else works without it. `code-viewer doctor` reports whether the SQLite driver
-loads and what to do if it does not.
+### Options
 
-Common options:
+| Option | Meaning |
+|---|---|
+| `--cwd <dir>` | Repository to open (default: current directory) |
+| `--open` | Open the URL in the default browser |
+| `--port <port>` | Port to listen on (default: a free port) |
+| `--idle-stop <seconds>` | Stop a project's process after this long unused (default `600`, `0` = never). Terminals and agents keep running |
+| `--remote-access <file>` | Add a listener for a Cloudflare Tunnel protected by Access ([Connect from outside](#connect-from-outside)) |
+| `--standalone` | Run a separate server for this repository only |
+| `--bin <name>=<absolute-path>` | Path of `git`, `rg`, `docker`, `gh` or `tmux`, for the repository you start in |
+| `--scope-omit-dir <name>` | Directories not to read in the repository you start in (repeatable; replaces the default list and the one in Settings) |
+| `--version`, `-v` / `--help`, `-h` | Version / full help |
 
-- `--cwd <dir>` — repository to view (default: current working directory).
-- `--open` — open the printed URL in the default browser.
-- `--port <port>` — bind to a specific port (default: pick a free port).
-- `--idle-stop <seconds>` — stop a project's process after nobody has used it
-  for this long (default `600`; `0` never stops). It is started again on the
-  next request; terminals, agents and unread marks are not affected.
-  When a code-viewer is already running, `--port` and `--idle-stop` are not
-  used (it prints a warning and the running one's URL).
-- `--standalone` — run one self-contained server for this repository only, the
-  way code-viewer worked before it served every project from one address
-  (scripts and tests use this).
-- `--bin <name>=<absolute-path>` — override an external command path
-  (`git`, `rg`, `docker`, `gh`, or `tmux`). The same values can be supplied through
-  `CODE_VIEWER_BIN_GIT`, `CODE_VIEWER_BIN_RG`, `CODE_VIEWER_BIN_DOCKER`, and
-  `CODE_VIEWER_BIN_GH`, and `CODE_VIEWER_BIN_TMUX`.
-- `--scope-omit-dir <name>` — skip a directory under the worktree (repeatable;
-  overrides the settings list for this session).
-- `--version`, `-v` — print the installed version.
-- `--help`, `-h` — print full CLI help.
+- `CODE_VIEWER_BIN_GIT`, `CODE_VIEWER_BIN_RG`, `CODE_VIEWER_BIN_DOCKER`, `CODE_VIEWER_BIN_GH` and `CODE_VIEWER_BIN_TMUX` set the same paths for every project. Paths must be absolute executable files outside the opened repository.
+- When a code-viewer is already running, `--port`, `--idle-stop`, `--bin` and `--scope-omit-dir` are not applied to it (it prints a warning); `--remote-access` stops with an error.
+- `--remote-access` and `--idle-stop` cannot be combined with `--standalone`.
 
-Arguments after options are passed to `git diff`. By default, code-viewer
-compares `HEAD` with the working tree.
+### SQLite and install scripts
 
-```sh
-npx @youtyan/code-viewer HEAD~1 HEAD
-npx @youtyan/code-viewer --staged
-code-viewer HEAD~1 HEAD
-code-viewer --cwd /path/to/repo --staged
-```
+`better-sqlite3` builds a native module when it is installed. Without it, the SQLite viewer, snapshots and every `code-viewer query` command fail; the rest works. `code-viewer doctor` shows whether the driver loads.
 
-`--bin` is useful when several command installations exist or a login shell
-PATH differs from the environment that starts code-viewer. Override paths must
-be absolute executable files outside the opened repository.
+- npm 11 may list packages whose install scripts have not been reviewed. The scripts still run. To allow it explicitly: `npm install -g --allow-scripts=better-sqlite3 @youtyan/code-viewer`, or `npm config set allow-scripts=better-sqlite3 --location=user` (also covers npx).
+- `pnpm dlx` skips the build unless you pass `--allow-build=better-sqlite3`.
+- If the build is missing, run `npm rebuild better-sqlite3` where code-viewer is installed.
 
-Open **Settings** at the bottom of the left sidebar to change display options such
-as light or dark, the color theme (Default, Night sea, Forest, Sand, Ink wash,
-Blossom, Moss, Mist, Amber, Indigo or GitHub, each in light and dark), terminal
-colors (always dark, or matching the page), font sizes (file list and code), and
-UI language. The language
-setting translates the viewer chrome itself, including that page, settings labels,
-sidebars, history controls, datastore viewer, and annotation panel labels.
+## Features
 
-## Repository View
+### Screen layout
 
-Open the project's URL (`/p/<key>/`) to browse the repository tree. Folder
-pages keep the file list visible, and file pages show a preview when the browser can safely render the
-file. Unsupported binary files show a clear unavailable state with file
-metadata instead of dumping bytes as text.
+| Area | What it holds |
+|---|---|
+| Left sidebar | Search, projects and their agents, **New agent**, **Settings**, **Help** |
+| List column | The current project and branch, six screen icons, the file list, and the list of the current screen (changed files, commits, worktrees) |
+| Tab row | Open files and screens, grouped by project |
+| Main area | The front tab. Can be split into two sides |
+| Bottom bar | Agents waiting / working, account usage, annotations, Copy AI context, auto update, theme, repository web page, Environment doctor |
 
-Folder listings show **Last committed** separately from **Local modified**,
-with independent date sorting. Commit dates come from the last commit that
-changed each path, using HEAD for the worktree or the selected revision.
-Folders include changes to their contents; uncommitted edits do not change
-the commit date. Paths without history are labeled explicitly. Local modified
-is filesystem metadata and can change during checkout, copying, or extraction.
+- Screens: **Files** (`g r`), **Diff** (`g d`), **History** (`g h`), **Worktrees**, **Data** (`g b`), **Work log** (`g j`).
+- Diff, History, Worktrees, Data and Work log each get one tab per project. Files is not a tab: the folder view shows when no tab is selected.
+- A file opened with one click gets a temporary tab (italic name) that the next file replaces. Double-click or **Keep open** keeps it. Middle-click or ⌘/Ctrl+click opens a kept tab.
+- A file at another revision opens in its own tab, named like `a.ts @ 1a2b3c4`.
+- Tab groups: a colored label per project. Select it to collapse the group; its ▾ has **New shell**, **New agent…**, that project's screens and **Close this group**.
+- Right-click a tab: **Close**, **Close others**, **Close to the right**, **Copy path**, **Split right**, **Move to other side** and more. Drag to reorder.
+- Split: the split button at the right of the tab row, **Split right**, or drag a tab to the right half. Screens stay on the left; files, terminals and images can go on either side. `g o` moves the focus to the other side.
+- Columns fold by hand, and fold by themselves when the window is narrow.
+- Tabs are shared by all projects and by every window.
+- Back / Forward return to the scroll position.
 
-The folder filter matches filenames without regard to case, shows matching / total
-counts, and stays applied while sorting. Press Down to focus a result, Enter to
-open the first result, or Escape to clear. The Code tab shows a line count and
-**Go to line** control, including for large files.
+### Files
 
-CSV and TSV files open as a table with all-column search, per-column filters, and
-three-state column sorting (ascending, descending, then source order). The
-visible-row count and reset action stay above the table while original file row
-numbers remain attached to their data after filtering or sorting.
+- **Code**, **Preview**, **Blame** and **History** tabs above each file.
+- Preview: Markdown, HTML, CSV / TSV, images, video, audio and PDF.
+- Markdown: table of contents, task lists, Mermaid diagrams (click to enlarge), Shiki highlighting. Relative links lead where they do on GitHub.
+- CSV / TSV: a table with search, per-column filters and sorting.
+- Large files open in a lighter, virtualized view (copy the whole file, or open the full view).
+- Drag over line numbers to select lines, then **Copy AI reference** copies `@path#start-end` (Shift: with the code). **Line history** shows the commits that changed those lines (`git log -L`).
+- On GitHub remotes: **Open on GitHub** for the repository or a file, and **Open selected lines on GitHub** for the selected lines.
+- ⌘/Ctrl+click or `g .` on a name jumps to its definition.
+- File list filter: plain text, `/regex/`, `~fuzzy`, or globs such as `*.ts` and `src/**`.
+- Folder listings show **Last committed** and **Local modified**, each sortable.
+- Symbolic links show `→ target` and open their target.
+- Open a folder in the OS file manager, create folders, move files to the Trash (⌘/Ctrl+Z undoes it), and upload files into worktree folders (**Settings → Files → Uploads**).
+- File changes reload live in every open tab.
+- Build, dependency and tool folders (`node_modules`, `dist`, `vendor`, `bin`, `log`, `tmp`, `.venv`, …) are listed but not read or searched. Change the list in **Settings → Files**.
+- On Linux the number of watched folders is capped (**Settings → Advanced → File change watcher**); a banner shows when the cap is reached.
 
-Markdown files use a dedicated preview tab. Relative links and images are
-resolved inside the repository, code blocks are highlighted with Shiki, and
-Mermaid diagrams are rendered lazily in the browser (click any diagram to
-open it in a lightbox). Relative links lead to the same destinations as they
-do on GitHub: another Markdown file opens its file page, an `#anchor` opens
-the preview and scrolls to that heading, a non-Markdown file opens in the
-Code view, and a link to a directory opens that folder in the repository
-tree.
+Marks in the file list:
 
-A file detail page lays out up to four tabs — **Preview**, **Code**,
-**Blame**, **History** — modelled after the GitHub file view. For text files
-`Code` is the default and `?preview=1` opts in to the Markdown / HTML
-preview. Media files (images, video, audio, PDF) show a **Preview** tab only
-— there is no Code tab for binary media. `Blame` and `History` each have
-their own canonical URL (`view=blame`, `view=history`), so deep links and
-the browser back/forward stay in sync. Opening another file from the
-repository tree keeps the active tab (a file that cannot be previewed falls
-back to Code). In a narrow header these tabs move to a row of their own, and
-under about 510px the breadcrumb takes the whole first row with the buttons
-beside it (copy path, open in the OS, info, previous / next, delete) on the
-second. The Blame tab reuses the source
-view's row component, so line numbers, drag-selection of `line=` ranges,
-syntax highlighting and the code font size from Settings all match the
-Code tab.
-
-When the repository remote is hosted on GitHub, repository and file headers
-include an **Open on GitHub** action. Selecting source lines opens a compact
-action bar for copying the AI reference, opening the exact line range on
-GitHub, or copying that GitHub URL. Markdown and HTML diff cards also expose a
-direct **Preview** shortcut beside the regular file view action.
-
-Very large text files use a virtualized source viewer. Only visible rows are
-rendered, and the page includes controls to copy the full file or reopen it in
-the full non-virtual view.
-
-The worktree is watched and changes are pushed to every open tab over SSE so
-files reload as you edit. The directory watcher is capped at 1024 directories
-by default and can be tuned from Settings → **File change watcher**
-(range slider + numeric input, 16–65536); when the cap is hit the viewer
-shows a banner so reloads are not silently missed.
-
-Large repositories load folder children on demand. The file list remembers which
-lazy-loaded folders you opened and re-expands them on the next reload, so the
-tree state survives navigation and refresh.
-Tab reaches the tree once, on the selected row; ↑ / ↓, Home / End, → (open a
-folder), ← (fold it or go to its parent) and Enter work there, next to the
-existing j / k / l / h keys.
-
-Symlinks get a distinct icon and a "→ target" label instead of looking like a
-regular file, and clicking one navigates straight to its resolved target.
-Broken symlinks are flagged and disabled instead of erroring out. Files with
-pending git changes show a status badge in the tree in place of the regular
-type icon:
-
-| Badge | Meaning |
+| Mark | Meaning |
 |---|---|
 | `M` | Modified |
-| `A` | Added — staged for commit |
+| `A` | Added (staged) |
 | `D` | Deleted |
 | `R` | Renamed |
-| `U` | Untracked — in the worktree, not under version control yet |
-| `I` | Ignored — excluded by a `.gitignore` rule |
+| `C` | Conflicted (merge conflict) |
+| `U` | Untracked (never `git add`ed) |
+| `I` | Ignored by `.gitignore` |
 
-`U` and `A` are deliberately separate: a file you have never run `git add` on
-reads differently from one already staged. A directory that is wholly
-untracked or ignored is badged as a whole, so it stays recognizable while
-collapsed; it keeps its folder icon and carries the badge next to its name.
-Inside an untracked directory the badge is inherited by its contents, except
-where an ignore rule names a file specifically.
+### Diffs
 
-## Uploads and Scope Settings
+- Unified or split layout, ignore whitespace (on by default), hide test files.
+- **Viewed** checkbox per file.
+- **View File** shows the whole file in place; **View Diff** goes back.
+- Images, video and audio show before / after.
+- Copy `@path#start-end` references from the diff, like in files.
+- The from / to pickers above the diff choose what is compared (`HEAD` and the working tree by default).
 
-File uploads are available for the local worktree target by default. Git tree
-views remain read-only. Open **Settings** at the bottom of the left sidebar to toggle
-uploads off, edit the directories to skip while browsing/searching, and hide
-files or directory names completely.
+### Search
 
-Scope settings control directory exclusions shared by the sidebar, Ctrl+K file
-palette, Ctrl+G grep palette, the Datastores browser, and the file change
-watcher — the same list applies to all five. Both the skip list and the hide
-list accept gitignore-style wildcards (`*`, `?`, `[abc]`, `[!abc]`) in
-addition to exact names. Everything you change in Viewer
-Settings remains a local draft until you select **Save changes**, then it is
-saved on the server under `.code-viewer/settings.json` (no
-separate project-level config file). `.DS_Store` and a broad set of
-build/cache directories (`node_modules`, `dist`, `build`, `.next`, `.turbo`,
-`.parcel-cache`, `.vite`, `.angular`, `.dart_tool`, `.venv`, …) are hidden by
-default. Pass `--scope-omit-dir <name>` (repeatable) to override the omit
-list on the command line for one session. `.devbox` and `.direnv` are always
-excluded regardless of saved settings or CLI overrides: they hold thousands
-of generated directories (Nix store link trees) that would stall the
-worktree watcher.
+- ⌘K / Ctrl+K: one box for projects, agents, sessions, files, actions and themes. With an empty query it lists recent files.
+- ⌘G / Ctrl+G: search the code. Regex (Alt+R), match case (Alt+C) and whole word (Alt+W); `path:<dir or glob>` narrows the search.
+- **Pin** (Ctrl+Enter) keeps the results in a **Search** tab (`/search?q=<query>`).
+- **Search** at the top of the left sidebar opens the ⌘K box (Shift+click: code search).
 
-The viewer keeps its per-project state under `.code-viewer/` at the repository
-root:
+### History and blame
 
-- `settings.json` — viewer chrome settings, scope overrides, annotation
-  panel/follow/TTS state.
-- `view-state.json` — last opened file, scroll positions, viewed-file marks.
-- `db-ui.json` — per-DB-tab UI state (column widths, related-panel size,
-  Rails FK toggle, S3 tooltip).
-- `tabs.json` — datastore tab list, order, and drafts.
-- `annotations.json` — AI Code Annotations.
-- `query-history.json` — datastore query history.
-- `db-snapshots.sqlite` — datastore snapshots and diff blobs.
-- `datastore-connections.json` — saved non-secret datastore connection settings.
+- **History**: commits per branch, the changed files and the diff of the selected one.
+- Filter: message text (one phrase, ignoring case), sha prefixes, `author:`, `path:`, `since:` / `after:` / `until:` / `before:`, `code:<text>` (`git log -S`), `merges:no` / `merges:only`. Quote values with spaces: `author:"Sample Name"`.
+- Shift+click a second commit to see the whole range. For a merge commit, pick the parent to compare against.
+- Each folder page has a **History** button for that folder. `g h` opens the history of the ref you are viewing.
+- Links are shareable: `/p/<key>/history?ref=<branch>&commit=<sha>`.
+- A file's **Blame** groups lines by commit; its **History** lists the commits that changed it.
+- ↑ / ↓ step through commits (`j` / `k` while the list has focus).
 
-The `.code-viewer` directory is tool-managed. It appears in the repository
-tree, and its text files can be inspected in the Code view, but it remains
-excluded from repository searches and diffs. Treat the files as diagnostic
-state rather than hand-edited configuration. Add `.code-viewer/` to
-`.gitignore` if you do not want to share its contents through git.
+### Worktrees
 
-What is shared by all projects (settings such as theme and language, the
-project list, accounts, the tab layout and the running code-viewer's record)
-lives in `$XDG_STATE_HOME/code-viewer`, or `~/.local/state/code-viewer` when
-`XDG_STATE_HOME` is not set. A relative `XDG_STATE_HOME` is ignored, as the
-XDG specification says, and code-viewer prints why once.
+- Every worktree of the repository, the changed files and commits of the selected one, and its diff.
+- Each row: commits ahead / behind the base branch, and whether it still merges cleanly (checked with `git merge-tree`; no files are touched) or which files would conflict.
+- A banner lists files that two or more worktrees are changing.
+- Create a worktree under `.worktrees/`. Delete removes its folder and keeps the branch.
+- The row's ⋯ menu: open the folder, copy the path, open in a new tab, stop its server, copy the merge command, delete.
 
-## Datastore Viewer
+### Projects
 
-SQL table lists support filtering, matching counts, and keyboard selection:
-Up/Down to move, Enter to open, Left/Right to collapse/expand, and Escape to
-clear the filter. Cell details offer **Cell** and **Row** modes. Row mode lists
-every column vertically and follows arrow-key navigation in the grid, keeping
-NULL, empty strings, false, and zero distinct. The detail panel can be resized;
-copying a row preserves column order and duplicate column names.
+- Add: the **+** next to **Projects**, **Add project…** in the ⌘K box, or `code-viewer` in the folder.
+- Switch: select a project in the sidebar, the project name at the top of the list column (`p`), or ⌘⇧↑ / ⌘⇧↓ (Ctrl+Shift+↑ / ↓). The page does not reload; tabs, terminals and unread marks stay.
+- The sidebar lists registered projects in use (an agent, a shell or its process running) in your order, then **Detected in tmux** (unregistered projects with agents), then **Not running** (folded).
+- Reorder by dragging a project heading or with Alt+↑ / Alt+↓.
+- Each project has a color and two initials (`code-viewer` → CV). The heading's ⋯ menu changes the color, renames it or removes it from the list (the repository is not touched).
+- Theme, language, key bindings and notifications are shared by all projects.
 
+### Agents
 
-code-viewer auto-discovers local datastores in your repository and provides a
-browser-based viewer for exploring their contents.
+- **New agent**: starts claude or codex in a new tmux window, with the account and project you choose. The dialog shows the exact command and each account's 5-hour and weekly usage.
+- The launch commands can be edited in **Settings → Accounts → Launch commands**.
+- Agents are listed under their project in the sidebar, on every screen. Select one to open its pane in a terminal tab. Rest the pointer on it to see the last lines of its screen.
+- **All agents** (`g a`): every agent in tmux on this machine, grouped by project, agents that need input first. **All panes** also lists plain shells.
+- The bottom bar counts agents that need input and agents that are working. The browser tab title shows the unread count.
+- **Enable notifications** on **All agents** turns on desktop notifications. Choose what notifies you in **Settings → Agents → Agent notifications**. Notifications need https or localhost.
+- Right-click an agent → **Continue with another account…** starts an agent with another account in a new window of the same tmux session. It continues from the previous agent's conversation log. It needs the hooks, and the previous agent must have received one message since. The previous agent keeps running.
 
-**SQLite** files (`.db`, `.sqlite`, `.sqlite3`, `.s3db`) are detected
-automatically by scanning the repository tree. **PostgreSQL**, **MySQL**,
-**Redis**, **Elasticsearch**, **DynamoDB on LocalStack**, **MinIO**, and
-**LocalStack S3** services are detected from any `docker-compose.yml`,
-`docker-compose.yaml`, `compose.yml`, or `compose.yaml` found by the same
-recursive scan — both the repository root and subdirectories are considered,
-so a single `code-viewer --cwd <root>` brings up every DB defined under that
-root. `.git/`, `.code-viewer/`, and `node_modules/` are skipped, and discovery
-is capped at a few-level depth and a few dozen services per scan to keep
-startup cheap.
+| State | Meaning |
+|---|---|
+| Needs input | Waiting for your answer or permission |
+| Working | Running a task |
+| Finished · unread | Finished, and you have not opened it yet |
+| Idle | Waiting for your next prompt |
 
-Services whose names collide across subdirectories are kept distinct via
-`docker:<service>@<relDir>` ids (cwd-direct compose files keep the historical
-`docker:<service>` id for backward compatibility).
+How the state is decided, strongest first:
 
-**Supabase CLI** (`supabase start`) local projects are also auto-discovered,
-even though the Supabase CLI does not write a `docker-compose.yml` into the
-project directory. Any `supabase/config.toml` found by the same recursive scan
-is picked up (`project_id` and `[db] port` are read from it), and the running
-Postgres container is resolved directly via `docker ps` (matched by container
-name and the `com.supabase.cli.project` label) instead of `docker compose ps`.
-Connection defaults to the Supabase CLI's documented local credentials
-(`postgres`/`postgres`/`postgres`).
+1. Hooks: claude and codex report it themselves. **Set up** in **Settings → Agents → Agent integration** shows the file and the diff before writing, backs up the file, and keeps your other hooks. If the settings file is generated (for example from dotfiles), it shows the hooks to add to the source instead. codex runs new hooks only after you trust them in `/hooks`.
+2. Screen text: rules match what the agent shows. Edit them as JSON in **Settings → Advanced**.
+3. Screen motion: whether the screen keeps changing.
 
-**Redis** support: browse DB 0–15, SCAN keys, and view values per
-type (string/hash/list as dedicated panes, set/zset/stream as JSON views).
-Edit values, delete keys, and create new keys (string/hash/list/set/zset/stream)
-with confirmation dialogs. It also participates in snapshots and diffs.
+### Accounts
 
-**Elasticsearch** support: list indices, view mappings, paginate
-docs with `search_after`, run lucene `q=` searches, and submit DSL queries to a
-small allowlist of `_search` / `_count` / `_msearch` / `_explain` /
-`_validate` / `_field_caps` / `_eql`. Edit documents (with optimistic
-concurrency via `_seq_no` / `_primary_term`), create new documents, and delete
-existing ones. Snapshots and diffs over `_search` iteration are supported.
+- An account is one claude or codex settings directory (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`).
+- **Settings → Accounts → Add account…**: create a new directory that links your settings from the default one, or register one you already have. It shows what will be created first. Sign-in details and history are never shared.
+- **Sign in** runs the official login command in a new tmux window.
+- Sign-in state and email come from `claude auth status`, `codex login status` and `codex app-server`. code-viewer does not read tokens.
+- Usage: the 5-hour and weekly windows with reset times, checked every 5 minutes while any code-viewer page is open (**Refresh all** checks now). Checking does not start a model turn.
+- The same steps from a terminal: `code-viewer accounts` (`list`, `plan`, `create`, `register`, `login`, `wait`, `rename`, `remove`).
 
-**DynamoDB** support: detect LocalStack services with DynamoDB enabled, list
-tables across paginated responses, and browse a Structure tab (key schema,
-global/local secondary indexes, and non-key attribute types inferred from
-loaded items) alongside scan or query items, `LastEvaluatedKey` pagination,
-and an item detail view with a copyable key. The explorer is read-only.
+### Terminal
 
-**Cloudflare D1** support: add a saved connection with a Cloudflare account ID,
-database ID, and API token (needs the `D1:Read` permission). The database is
-browsed over the D1 REST API (`POST /accounts/{account}/d1/database/{db}/raw`)
-and reuses the SQL screens — table list, row grid, query editor, schema, ER
-diagram, snapshots and diffs. D1 is SQLite, so the same `sqlite_master` and
-`PRAGMA table_info` / `index_list` / `foreign_key_list` introspection is used.
-The connection is read-only: the query editor accepts only
-`SELECT` / `PRAGMA` / `EXPLAIN` / `WITH`, and the grid's row editing is
-unavailable.
+- The **+** after the last tab (Ctrl+\`) opens **New shell**, existing shells and tmux panes, **Tools**, **Search** and more.
+- A shell runs your `$SHELL` on a PTY (not as a login shell), drawn with xterm.js. Opening shells needs `@lydell/node-pty`.
+- Shells end when code-viewer stops; tmux tabs reconnect. Run long work in tmux.
+- Each tmux session gets one tab; opening another pane of that session selects it in the same tab (and in tmux, so your own terminal attached to that session switches too). The tab closes when the tmux window ends or you detach.
+- Closing a tab never stops the shell or the agent. **Stop session** in the tab's right-click menu does.
+- **Read only** in the right-click menu turns input off; the same menu changes the text size.
+- Images whose paths appear in the terminal are listed on a shelf next to it. Select one to open it in an image tab.
+- Paste an image (⌘V / Ctrl+V) to hand it to the agent: it is saved under `.code-viewer/pasted/` and its path is typed without sending.
+- URLs and file paths on the screen are links (hold ⌘/Ctrl when tmux handles the mouse).
+- The terminal size follows the screen you are operating (PC or phone).
+- `?terminal=<shell>` on any URL brings that shell's tab to the front.
+- Powerline symbols and file icons show when a Nerd Font is installed where the browser runs.
 
-**Cloudflare R2**: R2 speaks the S3 API, so it is a saved connection of type
-`s3` with the **Cloudflare R2** provider preset. Enter the account ID and an R2
-access key pair; the endpoint (`https://<account-id>.r2.cloudflarestorage.com`)
-and the required `auto` signing region are filled in for you. Everything in the
-object-storage section below applies.
+> A tmux window has one size. If the same session is also attached in another terminal, the smaller one loses its right and bottom edges. `set -g window-size smallest` shows the whole window in both.
 
-**S3-compatible object storage** (MinIO, LocalStack, Cloudflare R2): browse
-buckets as a folder tree, search by prefix or filename, sort scanned objects by
-update time, and preview images, video, audio, PDFs, Markdown, HTML, and text
-files. Edit text/markdown/JSON object bodies inline, upload new objects to any
-prefix, and delete existing objects. Updated-time sorting is scoped to the
-objects scanned for the current prefix/search rather than a persistent
-whole-bucket index. HTML previews are rendered in a sandboxed `srcdoc` iframe;
-relative subresources inside the HTML are not rewritten. **LocalStack** falls
-back to `docker exec <container> curl` against the container-local endpoint
-when the service does not publish a host port; **MinIO** requires a published
-host port (add a `9000:9000` mapping) and will refuse to browse otherwise.
+### Tools
 
-**SQL row editing** (SQLite / PostgreSQL / MySQL): toggle an Edit mode on the
-table grid to insert, update, or delete rows inline. Edits queue as pending
-changes (shown with a yellow highlight on the affected row/cell) and are
-applied as a single transaction on commit. Row updates and deletes require the
-table to have a primary key. The whole batch rolls back on the first
-constraint violation. Cloudflare D1 is browsed read-only, so Edit mode is not
-offered there.
+- The **Tools** tab (`/tools?tool=markdown`, `mermaid` or `json`) works on pasted text: Markdown preview, Mermaid preview (zoom and drag), and JSON / YAML formatting and conversion.
+- Drafts are kept in `.code-viewer/tools.json`.
 
-### Browser UI
+### AI code annotations
 
-Open Data (the Data icon at the head of the list column, or `g b`) to access:
+- An agent posts notes on code lines with `code-viewer annotate`. With **Follow new notes** on, the viewer jumps to each new note.
+- The annotation panel (bottom bar) lists and searches notes by session. **Add note** writes one yourself.
+- The play button reads notes aloud.
+- **Copy reference for AI** copies text that points your AI at a note.
+- Notes are saved in `.code-viewer/annotations.json`.
 
-- **Saved connections** — use the `+` action beside the datastore selector to
-  add PostgreSQL, MySQL, Cloudflare D1, Redis, Elasticsearch, S3-compatible
-  (including Cloudflare R2), or DynamoDB endpoints that are not present in the
-  repository's local discovery files.
-  Required fields are marked in the connection dialog, and **Test connection**
-  verifies the current values before saving. Saved connections can be edited
-  or deleted from the adjacent actions.
-  PostgreSQL, MySQL, and Redis use Node.js drivers installed automatically with
-  this package, while Cloudflare D1, Elasticsearch, S3, and DynamoDB use
-  built-in HTTP clients. No database CLI or `curl` installation is required for
-  saved connections.
-  Non-secret settings (host, endpoint, account/database id, region, …) are
-  stored in `.code-viewer/datastore-connections.json`. User names, access key
-  IDs, passwords, secret keys, session tokens, and API tokens are never written
-  to that file and are never returned by list/edit responses.
+### Work log
 
-  Those credentials are kept in the macOS Keychain (one generic-password item
-  per connection, service `code-viewer`) and reloaded on demand, so they
-  survive a restart without being stored anywhere in the repository. The
-  keychain item is written through `security -i`, which reads the command from
-  stdin, so the secret never appears in any process's argument list. Deleting a
-  connection also deletes its keychain item; if that fails (a locked keychain,
-  for example) the connection is still removed and the UI says the credentials
-  were left behind, so you can clear them from Keychain Access yourself.
+- A daily work journal and a task queue for agents, kept in `.code-viewer/daily-journal.json` and `.code-viewer/tasks.json`.
+- Agents use it through `code-viewer journal`.
 
-  Credentials are deliberately not encrypted into a file next to the data: a
-  file the app can decrypt unattended needs its key on the same disk, which is
-  no stronger than plaintext. Key protection is left to the OS.
+### Install as an app
 
-  On platforms without keychain integration (currently everything except
-  macOS), credentials stay in server memory only and must be entered again
-  after restarting code-viewer.
+- In Chrome, use the install icon at the right of the address bar. Help → **Install as an app** also has an **Install code-viewer** button when Chrome offers it.
+- It opens in its own window. The title bar takes the project's color.
+- In that window, browser tab keys work on code-viewer's tabs: ⌘W / Ctrl+W closes the front tab (not the window), ⌘T / Ctrl+T opens the **+** menu, ⌘⇧T reopens the last closed tab, ⌘1–⌘8 pick a tab and ⌘9 the last one, Ctrl+Tab moves to the next tab, ⌘← / ⌘→ (Ctrl+← / Ctrl+→) move to the previous / next tab.
+- On Windows and Linux, these Ctrl keys go to the shell while a terminal has focus.
 
-- **Multi-DB tabs** — open multiple databases side by side, with their own
-  sidebar, panes, and history. `+` adds an empty tab; `×` or middle-click
-  closes one (the last tab resets to empty instead of vanishing). Tabs can be
-  reordered by drag and drop and persist in `.code-viewer/tabs.json`. A tab
-  with no datastore chosen is named New tab and points to the selector and
-  Add datastore connection. In a pane under 560px wide (the left side of a
-  split) the global search box stacks above its button and the query toolbar
-  wraps. A failure shows its whole reason on screen (operation, HTTP status,
-  server message, causes) and in the browser console with its target.
-- **PostgreSQL schema selector** — switch between schemas without reopening
-  the database.
-- **Table browser** — paginated data grid with column sort, text filter, cell
-  copy, and CSV/JSON export (capped at 100,000 rows; export respects current
-  filter/sort). Row numbers stay visible during horizontal scrolling, and
-  active column filters are highlighted. Reload just the current table from the search bar while
-  keeping global search and column filters, with a result chip that calls out
-  row-count changes. Double-click a cell to edit inline when Edit mode is on;
-  the whole pending edit batch commits atomically.
-- **Detail footer and related panel** — click any cell to open a resizable
-  detail footer, where JSON values are pretty-printed and syntax-highlighted;
-  foreign-key cells open a related panel showing the
-  referenced or referencing rows, with multi-step drill-down breadcrumbs.
-  Cells that match the focused row are highlighted in both panels. Once the
-  grid has focus, arrow keys move the active cell from data cell to data cell
-  and the detail footer follows it, `Enter` follows a foreign key (arrow keys
-  alone never fire a related-table query), `Escape` closes whichever panel is
-  open, and `Tab` / `Shift+Tab` move between the main grid and the related
-  grid. The related panel's reference list keeps each entry on one line with
-  the full table name and condition in a tooltip, and its width can be dragged
-  and is remembered.
-- **Footer dock with Query History & Session log** — bottom
-  dock that hosts two tabs: the per-database **Query History** (master/detail
-  list of saved queries, SSE-synced across tabs) and a **Session log** that
-  records every SQL the server runs in this browser session (read fetches,
-  user queries, and write commits) with timing, row counts, and the actual
-  executed SQL syntax-highlighted with shiki. Auto-follow keeps the newest
-  entry pinned; scroll up to pause.
-- **Rails FK inference toggle** — opt-in heuristic that adds virtual foreign
-  keys following Rails naming conventions (e.g. `user_id → users.id`) on top
-  of the database-declared FKs.
-- **Query editor** — sits above the result grid on the same screen (drag
-  the divider, or focus it and press ↑ / ↓, to resize it; it can also be
-  collapsed). Choosing a table puts the SQL that fetched its rows (with the
-  page's `LIMIT` / `OFFSET`) into the editor, Run / Explain results show in
-  the same place, and the Data tab goes back to the table. It executes
-  read-only SQL with syntax highlighting. The
-  allowlist depends on the engine (SQLite: `SELECT`, `PRAGMA`, `EXPLAIN`,
-  `WITH`; PostgreSQL and MySQL also accept `SHOW` and `DESCRIBE`, and
-  PostgreSQL queries run inside `BEGIN TRANSACTION READ ONLY`). Per-DB results
-  and history are saved and synced across tabs over SSE; the editor records
-  whether each entry came from the browser or the CLI.
-- **ER diagram** — auto-generated entity-relationship diagram showing
-  foreign-key relationships between tables.
-- **Schema view** — table columns (with column comments when the database
-  defines them), indexes, foreign keys, triggers, and DDL, with an in-tab
-  schema refresh action. Tables themselves surface a comment column on the
-  database table list.
-- **Global search** — full-text search across all tables and text columns of
-  a database.
-- **Snapshots and diffs** — take point-in-time snapshots of selected tables
-  (or Redis key spaces, or Elasticsearch indices) and compare any two
-  snapshots to see inserted, updated, and deleted rows with full before/after
-  values.
-- **Datastore explorers** — first-class sidebars for Redis (DB / SCAN),
-  Elasticsearch (indices / mappings / docs), DynamoDB (tables / scan / query),
-  and S3 (folder tree, kind badges) so the same Multi-DB tab UI works for
-  non-SQL stores too. Redis, Elasticsearch, and S3 support editing or creation
-  through in-line panes and confirmation dialogs; DynamoDB browsing is
-  read-only.
+### Phone
 
-### CLI
+In a window 640px wide or less (or a touch screen 500px tall or less), the layout keeps three tasks: answer agents, read diffs and files, and switch projects.
 
-AI agents can run read-only queries, search across tables, and capture
-snapshots / diffs from the command line. Query results are written to the
-per-repository history visible in the browser; search results are returned
-by the CLI and mirror the browser Search tab; snapshots are stored in the
-snapshot store. The same operations are available in the browser's
-Datastores tab (Query History, Search, and Snapshot tabs).
+- A bar at the bottom: **Projects**, **Files**, **Diff**, **Agents** (with the number waiting for input) and **List**.
+- Opening an agent shows only its pane, full screen. The PC's tmux layout does not change.
+- Numbered choices become buttons; the field at the bottom sends text and Enter; the image button attaches a photo.
+- **As on PC** shows the pane at the PC's width.
+- Touch and hold opens the right-click menu. Pinch changes the terminal's text size.
+- To use it away from home, see [Connect from outside](#connect-from-outside).
+
+### Settings, Help and shortcuts
+
+- **Settings** (bottom of the left sidebar, `/settings`): **Appearance**, **Agents**, **Accounts**, **Shortcuts**, **Files**, **Advanced**, with a search box.
+- Appearance: light / dark, color theme (Default, Night sea, Forest, Sand, Ink wash, Blossom, Moss, Mist, Amber, Indigo, GitHub), terminal colors, image shelf position, UI and code font sizes, language (English / Japanese).
+- Shortcuts: every action can get one or more keys, in text fields, in terminals, or only in the app window. Export, import or edit them as JSON.
+- Typed settings (excluded directories, hidden names, screen rules) and shortcut changes apply with **Save changes**. Other choices apply at once.
+- **Help** (`/help`): step-by-step guides with screenshots, in English and Japanese.
+- `?` on any screen shows the common keys.
+
+### Environment doctor
+
+The pulse icon at the right of the bottom bar (or `code-viewer doctor` in a terminal) checks:
+
+- Node / Bun / ABI, the code-viewer version and where it runs from (npx cache or local)
+- SQLite driver, snapshot store, git, `rg`, GitHub CLI, tmux, `@lydell/node-pty`
+- Every discovered datastore and saved connection, with a minimal read; Docker / Compose
+- Agent hooks, accounts, projects and running servers
+- The claude / codex CLI versions, next to the versions code-viewer was checked with
+- The claude / codex versions, next to the ones code-viewer was checked with
+
+Each row shows what failed; most warnings also say how to fix it.
+
+## Datastore viewer
+
+Open **Data** (`g b`).
+
+| Store | Auto-discovered from | Edit | Snapshots in the browser |
+|---|---|---|---|
+| SQLite (`.db`, `.sqlite`, `.sqlite3`, `.s3db`) | Files in the repository | Rows | Yes |
+| PostgreSQL, MySQL | Running compose services; Supabase CLI (PostgreSQL) | Rows | Yes |
+| Cloudflare D1 | — (add a connection) | — | Yes |
+| Redis | Running compose services | String values, new string keys, delete keys | CLI only (compose services) |
+| Elasticsearch | Running compose services | Documents | CLI only (compose services) |
+| DynamoDB (LocalStack) | Running compose services | — | — |
+| S3-compatible (MinIO, LocalStack, Cloudflare R2) | Running compose services | Text objects (edit, create), delete | — |
+
+### Discovery
+
+- SQLite files are found up to 3 folder levels deep (at most 50 files).
+- `docker-compose.yml`, `docker-compose.yaml`, `compose.yml` and `compose.yaml` are read from the repository and its subfolders (up to 3 levels, at most 30 services). Only running services are listed, so the Docker CLI is needed. MariaDB counts as MySQL and OpenSearch as Elasticsearch.
+- `supabase/config.toml` from `supabase start` is found too; the Postgres container is looked up with `docker ps`.
+- Every store except SQLite can also be added by hand: the **+** next to the datastore picker (**Add datastore connection**). **Test connection** checks the values before saving.
+- Connections added by hand need no database CLI: PostgreSQL, MySQL and Redis use bundled Node.js drivers; D1, Elasticsearch, S3 and DynamoDB use HTTP.
+- Compose and Supabase services are read through `docker exec` with the container's own `psql`, `mysql`, `redis-cli` or `curl`. S3 and DynamoDB use the published port when there is one.
+- MinIO needs a published host port. LocalStack without one is read through `docker exec … curl`; creating or editing objects, image previews, **Open raw** and **Download** then need a published port.
+
+### Credentials
+
+- Host, endpoint, account ID and other non-secret values go to `.code-viewer/datastore-connections.json`.
+- User names, passwords, access keys and tokens are never written to the repository. On macOS they are kept in the Keychain (service `code-viewer`). Elsewhere they stay in memory and must be entered again after a restart.
+
+### In the browser
+
+- Tabs: keep several databases open and switch between them.
+- Table grid: sort, filter, copy, export to CSV / JSON (up to 100,000 rows).
+- Tables open with the newest rows first (by `updated_at`, `created_at` or an integer primary key). **Newest first** above the grid switches back to the table's own order and is remembered.
+- The **Changed** column next to the row number shows when each row was added or changed (`5m ago`). After a reload, rows that are new or changed since the last load are marked and counted.
+- The time zone menu above the grid shows date and time columns (UNIX times included) in this computer's zone, UTC or any IANA zone; search it by name or offset (`tokyo`, `+9`). Export and cell details keep the stored values.
+- Select cells by dragging (or Shift+click / Shift+arrows, ⌘A / Ctrl+A for all rows) and press ⌘C / Ctrl+C to copy tab-separated text that pastes into Excel; add Shift to include the column names.
+- NULL and empty strings show as different tags (filled for NULL, dashed for an empty string).
+- **Edit** mode (SQLite / PostgreSQL / MySQL): edit, add and delete rows; **Commit** applies them in one transaction. Updates and deletes need a primary key.
+- Select a cell to see its value; the **Row** tab lists every column with its type (JSON pretty-printed, dates in the chosen zone).
+- Foreign-key cells open the related rows: what the row refers to and what refers to it, with row counts (relations without rows can be hidden).
+- SQL editor above the grid: read-only queries. SQLite and D1 allow `SELECT`, `PRAGMA`, `EXPLAIN`, `WITH`; PostgreSQL and MySQL allow `SELECT`, `EXPLAIN`, `WITH`, `SHOW`, `DESCRIBE` and run in a read-only transaction.
+- **Schema** (columns, comments, indexes, foreign keys, triggers, DDL), **ER** diagram, **Search** across all tables.
+- **Snapshot**: save selected tables now and compare two snapshots (added, changed and removed rows).
+- **Query history** and **Log** at the bottom (closed until you open one of them).
+- **Rails FK inference**: adds foreign keys from Rails naming (`user_id → users.id`).
+
+## CLI for AI agents
+
+`code-viewer agent-help` prints the index of AI-facing commands. Each has its own guide: `code-viewer <command> agent-help`.
+
+| Command | What it does | Needs a running code-viewer |
+|---|---|---|
+| `status` | Branch, remote, changed files, recent commits, next commands | No |
+| `file` | Blame, history, show and diff of one path | No |
+| `search` | Search code (`code`) and file names (`files`) | Yes |
+| `query` | Read-only datastore queries, cross-table search, snapshots and diffs | Yes |
+| `annotate` | Post notes on code lines for the viewer | Yes |
+| `journal` | Work log entries and the task queue | Yes (except `github-issues` and `--dry-run`) |
+| `terminal` | List terminals and their states, read a pane's text, report state | Yes |
+| `accounts` | Add and sign in claude / codex accounts | Yes |
+| `skill` | Install the bundled skills | No |
+| `doctor` | Check the environment (exit code `1` on an error) | No |
+
+- If code-viewer runs but this repository is not open in it yet, the CLI asks code-viewer to open it (which also adds it to the project list) and waits up to 30 seconds per request. With no code-viewer running, start `code-viewer` first.
+- `terminal` and `accounts` talk to the running code-viewer itself and never open a project.
+- `--cwd <repo>` and `--server <url>` pick another target.
+
+### status
 
 ```sh
-# Discover datastore ids the running server has detected (SQLite files plus
-# any PostgreSQL / MySQL / Redis / Elasticsearch / S3 services from a nearby
-# docker-compose). Use the printed id as --db on every other command.
-code-viewer query sources --json
-# Or skip composing the next SQL call yourself: --commands prints
-# shell-pasteable schema/exec lines for SQL sources, plus paste-safe
-# `list --db ... --json` and `snapshot list --db ... --json` so you can
-# step into the existing query history and snapshot store without
-# rebuilding those commands. Redis sources get
-# `redis databases / redis keys` lines, Elasticsearch sources get
-# `elasticsearch indices / elasticsearch docs` lines, and S3 sources get
-# `s3 buckets / s3 objects` lines with `--bucket <bucket-name>` as a
-# placeholder. Every emitted SQL command line pins --server '<url>' to the
-# same server URL this invocation resolved, so pasting them elsewhere
-# never silently re-runs auto-discovery. --json and --commands are
-# mutually exclusive. Notice/comment metadata is collapsed to one line
-# so copied command blocks stay intact.
-code-viewer query sources --commands
+code-viewer status
+code-viewer status --json
+code-viewer status --ref main --limit 20 --json
+```
 
-# Introspect tables and columns without writing dialect-specific SQL.
-# `query schema --json` adds paste-safe `columnsCommand` / `ddlCommand` fields
-# to every tables[] element (each pins --server and single-quotes the db /
-# schema / table) so AI/human can drill into a specific table without
-# rebuilding the call.
-code-viewer query schemas --db docker:pg-svc --json
+### file
+
+```sh
+code-viewer file blame --path src/sample.ts --json
+code-viewer file history --path src/sample.ts --limit 10 --json
+code-viewer file history --path src/sample.ts --query "author:tester" --json
+code-viewer file show --path src/sample.ts --start 100 --end 150 --json
+code-viewer file show --path src/sample.ts --ref main --json
+code-viewer file diff --path src/sample.ts --json
+code-viewer file diff --path src/sample.ts --from HEAD~1 --to HEAD --full --json
+code-viewer file diff --path new_sample.ts --untracked --json
+```
+
+- `blame` and `history` print tab-separated text; `show` prints the file and `diff` a unified diff.
+- `file diff` shows a preview by default; `--full` gives the whole diff.
+
+### search
+
+```sh
+code-viewer search code --term "TODO" --json
+code-viewer search code --term "fn handler" --regex --path src --path tests --ref main --json
+code-viewer search code --term "Token" --case-sensitive --word --path "src/**/*.ts" --json
+code-viewer search files --term "userId"
+code-viewer search files --term "src/**/*.test.ts" --max 200 --json
+```
+
+- `search code` uses the same search as ⌘G: `rg` for the working tree (a built-in search when `rg` is missing; regex needs `rg`) and `git grep` for other refs. Case-insensitive unless `--case-sensitive`.
+- `search files` ranks paths like ⌘K: words are fuzzy, patterns with `*` or `?` are globs. Default `--max` is 50.
+- Without `--json`, no match prints `no matches` / `no matching files` to stderr and exits 0.
+
+### query
+
+```sh
+code-viewer query sources --json
+code-viewer query sources --commands
 code-viewer query schema --db app.db --json
 code-viewer query schema --db docker:pg-svc --schema analytics --with-columns --json
 code-viewer query columns --db app.db --table users --json
 code-viewer query ddl --db app.db --table users
 
-code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
+code-viewer query exec --db app.db --sql "SELECT * FROM users LIMIT 10" \
     --title "Sample users" --body "Checking user data shape."
-code-viewer query exec --db docker:pg-svc --schema analytics \
-    --sql "SELECT * FROM events LIMIT 10"
-
 code-viewer query exec --db app.db --sql "SELECT count(*) FROM orders" \
     --max-rows 1 --no-save
-
-# Show saved query history. `list --json` enriches each entries[] element
-# with a paste-safe `replayCommand` — `code-viewer query --server '<url>'
-# exec --db '<dbId>' [--schema '<schema>'] --sql '<sql>' [--title '<title>']
-# --no-save` — so AI/human can re-run a past query without rebuilding the
-# call. server URL / dbId / schema / sql / title are POSIX single-quoted;
-# `--no-save` is fixed so replay does not re-pollute history (drop it if you
-# do want the replay saved).
 code-viewer query list --db app.db --json
-code-viewer query clear --db app.db
-# PostgreSQL multi-schema query history: keep list/clear scoped to one schema.
-code-viewer query list --db docker:pg-svc --schema analytics --json
-code-viewer query clear --db docker:pg-svc --schema analytics
 
-# Locate a value across every table (default: text-like columns only).
-# Blocks until the scan finishes or --timeout (default 60s) expires.
 code-viewer query search --db app.db --term "needle@example.com" --json
 code-viewer query search --db app.db --term "needle@example.com" \
     --tables users,orders --max-hits 20 --include-non-text --json
 
 code-viewer query snapshot create --db app.db --tables users,orders \
-    --note "Before user registration test"
-# The no-wait output also prints a paste-safe "Poll with: ..." line that
-# pins --server '<url>' and single-quotes db/schema, so AI/human paste never
-# silently falls back to auto-discovery. The same string is available as a
-# pollCommand field in --json ack output.
-# Block until the snapshot finishes (default --timeout 120s) and emit the
-# final meta as JSON — handy when an AI agent needs the snapshot id without
-# polling snapshot list separately.
-code-viewer query snapshot create --db app.db --tables users,orders \
     --note "Before user registration test" --wait --json
-# `snapshot list --json` enriches each snapshots[] element with paste-safe
-# `deleteCommand` and `noteCommand` fields. Each pins --server '<url>' and
-# single-quotes the snapshot id; `noteCommand` quotes the current note as-is
-# so AI/human can paste and edit the value to update.
 code-viewer query snapshot list --db app.db --json
-# PostgreSQL multi-schema: pin both create and list to the same schema so
-# the before/after pair and --wait polling stay scoped to that schema.
-code-viewer query snapshot create --db docker:pg-svc --schema analytics \
-    --tables events --note "Before backfill" --wait --json
-code-viewer query snapshot list --db docker:pg-svc --schema analytics --json
-code-viewer query snapshot note --id snap-abc123 --note "Updated context"
-code-viewer query snapshot delete --id snap-abc123
-
-# diff tables prints per-table summary lines plus a paste-safe "# diff rows: ..."
-# hint per table, and --json adds a diffRowsCommand field to each tables[] element
-# so AI/human can copy the exact row-detail command without rebuilding it.
 code-viewer query diff tables --before snap-abc123 --after snap-def456 --json
 code-viewer query diff rows --before snap-abc123 --after snap-def456 \
     --table users --json
 ```
 
-`query exec` prints pretty JSON with `dbId`, `columns`, `columnTypes`, `rows`,
-`rowCount`, `truncated`, `elapsedMs`, and optional `schema` / `executedSql`.
-Check `truncated` before treating the result as complete.
-
-`code-viewer query --help` shows all command syntax. `code-viewer query
-agent-help` prints a longer guide for AI agents covering query shape and
-conventions. Both `query` and `annotate` accept `--cwd <repo>` and
-`--server <url>` for targeting a specific running server.
-
-For discovered Redis sources, `code-viewer query redis` exposes the same
-read-only endpoints the browser's Datastores tab uses, so AI agents and
-shell scripts can look inside without opening a browser. The CLI calls
-the existing `/_db/redis/databases`, `/_db/redis/keys`, and
-`/_db/redis/value` routes (writes stay browser-only):
+- `query sources` lists the ids to pass as `--db`. `--commands` prints ready-to-paste follow-up commands.
+- `query exec` saves to the query history shown in the browser (`--no-save` skips it). Check `truncated` before treating rows as complete.
+- Redis, Elasticsearch and S3 sources have read-only subcommands. DynamoDB has none; browse it in the Data screen.
 
 ```sh
-# List the 16 logical DBs and their key counts.
 code-viewer query redis databases --db docker:redis-svc --json
-
-# SCAN-style key paging — re-issue with the returned nextCursor until "0".
-code-viewer query redis keys --db docker:redis-svc --db-index 0 \
-    --pattern '*' --count 500 --json
-
-# Read a single key's value. Binary content surfaces as binaryBase64.
-code-viewer query redis value --db docker:redis-svc --db-index 0 \
-    --key sample:key --json
-```
-
-Default text output is tab-separated (`index<TAB>keyCount` for
-databases, `name<TAB>type` for keys). For `keys` a non-terminal cursor
-appears as a trailing `# nextCursor: <cursor>` line so pagination needs
-no JSON parsing; 0 keys prints `no redis keys` to stderr and exits 0.
-`value`'s default output is the `RedisValue` payload as pretty JSON;
-`--json` wraps the same payload in the full `RedisValueResponse`
-(dbId / dbIndex / key included).
-
-For discovered Elasticsearch sources, `code-viewer query elasticsearch`
-exposes the same read-only endpoints the browser's Datastores tab uses.
-The CLI calls the existing `/_db/elasticsearch/indices`, `/mapping`,
-`/docs`, and `/doc` routes (writes stay browser-only):
-
-```sh
-# List indices: name, doc count, byte size, health.
+code-viewer query redis keys --db docker:redis-svc --db-index 0 --pattern '*' --count 500 --json
+code-viewer query redis value --db docker:redis-svc --db-index 0 --key sample:key --json
 code-viewer query elasticsearch indices --db docker:es-svc --json
-
-# Inspect a single index's mapping (field types / nested properties).
-code-viewer query elasticsearch mapping --db docker:es-svc \
-    --index sample-index --json
-
-# Search documents with a Lucene query; --size caps hits, --search-after
-# pages by feeding back the previous response's lastSort JSON array.
-code-viewer query elasticsearch docs --db docker:es-svc \
-    --index sample-index --q 'status:active' --size 10 --json
-code-viewer query elasticsearch docs --db docker:es-svc \
-    --index sample-index --q 'status:active' --size 10 \
-    --search-after '[1700000000000,"abc"]' --json
-
-# Read a single document by id.
-code-viewer query elasticsearch doc --db docker:es-svc \
-    --index sample-index --id sample-id --json
-```
-
-Default text output is tab-separated:
-`name<TAB>docCount<TAB>sizeBytes<TAB>health` for `indices`,
-`_id<TAB>_score` per hit for `docs` (followed by `# lastSort: <json>` and
-`# totalHits: <n> (returned <k>)` trailing lines so paging needs no JSON
-parsing). `mapping` and `doc` default to pretty JSON of the inner payload
-(`EsMapping` and `_source`). 0 hits on `docs` prints `no elasticsearch
-hits` to stderr (exit 0); a missing `doc` id prints
-`not found: <index>/<id>` to stderr (exit 0). `--json` always emits the
-full server response envelope.
-
-For discovered S3 sources, `code-viewer query s3` exposes the same
-read-only endpoints the browser's Datastores tab uses. The CLI calls the
-existing `/_db/s3/buckets`, `/objects`, `/folder`, `/head`, and `/text`
-routes (writes and raw byte streams stay browser-only):
-
-```sh
-# List buckets in the source.
+code-viewer query elasticsearch mapping --db docker:es-svc --index sample-index --json
+code-viewer query elasticsearch docs --db docker:es-svc --index sample-index --q 'status:active' --size 10 --json
+code-viewer query elasticsearch doc --db docker:es-svc --index sample-index --id sample-id --json
 code-viewer query s3 buckets --db docker:s3-svc --json
-
-# List objects in a bucket. --mode prefix walks --prefix; --mode contains
-# scans for --q across keys/basenames. Use --token to page.
-code-viewer query s3 objects --db docker:s3-svc --bucket sample-bucket \
-    --prefix logs/ --limit 50 --json
-
-# Walk one folder level (delimiter "/") — folders and files separately.
-code-viewer query s3 folder --db docker:s3-svc --bucket sample-bucket \
-    --prefix logs/ --json
-
-# Object metadata only (size / contentType / etag / updatedAt).
-code-viewer query s3 head --db docker:s3-svc --bucket sample-bucket \
-    --key logs/sample.json --json
-
-# Preview a text-shaped object's body (server caps at 512KiB and sets
-# truncated=true when it had to cut). Non-text keys return HTTP 415.
-code-viewer query s3 text --db docker:s3-svc --bucket sample-bucket \
-    --key logs/sample.json
+code-viewer query s3 objects --db docker:s3-svc --bucket sample-bucket --prefix logs/ --limit 50 --json
+code-viewer query s3 folder --db docker:s3-svc --bucket sample-bucket --prefix logs/ --json
+code-viewer query s3 head --db docker:s3-svc --bucket sample-bucket --key logs/sample.json --json
+code-viewer query s3 text --db docker:s3-svc --bucket sample-bucket --key logs/sample.json
 ```
 
-Default text output is tab-separated:
-`name<TAB>createdAt-or-"?"` for `buckets`,
-`key<TAB>sizeBytes<TAB>updatedAt-or-"?"<TAB>contentType-or-"?"` per object
-for `objects` (with `# nextToken: <token>` / `# scanLimitReached: true`
-trailing lines when the server returned them), and `DIR<TAB><prefix>` /
-`OBJ<TAB><key><TAB><sizeBytes>` rows for `folder`. 0 hits on `objects`
-prints `no s3 objects` to stderr (exit 0); an empty `folder` listing
-prints `no s3 folder entries` to stderr (exit 0). `head` defaults to
-pretty JSON of `S3ObjectHeadResponse`. `text` prints the object body to
-stdout and adds `text truncated` to stderr when the server flagged
-truncation. `--json` always emits the full server response envelope.
+`code-viewer query --help` lists every flag; `code-viewer query agent-help` explains the conventions.
 
-AI agents who don't yet know which subcommand they need can run
-`code-viewer agent-help` once. It prints a short index of the ten
-AI-facing entry points (`status`, `query`, `annotate`, `journal`, `search`,
-`file`, `terminal`, `accounts`, `skill`, `doctor`) with the exact `code-viewer <name>
-agent-help` command for each full guide. The index runs without any
-preflight, so it works even before SQLite or a running server is set
-up.
-
-### Workspace status CLI
-
-`code-viewer status` prints a one-shot snapshot of the current repo so
-an AI agent (or you) can orient yourself in a single call: current
-branch, remote URL, every file that differs from HEAD (staged +
-unstaged + untracked), the staged subset, the most recent commits, and
-a paste-safe shortlist of follow-up `code-viewer` commands. It runs
-locally over `git` — no running server, no SQLite preflight — so it is
-safe to call as the first command after entering any repository.
+### annotate
 
 ```sh
-# Human-readable summary.
-code-viewer status
-
-# Structured payload for agents.
-code-viewer status --json
-
-# Override the ref / depth used for "recent commits".
-code-viewer status --ref main --limit 20 --json
-
-# Use a specific git binary when PATH resolution is not the one you want.
-code-viewer status --bin git=/opt/bin/git --json
-```
-
-The `nextCommands` field pins `--server '<url>'` automatically for
-server-backed follow-ups when a code-viewer server is registered for
-the repo; local follow-ups stay bare. With no server, the snapshot
-itself still succeeds.
-
-### Code search CLI
-
-`code-viewer search code` exposes the running server's `/_grep`
-endpoint — the same engine that powers the browser's `Ctrl+G` palette —
-to the command line for AI agents and shell scripts. The search uses
-ripgrep when available and falls back to git grep / fixed-string
-scanning, honours the same scope rules as the UI (`.git`,
-`.code-viewer`, scope-omit directories filtered out), and can target a
-git ref instead of the worktree.
-
-```sh
-# default: fixed-string search across the worktree, plain text output.
-code-viewer search code --term "TODO"
-
-# JSON output: { ref, engine, truncated, matches[{path,line,column,preview}] }.
-# Prefer --json from agents — column / engine / truncated drive follow-up logic.
-code-viewer search code --term "TODO" --json
-
-# extended-regex search, restricted to two subtrees, on the `main` ref.
-code-viewer search code --term "fn handler" --regex \
-    --path src --path tests --ref main --json
-
-# exact case and whole words only; --path also accepts globs.
-code-viewer search code --term "Token" --case-sensitive --word \
-    --path "src/**/*.ts" --json
-```
-
-Default text output is `path:line:column<TAB>preview`, one line per
-match. An empty result prints `no matches` to stderr and exits 0.
-Parse errors and unreachable servers exit 1. `--max` accepts a positive
-integer up to the server's hard cap; `truncated=true` in the JSON
-response means more matches exist beyond the cap. Matching is
-case-insensitive on every engine unless `--case-sensitive` is given;
-`--word` keeps only hits on word boundaries (`rg -w` / `git grep -w`, and
-the same rule in the fallback scanner). `--path` takes a file, a
-directory, or a glob such as `src/**/*.ts`. Run
-`code-viewer search agent-help` for the full AI-agent guide.
-
-`code-viewer search files` is the sister command for **filename**
-lookups — the CLI mirror of the browser's `Ctrl+K` palette. It calls
-`/_files` for the ref's full tree, then ranks paths with the same
-`fuzzy + glob` algorithm the palette uses. `--term` auto-switches
-between modes: bare words (e.g. `"auth"`, `"userId"`) use fuzzy
-ranking; patterns containing `*` or `?` (e.g. `"src/**/*.test.ts"`) use
-glob matching, and the mode used is reported in `--json`. The `.git`,
-`.code-viewer`, and scope-omit directories are filtered out just like in
-the palette.
-
-```sh
-# Fuzzy search across the worktree, top 50 paths printed one per line.
-code-viewer search files --term "userId"
-
-# Glob: ranked JSON with score / ranges / mode for AI agents.
-code-viewer search files --term "src/**/*.test.ts" --max 200 --json
-
-# Look at a specific ref instead of the worktree.
-code-viewer search files --term "config" --ref main --json
-
-# Pin the git binary used for CLI-side repository discovery.
-code-viewer search files --term "config" --bin git=/opt/bin/git --json
-```
-
-Default text output is one path per line, best first. An empty result
-prints `no matching files` to stderr and exits 0. `--json` emits a
-ranked payload `{ ref, generation, query, mode, truncated,
-candidateTruncated, totalCandidates, totalMatches,
-matches[{ path, score, ranges }] }`. `truncated` means the ranked
-matches were sliced by `--max`; `candidateTruncated` means the server
-file-list cap was reached before ranking. The default `--max` is `50`
-(intentionally smaller than `search code` so the result fits an AI
-agent's context window); raise it up to the server-side cap when needed.
-
-### File inspect CLI
-
-After `search` locates a path, `code-viewer file` drills into it
-from git refs or the worktree. The CLI reuses the same read paths the
-browser uses for the Blame, History, and Diff tabs and the source viewer,
-so output matches the on-screen views. **No running code-viewer server is
-required** — these commands run locally, which makes them safe to use
-before the server has started (or from CI).
-
-```sh
-# "Who wrote this line?" — porcelain blame for a path, JSON DTO output.
-code-viewer file blame --path src/sample.ts --json
-
-# Force a committed-only blame against an explicit ref.
-code-viewer file blame --path src/sample.ts --base HEAD --ref main --json
-
-# "What changed on this path recently?" — paginated commit log.
-code-viewer file history --path src/sample.ts --limit 10 --json
-code-viewer file history --path src/sample.ts --query "author:tester" --json
-
-# Read the file (or a line range) as of a ref. AI-friendly JSON output
-# includes totalLines / complete so the caller knows what was sliced.
-code-viewer file show --path src/sample.ts --json
-code-viewer file show --path src/sample.ts --start 100 --end 150 --json
-code-viewer file show --path src/sample.ts --ref main --json
-
-# Unified diff for one path. Defaults to HEAD..worktree and a preview cap
-# (hunks/lines); pass --full for the entire diff.
-code-viewer file diff --path src/sample.ts --json
-code-viewer file diff --path src/sample.ts --from HEAD~1 --to HEAD --full --json
-code-viewer file diff --path new_sample.ts --untracked --json
-
-# Pin the git binary used by local file/blame/history/diff reads.
-code-viewer file history --path src/sample.ts --bin git=/opt/bin/git --json
-```
-
-Default (non-`--json`) output is tab-separated and easy to grep:
-
-- `blame` — `<line><TAB><shortSha or "worktree"><TAB><summary>`. Lines
-  with uncommitted edits show `worktree` and `<uncommitted>`.
-- `history` — `<shortSha><TAB><whenISO><TAB><author><TAB><subject>`.
-  A path with zero commits prints `no history` to stderr and exits 0.
-- `show` — the worktree file (or sliced lines) by default. Pass `--ref`
-  for a committed snapshot. Empty slices succeed.
-- `diff` — the unified diff text. An empty (or worktree == worktree)
-  range prints nothing on stdout and exits 0.
-
-Run `code-viewer file agent-help` for the full AI-agent guide
-including the JSON contract for each subcommand.
-
-### Doctor CLI
-
-The same diagnostic report behind the Environment Doctor sheet (see
-Features above) is available from the terminal without a browser, so AI
-agents and CI can introspect the runtime, SQLite driver, Git, search and
-terminal dependencies, GitHub CLI, Docker discovery, and snapshot store status
-directly.
-
-```sh
-# Human-readable status summary.
-code-viewer doctor
-
-# Full DoctorReport JSON (matches the /_doctor endpoint).
-code-viewer doctor --json
-code-viewer doctor --cwd /path/to/repo --port 64160 --json
-code-viewer doctor --bin git=/opt/bin/git --bin rg=/opt/bin/rg --bin docker=/opt/bin/docker --bin gh=/opt/bin/gh --bin tmux=/opt/bin/tmux --json
-```
-
-The exit code is `1` iff the worst check status is `"error"` (never on
-`"warn"`), so it doubles as a CI gate. Run `code-viewer doctor agent-help`
-for the full AI-agent guide.
-
-## AI Code Annotations
-
-AI coding agents (Claude Code, Codex, Cursor, Gemini, and similar CLI agents)
-can walk you through a codebase inside the viewer. An agent posts explanations
-for specific code locations with the `annotate` subcommand, and every open
-browser tab jumps to that location live — in the diff view when the file has
-changes in the current range, or in the source view otherwise:
-
-```sh
-code-viewer annotate start --title "How the SSE update flow works"
-code-viewer annotate add --file web-src/server/preview.ts --line 2330-2360 \
-  --body "Each browser tab keeps one SSE stream open against this endpoint."
-code-viewer annotate add --file web-src/app.ts --line 9650 \
-  --from HEAD~1 --to worktree \
-  --body "After the fix, reloads preserve the scroll position here."
-code-viewer annotate add --after a-previous --file web-src/app.ts --line 9700 \
-  --body "This inserted note now appears in the middle of the walkthrough."
-code-viewer annotate move a-late --before a-early
-code-viewer annotate rename sess-abc --title "Renamed walkthrough"
-code-viewer annotate edit a-id --body "Tightened wording."
-code-viewer annotate add-db --db app.db --table users --tab schema \
-  --body "This table is the identity root for user-facing records."
+code-viewer annotate start --title "How the update flow works"
+code-viewer annotate add --file src/server.ts --line 120-140 \
+  --body "Each browser tab keeps one event stream open here."
+code-viewer annotate add --file src/app.ts --line 96 --from HEAD~1 --to worktree \
+  --body "After the fix, reloads keep the scroll position."
 code-viewer annotate add-db --db app.db --table orders --tab data \
-  --grid-search failed --filter status=failed --sort created_at:desc \
-  --body "This restores the filtered failure investigation view."
-code-viewer annotate add-db --db app.db --tab query \
-  --sql "select * from orders where status = 'failed'" --run-query \
-  --body "This reopens the exact query result being discussed."
+  --filter status=failed --sort created_at:desc \
+  --body "The failed orders being discussed."
 ```
 
-The body is Markdown. Long bodies can be passed with `--body-file <path>` or
-piped through stdin (works for `add`, `add-db`, and `edit`).
-`code-viewer annotate --help` shows all commands: `start`, `add`, `add-db`,
-`move`, `edit`, `rename`, `list`, `delete <id>`, and `clear`. `add` and
-`add-db` accept `--before <id>`, `--after <id>`, or `--position <n>` when a
-note belongs somewhere other than the end, and `--title`, `--session <id>`, or
-`--session-title <text>` for session targeting.
+- Subcommands: `start`, `add`, `add-db`, `move`, `edit`, `rename`, `list`, `delete <id>`, `clear`.
+- The body is Markdown: `--body`, `--body-file <path>` or stdin.
+- `add` appends to the latest session; `--session <id>` picks one. `--before <id>`, `--after <id>` or `--position <n>` places the note.
+- `add-db` opens a datastore view: `--tab <data|schema|query|er|search|snapshot>`, `--filter`, `--sort`, `--row`, `--sql` with `--run-query`, and more.
 
-`add-db` accepts a wide set of DB-pane flags so the agent can pin the exact
-view it is discussing: `--tab <data|schema|query|er|search|snapshot>`,
-`--filter key=value` (repeatable), `--sort col:asc|desc`, `--row <n>`,
-`--grid-search <text>`, `--sql <text>` or `--sql-file <path>` plus
-`--run-query` and `--query-mode <run|explain>`, and `--search-term <text>`
-with `--include-non-text` and `--run-search`. For AI agents,
-`code-viewer annotate agent-help` prints a skill-style guide.
-
-Annotations are grouped into sessions and persisted in
-`.code-viewer/annotations.json` at the repository root, so the walkthrough
-survives reloads and server restarts. See **Uploads and Scope Settings**
-above for how `.code-viewer/` is treated by the viewer and how to opt out of
-sharing it through git.
-
-In the browser, the annotation icon in the bottom bar opens a searchable library.
-Search titles, full Markdown bodies, file paths, and session names, or show only
-notes for the current file or datastore location. Sessions can be collapsed,
-renamed, or deleted; original step numbers remain stable when filtering.
-Opening a note gives its Markdown the full panel height, with previous/next
-controls and a clickable location. Returning to the library keeps the search
-and scroll position. The panel is resizable and remembers its width.
-
-**Add note** creates a note directly from the browser. Select code line numbers
-first to prefill the file and line range, or capture the current datastore view
-including its filters. Choose an existing session or name a new one. The editor
-supports Markdown preview and Cmd/Ctrl+Enter to save. Failed saves keep the draft
-and display error details; background updates cannot replace the editor or
-navigate away while you write. Closing the panel keeps an unfinished draft in
-that tab; leaving the editor asks before discarding changes.
-
-The follow checkbox controls automatic navigation to newly posted notes. A
-built-in player reads annotations aloud with play/pause, previous/next, mute,
-and rate controls. Playback stops while editing; rate and mute are saved per
-project. Inline notes are readable directly below the target code, with line
-ranges, wrapping titles, and formatted Markdown. Paragraphs keep a comfortable
-reading width; code examples and wide tables scroll within the note. Notes start
-expanded even when the panel is open. Toggle **Note** to collapse an individual
-body, or use **Read in panel** for the full-height reader. Explicit collapse
-choices remain in effect as you open the panel or receive background updates.
-
-A copy button on each annotation produces a paste-ready prompt block that
-references the annotation by URL for sharing back into the originating agent.
-The panel-open state, selected session, and selected annotation are also kept
-in the URL, so a reload or shared link restores the same walkthrough context.
-
-The `annotate` subcommand (like `query`, `journal` and `search`) talks to the
-repository's server (discovered via `~/.cache/code-viewer/servers/`). When
-code-viewer is running but that repository's project process is not (the
-project was never opened, or it was stopped after `--idle-stop`), the CLI asks
-the running code-viewer to start it, the same way opening the project in the
-browser does, and waits up to 30 seconds for each request. With no
-code-viewer running, start one with `code-viewer` first and leave it running.
-Pass `--cwd <repo>` when annotating a repository other than the current
-directory, or `--server <url>` to target a specific server.
-
-`add` appends to the most recent session (creating one when none exists);
-run `annotate start` again to begin a new session, or pass `--session <id>`
-to target a specific one. When `--before` or `--after` is used, the target
-session is inferred from that anchor annotation; a conflicting `--session`
-is rejected.
-
-The in-app Help page includes a dedicated annotations guide for AI agents,
-covering when to start a session, how to choose focused line ranges, how to
-write concise Markdown explanations, and how to install the bundled agent skill.
-
-### Agent Skill
-
-The package bundles five [Agent Skills](https://agentskills.io)
-(the SKILL.md open standard) — `code-viewer-accounts`, `code-viewer-annotate`,
-`code-viewer-journal`, `code-viewer-query`, and `code-viewer-snapshot` —
-that teach AI coding agents when and how to add and sign in claude / codex
-accounts, use `annotate`, Work Log task queues, read-only `query`, and
-snapshot / diff workflows. A single `skill install` copies all five into the
-selected agent directories:
+### journal, terminal, accounts
 
 ```sh
-npx -y @youtyan/code-viewer skill install                       # Claude Code (.claude/skills/)
-npx -y @youtyan/code-viewer skill install --agent codex,gemini  # other agents
-npx -y @youtyan/code-viewer skill install --agent all           # claude, codex, gemini, cursor, agents (.agents/skills/)
+code-viewer journal task-next --json
+code-viewer terminal list --attention
+code-viewer terminal capture --target "$TMUX_PANE" --json
+code-viewer accounts list
 ```
 
-`--agent` accepts a comma-separated list of `claude`, `codex`, `gemini`,
-`cursor`, `agents` (vendor-neutral `.agents/skills`), or `all`. Pass
-`--global` to install into the agent's user-level skill directory
-(`~/.claude/skills/`, `~/.codex/skills/`, …) instead of the current project,
-and `--cwd <dir>` to target a specific repository. Running the same command
-again updates an existing installation in place.
+Run `code-viewer <command> --help` for every subcommand.
 
-## MCP Server
+## MCP server
 
-While `code-viewer` is running, the same server also exposes a local MCP
-(Model Context Protocol) endpoint at `/_mcp` — for example
-`http://127.0.0.1:<port>/_mcp`, where `<port>` is the port printed at
-startup. It speaks JSON-RPC 2.0 over the Streamable HTTP transport
-(`initialize`, `ping`, `tools/list`, `tools/call`; POST only,
-`application/json`) and is guarded by the same localhost/same-origin check
-as every other route, so MCP clients can call it directly instead of
-spawning `code-viewer` CLI subprocesses.
+While code-viewer runs, each project is also an MCP server (JSON-RPC 2.0 over Streamable HTTP, POST only):
 
-All tools are read-only:
+```
+http://127.0.0.1:<port>/p/<key>/_mcp
+```
+
+That is the project URL printed at start, followed by `_mcp` (`http://127.0.0.1:<port>/_mcp` with `--standalone`). Point any Streamable HTTP MCP client at it; nothing else needs to run.
 
 | Tool | What it does |
-| --- | --- |
-| `code_viewer_agent_help` | Index of every AI-facing CLI subcommand. |
-| `code_viewer_status` | Branch, remote, changed files, and recent commits. |
-| `code_viewer_file_show` | Read a file (optionally a line range) at any ref. |
-| `code_viewer_file_blame` | Per-line blame (sha / author / time / summary). |
-| `code_viewer_file_history` | Commit history for one path (follows renames). |
-| `code_viewer_file_diff` | Unified diff for one path (preview-capped by default). |
-| `code_viewer_search_files` | Rank repository paths by fuzzy or glob match. |
-| `code_viewer_search_code` | Grep the repository (`rg` / `git grep` / fallback). |
-| `code_viewer_datastore_sources` | Discover read-only datastore source ids. |
-| `code_viewer_datastore_schemas` | List schemas for one SQL datastore. |
-| `code_viewer_datastore_schema` | Inspect tables, indexes, FKs, and columns. |
-| `code_viewer_datastore_columns` | Inspect columns for one SQL table. |
-| `code_viewer_datastore_ddl` | Inspect the `CREATE` statement and triggers. |
-| `code_viewer_datastore_query` | Run a read-only `SELECT` / `PRAGMA` / `EXPLAIN` / `WITH`. |
-| `code_viewer_datastore_history` | Inspect saved query history. |
+|---|---|
+| `code_viewer_agent_help` | Index of the AI-facing CLI commands |
+| `code_viewer_status` | Branch, remote, changed files, recent commits |
+| `code_viewer_file_show` | A file (or a line range) at any ref |
+| `code_viewer_file_blame` | Blame per line |
+| `code_viewer_file_history` | Commit history of one path |
+| `code_viewer_file_diff` | Diff of one path |
+| `code_viewer_search_files` | Rank paths by fuzzy or glob match |
+| `code_viewer_search_code` | Search the code |
+| `code_viewer_datastore_sources` | Datastore source ids |
+| `code_viewer_datastore_schemas` | Schemas of a SQL datastore |
+| `code_viewer_datastore_schema` | Tables, indexes, foreign keys, columns |
+| `code_viewer_datastore_columns` | Columns of one table |
+| `code_viewer_datastore_ddl` | `CREATE` statement and triggers |
+| `code_viewer_datastore_query` | Read-only SQL (the same statements as the SQL editor) |
+| `code_viewer_datastore_history` | Saved query history |
+| `code_viewer_terminal_list` | States of the terminals |
+| `code_viewer_terminal_capture` | Text of a tmux pane or shell |
+| `code_viewer_terminal_state` | Report the agent's own state (the only tool that writes) |
 
-Point any MCP-compatible client (Claude Code, Codex, etc.) at the endpoint
-URL above as a Streamable HTTP MCP server; no separate install step or
-extra process is needed beyond `code-viewer` already running.
+## Bundled agent skills
+
+| Skill | What your AI can do with it |
+|---|---|
+| `code-viewer-accounts` | Add, sign in, rename or remove claude / codex accounts (you approve each sign-in in your browser) |
+| `code-viewer-annotate` | Walk you through code with notes on its lines |
+| `code-viewer-journal` | Create and work through Work log tasks |
+| `code-viewer-query` | Look into a database with read-only queries |
+| `code-viewer-snapshot` | Snapshot data and compare before and after |
+
+```sh
+npx -y @youtyan/code-viewer skill install                        # claude, current directory (.claude/skills/)
+npx -y @youtyan/code-viewer skill install --agent claude,codex   # several agents
+npx -y @youtyan/code-viewer skill install --agent all --global   # every agent, in your home directory
+```
+
+- `--agent`: `claude`, `codex`, `gemini`, `cursor`, `agents` (`.agents/skills`) or `all`.
+- Run it at the repository root: without `--global` it installs into the current directory. `--global` installs into `~/.claude/skills/`, `~/.codex/skills/` and so on; `--cwd <dir>` picks another directory.
+- Running it again updates the installed skills.
+
+## Files code-viewer writes
+
+### In each repository: `.code-viewer/`
+
+| File | Contents |
+|---|---|
+| `settings.json` | Project settings: layout, panel sizes, terminal text size, excluded directories, uploads, annotation panel |
+| `view-state.json` | Folded and opened folders, viewed files |
+| `tabs.json` | Datastore tabs and their drafts |
+| `db-ui.json` | Datastore column widths and other view settings |
+| `datastore-connections.json` | Saved datastore connections (no secrets) |
+| `query-history.json` | Query history |
+| `db-snapshots.sqlite` | Datastore snapshots |
+| `annotations.json` | AI code annotations |
+| `tools.json` | Tools tab drafts |
+| `daily-journal.json`, `tasks.json` | Work log |
+| `pasted/` | Images pasted into terminals (ignored by git) |
+
+- Add `.code-viewer/` to `.gitignore`. To share annotations, put `.code-viewer/*` and `!.code-viewer/annotations.json` in `.gitignore` instead, and commit `annotations.json`.
+- code-viewer rewrites these files itself; do not edit them by hand. Delete the folder to reset the repository's state.
+- Search skips `.code-viewer/`, and the changed-file list skips its untracked files. A committed `annotations.json` still shows its changes.
+
+### Shared by all projects
+
+`$XDG_STATE_HOME/code-viewer`, or `~/.local/state/code-viewer` when `XDG_STATE_HOME` is not set (a relative value is ignored):
+
+| File | Contents |
+|---|---|
+| `settings.json` | Theme, language, UI and code font sizes, key bindings, notifications |
+| `projects.json` | The project list |
+| `accounts.json`, `accounts/` | claude / codex accounts |
+| `main-tabs.json` | The open tabs of every project |
+| `agent-screen-rules.json` | Saved rules for agent states |
+| `server-logs/` | One log per project process |
+| `entry.json` | The running code-viewer |
+
+## Connect from outside
+
+Reach code-viewer on your Mac from a phone through a named Cloudflare Tunnel, with Cloudflare Access allowing only your email. The in-app Help → **Connect from outside** walks through each step, with captures of the main Cloudflare screens.
+
+You need a domain whose DNS is managed by Cloudflare (shown as Active).
+
+| Service | Role |
+|---|---|
+| Cloudflare Access (Zero Trust) | Sign-in, only your email allowed |
+| Cloudflare Tunnel (`cloudflared` on the Mac) | Forwards your public URL to the Mac |
+| Cloudflare DNS | The domain of the public URL |
+
+1. In Zero Trust, create a self-hosted Access application for the public hostname (for example `viewer.example.com`) with a policy that allows only your email.
+2. Copy the Team domain and the application's AUD tag.
+3. Save `~/.config/code-viewer/remote-access.json`, replacing `origin`, `teamDomain` and `audience` with your own values:
+
+   ```json
+   {
+     "port": 64161,
+     "origin": "https://viewer.example.com",
+     "teamDomain": "your-team.cloudflareaccess.com",
+     "audience": "<64-character Access AUD>"
+   }
+   ```
+
+4. Stop the running code-viewer and start it with the file (not with `--standalone`):
+
+   ```sh
+   code-viewer --remote-access ~/.config/code-viewer/remote-access.json
+   ```
+
+5. Create a named Tunnel (Networking → Tunnels), install `cloudflared` and run it with the Tunnel token kept in a file only you can read.
+6. In the Tunnel, add a published application route for the public hostname to `http://127.0.0.1:64161`.
+7. In the route's additional settings, set HTTP Host Header to the public hostname and turn on Protect with Access with your Team name (without `.cloudflareaccess.com`) and AUD.
+8. Add a Cache Rule for the domain that bypasses the cache for that hostname.
+9. Open the public URL on the phone and sign in. Check that a private window without sign-in cannot see it.
+
+- After setup, start both `code-viewer --remote-access …` and `cloudflared tunnel run …` each time; nothing starts automatically.
+- Point the Tunnel only at the `port` from the file, never at the normal local port.
+- Do not put the Tunnel token in the config file. Unknown keys are rejected.
+- Quick Tunnel does not work (no event streams for terminal output).
+- Keep the Mac awake. Input that failed to send is not retried.
+
+Cloudflare docs: [Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/), [Tunnel](https://developers.cloudflare.com/tunnel/get-started/), [origin parameters](https://developers.cloudflare.com/tunnel/reference/origin-parameters/), [Cache Rules](https://developers.cloudflare.com/cache/how-to/cache-rules/).
 
 ## Development
 
 ```sh
 pnpm install
-pnpm run verify
-pnpm run preview --cwd /path/to/repo
+pnpm run build               # once: builds every browser bundle
+pnpm run dev                 # dev server on http://127.0.0.1:64160/
+pnpm run verify              # typecheck, lint, format, build, tests, smoke checks
 ```
 
-`pnpm run preview` (and the alias `pnpm run dev`) is the development runner. It
-rebuilds the browser bundle when browser source files change, restarts the
-preview server when `web-src/server/*.ts` changes, and keeps the URL stable on
-`http://127.0.0.1:64160/` unless you pass `--port <port>`. Use
-`pnpm run preview:raw` to launch `preview.ts` directly without the dev watcher.
+- Stop any running code-viewer first: `pnpm run dev` uses the same state directory and would hand over to it. `pnpm run dev --port 64170` picks another port.
 
-To check the UI without touching your own data, run `pnpm run build`, then
-`pnpm run sandbox`: it starts a server on a free port against sample
-repositories, with stand-in claude and codex agents, and its home, state and
-tmux under `/tmp/cvdemo`. `pnpm run ui-check <project URL> <steps.json> <out dir>`
-drives a throwaway headless Chrome through the steps (open, change settings,
-click, hover, type, screenshot) and exits non-zero on a failed step or a page
-error; the step list is at the top of `scripts/ui-check.mjs`.
+| Script | What it does |
+|---|---|
+| `pnpm run dev` / `pnpm run preview` | Runs code-viewer from source. Rebuilds `web/app.js` on change (other bundles need `pnpm run build:web`); restarts on changes to `web-src/server/`, `web-src/core/` and `package.json` |
+| `pnpm run preview:raw` | Runs the single-repository server (`preview.ts`) without watching files |
+| `pnpm run build` | Builds the `web/` bundles and `dist/code-viewer.js` |
+| `pnpm run sandbox` | After `build`: a server with sample repositories and stand-in agents, with its home and state under `/tmp/cvdemo` (recreated on every run). Needs tmux, git and `rg` |
+| `pnpm run ui-check <url> <steps.json> <out>` | Drives a headless Chrome through steps; fails on a failed step, a page error or a console error or warning (steps listed at the top of `scripts/ui-check.mjs`). Needs Chrome or Chromium |
+| `pnpm test` | Vitest only |
 
-TypeScript runs through [tsx](https://tsx.is/), bundles are built with
-[esbuild](https://esbuild.github.io/), and tests run on
-[Vitest](https://vitest.dev/).
-
-Before releasing:
+Before a pull request or a release:
 
 ```sh
 pnpm run verify
 npm pack --dry-run
 ```
 
+Built with TypeScript ([tsx](https://tsx.is/)), [esbuild](https://esbuild.github.io/) and [Vitest](https://vitest.dev/). The browser side uses no framework.
+
 ## License
 
-MIT. Third-party licenses for bundled browser assets are included under
-`web/vendor/*`.
-
-## 外出先から接続する
-
-Cloudflareの名前付きTunnelとAccessで、自分のMac上のcode-viewerに接続できます。
-使うサービスはCloudflare Tunnel（Macへの接続）、Cloudflare Access（ログインと利用者の制限）、
-Cloudflare DNS（公開URLのドメイン管理）です。TunnelとAccessはZero Trustの管理画面で設定し、
-Macでは接続用ソフトのcloudflaredを動かします。
-アプリのヘルプ →「外出先から接続する」に、Cloudflareの設定画面のキャプチャを添えた8つの初回手順があります。接続後の使い方は「スマホでの操作」にまとめています。
-冒頭の構成図で、スマホ・Cloudflare・Macのつながりと、Macで動かす2つのソフトを確認できます。
-Cloudflareで開く画面、入力例、Team domain・AUDのコピー元、Macでのファイル作成と保存、
-接続できたかの確認まで、各項目を開いて順に操作できます。設定後の起動・停止と、
-DNS・ログイン・Tunnelのエラー別の確認方法も載せています。
-
-1. Cloudflare Accessで公開ホスト名全体を保護し、自分のメールだけを許可します。
-2. 次の設定例を自分の値に置き換え、`~/.config/code-viewer/remote-access.json` に保存します。
-
-```json
-{
-  "port": 64161,
-  "origin": "https://viewer.example.com",
-  "teamDomain": "example.cloudflareaccess.com",
-  "audience": "<Access application AUD>"
-}
-```
-
-3. 起動済みの入口を止め、`code-viewer --remote-access ~/.config/code-viewer/remote-access.json` で起動します。
-   開発版は `pnpm dev --remote-access ~/.config/code-viewer/remote-access.json`。`--standalone` は使いません。
-4. Tunnelの接続先は `http://127.0.0.1:64161`。HTTP Host Headerは公開ホスト名に合わせ、
-   Protect with AccessにTeam名とAUDを設定します。公開ホストのキャッシュはBypassにします。
-5. スマホで公開HTTPS URLを開いてログインします。未ログイン・別アカウントで画面とAPIに入れないことも確認します。
-
-通常のローカルポートやプロジェクトのポートはTunnelへ接続しません。設定ファイルにTunnelトークンは不要です。
-Macは起動したままにします。切断してもMac上の作業は続き、送信に失敗した操作は自動再送しません。
-外部接続を止めるには専用のconnectorを停止します。Quick TunnelはSSE非対応のため使えません。
-
-公式手順: [Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)、
-[Tunnel](https://developers.cloudflare.com/tunnel/get-started/)、
-[接続先の設定](https://developers.cloudflare.com/tunnel/reference/origin-parameters/)。
+MIT. Third-party licenses are in `web/vendor/` (`THIRD_PARTY_NOTICES.txt` is generated by the build and ships in the npm package).

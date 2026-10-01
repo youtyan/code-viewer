@@ -21,7 +21,7 @@ import {
   type HelpLabels,
   helpLabels,
 } from "../views/help-guides";
-import { HELP_CAPTURES } from "../views/help-images";
+import { HELP_CAPTURE_WIDTH, HELP_CAPTURES } from "../views/help-images";
 import {
   collectHelpKeybindingCoverage,
   documentedHelpKeybindingActions,
@@ -297,6 +297,7 @@ function renderHelpPage(
     currentRange: () => ({ from: "HEAD", to: "worktree" }),
     syncHeaderMenu: () => undefined,
     getLanguage: () => lang,
+    codeViewerVersion: () => "1.2.3",
     helpLabels: (labelLang) => helpLabels(labelLang, APP_LABELS[labelLang]),
     openAccountsSettings: () => calls.push("openAccountsSettings"),
     toggleKeyboardShortcuts: () => calls.push("toggleKeyboardShortcuts"),
@@ -667,6 +668,19 @@ describe("help page", () => {
     ]);
   });
 
+  // 版は server から読む。読めるまでは何も出さない (「code-viewer 」だけを出さない)。
+  test.each<[string, string | undefined]>([
+    ["1.2.3", "code-viewer 1.2.3"],
+    ["", undefined],
+  ])("the header shows the code-viewer version %j", (version, shown) => {
+    renderHelpPage("en", "getting-started", {
+      codeViewerVersion: () => version,
+    });
+    expect(
+      document.querySelector(".gdp-help-header .gdp-help-version")?.textContent,
+    ).toBe(shown);
+  });
+
   test("the keys link in the text opens the keyboard shortcuts window", () => {
     const view = renderHelpPage("en", "tabs-layout");
     const link = [
@@ -1008,10 +1022,9 @@ describe("help page captures", () => {
     ["doctor", ["doctor-sheet"]],
     ["keybindings", ["quick-help"]],
   ];
-  /** 1 枚と全部の大きさの上限、画像の幅 (800 CSS px を 1.5 倍の画素で撮る)。 */
+  /** 1 枚と全部の大きさの上限。 */
   const MAX_IMAGE_BYTES = 150 * 1024;
   const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
-  const IMAGE_WIDTH = 1200;
   const IMAGE_DIR = join(WEB_ROOT, "help-images");
 
   function renderedFigures(lang: HelpLanguage, section: string) {
@@ -1026,13 +1039,21 @@ describe("help page captures", () => {
     });
   }
 
-  /** WebP の幅 (可逆 VP8L・非可逆 VP8・拡張 VP8X の見出しから)。 */
-  function webpWidth(bytes: Buffer): number {
+  /** WebP の幅と高さ (可逆 VP8L・非可逆 VP8・拡張 VP8X の見出しから)。 */
+  function webpSize(file: string): [number, number] {
+    const bytes = readFileSync(join(IMAGE_DIR, file));
     const chunk = bytes.toString("ascii", 12, 16);
-    if (chunk === "VP8L") return 1 + (bytes.readUInt16LE(21) & 0x3fff);
-    if (chunk === "VP8 ") return bytes.readUInt16LE(26) & 0x3fff;
-    if (chunk === "VP8X") return 1 + bytes.readUIntLE(24, 3);
-    throw new Error(`not a WebP image (chunk ${JSON.stringify(chunk)})`);
+    if (chunk === "VP8L") {
+      const bits = bytes.readUInt32LE(21);
+      return [1 + (bits & 0x3fff), 1 + ((bits >>> 14) & 0x3fff)];
+    }
+    if (chunk === "VP8 ")
+      return [bytes.readUInt16LE(26) & 0x3fff, bytes.readUInt16LE(28) & 0x3fff];
+    if (chunk === "VP8X")
+      return [1 + bytes.readUIntLE(24, 3), 1 + bytes.readUIntLE(27, 3)];
+    throw new Error(
+      `${file} is not a WebP image (chunk ${JSON.stringify(chunk)})`,
+    );
   }
 
   const CASES = (["en", "ja"] as const).flatMap((lang) =>
@@ -1061,13 +1082,21 @@ describe("help page captures", () => {
     expect(readdirSync(IMAGE_DIR).sort()).toEqual(shown);
   });
 
-  // 撮った画像の一覧 (描くかどうかを決める) と、置いてある画像が食い違わない。
+  // 撮った画像の一覧 (描くかどうかと、届く前に取る箱の高さを決める) と、置いてある
+  // 画像の名前と高さが食い違わない。
   test("the list of taken captures matches web/help-images", () => {
-    const files = readdirSync(IMAGE_DIR);
-    expect(files.sort()).toEqual(
-      [...HELP_CAPTURES]
-        .flatMap((name) => [`${name}.en.webp`, `${name}.ja.webp`])
-        .sort(),
+    const files = readdirSync(IMAGE_DIR).sort();
+    expect(
+      Object.fromEntries(files.map((file) => [file, webpSize(file)[1]])),
+    ).toEqual(
+      Object.fromEntries(
+        [...HELP_CAPTURES].flatMap(([name, height]) =>
+          (["en", "ja"] as const).map((lang) => [
+            `${name}.${lang}.webp`,
+            typeof height === "object" ? height[lang] : height,
+          ]),
+        ),
+      ),
     );
   });
 
@@ -1092,10 +1121,7 @@ describe("help page captures", () => {
     const files = readdirSync(IMAGE_DIR);
     const sizes = files.map((file) => statSync(join(IMAGE_DIR, file)).size);
     expect({
-      wide: files.filter(
-        (file) =>
-          webpWidth(readFileSync(join(IMAGE_DIR, file))) !== IMAGE_WIDTH,
-      ),
+      wide: files.filter((file) => webpSize(file)[0] !== HELP_CAPTURE_WIDTH),
       heavy: files.filter((_, index) => sizes[index] > MAX_IMAGE_BYTES),
       total: sizes.reduce((sum, size) => sum + size, 0) <= MAX_TOTAL_BYTES,
     }).toEqual({ wide: [], heavy: [], total: true });

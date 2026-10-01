@@ -180,19 +180,19 @@ describe("table-grid related panel", () => {
     grid.destroy();
   });
 
-  test("related list entries keep one line each and carry the full text as a tooltip", async () => {
+  test("related list entries show the table, the row count and the column, with the full condition as a tooltip", async () => {
     const { grid } = setup();
     await tick();
     clickCell(grid.el, 1);
     await tick();
-    const item = q<HTMLElement>(grid.el, ".db-related-list-item");
-    const table = q<HTMLElement>(item, ".db-related-list-table");
-    const via = q<HTMLElement>(item, ".db-related-list-via");
-    expect(table.textContent).toBe("sample_long_named_owner_table");
-    // 省略表示になっても読めるよう、全文は tooltip に入れる。
-    expect(table.title).toBe("sample_long_named_owner_table");
-    expect(via.textContent).toBe("owner_id = 10");
-    expect(via.title).toBe("owner_id = 10");
+    const item = q<HTMLElement>(grid.el, ".db-related-item");
+    expect([
+      q(item, ".db-related-item-table").textContent,
+      q(item, ".db-related-item-count").textContent,
+      q(item, ".db-related-item-column").textContent,
+    ]).toEqual(["sample_long_named_owner_table", "1", "owner_id"]);
+    // 省略表示になっても読めるよう、条件の全文は tooltip に入れる。
+    expect(item.title).toBe("sample_long_named_owner_table.id = 10");
     grid.destroy();
   });
 
@@ -203,12 +203,12 @@ describe("table-grid related panel", () => {
     await tick();
     const handle = q<HTMLElement>(grid.el, ".db-related-list-resize");
     const width = () => grid.el.style.getPropertyValue("--db-related-list-w");
-    expect(width()).toBe("200px");
+    expect(width()).toBe("280px");
     press(handle, "ArrowRight");
-    expect(width()).toBe("216px");
-    expect(window.localStorage.getItem(LIST_WIDTH_KEY)).toBe("216");
+    expect(width()).toBe("296px");
+    expect(window.localStorage.getItem(LIST_WIDTH_KEY)).toBe("296");
     // 下限 / 上限の外へは出さない。
-    for (let i = 0; i < 40; i++) press(handle, "ArrowLeft");
+    for (let i = 0; i < 60; i++) press(handle, "ArrowLeft");
     expect(width()).toBe("120px");
     for (let i = 0; i < 60; i++) press(handle, "ArrowRight");
     expect(width()).toBe("480px");

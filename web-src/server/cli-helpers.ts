@@ -606,6 +606,21 @@ export async function requestJson(
   return await res.json();
 }
 
+/**
+ * 入口のエラー (entry/server.ts の errorJson) が error の横に置く欄。code・
+ * detail (原因の連鎖)・log (裏のプロセスの出力の末尾 8,000 文字か、読めない理由)・project
+ * (鍵と根)・route (取り次いだ要求)・waitedSeconds (待った秒数)。クエリの失敗の
+ * dbId・columns・rows などのデータの欄はここに入れない (出さない)。
+ */
+const ERROR_DIAGNOSTIC_FIELDS = [
+  "code",
+  "detail",
+  "log",
+  "project",
+  "route",
+  "waitedSeconds",
+] as const;
+
 export function extractErrorDetail(
   rawBody: string,
   isJson: boolean,
@@ -622,7 +637,17 @@ export function extractErrorDetail(
       !Array.isArray(parsed) &&
       typeof (parsed as { error?: unknown }).error === "string"
     ) {
-      return (parsed as { error: string }).error;
+      // 文字列はそのまま、数・オブジェクトは 1 行の JSON で続ける。
+      const body = parsed as Record<string, unknown>;
+      return [
+        body.error,
+        ...ERROR_DIAGNOSTIC_FIELDS.filter(
+          (field) => body[field] !== undefined && body[field] !== "",
+        ).map(
+          (field) =>
+            `${field}: ${typeof body[field] === "string" ? body[field] : JSON.stringify(body[field])}`,
+        ),
+      ].join("\n");
     }
   } catch {
     // Fall back to the raw body for malformed JSON.

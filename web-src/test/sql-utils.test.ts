@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   buildFilterWhere,
+  buildOrderClause,
   escapeSqlString,
 } from "../server/database/sql-utils";
 
@@ -48,5 +49,44 @@ describe("buildFilterWhere exact (eq) conditions", () => {
       { column: "c", value: "x\\" },
     ]);
     expect(r.where).toBe("CAST(\"c\" AS TEXT) = 'x\\'");
+  });
+});
+
+// NULL はどの方言でも最小の値として並べる (降順で NULL が先頭に来ると、
+// updated_at の「新しい順」で時刻の無い行が先頭を埋めた)。
+describe("buildOrderClause", () => {
+  test.each([
+    {
+      name: "sqlite descending keeps the native NULL order",
+      kind: "sqlite" as const,
+      direction: "desc" as const,
+      expected: ' ORDER BY "updated_at" DESC',
+    },
+    {
+      name: "mysql descending keeps the native NULL order",
+      kind: "mysql" as const,
+      direction: "desc" as const,
+      expected: " ORDER BY `updated_at` DESC",
+    },
+    {
+      name: "postgresql descending puts NULL last",
+      kind: "postgresql" as const,
+      direction: "desc" as const,
+      expected: ' ORDER BY "updated_at" DESC NULLS LAST',
+    },
+    {
+      name: "postgresql ascending puts NULL first",
+      kind: "postgresql" as const,
+      direction: "asc" as const,
+      expected: ' ORDER BY "updated_at" ASC NULLS FIRST',
+    },
+  ])("$name", ({ kind, direction, expected }) => {
+    expect(buildOrderClause([{ column: "updated_at", direction }], kind)).toBe(
+      expected,
+    );
+  });
+
+  test("no order gives an empty clause", () => {
+    expect(buildOrderClause([], "postgresql")).toBe("");
   });
 });

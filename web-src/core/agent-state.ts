@@ -189,6 +189,18 @@ export function conversationFromHookInput(input: Record<string, unknown>): {
   };
 }
 
+/**
+ * 申告に添える文字列 (指示文 `lastPrompt`・一言 `note`) の上限 (文字数)。指示文が
+ * そのまま来るので長くなりうる。受ける側 (server/terminal/handle.ts・
+ * agent-state.ts) も送る側 (フック・入口へ聞く裏の MCP) もこれで切る。申告の本文の
+ * 上限 (handle.ts の MAX_AGENT_STATE_BODY_BYTES) はこの長さで計算してある。
+ */
+const MAX_AGENT_STATE_TEXT = 2000;
+
+export function clipAgentStateText(value: string): string {
+  return value.slice(0, MAX_AGENT_STATE_TEXT);
+}
+
 export type AgentStateRecord = {
   /** tmux ペイン ID か、ブラウザシェルのセッション ID。 */
   target: string;

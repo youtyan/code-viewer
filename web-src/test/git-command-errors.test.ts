@@ -238,6 +238,22 @@ describe("git command failures", () => {
     ]);
   });
 
+  // 組み込みの検索は正規表現を扱えない。空の結果で返すと「見つからない」と
+  // 区別できないので、理由を失敗として返す (/_grep・CLI・MCP が全文を出す)。
+  test("fails a regex search with the reason when rg is unavailable", async () => {
+    const cwd = tempRoot("code-viewer-rg-unavailable-regex-cwd-");
+    writeFileSync(join(cwd, "sample_file.ts"), "const sample_value = 1;\n");
+    configureRg(cwd, "unavailable");
+
+    const result = await grepRepoAsync(
+      { cwd, omitDirNames: [], excludeNames: [] },
+      { query: "sample_.*", ref: "worktree", paths: [], regex: true, max: 10 },
+    );
+    if (result.ok === true) throw new Error("regex search without rg passed");
+    expect(result.status).toBe(500);
+    expect(result.error).toContain("regex search needs ripgrep (rg)");
+  });
+
   test("applies caller cancellation and a dedicated timeout to worktree listing", async () => {
     const cwd = tempRoot("code-viewer-worktree-list-cwd-");
     let configured = configureExternalCommands({

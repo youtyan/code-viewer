@@ -36,6 +36,13 @@ import { runGit } from "./_git-fixture";
 // per-test budget even on CI runners where docker may be installed but
 // the daemon is down.
 const TEST_CWD = mkdtempSync(join(tmpdir(), "code-viewer-doctor-test-"));
+// claude / codex の版は対話シェルで訊くので、テストでは利用者のシェルの初期化と
+// 本物の CLI を動かさない (Agent CLIs の群は checkAgentClis のテストが見る)。
+const FAKE_AGENT_CLI = async () => ({
+  code: 0,
+  stdout: "0.0.0\n",
+  stderr: "",
+});
 
 describe("sqlite driver diagnostics", () => {
   test("parses NODE_MODULE_VERSION mismatch messages", () => {
@@ -71,6 +78,11 @@ describe("sqlite driver diagnostics", () => {
       "npm rebuild better-sqlite3",
     ],
     [
+      "Could not locate the bindings file. Tried:\n → /x/build/better_sqlite3.node",
+      "unavailable",
+      "pnpm dlx --allow-build=better-sqlite3",
+    ],
+    [
       "Cannot find package 'better-sqlite3' imported from /x/dist/code-viewer.js",
       "unavailable",
       "npm i better-sqlite3",
@@ -79,6 +91,8 @@ describe("sqlite driver diagnostics", () => {
     const status = _classifySqliteLoadError(message);
     expect(status.kind).toBe(kind);
     expect(status.hint).toContain(hint);
+    // approve-scripts は npm install -g と npx では EGLOBAL で失敗する。
+    expect(status.hint).not.toContain("approve-scripts");
   });
 
   test("describeSqliteDriver returns a status with a known kind", async () => {
@@ -221,6 +235,7 @@ describe("doctor report", () => {
           cwd: TEST_CWD,
           scopeOmitDirNames: [],
           listenPort: 0,
+          runAgentCli: FAKE_AGENT_CLI,
         });
       } finally {
         if (originalPath === undefined) delete process.env.PATH;
@@ -265,6 +280,7 @@ describe("doctor report", () => {
         cwd: TEST_CWD,
         scopeOmitDirNames: [],
         listenPort: 12345,
+        runAgentCli: FAKE_AGENT_CLI,
       });
       const groupIds = new Set(report.groups.map((g) => g.id));
       for (const id of [
@@ -336,11 +352,13 @@ describe("doctor report", () => {
         cwd: TEST_CWD,
         scopeOmitDirNames: [],
         listenPort: 0,
+        runAgentCli: FAKE_AGENT_CLI,
       });
       const b = await buildDoctorReport({
         cwd: TEST_CWD,
         scopeOmitDirNames: [],
         listenPort: 0,
+        runAgentCli: FAKE_AGENT_CLI,
       });
       expect(b.generation > a.generation).toBe(true);
     },
@@ -354,6 +372,7 @@ describe("doctor report", () => {
         cwd: TEST_CWD,
         scopeOmitDirNames: [],
         listenPort: 8080,
+        runAgentCli: FAKE_AGENT_CLI,
       });
       const server = report.groups.find((g) => g.id === "server");
       expect(Boolean(server)).toBe(true);
@@ -489,6 +508,7 @@ describe("doctor keeps why a check failed", () => {
         cwd,
         scopeOmitDirNames: [],
         listenPort: 0,
+        runAgentCli: FAKE_AGENT_CLI,
       });
       const rows = report.groups.find((g) => g.id === "docker")?.rows ?? [];
       const found = Object.fromEntries(
@@ -516,6 +536,7 @@ describe("doctor keeps why a check failed", () => {
         cwd,
         scopeOmitDirNames: [],
         listenPort: 0,
+        runAgentCli: FAKE_AGENT_CLI,
       });
       const row = (id: string) => {
         const found = report.groups
@@ -562,6 +583,7 @@ describe("doctor keeps why a check failed", () => {
           cwd,
           scopeOmitDirNames: [],
           listenPort: 0,
+          runAgentCli: FAKE_AGENT_CLI,
           signal: controller.signal,
         }),
       ).rejects.toThrow("doctor aborted");
@@ -569,6 +591,7 @@ describe("doctor keeps why a check failed", () => {
         cwd,
         scopeOmitDirNames: [],
         listenPort: 0,
+        runAgentCli: FAKE_AGENT_CLI,
       });
       const git = report.groups
         .find((group) => group.id === "git")

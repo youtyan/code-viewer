@@ -32,13 +32,23 @@ export type EntryArgs = {
   open: boolean;
   /** `--bin <name>=<path>` の値 (入口の tmux・git と、起動したディレクトリの裏に効く)。 */
   bins: string[];
-  /** 起動したディレクトリの裏にだけ渡す引数 (`--scope-omit-dir`・git の差分の引数)。 */
+  /** 起動したディレクトリの裏にだけ渡す引数 (`--scope-omit-dir`)。 */
   backendArgs: string[];
 };
 
 export type EntryArgsResult =
   | { ok: true; args: EntryArgs }
   | { ok: false; error: string };
+
+/**
+ * 知らない引数 (位置引数・知らない option)。以前はオプションの後ろの引数を
+ * git diff に渡していたが、画面はいつも from / to を送るので効いていなかった。
+ * 黙って捨てず、全部を挙げて止める (入口と `--standalone` の両方が使う)。
+ */
+export function unsupportedArgumentsError(args: readonly string[]): string {
+  const listed = args.map((arg) => JSON.stringify(arg)).join(" ");
+  return `code-viewer does not accept: ${listed}\ngit diff arguments are no longer supported: pick what the Diff screen compares with its from / to pickers (options: code-viewer --help)`;
+}
 
 export function parseEntryArgs(argv: readonly string[]): EntryArgsResult {
   const args: EntryArgs = {
@@ -50,6 +60,7 @@ export function parseEntryArgs(argv: readonly string[]): EntryArgsResult {
     bins: [],
     backendArgs: [],
   };
+  const unsupported: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] ?? "";
     if (arg === "--remote-access") {
@@ -97,11 +108,15 @@ export function parseEntryArgs(argv: readonly string[]): EntryArgsResult {
         };
       }
       args.backendArgs.push(arg, next);
-    } else if (arg === "--allow-upload") {
-      // Deprecated no-op (preview.ts と同じ)。
+    } else if (arg === "--allow-upload" || arg === "--") {
+      // --allow-upload: Deprecated no-op (preview.ts と同じ)。
+      // --: 位置引数を取らないので区切る相手が無い (`pnpm dev -- --open` で pnpm がそのまま渡す)。
     } else {
-      args.backendArgs.push(arg);
+      unsupported.push(arg);
     }
+  }
+  if (unsupported.length > 0) {
+    return { ok: false, error: unsupportedArgumentsError(unsupported) };
   }
   return { ok: true, args };
 }

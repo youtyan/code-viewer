@@ -717,7 +717,8 @@ const repoStatusMapCache = new Map<
 //
 // Untracked paths get "U", never "A" - "A" means staged-for-commit, and
 // collapsing the two would make a file git does not track yet
-// indistinguishable from one that is already in the index.
+// indistinguishable from one that is already in the index. Merge conflicts
+// get "C", never "U" (the marks are core/types.ts FileStatusMark).
 //
 // A wholly untracked directory is stored under its own trailing-slash key
 // (`dir/`), exactly as `git status` reports it. Descendants of such a
@@ -737,9 +738,13 @@ const STATUS_PORCELAIN_ARGS = [
   "--untracked-files=normal",
 ];
 
+// git の unmerged (マージの衝突) の XY の 7 通り (git status の説明の表)。
+// 未追跡 (U) と同じ印にせず、衝突の印 C にする。
+const UNMERGED_XY = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+
 // `git status --porcelain=v1 -z` の出力を path -> code の map にする。git を
 // 呼ばない純粋な変換なので、コマンドを叩く側が何本あっても解釈は 1 つで済む。
-function parseStatusPorcelainZ(stdout: string): Map<string, string> {
+export function parseStatusPorcelainZ(stdout: string): Map<string, string> {
   const map = new Map<string, string>();
   const records = stdout.split("\0").filter(Boolean);
   for (let i = 0; i < records.length; i++) {
@@ -749,6 +754,10 @@ function parseStatusPorcelainZ(stdout: string): Map<string, string> {
     if (!path) continue;
     if (xy === "??") {
       map.set(path, "U");
+      continue;
+    }
+    if (UNMERGED_XY.has(xy)) {
+      map.set(path, "C");
       continue;
     }
     // Renames/copies emit "XY PATH" followed by a separate "ORIG_PATH"
@@ -767,17 +776,22 @@ function parseStatusPorcelainZ(stdout: string): Map<string, string> {
   return map;
 }
 
+// A failed `git status` is returned (and logged by gitFailureResult), never an
+// empty map: an empty map reads as "nothing changed" and every mark vanished.
 export async function repoStatusMapAsync(
   cwd: string,
   now = Date.now(),
-): Promise<Map<string, string>> {
+): Promise<
+  { ok: true; map: Map<string, string> } | ({ ok: false } & GitErrorResult)
+> {
   const cached = repoStatusMapCache.get(cwd);
-  if (cacheFresh(cached, now)) return cached.map;
+  if (cacheFresh(cached, now)) return { ok: true, map: cached.map };
   const res = await runGitAsync(STATUS_PORCELAIN_ARGS, cwd);
-  if (res.code !== 0) return new Map<string, string>();
+  if (res.code !== 0)
+    return { ok: false, ...gitFailureResult(res, "git status failed") };
   const map = parseStatusPorcelainZ(res.stdout);
   setTimedCacheEntry(repoStatusMapCache, cwd, { map }, now);
-  return map;
+  return { ok: true, map };
 }
 
 // Status for one path out of a repoStatusMapAsync map. `inherited` marks a
@@ -811,15 +825,45 @@ export function repoStatusForPath(
 export async function ignoredPathsAsync(
   paths: string[],
   cwd: string,
-): Promise<Set<string>> {
-  if (!paths.length) return new Set();
+): Promise<
+  { ok: true; paths: Set<string> } | ({ ok: false } & GitErrorResult)
+> {
+  if (!paths.length) return { ok: true, paths: new Set() };
   const res = await runGitAsync(["git", "check-ignore", "-z", "--stdin"], cwd, {
     stdin: paths.join("\0"),
   });
   // Exit 1 is "nothing matched", which is a normal answer, not a failure.
-  // Anything above that (128 = not a repository, missing git) yields none.
-  if (res.code !== 0 && res.code !== 1) return new Set();
-  return new Set(res.stdout.split("\0").filter(Boolean));
+  // Anything above that (128 = not a repository, missing git) is returned
+  // with git's reason: an empty set would show ignored files as untracked.
+  if (res.code !== 0 && res.code !== 1)
+    return { ok: false, ...gitFailureResult(res, "git check-ignore failed") };
+  return { ok: true, paths: new Set(res.stdout.split("\0").filter(Boolean)) };
+}
+
+// `git diff <ref>` against the working tree reports a file with a merge
+// conflict as "M". Callers comparing against the working tree mark those paths
+// with the conflict mark C (core/types.ts FileStatusMark). The unmerged paths
+// come from the index alone (`ls-files --unmerged`), no worktree scan. A
+// failure is returned with git's reason, never left as "M" silently.
+export async function markUnmergedAsync(
+  files: GitFileMeta[],
+  cwd: string,
+): Promise<GitErrorResult | null> {
+  const res = await runGitAsync(
+    ["git", "ls-files", "--unmerged", "-z", "--full-name", "--", ":/"],
+    cwd,
+  );
+  if (res.code !== 0)
+    return gitFailureResult(res, "git ls-files --unmerged failed");
+  // Each record is "<mode> <object> <stage>\t<path>", one per stage.
+  const unmerged = new Set(
+    res.stdout
+      .split("\0")
+      .filter(Boolean)
+      .map((record) => record.slice(record.indexOf("\t") + 1)),
+  );
+  for (const file of files) if (unmerged.has(file.path)) file.status = "C";
+  return null;
 }
 
 export function showAsync(

@@ -493,6 +493,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   let PROJECT_NAME = "";
   let PROJECT_BRANCH = "";
   let REPO_WEB_URL: string | null = null;
+  /** 開いているプロジェクトの server の code-viewer の版 (ヘルプのページの見出し)。 */
+  let SERVER_VERSION = "";
 
   let APP_SETTINGS: AppSettingsState = { version: 1 };
   let AGENT_SCREEN_RULES = formatAgentScreenRuleSet(DEFAULT_AGENT_SCREEN_RULES);
@@ -1346,6 +1348,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setProjectName(settings.project || "");
     setProjectBranch(settings.branch || "");
     REPO_WEB_URL = settings.repo_web_url;
+    SERVER_VERSION = settings.server.version;
     const repoLink =
       document.querySelector<HTMLAnchorElement>("#repo-web-link");
     if (repoLink) {
@@ -2328,6 +2331,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     createRepositoryWebLink: createFileRepositoryWebLink,
     createRevisionNav: createFileRevisionNav,
     removeStandaloneSource,
+    renderVirtualSourceWithGutter: (target, textValue, gutter) =>
+      SOURCE_VIEW.renderVirtualSourceWithGutter(target, textValue, gutter),
     placeSidebarToggle,
     escapeHtml,
     repoFileTargetFromRoute,
@@ -3744,7 +3749,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function ensureSyntaxHighlighterForRoute(): void {
-    if (!routeCanUseSyntaxHighlighter()) return;
+    // 読み込み済みなら、カードは描いたときに色を付けている。画面を移るたびに
+    // 読み込んだカードを全部描き直していた (Diff から History へ 300ms 止まった)。
+    if (!routeCanUseSyntaxHighlighter() || getHljs()) return;
     loadSyntaxHighlighter().then((hljsRef) => {
       if (!hljsRef) return;
       rerenderLoadedDiffs();
@@ -5286,6 +5293,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     syncHeaderMenu,
     getLanguage: () => STATE.language,
+    codeViewerVersion: () => SERVER_VERSION,
     // ヘルプの本文のボタン名は各画面の i18n から (views/help-guides.ts)。
     // 一覧の列の頭の画面の名前と差分の帯のボタンは app が持つので渡す。
     helpLabels: (lang) => {
@@ -7294,6 +7302,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       setRoute: (next, replace) => setRightPaneRoute(next, replace),
       setPageMode: noop,
       removeStandaloneSource: () => pane.source.removeStandaloneSource(),
+      renderVirtualSourceWithGutter: (target, textValue, gutter) =>
+        pane.source.renderVirtualSourceWithGutter(target, textValue, gutter),
       placeSidebarToggle: noop,
       repoFileTargetFromRoute: () => pane.route.ref,
       renderRepoBlobSidebar: noop,
@@ -10202,7 +10212,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     STATE.syntaxHighlight = on;
     if (persist) patchSettings({ syntaxHighlight: on });
     setHighlightButton(on && getHljs() ? "loaded" : "idle");
-    if (on) {
+    if (on && !getHljs()) {
       ensureSyntaxHighlighterForRoute();
     } else {
       rerenderLoadedDiffs();

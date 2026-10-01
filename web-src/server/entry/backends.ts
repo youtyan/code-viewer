@@ -91,7 +91,7 @@ export type EntryBackendsDeps = {
     | { status: "found"; pid: number; backend: boolean }
     | { status: "absent" }
     | { status: "unreadable"; error: unknown };
-  /** その根の裏に足す引数 (起動したディレクトリの `--bin` や git の差分の引数)。 */
+  /** その根の裏に足す引数 (起動したディレクトリの `--bin` と `--scope-omit-dir`)。 */
   serverArgs(root: string): readonly string[];
   /** 使われていない裏を止めるまでの時間。0 なら止めない。 */
   idleStopMs: number;

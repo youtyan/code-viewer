@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmod } from "node:fs/promises";
 import { join } from "node:path";
 import type { DbFileInfo, DbKind } from "../../core/database/types";
+import { formatErrorDetail } from "../../core/error-detail";
 import { createJsonFileStore } from "../json-store";
 import {
   deleteConnectionSecretsAsync,
@@ -92,8 +93,9 @@ const RUNTIME_ONLY_FIELDS = [
   "apiToken",
 ] as const;
 
-// 編集時にクライアントが値を送ってこなかった場合、既存の値を引き継ぐ
-// フィールド (フォームでは伏せ字のまま触られないことがある)。
+// 秘密の値のフィールド。編集時にクライアントが値を送ってこなかった場合は
+// 既存の値を引き継ぎ (フォームでは伏せ字のまま触られないことがある)、
+// エラーからは maskConnectionError が伏せる。
 const PRESERVED_SECRET_FIELDS = [
   "password",
   "secretAccessKey",
@@ -409,6 +411,100 @@ export async function findDatastoreConnection(
     (await loadDatastoreConnections(cwd)).find((entry) => entry.id === id) ??
     null
   );
+}
+
+// このプロセスがその接続の資格情報を持っているか (保存したプロセスのメモリか、
+// キーチェーンから戻せたか)。loadDatastoreConnections / findDatastoreConnection の
+// 後に呼ぶ。持っていない接続を開くと、資格情報の無い接続として認証で落ちる。
+export function connectionSecretsLoaded(cwd: string, id: string): boolean {
+  return runtimeSecrets.has(secretKey(cwd, id));
+}
+
+// ドライバのエラーは秘密の値を (接続文字列や JSON に埋めた形でも) 含むことが
+// ある。文面を表に出す前に、その接続の秘密の値を素の形・URL の形・JSON の
+// 文字列の形で伏せる。
+function secretMasker(
+  connection: DatastoreConnection,
+): ((text: string) => string) | null {
+  const source = connection as unknown as Record<string, unknown>;
+  const forms = PRESERVED_SECRET_FIELDS.flatMap((field) => {
+    const value = source[field];
+    return typeof value === "string" && value
+      ? [value, encodeURIComponent(value), JSON.stringify(value).slice(1, -1)]
+      : [];
+  }).sort((a, b) => b.length - a.length);
+  if (forms.length === 0) return null;
+  return (text) =>
+    forms.reduce((masked, form) => masked.split(form).join("***"), text);
+}
+
+// 失敗を伏せた写しに置き換える。元のエラーやドライバの持つオブジェクトは
+// 書き換えない (生きている接続の設定を壊さない)。写しは種類 (prototype)・
+// name・status などの欄・cause / errors の連鎖を保つ。秘密が無ければ元のまま。
+export function maskConnectionError(
+  connection: DatastoreConnection,
+  error: unknown,
+): unknown {
+  const mask = secretMasker(connection);
+  return mask ? maskReachable(error, mask, new Map()).value : error;
+}
+
+type Masked = { value: unknown; changed: boolean };
+
+function maskReachable(
+  value: unknown,
+  mask: (text: string) => string,
+  seen: Map<object, Masked>,
+): Masked {
+  if (typeof value === "string") {
+    const masked = mask(value);
+    return { value: masked, changed: masked !== value };
+  }
+  if (!value || typeof value !== "object") return { value, changed: false };
+  const known = seen.get(value);
+  if (known) return known;
+  const proto = Object.getPrototypeOf(value);
+  const isError = value instanceof Error;
+  if (
+    !isError &&
+    !Array.isArray(value) &&
+    proto !== Object.prototype &&
+    proto !== null
+  ) {
+    // ドライバのクラスのインスタンスは写さず、表示と同じ形の文字列を伏せる。
+    const text = formatErrorDetail(value);
+    const masked = mask(text);
+    return masked === text
+      ? { value, changed: false }
+      : { value: masked, changed: true };
+  }
+  const copy: Record<string, unknown> = Array.isArray(value)
+    ? ([] as unknown as Record<string, unknown>)
+    : Object.create(proto);
+  const result: Masked = { value: copy, changed: false };
+  seen.set(value, result);
+  const keys = Object.getOwnPropertyNames(value).filter(
+    (key) => !(Array.isArray(value) && key === "length"),
+  );
+  // name / message が prototype の getter (DOMException など) でも、写しには
+  // 読んだ値を持たせる。
+  if (isError)
+    keys.push(...["name", "message"].filter((k) => !keys.includes(k)));
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    // V8 の stack は accessor。読んだ値を伏せて持たせる。ほかの accessor は写さない。
+    if (descriptor && !("value" in descriptor) && key !== "stack") continue;
+    const masked = maskReachable(Reflect.get(value, key), mask, seen);
+    Object.defineProperty(copy, key, {
+      value: masked.value,
+      writable: true,
+      configurable: true,
+      enumerable: descriptor?.enumerable ?? false,
+    });
+    result.changed ||= masked.changed;
+  }
+  if (!result.changed) result.value = value;
+  return result;
 }
 
 export async function saveDatastoreConnection(

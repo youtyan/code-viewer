@@ -36,6 +36,7 @@ description: Use at the start of any implementation, investigation, or review in
 | テストを書く / 落ちたテストを直す | `.agents/skills/project-rules/references/testing.md` |
 | エージェント一覧・状態判定・通知・フック・アカウント・使用量・起動・プロジェクトの登録と切替を触る / 調べる | `.agents/skills/project-rules/references/agents.md` |
 | リリース・npm publish・Trusted Publisher | `.agents/skills/project-npm-publish-procedure/SKILL.md` |
+| 手元の Claude Code / Codex の版が、確かめた版（`CHECKED_AGENT_CLI_VERSIONS`）と違う | `.agents/skills/project-agent-cli-upgrade/SKILL.md` |
 
 複数に該当するなら複数読む。UI 変更はたいてい ui-layout か ui-surface のどちらか一方で足りる
 （寸法を変えるなら layout、変えないなら surface）。
