@@ -85,6 +85,10 @@ export type DbText = {
     copied: string;
     copyFailed: string;
     close: string;
+    /** 行全体: 列の名前の絞り込み欄・関連を開くボタン・値のコピー。 */
+    filterColumns: (count: number) => string;
+    openRelated: string;
+    copyValue: (column: string) => string;
   };
   // データグリッド本体。
   grid: {
@@ -114,6 +118,54 @@ export type DbText = {
     statusSort: (column: string, dir: string) => string;
     statusFilters: (n: number) => string;
     statusRefreshing: (filters: number) => string;
+    /** 「新しい順」のボタン。column は並べる列。 */
+    newestLabel: string;
+    newestOnAction: (column: string) => string;
+    newestOffAction: string;
+    newestSaveFailed: (detail: string) => string;
+    statusNewest: (column: string) => string;
+    /** 行番号の右の「変更」の列。columns は時刻の列の名前。 */
+    recencyHeader: string;
+    recencyHeaderHint: (columns: string) => string;
+    recencyAdded: (when: string, column: string, value: string) => string;
+    recencyUpdated: (when: string, column: string, value: string) => string;
+    /** 再読み込みで前と比べて付けた印。 */
+    refreshMarkAdded: string;
+    refreshMarkChanged: string;
+    statusRefreshMarks: (added: number, changed: number) => string;
+    /** 日時の列を出し直すタイムゾーンの選択欄。 */
+    timeZoneLabel: string;
+    timeZoneRaw: string;
+    timeZoneLocal: (zone: string) => string;
+    /** ボタンに出す「この PC」(幅が決まっているので短く)。 */
+    timeZoneLocalShort: string;
+    timeZoneCommon: string;
+    timeZoneAll: string;
+    timeZoneSearch: string;
+    timeZoneNoMatch: string;
+    timeZoneTitle: string;
+    timeZoneCellTitle: (value: string) => string;
+    timeZoneSaveFailed: (detail: string) => string;
+    timeZoneUnknown: (zone: string, detail: string) => string;
+    /** 空文字のセルに出す札 (NULL の札は "NULL" のまま)。 */
+    emptyValue: string;
+    /** 選んだセルのコピー (表の下の行に出す)。 */
+    copyDone: (rows: number, cols: number, withHeader: boolean) => string;
+    copyTruncated: (copied: number, selected: number, cols: number) => string;
+    copyFailed: (detail: string) => string;
+    copyCancelled: string;
+    /** 関連パネル: 一覧の 2 つの見出し・件数・0 件の切り替え・右の見出しの文。 */
+    relatedOutgoingGroup: string;
+    relatedIncomingGroup: string;
+    relatedRows: (rows: number) => string;
+    relatedCountLoading: string;
+    relatedCountFailed: (detail: string) => string;
+    relatedHideEmpty: (count: number) => string;
+    relatedShowEmpty: (count: number) => string;
+    relatedOutgoingHead: (ownColumn: string, table: string) => string;
+    relatedIncomingHead: (table: string, column: string) => string;
+    relatedInferredNote: string;
+    relatedEmptyIncoming: string;
   };
   // 行編集 / 新規追加 / 削除。
   edit: {
@@ -613,6 +665,9 @@ const EN: DbText = {
     copied: "Copied",
     copyFailed: "Copy failed",
     close: "Close details",
+    filterColumns: (count) => `Filter ${count} columns…`,
+    openRelated: "Open the related rows",
+    copyValue: (column) => `Copy the value of ${column}`,
   },
   grid: {
     searchPlaceholder: "Search all columns…",
@@ -653,6 +708,60 @@ const EN: DbText = {
       filters > 0
         ? `Reloading with ${filters} active filter${filters === 1 ? "" : "s"}…`
         : "Reloading current table…",
+    newestLabel: "Newest first",
+    newestOnAction: (column) => `Show the newest rows first (by ${column})`,
+    newestOffAction: "Back to the table's own order",
+    newestSaveFailed: (detail) =>
+      `The order changed, but it could not be remembered: ${detail}`,
+    statusNewest: (column) => `Newest first (${column})`,
+    recencyHeader: "Changed",
+    recencyHeaderHint: (columns) =>
+      `When each row was added or last changed, from ${columns}. Within an hour is strong, within a day is colored.`,
+    recencyAdded: (when, column, value) =>
+      `Added ${when} — ${column}: ${value}`,
+    recencyUpdated: (when, column, value) =>
+      `Changed ${when} — ${column}: ${value}`,
+    refreshMarkAdded: "New since the last reload",
+    refreshMarkChanged: "Changed since the last reload",
+    statusRefreshMarks: (added, changed) =>
+      `Since the last reload: ${added} new, ${changed} changed`,
+    timeZoneLabel: "Time zone for date and time columns",
+    timeZoneRaw: "Time as stored",
+    timeZoneLocal: (zone) => `This computer (${zone})`,
+    timeZoneLocalShort: "This computer",
+    timeZoneCommon: "Common",
+    timeZoneAll: "All time zones",
+    timeZoneSearch: "Search: tokyo, london, +9, -5…",
+    timeZoneNoMatch: "No time zone matches",
+    timeZoneTitle:
+      "Show date and time columns in this time zone. Copying cells follows the display; export and cell details keep the stored value.",
+    timeZoneCellTitle: (value) => `Stored value: ${value}`,
+    timeZoneSaveFailed: (detail) =>
+      `The time zone changed, but it could not be remembered: ${detail}`,
+    timeZoneUnknown: (zone, detail) =>
+      `This browser does not know the time zone ${zone}, so the stored values are shown: ${detail}`,
+    emptyValue: "empty",
+    copyDone: (rows, cols, withHeader) =>
+      `Copied ${rows.toLocaleString()} × ${cols} cells${withHeader ? " with column names" : " (add Shift for column names)"}`,
+    copyTruncated: (copied, selected, cols) =>
+      `Copied the first ${copied.toLocaleString()} of ${selected.toLocaleString()} rows × ${cols} columns (at most ${copied.toLocaleString()} rows at once)`,
+    copyFailed: (detail) => `Copy failed: ${detail}`,
+    copyCancelled: "Copy stopped because the table changed while loading rows",
+    relatedOutgoingGroup: "This row refers to",
+    relatedIncomingGroup: "Rows that refer to this row",
+    relatedRows: (rows) =>
+      `${rows.toLocaleString()} row${rows === 1 ? "" : "s"}`,
+    relatedCountLoading: "Counting rows…",
+    relatedCountFailed: (detail) => `Could not count the rows: ${detail}`,
+    relatedHideEmpty: (count) => `Hide ${count} with no rows`,
+    relatedShowEmpty: (count) => `Show ${count} hidden with no rows`,
+    relatedOutgoingHead: (ownColumn, table) =>
+      `The ${table} row this row's ${ownColumn} points to`,
+    relatedIncomingHead: (table, column) =>
+      `${table} rows whose ${column} points to this row`,
+    relatedInferredNote:
+      "Guessed from the column names; the database does not declare this foreign key",
+    relatedEmptyIncoming: "No row refers to this row",
   },
   edit: {
     editMode: "Edit",
@@ -1162,6 +1271,9 @@ const JA: DbText = {
     copied: "コピーしました",
     copyFailed: "コピーに失敗しました",
     close: "詳細を閉じる",
+    filterColumns: (count) => `${count} 列から絞り込み…`,
+    openRelated: "関係する行を開く",
+    copyValue: (column) => `${column} の値をコピー`,
   },
   grid: {
     searchPlaceholder: "全カラムを検索…",
@@ -1200,6 +1312,58 @@ const JA: DbText = {
       filters > 0
         ? `フィルタ ${filters} 件を保持して再読み込み中…`
         : "この表を再読み込み中…",
+    newestLabel: "新しい順",
+    newestOnAction: (column) => `新しい行を先頭に並べる (${column} の順)`,
+    newestOffAction: "テーブルの元の順に戻す",
+    newestSaveFailed: (detail) =>
+      `並びは変えましたが、次回のために覚えられませんでした: ${detail}`,
+    statusNewest: (column) => `新しい順 (${column})`,
+    recencyHeader: "変更",
+    recencyHeaderHint: (columns) =>
+      `${columns} から、行が足された・変わった時刻を出します。1 時間以内は濃く、24 時間以内は色付きです。`,
+    recencyAdded: (when, column, value) => `追加 ${when} — ${column}: ${value}`,
+    recencyUpdated: (when, column, value) =>
+      `更新 ${when} — ${column}: ${value}`,
+    refreshMarkAdded: "前回の読み込みから新しく出た行",
+    refreshMarkChanged: "前回の読み込みから中身が変わった行",
+    statusRefreshMarks: (added, changed) =>
+      `前回の読み込みから: 新しく出た行 ${added} · 変わった行 ${changed}`,
+    timeZoneLabel: "日時の列を表示するタイムゾーン",
+    timeZoneRaw: "元の時刻のまま",
+    timeZoneLocal: (zone) => `この PC (${zone})`,
+    timeZoneLocalShort: "この PC の時刻",
+    timeZoneCommon: "よく使う",
+    timeZoneAll: "すべてのタイムゾーン",
+    timeZoneSearch: "検索: tokyo・london・+9・-5…",
+    timeZoneNoMatch: "一致するタイムゾーンはありません",
+    timeZoneTitle:
+      "日時の列をこのタイムゾーンで表示します。セルのコピーは表示のとおり、書き出しとセルの詳細は元の値のままです。",
+    timeZoneCellTitle: (value) => `元の値: ${value}`,
+    timeZoneSaveFailed: (detail) =>
+      `タイムゾーンは変えましたが、次回のために覚えられませんでした: ${detail}`,
+    timeZoneUnknown: (zone, detail) =>
+      `このブラウザはタイムゾーン ${zone} を知らないので、元の値を出しています: ${detail}`,
+    emptyValue: "空文字",
+    copyDone: (rows, cols, withHeader) =>
+      `${rows.toLocaleString()} 行 × ${cols} 列をコピーしました${withHeader ? " (列名つき)" : " (Shift も押すと列名つき)"}`,
+    copyTruncated: (copied, selected, cols) =>
+      `${selected.toLocaleString()} 行のうち先頭の ${copied.toLocaleString()} 行 × ${cols} 列をコピーしました (1 回で ${copied.toLocaleString()} 行まで)`,
+    copyFailed: (detail) => `コピーできませんでした: ${detail}`,
+    copyCancelled: "行を読んでいる間に表が変わったので、コピーをやめました",
+    relatedOutgoingGroup: "この行が参照している",
+    relatedIncomingGroup: "この行を参照している",
+    relatedRows: (rows) => `${rows.toLocaleString()} 件`,
+    relatedCountLoading: "件数を数えています…",
+    relatedCountFailed: (detail) => `件数を数えられませんでした: ${detail}`,
+    relatedHideEmpty: (count) => `0 件の ${count} 個を隠す`,
+    relatedShowEmpty: (count) => `隠している 0 件の ${count} 個を出す`,
+    relatedOutgoingHead: (ownColumn, table) =>
+      `この行の ${ownColumn} が指す ${table} の行`,
+    relatedIncomingHead: (table, column) =>
+      `${column} でこの行を指している ${table} の行`,
+    relatedInferredNote:
+      "列の名前から推測した関係です (データベースには外部キーとして宣言されていません)",
+    relatedEmptyIncoming: "この行を参照している行はありません",
   },
   edit: {
     editMode: "編集",

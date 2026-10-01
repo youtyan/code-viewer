@@ -11449,23 +11449,6 @@ body.journal-task-editor-resizing * {
   white-space: nowrap;
 }
 
-/* 推測 FK は実 FK と区別。関連パネルのリスト項目に淡いマーカーを乗せる。 */
-.db-related-list-inferred {
-  background: color-mix(in srgb, var(--attn, var(--accent)) 6%, transparent);
-}
-.db-related-list-inferred-badge {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--attn, var(--accent)) 18%, var(--bg));
-  color: var(--attn, var(--accent));
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  vertical-align: middle;
-}
 .db-icon-btn {
   display: inline-flex;
   align-items: center;
@@ -12141,18 +12124,6 @@ body.journal-task-editor-resizing * {
   background: var(--accent-subtle) !important;
   outline: 1px solid var(--accent);
   outline-offset: -1px;
-}
-.db-grid-cell.null {
-  color: var(--fg-subtle);
-  font-style: italic;
-  font-size: var(--db-font-sm);
-  background: rgba(128, 128, 128, 0.06);
-  border-radius: 3px;
-}
-.db-grid-cell.empty {
-  color: var(--fg-subtle);
-  font-style: italic;
-  font-size: var(--db-font-sm);
 }
 .db-grid-cell.blob {
   color: var(--fg-subtle);
@@ -13086,78 +13057,10 @@ html[data-theme="dark"] .db-grid-detail-json span[style] {
   outline: none;
 }
 
-.db-related-list-item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  width: 100%;
-  padding: 5px 8px;
-  margin-bottom: 2px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-}
-.db-related-list-item:hover {
-  background: var(--bg-mute);
-}
-.db-related-list-item.active {
-  background: var(--bg-mute);
-  border-color: var(--accent, var(--border));
-}
-
-.db-related-list-name {
-  font-size: var(--db-font-base);
-  font-weight: 600;
-  color: var(--fg);
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  /* 項目の幅を超えたら省略記号にする。min-width:0 が無いと flex 子は
-     内容幅より縮まず、はみ出したまま折り返す。 */
-  max-width: 100%;
-  min-width: 0;
-}
-
-.db-related-list-table {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* 方向アイコンを name の前に出す: outgoing は → (自分→他テーブル)、
-   incoming は ← (他テーブル→自分の PK)。テキスト 1 文字なのでフォントに
-   影響されず軽量。 */
-.db-related-list-name::before {
-  flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--fg-muted);
-}
-.db-related-list-outgoing .db-related-list-name::before {
-  content: "→";
-}
-.db-related-list-incoming .db-related-list-name::before {
-  content: "←";
-}
-
-.db-related-list-via {
-  font-size: 11px;
-  color: var(--fg-muted);
-  /* break-all だと "sample_association_table.sa / mple_column_id = 12" の
-     ように語の途中で折り返って読めなくなる。1 行で省略し、全文は title で出す。 */
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .db-related-grid-host {
   position: relative;
   display: flex;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -13165,18 +13068,6 @@ html[data-theme="dark"] .db-grid-detail-json span[style] {
 
 .db-related-empty[hidden] {
   display: none !important;
-}
-.db-related-empty {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-soft);
-  color: var(--fg-muted);
-  font-style: italic;
-  font-size: var(--db-font-base);
 }
 
 /* ---------- Export (icon + menu at the right of the search bar) ---------- */
@@ -17321,15 +17212,6 @@ html[data-theme="dark"] .tools-code span[style] {
   color: var(--accent);
   background: var(--accent-subtle);
 }
-.db-grid-row-detail { white-space: normal; }
-.db-grid-row-detail .db-detail-table { width: 100%; table-layout: fixed; }
-.db-grid-row-detail th:first-child { width: 24%; }
-.db-grid-row-detail td {
-  vertical-align: top;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.db-grid-row-detail .db-detail-table-muted { color: var(--fg); }
 .db-grid-detail-copy-status:empty { display: none; }
 .db-grid-detail-copy-status {
   display: block;
@@ -25569,6 +25451,9 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 .db-root .db-grid-filter-bar {
   border-bottom-color: var(--color-line-soft);
   background: var(--color-doc);
+  /* 入りきらない操作は次の行へ折る (右端の再読み込み・書き出しが切れていた)。 */
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
 }
 .db-root .db-grid-header-wrap {
   border-bottom: 2px solid var(--color-line-row);
@@ -25610,6 +25495,608 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   background: var(--color-select);
   box-shadow: inset 0 0 0 2px var(--color-accent);
   color: var(--color-text);
+}
+/* 選んだセルの範囲 (views/database/grid-range-select.ts)。今のセルの枠より
+   弱く、選んだ行の地と重なっても範囲の形が見える濃さ。 */
+.db-root .db-grid-cell.in-range {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+.db-root .db-grid-cell.in-range.db-grid-cell-active {
+  background: color-mix(in srgb, var(--color-accent) 26%, transparent);
+}
+/* 関連パネル (views/database/related-list.ts)。左は「この行が参照している」と
+   「この行を参照している」の 2 つの群。項目は表の名前と件数の 1 行目、つなぐ
+   列と推測の札の 2 行目。右は表の上に「何の行か」の見出し。 */
+.db-root .db-related-list {
+  padding: var(--space-2);
+  background: var(--color-inset);
+}
+.db-root .db-related-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  color: var(--color-text-2);
+  font-family: var(--font-ui);
+  font-size: var(--db-font-sm);
+  font-weight: 600;
+}
+.db-root .db-related-group:not(:first-child) {
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--color-line-soft);
+}
+.db-root .db-related-group-count {
+  color: var(--color-text-3);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.db-root .db-related-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.db-root .db-related-item:hover {
+  background: var(--color-raised);
+}
+.db-root .db-related-item.is-active {
+  background: var(--color-select);
+  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+.db-root .db-related-item.is-empty {
+  color: var(--color-text-3);
+}
+.db-root .db-related-item-top,
+.db-root .db-related-item-via {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  width: 100%;
+}
+.db-root .db-related-item-table {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.db-root .db-related-item-count {
+  flex: none;
+  min-width: calc(var(--space-unit) * 6);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  color: var(--color-accent-strong);
+  font-size: var(--db-font-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.db-root .db-related-item-count.is-zero,
+.db-root .db-related-item-count.is-loading {
+  background: color-mix(in srgb, var(--color-text-3) 14%, transparent);
+  color: var(--color-text-3);
+}
+.db-root .db-related-item-count.is-failed {
+  background: color-mix(in srgb, var(--color-failed) 16%, transparent);
+  color: var(--color-failed);
+}
+.db-root .db-related-item-column {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-2);
+  font-size: var(--db-font-sm);
+}
+.db-root .db-related-item.is-empty .db-related-item-column {
+  color: var(--color-text-3);
+}
+/* 推測した関係の札。折り返さない (2 文字が縦に割れていた)。 */
+.db-root .db-related-inferred {
+  flex: none;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-waiting) 16%, transparent);
+  color: var(--color-waiting);
+  font-family: var(--font-ui);
+  font-size: var(--db-font-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.db-root .db-related-empty-toggle {
+  width: 100%;
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 1px dashed var(--color-line);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-2);
+  font-family: var(--font-ui);
+  font-size: var(--db-font-sm);
+  cursor: pointer;
+}
+.db-root .db-related-empty-toggle:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.db-root .db-related-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-line-soft);
+  background: var(--color-doc);
+  font-family: var(--font-ui);
+  font-size: var(--db-font-base);
+}
+.db-root .db-related-head:empty {
+  display: none;
+}
+.db-root .db-related-head-icon {
+  display: inline-flex;
+  color: var(--color-accent);
+}
+.db-root .db-related-head-icon svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+.db-root .db-related-head-sentence {
+  color: var(--color-text);
+  font-weight: 600;
+}
+.db-root .db-related-head-condition {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-inset);
+  color: var(--color-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--db-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-root .db-related-head-rows {
+  color: var(--color-text-2);
+  font-variant-numeric: tabular-nums;
+}
+.db-root .db-related-grid-host.is-empty > .db-grid {
+  display: none;
+}
+.db-root .db-related-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-code);
+  color: var(--color-text-2);
+  font-family: var(--font-ui);
+  text-align: center;
+}
+.db-root .db-related-empty-note {
+  color: var(--color-text-3);
+  font-size: var(--db-font-sm);
+}
+/* セルの詳細の「行全体」(views/database/row-detail.ts)。左に列 (名前・型・
+   PK)、右に値、右端に関連とコピー。行の区切りは表の決まりの線。いま選んで
+   いる列は地を変え、左に強調の線を引く。 */
+.db-root .db-grid-detail-content.db-row-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  white-space: normal;
+}
+.db-root .db-row-detail-filter {
+  align-self: flex-start;
+  width: min(100%, calc(var(--space-unit) * 64));
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-inset);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--db-font-sm);
+}
+.db-root .db-row-detail-list {
+  display: grid;
+  grid-template-columns: minmax(calc(var(--space-unit) * 30), max-content) minmax(0, 1fr) auto;
+}
+.db-root .db-row-detail-item {
+  display: contents;
+}
+.db-root .db-row-detail-item[hidden] {
+  display: none;
+}
+.db-root .db-row-detail-item > * {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-line-row);
+}
+.db-root .db-row-detail-item:hover > * {
+  background: color-mix(in srgb, var(--color-raised) 60%, transparent);
+}
+.db-root .db-row-detail-item.is-active > * {
+  background: color-mix(in srgb, var(--color-select) 70%, transparent);
+}
+.db-root .db-row-detail-item.is-active > .db-row-detail-key {
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+.db-root .db-row-detail-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+  max-width: calc(var(--space-unit) * 64);
+  min-width: 0;
+}
+.db-root .db-row-detail-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-root .db-row-detail-type {
+  color: var(--color-text-3);
+  font-size: var(--db-font-sm);
+}
+.db-root .db-row-detail-pk {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  color: var(--color-accent-strong);
+  font-size: var(--db-font-sm);
+  font-weight: 600;
+}
+.db-root .db-row-detail-value {
+  min-width: 0;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.db-root .db-row-detail-value.is-blob {
+  color: var(--color-text-3);
+}
+.db-root .db-row-detail-json {
+  max-height: calc(var(--space-unit) * 80);
+  margin: 0;
+  padding: var(--space-2);
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--color-inset);
+}
+.db-root .db-row-detail-time {
+  font-variant-numeric: tabular-nums;
+}
+.db-root .db-row-detail-relative {
+  margin-left: var(--space-2);
+  color: var(--color-text-3);
+  font-size: var(--db-font-sm);
+}
+.db-root .db-row-detail-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+.db-root .db-row-detail-action {
+  display: inline-grid;
+  place-items: center;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-3);
+  cursor: pointer;
+}
+.db-root .db-row-detail-action svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+.db-root .db-row-detail-action:hover {
+  border-color: var(--color-line);
+  color: var(--color-text);
+}
+.db-root .db-row-detail-action.copied {
+  color: var(--diff-add-fg);
+}
+.db-root .db-row-detail-action.failed {
+  color: var(--color-failed);
+}
+/* 行番号の右の「変更」の列 (views/database/grid-recency.ts)。幅と左の位置は
+   TS が持つ (列幅と同じ)。行番号と一緒に横スクロールしても残す。足された =
+   差分の追加の色、変わった = 差分の塊の見出しの色。濃さは 1 時間以内 (fresh) /
+   24 時間以内 (recent) / それより前 (old)。色だけでなく絵 (＋ / 鉛筆) でも分ける。 */
+.db-root .db-grid-recency-header,
+.db-root .db-grid-recency {
+  position: sticky;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  background: var(--color-inset);
+  color: var(--color-text-3);
+  font-size: var(--db-font-sm);
+  font-variant-numeric: tabular-nums;
+  box-shadow: 1px 0 0 var(--color-line-soft);
+}
+.db-root .db-grid-recency-header {
+  color: var(--color-text-2);
+  font-weight: 600;
+  cursor: help;
+}
+.db-root .db-grid-recency-icon {
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+.db-root .db-grid-recency-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.db-root .db-grid-recency.is-recent.is-added {
+  color: var(--diff-add-fg);
+}
+.db-root .db-grid-recency.is-recent.is-updated {
+  color: var(--diff-hunk-fg);
+}
+.db-root .db-grid-recency.is-fresh {
+  font-weight: 600;
+}
+.db-root .db-grid-recency.is-fresh.is-added {
+  background: color-mix(in srgb, var(--diff-add-fg) 16%, var(--color-inset));
+  color: var(--diff-add-fg);
+}
+.db-root .db-grid-recency.is-fresh.is-updated {
+  background: color-mix(in srgb, var(--diff-hunk-fg) 16%, var(--color-inset));
+  color: var(--diff-hunk-fg);
+}
+/* 1 時間以内の行は、データの列を読んでいても目に入るよう行の地も薄く染める。 */
+.db-root .db-grid-row:not(.selected):has(> .db-grid-recency.is-fresh.is-added) {
+  background: color-mix(in srgb, var(--diff-add-fg) 6%, transparent);
+}
+.db-root .db-grid-row:not(.selected):has(> .db-grid-recency.is-fresh.is-updated) {
+  background: color-mix(in srgb, var(--diff-hunk-fg) 6%, transparent);
+}
+/* 再読み込みで前と比べた印: 行番号の左端の線と、行の薄い地。 */
+.db-root .db-grid-row-refreshed.is-added > .db-grid-rownum {
+  box-shadow: inset 3px 0 0 var(--diff-add-fg), 1px 0 0 var(--color-line-soft);
+  color: var(--diff-add-fg);
+  font-weight: 600;
+}
+.db-root .db-grid-row-refreshed.is-changed > .db-grid-rownum {
+  box-shadow: inset 3px 0 0 var(--diff-hunk-fg), 1px 0 0 var(--color-line-soft);
+  color: var(--diff-hunk-fg);
+  font-weight: 600;
+}
+.db-root .db-grid-row-refreshed.is-added:not(.selected) {
+  background: color-mix(in srgb, var(--diff-add-fg) 9%, transparent);
+}
+.db-root .db-grid-row-refreshed.is-changed:not(.selected) {
+  background: color-mix(in srgb, var(--diff-hunk-fg) 9%, transparent);
+}
+/* 「新しい順」: 押している間は強調の色 (押せるものの今の状態)。箱の寸法は変えない。 */
+.db-root .db-grid-newest {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+  color: var(--color-text-2);
+  font-size: var(--db-font-sm);
+  white-space: nowrap;
+}
+.db-root .db-grid-newest[hidden] {
+  display: none;
+}
+.db-root .db-grid-newest svg {
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+.db-root .db-grid-newest[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-doc));
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-line));
+  color: var(--color-accent-strong);
+}
+.db-root .db-grid-newest[data-save-failed] {
+  color: var(--color-failed);
+}
+/* タイムゾーンの選択窓 (views/database/time-zone-picker.ts)。ボタンの幅は
+   決めておき、選んだ名前の長さで横の操作が動かないようにする (長い名前は …)。
+   窓は「書き出し」のメニューと同じく、ボタンの下に右端をそろえて浮かせる。 */
+.db-root .db-grid-tz {
+  position: relative;
+  display: inline-flex;
+}
+.db-root .db-grid-tz[hidden] {
+  display: none;
+}
+.db-root .db-grid-tz-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  width: calc(var(--space-unit) * 32);
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+  color: var(--color-text);
+  font-size: var(--db-font-sm);
+}
+.db-root .db-grid-tz-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-root .db-grid-tz-chevron {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-text-3);
+}
+.db-root .db-grid-tz-chevron svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+.db-root .db-grid-tz.is-failed .db-grid-tz-button,
+.db-root .db-grid-tz[data-save-failed] .db-grid-tz-button {
+  border-color: var(--color-failed);
+  color: var(--color-failed);
+}
+.db-root .db-grid-tz-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  width: calc(var(--space-unit) * 84);
+  max-height: min(calc(var(--space-unit) * 100), 60vh);
+  padding: var(--space-2);
+  gap: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-doc);
+  box-shadow: var(--db-glass-shadow);
+}
+.db-root .db-grid-tz-menu[hidden] {
+  display: none;
+}
+.db-root .db-grid-tz-search {
+  flex: none;
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-inset);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--db-font-base);
+}
+.db-root .db-grid-tz-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.db-root .db-grid-tz-group {
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  color: var(--color-text-3);
+  font-size: var(--db-font-sm);
+  font-weight: 600;
+}
+.db-root .db-grid-tz-group[hidden],
+.db-root .db-grid-tz-option[hidden],
+.db-root .db-grid-tz-empty[hidden] {
+  display: none;
+}
+.db-root .db-grid-tz-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: var(--ui-row-h);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--db-font-base);
+  text-align: left;
+  cursor: pointer;
+}
+.db-root .db-grid-tz-option.is-highlighted {
+  background: var(--color-raised);
+}
+.db-root .db-grid-tz-check {
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  visibility: hidden;
+  color: var(--color-accent);
+}
+.db-root .db-grid-tz-option.is-selected .db-grid-tz-check {
+  visibility: visible;
+}
+.db-root .db-grid-tz-option.is-selected .db-grid-tz-name {
+  font-weight: 600;
+}
+.db-root .db-grid-tz-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-root .db-grid-tz-offset {
+  flex: none;
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: var(--db-font-sm);
+  font-variant-numeric: tabular-nums;
+}
+.db-root .db-grid-tz-empty {
+  padding: var(--space-3) var(--space-2);
+  color: var(--color-text-2);
+}
+/* 出し直している日時の列の見出しに、どのタイムゾーンかの札を添える。 */
+.db-root .db-grid-header-tz {
+  margin-left: var(--space-1);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-raised);
+  color: var(--color-text-2);
+  font-size: var(--db-font-sm);
+  font-weight: 500;
+}
+.db-root .db-grid-cell-time {
+  font-variant-numeric: tabular-nums;
+}
+/* NULL と空文字の札 (table-grid.ts の fillNullOrEmpty)。NULL は塗り、空文字は
+   点線の枠。本文と違う濃さ・形で、値の文字と取り違えないようにする。 */
+.db-root .db-grid-cell.is-null,
+.db-root .db-grid-cell.is-empty {
+  background: none;
+  font-style: normal;
+}
+.db-root .db-grid-null,
+.db-root .db-grid-empty {
+  display: inline-block;
+  padding: 0 var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--db-font-sm);
+  font-style: italic;
+  line-height: 1.5;
+}
+.db-root .db-grid-null {
+  background: color-mix(in srgb, var(--color-text-3) 22%, transparent);
+  color: var(--color-text-2);
+}
+.db-root .db-grid-empty {
+  border-style: dashed;
+  border-color: var(--color-text-3);
+  color: var(--color-text-3);
 }
 .db-root .db-grid-status {
   display: flex;

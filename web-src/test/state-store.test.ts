@@ -819,5 +819,48 @@ describe("state store", () => {
         expect(afterPref.prefs).toEqual({ inferFkRails: true });
       });
     });
+
+    // 日時の列を出し直すタイムゾーン: "local" か、Intl が知っている名前だけ。
+    test.each([
+      {
+        name: "this computer",
+        value: "local",
+        expected: { timeZone: "local" },
+      },
+      { name: "UTC", value: "UTC", expected: { timeZone: "UTC" } },
+      {
+        name: "an IANA name",
+        value: "Asia/Tokyo",
+        expected: { timeZone: "Asia/Tokyo" },
+      },
+      { name: "an unknown name", value: "Mars/Olympus", expected: undefined },
+      { name: "a path-like value", value: "../etc", expected: undefined },
+      { name: "a number", value: 9, expected: undefined },
+      { name: "too long", value: `A${"a".repeat(64)}`, expected: undefined },
+    ])("timeZone pref: $name", async ({ value, expected }) => {
+      await withTempProject(async (dir) => {
+        const written = await patchDbUiState(dir, {
+          prefs: { timeZone: value },
+        } as unknown as Parameters<typeof patchDbUiState>[1]);
+        expect(written.prefs).toEqual(expected);
+      });
+    });
+
+    test("timeZone pref is kept by other patches and removed by null", async () => {
+      await withTempProject(async (dir) => {
+        await patchDbUiState(dir, { prefs: { timeZone: "UTC" } });
+        const kept = await patchDbUiState(dir, {
+          prefs: { newestFirst: false },
+        });
+        expect(kept.prefs).toEqual({ timeZone: "UTC", newestFirst: false });
+        const removed = await patchDbUiState(dir, {
+          prefs: { timeZone: null },
+        } as unknown as Parameters<typeof patchDbUiState>[1]);
+        expect(removed.prefs).toEqual({ newestFirst: false });
+        expect((await loadDbUiState(dir)).prefs).toEqual({
+          newestFirst: false,
+        });
+      });
+    });
   });
 });

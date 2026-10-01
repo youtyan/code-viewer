@@ -2429,12 +2429,18 @@ describe("database view SQL error rendering", () => {
       if (url.startsWith("/_db/schema")) {
         const db = new URL(url, "http://localhost").searchParams.get("db");
         events.push(`schema:${db}`);
+        // 実際のサーバと同じく、全部のテーブルの列を付ける (列が分からない表は
+        // 「新しい順」を決めるために取り直す)。
         return jsonResponse({
           ...baseSchemaResponse(),
           tables: [
             { name: "users", type: "table", rowCount: 1 },
             { name: "bookings", type: "table", rowCount: 1 },
           ],
+          columnsMap: {
+            users: [{ name: "id", type: "integer", primaryKey: true }],
+            bookings: [{ name: "id", type: "integer", primaryKey: true }],
+          },
         });
       }
       if (url.startsWith("/_db/table")) {

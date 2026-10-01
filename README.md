@@ -884,6 +884,22 @@ Open Data (the Data icon at the head of the list column, or `g b`) to access:
   keeping global search and column filters, with a result chip that calls out
   row-count changes. Double-click a cell to edit inline when Edit mode is on;
   the whole pending edit batch commits atomically.
+- **Recent rows first** — tables open newest first (by `updated_at`,
+  `created_at`, or an integer primary key); **Newest first** above the grid
+  switches back to the table's own order and is remembered. A **Changed**
+  column next to the row number shows when each row was added or changed
+  (`5m ago`), stronger within the hour. After a reload, rows that are new or
+  changed since the last load are marked and counted.
+- **Time zones** — a searchable menu above the grid (by name or offset, e.g.
+  `tokyo`, `+9`) shows date and time columns, including UNIX times, in this
+  computer's zone, UTC or any IANA zone. Export and cell details keep the
+  stored values.
+- **Range copy** — drag across cells (or Shift+click / Shift+arrow keys,
+  ⌘A / Ctrl+A for all rows) and press ⌘C / Ctrl+C to copy tab-separated text
+  that pastes straight into Excel; add Shift to include the column names.
+- **NULL and empty strings** — shown as different tags (filled for NULL,
+  dashed for an empty string) in the grid, query results and history.
+  PostgreSQL read through `docker exec psql` tells NULL from an empty string.
 - **Detail footer and related panel** — click any cell to open a resizable
   detail footer, where JSON values are pretty-printed and syntax-highlighted;
   foreign-key cells open a related panel showing the
@@ -893,11 +909,14 @@ Open Data (the Data icon at the head of the list column, or `g b`) to access:
   and the detail footer follows it, `Enter` follows a foreign key (arrow keys
   alone never fire a related-table query), `Escape` closes whichever panel is
   open, and `Tab` / `Shift+Tab` move between the main grid and the related
-  grid. The related panel's reference list keeps each entry on one line with
-  the full table name and condition in a tooltip, and its width can be dragged
-  and is remembered.
+  grid. The related panel lists what the row refers to and what refers to it,
+  each with its row count (relations without rows can be hidden), says above
+  the rows which rows they are, and its list width can be dragged and is
+  remembered. The Row tab lists every column with its type, pretty-prints
+  JSON, shows dates in the chosen time zone with how long ago, and copies a
+  value or opens a foreign key from each line.
 - **Footer dock with Query History & Session log** — bottom
-  dock that hosts two tabs: the per-database **Query History** (master/detail
+  dock (closed by default; its tabs open it) that hosts two tabs: the per-database **Query History** (master/detail
   list of saved queries, SSE-synced across tabs) and a **Session log** that
   records every SQL the server runs in this browser session (read fetches,
   user queries, and write commits) with timing, row counts, and the actual

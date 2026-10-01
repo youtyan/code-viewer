@@ -633,7 +633,7 @@ export type TabState = {
   // Query editor (SQL タブ) の textarea 内容。リロードで復元される。
   sqlDraft?: string;
 
-  // history pane の開閉状態。タブごとに独立。default は true (= 開いている)。
+  // history pane の開閉状態。タブごとに独立。default は false (= 閉じている)。
   historyOpen?: boolean;
 
   // history pane の高さ。CSS pixel 表現 (例: "240px")。

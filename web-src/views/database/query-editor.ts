@@ -8,7 +8,7 @@ import {
   type ShikiHighlighter,
 } from "../../core/shiki-loader";
 import { type DbText, dbText } from "./i18n";
-import { formatQueryValue } from "./query-value";
+import { fillNullOrEmpty, formatQueryValue } from "./query-value";
 import { serverErrorSummary } from "./report-failure";
 import { highlightSqlToInnerHtml } from "./shiki-sql";
 
@@ -334,8 +334,8 @@ export function createQueryEditor(
         tr.appendChild(tdNum);
         for (const value of row) {
           const td = document.createElement("td");
-          td.textContent = formatQueryValue(value);
-          if (value === null) td.classList.add("null");
+          if (!fillNullOrEmpty(td, value, text().grid.emptyValue))
+            td.textContent = formatQueryValue(value);
           tr.appendChild(td);
         }
         tbody.appendChild(tr);

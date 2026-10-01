@@ -2190,7 +2190,36 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(l.database.edit.editMode),
                   " to change cells and write them all at once.",
                 ],
-                "Select a foreign-key cell to follow it to the related rows.",
+                "Select a foreign-key cell to see the related rows below. The list on the left splits what this row refers to from what refers to it, with row counts.",
+                [
+                  "Drag across cells to select a range and press ",
+                  key("⌘C"),
+                  " to copy it; it pastes straight into Excel. Add ",
+                  key("Shift"),
+                  " to include the column names.",
+                ],
+                "NULL shows as a filled tag and an empty string as a dashed one.",
+              ],
+            },
+          ],
+        },
+        {
+          title: "See what changed recently",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                [
+                  "Tables open with the newest rows first. ",
+                  ui(l.database.grid.newestLabel),
+                  " above the grid switches back to the table's own order.",
+                ],
+                [
+                  ui(l.database.grid.recencyHeader),
+                  " next to the row number shows when a row was added (+) or changed (pencil), from columns such as created_at and updated_at.",
+                ],
+                "After a reload, rows that are new or changed since the last load get a colored mark.",
+                "The time zone menu above the grid shows date and time columns in another zone (search by tokyo, +9 and so on). Export keeps the stored values.",
               ],
             },
           ],

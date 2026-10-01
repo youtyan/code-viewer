@@ -90,6 +90,11 @@ type DatabasePaneDeps = DatabaseViewDeps & {
     key: K,
     fallback: NonNullable<DbUiPrefs[K]>,
   ): NonNullable<DbUiPrefs[K]>;
+  saveDbUiPrefs(
+    patch: Partial<{
+      [K in keyof DbUiPrefs]: NonNullable<DbUiPrefs[K]> | null;
+    }>,
+  ): Promise<void>;
   onDbUiPrefChange(listener: (state: DbUiState) => void): () => void;
   loadSqlHistory(dbId: string | null, schema: string | null): Promise<string[]>;
   refreshDatastores(): Promise<void>;
@@ -767,6 +772,18 @@ function createTabPane(
     // 出す。これらは adapter.applyMutations + /_db/mutate に対応。
     getEditable: () => isRowEditableKind(currentDbInfo?.kind),
     applyMutations: (mutations) => applyRowMutations(mutations),
+    getNewestFirst: () => outerDeps.getDbUiPref("newestFirst", true),
+    setNewestFirst: (on) => outerDeps.saveDbUiPrefs({ newestFirst: on }),
+    getTimeZone: () => outerDeps.getDbUiPref("timeZone", ""),
+    setTimeZone: async (pref) => {
+      await outerDeps.saveDbUiPrefs({ timeZone: pref });
+      // サーバは知らないタイムゾーンを保存せずに 200 を返すので、応答の値で確かめる。
+      const saved = outerDeps.getDbUiPref("timeZone", "");
+      if (saved !== (pref ?? ""))
+        throw new Error(
+          `the server did not keep the time zone ${JSON.stringify(pref)} (kept ${JSON.stringify(saved)})`,
+        );
+    },
     onRefreshComplete: ({ table, filters }) => {
       if (filters.length === 0) {
         return;
@@ -1151,7 +1168,8 @@ function createTabPane(
 
   // history pane の開閉はタブごとに独立。initial が無ければ default は
   // 「開いている」状態を default にする。
-  let userPrefersHistoryOpen = initial.historyOpen ?? true;
+  // 既定は閉じる (開いていると表が数行しか見えなかった)。下のタブで開く。
+  let userPrefersHistoryOpen = initial.historyOpen ?? false;
 
   function applyVisibility() {
     const sqlMode = isSqlKind(currentDbInfo?.kind);
@@ -1849,17 +1867,7 @@ function createTabPane(
       ) {
         return;
       }
-      const data = await deps.trackLoad(
-        fetchTablePage(table, 0, 200, null, [], slot.signal),
-      );
-      if (
-        slot.isStale() ||
-        generation !== loadGeneration ||
-        currentDbInfo?.id !== requestDbId ||
-        currentTable !== table
-      ) {
-        return;
-      }
+      // 「新しい順」の設定 (db-ui.json) を読んでから、最初のページをその並びで取る。
       await outerDeps.ensureDbUiState();
       if (
         slot.isStale() ||
@@ -1869,11 +1877,30 @@ function createTabPane(
       ) {
         return;
       }
-      grid.load(table, data);
+      // 列が分からなければ並べずに取り、表が決め直す (grid.load)。
+      const knownColumns = schemaCache?.columnsMap?.[table];
+      const initialSort = knownColumns
+        ? grid.initialSortFor(knownColumns)
+        : undefined;
+      const data = await deps.trackLoad(
+        fetchTablePage(table, 0, 200, initialSort ?? null, [], slot.signal),
+      );
+      if (
+        slot.isStale() ||
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== requestDbId ||
+        currentTable !== table
+      ) {
+        return;
+      }
+      grid.load(table, data, initialSort);
       queryEditor.showTableResult();
-      if (preserveInitialSqlDraft) {
-        preserveInitialSqlDraft = false;
-      } else {
+      // 保存してあった SQL の下書きは、保存したときと同じ表を開いたときだけ
+      // 残す。URL で別の表を開いたときに残すと、見ている表と違う表の SELECT が
+      // 出ていた (表を押して切り替えたときと同じく、開いた表の SELECT にする)。
+      const keepDraft = preserveInitialSqlDraft && table === initial.table;
+      preserveInitialSqlDraft = false;
+      if (!keepDraft) {
         const tableQuery = queryForTableResult(data);
         if (tableQuery) queryEditor.setSql(tableQuery);
       }
@@ -2483,9 +2510,9 @@ function createTabPane(
     // 体積を最小化、旧形式と区別しやすくする)。
     const sqlDraft = queryEditor.getSql();
     if (sqlDraft) state.sqlDraft = sqlDraft;
-    // historyOpen は default = true なので、true のときは載せない (= 既定値)。
-    // false のときだけ load 時に「閉じる」と判定できればよい。
-    if (!userPrefersHistoryOpen) state.historyOpen = false;
+    // historyOpen は default = false なので、false のときは載せない (= 既定値)。
+    // true のときだけ load 時に「開く」と判定できればよい。
+    if (userPrefersHistoryOpen) state.historyOpen = true;
     if (historyPane.style.height)
       state.historyHeight = historyPane.style.height;
     // activeHistoryTab は default = "history" なので、"log" のときだけ載せる。
@@ -3489,6 +3516,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         getSnapshotSelectedTables,
         setSnapshotSelectedTables,
         getDbUiPref,
+        saveDbUiPrefs,
         onDbUiPrefChange,
         loadSqlHistory,
         refreshDatastores,

@@ -305,6 +305,12 @@ export type DbUiPrefs = {
   // 推測し、🔗 表示や関連パネル経由でナビゲートできるようにする。
   // default false (DB の真実を尊重)。
   inferFkRails?: boolean;
+  // Data の表を開いたとき、新しい行を先頭に並べる (updated_at / created_at /
+  // 整数の主キーの降順)。表の上の「新しい順」で切り替えた値を覚える。default true。
+  newestFirst?: boolean;
+  // Data の表の日時の列を表示し直すタイムゾーン。"local" は画面の PC の
+  // タイムゾーン、ほかは IANA の名前 ("UTC"・"Asia/Tokyo")。無ければ元の値のまま。
+  timeZone?: string;
 };
 
 export type DbUiState = {

@@ -501,7 +501,28 @@ function safeObjectKey(value: string): string | null {
 // DbUiPrefs に新キーを増やすたびに sanitize/merge を両方触らないで済むよう、
 // boolean prefs キーを 1 か所で列挙する。テストもこの集合が完備していること
 // を前提にする (state-store-prefs.test.ts)。
-const DB_UI_BOOL_PREF_KEYS = ["s3TooltipEnabled", "inferFkRails"] as const;
+const DB_UI_BOOL_PREF_KEYS = [
+  "s3TooltipEnabled",
+  "inferFkRails",
+  "newestFirst",
+] as const;
+
+// 日時の列を表示し直すタイムゾーン。"local" (画面の PC) か、このランタイムの
+// Intl が知っている IANA の名前だけを受ける。
+const MAX_TIME_ZONE_LEN = 64;
+function isTimeZonePref(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > MAX_TIME_ZONE_LEN)
+    return false;
+  if (value === "local") return true;
+  if (!/^[A-Za-z][A-Za-z0-9_+\-/]*$/.test(value)) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch (error) {
+    if (error instanceof RangeError) return false;
+    throw error;
+  }
+}
 
 function sanitizeDbUiPrefs(raw: unknown): DbUiPrefs | undefined {
   if (!isRecord(raw)) return undefined;
@@ -510,6 +531,7 @@ function sanitizeDbUiPrefs(raw: unknown): DbUiPrefs | undefined {
     const v = raw[key];
     if (v === true || v === false) out[key] = v;
   }
+  if (isTimeZonePref(raw.timeZone)) out.timeZone = raw.timeZone;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -604,6 +626,8 @@ function mergeDbUiPrefs(
     if (v === null) delete next[key];
     else if (v === true || v === false) next[key] = v;
   }
+  if (patch.timeZone === null) delete next.timeZone;
+  else if (isTimeZonePref(patch.timeZone)) next.timeZone = patch.timeZone;
   return Object.keys(next).length > 0 ? next : undefined;
 }
 
