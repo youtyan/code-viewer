@@ -19,6 +19,7 @@ import {
   bottomSwipeAction,
   drawerDragOffset,
   edgeSwipeAction,
+  gestureAxis,
   LONG_PRESS_MS,
   LONG_PRESS_TARGETS,
   longPressMoved,
@@ -36,6 +37,7 @@ import {
 import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from "../core/tmux";
 import type { TabListEntry } from "./main-tabs/main-tabs-view";
 import { CLOSE_ICON_PATH, pageIconPaths } from "./main-tabs/tab-icons";
+import { projectMark } from "./projects/project-looks";
 import {
   type MobileShellLang,
   type MobileShellText,
@@ -186,14 +188,15 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   // 差分の長い行を折り返す切替 (電話の段だけ。Diff の上の帯の端に置く)。
   // .controls の中に置かない: その規則は display を決めるので、デスクトップで
   // hidden にしても場所を取る。見た目は SP の節だけ。状態はこのセッションだけ。
+  // 既定は折り返す (幅 390 では長い行を横に送って読むことになった)。印は電話の
+  // 段の間だけ付ける (apply)。
+  let diffWrap = true;
   const wrapButton = document.createElement("button");
   wrapButton.type = "button";
   wrapButton.className = "mobile-wrap-toggle";
-  wrapButton.setAttribute("aria-pressed", "false");
   wrapButton.addEventListener("click", () => {
-    const next = !document.body.classList.contains("mobile-diff-wrap");
-    document.body.classList.toggle("mobile-diff-wrap", next);
-    wrapButton.setAttribute("aria-pressed", String(next));
+    diffWrap = !diffWrap;
+    syncDiffWrap();
   });
   topbar.append(wrapButton);
 
@@ -274,6 +277,43 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
 
   app.append(scrim, keys, bar, ...(tabsSheet ? [tabsSheet] : []));
 
+  /** タブの一覧の 1 行 (押すと前面に出す・×で閉じる)。 */
+  function tabRow(entry: TabListEntry, t: MobileShellText): HTMLLIElement {
+    const row = document.createElement("li");
+    row.className = "mobile-tabs-row";
+    row.dataset.tabId = entry.id;
+    row.classList.toggle("is-front", entry.front);
+    row.classList.toggle("is-preview", entry.preview);
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "mobile-tabs-open";
+    openButton.title = entry.title;
+    if (entry.front) openButton.setAttribute("aria-current", "true");
+    const icon = document.createElement("span");
+    icon.className = "mobile-tabs-icon";
+    icon.innerHTML = entry.iconHtml;
+    const name = document.createElement("span");
+    name.className = "mobile-tabs-name";
+    name.textContent = entry.name;
+    openButton.append(icon, name);
+    if (entry.parked) {
+      const tag = document.createElement("span");
+      tag.className = "mobile-tabs-parked";
+      tag.textContent = t.tabsParked;
+      tag.title = t.tabsParkedTitle;
+      openButton.append(tag);
+    }
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "mobile-tabs-x";
+    closeButton.innerHTML = iconSvg("mobile-tabs-x-icon", CLOSE_ICON_PATH);
+    const closeLabel = t.closeTab(entry.name);
+    closeButton.title = closeLabel;
+    closeButton.setAttribute("aria-label", closeLabel);
+    row.append(openButton, closeButton);
+    return row;
+  }
+
   /** タブの一覧の面の中身を今のタブから組み直す (×の後も面は開いたまま)。 */
   function renderTabs(): void {
     if (!deps.tabs) return;
@@ -286,7 +326,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     const focusedRow =
       document.activeElement instanceof HTMLElement &&
       tabsList.contains(document.activeElement)
-        ? [...tabsList.children].indexOf(
+        ? [...tabsList.querySelectorAll(".mobile-tabs-row")].indexOf(
             document.activeElement.closest(".mobile-tabs-row") as Element,
           )
         : -1;
@@ -297,41 +337,34 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
       tabsList.replaceChildren(empty);
       return;
     }
+    // プロジェクトごとにまとめる (タブ列のグループと同じ)。並びは最初に出てきた
+    // 順で、どのプロジェクトのものでもないタブは最後。
+    const groups = new Map<string | null, TabListEntry[]>();
+    for (const entry of entries) {
+      const key = entry.project?.root ?? null;
+      groups.set(key, [...(groups.get(key) ?? []), entry]);
+    }
+    const shared = groups.get(null);
+    groups.delete(null);
+    if (shared) groups.set(null, shared);
     tabsList.replaceChildren(
-      ...entries.map((entry) => {
-        const row = document.createElement("li");
-        row.className = "mobile-tabs-row";
-        row.dataset.tabId = entry.id;
-        row.classList.toggle("is-front", entry.front);
-        row.classList.toggle("is-preview", entry.preview);
-        const openButton = document.createElement("button");
-        openButton.type = "button";
-        openButton.className = "mobile-tabs-open";
-        openButton.title = entry.title;
-        if (entry.front) openButton.setAttribute("aria-current", "true");
-        const icon = document.createElement("span");
-        icon.className = "mobile-tabs-icon";
-        icon.innerHTML = entry.iconHtml;
+      ...[...groups.values()].map((group) => {
+        const project = group[0]?.project ?? null;
+        const item = document.createElement("li");
+        item.className = "mobile-tabs-group";
+        const head = document.createElement("div");
+        head.className = "mobile-tabs-group-head";
         const name = document.createElement("span");
-        name.className = "mobile-tabs-name";
-        name.textContent = entry.name;
-        openButton.append(icon, name);
-        if (entry.parked) {
-          const tag = document.createElement("span");
-          tag.className = "mobile-tabs-parked";
-          tag.textContent = t.tabsParked;
-          tag.title = t.tabsParkedTitle;
-          openButton.append(tag);
-        }
-        const closeButton = document.createElement("button");
-        closeButton.type = "button";
-        closeButton.className = "mobile-tabs-x";
-        closeButton.innerHTML = iconSvg("mobile-tabs-x-icon", CLOSE_ICON_PATH);
-        const closeLabel = t.closeTab(entry.name);
-        closeButton.title = closeLabel;
-        closeButton.setAttribute("aria-label", closeLabel);
-        row.append(openButton, closeButton);
-        return row;
+        name.className = "mobile-tabs-group-name";
+        name.textContent = project?.name ?? t.tabsShared;
+        if (project) head.append(projectMark(project));
+        head.append(name);
+        const rows = document.createElement("ul");
+        rows.className = "mobile-tabs-group-list";
+        rows.setAttribute("aria-label", name.textContent);
+        rows.append(...group.map((entry) => tabRow(entry, t)));
+        item.append(head, rows);
+        return item;
       }),
     );
     if (focusedRow >= 0) {
@@ -488,6 +521,12 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     }
   }
 
+  function syncDiffWrap(): void {
+    const on = current === "phone" && diffWrap;
+    document.body.classList.toggle("mobile-diff-wrap", on);
+    wrapButton.setAttribute("aria-pressed", String(diffWrap));
+  }
+
   function apply(): void {
     current = viewportTier({
       width: document.documentElement.clientWidth,
@@ -498,6 +537,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     menuButton.hidden = !phone;
     bar.hidden = !phone;
     wrapButton.hidden = !phone;
+    syncDiffWrap();
     scrim.hidden = !phone;
     if (tabsSheet) tabsSheet.hidden = !phone;
     keys.hidden = !(phone || touchQuery.matches);
@@ -542,8 +582,14 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
 
   // 左端からのスワイプで開き、開いている間は左へのスワイプで閉じる。指を
   // 動かしている間は引き出しが指に付いて動く (drawerDragOffset)。離したときに
-  // 開くか閉じるかは edgeSwipeAction が決める。
-  let touchStart: { x: number; y: number; drawerOpen: boolean } | null = null;
+  // 開くか閉じるかは edgeSwipeAction が決める。縦で動き始めた指 (gestureAxis)
+  // では引き出しを動かさない。
+  let touchStart: {
+    x: number;
+    y: number;
+    drawerOpen: boolean;
+    axis: "x" | "y" | null;
+  } | null = null;
   let dragging = false;
   function endDrag(): void {
     if (!dragging) return;
@@ -563,6 +609,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
               x: touch.clientX,
               y: touch.clientY,
               drawerOpen: open === "drawer",
+              axis: null,
             }
           : null;
     },
@@ -574,6 +621,11 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
       const start = touchStart;
       const touch = event.touches[0];
       if (!start || !touch || current !== "phone") return;
+      start.axis ??= gestureAxis(
+        touch.clientX - start.x,
+        touch.clientY - start.y,
+      );
+      if (start.axis !== "x") return;
       const offset = drawerDragOffset({
         startX: start.x,
         startY: start.y,
@@ -598,13 +650,16 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
       endDrag();
       const touch = event.changedTouches[0];
       if (!start || !touch || current !== "phone") return;
-      const action = edgeSwipeAction({
-        startX: start.x,
-        startY: start.y,
-        endX: touch.clientX,
-        endY: touch.clientY,
-        drawerOpen: start.drawerOpen,
-      });
+      const action =
+        start.axis === "y"
+          ? null
+          : edgeSwipeAction({
+              startX: start.x,
+              startY: start.y,
+              endX: touch.clientX,
+              endY: touch.clientY,
+              drawerOpen: start.drawerOpen,
+            });
       if (action === "open") setOpen("drawer");
       else if (action === "close" && open === "drawer") close();
       else if (!action) followBottomSwipe(start, touch);

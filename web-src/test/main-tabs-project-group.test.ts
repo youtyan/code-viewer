@@ -208,6 +208,54 @@ describe("開いているプロジェクトのグループ", () => {
     ]);
   });
 
+  // 電話の段は、この印の札と前面のタブ (">") だけを出す (style.css の SP の節)。
+  test.each([
+    {
+      name: "Diff (このプロジェクト)",
+      saved: libOnly,
+      route: diff,
+      expected: {
+        front: [APP],
+        strip: [
+          `[${LIB}]`,
+          `${LIB}(lib.ts Shell shell-lib)`,
+          `[${APP}]`,
+          `${APP}(>diff)`,
+          "+",
+          "-()",
+        ],
+      },
+    },
+    {
+      name: "フォルダ表示 (タブにしない。前面は保存した別のプロジェクトのタブ)",
+      saved: libOnly,
+      route: home,
+      expected: {
+        front: [LIB],
+        strip: [
+          `[${LIB}]`,
+          `${LIB}(>lib.ts Shell shell-lib)`,
+          `[${APP}]`,
+          `${APP}()`,
+          "+",
+          "-()",
+        ],
+      },
+    },
+  ])("前面のタブのグループの札にだけ印: $name", async ({
+    saved,
+    route,
+    expected,
+  }) => {
+    const { mount } = await open(saved, APP, route);
+    expect({
+      front: [
+        ...mount.querySelectorAll<HTMLElement>(".main-tab-group-front"),
+      ].map((head) => head.dataset.group),
+      strip: strip(mount),
+    }).toEqual(expected);
+  });
+
   test("このプロジェクトの最後のタブを閉じてフォルダ表示に戻っても、札は残る", async () => {
     const { mount } = await open(withAppReadme, APP, fileRoute("README.md"));
     const before = heads(mount);

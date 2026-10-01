@@ -6857,6 +6857,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         setStatus,
         emptyText: () => uiText().diff,
       });
+      // 電話: 本文は「コミット未選択」だけで、一覧は下端の帯の「List」の奥に
+      // あった (履歴が見えないと言われた)。履歴に入ったら一覧の面を出す。
+      if (PHONE_QUERY.matches) MOBILE_SHELL.openSheet();
     },
     getSyntaxHighlight: () => STATE.syntaxHighlight,
     getLanguage: () => STATE.language,

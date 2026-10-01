@@ -40,6 +40,8 @@ export type MobileShellText = {
   /** 右の面に預けているタブの札 (電話では右の面を出さない)。 */
   tabsParked: string;
   tabsParkedTitle: string;
+  /** どのプロジェクトのものでもないタブの見出し (エージェントの一覧・設定など)。 */
+  tabsShared: string;
   /** 一覧の行のタブを閉じる。 */
   closeTab: (name: string) => string;
 };
@@ -71,6 +73,7 @@ const EN: MobileShellText = {
   tabsTitle: (count) => `Open tabs (${count})`,
   tabsEmpty: "No open tabs",
   tabsParked: "Right",
+  tabsShared: "Shared",
   tabsParkedTitle:
     "On the right side (hidden on a phone). Opening it moves it to the left side.",
   closeTab: (name) => `Close ${name}`,
@@ -102,6 +105,7 @@ const JA: MobileShellText = {
   tabsTitle: (count) => `開いているタブ (${count} 枚)`,
   tabsEmpty: "開いているタブはありません",
   tabsParked: "右",
+  tabsShared: "共通",
   tabsParkedTitle:
     "右の面のタブです (SP では右の面を出しません)。開くと左の面へ移します。",
   closeTab: (name) => `${name} を閉じる`,
