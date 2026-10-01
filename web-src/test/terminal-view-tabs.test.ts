@@ -456,13 +456,15 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
     return { ...env, session };
   }
 
-  test("繋ぎ直せたら、同じ ID と保存した場所を送り、映していた面を新しいシェルに付け直す", async () => {
+  // 映す面で測った大きさを送る。送らないと仮の 120×32 で tmux に繋ぎ、
+  // window-size smallest の tmux では PC のウインドウまで縮んだ。
+  test("繋ぎ直せたら、同じ ID と保存した場所と映す面の大きさを送り、面を新しいシェルに付け直す", async () => {
     const revived = { ...shell("shell-r1"), tty: "/dev/sample-new" };
     const { view, requests } = await showing("shell-r1", [
       () => json({ session: revived, action: "attached" }),
     ]);
 
-    const result = await view.reviveInTab(revived.id, PLACE);
+    const result = await view.reviveInTab(revived.id, PLACE, "left");
 
     expect([
       result,
@@ -471,7 +473,7 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
       view.knownShells()?.sessions,
     ]).toEqual([
       "revived",
-      'POST /_tmux/open {"pane":"%3","revive":{"shell":"shell-r1","session":"sample","window":1}}',
+      'POST /_tmux/open {"pane":"%3","cols":80,"rows":24,"revive":{"shell":"shell-r1","session":"sample","window":1}}',
       revived,
       [revived],
     ]);
@@ -482,7 +484,9 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
       () => new Response("pane is gone", { status: 410 }),
     ]);
 
-    await expect(view.reviveInTab(session.id, PLACE)).resolves.toBe("gone");
+    await expect(view.reviveInTab(session.id, PLACE, "left")).resolves.toBe(
+      "gone",
+    );
     expect(terminalScreenState.screens[0]?.attached).toEqual(session);
   });
 
@@ -491,7 +495,7 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
       () => new Response("tmux failed", { status: 500 }),
     ]);
 
-    await expect(view.reviveInTab(session.id, PLACE)).rejects.toThrow(
+    await expect(view.reviveInTab(session.id, PLACE, "left")).rejects.toThrow(
       "Could not open this pane. (HTTP 500): tmux failed",
     );
   });

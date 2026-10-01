@@ -133,12 +133,13 @@ export type TerminalViewHandle = {
   ): Promise<void>;
   /**
    * サーバが起き直して終わったシェルのタブを、同じ ID のシェルで保存した tmux の
-   * 場所へ繋ぎ直す。そのシェルを映していた面は新しいシェルを映し直す。場所が
+   * 場所へ繋ぎ直し、side の面に映す。大きさはその面で測ったものを渡す。場所が
    * もう無い・合わない (tmux が起き直した) なら "gone"。ほかの失敗は reject する。
    */
   reviveInTab(
     id: ShellSessionId,
     place: TmuxPlace,
+    side: TabSide,
   ): Promise<"revived" | "gone">;
   /**
    * サーバが起き直して終わった、tmux を映していなかったシェルのタブ。閉じずに、
@@ -624,7 +625,12 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   async function reviveInTab(
     id: ShellSessionId,
     place: TmuxPlace,
+    side: TabSide,
   ): Promise<"revived" | "gone"> {
+    showing[side] = id;
+    // 映す面で測った大きさで繋ぐ。渡さないと仮の大きさ (120×32) で tmux に
+    // 繋ぎ、window-size smallest の tmux では PC のウインドウまで縮んだ。
+    const size = tabSlot(side, id).screen.measure();
     const res = await deps.trackLoad(
       fetch(apiUrl("tmuxOpen"), {
         method: "POST",
@@ -636,6 +642,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
         },
         body: JSON.stringify({
           pane: place.pane,
+          cols: size?.cols,
+          rows: size?.rows,
           revive: { shell: id, session: place.session, window: place.window },
         }),
       }),
