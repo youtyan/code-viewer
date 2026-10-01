@@ -15,6 +15,7 @@ import { helpTextJa } from "./help-text-ja";
 import { mainTabsText } from "./main-tabs/i18n";
 import { mobileShellText } from "./mobile-shell-i18n";
 import { quickHelpText } from "./quick-help-i18n";
+import { REMOTE_ACCESS_SETTINGS_TEXT } from "./remote-access-settings-i18n";
 import { searchPaletteText } from "./search-palette-i18n";
 import { SOURCE_READING_TEXT } from "./source-preview-i18n";
 import { terminalText } from "./terminal/i18n";
@@ -153,6 +154,7 @@ export type HelpLabels = {
   mainTabs: ReturnType<typeof mainTabsText>;
   mobile: ReturnType<typeof mobileShellText>;
   quickHelp: ReturnType<typeof quickHelpText>;
+  remote: (typeof REMOTE_ACCESS_SETTINGS_TEXT)[HelpLanguage];
   search: ReturnType<typeof searchPaletteText>;
   settings: (typeof VIEWER_SETTINGS_TEXT)[HelpLanguage];
   source: (typeof SOURCE_READING_TEXT)[HelpLanguage];
@@ -171,6 +173,7 @@ export function helpLabels(lang: HelpLanguage, app: AppHelpLabels): HelpLabels {
     mainTabs: mainTabsText(lang),
     mobile: mobileShellText(lang),
     quickHelp: quickHelpText(lang),
+    remote: REMOTE_ACCESS_SETTINGS_TEXT[lang],
     search: searchPaletteText(lang),
     settings: VIEWER_SETTINGS_TEXT[lang],
     source: SOURCE_READING_TEXT[lang],

@@ -16,6 +16,7 @@ import {
 } from "../core/color-themes";
 import { ACCOUNTS_SECTION_ID } from "../views/agents/accounts-settings";
 import { AGENT_HOOKS_SECTION_ID } from "../views/agents/agent-hooks-settings";
+import { REMOTE_ACCESS_SECTION_ID } from "../views/remote-access-settings";
 import {
   createViewerSettings,
   SETTINGS_CATEGORIES,
@@ -154,6 +155,7 @@ const EN_TEXT: ViewerSettingsText = {
     accounts: { label: "Accounts", description: "Sign-in." },
     shortcuts: { label: "Shortcuts", description: "Keys." },
     files: { label: "Files", description: "This project only." },
+    remote: { label: "Remote access", description: "From outside." },
     advanced: { label: "Advanced", description: "Rarely changed." },
   },
   searchPlaceholder: "Search settings",
@@ -323,6 +325,10 @@ function setup(
       "Accounts list",
     ),
     shortcutsSection: sectionWithHeading(SHORTCUT_SECTION_ID, "Shortcut list"),
+    remoteAccessSection: sectionWithHeading(
+      REMOTE_ACCESS_SECTION_ID,
+      "Remote access status",
+    ),
     drafts: options.draft ? [options.draft] : [],
   });
 
@@ -385,6 +391,7 @@ describe("viewer settings form", () => {
     ["accounts", ["Accounts list"]],
     ["shortcuts", ["Shortcut list"]],
     ["files", ["Excluded directories", "Uploads"]],
+    ["remote", ["Remote access status"]],
     [
       "advanced",
       ["Datastores", "File change watcher", "Terminal state detection"],
@@ -548,6 +555,7 @@ describe("viewer settings form", () => {
     [SHORTCUT_SECTION_ID, "shortcuts"],
     ["excluded-section-title", "files"],
     ["upload-section-title", "files"],
+    [REMOTE_ACCESS_SECTION_ID, "remote"],
     ["datastore-section-title", "advanced"],
     ["watch-section-title", "advanced"],
     ["agent-screen-rules-title", "advanced"],
@@ -580,6 +588,7 @@ describe("viewer settings form", () => {
       "accounts",
       "shortcuts",
       "files",
+      "remote",
       "advanced",
     ]);
   });

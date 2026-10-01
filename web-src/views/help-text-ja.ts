@@ -23,6 +23,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
   const cat = l.settings.categories;
   const hooks = l.agents.hooks;
   const accounts = l.agents.accounts;
+  const remote = l.remote;
   const app = l.app;
   return {
     "getting-started": {
@@ -1593,7 +1594,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
             },
             {
               kind: "paragraph",
-              text: "Accessは「Zero Trust」、Tunnelはアカウント画面の「ネットワーク」→「Tunnels」で設定します。Macでは接続ソフトcloudflaredを動かします。",
+              text: "Accessは「Zero Trust」、Tunnelはアカウント画面の「ネットワーク」→「Tunnels」で設定します。Macの接続ソフトcloudflaredは、code-viewerが起動・停止します。",
             },
             {
               kind: "paragraph",
@@ -1601,7 +1602,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
             },
             {
               kind: "paragraph",
-              text: "設定済みなら「毎回の起動・停止」へ。初回は1〜8を順に進めます。",
+              text: "設定済みなら「開始・停止」へ。初回は1〜8を順に進めます。",
             },
           ],
         },
@@ -1713,7 +1714,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   items: [
                     {
                       title: "Team domainを控える",
-                      text: "Zero Trustの左下「設定」→「チーム名とドメイン」を開きます。your-team.cloudflareaccess.com のようなドメインを控え、手順4の teamDomain に入れます。",
+                      text: "Zero Trustの左下「設定」→「チーム名とドメイン」を開きます。your-team.cloudflareaccess.com のようなドメインを控えます。",
                     },
                     {
                       title: "アプリのAUDをコピーする",
@@ -1721,7 +1722,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                     },
                     {
                       title: "2つの値を手順4で使う",
-                      text: "Team domainは https:// を付けずに使い、AUDは64文字すべてを audience に貼り付けます。アプリIDやTunnelのトークンは使いません。",
+                      text: "Team domainは https:// を付けずに、AUDは64文字すべてを使います。アプリIDやTunnelのトークンはここでは使いません。",
                     },
                   ],
                 },
@@ -1729,86 +1730,53 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
             },
             {
               kind: "subsection",
-              title: "4. 接続設定ファイルを作る（Macのターミナル）",
+              title: "4. code-viewerの設定に値を入れる（Mac）",
               blocks: [
                 {
-                  kind: "paragraph",
-                  text: "Macの「ターミナル」で次のコマンドを実行します。保存用フォルダを作り、nanoという文字編集画面で新しい設定ファイルを開きます。",
-                },
-                {
-                  kind: "command",
-                  title: "設定ファイルを開く",
-                  command:
-                    "mkdir -p ~/.config/code-viewer\nnano ~/.config/code-viewer/remote-access.json",
-                },
-                {
-                  kind: "paragraph",
-                  text: "下の内容を貼り付け、origin・teamDomain・audienceの3つを自分の値に置き換えます。すでに設定が書かれている場合は、必要な項目だけを直してください。",
-                },
-                {
-                  kind: "command",
-                  title: "remote-access.json に保存する内容",
-                  language: "json",
-                  command:
-                    '{\n  "port": 64161,\n  "origin": "https://viewer.example.com",\n  "teamDomain": "your-team.cloudflareaccess.com",\n  "audience": "ここをコピーした64文字のAUDに置き換える"\n}',
+                  kind: "steps",
+                  items: [
+                    {
+                      title: [settings, " → ", ui(cat.remote.label), " を開く"],
+                      text: "code-viewerを --standalone なしで起動し、Macのブラウザで設定を開きます。",
+                    },
+                    {
+                      title: "値を入れて保存する",
+                      text: [
+                        "下の表のとおりに入れ、ページの下の ",
+                        ui(l.settings.save),
+                        " を押します。",
+                      ],
+                    },
+                  ],
                 },
                 {
                   kind: "table",
-                  head: ["項目", "入れるもの"],
+                  head: ["欄", "入れるもの"],
                   rows: [
-                    ["port", "64161 のまま使う（通常の表示用ポートとは別）"],
                     [
-                      "origin",
+                      ui(remote.originLabel),
                       "スマホで開く https:// から始まるURL。末尾に / を付けない",
                     ],
-                    ["teamDomain", "手順3で控えた値。https:// は付けない"],
-                    ["audience", "手順3でコピーした64文字のAUD。引用符は残す"],
+                    [
+                      ui(remote.teamDomainLabel),
+                      "手順3で控えた値。https:// は付けない",
+                    ],
+                    [ui(remote.audienceLabel), "手順3でコピーした64文字のAUD"],
+                    [
+                      ui(remote.portLabel),
+                      "64161 のまま（通常の表示用ポートとは別）",
+                    ],
                   ],
                 },
                 {
                   kind: "paragraph",
-                  text: "保存はControl+O、Enterの順に押します。Control+Xで編集画面を閉じます（CommandキーではなくControlキーです）。",
-                },
-                {
-                  kind: "paragraph",
-                  text: "~ はMacのホームフォルダを表します。このファイルはプロジェクトの中に置かず、Tunnelトークンも書き込みません。",
+                  text: "値はプロジェクトの外に、自分だけが読めるファイルとして保存されます。保存先は節の下に出ます。",
                 },
               ],
             },
             {
               kind: "subsection",
-              title: "5. 設定ファイルを指定してcode-viewerを起動する（Mac）",
-              blocks: [
-                {
-                  kind: "paragraph",
-                  text: "すでにcode-viewerを動かしている場合は、そのターミナルでControl+Cを押して一度止めます。次の2つから、普段使っている起動方法を選びます。",
-                },
-                {
-                  kind: "command",
-                  title: "インストール済みのcode-viewerを使う場合",
-                  command:
-                    "code-viewer --remote-access ~/.config/code-viewer/remote-access.json",
-                },
-                {
-                  kind: "command",
-                  title:
-                    "このリポジトリで開発版を使う場合（リポジトリのフォルダで実行）",
-                  command:
-                    "pnpm dev --remote-access ~/.config/code-viewer/remote-access.json",
-                },
-                {
-                  kind: "paragraph",
-                  text: "開発版に --standalone は付けません。通常の「pnpm dev」だけで起動すると、スマホ用の接続は有効になりません。",
-                },
-                {
-                  kind: "paragraph",
-                  text: "起動ログに「code-viewer remote access」と「tunnel target http://127.0.0.1:64161」が出れば成功です。このターミナルは起動したままにします。",
-                },
-              ],
-            },
-            {
-              kind: "subsection",
-              title: "6. Tunnelを作り、Macから接続する",
+              title: "5. Tunnelを作り、トークンを貼る",
               blocks: [
                 {
                   kind: "steps",
@@ -1818,47 +1786,59 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                       text: "アカウント画面の「ネットワーク」→「Tunnels」で「トンネル作成」を押します。種類を選ぶ場合は cloudflared、名前は code-viewer にします。",
                     },
                     {
-                      title: "接続用ソフトを入れる（Mac）",
-                      text: "Tunnelの画面でOSにmacOSを選び、案内されるインストール手順を実行します。Homebrewが入っている場合は、下のコマンドでもインストールできます。",
+                      title: [
+                        "接続用ソフトを入れる（Mac）：",
+                        ui(remote.install),
+                      ],
+                      text: "cloudflaredが無くHomebrewがあるとき、外部接続の節にこのボタンが出ます。Homebrewが無いときは、Tunnelの画面のmacOSの手順で入れます。",
                     },
                   ],
                 },
                 {
-                  kind: "command",
-                  title: "cloudflaredをインストールする",
-                  command: "brew install cloudflared",
+                  kind: "paragraph",
+                  text: [
+                    "Tunnel画面の接続コマンド（cloudflared service install …）をコピーし、",
+                    ui(remote.tokenLabel),
+                    " にそのまま貼って ",
+                    ui(l.settings.save),
+                    " を押します。",
+                  ],
                 },
                 {
                   kind: "paragraph",
-                  text: "次はcode-viewerとは別のターミナルを開き、トークンを保存するファイルを作ります。これはMacをこのTunnelに接続するための秘密の値です。",
-                },
-                {
-                  kind: "command",
-                  title: "自分だけが読めるファイルを用意する",
-                  command:
-                    "umask 077\ntouch ~/.config/code-viewer/tunnel-token\nchmod 600 ~/.config/code-viewer/tunnel-token\nnano ~/.config/code-viewer/tunnel-token",
-                },
-                {
-                  kind: "paragraph",
-                  text: "Tunnel画面の接続コマンドをコピーし、末尾の長いトークン部分だけを1行で保存します。「--token」や「service install」などのコマンド部分は含めません。",
-                },
-                {
-                  kind: "paragraph",
-                  text: "Control+O、Enter、Control+Xで保存して閉じたら、次を実行します。トークンをチャットやリポジトリへ貼り付けないでください。",
-                },
-                {
-                  kind: "command",
-                  title: "Tunnelを接続する",
-                  command:
-                    "cloudflared tunnel run --token-file ~/.config/code-viewer/tunnel-token",
-                },
-                {
-                  kind: "paragraph",
-                  text: "「Registered tunnel connection」が出て、CloudflareのTunnel画面が「正常／Healthy」になれば接続できています。このターミナルも起動したままにします。",
+                  text: "トークンだけが自分しか読めないファイルに保存され、画面には二度と出ません。接続コマンドそのものはMacで実行しません。",
                 },
                 {
                   kind: "paragraph",
                   text: "既存の別Tunnelがある場合も、この名前の新しいTunnelを使います。一時URLを作るQuick Tunnelは、ターミナル出力の通信に対応しないため使いません。",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "6. 外部接続を開始する（Mac）",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: [
+                    ui(cat.remote.label),
+                    " の ",
+                    ui(remote.start),
+                    " を押します。code-viewerが待ち受けを開き、cloudflaredを起動します。",
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: [
+                    ui(remote.rowListener),
+                    " が ",
+                    ui(remote.listenerRunning),
+                    "、",
+                    ui(remote.rowTunnel),
+                    " が ",
+                    ui(remote.tunnelConnected(4)),
+                    " になり、CloudflareのTunnel画面が「正常／Healthy」になれば接続できています。",
+                  ],
                 },
               ],
             },
@@ -1987,45 +1967,43 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
           ],
         },
         {
-          title: "毎回の起動・停止",
+          title: "開始・停止",
           blocks: [
             {
               kind: "paragraph",
-              text: "初回設定が済めば、Macでcode-viewerとcloudflaredの2つを起動し、スマホで決めたURLを開くだけです。Cloudflareの設定を毎回作り直す必要はありません。",
-            },
-            {
-              kind: "subsection",
-              title: "起動コマンド・停止方法を確認する",
-              blocks: [
-                {
-                  kind: "command",
-                  title: "ターミナル1：開発版",
-                  command:
-                    "pnpm dev --remote-access ~/.config/code-viewer/remote-access.json",
-                },
-                {
-                  kind: "command",
-                  title: "ターミナル1：インストール版ならこちら",
-                  command:
-                    "code-viewer --remote-access ~/.config/code-viewer/remote-access.json",
-                },
-                {
-                  kind: "command",
-                  title: "ターミナル2：接続用ソフト",
-                  command:
-                    "cloudflared tunnel run --token-file ~/.config/code-viewer/tunnel-token",
-                },
-                {
-                  kind: "list",
-                  items: [
-                    "ターミナル1はどちらか一方だけを実行します。開発版はリポジトリのフォルダで実行してください。",
-                    "スマホからの接続だけを止めるには、cloudflaredを動かしたターミナル2でControl+Cを押します。Macのcode-viewerはそのまま使えます。",
-                    "この手順では自動起動は設定しません。Macの再起動後は2つとも起動し直し、サービスとして登録済みのcloudflaredを重ねて起動しないでください。",
-                    "Macがスリープ中・電源オフ・オフラインの間は接続できません。スマホの画面を閉じるだけなら、Mac側のエージェントの作業は続きます。",
-                  ],
-                },
+              text: [
+                "初回設定が済めば、",
+                settings,
+                " → ",
+                ui(cat.remote.label),
+                " で ",
+                ui(remote.start),
+                " と ",
+                ui(remote.stop),
+                " を押すだけです。Cloudflareの設定を毎回作り直す必要はありません。",
               ],
             },
+            {
+              kind: "list",
+              items: [
+                [
+                  ui(remote.autoStart),
+                  " をオンにすると、code-viewerを起動するたびに開始します。",
+                ],
+                [
+                  ui(remote.stop),
+                  " はスマホからの接続だけを止め、Macのcode-viewerはそのまま使えます。code-viewerを止めるとcloudflaredも止まります。",
+                ],
+                "開始・停止と値の変更は、Macの画面でだけ行えます。スマホから開いた設定では操作できません。",
+                "cloudflaredをサービスとして別に動かしているなら、トークンを保存せずに開始します（待ち受けだけを開きます）。",
+                "Macがスリープ中・電源オフ・オフラインの間は接続できません。スマホの画面を閉じるだけなら、Mac側のエージェントの作業は続きます。",
+              ],
+            },
+            more([
+              "以前の起動方法 ",
+              code("code-viewer --remote-access <file>"),
+              " も使えます。値はそのファイルから読みますが、トークンは状態フォルダに保存するので、設定で一度貼ってください。",
+            ]),
           ],
         },
         {
@@ -2052,8 +2030,20 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   kind: "list",
                   items: [
                     "ログイン画面で拒否される場合は、許可ポリシーのメールと実際にログインしたメールを照合します。メールの入力後にEnterで確定して保存したかも確認してください。",
-                    "ログイン後も401なら、設定ファイルのteamDomain・audienceと、TunnelのTeam name・AUDを確認します。Macでcode-viewerを起動したターミナルのエラー全文も確認してください。",
-                    "403なら、originのURLとTunnelのHTTP Host Headerが同じホスト名かを確認します。認証が必要な設定をオフにして解決しようとしないでください。",
+                    [
+                      "ログイン後も401なら、",
+                      ui(cat.remote.label),
+                      " の ",
+                      ui(remote.teamDomainLabel),
+                      "・",
+                      ui(remote.audienceLabel),
+                      " と、TunnelのTeam name・AUDを確認します。Macでcode-viewerを起動したターミナルのエラー全文も確認してください。",
+                    ],
+                    [
+                      "403なら、",
+                      ui(remote.originLabel),
+                      " とTunnelのHTTP Host Headerが同じホスト名かを確認します。認証が必要な設定をオフにして解決しようとしないでください。",
+                    ],
                   ],
                 },
               ],
@@ -2065,9 +2055,23 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 {
                   kind: "list",
                   items: [
-                    "Tunnelが非アクティブなら、cloudflaredを起動したターミナルのエラーを確認します。別のTunnelのトークンを保存していないかも確認してください。",
-                    "Tunnelが正常でも502なら、code-viewerを --remote-access 付きで起動したか確認します。サービスURLのポートと設定ファイルのportをそろえてください。",
-                    "設定ファイルを直した後はcode-viewerを起動し直します。通常の表示用ポートをサービスURLに指定しても、スマホ用の認証付き接続にはなりません。",
+                    [
+                      "Tunnelが非アクティブなら、",
+                      ui(cat.remote.label),
+                      " の ",
+                      ui(remote.rowTunnel),
+                      " の行と、その下のcloudflaredの出力を確認します。別のTunnelのトークンを保存していないかも確認してください。",
+                    ],
+                    [
+                      "Tunnelが正常でも502なら、",
+                      ui(remote.rowListener),
+                      " が ",
+                      ui(remote.listenerRunning),
+                      " か確認します。サービスURLのポートと ",
+                      ui(remote.portLabel),
+                      " をそろえてください。",
+                    ],
+                    "開始している間に値を保存すると、すぐ新しい値で開き直します。通常の表示用ポートをサービスURLに指定しても、スマホ用の認証付き接続にはなりません。",
                   ],
                 },
               ],

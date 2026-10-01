@@ -24,6 +24,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
   const cat = l.settings.categories;
   const hooks = l.agents.hooks;
   const accounts = l.agents.accounts;
+  const remote = l.remote;
   const app = l.app;
   return {
     "getting-started": {
@@ -1611,7 +1612,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
             },
             {
               kind: "paragraph",
-              text: "Access is in Zero Trust; Tunnel is under Networking → Tunnels in the account dashboard. cloudflared connects your Mac to the Tunnel.",
+              text: "Access is in Zero Trust; Tunnel is under Networking → Tunnels in the account dashboard. code-viewer starts and stops cloudflared, which connects your Mac to the Tunnel.",
             },
             {
               kind: "paragraph",
@@ -1731,7 +1732,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   items: [
                     {
                       title: "Copy the Team domain",
-                      text: "In Zero Trust, open Settings → Team name and domain. Copy the domain, such as your-team.cloudflareaccess.com, for teamDomain in step 4.",
+                      text: "In Zero Trust, open Settings → Team name and domain. Copy the domain, such as your-team.cloudflareaccess.com.",
                     },
                     {
                       title: "Copy the application's AUD",
@@ -1739,7 +1740,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                     },
                     {
                       title: "Use both values in step 4",
-                      text: "Team domain has no https:// prefix. Paste the entire 64-character AUD into audience; do not use the application ID or the Tunnel token.",
+                      text: "Team domain has no https:// prefix, and the AUD is all 64 characters. The application ID and the Tunnel token are not used here.",
                     },
                   ],
                 },
@@ -1747,92 +1748,56 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
             },
             {
               kind: "subsection",
-              title: "4. Create the configuration file (Mac Terminal)",
+              title: "4. Enter the values in code-viewer's settings (Mac)",
               blocks: [
                 {
-                  kind: "paragraph",
-                  text: "In the Mac Terminal app, run these commands to create a configuration folder and open the file in the nano text editor.",
-                },
-                {
-                  kind: "command",
-                  title: "Open the configuration file",
-                  command:
-                    "mkdir -p ~/.config/code-viewer\nnano ~/.config/code-viewer/remote-access.json",
-                },
-                {
-                  kind: "paragraph",
-                  text: "Paste the example below, replacing origin, teamDomain and audience with your own values. If a configuration already exists, edit the relevant fields instead of pasting another object.",
-                },
-                {
-                  kind: "command",
-                  title: "Contents of remote-access.json",
-                  language: "json",
-                  command:
-                    '{\n  "port": 64161,\n  "origin": "https://viewer.example.com",\n  "teamDomain": "your-team.cloudflareaccess.com",\n  "audience": "REPLACE_WITH_YOUR_64_CHARACTER_AUD"\n}',
+                  kind: "steps",
+                  items: [
+                    {
+                      title: ["Open ", settings, " → ", ui(cat.remote.label)],
+                      text: "Start code-viewer without --standalone and open Settings in a browser on your Mac.",
+                    },
+                    {
+                      title: "Enter the values and save",
+                      text: [
+                        "Fill in the fields as in the table below, then press ",
+                        ui(l.settings.save),
+                        " at the bottom of the page.",
+                      ],
+                    },
+                  ],
                 },
                 {
                   kind: "table",
-                  head: ["Field", "Value to use"],
+                  head: ["Field", "Value"],
                   rows: [
                     [
-                      "port",
-                      "Keep 64161, separate from the normal local viewing port",
+                      ui(remote.originLabel),
+                      "The https:// URL you open on your phone, without a trailing /",
                     ],
                     [
-                      "origin",
-                      "The https:// URL you will open on your phone, without a trailing slash",
+                      ui(remote.teamDomainLabel),
+                      "The value from step 3, without https://",
                     ],
-                    ["teamDomain", "The domain from step 3, without https://"],
                     [
-                      "audience",
-                      "The 64-character AUD copied in step 3; keep the quotation marks",
+                      ui(remote.audienceLabel),
+                      "The 64-character AUD copied in step 3",
+                    ],
+                    [
+                      ui(remote.portLabel),
+                      "Keep 64161 (separate from the normal viewing port)",
                     ],
                   ],
                 },
                 {
                   kind: "paragraph",
-                  text: "Press Control+O, then Enter to save; press Control+X to exit nano. Use the Control key, not Command.",
-                },
-                {
-                  kind: "paragraph",
-                  text: "The ~ symbol means your Mac home folder. Keep this file outside your project, and do not put the Tunnel token in it.",
+                  text: "The values are saved outside your projects, in a file only you can read. The section shows where.",
                 },
               ],
             },
             {
               kind: "subsection",
-              title: "5. Start code-viewer with this file (Mac)",
-              blocks: [
-                {
-                  kind: "paragraph",
-                  text: "If code-viewer is already running, press Control+C in its terminal first. Choose one of the following commands to match how you normally run it.",
-                },
-                {
-                  kind: "command",
-                  title: "Installed code-viewer",
-                  command:
-                    "code-viewer --remote-access ~/.config/code-viewer/remote-access.json",
-                },
-                {
-                  kind: "command",
-                  title:
-                    "Development checkout (run from the repository folder)",
-                  command:
-                    "pnpm dev --remote-access ~/.config/code-viewer/remote-access.json",
-                },
-                {
-                  kind: "paragraph",
-                  text: "Do not add --standalone. Running only pnpm dev does not enable remote access.",
-                },
-                {
-                  kind: "paragraph",
-                  text: "Look for “code-viewer remote access” and “tunnel target http://127.0.0.1:64161” in the startup output. Leave this terminal running.",
-                },
-              ],
-            },
-            {
-              kind: "subsection",
-              title: "6. Create a Tunnel and connect your Mac",
+              title: "5. Create a Tunnel and paste its token",
               blocks: [
                 {
                   kind: "steps",
@@ -1842,47 +1807,61 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                       text: "From the account dashboard, open Networking → Tunnels → Create tunnel. Select cloudflared if asked for a type, and name the new Tunnel code-viewer.",
                     },
                     {
-                      title: "Install the connector (Mac)",
-                      text: "Select macOS on the Tunnel page and follow its installation instructions. If you already have Homebrew, you can use the command below.",
+                      title: [
+                        "Install the connector (Mac): ",
+                        ui(remote.install),
+                      ],
+                      text: "Remote access shows this button when cloudflared is missing and Homebrew is installed. Without Homebrew, follow the macOS instructions on the Tunnel page.",
                     },
                   ],
                 },
                 {
-                  kind: "command",
-                  title: "Install cloudflared",
-                  command: "brew install cloudflared",
+                  kind: "paragraph",
+                  text: [
+                    "Copy the connection command on the Tunnel page (cloudflared service install …), paste it as it is into ",
+                    ui(remote.tokenLabel),
+                    " and press ",
+                    ui(l.settings.save),
+                    ".",
+                  ],
                 },
                 {
                   kind: "paragraph",
-                  text: "Open a second terminal, separate from code-viewer. Create a private file for the token that lets this Mac connect to this Tunnel.",
-                },
-                {
-                  kind: "command",
-                  title: "Create a file only you can read",
-                  command:
-                    "umask 077\ntouch ~/.config/code-viewer/tunnel-token\nchmod 600 ~/.config/code-viewer/tunnel-token\nnano ~/.config/code-viewer/tunnel-token",
-                },
-                {
-                  kind: "paragraph",
-                  text: "Copy the connection command shown on the Tunnel page. Save only its long token at the end, on one line; do not include --token, service install, or the rest of the command.",
-                },
-                {
-                  kind: "paragraph",
-                  text: "Save with Control+O, Enter, then exit with Control+X and run the command below. Never paste the token into a chat or repository.",
-                },
-                {
-                  kind: "command",
-                  title: "Connect the Tunnel",
-                  command:
-                    "cloudflared tunnel run --token-file ~/.config/code-viewer/tunnel-token",
-                },
-                {
-                  kind: "paragraph",
-                  text: "The log should show “Registered tunnel connection”, and the Tunnel dashboard should report Healthy. Leave this terminal running too.",
+                  text: "Only the token is kept, in a file only you can read, and it is never shown again. Do not run the connection command itself on your Mac.",
                 },
                 {
                   kind: "paragraph",
                   text: "Use this new named Tunnel even if you have another one. Do not use Quick Tunnel: its temporary URLs do not support the stream used for terminal output.",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "6. Start remote access (Mac)",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: [
+                    "Press ",
+                    ui(remote.start),
+                    " in ",
+                    ui(cat.remote.label),
+                    ". code-viewer opens its listener and starts cloudflared.",
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: [
+                    "It is connected when ",
+                    ui(remote.rowListener),
+                    " shows ",
+                    ui(remote.listenerRunning),
+                    ", ",
+                    ui(remote.rowTunnel),
+                    " shows ",
+                    ui(remote.tunnelConnected(4)),
+                    ", and the Tunnel dashboard reports Healthy.",
+                  ],
                 },
               ],
             },
@@ -2015,42 +1994,40 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
           blocks: [
             {
               kind: "paragraph",
-              text: "After setup, start code-viewer and cloudflared on your Mac, then open your chosen URL on the phone. You do not need to recreate the Cloudflare settings.",
-            },
-            {
-              kind: "subsection",
-              title: "Show startup commands and how to stop",
-              blocks: [
-                {
-                  kind: "command",
-                  title: "Terminal 1: development checkout",
-                  command:
-                    "pnpm dev --remote-access ~/.config/code-viewer/remote-access.json",
-                },
-                {
-                  kind: "command",
-                  title:
-                    "Terminal 1: use this instead for the installed version",
-                  command:
-                    "code-viewer --remote-access ~/.config/code-viewer/remote-access.json",
-                },
-                {
-                  kind: "command",
-                  title: "Terminal 2: connector",
-                  command:
-                    "cloudflared tunnel run --token-file ~/.config/code-viewer/tunnel-token",
-                },
-                {
-                  kind: "list",
-                  items: [
-                    "Use only one of the Terminal 1 commands. Run the development command from the repository folder.",
-                    "To stop phone access only, press Control+C in Terminal 2 where cloudflared is running. You can keep using code-viewer locally on the Mac.",
-                    "This guide does not configure automatic startup. Start both programs again after restarting the Mac, and do not duplicate a cloudflared instance already running as a service.",
-                    "The Mac must stay online and awake. Closing the phone browser does not stop the agents working on your Mac.",
-                  ],
-                },
+              text: [
+                "After setup, press ",
+                ui(remote.start),
+                " or ",
+                ui(remote.stop),
+                " in ",
+                settings,
+                " → ",
+                ui(cat.remote.label),
+                ". You do not need to recreate the Cloudflare settings.",
               ],
             },
+            {
+              kind: "list",
+              items: [
+                [
+                  "Turn on ",
+                  ui(remote.autoStart),
+                  " to start remote access every time code-viewer starts.",
+                ],
+                [
+                  ui(remote.stop),
+                  " stops phone access only; you can keep using code-viewer on the Mac. Stopping code-viewer also stops cloudflared.",
+                ],
+                "Remote access can be started, stopped and changed only on the Mac. Settings opened from the phone cannot change it.",
+                "If you run cloudflared as a service yourself, start without saving a token (only the listener opens).",
+                "The Mac must stay online and awake. Closing the phone browser does not stop the agents working on your Mac.",
+              ],
+            },
+            more([
+              "The earlier way, ",
+              code("code-viewer --remote-access <file>"),
+              ", still works and reads the values from that file. The token is still saved in the state folder, so paste it once in Settings.",
+            ]),
           ],
         },
         {
@@ -2077,8 +2054,20 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   kind: "list",
                   items: [
                     "If the login page denies access, compare the allowed email with the account you actually signed in to. Check that you pressed Enter to add the policy email and saved it.",
-                    "For a 401 after login, check teamDomain and audience in the configuration file, and Team name and AUD on the Tunnel. Read the full error in the code-viewer terminal on your Mac.",
-                    "For a 403, check that the origin URL and Tunnel HTTP Host Header use the same hostname. Keep authentication enabled while fixing the configuration.",
+                    [
+                      "For a 401 after login, check ",
+                      ui(remote.teamDomainLabel),
+                      " and ",
+                      ui(remote.audienceLabel),
+                      " in ",
+                      ui(cat.remote.label),
+                      ", and Team name and AUD on the Tunnel. Read the full error in the code-viewer terminal on your Mac.",
+                    ],
+                    [
+                      "For a 403, check that ",
+                      ui(remote.originLabel),
+                      " and the Tunnel HTTP Host Header use the same hostname. Keep authentication enabled while fixing the configuration.",
+                    ],
                   ],
                 },
               ],
@@ -2090,9 +2079,23 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 {
                   kind: "list",
                   items: [
-                    "If the Tunnel is inactive, read the errors in the cloudflared terminal. Check that its token belongs to the new Tunnel.",
-                    "If the Tunnel is Healthy but returns 502, check that code-viewer was started with --remote-access. The service URL port must match port in the configuration file.",
-                    "Restart code-viewer after editing the configuration. Pointing the Tunnel at the normal local viewing port does not enable authenticated remote access.",
+                    [
+                      "If the Tunnel is inactive, read the ",
+                      ui(remote.rowTunnel),
+                      " row and the cloudflared output in ",
+                      ui(cat.remote.label),
+                      ". Check that the saved token belongs to the new Tunnel.",
+                    ],
+                    [
+                      "If the Tunnel is Healthy but returns 502, check that ",
+                      ui(remote.rowListener),
+                      " shows ",
+                      ui(remote.listenerRunning),
+                      ". The service URL port must match ",
+                      ui(remote.portLabel),
+                      ".",
+                    ],
+                    "Saving values while remote access is on reopens it with them right away. Pointing the Tunnel at the normal local viewing port does not enable authenticated remote access.",
                   ],
                 },
               ],

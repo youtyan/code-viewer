@@ -56,6 +56,13 @@ const CATEGORY_HELP_LINKS: Partial<
       ja: "足し方・ログインのしかた・エージェントでの使い方は ",
     },
   },
+  remote: {
+    section: "remote-access",
+    before: {
+      en: "How to set up Cloudflare, step by step: ",
+      ja: "Cloudflare 側の設定の手順は ",
+    },
+  },
   shortcuts: {
     section: "keybindings",
     before: {

@@ -82,7 +82,7 @@ code-viewer
 | `--open` | Open the URL in the default browser |
 | `--port <port>` | Port to listen on (default: a free port) |
 | `--idle-stop <seconds>` | Stop a project's process after this long unused (default `600`, `0` = never). Terminals and agents keep running |
-| `--remote-access <file>` | Add a listener for a Cloudflare Tunnel protected by Access ([Connect from outside](#connect-from-outside)) |
+| `--remote-access <file>` | Use this remote access file and open its listener on start (Settings → **Remote access** does the same without it; [Connect from outside](#connect-from-outside)) |
 | `--standalone` | Run a separate server for this repository only |
 | `--bin <name>=<absolute-path>` | Path of `git`, `rg`, `docker`, `gh` or `tmux`, for the repository you start in |
 | `--scope-omit-dir <name>` | Directories not to read in the repository you start in (repeatable; replaces the default list and the one in Settings) |
@@ -573,47 +573,37 @@ npx -y @youtyan/code-viewer skill install --agent all --global   # every agent, 
 | `agent-screen-rules.json` | Saved rules for agent states |
 | `server-logs/` | One log per project process |
 | `entry.json` | The running code-viewer |
+| `remote-access.json`, `tunnel-token` | Remote access values and the Tunnel token ([Connect from outside](#connect-from-outside)) |
+| `remote-access-cloudflared.pid` | The `cloudflared` code-viewer started, so a later code-viewer can stop it if it was left running |
 
 ## Connect from outside
 
-Reach code-viewer on your Mac from a phone through a named Cloudflare Tunnel, with Cloudflare Access allowing only your email. The in-app Help → **Connect from outside** walks through each step, with captures of the main Cloudflare screens.
+Reach code-viewer on your Mac from a phone through a named Cloudflare Tunnel, with Cloudflare Access allowing only your email. code-viewer runs `cloudflared` itself: Settings → **Remote access** holds the Cloudflare values and the Tunnel token, starts and stops the connection, and shows the `cloudflared` output. The in-app Help → **Connect from outside** walks through each step, with captures of the main Cloudflare screens.
 
 You need a domain whose DNS is managed by Cloudflare (shown as Active).
 
 | Service | Role |
 |---|---|
 | Cloudflare Access (Zero Trust) | Sign-in, only your email allowed |
-| Cloudflare Tunnel (`cloudflared` on the Mac) | Forwards your public URL to the Mac |
+| Cloudflare Tunnel (`cloudflared`, started by code-viewer) | Forwards your public URL to the Mac |
 | Cloudflare DNS | The domain of the public URL |
 
 1. In Zero Trust, create a self-hosted Access application for the public hostname (for example `viewer.example.com`) with a policy that allows only your email.
-2. Copy the Team domain and the application's AUD tag.
-3. Save `~/.config/code-viewer/remote-access.json`, replacing `origin`, `teamDomain` and `audience` with your own values:
+2. Copy the Team domain and the application's AUD.
+3. In code-viewer (not started with `--standalone`), open Settings → **Remote access**, enter **Public URL**, **Team domain**, **AUD** and **Listener port** (`64161`), and press **Save changes**.
+4. Create a named Tunnel (Networking → Tunnels). If `cloudflared` is missing and Homebrew is installed, **Install cloudflared** in the same section installs it.
+5. Paste the Tunnel's install command (`cloudflared service install …`) into **Tunnel token** and save. Only the token is kept; do not run the command itself.
+6. Press **Start**. The section shows the listener and the number of Tunnel connections.
+7. In the Tunnel, add a published application route for the public hostname to `http://127.0.0.1:64161`.
+8. In the route's additional settings, set HTTP Host Header to the public hostname and turn on Protect with Access with your Team name (without `.cloudflareaccess.com`) and AUD.
+9. Add a Cache Rule for the domain that bypasses the cache for that hostname.
+10. Open the public URL on the phone and sign in. Check that a private window without sign-in cannot see it.
 
-   ```json
-   {
-     "port": 64161,
-     "origin": "https://viewer.example.com",
-     "teamDomain": "your-team.cloudflareaccess.com",
-     "audience": "<64-character Access AUD>"
-   }
-   ```
-
-4. Stop the running code-viewer and start it with the file (not with `--standalone`):
-
-   ```sh
-   code-viewer --remote-access ~/.config/code-viewer/remote-access.json
-   ```
-
-5. Create a named Tunnel (Networking → Tunnels), install `cloudflared` and run it with the Tunnel token kept in a file only you can read.
-6. In the Tunnel, add a published application route for the public hostname to `http://127.0.0.1:64161`.
-7. In the route's additional settings, set HTTP Host Header to the public hostname and turn on Protect with Access with your Team name (without `.cloudflareaccess.com`) and AUD.
-8. Add a Cache Rule for the domain that bypasses the cache for that hostname.
-9. Open the public URL on the phone and sign in. Check that a private window without sign-in cannot see it.
-
-- After setup, start both `code-viewer --remote-access …` and `cloudflared tunnel run …` each time; nothing starts automatically.
-- Point the Tunnel only at the `port` from the file, never at the normal local port.
-- Do not put the Tunnel token in the config file. Unknown keys are rejected.
+- **Start when code-viewer starts** starts remote access every time code-viewer starts. Stopping code-viewer stops `cloudflared`; one left behind by a killed code-viewer is stopped when code-viewer starts again.
+- Remote access can be started, stopped and changed only on the Mac, not from a page opened through the Tunnel.
+- The values are saved in `remote-access.json` and the token in `tunnel-token`, both in the state folder and readable only by you. `--remote-access <file>` reads the values from that file instead and opens the listener when code-viewer starts; the token still goes to the state folder, so paste it once in Settings.
+- If you run `cloudflared` yourself (for example as a service), do not save a token: **Start** then opens only the listener.
+- Point the Tunnel only at the listener port, never at the normal local port.
 - Quick Tunnel does not work (no event streams for terminal output).
 - Keep the Mac awake. Input that failed to send is not retried.
 

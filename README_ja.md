@@ -81,7 +81,7 @@ code-viewer
 | `--open` | 既定のブラウザで URL を開く |
 | `--port <port>` | 待ち受けるポート（既定: 空いているポート） |
 | `--idle-stop <seconds>` | 使われないままこの秒数が経ったプロジェクトのプロセスを止める（既定 `600`、`0` は止めない）。ターミナルとエージェントは動き続けます |
-| `--remote-access <file>` | Cloudflare Access で守った Tunnel 用の待ち受けを足す（[外出先から接続する](#外出先から接続する)） |
+| `--remote-access <file>` | この外部接続の設定ファイルを使い、起動時に待ち受けを開く（付けなくても設定 → **外部接続** で同じことができます。[外出先から接続する](#外出先から接続する)） |
 | `--standalone` | このリポジトリだけの別のサーバを起動する |
 | `--bin <name>=<absolute-path>` | 起動したリポジトリで使う `git`・`rg`・`docker`・`gh`・`tmux` の場所 |
 | `--scope-omit-dir <name>` | 起動したリポジトリで中を読まないディレクトリ（複数可。既定の一覧と設定の一覧の代わりに使います） |
@@ -572,47 +572,37 @@ npx -y @youtyan/code-viewer skill install --agent all --global   # すべての�
 | `agent-screen-rules.json` | 保存したエージェントの状態のルール |
 | `server-logs/` | プロジェクトのプロセスごとのログ |
 | `entry.json` | 動いている code-viewer の記録 |
+| `remote-access.json`・`tunnel-token` | 外部接続の値と Tunnel のトークン（[外出先から接続する](#外出先から接続する)） |
+| `remote-access-cloudflared.pid` | code-viewer が起動した `cloudflared`（残ったときに次の code-viewer が止めるため） |
 
 ## 外出先から接続する
 
-Cloudflare の名前付き Tunnel を通して、スマホから Mac の code-viewer に接続します。Cloudflare Access で自分のメールアドレスだけを通します。アプリのヘルプ → **外出先から接続する** で、各手順を、主な Cloudflare の画面のキャプチャ付きで説明しています。
+Cloudflare の名前付き Tunnel を通して、スマホから Mac の code-viewer に接続します。Cloudflare Access で自分のメールアドレスだけを通します。`cloudflared` は code-viewer が動かします。設定 → **外部接続** で Cloudflare の値と Tunnel のトークンを保存し、接続の開始・停止と `cloudflared` の出力の確認ができます。アプリのヘルプ → **外出先から接続する** で、各手順を、主な Cloudflare の画面のキャプチャ付きで説明しています。
 
 Cloudflare で DNS を管理しているドメイン（Active と出ているもの）が要ります。
 
 | サービス | 役目 |
 |---|---|
 | Cloudflare Access（Zero Trust） | ログインと、自分のメールアドレスだけの許可 |
-| Cloudflare Tunnel（Mac で動かす `cloudflared`） | 公開 URL への接続を Mac に届ける |
+| Cloudflare Tunnel（code-viewer が起動する `cloudflared`） | 公開 URL への接続を Mac に届ける |
 | Cloudflare DNS | 公開 URL のドメイン |
 
 1. Zero Trust で、公開ホスト名（例: `viewer.example.com`）のセルフホストの Access アプリを作り、自分のメールアドレスだけを許可するポリシーを付けます。
 2. Team domain と、アプリの AUD タグをコピーします。
-3. `~/.config/code-viewer/remote-access.json` に次の内容を保存します。`origin`・`teamDomain`・`audience` は自分の値に置き換えます。
+3. code-viewer（`--standalone` なし）の設定 → **外部接続** で、**公開 URL**・**Team domain**・**AUD**・**待ち受けのポート**（`64161`）を入れて **変更を保存** を押します。
+4. 名前付きの Tunnel を作ります（アカウント画面の「ネットワーク」→「Tunnels」）。`cloudflared` が無く Homebrew があれば、同じ節の **cloudflared を入れる** で入ります。
+5. Tunnel のインストールコマンド（`cloudflared service install …`）を **Tunnel のトークン** にそのまま貼って保存します。トークンだけを保存します。コマンドそのものは実行しません。
+6. **開始** を押します。節に待ち受けの状態と Tunnel の接続の本数が出ます。
+7. Tunnel に、公開ホスト名から `http://127.0.0.1:64161` へ届ける公開アプリケーションのルートを足します。
+8. ルートの追加の設定で、HTTP Host ヘッダーを公開ホスト名にし、Protect with Access を入れて Team name（`.cloudflareaccess.com` を除いたもの）と AUD を設定します。
+9. ドメインに、そのホスト名のキャッシュを使わない Cache Rule を足します。
+10. スマホで公開 URL を開いてログインします。ログインしていないプライベートブラウズでは見えないことも確かめます。
 
-   ```json
-   {
-     "port": 64161,
-     "origin": "https://viewer.example.com",
-     "teamDomain": "your-team.cloudflareaccess.com",
-     "audience": "<64-character Access AUD>"
-   }
-   ```
-
-4. 動いている code-viewer を止め、このファイルを指定して起動します（`--standalone` は付けません）。
-
-   ```sh
-   code-viewer --remote-access ~/.config/code-viewer/remote-access.json
-   ```
-
-5. 名前付きの Tunnel を作り（アカウント画面の「ネットワーク」→「Tunnels」）、`cloudflared` を入れて、自分だけが読めるファイルに置いた Tunnel のトークンで動かします。
-6. Tunnel に、公開ホスト名から `http://127.0.0.1:64161` へ届ける公開アプリケーションのルートを足します。
-7. ルートの追加の設定で、HTTP Host ヘッダーを公開ホスト名にし、Protect with Access を入れて Team name（`.cloudflareaccess.com` を除いたもの）と AUD を設定します。
-8. ドメインに、そのホスト名のキャッシュを使わない Cache Rule を足します。
-9. スマホで公開 URL を開いてログインします。ログインしていないプライベートブラウズでは見えないことも確かめます。
-
-- 設定の後は、毎回 `code-viewer --remote-access …` と `cloudflared tunnel run …` の両方を起動します。自動では起動しません。
-- Tunnel の接続先は、ファイルの `port` だけにします。通常の表示用ポートには向けません。
-- 設定ファイルに Tunnel のトークンは入れません。未知のキーがあると、エラーになって起動しません。
+- **code-viewer の起動時に開始する** をオンにすると、code-viewer を起動するたびに開始します。code-viewer を止めると `cloudflared` も止まります。強制終了などで残った `cloudflared` は、次に code-viewer を起動したときに止めます。
+- 開始・停止と値の変更は Mac の画面でだけできます。Tunnel 経由で開いた画面からはできません。
+- 値は `remote-access.json`、トークンは `tunnel-token` に、どちらも状態フォルダへ自分だけが読める形で保存します。`--remote-access <file>` を付けると値はそのファイルから読み、起動時に待ち受けを開きます。トークンはその場合も状態フォルダに保存するので、設定で一度貼ってください。
+- `cloudflared` を自分で動かしている（サービスなど）なら、トークンを保存しません。**開始** は待ち受けだけを開きます。
+- Tunnel の接続先は待ち受けのポートだけにします。通常の表示用ポートには向けません。
 - Quick Tunnel は使えません（ターミナルの出力に使うストリームが通りません）。
 - Mac をスリープさせないでください。送れなかった入力は自動で送り直しません。
 

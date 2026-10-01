@@ -167,6 +167,11 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
         description:
           "Directories to skip or hide, and uploads. These apply to this project only.",
       },
+      remote: {
+        label: "Remote access",
+        description:
+          "Open this code-viewer from a phone or another computer through Cloudflare Tunnel. Only people you allow in Cloudflare Access can sign in.",
+      },
       advanced: {
         label: "Advanced",
         description:
@@ -303,6 +308,11 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
         label: "ファイル",
         description:
           "読まないディレクトリ・隠す名前と、アップロード。このプロジェクトだけの設定です。",
+      },
+      remote: {
+        label: "外部接続",
+        description:
+          "スマホなど別の端末から Cloudflare Tunnel 経由でこの code-viewer を開きます。入れるのは Cloudflare Access で許可した人だけです。",
       },
       advanced: {
         label: "詳細",

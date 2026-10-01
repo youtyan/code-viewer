@@ -278,6 +278,7 @@ import { createDiffView, type RenderResult } from "./views/diff-view";
 import { DIFF_SCREEN_TEXT, type DiffScreenText } from "./views/diff-view-i18n";
 import { createDoctorView, doctorText } from "./views/doctor-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
+import { renderEmptyState } from "./views/empty-state";
 import {
   removeFileHistoryShell as removeRenderedFileHistoryShell,
   renderFileHistoryShell as renderFileHistoryShellView,
@@ -354,6 +355,8 @@ import {
 import { createQuickHelp } from "./views/quick-help";
 import { createRefPicker } from "./views/ref-picker";
 import { createRemoteAccessNotice } from "./views/remote-access";
+import { createRemoteAccessSettings } from "./views/remote-access-settings";
+import { REMOTE_ACCESS_SETTINGS_TEXT } from "./views/remote-access-settings-i18n";
 import { createRepoView } from "./views/repo-view";
 import { createRepositoryWebLink } from "./views/repository-web-link";
 import {
@@ -392,14 +395,13 @@ import {
 } from "./views/status-label";
 import { terminalText } from "./views/terminal/i18n";
 import {
-  createPaneView,
-  type PaneDescription,
-} from "./views/terminal/pane-view";
-import { renderEmptyState } from "./views/empty-state";
-import {
   DEFAULT_IMAGE_SHELF_LAYOUT,
   type ImageShelfLayout,
 } from "./views/terminal/image-shelf";
+import {
+  createPaneView,
+  type PaneDescription,
+} from "./views/terminal/pane-view";
 import {
   createShellEndNotice,
   createShellEndTracker,
@@ -5148,6 +5150,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     getText: () => agentsText(STATE.language).accounts,
   });
 
+  // ---------- Remote access (settings): remote-access-settings.ts ----------
+  // 入口のサーバの待ち受けと cloudflared。節が画面にある間だけ状態を取り直す。
+  const REMOTE_ACCESS_SETTINGS = createRemoteAccessSettings({
+    getText: () => REMOTE_ACCESS_SETTINGS_TEXT[STATE.language],
+    trackLoad,
+    actionHeaders,
+  });
+
   // ---------- Shortcuts (settings): help-keybinding-editor.ts ----------
   // 保存はページの「変更を保存」(draft)。保存先はユーザー単位のサーバの設定
   // (ブラウザと PWA で共通。core/user-settings.ts の keybindings)。
@@ -5232,6 +5242,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         DATABASE_VIEW.loadDbUiPrefs(),
         AGENT_HOOKS_SETTINGS.refresh(),
         ACCOUNTS_SETTINGS.refresh(),
+        REMOTE_ACCESS_SETTINGS.refresh(),
       ]);
       SHORTCUT_SETTINGS.refresh();
     },
@@ -5241,13 +5252,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     agentHooksSection: AGENT_HOOKS_SETTINGS.element,
     agentAccountsSection: ACCOUNTS_SETTINGS.element,
     shortcutsSection: SHORTCUT_SETTINGS.element,
-    drafts: [ACCOUNTS_SETTINGS.draft, SHORTCUT_SETTINGS.draft],
+    remoteAccessSection: REMOTE_ACCESS_SETTINGS.element,
+    drafts: [
+      ACCOUNTS_SETTINGS.draft,
+      SHORTCUT_SETTINGS.draft,
+      REMOTE_ACCESS_SETTINGS.draft,
+    ],
   });
   relocalizeViewerSettings = () => {
     VIEWER_SETTINGS.localize();
     AGENT_HOOKS_SETTINGS.localize();
     ACCOUNTS_SETTINGS.localize();
     SHORTCUT_SETTINGS.localize();
+    REMOTE_ACCESS_SETTINGS.localize();
   };
 
   // ---------- Settings page: settings-page.ts ----------

@@ -167,6 +167,7 @@ export const SETTINGS_CATEGORIES = [
   "accounts",
   "shortcuts",
   "files",
+  "remote",
   "advanced",
 ] as const;
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
@@ -224,9 +225,11 @@ export type ViewerSettingsDeps = {
   agentAccountsSection: HTMLElement;
   /** ショートカットの節。持ち主は help-keybinding-editor.ts。 */
   shortcutsSection: HTMLElement;
+  /** 外部接続の節。持ち主は remote-access-settings.ts。 */
+  remoteAccessSection: HTMLElement;
   /**
    * ページの「変更を保存」で一緒に保存する節の下書き。下書きを持つ節は
-   * accounts と shortcuts (保存の帯をその分類に出す)。
+   * accounts・shortcuts・remote (保存の帯をその分類に出す)。
    */
   drafts: readonly SettingsDraft[];
 };
@@ -666,6 +669,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       ruleSettings,
       deps.agentAccountsSection,
       deps.shortcutsSection,
+      deps.remoteAccessSection,
     );
     // 並びは分類の並び (検索の結果もこの順に出る)。
     categorized.push(
@@ -676,6 +680,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       [deps.shortcutsSection, "shortcuts"],
       [excluded, "files"],
       [uploads, "files"],
+      [deps.remoteAccessSection, "remote"],
       [datastores, "advanced"],
       [watch, "advanced"],
       [ruleSettings, "advanced"],

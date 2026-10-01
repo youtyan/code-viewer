@@ -1,27 +1,45 @@
 import { readFileSync } from "node:fs";
-import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
+import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from "jose";
 import { errorWithCause } from "../../core/error-detail";
+import {
+  REMOTE_LOCAL_ONLY_CODE,
+  type RemoteAccessValues,
+} from "../../core/remote-access";
 import { createLinkedAbortController } from "../abort";
 import { requestAllowed, sideEffectRequestAllowed } from "../request-origin";
 
-export type RemoteAccessConfig = {
-  port: number;
-  origin: string;
-  teamDomain: string;
-  audience: string;
+/** 設定ファイルの中身。値と「code-viewer の起動時に開始する」。 */
+export type RemoteAccessFile = {
+  values: RemoteAccessValues;
+  autoStart: boolean;
 };
 
-export function readRemoteAccessConfig(path: string): RemoteAccessConfig {
+export function readRemoteAccessFile(path: string): RemoteAccessFile {
   try {
-    return parseRemoteAccessConfig(JSON.parse(readFileSync(path, "utf8")));
+    return parseRemoteAccessFile(JSON.parse(readFileSync(path, "utf8")));
   } catch (error) {
     throw errorWithCause(`could not read remote access config ${path}`, error);
   }
 }
 
-export function parseRemoteAccessConfig(value: unknown): RemoteAccessConfig {
+/** 設定ファイル。値の欄に、省略できる autoStart (真偽値) を足したもの。 */
+export function parseRemoteAccessFile(value: unknown): RemoteAccessFile {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("remote access config must be a JSON object");
+  }
+  const { autoStart, ...rest } = value as Record<string, unknown>;
+  if (autoStart !== undefined && typeof autoStart !== "boolean") {
+    throw new Error("remote access autoStart must be true or false");
+  }
+  return {
+    values: parseRemoteAccessValues(rest),
+    autoStart: autoStart === true,
+  };
+}
+
+export function parseRemoteAccessValues(value: unknown): RemoteAccessValues {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("remote access values must be a JSON object");
   }
   const fields = value as Record<string, unknown>;
   const unknown = Object.keys(fields).filter(
@@ -40,7 +58,15 @@ export function parseRemoteAccessConfig(value: unknown): RemoteAccessConfig {
   }
   if (typeof origin !== "string")
     throw new Error("remote access origin is required");
-  const url = new URL(origin);
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch (error) {
+    throw errorWithCause(
+      `remote access origin must be a URL like https://viewer.example.com: ${origin}`,
+      error,
+    );
+  }
   if (
     url.protocol !== "https:" ||
     url.origin !== origin ||
@@ -81,7 +107,7 @@ function remoteError(status: number, code: string, error: string): Response {
 
 /** Only the dedicated listener invokes this boundary, never a forwarded header. */
 export function createRemoteAccess(
-  config: RemoteAccessConfig,
+  config: RemoteAccessValues,
   getKey?: JWTVerifyGetKey,
 ) {
   const issuer = `https://${config.teamDomain}`;
@@ -129,14 +155,17 @@ export function createRemoteAccess(
       );
     }
     const url = new URL(request.url);
+    // 外部接続そのものの操作 (/_entry/remote*) も、外からは開始・停止・
+    // トークンの書き換えをさせない。
     if (
       url.pathname === "/_entry" ||
       url.pathname === "/_entry/open" ||
-      /(?:^|\/)_entry(?:\/(?:adopt|open))?$/.test(url.pathname)
+      /(?:^|\/)_entry(?:\/(?:adopt|open))?$/.test(url.pathname) ||
+      /(?:^|\/)_entry\/remote(?:\/|$)/.test(url.pathname)
     ) {
       return remoteError(
         403,
-        "remote-local-only",
+        REMOTE_LOCAL_ONLY_CODE,
         "This route is available only on the local listener",
       );
     }
