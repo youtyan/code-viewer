@@ -723,17 +723,18 @@ describe("time zone display", () => {
       t.zoneButton().click();
       t.zoneSearch().value = "utc";
       t.zoneSearch().dispatchEvent(new Event("input"));
-      const first = t.shownZones()[0]?.dataset.value;
+      // 先頭は実行するマシンのタイムゾーンで変わる (UTC のマシンでは「この
+      // コンピュータ」も utc に当たって先頭に来る)。先頭が選ばれることを見る。
+      const shown = t.shownZones().map((option) => option.dataset.value);
       key(t.zoneSearch(), "ArrowDown");
       key(t.zoneSearch(), "ArrowUp");
       key(t.zoneSearch(), "Enter");
       await tick();
-      expect([first, t.savedZones, t.zoneMenu().hidden]).toEqual([
-        "UTC",
-        ["UTC"],
-        true,
-      ]);
-      expect(t.zoneButton().textContent).toBe("UTC");
+      expect([
+        shown.includes("UTC"),
+        t.savedZones,
+        t.zoneMenu().hidden,
+      ]).toEqual([true, [shown[0]], true]);
       t.done();
     });
 
