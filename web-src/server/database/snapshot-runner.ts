@@ -14,8 +14,12 @@
 //   - container !== "" && done === false: そのテーブルの処理開始 (index/total 付き)
 //   - container === "" && done === true: 全体完了 (最後に 1 度だけ)
 
-import { errorWithCauses, formatErrorDetail } from "../../core/error-detail";
 import type { DbKind } from "../../core/database/types";
+import {
+  errorWithCause,
+  errorWithCauses,
+  formatErrorDetail,
+} from "../../core/error-detail";
 import { isAbortLikeError, throwIfAborted } from "./adapters/abort";
 import { asAsync } from "./adapters/async-facade";
 import type { DatabaseAdapter } from "./adapters/types";
@@ -104,7 +108,13 @@ export async function runSnapshot(
           pkColumns = cols.filter((c) => c.primaryKey).map((c) => c.name);
         } catch (err) {
           if (isAbortLikeError(err, options.signal)) throw err;
-          // 非 SQL source や container が table ではない場合は無視。
+          // 主キー無しで続けない。SQL の iterateForSnapshot は同じ列を読み直して
+          // 行の鍵を作るので、ここで捨てた失敗は後で同じ理由で落ちるか、
+          // 鍵と食い違う pk_columns_json を残すだけ。
+          throw errorWithCause(
+            `reading the columns of ${container} for the snapshot failed`,
+            err,
+          );
         }
       }
       throwIfAborted(options.signal, "snapshot cancelled");

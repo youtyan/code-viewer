@@ -221,6 +221,40 @@ describe("database snapshot runner", () => {
     });
   });
 
+  // 主キーを読めなかった SQL の表を、主キー無しのまま撮らない。
+  test("fails the snapshot with the cause when a SQL table's columns cannot be read", async () => {
+    await withTempProject(async (dir) => {
+      const columnsFailure = new Error("sample columns failure");
+      const source = {
+        kind: "sqlite" as const,
+        model: "sql" as const,
+        capabilities: { snapshot: true as const },
+        getColumnsAsync: () => Promise.reject(columnsFailure),
+        async *iterateForSnapshot(): AsyncIterable<SnapshotItem> {
+          yield {
+            keyJson: JSON.stringify({ id: 1 }),
+            payloadJson: JSON.stringify({ id: 1 }),
+            rowHash: "hash",
+          };
+        },
+        async listSnapshotContainers() {
+          return [{ id: "users", label: "users" }];
+        },
+      };
+
+      await expect(
+        runSnapshot(dir, source, "db.sqlite", ["users"], ""),
+      ).rejects.toMatchObject({
+        message: "reading the columns of users for the snapshot failed",
+        cause: columnsFailure,
+      });
+      const snapshots = await listSnapshots(dir);
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0].status).toBe("error");
+      expect(snapshots[0].errorMessage).toContain("sample columns failure");
+    });
+  });
+
   test("stores schema metadata and rejects cross-schema diffs", async () => {
     await withTempProject(async (dir) => {
       const source = {
