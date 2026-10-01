@@ -267,6 +267,28 @@ describe("流しから届いた画面", () => {
     expect(shownText()[0]).toBe("  hello world this wraps here");
   });
 
+  // PC のペインが低いと、作業中の印の行や入力欄の罫線が過去の行に溜まり、読む
+  // 画面がそれで埋まった。過去の行からは外し、今の画面の行は全部出す。
+  test("過去の行の作業中の表示は出さず、今の画面の行は全部出す", async () => {
+    await openWith(
+      [
+        "✻ Twisting… (1s)",
+        "─".repeat(20),
+        "  real content",
+        "x",
+        "✻ Working… (2s)",
+        "y",
+      ].join("\n"),
+      { height: 3, cursorX: 1, cursorY: 2 },
+    );
+    expect(shownText()).toEqual([
+      "  real content",
+      "x",
+      "✻ Working… (2s)",
+      "y",
+    ]);
+  });
+
   test("画面と過去の行を消したら、消えた行を出さない", async () => {
     const lines = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`);
     await openWith(lines.join("\n"), { height: 5, cursorX: 7, cursorY: 4 });

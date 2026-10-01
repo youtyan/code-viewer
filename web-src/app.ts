@@ -8568,7 +8568,8 @@ window.GdpExpandLogic = GdpExpandLogic;
           if (PHONE_PANE_TAB === tab.id) PHONE_PANE_TAB = null;
           const pane = TERMINAL_VIEW.tabPaneFor(side);
           if (host.firstElementChild !== pane) host.replaceChildren(pane);
-          void TERMINAL_VIEW.showInTab(session, side);
+          if (!reviveIfPending(session, side))
+            void TERMINAL_VIEW.showInTab(session, side);
         }
       } else if (tab.target.kind === "image") {
         showImageIn(
@@ -8662,6 +8663,14 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 残し、中に「新しいシェルで開き直す」を出す。サーバが同じままシェルが
    * 終わったときは、今までどおり closeEndedTerminal が閉じる。
    */
+  /**
+   * サーバが起き直して無くなったシェルのタブのうち、まだ繋ぎ直していないもの。
+   * 画面に出したときに、出す面の大きさで繋ぎ直す。起き直したときに全部のタブを
+   * 仮の大きさ (120×32) で tmux に繋ぎ直していたので、window-size smallest の
+   * tmux では PC のウインドウが縮み、分割したペインが 60×7 まで小さくなった。
+   */
+  const PENDING_REVIVES = new Map<string, TmuxPlace>();
+
   function recoverShellTabs(sessions: readonly string[]): void {
     const saved = MAIN_TABS.layout().terminalTmux;
     for (const session of sessions) {
@@ -8673,23 +8682,44 @@ window.GdpExpandLogic = GdpExpandLogic;
       }
       // 繋ぎ直すまでの名前付けと、同じペインを開いたときの重なりの判定用。
       TAB_SHELL_PANES.set(session, place.pane);
-      TERMINAL_VIEW.reviveInTab(session, place).then(
-        (result) => {
-          if (result === "gone") closeEndedTerminal(session);
-        },
-        (error: unknown) => {
-          console.error(
-            `[code-viewer] could not reconnect the terminal tab of ${session} to tmux ${JSON.stringify(place)}`,
-            error,
-          );
-          TERMINAL_NOTICE.show(
-            `${terminalText(STATE.language).paneOpenFailed}\n${formatErrorDetail(error)}`,
-          );
-          TERMINAL_VIEW.markEnded(session);
-        },
-      );
+      PENDING_REVIVES.set(session, place);
+    }
+    // 今出しているタブだけを今繋ぎ直す。ほかは出したとき (showPanes)。
+    const fronts = MAIN_TABS.panes().fronts;
+    for (const side of ["left", "right"] as const) {
+      const front = fronts[side];
+      if (front?.target.kind === "terminal")
+        reviveIfPending(front.target.session, side);
     }
   }
+
+  /**
+   * まだ繋ぎ直していないタブなら、side の面の大きさで繋ぎ直して映す (true)。
+   * 電話の段では繋がない: ペインを映すタブは 1 ペイン表示で見るので、tmux に
+   * 端末を繋ぐと PC のウインドウを縮めるだけだった。
+   */
+  function reviveIfPending(session: string, side: PaneSide): boolean {
+    const place = PENDING_REVIVES.get(session);
+    if (!place || PHONE_QUERY.matches) return false;
+    PENDING_REVIVES.delete(session);
+    TERMINAL_VIEW.reviveInTab(session, place, side).then(
+      (result) => {
+        if (result === "gone") closeEndedTerminal(session);
+      },
+      (error: unknown) => {
+        console.error(
+          `[code-viewer] could not reconnect the terminal tab of ${session} to tmux ${JSON.stringify(place)}`,
+          error,
+        );
+        TERMINAL_NOTICE.show(
+          `${terminalText(STATE.language).paneOpenFailed}\n${formatErrorDetail(error)}`,
+        );
+        TERMINAL_VIEW.markEnded(session);
+      },
+    );
+    return true;
+  }
+
   /** シェルごとの、中の tmux の端末とウインドウの大きさ (全画面共通の取り直し)。 */
   let TMUX_WINDOWS = new Map<string, TmuxClientWindow | null>();
   /** 前面でないタブのシェルの終わりを、取り直しの一覧から拾う。 */

@@ -1544,7 +1544,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(l.terminal.paneView.send),
                   " to paste it and press Enter. Tapping it with the field empty sends only Enter.",
                 ],
-                "Scroll to the top to read earlier output, up to 3,000 lines.",
+                "Scroll to the top to read earlier output, up to 3,000 lines. The agent's working status lines and input box borders are left out of it.",
                 "The image button left of the field attaches a photo or screenshot. It is saved like an image pasted into a terminal, and its path is added to the field.",
                 "Go back (‹ at the top left, or the browser's back) to return to where you opened it, such as the sidebar or the + menu.",
               ],

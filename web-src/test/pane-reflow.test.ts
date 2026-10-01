@@ -13,6 +13,7 @@ import {
   readLogicalLines,
   readParagraphs,
   runCss,
+  withoutTransient,
   STYLE,
   terminalPalette,
 } from "../core/pane-reflow";
@@ -229,6 +230,53 @@ describe("readParagraphs", () => {
     expect([0, 1, 2].map((y) => paragraphStart(buffer, y, 20))).toEqual([
       0, 1, 1,
     ]);
+  });
+});
+
+// PC のペインが低いと、Claude Code が書き換えのたびに作業中の表示を上へ押し出し、
+// 過去の行がそれで埋まって読む画面が読めなかった (作業中の印の行と入力欄の罫線が
+// 4 割以上)。過去の行からだけ外す。
+describe("withoutTransient", () => {
+  test("作業中の印・入力欄の罫線と空の入力行・Waiting… を外し、続く空行をまとめる", async () => {
+    const rule = "─".repeat(40);
+    const rows = [
+      "✻ Twisting… (1m 40s · ↓ 6.8k tokens)",
+      "",
+      rule,
+      "❯ ",
+      rule,
+      "",
+      "  - A: real content",
+      "",
+      "✻ Crunched for 2m 25s · done 19:29",
+      "  ⎿  Waiting…",
+      "",
+      "  more content",
+    ];
+    const term = await terminal(40, rows.length, rows.join("\r\n"));
+    const buffer = term.buffer.active;
+    expect(
+      texts(withoutTransient(readParagraphs(buffer, 0, buffer.length, 40))),
+    ).toEqual([
+      "",
+      "  - A: real content",
+      "",
+      "✻ Crunched for 2m 25s · done 19:29",
+      "",
+      "  more content",
+    ]);
+  });
+
+  test.each([
+    { name: "字下げした罫線", row: `  ${"─".repeat(20)}` },
+    { name: "文の入った入力行", row: "❯ 進捗教えて" },
+    { name: "… で終わる普通の文", row: "  Loading the data…" },
+  ])("残す: $name", async ({ row }) => {
+    const term = await terminal(40, 1, row);
+    const buffer = term.buffer.active;
+    expect(
+      texts(withoutTransient(readParagraphs(buffer, 0, buffer.length, 40))),
+    ).toEqual([row]);
   });
 });
 
