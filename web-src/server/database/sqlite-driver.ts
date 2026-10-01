@@ -91,9 +91,11 @@ const INSTALL_GUIDE =
 
 const MISSING_BUILD_GUIDE =
   "better-sqlite3 is installed, but its native build is missing: its install script did not run " +
-  "(npm --ignore-scripts, or npm's allow-scripts left it unapproved). " +
-  "Run `npm rebuild better-sqlite3` where code-viewer is installed " +
-  "(or `npm approve-scripts better-sqlite3` and install again).";
+  "(for example `--ignore-scripts`, or `pnpm dlx` without `--allow-build=better-sqlite3`). " +
+  "Run `npm rebuild better-sqlite3` where code-viewer is installed, or install again with the script allowed: " +
+  "`npm install -g --allow-scripts=better-sqlite3 @youtyan/code-viewer`, " +
+  "`npm config set allow-scripts=better-sqlite3 --location=user` (also covers npx), " +
+  "or `pnpm dlx --allow-build=better-sqlite3 @youtyan/code-viewer`.";
 
 /**
  * better-sqlite3 を読めなかった・開けなかった理由から、状態と直し方を決める。
