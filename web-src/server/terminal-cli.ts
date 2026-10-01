@@ -19,10 +19,12 @@ import {
   type AgentEvent,
   type AgentStateRecord,
   type AgentStatesResponse,
+  clipAgentStateText,
   isAgentEvent,
   needsAttention,
 } from "../core/agent-state";
 import { formatErrorDetail } from "../core/error-detail";
+import type { TerminalCaptureResponse } from "../core/terminal-capture";
 import {
   ensureAgentServerUrl,
   readStdin,
@@ -351,14 +353,6 @@ export function formatStateLine(record: AgentStateRecord): string {
   return `${mark} ${state} ${source} ${record.target.padEnd(16, " ")} ${text}`;
 }
 
-type CaptureResponse = {
-  target?: string;
-  kind?: string;
-  content?: string;
-  cursor?: string;
-  reset?: boolean;
-};
-
 export async function runTerminalCli(argv: string[]): Promise<void> {
   const parsed = parseTerminalArgs(argv);
   if (parsed.ok === false) {
@@ -399,8 +393,13 @@ export async function runTerminalCli(argv: string[]): Promise<void> {
         target: command.target,
         event: command.event,
         at,
-        ...(command.prompt === null ? {} : { lastPrompt: command.prompt }),
-        ...(command.note === null ? {} : { note: command.note }),
+        // サーバと同じ長さに切って送る。長い文は本文の上限で 413 になる。
+        ...(command.prompt === null
+          ? {}
+          : { lastPrompt: clipAgentStateText(command.prompt) }),
+        ...(command.note === null
+          ? {}
+          : { note: clipAgentStateText(command.note) }),
       },
       "terminal state",
     );
@@ -414,18 +413,23 @@ export async function runTerminalCli(argv: string[]): Promise<void> {
       "GET",
       undefined,
       "terminal list",
-    )) as AgentStatesResponse;
-    const all = response.states ?? [];
+    )) as Partial<AgentStatesResponse> | null;
+    // 形の違う応答を「端末なし」と読まない。
+    if (!Array.isArray(response?.states) || !Array.isArray(response?.errors)) {
+      console.error(
+        `terminal list: GET ${serverUrl}/_agent/states answered without states and errors lists: ${JSON.stringify(response)}`,
+      );
+      process.exit(1);
+    }
+    const all = response.states;
     const states = command.attentionOnly
       ? all.filter((record) => needsAttention(record.state))
       : all;
     if (command.json) {
-      console.log(
-        JSON.stringify({ states, errors: response.errors ?? [] }, null, 2),
-      );
+      console.log(JSON.stringify({ states, errors: response.errors }, null, 2));
       return;
     }
-    for (const error of response.errors ?? []) {
+    for (const error of response.errors) {
       const target = error.target ? ` ${error.target}` : "";
       console.error(`[${error.operation}${target}] ${error.detail}`);
       if (error.stack) console.error(error.stack);
@@ -441,13 +445,24 @@ export async function runTerminalCli(argv: string[]): Promise<void> {
   const query = new URLSearchParams({ target: command.target });
   if (command.cursor) query.set("cursor", command.cursor);
   if (command.history !== null) query.set("history", String(command.history));
+  const path = `/_agent/capture?${query.toString()}`;
   const response = (await requestJson(
     serverUrl,
-    `/_agent/capture?${query.toString()}`,
+    path,
     "GET",
     undefined,
     "terminal capture",
-  )) as CaptureResponse;
+  )) as Partial<TerminalCaptureResponse> | null;
+  // 形の違う応答を空の本文として出して終わらない。
+  if (
+    typeof response?.content !== "string" ||
+    typeof response?.cursor !== "string"
+  ) {
+    console.error(
+      `terminal capture: GET ${serverUrl}${path} answered without content and cursor strings: ${JSON.stringify(response)}`,
+    );
+    process.exit(1);
+  }
   if (command.json) {
     console.log(JSON.stringify(response, null, 2));
     return;
@@ -456,6 +471,6 @@ export async function runTerminalCli(argv: string[]): Promise<void> {
   if (response.reset) {
     console.error("(cursor could not be followed — the whole buffer follows)");
   }
-  console.error(`cursor: ${response.cursor ?? ""}`);
-  console.log(response.content ?? "");
+  console.error(`cursor: ${response.cursor}`);
+  console.log(response.content);
 }

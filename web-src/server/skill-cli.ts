@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { errorWithCause } from "../core/error-detail";
 import { ROOT } from "./root";
 
 // Skill directory name per agent. SKILL.md is an open standard; only the
@@ -170,16 +171,15 @@ export type InstallSkillDeps = {
   projectDir: string;
 };
 
+type InstalledSkill = {
+  agent: AgentName;
+  skill: string;
+  action: "installed" | "updated";
+  target: string;
+};
+
 export type InstallSkillResult =
-  | {
-      ok: true;
-      results: {
-        agent: AgentName;
-        skill: string;
-        action: "installed" | "updated";
-        target: string;
-      }[];
-    }
+  | { ok: true; results: InstalledSkill[] }
   | { ok: false; error: string };
 
 function discoverBundledSkills(skillsRoot: string): string[] {
@@ -192,6 +192,11 @@ function discoverBundledSkills(skillsRoot: string): string[] {
     )
     .map((entry) => entry.name)
     .sort();
+}
+
+/** 入れた 1 件の 1 行。CLI の出力と、途中で失敗したときの理由で同じ形にする。 */
+function installedLine(entry: InstalledSkill): string {
+  return `${entry.action} (${entry.agent}/${entry.skill}): ${entry.target}`;
 }
 
 export function installSkill(
@@ -208,22 +213,24 @@ export function installSkill(
   const base = args.global
     ? deps.homeDir
     : resolve(args.cwd ?? deps.projectDir);
-  const results: {
-    agent: AgentName;
-    skill: string;
-    action: "installed" | "updated";
-    target: string;
-  }[] = [];
+  const results: InstalledSkill[] = [];
   for (const agent of args.agents) {
     for (const skill of skills) {
       const sourceDir = join(deps.skillsRoot, skill);
       const target = join(base, AGENT_SKILL_DIRS[agent], "skills", skill);
       const action = existsSync(target) ? "updated" : "installed";
+      // 書けなかった理由 (code・syscall・path・スタック) は cause ごと上へ投げる。
+      // CLI は捕まえないので、Node が全文を端末に出して exit 1 で終わる。
+      // それまでに入れた・更新したものも書く (途中までは書き換わっている)。
       try {
         mkdirSync(target, { recursive: true });
         cpSync(sourceDir, target, { recursive: true });
       } catch (error) {
-        return { ok: false, error: String(error) };
+        const done = results.map((entry) => `\n  ${installedLine(entry)}`);
+        throw errorWithCause(
+          `could not copy the ${skill} skill for ${agent} into ${target}; ${done.length === 0 ? "nothing was copied before it" : `copied before it:${done.join("")}`}`,
+          error,
+        );
       }
       results.push({ agent, skill, action, target });
     }
@@ -256,11 +263,7 @@ export function runSkillCli(argv: string[]): void {
     console.error(result.error);
     process.exit(1);
   }
-  for (const entry of result.results) {
-    console.log(
-      `${entry.action} (${entry.agent}/${entry.skill}): ${entry.target}`,
-    );
-  }
+  for (const entry of result.results) console.log(installedLine(entry));
   if (result.results.some((entry) => entry.action === "installed")) {
     console.log("Re-run the same command anytime to update the skills.");
   }
