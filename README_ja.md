@@ -297,6 +297,7 @@ code-viewer
 - SQLite のドライバ、スナップショットの保存先、git、`rg`、GitHub CLI、tmux、`@lydell/node-pty`
 - 見つけたデータストアと保存した接続のすべてに、最小限の読み出し。Docker / Compose
 - エージェントのフック、アカウント、プロジェクト、動いているサーバ
+- claude / codex の CLI のバージョン（code-viewer が確かめたバージョンと並べて）
 - claude / codex のバージョンと、code-viewer が動作を確かめたバージョン
 
 各行に何が失敗したかを出します。警告の多くには直し方も付きます。

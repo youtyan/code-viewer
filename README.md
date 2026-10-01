@@ -298,6 +298,7 @@ The pulse icon at the right of the bottom bar (or `code-viewer doctor` in a term
 - SQLite driver, snapshot store, git, `rg`, GitHub CLI, tmux, `@lydell/node-pty`
 - Every discovered datastore and saved connection, with a minimal read; Docker / Compose
 - Agent hooks, accounts, projects and running servers
+- The claude / codex CLI versions, next to the versions code-viewer was checked with
 - The claude / codex versions, next to the ones code-viewer was checked with
 
 Each row shows what failed; most warnings also say how to fix it.
