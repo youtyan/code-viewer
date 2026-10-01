@@ -215,6 +215,7 @@ import type { TerminalTabProject } from "./core/terminal-tab-name";
 import {
   clampTerminalFontSize,
   type TmuxClientWindow,
+  type TmuxPaneId,
   type TmuxPlace,
 } from "./core/tmux";
 import { isToolId, type ToolId } from "./core/tools";
@@ -391,6 +392,7 @@ import {
 } from "./views/status-label";
 import { terminalText } from "./views/terminal/i18n";
 import { createPaneView } from "./views/terminal/pane-view";
+import { renderEmptyState } from "./views/empty-state";
 import {
   DEFAULT_IMAGE_SHELF_LAYOUT,
   type ImageShelfLayout,
@@ -8542,12 +8544,16 @@ window.GdpExpandLogic = GdpExpandLogic;
       } else if (tab.target.kind === "file") {
         showSourceInRight();
       } else if (tab.target.kind === "terminal") {
-        const pane = TERMINAL_VIEW.tabPaneFor(side);
-        if (host.firstElementChild !== pane) host.replaceChildren(pane);
-        void TERMINAL_VIEW.showInTab(
-          tab.target.session as ShellSessionId,
-          side,
-        );
+        const session = tab.target.session as ShellSessionId;
+        const phonePane = PHONE_QUERY.matches ? tmuxPaneOfShell(session) : null;
+        if (phonePane) {
+          showPhonePane(side, tab.id, session, phonePane);
+        } else {
+          if (PHONE_PANE_TAB === tab.id) PHONE_PANE_TAB = null;
+          const pane = TERMINAL_VIEW.tabPaneFor(side);
+          if (host.firstElementChild !== pane) host.replaceChildren(pane);
+          void TERMINAL_VIEW.showInTab(session, side);
+        }
       } else if (tab.target.kind === "image") {
         showImageIn(
           side,
@@ -8694,6 +8700,69 @@ window.GdpExpandLogic = GdpExpandLogic;
     TAB_LAST_LABELS.delete(session);
     MAIN_TABS.closeTerminal(session);
     TERMINAL_NOTICE.show(terminalText(STATE.language).tabEnded(name));
+  }
+
+  /**
+   * SP で 1 ペイン表示に替えたターミナルのタブ。自動で開くのはタブが前面に
+   * なったときの 1 回だけ (戻るで閉じた後に、描き直しのたびに開き直さない)。
+   */
+  let PHONE_PANE_TAB: string | null = null;
+
+  /**
+   * そのシェルが映している tmux のペイン。サーバが結び付けたもの (エージェントの
+   * 一覧) を先に、まだ一覧が届いていなければタブの保存した場所を使う。
+   */
+  function tmuxPaneOfShell(session: string): TmuxPaneId | null {
+    return (
+      paneForShell(session)?.id ??
+      TAB_TMUX_PLACES.get(session)?.pane ??
+      MAIN_TABS.layout().terminalTmux?.[session]?.pane ??
+      null
+    );
+  }
+
+  /**
+   * SP: tmux のペインを映すシェルのタブは、attach した端末 (分割したウインドウ
+   * 全体が映り、触るとウインドウが縮む) ではなく 1 ペイン表示で開く。面には
+   * 開き直すための案内を置き、シェルの流しは外す。
+   */
+  function showPhonePane(
+    side: PaneSide,
+    tabId: string,
+    session: ShellSessionId,
+    pane: TmuxPaneId,
+  ): void {
+    TERMINAL_VIEW.releaseTab(session);
+    const t = terminalText(STATE.language).paneView;
+    // 面は端末ではなく案内 (端末の操作札・ピンチ・端末の配色を当てない)。
+    PANE_HOSTS[side].dataset.kind = "";
+    PANE_HOSTS[side].removeAttribute("data-terminal-surface");
+    PANE_HOSTS[side].replaceChildren(
+      renderEmptyState({
+        icon: TERMINAL_16_PATHS,
+        title: t.tabShowsPane,
+        actions: [
+          { label: t.openPane, primary: true, run: () => PANE_VIEW.open(pane) },
+        ],
+      }),
+    );
+    if (PHONE_PANE_TAB === tabId) return;
+    PHONE_PANE_TAB = tabId;
+    PANE_VIEW.open(pane);
+  }
+
+  /**
+   * エージェントの一覧が届いて、前面のシェルのタブがペインを映していると後から
+   * 分かったとき (URL で開いた直後など)。SP なら 1 ペイン表示に替える。
+   */
+  function syncPhoneTerminalFront(): void {
+    if (!PHONE_QUERY.matches) return;
+    const front = MAIN_TABS.panes().fronts.left;
+    if (front?.target.kind !== "terminal" || PHONE_PANE_TAB === front.id)
+      return;
+    const session = front.target.session as ShellSessionId;
+    const pane = tmuxPaneOfShell(session);
+    if (pane) showPhonePane("left", front.id, session, pane);
   }
 
   /** そのシェルが映しているエージェントのペイン。 */
@@ -9185,7 +9254,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     onNotificationClick: (pane) => openAgentPane(pane.id),
     actionHeaders,
   });
-  AGENT_MONITOR.subscribe(() => PANE_VIEW.refreshHeader());
+  AGENT_MONITOR.subscribe(() => {
+    PANE_VIEW.refreshHeader();
+    syncPhoneTerminalFront();
+  });
 
   const agentStatusButton =
     document.querySelector<HTMLButtonElement>("#agent-status");
