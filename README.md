@@ -396,6 +396,11 @@ Requires Node.js 20 or newer. Development uses
   so no font ships with the package. Panes need `tmux` on `PATH`; shells work
   without it.
   Opening shells needs the optional `@lydell/node-pty` package.
+- Terminal size follows the screen you operate: click, tap or type on a phone
+  to use its size, then operate on the PC to switch back. Idle browser screens
+  cannot reclaim the size through background resizing. Size and input are sent
+  together, so returning to a screen also works when its container has not changed.
+  Views of the same tmux pane still share one size.
 - One tmux caveat worth knowing: a tmux window can only have one size, so when
   the same session is attached from both a terminal tab and another terminal, they
   share it. With tmux's default `window-size latest` the window snaps to

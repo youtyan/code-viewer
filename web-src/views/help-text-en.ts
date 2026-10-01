@@ -1319,6 +1319,8 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 code("window-size smallest"),
                 " shows the whole window in both.",
               ],
+              "Click, tap or type in a terminal to fit it to that screen. Phone operation uses the phone size; operating on the PC switches it back to the PC size.",
+              "Idle screens do not take the size back. Views of the same pane still share one terminal size.",
               "Powerline symbols and file icons show when a Nerd Font is installed on the machine running the browser.",
               [
                 "If shells cannot be opened, ",

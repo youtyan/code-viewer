@@ -1,3 +1,4 @@
+import { isShellViewport } from "../../core/shell";
 // シェルセッションの HTTP 入口。
 //
 // - GET  /_shell/list             開いているシェルの一覧
@@ -27,6 +28,7 @@ import {
   describeShellAvailability,
   listShellSessionsForMatching,
   resizeShell,
+  operateShellView,
   subscribeShell,
   writeToShell,
 } from "./session";
@@ -203,20 +205,32 @@ async function readShellBody<T extends { id?: unknown }>(
 }
 
 async function handleKeys(req: Request): Promise<Response> {
-  const parsed = await readShellBody<{ id?: unknown; data?: unknown }>(req);
+  const parsed = await readShellBody<{
+    id?: unknown;
+    data?: unknown;
+    viewport?: unknown;
+  }>(req);
   if (parsed instanceof Response) return parsed;
   const { data } = parsed.body;
   if (typeof data !== "string") return textError("invalid data", 400);
   if (data.length > MAX_KEY_INPUT_LENGTH) {
     return textError("key input too large", 413);
   }
-  const result = writeToShell(parsed.id, data);
+  const { viewport } = parsed.body;
+  if (viewport !== undefined && !isShellViewport(viewport))
+    return textError("invalid viewport", 400);
+  const result = isShellViewport(viewport)
+    ? await operateShellView(parsed.id, viewport, data)
+    : writeToShell(parsed.id, data);
   if (result.status === "gone") return textError("shell is gone", 410);
   if (result.status === "error") {
     console.error("[code-viewer] shell write failed", result.error);
     return textError(formatErrorDetail(result.error), 500);
   }
-  return json({ ok: true });
+  return json({
+    ok: true,
+    ...(isShellViewport(viewport) ? { generation: viewport.sequence } : {}),
+  });
 }
 
 async function handleResize(req: Request): Promise<Response> {
@@ -224,13 +238,19 @@ async function handleResize(req: Request): Promise<Response> {
     id?: unknown;
     cols?: unknown;
     rows?: unknown;
+    viewport?: unknown;
   }>(req);
   if (parsed instanceof Response) return parsed;
   const { cols, rows } = parsed.body;
   if (typeof cols !== "number" || typeof rows !== "number") {
     return textError("invalid size", 400);
   }
-  const result = resizeShell(parsed.id, cols, rows);
+  const { viewport } = parsed.body;
+  if (viewport !== undefined && !isShellViewport(viewport))
+    return textError("invalid viewport", 400);
+  const result = isShellViewport(viewport)
+    ? await operateShellView(parsed.id, viewport)
+    : resizeShell(parsed.id, cols, rows);
   if (result.status === "gone") return textError("shell is gone", 410);
   // 失敗を成功として返すと、呼び出し側が「このサイズで通った」と記録して
   // 二度と送り直さなくなる。表示は続けられるが、桁数はずれたままになる。
@@ -238,7 +258,10 @@ async function handleResize(req: Request): Promise<Response> {
     console.error("[code-viewer] shell resize failed", result.error);
     return textError(formatErrorDetail(result.error), 500);
   }
-  return json({ ok: true });
+  return json({
+    ok: true,
+    ...(isShellViewport(viewport) ? { generation: viewport.sequence } : {}),
+  });
 }
 
 async function handleClose(req: Request): Promise<Response> {

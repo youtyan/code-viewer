@@ -109,3 +109,30 @@ export function clampShellSize(
     rows: clamp(rows, MIN_SHELL_ROWS, MAX_SHELL_ROWS),
   };
 }
+
+/** One screen's ordered size requests; only an explicit operation may take ownership. */
+export type ShellViewport = {
+  view: string;
+  sequence: number;
+  claim: boolean;
+  cols: number;
+  rows: number;
+};
+
+export function isShellViewport(value: unknown): value is ShellViewport {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.view === "string" &&
+    /^[a-z0-9-]{1,80}$/.test(v.view) &&
+    Number.isSafeInteger(v.sequence) &&
+    Number(v.sequence) > 0 &&
+    typeof v.claim === "boolean" &&
+    typeof v.cols === "number" &&
+    Number.isFinite(v.cols) &&
+    typeof v.rows === "number" &&
+    Number.isFinite(v.rows)
+  );
+}
+
+export type ShellViewportResponse = { ok: true; generation: number };

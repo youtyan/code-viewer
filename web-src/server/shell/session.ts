@@ -1,3 +1,4 @@
+import type { ShellViewport } from "../../core/shell";
 // ブラウザ専用のシェルを PTY で起動し、生きている間だけ保持する。
 //
 // tmux ペインと違い、このシェルは code-viewer の子プロセスとして生まれる。
@@ -96,6 +97,9 @@ type SessionEntry = {
   tmuxAttachment: { session: string; pane: string } | null;
   /** 同じ空TTYを同時に問い合わせないための、進行中の再取得。 */
   ttyRefresh: Promise<void> | null;
+  sizeOwner: string | null;
+  viewSequences: Map<string, number>;
+  viewOperation: Promise<ShellWriteResult>;
 };
 
 const sessions = new Map<ShellSessionId, SessionEntry>();
@@ -394,6 +398,9 @@ export async function createShellSession(
     queued: [],
     tmuxAttachment: null,
     ttyRefresh: null,
+    sizeOwner: null,
+    viewSequences: new Map(),
+    viewOperation: Promise.resolve({ status: "ok" }),
   };
 
   child.onData((chunk) => {
@@ -563,6 +570,35 @@ export function writeToShell(
   const entry = sessions.get(id);
   if (!entry || entry.meta.exited) return { status: "gone" };
   return writeToShellEntry(entry, data);
+}
+
+/** Serialize size and input together, so a second view cannot resize between them. */
+export function operateShellView(
+  id: ShellSessionId,
+  viewport: ShellViewport,
+  data?: string,
+): Promise<ShellWriteResult> {
+  const entry = sessions.get(id);
+  if (!entry || entry.meta.exited) return Promise.resolve({ status: "gone" });
+  entry.viewOperation = entry.viewOperation.then(async () => {
+    if (entry.meta.exited || sessions.get(id) !== entry)
+      return { status: "gone" };
+    const previous = entry.viewSequences.get(viewport.view) ?? 0;
+    if (viewport.sequence <= previous) {
+      return data === undefined ? { status: "ok" } : writeToShell(id, data);
+    }
+    entry.viewSequences.set(viewport.view, viewport.sequence);
+    if (viewport.claim || entry.sizeOwner === null)
+      entry.sizeOwner = viewport.view;
+    if (entry.sizeOwner === viewport.view) {
+      const resized = resizeShell(id, viewport.cols, viewport.rows);
+      if (resized.status !== "ok") return resized;
+    }
+    if (!viewport.claim && entry.sizeOwner !== viewport.view)
+      return { status: "ok" };
+    return data === undefined ? { status: "ok" } : writeToShell(id, data);
+  });
+  return entry.viewOperation;
 }
 
 export function resizeShell(
