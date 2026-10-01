@@ -49,11 +49,7 @@ import {
   type TerminalPathHit,
   type TerminalPathsResponse,
 } from "../../core/terminal-links";
-import {
-  isShiftEnter,
-  type PasteImageResponse,
-  SHIFT_ENTER_SEQUENCE,
-} from "../../core/terminal-paste";
+import { isShiftEnter, SHIFT_ENTER_SEQUENCE } from "../../core/terminal-paste";
 import type { TmuxClientWindow } from "../../core/tmux";
 import {
   loadXterm,
@@ -78,6 +74,7 @@ import {
   shelfEntryByCandidate,
   shelfGallery,
 } from "./image-shelf-list";
+import { uploadPastedImage } from "./paste-upload";
 import {
   createTerminalLinkLayer,
   type LinkSegment,
@@ -1444,24 +1441,6 @@ export function createTerminalScreen(
     }, REVEAL_FRAME_MS);
   }
 
-  /** File を base64 にする。data URL の接頭辞は落として本体だけ返す。 */
-  function readAsBase64(file: File): Promise<{ base64: string; url: string }> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onerror = () => reject(reader.error ?? new Error("read failed"));
-      reader.onload = () => {
-        const url = String(reader.result ?? "");
-        const comma = url.indexOf(",");
-        if (comma < 0) {
-          reject(new Error("unexpected data url"));
-          return;
-        }
-        resolve({ base64: url.slice(comma + 1), url });
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-
   /**
    * 画像を貼り付けたときの流れ。
    *
@@ -1494,54 +1473,24 @@ export function createTerminalScreen(
   async function pasteImage(file: File): Promise<void> {
     if (!attached || disposed) return;
     const myGen = generation;
-    let read: { base64: string; url: string };
-    try {
-      read = await readAsBase64(file);
-    } catch (error) {
-      console.error("[code-viewer] pasted image read failed", error);
-      if (!disposed && myGen === generation)
-        showStatus(
-          `${deps.getText().pasteFailed}\n${formatErrorDetail(error)}`,
-        );
+    const result = await uploadPastedImage(file, {
+      actionHeaders: deps.actionHeaders,
+      trackLoad: deps.trackLoad,
+      failedText: deps.getText().pasteFailed,
+    });
+    if (result.status === "failed") {
+      console.error("[code-viewer] pasted image save failed", result.error);
+      if (!disposed && myGen === generation) showStatus(result.message);
       return;
     }
-    if (disposed || myGen !== generation) return;
-    try {
-      const res = await deps.trackLoad(
-        fetch(apiUrl("agentPaste"), {
-          method: "POST",
-          headers: {
-            ...deps.actionHeaders(),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ mime: file.type, data: read.base64 }),
-        }),
-      );
-      if (!res.ok) {
-        const message = await responseErrorMessage(
-          res,
-          deps.getText().pasteFailed,
-        );
-        console.error("[code-viewer] pasted image save failed", message);
-        if (!disposed && myGen === generation) showStatus(message);
-        return;
-      }
-      const saved = (await res.json()) as PasteImageResponse;
-      if (disposed || myGen !== generation || !attached) return;
-      // 打ち込んだパスは画面に出るが、ここで問い合わせ済みにしておくので
-      // 聞き直さない。別の綴りで出ても、同じ実体なら棚では 1 枚にまとまる。
-      queueImagePaths([saved.path]);
-      // パスに空白は入らない命名にしてあるが、引用しておけば将来変えても壊れない。
-      enqueueInput(`'${saved.path}' `);
-      showPasteNotice(deps.getText().pasteSaved(saved.relativePath));
-    } catch (error) {
-      console.error("[code-viewer] pasted image save failed", error);
-      if (!disposed && myGen === generation) {
-        showStatus(
-          `${deps.getText().pasteFailed}\n${formatErrorDetail(error)}`,
-        );
-      }
-    }
+    const saved = result.saved;
+    if (disposed || myGen !== generation || !attached) return;
+    // 打ち込んだパスは画面に出るが、ここで問い合わせ済みにしておくので
+    // 聞き直さない。別の綴りで出ても、同じ実体なら棚では 1 枚にまとまる。
+    queueImagePaths([saved.path]);
+    // パスに空白は入らない命名にしてあるが、引用しておけば将来変えても壊れない。
+    enqueueInput(`'${saved.path}' `);
+    showPasteNotice(deps.getText().pasteSaved(saved.relativePath));
   }
 
   /** クリップボードから最初の画像を 1 枚取る。無ければ null。 */

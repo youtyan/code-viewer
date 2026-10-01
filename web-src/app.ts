@@ -391,7 +391,10 @@ import {
   STATUS_LABEL_TEXT,
 } from "./views/status-label";
 import { terminalText } from "./views/terminal/i18n";
-import { createPaneView } from "./views/terminal/pane-view";
+import {
+  createPaneView,
+  type PaneDescription,
+} from "./views/terminal/pane-view";
 import { renderEmptyState } from "./views/empty-state";
 import {
   DEFAULT_IMAGE_SHELF_LAYOUT,
@@ -7883,22 +7886,25 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 電話の段に出入りすると、端末の文字の大きさの出所 (電話の値と設定) が替わる。
   PHONE_QUERY.addEventListener("change", () => TERMINAL_VIEW.applyFontSize());
 
+  /** 1 ペイン表示の見出しとタブの札に出す、ペインの名前と状態。 */
+  function describeAgentPane(id: string): PaneDescription | null {
+    const pane = AGENT_MONITOR.snapshot().overview?.panes.find(
+      (item) => item.id === id,
+    );
+    if (!pane) return null;
+    const described = paneText(pane, agentsText(STATE.language));
+    return {
+      title: described.kind,
+      detail: described.detail,
+      state: pane.state,
+    };
+  }
+
   // SP の 1 ペイン表示。電話の段でエージェントを開くと、attach せずにそのペイン
   // だけを全画面で映す (分割したウインドウ全体では狭すぎる)。
   const PANE_VIEW = createPaneView({
     getText: () => terminalText(STATE.language),
-    describePane: (id) => {
-      const pane = AGENT_MONITOR.snapshot().overview?.panes.find(
-        (item) => item.id === id,
-      );
-      if (!pane) return null;
-      const described = paneText(pane, agentsText(STATE.language));
-      return {
-        title: described.kind,
-        detail: described.detail,
-        state: pane.state,
-      };
-    },
+    describePane: describeAgentPane,
     actionHeaders,
     trackLoad,
     onClose: (pane) => AGENT_MONITOR.markRead(pane),
@@ -8053,6 +8059,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     const a = agentsText(STATE.language);
     const overview = AGENT_MONITOR.snapshot().overview;
     const unread = AGENT_MONITOR.snapshot().unread;
+    // 電話でここから開いたペインは、戻るでこのメニューへ戻す。
+    const reopenNewTabMenu = returnOnPhone(() => MAIN_TABS.openNewTabMenu());
     const items: ContextMenuItem[] = [
       {
         label: t.newTabOpenFile,
@@ -8102,7 +8110,12 @@ window.GdpExpandLogic = GdpExpandLogic;
           title: [pane ? paneText(pane, a).title : session.command, session.cwd]
             .filter(Boolean)
             .join("\n"),
-          onSelect: () => MAIN_TABS.openTerminal(session.id),
+          // 電話でペインを映すシェルは、タブではなくそのペインの 1 ペイン表示で
+          // 開く (タブにしても 1 ペイン表示で開き、戻ると案内だけが残った)。
+          onSelect: () =>
+            pane && PHONE_QUERY.matches
+              ? openAgentPane(pane.id, undefined, reopenNewTabMenu)
+              : MAIN_TABS.openTerminal(session.id),
         });
       }
     }
@@ -8121,7 +8134,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       sessions.push({
         label: `${mark(pane.id, false)}${row.row}`,
         title: row.title,
-        onSelect: () => openAgentPane(pane.id),
+        onSelect: () => openAgentPane(pane.id, undefined, reopenNewTabMenu),
       });
     }
     if (sessions.length > 0) items.push({ kind: "separator" }, ...sessions);
@@ -8736,22 +8749,50 @@ window.GdpExpandLogic = GdpExpandLogic;
     pane: TmuxPaneId,
   ): void {
     TERMINAL_VIEW.releaseTab(session);
-    const t = terminalText(STATE.language).paneView;
     // 面は端末ではなく案内 (端末の操作札・ピンチ・端末の配色を当てない)。
     PANE_HOSTS[side].dataset.kind = "";
     PANE_HOSTS[side].removeAttribute("data-terminal-surface");
-    PANE_HOSTS[side].replaceChildren(
-      renderEmptyState({
-        icon: TERMINAL_16_PATHS,
-        title: t.tabShowsPane,
-        actions: [
-          { label: t.openPane, primary: true, run: () => PANE_VIEW.open(pane) },
-        ],
-      }),
-    );
+    renderPhonePaneCard(side, tabId, pane);
     if (PHONE_PANE_TAB === tabId) return;
     PHONE_PANE_TAB = tabId;
     PANE_VIEW.open(pane);
+  }
+
+  /** 面に出しているペインの札と、その中身 (同じなら描き直さない)。 */
+  let PHONE_PANE_CARD: { el: HTMLElement; signature: string } | null = null;
+
+  /**
+   * 1 ペイン表示を閉じた後に面に残る、そのペインの札: 名前と状態、開き直す・
+   * タブを閉じる。以前は「このタブは tmux のペインを映しています」だけで、
+   * どのペインのタブか分からなかった。状態が変わったら描き直す。
+   */
+  function renderPhonePaneCard(
+    side: PaneSide,
+    tabId: string,
+    pane: TmuxPaneId,
+  ): void {
+    const t = terminalText(STATE.language).paneView;
+    const described = describeAgentPane(pane);
+    const title = described?.title ?? t.tabShowsPane;
+    const hint = described?.detail;
+    const host = PANE_HOSTS[side];
+    const signature = JSON.stringify([STATE.language, tabId, title, hint]);
+    if (
+      PHONE_PANE_CARD?.signature === signature &&
+      PHONE_PANE_CARD.el.parentElement === host
+    )
+      return;
+    const el = renderEmptyState({
+      icon: TERMINAL_16_PATHS,
+      title,
+      hint,
+      actions: [
+        { label: t.openPane, primary: true, run: () => PANE_VIEW.open(pane) },
+        { label: t.closeTab, run: () => MAIN_TABS.closeTab(tabId) },
+      ],
+    });
+    PHONE_PANE_CARD = { el, signature };
+    host.replaceChildren(el);
   }
 
   /**
@@ -8761,11 +8802,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   function syncPhoneTerminalFront(): void {
     if (!PHONE_QUERY.matches) return;
     const front = MAIN_TABS.panes().fronts.left;
-    if (front?.target.kind !== "terminal" || PHONE_PANE_TAB === front.id)
-      return;
+    if (front?.target.kind !== "terminal") return;
     const session = front.target.session as ShellSessionId;
     const pane = tmuxPaneOfShell(session);
-    if (pane) showPhonePane("left", front.id, session, pane);
+    if (!pane) return;
+    // もう札にしたタブは、名前と状態だけ描き直す (1 ペイン表示を開き直さない)。
+    if (PHONE_PANE_TAB === front.id)
+      renderPhonePaneCard("left", front.id, pane);
+    else showPhonePane("left", front.id, session, pane);
   }
 
   /** そのシェルが映しているエージェントのペイン。 */
@@ -9202,19 +9246,38 @@ window.GdpExpandLogic = GdpExpandLogic;
    * エージェントのペインを開く (通知・サイドバー・全体ボード・パレット)。
    * 別のプロジェクトのペインならそのプロジェクトへ移る (agent-pane-opener.ts)。
    */
-  function openAgentPane(pane: string, destination?: "opposite"): void {
+  function openAgentPane(
+    pane: string,
+    destination?: "opposite",
+    returnTo?: () => void,
+  ): void {
     // 電話の段で引き出しや面が開いたままだと、開いた端末がその下に隠れる
     // (引き出しと面の中の行は押したときに自分で閉じるが、通知・最下段の件数・
     // 全体ボード・パレットから来たときは閉じていなかった)。
     MOBILE_SHELL.close();
-    AGENT_PANE_OPENER(pane, destination);
+    AGENT_PANE_OPENER(pane, destination, returnTo);
+  }
+
+  /**
+   * 電話の 1 ペイン表示を戻るで閉じた後に、開いた場所 (引き出し・＋のメニュー)
+   * を出し直す。戻った先が開く前と違う画面だった。デスクトップの幅へ移って
+   * 閉じたときは出さない。
+   */
+  function returnOnPhone(reopen: () => void): () => void {
+    return () => {
+      if (PHONE_QUERY.matches) reopen();
+    };
   }
 
   /** この画面のメインの面のタブで開く。サイドバーの修飾操作だけ反対面。 */
-  function openAgentPaneHere(pane: string, destination?: "opposite"): void {
+  function openAgentPaneHere(
+    pane: string,
+    destination?: "opposite",
+    returnTo?: () => void,
+  ): void {
     AGENT_MONITOR.markRead(pane);
     if (PHONE_QUERY.matches) {
-      PANE_VIEW.open(pane);
+      PANE_VIEW.open(pane, returnTo);
       return;
     }
     const panes = MAIN_TABS.panes();
@@ -9555,7 +9618,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         projects: PROJECT_ACTIONS,
         switchProject: (info) => switchToProjectGroup(info.root),
         getText: () => agentsText(STATE.language),
-        openPane: openAgentPane,
+        openPane: (pane, destination) =>
+          openAgentPane(
+            pane,
+            destination,
+            returnOnPhone(() => MOBILE_SHELL.openDrawer()),
+          ),
         viewingPane: viewingAgentPane,
         openProjectMenu: (root, anchor) =>
           MAIN_TABS.openProjectMenu(root, anchor),

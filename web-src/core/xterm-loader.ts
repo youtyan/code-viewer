@@ -13,6 +13,15 @@ export type XtermDisposable = {
   dispose(): void;
 };
 
+/**
+ * バッファの 1 行に付ける印。古い行が捨てられても同じ行を指し続ける (line が
+ * 減る)。その行が捨てられたら isDisposed (line は -1)。
+ */
+export type XtermMarker = XtermDisposable & {
+  readonly line: number;
+  readonly isDisposed: boolean;
+};
+
 /** 実際に指定しているオプションだけ。xterm 側にはこの何倍もある。 */
 export type XtermOptions = {
   cols?: number;
@@ -152,6 +161,8 @@ export type XtermTerminal = {
   ): XtermDisposable;
   /** 書き込んだ分を解釈し終えた (画面に描くかどうかに関わらず)。 */
   onWriteParsed(handler: () => void): XtermDisposable;
+  /** カーソルの行から cursorYOffset 行ずらした所に印を付ける (通常の画面のバッファ)。 */
+  registerMarker(cursorYOffset?: number): XtermMarker | undefined;
   attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void;
   /**
    * ホイールを xterm に処理させるか。false を返すと xterm は何もしない

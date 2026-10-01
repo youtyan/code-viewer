@@ -427,6 +427,35 @@ describe("1 ペイン表示", () => {
       declarationsOf(rules, [".pane-view:not([hidden])"]).get("inset"),
     ).toBe("0 0 var(--sp-keyboard-h, 0px) 0");
   });
+
+  // 幅の広いペインの色付きの帯 (数百桁の空白) を iPhone の Safari がはみ出しと
+  // 数え、本文ごと横にずれて左が切れた。「画面」の升目は中の箱が横に送る。
+  test("本文は縦にだけ送り、「画面」の升目は中の箱が横に送る", () => {
+    const body = declarationsOf(rules, [".pane-view-body"]);
+    expect({
+      body: [body.get("overflow-x"), body.get("overflow-y")],
+      screen: declarationsOf(rules, [".pane-view-screen"]).get("overflow-x"),
+    }).toEqual({ body: ["hidden", "auto"], screen: "auto" });
+  });
+});
+
+// iPhone の Safari は横向きにすると長い文章の文字を勝手に大きくする (1 ペイン
+// 表示の「読む」が大きくなりすぎた)。指の画面では決めた大きさのまま出す。
+describe("横向きでも文字を勝手に大きくしない", () => {
+  test.each([
+    {
+      name: "電話の段・指の画面",
+      rules: withTiers(SOFT_KEYS),
+      expected: "100%",
+    },
+    { name: "デスクトップ", rules: baseRules(sheet), expected: undefined },
+  ])("$name", ({ rules, expected }) => {
+    const root = declarationsOf(rules, ["html"]);
+    expect([
+      root.get("-webkit-text-size-adjust"),
+      root.get("text-size-adjust"),
+    ]).toEqual([expected, expected]);
+  });
 });
 
 describe("指の画面の押せる大きさ", () => {

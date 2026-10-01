@@ -26036,6 +26036,12 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body:has(.main-pane-host[data-side="left"][data-kind="terminal"].is-shown) {
     --sp-keys-visible-h: var(--sp-keys-h);
   }
+  /* iPhone の Safari は横向きにすると長い文章の文字を勝手に大きくする (1 ペイン
+     表示の「読む」が大きくなりすぎて読みにくかった)。決めた大きさのまま出す。 */
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
   /* 面の箱 (端末) の下端を操作札の帯の上にする (T2 に 1 項)。 */
   body {
     --main-bottom: calc(var(--chrome-bottom) + var(--sp-keys-visible-h));
@@ -26974,11 +26980,15 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .pane-view-mode button {
     min-height: var(--sp-touch);
   }
+  /* 横には送らない: 幅の広いペインの色付きの帯 (数百桁の空白) を iPhone の
+     Safari ははみ出しとして数え、本文ごと横にずれて左が切れた。「画面」の升目は
+     中の箱 (.pane-view-screen) が横に送る。 */
   .pane-view-body {
     position: relative;
     flex: 1 1 0;
     min-height: 0;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     overscroll-behavior: contain;
     padding: var(--space-2) var(--pad-face);
     font-family: var(--font-mono);
@@ -26986,14 +26996,29 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     line-height: 1.45;
   }
   /* 端末の 1 行 (折り返しを繋いだもの) を幅で折り返す。枠の線だけの行は折り返さずに切る。 */
+  /* 2 行目以降は文の始まりに揃える (--pane-hang。pane-view.ts の lineHtml)。 */
   .pane-line {
     min-height: 1.45em;
+    padding-left: var(--pane-hang, 0);
+    text-indent: calc(0px - var(--pane-hang, 0px));
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
   .pane-line-rule {
     white-space: pre;
     overflow: hidden;
+  }
+  /* 「画面」の通常の画面: 読む画面と同じ行を PC のペインの桁で折り返し、その桁が
+     幅に入る字の大きさで出す (pane-view.ts の fitScreenFont)。ピンチで大きく
+     したら、この箱が横に送る。 */
+  .pane-view-read.is-grid {
+    overflow-x: auto;
+    font-size: var(--pane-grid-font, var(--ui-font-sm));
+    line-height: 1.25;
+  }
+  .pane-view-read.is-grid .pane-line {
+    width: calc(var(--pane-cols, 80) * 1ch);
+    min-height: 1.25em;
   }
   .pane-view-screen {
     overflow-x: auto;
@@ -27098,6 +27123,27 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     color: var(--color-text);
     resize: none;
     field-sizing: content;
+  }
+  .pane-view-attach {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--sp-touch);
+    height: var(--sp-touch);
+    padding: 0;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    background: var(--color-raised);
+    color: var(--color-text-2);
+    touch-action: manipulation;
+  }
+  .pane-view-attach:active {
+    background: var(--color-select);
+  }
+  .pane-view-attach-icon {
+    width: var(--icon-md);
+    height: var(--icon-md);
+    fill: currentColor;
   }
   .pane-view-send {
     flex: none;

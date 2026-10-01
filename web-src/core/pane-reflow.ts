@@ -45,6 +45,11 @@ export type ReflowLine = {
   runs: ReflowRun[];
   /** 枠の線だけの行。折り返さず、幅で切って 1 行にする。 */
   rule: boolean;
+  /**
+   * 折り返した 2 行目以降を揃える桁 (文の始まり。箇条書きなら頭の後ろ)。
+   * readParagraphs だけが付ける。
+   */
+  hang?: number;
 };
 
 export type PaneChoice = { key: string; label: string };
@@ -186,6 +191,216 @@ export function readLogicalLines(
     y = line.end;
   }
   return lines;
+}
+
+/**
+ * 端末の 1 行の字の詰まり方。アプリがペインの幅で入れた改行かを見分けるのに使う
+ * (幅は升目の数。全角は 2)。
+ */
+type RowShape = {
+  /** 最初の字の桁。 */
+  indent: number;
+  /** 文の始まりの桁 (箇条書きの頭 `- ` `1. ` などの後ろ。無ければ indent)。 */
+  textStart: number;
+  /** 最後の字の右端の桁。 */
+  width: number;
+  /** 箇条書きの頭で始まる。 */
+  marker: boolean;
+  /** 枠の線だけ・`│` の枠で始まる。 */
+  boxed: boolean;
+  firstToken: number;
+  lastToken: number;
+  firstWide: boolean;
+  lastWide: boolean;
+  last: string;
+};
+
+const LIST_MARKER = /^(?:[-*•・⏺⎿]|\d{1,3}[.)])$/;
+
+function rowShape(buffer: XtermBuffer, y: number): RowShape | null {
+  const line = buffer.getLine(y);
+  if (!line) return null;
+  const cells: { x: number; text: string; width: number }[] = [];
+  for (let x = 0; x < line.length; x += 1) {
+    const cell = line.getCell(x);
+    if (!cell) break;
+    const width = cell.getWidth();
+    if (width === 0) continue;
+    cells.push({ x, text: cell.getChars() || " ", width });
+  }
+  const filled = cells.filter((cell) => cell.text !== " ");
+  const head = filled[0];
+  const tail = filled[filled.length - 1];
+  if (!head || !tail) return null;
+  // 語 = 空白で区切った字の並び。
+  const tokens: { start: number; end: number; text: string }[] = [];
+  for (const cell of cells) {
+    const open = tokens[tokens.length - 1];
+    if (cell.text === " ") continue;
+    if (open && open.end === cell.x) {
+      open.end = cell.x + cell.width;
+      open.text += cell.text;
+    } else
+      tokens.push({ start: cell.x, end: cell.x + cell.width, text: cell.text });
+  }
+  const first = tokens[0];
+  const last = tokens[tokens.length - 1];
+  const marker = !!first && LIST_MARKER.test(first.text) && tokens.length > 1;
+  const text = cells.map((cell) => cell.text).join("");
+  return {
+    indent: head.x,
+    textStart: marker ? tokens[1].start : head.x,
+    width: tail.x + tail.width,
+    marker,
+    boxed: BOX_ONLY.test(text) || head.text === "│",
+    firstToken: first ? first.end - first.start : 0,
+    lastToken: last ? last.end - last.start : 0,
+    firstWide: head.width === 2,
+    lastWide: tail.width === 2,
+    last: tail.text,
+  };
+}
+
+/**
+ * 罫線を探す、行から下 (無ければ上) の範囲 (行の数)。高さの低いペインでは、
+ * 罫線が数百行おきにしか過去の行に残らなかった。
+ */
+const RULE_SEARCH_ROWS = 2000;
+
+/** y 行目が左端からの罫線 (Claude Code の入力欄の上下の線) なら、その長さ。 */
+function ruleWidth(buffer: XtermBuffer, y: number): number | null {
+  const line = buffer.getLine(y);
+  if (!line) return null;
+  if (line.getCell(0)?.getChars() !== "─") return null;
+  let end = 0;
+  while (end < line.length && line.getCell(end)?.getChars() === "─") end += 1;
+  return end >= 2 ? end : null;
+}
+
+/**
+ * 行を書いたときのペインの幅。ペインの幅は後から変わる (59 桁が 210 桁に) が、
+ * 過去の行は書いたときの幅で改行されている。その行の下で最初に出てくる罫線
+ * (Claude Code が入力欄の上下に幅いっぱいに引く) の長さを、その時の幅とみなす。
+ * 罫線が無ければ今の幅 (cols)。続けて聞く行が近いので、見つけた範囲を覚える。
+ */
+function wrapWidths(buffer: XtermBuffer, cols: number): (y: number) => number {
+  let known = { from: -1, to: -1, width: cols };
+  return (y) => {
+    if (y >= known.from && y <= known.to) return known.width;
+    const limit = Math.min(buffer.length, y + RULE_SEARCH_ROWS);
+    for (let row = y; row < limit; row += 1) {
+      const width = ruleWidth(buffer, row);
+      if (width === null) continue;
+      known = { from: y, to: row, width };
+      return width;
+    }
+    // 下に無ければ上の近いもの。y から limit までに罫線は無いので、その間は同じ答え。
+    let width = cols;
+    for (let row = y - 1; row >= Math.max(0, y - RULE_SEARCH_ROWS); row -= 1) {
+      const found = ruleWidth(buffer, row);
+      if (found === null) continue;
+      width = found;
+      break;
+    }
+    known = { from: y, to: limit - 1, width };
+    return width;
+  };
+}
+
+/**
+ * 行 [prevStart, prevEnd) の後ろの nextStart 行目からの行が、アプリがペインの幅で
+ * 入れた改行の続きか。続きなら繋ぎ方 ("join" はそのまま、"space" は空白を挟む)。
+ *
+ * 続きとみなすのは、次の行が前の行の文の始まりと同じ字下げで、箇条書きの頭や
+ * 枠でなく、前の行の右端に次の語が入る余りが無かったとき (入る余りがあれば、
+ * アプリがわざと改行した)。全角どうし・長い語の途中で切れたときは空白を挟まない。
+ */
+function continuation(
+  buffer: XtermBuffer,
+  prevStart: number,
+  prevEnd: number,
+  nextStart: number,
+  widthAt: (y: number) => number,
+): "join" | "space" | null {
+  const head = rowShape(buffer, prevStart);
+  const tail = rowShape(buffer, prevEnd - 1);
+  const next = rowShape(buffer, nextStart);
+  if (!head || !tail || !next) return null;
+  if (head.boxed || next.boxed || next.marker) return null;
+  if (tail.last === "…" || next.indent !== head.textStart) return null;
+  const cols = widthAt(prevEnd - 1);
+  const gap = cols - tail.width;
+  if (gap < 0 || (gap > 1 && next.firstToken + 1 <= gap)) return null;
+  // 全角どうしは字の間で折られている。全角と半角の境目は空白で折られている
+  // (日本語の文の中の半角の語は空白で区切って書く)。
+  if (tail.lastWide && next.firstWide) return "join";
+  if (tail.lastWide || next.firstWide) return "space";
+  if (gap <= 1 && tail.lastToken >= cols - head.textStart - 1) return "join";
+  return "space";
+}
+
+/**
+ * from 行目から to 行目の前までの行を、アプリがペインの幅で入れた改行を繋いだ
+ * 段落にして読む (読む画面。スマホの幅で折り返し直すので、ペインの幅の改行が
+ * 残ると行の端が細切れになった)。cols はペインの桁。
+ */
+export function readParagraphs(
+  buffer: XtermBuffer,
+  from: number,
+  to: number,
+  cols: number,
+): ReflowLine[] {
+  const out: ReflowLine[] = [];
+  const widthAt = wrapWidths(buffer, cols);
+  for (const read of readLogicalLines(buffer, from, to)) {
+    const line = read.rule
+      ? read
+      : { ...read, hang: rowShape(buffer, read.start)?.textStart ?? 0 };
+    const prev = out[out.length - 1];
+    const how =
+      prev && !prev.rule && !line.rule
+        ? continuation(buffer, prev.start, prev.end, line.start, widthAt)
+        : null;
+    if (!prev || !how) {
+      out.push(line);
+      continue;
+    }
+    const runs = line.runs.map((run) => ({ ...run }));
+    if (runs[0]) runs[0].text = runs[0].text.replace(/^\s+/, "");
+    out[out.length - 1] = {
+      ...prev,
+      end: line.end,
+      runs: [
+        ...prev.runs,
+        ...(how === "space"
+          ? [
+              {
+                text: " ",
+                style: { fg: DEFAULT_COLOR, bg: DEFAULT_COLOR, flags: 0 },
+              },
+            ]
+          : []),
+        ...runs.filter((run) => run.text.length > 0),
+      ],
+    };
+  }
+  return out;
+}
+
+/** y 行目を含む段落 (readParagraphs の 1 行) の先頭の行。 */
+export function paragraphStart(
+  buffer: XtermBuffer,
+  y: number,
+  cols: number,
+): number {
+  const widthAt = wrapWidths(buffer, cols);
+  let start = logicalLineStart(buffer, y);
+  while (start > 0) {
+    const prevStart = logicalLineStart(buffer, start - 1);
+    if (!continuation(buffer, prevStart, start, start, widthAt)) break;
+    start = prevStart;
+  }
+  return start;
 }
 
 /** y 行目を含む行の先頭 (折り返しの続きなら、さかのぼった最初の行)。 */

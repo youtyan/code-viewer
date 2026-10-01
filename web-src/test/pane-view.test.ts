@@ -163,6 +163,165 @@ describe("流しから届いた画面", () => {
     await vi.waitFor(() => expect(shownText()).toEqual(["first", "next"]));
   });
 
+  // 最初は後ろの 600 行だけを描く。上端で止まったら、押さなくても前を足す
+  // (「前の出力」を押さないと履歴が読めなかった)。動いている間は足さない
+  // (足すと iOS の慣性のスクロールが止まって跳ぶ)。
+  test("上端で止まると、前の出力を足す", async () => {
+    const lines = Array.from(
+      { length: 700 },
+      (_, index) => `line ${index + 1}`,
+    );
+    await openWith(lines.join("\n"));
+    const before = [shownText().length, shownText()[0]];
+    const body = view.el.querySelector<HTMLElement>(".pane-view-body");
+    if (!body) throw new Error("missing .pane-view-body");
+    body.scrollTop = 0;
+    body.dispatchEvent(new Event("scroll"));
+    const whileMoving = shownText().length;
+    await vi.waitFor(() => expect(shownText()).toHaveLength(700));
+    expect({
+      before,
+      whileMoving,
+      after: [shownText().length, shownText()[0]],
+      olderHidden:
+        view.el.querySelector<HTMLElement>(".pane-view-older")?.hidden,
+    }).toEqual({
+      before: [600, "line 101"],
+      whileMoving: 600,
+      after: [700, "line 1"],
+      olderHidden: true,
+    });
+  });
+
+  // Claude Code が作業中は印が 1 秒に何度も書き換わる。そのたびに全部の行を
+  // 描き直すと、スマホが固まった。書き換わるのは端末の画面の行だけ。
+  test("続きの出力では、確定した行 (端末の過去の行) を描き直さない", async () => {
+    const lines = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`);
+    await openWith(lines.join("\n"), { height: 5, cursorX: 7, cursorY: 4 });
+    const first = view.el.querySelector(".pane-line");
+    sources[0].emit("output", { data: "\r\nnext" });
+    await vi.waitFor(() =>
+      expect(shownText()[shownText().length - 1]).toBe("next"),
+    );
+    expect({
+      same: view.el.querySelector(".pane-line") === first,
+      count: shownText().length,
+      first: shownText()[0],
+    }).toEqual({ same: true, count: 31, first: "line 1" });
+  });
+
+  // 続きが届くたびに一番下へ寄せていたので、指でゆっくり上へ送ろうとすると
+  // 0.1 秒ほどで引き戻された。触れている間は寄せず、離したら続きを描く。
+  test("指で触れている間は、続きが来ても一番下へ引き戻さない", async () => {
+    await openWith("first", { cursorX: 5 });
+    const body = view.el.querySelector<HTMLElement>(".pane-view-body");
+    if (!body) throw new Error("missing .pane-view-body");
+    body.dispatchEvent(new Event("touchstart"));
+    sources[0].emit("output", { data: "\r\nnext" });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const whileTouching = shownText();
+    body.dispatchEvent(new Event("touchend"));
+    expect({ whileTouching, released: shownText() }).toEqual({
+      whileTouching: ["first"],
+      released: ["first", "next"],
+    });
+  });
+
+  // 下端から 32px までを一番下とみなしていたので、少しだけ上へ送って離すと
+  // 引き戻された。
+  test("一番下から少しでも上へ送ったら、続きが来ても引き戻さない", async () => {
+    await openWith("first", { cursorX: 5 });
+    const body = view.el.querySelector<HTMLElement>(".pane-view-body");
+    if (!body) throw new Error("missing .pane-view-body");
+    for (const [name, value] of [
+      ["scrollHeight", 1000],
+      ["clientHeight", 500],
+      ["scrollTop", 480],
+    ] as const)
+      Object.defineProperty(body, name, {
+        configurable: true,
+        writable: true,
+        value,
+      });
+    body.dispatchEvent(new Event("scroll"));
+    sources[0].emit("output", { data: "\r\nnext" });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect({
+      shown: shownText(),
+      latest: view.el.querySelector<HTMLElement>(".pane-view-latest")?.hidden,
+      scrollTop: body.scrollTop,
+    }).toEqual({ shown: ["first"], latest: false, scrollTop: 480 });
+  });
+
+  // 描く範囲 (後ろの 600 行) の先頭が段落の続きの行に当たっても、段落の頭から
+  // 描く (続きだけが 1 行目に出て、前の出力を足すとそこで文が切れた)。
+  test("描く範囲の先頭が段落の続きなら、段落の頭から描く", async () => {
+    const lines = [
+      ...Array.from({ length: 98 }, (_, index) => `l${index}`),
+      "",
+      "  hello world this",
+      "  wraps here",
+      ...Array.from({ length: 599 }, (_, index) => `m${index}`),
+    ];
+    await openWith(lines.join("\n"), { width: 20 });
+    expect(shownText()[0]).toBe("  hello world this wraps here");
+  });
+
+  test("画面と過去の行を消したら、消えた行を出さない", async () => {
+    const lines = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`);
+    await openWith(lines.join("\n"), { height: 5, cursorX: 7, cursorY: 4 });
+    sources[0].emit("output", { data: "\x1b[2J\x1b[3J\x1b[Hfresh" });
+    await vi.waitFor(() => expect(shownText()).toEqual(["fresh"]));
+  });
+
+  // 読む画面の長い中身が隠れて箱が短くなっても、iPhone の Safari はスクロールの
+  // 位置を戻さず、何も無い所を映して真っ黒になった。
+  test("端末 (別画面) に切り替えたら、本文の箱を一番上から出す", async () => {
+    await openWith("ready", { alternate: true });
+    const body = view.el.querySelector<HTMLElement>(".pane-view-body");
+    if (!body) throw new Error("missing .pane-view-body");
+    Object.defineProperty(body, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 5000,
+    });
+    view.el
+      .querySelector<HTMLButtonElement>('.pane-view-mode [data-mode="screen"]')
+      ?.click();
+    expect(body.scrollTop).toBe(0);
+  });
+
+  // 端末だけでは、高さの低いペイン (PC で 7 行) は入力欄と状態の数行しか見えず、
+  // 過去の行も読めなかった。通常の画面は読む画面と同じ行を PC の桁で折り返して
+  // 出し、別画面 (vim など全画面のアプリ) だけ端末を出す。
+  test.each([
+    {
+      name: "通常の画面は、PC の桁で折り返した文 (過去の行も読める)",
+      extra: { height: 5, cursorX: 7, cursorY: 4 },
+      expected: { read: true, grid: true, terminal: false, lines: 30 },
+    },
+    {
+      name: "別画面 (vim など) は端末",
+      extra: { alternate: true },
+      expected: { read: false, grid: false, terminal: true, lines: 30 },
+    },
+  ])("画面: $name", async ({ extra, expected }) => {
+    const lines = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`);
+    await openWith(lines.join("\n"), extra);
+    view.el
+      .querySelector<HTMLButtonElement>('.pane-view-mode [data-mode="screen"]')
+      ?.click();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const read = view.el.querySelector<HTMLElement>(".pane-view-read");
+    const screen = view.el.querySelector<HTMLElement>(".pane-view-screen");
+    expect({
+      read: read?.hidden === false,
+      grid: read?.classList.contains("is-grid"),
+      terminal: screen?.hidden === false,
+      lines: shownText().length,
+    }).toEqual(expected);
+  });
+
   test("閉じた後に届いた知らせは描かない", async () => {
     await openWith("first");
     view.handlePopState();
@@ -173,6 +332,76 @@ describe("流しから届いた画面", () => {
       [],
       true,
     ]);
+  });
+});
+
+// 電話から写真・スクショを渡す。PC のターミナルに貼ったときと同じ場所に保存して
+// もらい、パスを返事の欄に足す (文を書き足してから送れるよう、送らない)。
+describe("画像の添付", () => {
+  function pick(files: File[]): void {
+    const picker = view.el.querySelector<HTMLInputElement>(".pane-view-picker");
+    if (!picker) throw new Error("missing .pane-view-picker");
+    Object.defineProperty(picker, "files", {
+      configurable: true,
+      value: files,
+    });
+    picker.dispatchEvent(new Event("change"));
+  }
+  const field = () => {
+    const input =
+      view.el.querySelector<HTMLTextAreaElement>(".pane-view-input");
+    if (!input) throw new Error("missing .pane-view-input");
+    return input;
+  };
+  const statusText = () =>
+    view.el.querySelector(".pane-view-status")?.textContent ?? "";
+
+  test("選んだ画像を保存してもらい、そのパスを返事の欄の後ろに足す", async () => {
+    await openWith("ready");
+    field().value = "これを見て";
+    reply = () =>
+      new Response(
+        JSON.stringify({
+          path: "/repo/.code-viewer/pasted/pasted-image-1.png",
+          relativePath: ".code-viewer/pasted/pasted-image-1.png",
+          name: "pasted-image-1.png",
+          bytes: 3,
+        }),
+      );
+    pick([
+      new File([new Uint8Array([1, 2, 3])], "photo.png", { type: "image/png" }),
+    ]);
+    await vi.waitFor(() =>
+      expect(field().value).toBe(
+        "これを見て '/repo/.code-viewer/pasted/pasted-image-1.png' ",
+      ),
+    );
+    expect(posted).toEqual([{ mime: "image/png", data: "AQID" }]);
+  });
+
+  test.each([
+    {
+      name: "受け付けない種類は送らずに理由を出す",
+      file: () => new File(["x"], "notes.pdf", { type: "application/pdf" }),
+      answer: () => new Response("{}"),
+      expected: { status: "notes.pdf", posted: 0 },
+    },
+    {
+      name: "保存できなかったら理由を出す",
+      file: () =>
+        new File([new Uint8Array([1])], "big.png", { type: "image/png" }),
+      answer: () => new Response("image too large", { status: 400 }),
+      expected: { status: "image too large", posted: 1 },
+    },
+  ])("$name", async ({ file, answer, expected }) => {
+    await openWith("ready");
+    reply = answer;
+    pick([file()]);
+    await vi.waitFor(() => expect(statusText()).toContain(expected.status));
+    expect({ field: field().value, posted: posted.length }).toEqual({
+      field: "",
+      posted: expected.posted,
+    });
   });
 });
 
@@ -293,5 +522,26 @@ describe("終わり", () => {
       view.el.hidden,
       onClose.mock.calls,
     ]).toEqual([1, false, true, true, [["%3"]]]);
+  });
+
+  // 引き出し・＋のメニューから開いたペインは、戻るでその場所へ戻す (戻った先が
+  // 開く前と違う画面だった)。
+  test.each([
+    {
+      name: "戻るのボタン",
+      act: () => {
+        view.el.querySelector<HTMLButtonElement>(".pane-view-back")?.click();
+        view.handlePopState();
+      },
+      expected: 1,
+    },
+    { name: "ブラウザの戻る", act: () => view.handlePopState(), expected: 1 },
+    { name: "別のペインへ開き直した", act: () => view.open("%4"), expected: 0 },
+  ])("開いた場所へ戻す: $name", ({ act, expected }) => {
+    vi.spyOn(history, "back").mockImplementation(() => undefined);
+    const reopen = vi.fn();
+    view.open("%3", reopen);
+    act();
+    expect(reopen).toHaveBeenCalledTimes(expected);
   });
 });
