@@ -453,7 +453,7 @@ Requires Node.js 20 or newer. Development uses
 5. When something does not work, `code-viewer doctor` lists what is missing
    (git, tmux, an old code-viewer still running, …) and how to fix it.
 
-### On a phone
+### Phone controls
 
 In a window 640px wide or less (or a phone turned sideways) the layout is
 reduced to three tasks: checking agents and answering one that needs input,
@@ -1505,3 +1505,41 @@ npm pack --dry-run
 
 MIT. Third-party licenses for bundled browser assets are included under
 `web/vendor/*`.
+
+## 外出先から接続する
+
+Cloudflareの名前付きTunnelとAccessで、自分のMac上のcode-viewerに接続できます。
+使うサービスはCloudflare Tunnel（Macへの接続）、Cloudflare Access（ログインと利用者の制限）、
+Cloudflare DNS（公開URLのドメイン管理）です。TunnelとAccessはZero Trustの管理画面で設定し、
+Macでは接続用ソフトのcloudflaredを動かします。
+アプリのヘルプ →「外出先から接続する」に、Cloudflareの設定画面のキャプチャを添えた8つの初回手順があります。接続後の使い方は「スマホでの操作」にまとめています。
+冒頭の構成図で、スマホ・Cloudflare・Macのつながりと、Macで動かす2つのソフトを確認できます。
+Cloudflareで開く画面、入力例、Team domain・AUDのコピー元、Macでのファイル作成と保存、
+接続できたかの確認まで、各項目を開いて順に操作できます。設定後の起動・停止と、
+DNS・ログイン・Tunnelのエラー別の確認方法も載せています。
+
+1. Cloudflare Accessで公開ホスト名全体を保護し、自分のメールだけを許可します。
+2. 次の設定例を自分の値に置き換え、`~/.config/code-viewer/remote-access.json` に保存します。
+
+```json
+{
+  "port": 64161,
+  "origin": "https://viewer.example.com",
+  "teamDomain": "example.cloudflareaccess.com",
+  "audience": "<Access application AUD>"
+}
+```
+
+3. 起動済みの入口を止め、`code-viewer --remote-access ~/.config/code-viewer/remote-access.json` で起動します。
+   開発版は `pnpm dev --remote-access ~/.config/code-viewer/remote-access.json`。`--standalone` は使いません。
+4. Tunnelの接続先は `http://127.0.0.1:64161`。HTTP Host Headerは公開ホスト名に合わせ、
+   Protect with AccessにTeam名とAUDを設定します。公開ホストのキャッシュはBypassにします。
+5. スマホで公開HTTPS URLを開いてログインします。未ログイン・別アカウントで画面とAPIに入れないことも確認します。
+
+通常のローカルポートやプロジェクトのポートはTunnelへ接続しません。設定ファイルにTunnelトークンは不要です。
+Macは起動したままにします。切断してもMac上の作業は続き、送信に失敗した操作は自動再送しません。
+外部接続を止めるには専用のconnectorを停止します。Quick TunnelはSSE非対応のため使えません。
+
+公式手順: [Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)、
+[Tunnel](https://developers.cloudflare.com/tunnel/get-started/)、
+[接続先の設定](https://developers.cloudflare.com/tunnel/reference/origin-parameters/)。

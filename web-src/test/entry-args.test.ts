@@ -31,6 +31,7 @@ describe("parseEntryArgs", () => {
     [
       [],
       {
+        remoteAccess: null,
         port: 0,
         idleStopSeconds: 600,
         cwd: null,
@@ -42,6 +43,7 @@ describe("parseEntryArgs", () => {
     [
       ["--port", "64620", "--cwd", "/work/sample", "--open"],
       {
+        remoteAccess: null,
         port: 64620,
         idleStopSeconds: 600,
         cwd: "/work/sample",
@@ -53,6 +55,7 @@ describe("parseEntryArgs", () => {
     [
       ["--bin", "git=/usr/bin/git", "--staged", "--scope-omit-dir", "vendor"],
       {
+        remoteAccess: null,
         port: 0,
         idleStopSeconds: 600,
         cwd: null,
@@ -64,6 +67,7 @@ describe("parseEntryArgs", () => {
     [
       ["--allow-upload"],
       {
+        remoteAccess: null,
         port: 0,
         idleStopSeconds: 600,
         cwd: null,
@@ -75,6 +79,7 @@ describe("parseEntryArgs", () => {
     [
       ["--idle-stop", "0"],
       {
+        remoteAccess: null,
         port: 0,
         idleStopSeconds: 0,
         cwd: null,
@@ -86,6 +91,7 @@ describe("parseEntryArgs", () => {
     [
       ["--idle-stop", "5"],
       {
+        remoteAccess: null,
         port: 0,
         idleStopSeconds: 5,
         cwd: null,
@@ -97,6 +103,7 @@ describe("parseEntryArgs", () => {
     [
       ["--idle-stop", "0.5"],
       {
+        remoteAccess: null,
         port: 0,
         idleStopSeconds: 0.5,
         cwd: null,
@@ -109,7 +116,17 @@ describe("parseEntryArgs", () => {
     expect(parseEntryArgs(argv)).toEqual({ ok: true, args: expected });
   });
 
+  test("keeps remote config on the entry, not its project process", () => {
+    expect(
+      parseEntryArgs(["--remote-access", "/config/remote.json"]),
+    ).toMatchObject({
+      ok: true,
+      args: { remoteAccess: "/config/remote.json", backendArgs: [] },
+    });
+  });
+
   test.each([
+    [["--remote-access"], "--remote-access requires a JSON config file"],
     [["--port"], "--port requires a TCP port number"],
     [["--port", "70000"], "--port requires a TCP port number"],
     [["--cwd"], "--cwd requires a value"],

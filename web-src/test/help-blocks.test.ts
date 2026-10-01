@@ -11,6 +11,7 @@ import {
   test,
   vi,
 } from "vitest";
+import * as shiki from "../core/shiki-loader";
 import {
   type HelpText,
   helpBlocks,
@@ -20,11 +21,19 @@ import {
 } from "../views/help-blocks";
 import { helpFigure } from "../views/help-images";
 
-beforeAll(() => {
+vi.mock("../core/lazy-bundle", () => ({
+  createBundleLoader: () => () => import("../shiki-entry"),
+}));
+
+beforeAll(async () => {
   GlobalRegistrator.register({
     url: "http://localhost/",
     // クリックをブラウザへ渡すことを確認し、リンク先の通信は行わない。
     settings: { navigation: { disableChildPageNavigation: true } },
+  });
+  await shiki.loadShikiHighlighter({
+    langs: ["bash", "json"],
+    failureMode: "throw",
   });
 });
 afterAll(() => {
@@ -275,6 +284,72 @@ describe("a note", () => {
 });
 
 describe("a command", () => {
+  test.each([
+    { name: "shell", language: "bash", text: 'echo "<sample>"\nexit 0' },
+    {
+      name: "JSON",
+      language: "json",
+      text: '{"value": "<sample>", "port": 1234}',
+    },
+  ] as const)("highlights $name without changing the code or copy", async ({
+    language,
+    text,
+  }) => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const block = helpBlocks("en").command(text, undefined, language);
+    await vi.waitFor(() =>
+      expect(block.querySelector("code span[style]")).not.toBeNull(),
+    );
+    expect(block.querySelector("code")?.textContent).toBe(text);
+    expect(block.querySelector("sample")).toBeNull();
+    block.querySelector<HTMLButtonElement>("button")?.click();
+    expect(writeText.mock.calls).toEqual([[text]]);
+  });
+
+  test.each([
+    {
+      name: "bundle load",
+      result: () => Promise.reject(new Error("sample load failure")),
+      reason: "sample load failure",
+    },
+    {
+      name: "code render",
+      result: () =>
+        Promise.resolve({
+          codeToHtml: () => {
+            throw new Error("sample render failure");
+          },
+        }),
+      reason: "sample render failure",
+    },
+    {
+      name: "missing HTML",
+      result: () => Promise.resolve({ codeToHtml: () => "" }),
+      reason: "No highlighted HTML",
+    },
+  ])("a failed $name keeps the code and reports the reason", async ({
+    result,
+    reason,
+  }) => {
+    vi.spyOn(shiki, "loadShikiHighlighter").mockImplementationOnce(result);
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const block = helpBlocks("en").command('echo "sample"');
+    await vi.waitFor(() =>
+      expect(
+        block.querySelector("pre")?.classList.contains("gdp-highlight-failed"),
+      ).toBe(true),
+    );
+    expect(block.querySelector("code")?.textContent).toBe('echo "sample"');
+    expect(block.querySelector("pre")?.title).toContain(reason);
+    expect(errors.mock.calls).toEqual([[expect.any(Error)]]);
+  });
+
   test("shows the command with an optional title", () => {
     const blocks = helpBlocks("en");
     expect([
@@ -339,36 +414,42 @@ describe("a command", () => {
   });
 });
 
-describe("folded details", () => {
+describe("visible subsections", () => {
   test.each([
     {
-      name: "en default summary",
+      name: "en default heading",
       lang: "en",
-      summary: undefined,
-      expected: "More details",
+      title: undefined,
+      expected: "Additional notes",
     },
     {
-      name: "ja default summary",
+      name: "ja default heading",
       lang: "ja",
-      summary: undefined,
-      expected: "詳しく",
+      title: undefined,
+      expected: "補足",
     },
     {
-      name: "a given summary",
+      name: "a given heading",
       lang: "en",
-      summary: "How it works",
+      title: "How it works",
       expected: "How it works",
     },
-  ] as const)("$name", ({ lang, summary, expected }) => {
+  ] as const)("$name", ({ lang, title, expected }) => {
     const blocks = helpBlocks(lang);
-    const box = blocks.details([blocks.paragraph("Inside.")], summary);
+    const box = blocks.subsection([blocks.paragraph("Inside.")], title);
     expect({
-      open: box.open,
-      summary: box.querySelector("summary")?.textContent,
+      tag: box.tagName,
+      heading: box.querySelector("h4")?.textContent,
+      disclosures: box.querySelectorAll("details, summary").length,
       body: shape([
-        ...(box.querySelector(".gdp-help-details-body")?.children ?? []),
+        ...(box.querySelector(".gdp-help-subsection-body")?.children ?? []),
       ]),
-    }).toEqual({ open: false, summary: expected, body: ["p:Inside."] });
+    }).toEqual({
+      tag: "SECTION",
+      heading: expected,
+      disclosures: 0,
+      body: ["p:Inside."],
+    });
   });
 });
 

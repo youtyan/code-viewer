@@ -24296,10 +24296,13 @@ body.gdp-help-page #content {
    階層は ページの見出し > 分類・節の見出し > 群の見出し > 本文 > 補足 を、大きさ・
    太さ・色の濃さで分ける。本文は本来の文字色 (薄い灰色にしない)。一段薄い
    --color-text-2 は補足 (要約・説明・注記) だけ。まとまりは余白で分ける: 中は詰め、
-   まとまりの間は --space-7 (枠や面では囲まない)。1 行の長さは --doc-measure
-   (英語 70 字前後・日本語 40 字前後。em / ch なので文字の大きさに比例する)。
+   まとまりの間は --space-7 (枠や面では囲まない)。幅は --doc-measure で決め、
+   ヘルプは本文欄いっぱい、設定の説明は英語 70 字前後・日本語 40 字前後まで。
    強調色 (--color-accent) は押せるもの (リンク・ボタン) と目次の選択だけ。 */
 .gdp-help-shell {
+  /* 画像の通常表示の上限。広い本文や表示密度でも巨大化させない。 */
+  --help-figure-max-w: 800px;
+  --help-figure-max-h: 600px;
   --doc-measure: 68ch;
   --doc-line-height: 1.75;
   --help-step-mark: calc(var(--space-unit) * 7);
@@ -24307,6 +24310,9 @@ body.gdp-help-page #content {
 }
 .gdp-help-shell[lang="ja"] {
   --doc-measure: 40em;
+}
+.gdp-help-shell[data-page="help"] {
+  --doc-measure: 100%;
 }
 .gdp-help-content {
   color: var(--color-text);
@@ -24344,7 +24350,7 @@ body.gdp-help-page #content {
 .gdp-help-list,
 .gdp-help-table,
 .gdp-help-note,
-.gdp-help-details,
+.gdp-help-subsection,
 .gdp-help-command {
   max-width: var(--doc-measure);
 }
@@ -24440,11 +24446,12 @@ body.gdp-help-page #content {
   color: var(--color-text-2);
   font-size: var(--ui-font-lg);
 }
-/* 画面のキャプチャ (views/help-images.ts)。本文の幅まで。押すと大きく開く
+/* 画面のキャプチャ (views/help-images.ts)。本文とは別に表示サイズを制限。押すと大きく開く
    (views/terminal/image-lightbox.ts)。 */
 .gdp-help-figure {
   display: block;
-  max-width: min(100%, var(--doc-measure));
+  width: fit-content;
+  max-width: min(100%, var(--help-figure-max-w));
   margin: var(--space-3) 0 var(--space-5);
   overflow: hidden;
   border: 1px solid var(--color-line);
@@ -24461,8 +24468,10 @@ body.gdp-help-page #content {
 }
 .gdp-help-figure img {
   display: block;
-  width: 100%;
+  width: auto;
   height: auto;
+  max-width: 100%;
+  max-height: var(--help-figure-max-h);
 }
 .gdp-help-steps > li > .gdp-help-figure {
   margin: var(--space-2) 0 var(--space-3);
@@ -24499,6 +24508,9 @@ body.gdp-help-page #content {
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.gdp-help-command span[style] {
+  color: var(--shiki-light);
 }
 .gdp-help-command-copy {
   position: absolute;
@@ -24563,40 +24575,18 @@ body.gdp-help-page #content {
 .gdp-help-note-body > p + p {
   margin-top: var(--space-2);
 }
-/* 畳める「詳しく」。開くと左の線の内側に中身。 */
-.gdp-help-details {
-  margin: var(--space-5) 0 var(--space-4);
+/* 小節と補足は、見出しも本文も常に表示する。 */
+.gdp-help-subsection {
+  margin: var(--space-6) 0 var(--space-4);
 }
-.gdp-help-details > summary {
-  width: fit-content;
+.gdp-help-subsection > h4 {
+  margin: 0 0 var(--space-3);
   color: var(--color-text);
+  font-size: var(--ui-font-lg);
   font-weight: 600;
-  list-style: none;
-  cursor: pointer;
+  line-height: 1.4;
 }
-.gdp-help-details > summary::-webkit-details-marker {
-  display: none;
-}
-.gdp-help-details > summary::before {
-  content: "";
-  display: inline-block;
-  width: 0.45em;
-  height: 0.45em;
-  margin: 0 var(--space-2) 0.15em var(--space-1);
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(-45deg);
-}
-.gdp-help-details[open] > summary::before {
-  transform: rotate(45deg);
-}
-.gdp-help-details > summary:focus-visible {
-  outline: none;
-  border-radius: var(--radius-sm);
-  box-shadow: var(--focus-ring);
-}
-.gdp-help-details-body {
-  margin-top: var(--space-3);
+.gdp-help-subsection-body {
   padding-left: var(--space-4);
   border-left: 2px solid var(--color-line);
 }

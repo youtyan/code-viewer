@@ -466,6 +466,13 @@ export function createTerminalScreen(
 
   function enqueueInput(data: string, claim = true): void {
     if (!inputEnabled || !attached || disposed || data.length === 0) return;
+    if (
+      window.location.protocol === "https:" &&
+      source?.readyState !== EventSource.OPEN
+    ) {
+      showStatus(deps.getText().connecting);
+      return;
+    }
     pendingClaim ||= claim;
     hasOperated ||= claim;
     pendingInput += data;
@@ -560,6 +567,14 @@ export function createTerminalScreen(
 
   async function flushInput(): Promise<void> {
     if (sending || !pendingInput || !attached || disposed) return;
+    if (
+      window.location.protocol === "https:" &&
+      source?.readyState !== EventSource.OPEN
+    ) {
+      pendingInput = "";
+      showStatus(deps.getText().sendFailed);
+      return;
+    }
     sending = true;
     const target = attached;
     const myGen = generation;
@@ -1716,6 +1731,9 @@ export function createTerminalScreen(
     source = stream;
 
     const stale = () => disposed || myGen !== generation;
+    stream.addEventListener("open", () => {
+      if (!stale()) showStatus("");
+    });
 
     stream.addEventListener("output", (event) => {
       if (stale() || !term) return;
@@ -1773,8 +1791,32 @@ export function createTerminalScreen(
     stream.onerror = () => {
       // EventSource は自動で繋ぎ直す。落ちたままなら状態表示だけ残す。
       if (stale()) return;
+      showStatus(deps.getText().connecting);
       if (stream.readyState === EventSource.CLOSED) {
         showStatus(deps.getText().screenFailed);
+        if (window.location.protocol === "https:") {
+          void deps
+            .trackLoad(fetch(apiUrl("settings")))
+            .then(async (response) => {
+              if (!response.ok)
+                throw new Error(
+                  await responseErrorMessage(
+                    response,
+                    "remote connection check",
+                  ),
+                );
+            })
+            .catch((error: unknown) => {
+              console.error(
+                "[code-viewer] remote connection check failed",
+                error,
+              );
+              if (!stale())
+                showStatus(
+                  `${deps.getText().screenFailed}\n${formatErrorDetail(error)}`,
+                );
+            });
+        }
       }
     };
   }

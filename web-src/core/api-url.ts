@@ -217,6 +217,7 @@ export function apiUrl(endpoint: ApiEndpoint): string {
 
 /** サーバが返した URL (`http://…/p/<鍵>/`) のプロジェクトの鍵。無ければ null。 */
 export function projectKeyOfServerUrl(url: string): string | null {
+  if (/^\/p\/[0-9a-f]{16}\/$/.test(url)) return projectKey(url);
   let pathname: string;
   try {
     pathname = new URL(url).pathname;
@@ -276,6 +277,19 @@ export function projectRequest(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): { input: RequestInfo | URL; init?: RequestInit } {
+  if (typeof location !== "undefined" && location.protocol === "https:") {
+    const url = new URL(
+      input instanceof Request ? input.url : String(input),
+      location.href,
+    );
+    if (url.origin === location.origin) {
+      const headers = new Headers(
+        init?.headers ?? (input instanceof Request ? input.headers : undefined),
+      );
+      headers.set("X-Requested-With", "XMLHttpRequest");
+      init = { ...init, headers };
+    }
+  }
   const key = projectKey();
   if (!key || typeof input !== "string") return { input, init };
   if (!input.startsWith("/") || input.startsWith("//")) return { input, init };

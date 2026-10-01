@@ -352,6 +352,7 @@ import {
 } from "./views/projects/project-switcher";
 import { createQuickHelp } from "./views/quick-help";
 import { createRefPicker } from "./views/ref-picker";
+import { createRemoteAccessNotice } from "./views/remote-access";
 import { createRepoView } from "./views/repo-view";
 import { createRepositoryWebLink } from "./views/repository-web-link";
 import {
@@ -508,11 +509,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     reload: () => window.location.reload(),
     reportError: reportPersistenceError,
   });
+  const inspectRemoteAccess = createRemoteAccessNotice(
+    () => STATE.language,
+    reportPersistenceError,
+  );
   const NETWORK_ACTIVITY = createNetworkActivityTracker({
     onChange: updateNetworkActivity,
     // 入口のサーバの下の画面では、前置きとプロジェクトの鍵を足す。
     prepareRequest: projectRequest,
-    onResponse: (response) => BACKEND_STATE.inspect(response),
+    onResponse: (response) => {
+      inspectRemoteAccess(response);
+      BACKEND_STATE.inspect(response);
+    },
   });
   NETWORK_ACTIVITY.installFetch(window);
   // 入口のサーバの下の画面では、index.html に書いた画面のリンクにも前置きを

@@ -1,6 +1,7 @@
-// ヘルプのページに添える画面のキャプチャ。画像は web/help-images/ に言語ごとに
+// ヘルプのページに添える画面のキャプチャと構成図。画像は web/help-images/ に言語ごとに
 // 1 枚ずつあり (<名前>.<言語>.webp)、サーバが /help-images/ で配る
-// (server/static-files.ts)。撮り直すのは scripts/help-captures.mjs。
+// (server/static-files.ts)。アプリの撮り直しは scripts/help-captures.mjs。
+// remote-* はCloudflareの未保存の設定画面を、説明用の値で撮影したもの。
 
 import type { HelpLanguage } from "./help-page";
 
@@ -36,6 +37,10 @@ export const HELP_CAPTURES: ReadonlySet<string> = new Set([
   "project-register",
   "projects-menu",
   "quick-help",
+  "remote-access-hostname",
+  "remote-access-policy",
+  "remote-tunnel-route",
+  "remote-tunnel-options",
   "search-palette",
   "sidebar-no-tmux",
   "skill-install",

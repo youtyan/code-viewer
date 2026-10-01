@@ -1,6 +1,6 @@
 // ヘルプの本文 (日本語)。節の並びと名前は help-guides.ts、英語は help-text-en.ts。
 // 画面のボタン名は { ui } で、値は各画面の i18n から (w.l)。1 段落は 120 文字・
-// 1 節の本文は 600 文字まで (help-text-length.test.ts)。
+// 見出しごとの本文は 600 文字まで (help-text-length.test.ts)。
 
 import type { HelpText } from "./help-blocks";
 import type { HelpTexts, HelpWriter } from "./help-guides";
@@ -12,7 +12,7 @@ const ui = (label: string) => ({ ui: label });
 const code = (text: string) => ({ code: text });
 const key = (text: string) => ({ key: text });
 const more = (...items: HelpText[]): HelpBlock => ({
-  kind: "details",
+  kind: "subsection",
   blocks: [{ kind: "list", items }],
 });
 
@@ -1454,9 +1454,10 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
       ],
     },
     phone: {
-      title: "SP で使う",
+      title: "スマホでの操作",
       intro:
-        "幅の狭い画面では、エージェントへの返事・差分とファイルを読む・プロジェクトの切り替えの 3 つに絞った形になります。",
+        "接続後にスマホでできる操作を説明します。エージェントへの返事、差分・ファイルの閲覧、プロジェクトの切り替えができます。",
+      lead: [w.see("remote-access")],
       groups: [
         {
           title: "できること",
@@ -1491,7 +1492,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               kind: "figure",
               figure: fig(
                 "phone-screen",
-                "SP の画面。下端に画面を切り替える帯があります。",
+                "スマホの画面。下端に画面を切り替える帯があります。",
               ),
             },
             more(
@@ -1502,6 +1503,598 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               ],
               "ターミナルの上で 2 本の指を広げる・狭めると、文字の大きさが変わります。",
             ),
+          ],
+        },
+      ],
+    },
+    "remote-access": {
+      title: "外出先から接続する",
+      intro:
+        "外出先からMacのcode-viewerを開くための接続設定です。Macで設定し、最後にスマホで確認します。",
+      groups: [
+        {
+          title: "使うCloudflareのサービス",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                [
+                  {
+                    link: "Cloudflare Tunnel",
+                    href: "https://developers.cloudflare.com/tunnel/",
+                  },
+                  "：公開URLからMacのcode-viewerへ接続します。Freeプランで無料です。",
+                ],
+                [
+                  {
+                    link: "Cloudflare Access",
+                    href: "https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/",
+                  },
+                  "：ログインを求め、許可した自分のメールだけが使えます。Freeプランは50ユーザーまで無料です。",
+                ],
+                [
+                  {
+                    link: "Cloudflare DNS",
+                    href: "https://developers.cloudflare.com/dns/",
+                  },
+                  "：DNSレコードを管理し、公開URLをTunnelに結び付けます。Freeプランで無料です。",
+                ],
+              ],
+            },
+            {
+              kind: "paragraph",
+              text: "自分1人で使うこの手順では、Cloudflareのサービスは無料プランで使えます。ドメインの取得・更新料金は別途かかり、購入先や種類で変わります。",
+            },
+            {
+              kind: "paragraph",
+              text: [
+                "料金の確認：",
+                {
+                  link: "Zero Trustの料金",
+                  href: "https://www.cloudflare.com/plans/zero-trust-services/",
+                },
+                "・",
+                {
+                  link: "DNSの料金",
+                  href: "https://developers.cloudflare.com/dns/faq/",
+                },
+                "・",
+                {
+                  link: "ドメインの取得・更新",
+                  href: "https://www.cloudflare.com/products/registrar/",
+                },
+                "（2026年10月1日確認）。",
+              ],
+            },
+            {
+              kind: "paragraph",
+              text: "Accessは「Zero Trust」、Tunnelはアカウント画面の「ネットワーク」→「Tunnels」で設定します。Macでは接続ソフトcloudflaredを動かします。",
+            },
+            {
+              kind: "paragraph",
+              text: "接続経路：スマホ → Access → Tunnel → Mac。キャプチャは説明用の値を入力した実画面です。",
+            },
+            {
+              kind: "paragraph",
+              text: "設定済みなら「毎回の起動・停止」へ。初回は1〜8を順に進めます。",
+            },
+          ],
+        },
+        {
+          title: "始める前に用意するもの",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                "code-viewerが動くMac、Cloudflareのアカウント、自分のドメイン（DNSはCloudflareで管理）が必要です。",
+                "viewer.example.com は説明用です。自分のドメインに置き換えてください。",
+                "Macはインターネットにつなぎ、起動したままにします。",
+              ],
+            },
+          ],
+        },
+        {
+          title: "初回設定 — 上から順に進める",
+          blocks: [
+            {
+              kind: "subsection",
+              title: "1. スマホで開くURLを決める",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "Cloudflareの管理画面をMacのブラウザで開きます。「ドメイン」で自分のドメインが「アクティブ」になっていることを確認してください。",
+                },
+                {
+                  kind: "paragraph",
+                  text: "自分のドメインが example.com なら、未使用の viewer.example.com を接続先にできます。viewer の部分は好きな名前に変えられます。",
+                },
+                {
+                  kind: "table",
+                  head: ["この手順での呼び方", "入力例"],
+                  rows: [
+                    ["ドメイン", "example.com"],
+                    ["サブドメイン", "viewer"],
+                    ["ホスト名", "viewer.example.com"],
+                    ["公開URL", "https://viewer.example.com"],
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: "ドメインがまだない場合は、先に取得してCloudflareへ追加します。ネームサーバーを変更した直後は、接続先が反映されるまで時間がかかる場合があります。",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "2. 自分だけがログインできるようにする（Cloudflare）",
+              blocks: [
+                {
+                  kind: "steps",
+                  items: [
+                    {
+                      title: "Zero Trustを開く",
+                      text: "Cloudflareで「Zero Trust」を開き、チーム名とFreeプランを選びます。支払い情報を求められても、Freeプランでは請求されません。",
+                    },
+                    {
+                      title: "セルフホストのアプリを追加する",
+                      text: "左メニューの「Access コントロール」→「アプリケーション」で「新規アプリケーションを作成」を押します。「セルフホストとプライベートで続行」を選びます。",
+                    },
+                    {
+                      title: "宛先に、手順1のホスト名を入れる",
+                      text: "「サブドメイン」に viewer、「ドメイン」に自分のドメインを選び、パスは空欄にします。「カスタム入力に切り替える」なら viewer.example.com を1つの欄に入力できます。",
+                      figures: [
+                        fig(
+                          "remote-access-hostname",
+                          "Accessの宛先。カスタム入力で公開ホスト名を指定した例。",
+                        ),
+                      ],
+                    },
+                    {
+                      title: "自分のメールだけを許可する",
+                      text: "「Accessポリシー」で「新しいポリシーを作成」を押します。「含める」を「メール」にし、自分のメールを入力してEnterで確定します。",
+                      figures: [
+                        fig(
+                          "remote-access-policy",
+                          "許可ポリシーの「含める」ルール。メールを選び、自分のアドレスをEnterで確定します。",
+                        ),
+                      ],
+                    },
+                    {
+                      title: "ポリシーを保存してアプリに戻る",
+                      text: "「ポリシー名」は code-viewer-owner、「アクション」は「許可」にします。「ポリシーを保存」を押し、アプリにこのポリシーが付いたことを確認します。",
+                    },
+                    {
+                      title: "アプリの名前とログイン方法を確認する",
+                      text: "下の「詳細」で「名前」を code-viewer、「セッション期間」を6時間にします。「認証」では、許可したメールで使えるログイン方法を選びます。",
+                    },
+                    {
+                      title: "「作成」を押す",
+                      text: "アプリを作成します。一覧に code-viewer が表示され、code-viewer-owner が付いていれば完了です。",
+                    },
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: "「Everyone／全員」や「Bypass／バイパス」は選びません。例の user@example.com は自分のメールに置き換えます。",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "3. 設定に使う2つの値をコピーする（Cloudflare）",
+              blocks: [
+                {
+                  kind: "steps",
+                  items: [
+                    {
+                      title: "Team domainを控える",
+                      text: "Zero Trustの左下「設定」→「チーム名とドメイン」を開きます。your-team.cloudflareaccess.com のようなドメインを控え、手順4の teamDomain に入れます。",
+                    },
+                    {
+                      title: "アプリのAUDをコピーする",
+                      text: "「Access コントロール」→「アプリケーション」で code-viewer を開きます。「追加設定」の「アプリケーション オーディエンス（AUD）タグ」で「コピー」を押します。",
+                    },
+                    {
+                      title: "2つの値を手順4で使う",
+                      text: "Team domainは https:// を付けずに使い、AUDは64文字すべてを audience に貼り付けます。アプリIDやTunnelのトークンは使いません。",
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "4. 接続設定ファイルを作る（Macのターミナル）",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "Macの「ターミナル」で次のコマンドを実行します。保存用フォルダを作り、nanoという文字編集画面で新しい設定ファイルを開きます。",
+                },
+                {
+                  kind: "command",
+                  title: "設定ファイルを開く",
+                  command:
+                    "mkdir -p ~/.config/code-viewer\nnano ~/.config/code-viewer/remote-access.json",
+                },
+                {
+                  kind: "paragraph",
+                  text: "下の内容を貼り付け、origin・teamDomain・audienceの3つを自分の値に置き換えます。すでに設定が書かれている場合は、必要な項目だけを直してください。",
+                },
+                {
+                  kind: "command",
+                  title: "remote-access.json に保存する内容",
+                  language: "json",
+                  command:
+                    '{\n  "port": 64161,\n  "origin": "https://viewer.example.com",\n  "teamDomain": "your-team.cloudflareaccess.com",\n  "audience": "ここをコピーした64文字のAUDに置き換える"\n}',
+                },
+                {
+                  kind: "table",
+                  head: ["項目", "入れるもの"],
+                  rows: [
+                    ["port", "64161 のまま使う（通常の表示用ポートとは別）"],
+                    [
+                      "origin",
+                      "スマホで開く https:// から始まるURL。末尾に / を付けない",
+                    ],
+                    ["teamDomain", "手順3で控えた値。https:// は付けない"],
+                    ["audience", "手順3でコピーした64文字のAUD。引用符は残す"],
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: "保存はControl+O、Enterの順に押します。Control+Xで編集画面を閉じます（CommandキーではなくControlキーです）。",
+                },
+                {
+                  kind: "paragraph",
+                  text: "~ はMacのホームフォルダを表します。このファイルはプロジェクトの中に置かず、Tunnelトークンも書き込みません。",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "5. 設定ファイルを指定してcode-viewerを起動する（Mac）",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "すでにcode-viewerを動かしている場合は、そのターミナルでControl+Cを押して一度止めます。次の2つから、普段使っている起動方法を選びます。",
+                },
+                {
+                  kind: "command",
+                  title: "インストール済みのcode-viewerを使う場合",
+                  command:
+                    "code-viewer --remote-access ~/.config/code-viewer/remote-access.json",
+                },
+                {
+                  kind: "command",
+                  title:
+                    "このリポジトリで開発版を使う場合（リポジトリのフォルダで実行）",
+                  command:
+                    "pnpm dev --remote-access ~/.config/code-viewer/remote-access.json",
+                },
+                {
+                  kind: "paragraph",
+                  text: "開発版に --standalone は付けません。通常の「pnpm dev」だけで起動すると、スマホ用の接続は有効になりません。",
+                },
+                {
+                  kind: "paragraph",
+                  text: "起動ログに「code-viewer remote access」と「tunnel target http://127.0.0.1:64161」が出れば成功です。このターミナルは起動したままにします。",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "6. Tunnelを作り、Macから接続する",
+              blocks: [
+                {
+                  kind: "steps",
+                  items: [
+                    {
+                      title: "新しいTunnelを作る（Cloudflare）",
+                      text: "アカウント画面の「ネットワーク」→「Tunnels」で「トンネル作成」を押します。種類を選ぶ場合は cloudflared、名前は code-viewer にします。",
+                    },
+                    {
+                      title: "接続用ソフトを入れる（Mac）",
+                      text: "Tunnelの画面でOSにmacOSを選び、案内されるインストール手順を実行します。Homebrewが入っている場合は、下のコマンドでもインストールできます。",
+                    },
+                  ],
+                },
+                {
+                  kind: "command",
+                  title: "cloudflaredをインストールする",
+                  command: "brew install cloudflared",
+                },
+                {
+                  kind: "paragraph",
+                  text: "次はcode-viewerとは別のターミナルを開き、トークンを保存するファイルを作ります。これはMacをこのTunnelに接続するための秘密の値です。",
+                },
+                {
+                  kind: "command",
+                  title: "自分だけが読めるファイルを用意する",
+                  command:
+                    "umask 077\ntouch ~/.config/code-viewer/tunnel-token\nchmod 600 ~/.config/code-viewer/tunnel-token\nnano ~/.config/code-viewer/tunnel-token",
+                },
+                {
+                  kind: "paragraph",
+                  text: "Tunnel画面の接続コマンドをコピーし、末尾の長いトークン部分だけを1行で保存します。「--token」や「service install」などのコマンド部分は含めません。",
+                },
+                {
+                  kind: "paragraph",
+                  text: "Control+O、Enter、Control+Xで保存して閉じたら、次を実行します。トークンをチャットやリポジトリへ貼り付けないでください。",
+                },
+                {
+                  kind: "command",
+                  title: "Tunnelを接続する",
+                  command:
+                    "cloudflared tunnel run --token-file ~/.config/code-viewer/tunnel-token",
+                },
+                {
+                  kind: "paragraph",
+                  text: "「Registered tunnel connection」が出て、CloudflareのTunnel画面が「正常／Healthy」になれば接続できています。このターミナルも起動したままにします。",
+                },
+                {
+                  kind: "paragraph",
+                  text: "既存の別Tunnelがある場合も、この名前の新しいTunnelを使います。一時URLを作るQuick Tunnelは、ターミナル出力の通信に対応しないため使いません。",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "7-1. 公開URLのルートを追加する（Cloudflare）",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "作ったTunnelを開き、「ルートを追加」→「公開アプリケーション」を選びます。次の値を入力し、まだ保存せずに追加設定へ進みます。",
+                },
+                {
+                  kind: "figure",
+                  figure: fig(
+                    "remote-tunnel-route",
+                    "Tunnelの公開アプリケーション。サブドメインとサービスURLの入力例。ドメインは自分のものを選びます。",
+                  ),
+                },
+                {
+                  kind: "table",
+                  head: ["入力欄", "入力例"],
+                  rows: [
+                    ["サブドメイン", "viewer"],
+                    ["ドメイン", "example.com"],
+                    ["パス", "空欄"],
+                    ["サービスURL", "http://127.0.0.1:64161"],
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: "種類とURLが別々の欄の場合は、種類をHTTP、URLを127.0.0.1:64161にします。このアドレスはスマホで開くURLではなく、Mac上の接続先です。",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "7-2. 接続先をAccessで保護する",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "「追加アプリケーション設定」で「HTTP」と「Access」を開きます。下の4項目を設定してから「ルートを追加」を押し、一覧にホスト名が出ることを確認します。",
+                },
+                {
+                  kind: "figure",
+                  figure: fig(
+                    "remote-tunnel-options",
+                    "追加アプリケーション設定のAccess欄。Protect with Accessをオンにした例。Team nameとAUDは自分の値に置き換えます。",
+                  ),
+                },
+                {
+                  kind: "table",
+                  head: ["追加設定", "入力する値"],
+                  rows: [
+                    [
+                      "HTTP → HTTP Host ヘッダー",
+                      "viewer.example.com（https:// は付けない）",
+                    ],
+                    ["Access → Protect with Access", "オン"],
+                    [
+                      "Access → Team name",
+                      "your-team（.cloudflareaccess.com より前だけ）",
+                    ],
+                    [
+                      "Access → Application Audience (AUD) tag",
+                      "手順3のAUDを貼り付け、Enterで確定",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "7-3. キャッシュを無効にする",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "続いてアカウントの「ドメイン」から自分のドメインを開き、「ルール」でCache Ruleを作ります。この公開ホスト名だけを対象にします。",
+                },
+                {
+                  kind: "table",
+                  head: ["キャッシュルール", "設定"],
+                  rows: [
+                    ["ルール名", "code-viewer-no-cache"],
+                    [
+                      "一致条件",
+                      'カスタム式: (http.host eq "viewer.example.com")',
+                    ],
+                    ["キャッシュの適格性", "キャッシュをバイパスする"],
+                    ["ブラウザTTL", "設定を追加し、キャッシュをバイパスする"],
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: "「デプロイ」で有効にします。これで、操作画面やファイルの内容がキャッシュに残らない設定になります。",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "8. スマホでログインし、操作を確かめる",
+              blocks: [
+                {
+                  kind: "steps",
+                  items: [
+                    {
+                      title: "公開URLを開く",
+                      text: "スマホのSafariやChromeで https://viewer.example.com を開きます。Cloudflareのログイン画面が出たら、手順2で許可したメールのアカウントでログインします。",
+                    },
+                    {
+                      title: "Macと同じ内容が見えるか確認する",
+                      text: "プロジェクトを選び、ファイルや差分を開きます。エージェントの出力が更新されるかも確認してください。",
+                    },
+                    {
+                      title: "ログイン前には見えないことを確認する",
+                      text: "プライベートブラウズでも同じURLを開き、code-viewerの画面ではなくログイン画面が出ることを確認します。別のメールは許可されない設定にします。",
+                    },
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: "スマホへcode-viewerやcloudflaredをインストールする必要はありません。使い方は「スマホでの操作」を参照してください。",
+                },
+                w.see("phone"),
+              ],
+            },
+          ],
+        },
+        {
+          title: "毎回の起動・停止",
+          blocks: [
+            {
+              kind: "paragraph",
+              text: "初回設定が済めば、Macでcode-viewerとcloudflaredの2つを起動し、スマホで決めたURLを開くだけです。Cloudflareの設定を毎回作り直す必要はありません。",
+            },
+            {
+              kind: "subsection",
+              title: "起動コマンド・停止方法を確認する",
+              blocks: [
+                {
+                  kind: "command",
+                  title: "ターミナル1：開発版",
+                  command:
+                    "pnpm dev --remote-access ~/.config/code-viewer/remote-access.json",
+                },
+                {
+                  kind: "command",
+                  title: "ターミナル1：インストール版ならこちら",
+                  command:
+                    "code-viewer --remote-access ~/.config/code-viewer/remote-access.json",
+                },
+                {
+                  kind: "command",
+                  title: "ターミナル2：接続用ソフト",
+                  command:
+                    "cloudflared tunnel run --token-file ~/.config/code-viewer/tunnel-token",
+                },
+                {
+                  kind: "list",
+                  items: [
+                    "ターミナル1はどちらか一方だけを実行します。開発版はリポジトリのフォルダで実行してください。",
+                    "スマホからの接続だけを止めるには、cloudflaredを動かしたターミナル2でControl+Cを押します。Macのcode-viewerはそのまま使えます。",
+                    "この手順では自動起動は設定しません。Macの再起動後は2つとも起動し直し、サービスとして登録済みのcloudflaredを重ねて起動しないでください。",
+                    "Macがスリープ中・電源オフ・オフラインの間は接続できません。スマホの画面を閉じるだけなら、Mac側のエージェントの作業は続きます。",
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          title: "つながらないとき",
+          blocks: [
+            {
+              kind: "subsection",
+              title: "URLが開かない／Wi-Fiによって結果が違う",
+              blocks: [
+                {
+                  kind: "list",
+                  items: [
+                    "まずURLの綴りを確認し、スマホのWi-Fiを切って携帯回線で開きます。携帯回線だけで開く場合は、自宅側に古いDNS情報が残っている可能性があります。",
+                    "Cloudflareのドメインがアクティブか、Tunnelの公開ルートにホスト名があるかを確認します。変更直後はDNSの反映を待ってから試してください。",
+                  ],
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "ログインできない／401・403が出る",
+              blocks: [
+                {
+                  kind: "list",
+                  items: [
+                    "ログイン画面で拒否される場合は、許可ポリシーのメールと実際にログインしたメールを照合します。メールの入力後にEnterで確定して保存したかも確認してください。",
+                    "ログイン後も401なら、設定ファイルのteamDomain・audienceと、TunnelのTeam name・AUDを確認します。Macでcode-viewerを起動したターミナルのエラー全文も確認してください。",
+                    "403なら、originのURLとTunnelのHTTP Host Headerが同じホスト名かを確認します。認証が必要な設定をオフにして解決しようとしないでください。",
+                  ],
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "502／Tunnelが非アクティブ／接続先が見つからない",
+              blocks: [
+                {
+                  kind: "list",
+                  items: [
+                    "Tunnelが非アクティブなら、cloudflaredを起動したターミナルのエラーを確認します。別のTunnelのトークンを保存していないかも確認してください。",
+                    "Tunnelが正常でも502なら、code-viewerを --remote-access 付きで起動したか確認します。サービスURLのポートと設定ファイルのportをそろえてください。",
+                    "設定ファイルを直した後はcode-viewerを起動し直します。通常の表示用ポートをサービスURLに指定しても、スマホ用の認証付き接続にはなりません。",
+                  ],
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "途中で切れる／入力が送れない",
+              blocks: [
+                {
+                  kind: "list",
+                  items: [
+                    "ログイン期限が切れた場合は画面を開き直してログインします。スマホのロック解除や回線切替の後も、再接続が終わるまで待ってください。",
+                    "失敗した入力は自動で送り直しません。Mac側の出力を確認してから、必要な操作だけをもう一度行ってください。",
+                  ],
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "公式の説明を開く",
+              blocks: [
+                {
+                  kind: "list",
+                  items: [
+                    [
+                      {
+                        link: "Cloudflare Access",
+                        href: "https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/",
+                      },
+                    ],
+                    [
+                      {
+                        link: "Cloudflare Tunnel",
+                        href: "https://developers.cloudflare.com/tunnel/get-started/",
+                      },
+                    ],
+                    [
+                      {
+                        link: "HTTP Host Header / Protect with Access",
+                        href: "https://developers.cloudflare.com/tunnel/reference/origin-parameters/",
+                      },
+                    ],
+                    [
+                      {
+                        link: "Cache Rules",
+                        href: "https://developers.cloudflare.com/cache/how-to/cache-rules/",
+                      },
+                    ],
+                  ],
+                },
+              ],
+            },
           ],
         },
       ],

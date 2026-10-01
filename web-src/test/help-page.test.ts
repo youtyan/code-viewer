@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import {
   DEFAULT_KEY_BINDINGS,
   KEYMAP_SCOPES,
@@ -11,11 +11,13 @@ import {
 import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import type { InstallOffer, InstallOfferState } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
+import { loadShikiHighlighter } from "../core/shiki-loader";
 import { parseQueryArgs } from "../server/query-cli";
 import { staticFileSpec, WEB_ROOT } from "../server/static-files";
 import {
   type AppHelpLabels,
   HELP_SECTION_ALIASES,
+  HELP_SECTIONS,
   type HelpLabels,
   helpLabels,
 } from "../views/help-guides";
@@ -45,8 +47,16 @@ const HIDDEN_INSTALL_OFFER: InstallOffer = {
   onChange: () => undefined,
 };
 
-beforeAll(() => {
+vi.mock("../core/lazy-bundle", () => ({
+  createBundleLoader: () => () => import("../shiki-entry"),
+}));
+
+beforeAll(async () => {
   GlobalRegistrator.register();
+  await loadShikiHighlighter({
+    langs: ["bash", "json"],
+    failureMode: "throw",
+  });
 });
 
 afterAll(() => {
@@ -498,7 +508,8 @@ describe("help page", () => {
         "Terminal",
         "Tabs and layout",
         "Install as an app",
-        "On a phone",
+        "Phone controls",
+        "Connect from outside",
         "Datastores",
         "Tools",
         "AI annotations",
@@ -527,7 +538,8 @@ describe("help page", () => {
         "ターミナル",
         "タブと画面の配置",
         "アプリとして入れる",
-        "SP で使う",
+        "スマホでの操作",
+        "外出先から接続する",
         "データストア",
         "ツール",
         "AI の注釈",
@@ -755,15 +767,37 @@ describe("help page text uses each screen's names", () => {
     ]);
   });
 
-  // 利用者の呼び方は「SP」。日本語の本文に「電話」を混ぜない。
-  test("the Japanese help calls the phone layout SP", () => {
+  // 接続の設定とスマホの操作を別の見出しにし、日本語の本文に「電話」を混ぜない。
+  test("the Japanese help names the phone controls clearly", () => {
     renderHelpPage("ja", "phone");
     const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
     expect([
       document.querySelector(".gdp-help-content h2")?.textContent,
       text.includes("電話"),
       mobileShellText("ja").tabsParkedTitle.includes("電話"),
-    ]).toEqual(["SP で使う", false, false]);
+    ]).toEqual(["スマホでの操作", false, false]);
+  });
+});
+
+describe("help content is immediately readable", () => {
+  test.each(
+    (["en", "ja"] as const).flatMap((lang) =>
+      HELP_SECTIONS.map((section) => [lang, section] as const),
+    ),
+  )("in %s the %s guide has no collapsed instructions", (lang, section) => {
+    renderHelpPage(lang, section);
+    const article = document.querySelector(".gdp-help-content");
+    expect(article).not.toBeNull();
+    expect(article?.querySelectorAll("details, summary, [hidden]").length).toBe(
+      0,
+    );
+    for (const part of article?.querySelectorAll(".gdp-help-subsection") ??
+      []) {
+      expect(part.querySelector("h4")?.textContent).toBeTruthy();
+      expect(
+        part.querySelector(".gdp-help-subsection-body")?.children.length,
+      ).toBeGreaterThan(0);
+    }
   });
 });
 
@@ -956,6 +990,15 @@ describe("help page captures", () => {
     ["tabs-layout", ["tabs-groups", "tabs-split"]],
     ["install-app", []],
     ["phone", ["phone-screen"]],
+    [
+      "remote-access",
+      [
+        "remote-access-hostname",
+        "remote-access-policy",
+        "remote-tunnel-route",
+        "remote-tunnel-options",
+      ],
+    ],
     ["datastores", ["datastore-grid"]],
     ["tools", ["tools-markdown"]],
     ["annotations", ["annotations-panel"]],

@@ -21,6 +21,7 @@ const distributedPackageRoots = [
   "@xterm/xterm",
   "d3-dsv",
   "highlight.js",
+  "jose",
   "markdown-it",
   "markdown-it-anchor",
   "markdown-it-footnote",

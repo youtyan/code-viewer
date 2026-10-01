@@ -900,3 +900,12 @@ describe("projectDropBefore (where a dragged heading lands)", () => {
     expect(projectDropBefore(order, dragged, gap)).toEqual(expected);
   });
 });
+
+test.each([
+  ["/history", "/p/0123456789abcdef/history"],
+  ["/file?path=sample.ts", "/p/0123456789abcdef/file?path=sample.ts"],
+  ["//other.example.com", "/p/0123456789abcdef/"],
+  ["/../../escape", "/p/0123456789abcdef/"],
+])("remote project navigation keeps %s on its own origin", (path, expected) => {
+  expect(projectDestination("/p/0123456789abcdef/", path)).toBe(expected);
+});

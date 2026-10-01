@@ -435,9 +435,10 @@ export function canStopProjectServer(server: AgentProjectServer): boolean {
  * 根にする (別のオリジンへ飛ばさない)。
  */
 export function projectDestination(serverUrl: string, path: string): string {
+  const relative = /^\/p\/[0-9a-f]{16}\/$/.test(serverUrl);
   let base: URL;
   try {
-    base = new URL(serverUrl);
+    base = new URL(serverUrl, relative ? "http://localhost:1" : undefined);
   } catch (cause) {
     throw errorWithCause(
       "project server URL must be an HTTP loopback URL",
@@ -472,9 +473,11 @@ export function projectDestination(serverUrl: string, path: string): string {
     target.origin !== base.origin ||
     (prefix && !target.pathname.startsWith(`${prefix}/`))
   ) {
-    return base.href;
+    return relative ? base.pathname : base.href;
   }
-  return target.href;
+  return relative
+    ? `${target.pathname}${target.search}${target.hash}`
+    : target.href;
 }
 
 /** 起こした結果 (ワイヤ形式)。 */

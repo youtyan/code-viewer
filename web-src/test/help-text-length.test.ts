@@ -1,11 +1,10 @@
 // ヘルプの本文の長さ。使う人が読む説明なので、1 段落・1 項目は短く、1 節も
-// 短くする (以前の本文は 1 段落に寸法・判定の細部・キーの一覧を詰め込み、
-// 読めなかった)。細部は畳んだ「詳しく」かヘルプの外 (README・reference) へ。
+// 短くする。長い手順は見出しで分け、各まとまりを短くする。
 //
 // 決まり (言語ごと):
 //   - 1 段落・1 項目・表の 1 行: 日本語 120 文字・英語 240 文字まで
 //   - 1 項目は 2 文まで
-//   - 1 節の本文: 日本語 600 文字・英語 1200 文字まで。「詳しく」の中・見出し・
+//   - 見出しごとの本文: 日本語 600 文字・英語 1200 文字まで。見出し・
 //     コマンド・画像・リンクの行は数えない
 //   - 導入手順は 1 手順に 1 行の動作・画像 1 枚・説明 1 文まで
 //   - 寸法 (px) を書かない
@@ -88,26 +87,22 @@ function sentences(text: string, lang: HelpLanguage): number {
   return ends + (closed.test(text.trim()) ? 0 : 1);
 }
 
-type Piece = { where: string; text: string; item: boolean; folded: boolean };
+type Piece = { where: string; text: string; item: boolean; scope: string };
 
-/** 節の中の文を全部 (畳んだ中も、印を付けて) 集める。 */
+/** 節の中の文を、見出しごとのまとまりを付けて全部集める。 */
 function pieces(section: HelpSection, body: HelpSectionContent): Piece[] {
   const out: Piece[] = [
     {
       where: `${section} intro`,
       text: plain(body.intro),
       item: false,
-      folded: false,
+      scope: section,
     },
   ];
-  const walk = (
-    blocks: readonly HelpBlock[],
-    where: string,
-    folded: boolean,
-  ) => {
-    for (const block of blocks) {
+  const walk = (blocks: readonly HelpBlock[], where: string, scope: string) => {
+    for (const [index, block] of blocks.entries()) {
       const add = (text: HelpText, item: boolean) =>
-        out.push({ where, text: plain(text), item, folded });
+        out.push({ where, text: plain(text), item, scope });
       if (block.kind === "paragraph") add(block.text, false);
       if (block.kind === "list")
         for (const item of block.items) add(item, true);
@@ -120,13 +115,19 @@ function pieces(section: HelpSection, body: HelpSectionContent): Piece[] {
         for (const row of block.rows) add(row.map(plain).join(" "), true);
       if (block.kind === "install")
         for (const step of block.steps) add(step, true);
-      if (block.kind === "details")
-        walk(block.blocks, `${where} (details)`, true);
+      if (block.kind === "subsection") {
+        const childScope = `${where} › ${block.title ?? `notes ${index}`}`;
+        walk(block.blocks, childScope, childScope);
+      }
     }
   };
-  walk(body.lead ?? [], `${section} lead`, false);
+  walk(body.lead ?? [], `${section} lead`, section);
   for (const group of body.groups)
-    walk(group.blocks, `${section} › ${group.title}`, false);
+    walk(
+      group.blocks,
+      `${section} › ${group.title}`,
+      `${section} › ${group.title}`,
+    );
   return out;
 }
 
@@ -152,14 +153,12 @@ describe.each<HelpLanguage>(["en", "ja"])("help text in %s", (lang) => {
     ).toEqual([]);
   });
 
-  test("every section body, without the folded details, is short enough", () => {
+  test("every heading's body is short enough, including supplemental text", () => {
+    const lengths = new Map<string, number>();
+    for (const { scope, text } of all)
+      lengths.set(scope, (lengths.get(scope) ?? 0) + [...text].length);
     expect(
-      HELP_SECTIONS.map((section) => [
-        section,
-        pieces(section, sections[section])
-          .filter(({ folded }) => !folded)
-          .reduce((sum, { text }) => sum + [...text].length, 0),
-      ]).filter(([, length]) => (length as number) > LIMIT[lang].section),
+      [...lengths].filter(([, length]) => length > LIMIT[lang].section),
     ).toEqual([]);
   });
 

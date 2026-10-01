@@ -6,7 +6,7 @@
 //   本文は一覧の文字 (body) より一段大きい。設定の節の見出しはヘルプの群の見出しと同じ段
 // - 色: 本文は本来の文字色、要約・設定の説明だけ一段薄い色 (--color-text-2)
 // - 行間は日本語で読みやすい 1.7〜1.8
-// - 1 行の長さ: 本文は --doc-measure まで。日本語は em で 40 字前後、英語は ch で 70 字前後
+// - 本文の幅: ヘルプは本文欄いっぱい、設定の説明は日本語 40 字・英語 70 字前後まで
 // - 表示密度で文字が比例して変わる
 // - 設定の「変更を保存」は本文の箱の下端に貼り付く
 //
@@ -181,21 +181,26 @@ describe("the help and settings pages", () => {
   });
 
   test.each([
-    { lang: "ja", unit: "em", min: 36, max: 44 },
-    { lang: "en", unit: "ch", min: 60, max: 78 },
-  ] as const)("a line is about $min-$max $unit long in $lang", ({
+    { page: "help", lang: "ja", unit: "%", min: 100, max: 100 },
+    { page: "help", lang: "en", unit: "%", min: 100, max: 100 },
+    { page: "settings", lang: "ja", unit: "em", min: 36, max: 44 },
+    { page: "settings", lang: "en", unit: "ch", min: 60, max: 78 },
+  ] as const)("$page uses $min-$max $unit of reading width in $lang", ({
+    page,
     lang,
     unit,
     min,
     max,
   }) => {
     renderPages(lang);
-    const shell = document.querySelector(".gdp-help-shell");
+    const shell = document.querySelector(
+      `.gdp-help-shell[data-page="${page}"]`,
+    );
     if (!shell) throw new Error("missing shell");
     const measure = getComputedStyle(shell)
       .getPropertyValue("--doc-measure")
       .trim();
-    const match = /^([\d.]+)(em|ch)$/.exec(measure);
+    const match = /^([\d.]+)(em|ch|%)$/.exec(measure);
     expect({
       unit: match?.[2],
       inRange: Number(match?.[1]) >= min && Number(match?.[1]) <= max,
@@ -212,7 +217,7 @@ describe("the help and settings pages", () => {
     ".gdp-help-note",
     ".gdp-help-command",
     ".gdp-help-table",
-    ".gdp-help-details",
+    ".gdp-help-subsection",
     ".scope-settings-help",
   ])("%s stops at the reading measure", (selector) => {
     const width = cascadedDeclarations(

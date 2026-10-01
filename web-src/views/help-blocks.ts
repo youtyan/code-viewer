@@ -1,10 +1,10 @@
 // ヘルプの本文の部品: 段落・箇条書き・番号つきの手順・画像・注意と補足・コマンド・
-// キー・畳める「詳しく」・表。見た目の決まり (幅・文字・行間・余白) は style.css の
+// キー・見出しつきの補足・表。見た目の決まり (幅・文字・行間・余白) は style.css の
 // 「設定とヘルプのページの文字と部品」の節が持ち、ここは DOM の形だけを決める。本文を
 // 書く側 (help-page.ts・help-guides.ts) は helpBlocks(lang) の関数を呼んで中身を入れる
 // (.agents/skills/project-rules/references/ui-surface.md の「Help ページ」)。
 
-import { showCopyFailure } from "../core/copy-failure";
+import { showCopyFailure, showHighlightFailure } from "../core/copy-failure";
 import {
   ALERT_16_PATH,
   CHECK_16_PATHS,
@@ -12,6 +12,10 @@ import {
   INFO_16_PATH,
   iconSvg,
 } from "../core/icons";
+import {
+  highlightToInnerHtml,
+  loadShikiHighlighter,
+} from "../core/shiki-loader";
 import type { HelpFigure } from "./help-images";
 import type { HelpLanguage } from "./help-page";
 import { terminalText } from "./terminal/i18n";
@@ -28,7 +32,7 @@ export type HelpInline =
   | { code: string }
   | { key: string }
   | { ui: string }
-  | { link: string; href: string; open(): void };
+  | { link: string; href: string; open?(): void };
 
 /** 1 つの文。部品を並べるときは配列にする。 */
 export type HelpText = HelpInline | readonly HelpInline[];
@@ -50,7 +54,7 @@ export type HelpNoteKind = "warning" | "info";
 
 type HelpBlocksText = {
   note: Record<HelpNoteKind, string>;
-  details: string;
+  subsection: string;
   copyCommand: string;
   /** キーの一覧の表の見出しの行。 */
   keyTableHead: readonly [string, string];
@@ -59,13 +63,13 @@ type HelpBlocksText = {
 const HELP_BLOCKS_TEXT: Record<HelpLanguage, HelpBlocksText> = {
   en: {
     note: { warning: "Caution", info: "Note" },
-    details: "More details",
+    subsection: "Additional notes",
     copyCommand: "Copy the command",
     keyTableHead: ["Key", "Action"],
   },
   ja: {
     note: { warning: "注意", info: "補足" },
-    details: "詳しく",
+    subsection: "補足",
     copyCommand: "コマンドをコピー",
     keyTableHead: ["キー", "操作"],
   },
@@ -91,11 +95,17 @@ function inlineNode(part: HelpInline): Node {
   const link = document.createElement("a");
   link.href = part.href;
   link.textContent = part.link;
+  const open = part.open;
+  if (!open) {
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    return link;
+  }
   link.addEventListener("click", (event) => {
     // 中ボタン・⌘/Ctrl はブラウザに任せる (別のタブで開く)。
     if (event.button !== 0 || event.metaKey || event.ctrlKey) return;
     event.preventDefault();
-    part.open();
+    open();
   });
   return link;
 }
@@ -165,6 +175,7 @@ export function command(
   lang: HelpLanguage,
   text: string,
   title?: string,
+  language: "bash" | "json" = "bash",
 ): HTMLDivElement {
   const wrap = document.createElement("div");
   wrap.className = "gdp-help-command";
@@ -180,6 +191,24 @@ export function command(
   const code = document.createElement("code");
   code.textContent = text;
   pre.appendChild(code);
+  pre.dataset.language = language;
+  void loadShikiHighlighter({
+    langs: ["bash", "json"],
+    failureMode: "throw",
+  })
+    .then((highlighter) => {
+      const html = highlightToInnerHtml(text, language, highlighter);
+      if (!html && text)
+        throw new Error(`No highlighted HTML for the ${language} help code`);
+      if (html) pre.innerHTML = html;
+    })
+    .catch((error: unknown) => {
+      showHighlightFailure(
+        pre,
+        `Highlighting the ${language} help code failed`,
+        error,
+      );
+    });
   const label = HELP_BLOCKS_TEXT[lang].copyCommand;
   const copy = document.createElement("button");
   copy.type = "button";
@@ -262,17 +291,17 @@ function note(
   return aside;
 }
 
-function details(
+function subsection(
   lang: HelpLanguage,
   body: readonly HTMLElement[],
-  summary?: string,
-): HTMLDetailsElement {
-  const box = document.createElement("details");
-  box.className = "gdp-help-details";
-  const head = document.createElement("summary");
-  head.textContent = summary ?? HELP_BLOCKS_TEXT[lang].details;
+  title?: string,
+): HTMLElement {
+  const box = document.createElement("section");
+  box.className = "gdp-help-subsection";
+  const head = document.createElement("h4");
+  head.textContent = title ?? HELP_BLOCKS_TEXT[lang].subsection;
   const inner = document.createElement("div");
-  inner.className = "gdp-help-details-body";
+  inner.className = "gdp-help-subsection-body";
   inner.append(...body);
   box.append(head, inner);
   return box;
@@ -383,10 +412,11 @@ export function helpBlocks(lang: HelpLanguage) {
     figure: (item: HelpFigure) => figure(lang, item),
     note: (kind: HelpNoteKind, paragraphs: readonly HelpText[]) =>
       note(lang, kind, paragraphs),
-    command: (text: string, title?: string) => command(lang, text, title),
+    command: (text: string, title?: string, language?: "bash" | "json") =>
+      command(lang, text, title, language),
     key: helpKey,
-    details: (body: readonly HTMLElement[], summary?: string) =>
-      details(lang, body, summary),
+    subsection: (body: readonly HTMLElement[], title?: string) =>
+      subsection(lang, body, title),
     table,
     keyTable: (rows: Array<[string, string]>) =>
       renderHelpTable(rows, HELP_BLOCKS_TEXT[lang].keyTableHead),

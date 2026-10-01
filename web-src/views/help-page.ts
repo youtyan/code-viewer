@@ -67,12 +67,17 @@ export type HelpBlock =
   /** 画面のキャプチャ (help-images.ts)。撮っていないものは描かない。 */
   | { kind: "figure"; figure: HelpFigure }
   | { kind: "note"; note: HelpNoteKind; paragraphs: HelpText[] }
-  | { kind: "command"; command: string; title?: string }
+  | {
+      kind: "command";
+      command: string;
+      title?: string;
+      language?: "bash" | "json";
+    }
   | { kind: "table"; rows: HelpText[][]; head?: HelpText[] }
   /** キーの一覧 (左の列の押し方をキーキャップにする)。 */
   | { kind: "keys"; rows: Array<[string, string]> }
-  /** 既定で畳む「詳しく」。 */
-  | { kind: "details"; blocks: HelpBlock[] }
+  /** 見出しと本文を常に表示する小節。 */
+  | { kind: "subsection"; blocks: HelpBlock[]; title?: string }
   /** ほかの節・画面へのリンクの 1 行。 */
   | { kind: "link"; text: HelpText }
   /** インストールの案内 (PWA)。ボタンはブラウザが出せるときだけ。Chrome 以外では出さない */
@@ -203,13 +208,16 @@ function renderHelpBlocks(
       case "note":
         return b.note(block.note, block.paragraphs);
       case "command":
-        return b.command(block.command, block.title);
+        return b.command(block.command, block.title, block.language);
       case "table":
         return b.table(block.rows, block.head);
       case "keys":
         return b.keyTable(block.rows);
-      case "details":
-        return b.details(renderHelpBlocks(lang, block.blocks, renderInstall));
+      case "subsection":
+        return b.subsection(
+          renderHelpBlocks(lang, block.blocks, renderInstall),
+          block.title,
+        );
       case "link":
         return renderHelpLink(block.text);
       case "install":

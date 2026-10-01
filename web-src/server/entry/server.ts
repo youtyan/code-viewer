@@ -82,6 +82,7 @@ import {
 } from "./entry-file";
 import { createEntryProjects, type EntryProjects } from "./projects";
 import { isConnectionFailure, proxyToBackend } from "./proxy";
+import { createRemoteAccess, readRemoteAccessConfig } from "./remote-access";
 import { readPageLook, unknownProjectPage } from "./unknown-project-page";
 
 const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
@@ -239,6 +240,9 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
   const parsed = parseEntryArgs(argv);
   if (parsed.ok === false) fail(parsed.error);
   const args: EntryArgs = parsed.args;
+  const remoteConfig = args.remoteAccess
+    ? readRemoteAccessConfig(args.remoteAccess)
+    : null;
   const overrides = [];
   for (const bin of args.bins) {
     const override = parseExternalCommandOverride(bin);
@@ -268,6 +272,10 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
       );
     }
     if (decision.kind === "delegate") {
+      if (remoteConfig)
+        fail(
+          `code-viewer is already running at ${decision.url}. Stop that entry server and restart it with --remote-access; remote settings were not applied.`,
+        );
       const url = await delegateOpen(decision.url, launchRoot);
       if (args.port !== 0 && new URL(decision.url).port !== String(args.port)) {
         console.warn(
@@ -373,6 +381,7 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
     throw error;
   }
   lock.release();
+  let remoteServer: Awaited<ReturnType<typeof startServer>> | null = null;
   const shutdown = createProcessShutdown([
     {
       label: "code-viewer entry record cleanup",
@@ -398,6 +407,12 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
       label: "code-viewer agent watch stop",
       run: async () =>
         (await import("../terminal/activity")).stopAgentActivityWatch(),
+    },
+    {
+      label: "code-viewer remote server close",
+      run: async () => {
+        if (remoteServer) await remoteServer.close();
+      },
     },
     { label: "code-viewer entry server close", run: () => server.close() },
   ]);
@@ -431,6 +446,32 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
   }
   // 開発中の読み直し (index.html・style.css・app.js) は裏の SSE が送る
   // (裏も CODE_VIEWER_DEV を受け継ぎ、startDevAssetReload を動かす)。
+
+  if (remoteConfig) {
+    try {
+      const remote = createRemoteAccess(remoteConfig);
+      remoteServer = await startServer({
+        hostname: "127.0.0.1",
+        port: remoteConfig.port,
+        fetch: (req) =>
+          remote(req, (authenticated) =>
+            handleEntryRequest(authenticated, context, remoteConfig.origin),
+          ),
+        onError: (error) =>
+          reportFatalAndShutdown("remote server error", error, shutdown.run),
+      });
+      console.log(
+        `code-viewer remote access: ${remoteConfig.origin} (tunnel target http://127.0.0.1:${remoteServer.port})`,
+      );
+    } catch (error) {
+      reportFatalAndShutdown(
+        "remote access startup failed",
+        error,
+        shutdown.run,
+      );
+      return;
+    }
+  }
 
   const { startAgentActivityWatch } = await import("../terminal/activity");
   startAgentActivityWatch(launchRoot, context.paneListOptions);
@@ -561,7 +602,10 @@ type EntryContext = {
 };
 
 function projectUrl(ctx: EntryContext, root: string, requestUrl: URL): string {
-  return new URL(`/p/${ctx.projects.keyOf(root)}/`, requestUrl).href;
+  const path = `/p/${ctx.projects.keyOf(root)}/`;
+  return requestUrl.protocol === "https:"
+    ? path
+    : new URL(path, requestUrl).href;
 }
 
 /** 前置きの無い画面の URL を、最後に開いたプロジェクトへ送る。 */
@@ -718,6 +762,7 @@ async function handleProjectPath(
   ctx: EntryContext,
   req: Request,
   url: URL,
+  publicOrigin?: string,
 ): Promise<Response> {
   const match = /^\/p\/([^/]+)(\/.*)?$/.exec(url.pathname);
   if (!match) return textError("not found", 404);
@@ -768,6 +813,7 @@ async function handleProjectPath(
     return backendFailure(502, key, root, target);
   const result = await proxyToBackend(req, target.url, rest, url.search, {
     onBodyEnd: release ?? undefined,
+    publicOrigin,
   });
   if (result.status === "ok") return result.response;
   if (req.signal.aborted) return textError("the request was cancelled", 499);
@@ -827,8 +873,11 @@ export function proxyTimeoutResponse(
 async function handleEntryRequest(
   req: Request,
   ctx: EntryContext,
+  publicOrigin?: string,
 ): Promise<Response> {
-  if (!requestAllowed(req)) return textError("forbidden", 403);
+  const mutationAllowed = (request: Request) =>
+    sideEffectRequestAllowed(request, publicOrigin);
+  if (!requestAllowed(req, publicOrigin)) return textError("forbidden", 403);
   const url = new URL(req.url);
   const path = url.pathname;
   if (path === "/_entry" && req.method === "GET") {
@@ -848,14 +897,15 @@ async function handleEntryRequest(
   }
   if (path === "/_entry/open" || path === "/_entry/restart") {
     if (req.method !== "POST") return textError("method not allowed", 405);
-    if (!sideEffectRequestAllowed(req)) return textError("forbidden", 403);
+    if (!mutationAllowed(req)) return textError("forbidden", 403);
     return path === "/_entry/open"
       ? handleEntryOpen(ctx, req, url)
       : handleEntryRestart(ctx, req);
   }
   if (path === "/p" || path === "/p/")
     return redirectToLastProject(ctx, url, "/");
-  if (path.startsWith("/p/")) return handleProjectPath(ctx, req, url);
+  if (path.startsWith("/p/"))
+    return handleProjectPath(ctx, req, url, publicOrigin);
   if (isAppEntryPath(path)) {
     return redirectToLastProject(ctx, url, path === "/index.html" ? "/" : path);
   }
@@ -874,7 +924,7 @@ async function handleEntryRequest(
   if (isShell) {
     const { handleShellRoute } = await import("../shell/handle");
     return (
-      (await handleShellRoute(req, url, cwd, sideEffectRequestAllowed)) ??
+      (await handleShellRoute(req, url, cwd, mutationAllowed)) ??
       textError("not found", 404)
     );
   }
@@ -885,7 +935,7 @@ async function handleEntryRequest(
         req,
         url,
         cwd,
-        sideEffectRequestAllowed,
+        mutationAllowed,
         ctx.paneListOptions,
       )) ?? textError("not found", 404)
     );
@@ -893,7 +943,7 @@ async function handleEntryRequest(
   if (isWorktree) {
     const { handleWorktreeRoute } = await import("../worktree/handle");
     return (
-      (await handleWorktreeRoute(req, url, cwd, 0, sideEffectRequestAllowed, {
+      (await handleWorktreeRoute(req, url, cwd, 0, mutationAllowed, {
         open: (worktree) => openWorktreeInEntry(ctx, worktree, url),
         stop: (worktree) => ctx.backends.stop(worktree),
       })) ?? textError("not found", 404)
@@ -901,7 +951,7 @@ async function handleEntryRequest(
   }
   const { handleAgentRoute } = await import("../terminal/handle");
   return (
-    (await handleAgentRoute(req, url, cwd, sideEffectRequestAllowed, {
+    (await handleAgentRoute(req, url, cwd, mutationAllowed, {
       selectedRoot: selected ?? "",
       serverUrl: (root) => projectUrl(ctx, root, url),
       openProject: (root) => openProjectInEntry(ctx, root, url),
