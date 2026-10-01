@@ -39,6 +39,8 @@ export type HelpPageDeps = {
   currentRange(): { from: string; to: string };
   syncHeaderMenu(): void;
   getLanguage(): HelpLanguage;
+  /** 開いている server の code-viewer の版。見出しの右に出す (まだ読めていなければ空)。 */
+  codeViewerVersion(): string;
   /** 本文に出す画面の名前とボタンの文言 (各画面の i18n の値。help-guides.ts)。 */
   helpLabels(lang: HelpLanguage): HelpLabels;
   /** 設定のアカウントの節を開く (本文のリンク)。 */
@@ -392,12 +394,23 @@ export function createHelpPage(deps: HelpPageDeps) {
     shortcuts.textContent = quickHelpText(lang).panelTitle;
     shortcuts.title = KEYBOARD_SHORTCUTS_TITLE[lang];
     shortcuts.addEventListener("click", deps.toggleKeyboardShortcuts);
+    // 版は小窓の操作の左に並べる (見出しの行は両端寄せなので 1 つの塊にする)。
+    const headerEnd = document.createElement("div");
+    headerEnd.className = "gdp-help-header-end";
+    const version = deps.codeViewerVersion();
+    if (version) {
+      const versionText = document.createElement("span");
+      versionText.className = "gdp-help-version";
+      versionText.textContent = `code-viewer ${version}`;
+      headerEnd.append(versionText);
+    }
+    headerEnd.append(shortcuts);
 
     shell.render(deps.$("#diff"), {
       page: "help",
       lang,
       title: agentsText(lang).sidebar.help,
-      headerActions: [shortcuts],
+      headerActions: [headerEnd],
       nav,
       article,
       toggleText: HELP_NAV_TOGGLE_TEXT[lang],

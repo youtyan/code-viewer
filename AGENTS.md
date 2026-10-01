@@ -15,6 +15,7 @@ did not happen.
 |---|---|
 | Starting any implementation, investigation, or review in this repository | `.agents/skills/project-rules/SKILL.md` |
 | npm publish, releases, Trusted Publisher, registry issues | `.agents/skills/project-npm-publish-procedure/SKILL.md` |
+| The installed Claude Code / Codex version differs from the checked one (`CHECKED_AGENT_CLI_VERSIONS`) | `.agents/skills/project-agent-cli-upgrade/SKILL.md` |
 
 `project-rules` is the entry point; it routes to the area reference for the work at hand
 (orientation / ui-layout / ui-surface / server / dependencies / diagnose / testing).

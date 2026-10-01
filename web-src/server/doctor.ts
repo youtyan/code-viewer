@@ -2,7 +2,16 @@ import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { accountEntries, emptyAccountRegistry } from "../core/agent-accounts";
-import { AGENT_HOOK_MARKER, HOOK_AGENTS } from "../core/agent-hooks";
+import {
+  agentCliVersionIn,
+  CHECKED_AGENT_CLI_VERSIONS,
+  type CheckedAgentCli,
+} from "../core/agent-cli-versions";
+import {
+  AGENT_HOOK_MARKER,
+  HOOK_AGENTS,
+  type HookAgent,
+} from "../core/agent-hooks";
 import type { DbFileInfo, DbFilesResponse } from "../core/database/types";
 import type {
   DoctorGroup,
@@ -10,16 +19,14 @@ import type {
   DoctorRow,
   DoctorStatus,
 } from "../core/doctor-types";
-import {
-  errorWithCause,
-  errorWithCauses,
-  formatErrorDetail,
-} from "../core/error-detail";
+import { formatErrorDetail } from "../core/error-detail";
+import { agentCommandArgv } from "./accounts/launch";
 import {
   type AccountPaths,
   accountPaths,
   readAccountRegistry,
 } from "./accounts/registry";
+import { launchCommandsOf } from "./accounts/service";
 import { shellSingleQuote } from "./cli-helpers";
 import {
   commandForExternal,
@@ -30,12 +37,18 @@ import {
   openDockerAdapterAsync,
   openSupabaseDockerAdapterAsync,
 } from "./database/adapters/docker";
+import { openDynamoDbExplorerAsync } from "./database/adapters/dynamodb";
 import { openElasticsearchAdapterAsync } from "./database/adapters/elasticsearch";
 import { openRedisExplorerAsync } from "./database/adapters/redis";
 import { openS3ExplorerAsync } from "./database/adapters/s3";
 import { spawnTextAsync } from "./database/adapters/spawn-runner";
 import { sqliteAdapterFactory } from "./database/adapters/sqlite";
 import {
+  connectionSecretsLoaded,
+  findDatastoreConnection,
+} from "./database/connections-store";
+import {
+  type DockerDbInfo,
   type DockerDiscoveryResult,
   discoverDockerDatabasesAsync,
   discoverSqliteFilesAsync,
@@ -45,7 +58,11 @@ import {
   parseSupabaseDbId,
   validateDbPath,
 } from "./database/discovery";
-import { createDbFilesResponse } from "./database/handle";
+import {
+  createDbFilesResponse,
+  probeDatastoreConnection,
+} from "./database/handle";
+import { readThenClose } from "./database/handle-shared";
 import {
   describeSqliteDriver,
   loadSqliteClass,
@@ -93,6 +110,12 @@ export type DoctorContext = {
   scopeOmitDirNames: readonly string[];
   listenPort: number;
   signal?: AbortSignal;
+  /**
+   * claude / codex の `--version` を動かす (checkAgentClis)。既定は起動コマンドを
+   * 対話シェルで動かす。テストは利用者のシェルの初期化と本物の CLI を動かさない
+   * よう差し替える。
+   */
+  runAgentCli?: (argv: string[]) => Promise<RunResult>;
 };
 
 const SNAPSHOT_DB_REL = ".code-viewer/db-snapshots.sqlite";
@@ -108,6 +131,9 @@ const TTL = {
 
 const TIMEOUT = {
   version: 1_500,
+  // claude / codex は起動コマンドを対話シェル (-i) で動かすので、シェルの
+  // 初期化の分だけ長く待つ (ログインの状態を訊くときと同じ長さ)。
+  agentCli: 8_000,
   dockerInfo: 2_500,
   composeConfig: 3_500,
   composePs: 4_500,
@@ -791,6 +817,76 @@ export function checkAgentAccounts(
   return { id: "agent-accounts", title: "Agent accounts", rows };
 }
 
+function configuredLaunchCommands(): Record<HookAgent, string> {
+  const read = readAccountRegistry(accountPaths().registry);
+  // 読めない登録簿は Agent accounts の群が理由を出す。ここは既定の起動コマンドで訊く。
+  return launchCommandsOf(read.ok ? read.registry : emptyAccountRegistry());
+}
+
+function agentCliFailureDetail(command: string, result: RunResult): string {
+  const failure = result.failure;
+  return [
+    failure?.kind === "timed-out"
+      ? failure.message
+      : failure?.kind === "spawn-error"
+        ? `${command} --version could not be started: ${formatErrorDetail(failure.error)}`
+        : result.code === 0
+          ? `${command} --version printed no version`
+          : `${command} --version exited with ${result.code}`,
+    result.stderr.trim() ? `stderr: ${result.stderr.trim()}` : "",
+    result.stdout.trim() ? `stdout: ${result.stdout.trim()}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * 手元の claude / codex の版と、code-viewer が動作を確かめた版
+ * (core/agent-cli-versions.ts)。版が違っても壊れているとは限らない (claude は
+ * ほぼ毎日上がる) ので ok のまま並べ、違うときだけ hint で疑う順番を示す。
+ * 訊くのは設定のアカウントの起動コマンドで、起動・ログインと同じ対話シェルを
+ * 通す (ラッパーやシェルの関数でも、実際に起動するものの版を読む)。
+ */
+export async function checkAgentClis(
+  run: (argv: string[]) => Promise<RunResult>,
+  commands: Record<HookAgent, string> = configuredLaunchCommands(),
+  checkedVersions: Record<
+    HookAgent,
+    CheckedAgentCli
+  > = CHECKED_AGENT_CLI_VERSIONS,
+): Promise<DoctorGroup> {
+  const rows = await Promise.all(
+    HOOK_AGENTS.map(async (agent): Promise<DoctorRow> => {
+      const command = commands[agent];
+      const checked = checkedVersions[agent];
+      const checkedText = `code-viewer was checked with ${checked.version} on ${checked.checkedOn}`;
+      const result = await run(agentCommandArgv(command, ["--version"]));
+      const version =
+        result.code === 0 ? agentCliVersionIn(result.stdout) : null;
+      const base = { id: `agent-cli.${agent}`, title: `${agent} CLI` };
+      if (version === null) {
+        return {
+          ...base,
+          status: "warn",
+          detail: agentCliFailureDetail(command, result),
+          hint: `Needed only to run ${agent} from code-viewer. Install it, or set its launch command in Settings > Accounts; ${checkedText}.`,
+        };
+      }
+      return {
+        ...base,
+        status: "ok",
+        detail: `${version} (${checkedText})`,
+        ...(version === checked.version
+          ? {}
+          : {
+              hint: `Not checked with ${version} yet. Hooks, agent states, sign-in and usage rely on how ${agent} behaves; if one of them looks wrong, suspect this version first.`,
+            }),
+      };
+    }),
+  );
+  return { id: "agent-cli", title: "Agent CLIs", rows };
+}
+
 /**
  * プロジェクトの登録簿と、全プロジェクト共通の設定 (projects/registry.ts・
  * user-settings.ts)。どちらもユーザーの状態ディレクトリに残るので、機能を
@@ -1319,12 +1415,14 @@ async function checkDiscovery(
 
 // --- Datastore connectivity probe -----------------------------------------
 //
-// Each discovered source (sqlite / docker SQL / redis / es / s3) gets a
-// minimal read round-trip with a 2s timeout. Result becomes one DoctorRow
-// in the `datastore` group. Failure rows include a paste-safe retry hint
-// (SQL: `code-viewer query schemas --db '<id>' --json` without --server,
-// since doctor does not know the server URL — the CLI's auto-discovery
-// resolves it at paste time; Redis/ES/S3: cheapest read-only CLI command).
+// Each discovered source (sqlite / docker SQL / redis / es / s3 / dynamodb)
+// and each saved connection (opened the way the datastore routes open it,
+// D1 included) gets a minimal read round-trip with a 2s timeout. Result
+// becomes one DoctorRow in the `datastore` group. Failure rows include a
+// paste-safe retry hint (SQL: `code-viewer query schemas --db '<id>' --json`
+// without --server, since doctor does not know the server URL — the CLI's
+// auto-discovery resolves it at paste time; Redis/ES/S3: cheapest read-only
+// CLI command; DynamoDB has no CLI, so the hint points at the Data screen).
 //
 // `deps` is injectable so the test suite can swap `listSources` and
 // `probeSource` for fakes without requiring Docker / SQLite at test time.
@@ -1336,6 +1434,9 @@ export type DatastoreProbe = (
   cwd: string,
   signal: AbortSignal,
 ) => Promise<void>;
+
+// 繋がずに終えた probe の理由。繋いで失敗した (probe failed) とは別に出す。
+class DatastoreNotCheckedError extends Error {}
 
 export type DatastoreConnectivityDeps = {
   listSources: (
@@ -1359,6 +1460,20 @@ async function defaultDatastoreProbe(
   cwd: string,
   signal: AbortSignal,
 ): Promise<void> {
+  // 保存した接続は compose を探さず、接続の確認 (/_db/connections/test) と
+  // 同じ開き方で繋ぐ (手で足したホストも D1 の Cloudflare API も)。
+  if (file.id.startsWith("connection:")) {
+    const connection = await findDatastoreConnection(cwd, file.id);
+    if (!connection) throw new Error(`saved connection not found: ${file.id}`);
+    // 資格情報を持たないプロセス (別プロセスの `code-viewer doctor` など) で
+    // 繋ぐと、認証の失敗という誤った理由になる。
+    if (!connectionSecretsLoaded(cwd, file.id)) {
+      throw new DatastoreNotCheckedError(
+        "this process has no credentials for the saved connection (they are kept in the memory of the running code-viewer that saved them, or in the OS keychain). Check it from the Environment doctor in the browser; if that shows this too, enter the credentials again in the Data screen.",
+      );
+    }
+    return probeDatastoreConnection(connection, signal);
+  }
   // Supabase CLI ソースも kind は "postgresql" (docker: 系と同じ) だが、
   // id prefix で見分けて別経路 (docker compose ps を使わない) に振る。
   if (file.id.startsWith("supabase:")) {
@@ -1371,39 +1486,58 @@ async function defaultDatastoreProbe(
     case "mysql":
       return probeDockerSqlSource(file, cwd, signal);
     case "redis":
-      return probeRedisSource(file, cwd, signal);
+      return probeDockerService(
+        file,
+        cwd,
+        signal,
+        (info) =>
+          openRedisExplorerAsync(
+            info.serviceName,
+            info.env,
+            info.composeDir,
+            signal,
+          ),
+        (explorer) => explorer.listDatabasesAsync(signal),
+      );
     case "elasticsearch":
-      return probeEsSource(file, cwd, signal);
+      return probeDockerService(
+        file,
+        cwd,
+        signal,
+        (info) =>
+          openElasticsearchAdapterAsync(
+            info.serviceName,
+            info.env,
+            info.composeDir,
+            signal,
+          ),
+        (explorer) => explorer.listIndicesAsync(signal),
+      );
     case "s3":
-      return probeS3Source(file, cwd, signal);
+      return probeDockerService(
+        file,
+        cwd,
+        signal,
+        (info) => openS3ExplorerAsync(info, signal),
+        (explorer) => explorer.listBuckets(signal),
+      );
+    case "dynamodb":
+      return probeDockerService(
+        file,
+        cwd,
+        signal,
+        (info) => openDynamoDbExplorerAsync(info, signal),
+        (explorer) => explorer.listTablesAsync({ limit: 1, signal }),
+      );
+    case "d1":
+      // D1 は保存した接続としてしか現れない (上で繋いでいる)。
+      throw new Error(`d1 source is not a saved connection: ${file.id}`);
+    default: {
+      // 種類を足したら probe も足す。足し忘れを「成功」と出さない。
+      const unhandled: never = file.kind;
+      throw new Error(`no probe for datastore kind: ${String(unhandled)}`);
+    }
   }
-}
-
-// 最小の読み取りの後に閉じる。閉じる失敗も probe の失敗として出す (読み取りも
-// 失敗していたら、両方を並べる)。
-export async function readThenClose(
-  resource: { close(): void },
-  read: () => Promise<unknown>,
-  signal: AbortSignal,
-): Promise<void> {
-  let readFailure: { error: unknown } | null = null;
-  try {
-    signal.throwIfAborted();
-    await read();
-  } catch (error) {
-    readFailure = { error };
-  }
-  try {
-    resource.close();
-  } catch (closeError) {
-    throw readFailure
-      ? errorWithCauses("the probe failed, and closing it also failed", [
-          readFailure.error,
-          closeError,
-        ])
-      : errorWithCause("closing after the probe failed", closeError);
-  }
-  if (readFailure) throw readFailure.error;
 }
 
 async function probeSqliteSource(
@@ -1471,80 +1605,29 @@ async function probeSupabaseSource(
   await readThenClose(adapter, () => adapter.getTablesAsync(signal), signal);
 }
 
-async function probeRedisSource(
+// compose で見つけた非 SQL のサービス: 探して開き、最小の読み取りをして閉じる。
+async function probeDockerService<T extends { close(): void }>(
   file: DbFileInfo,
   cwd: string,
   signal: AbortSignal,
+  open: (info: DockerDbInfo) => Promise<T>,
+  read: (explorer: T) => Promise<unknown>,
 ): Promise<void> {
   const info = await findDockerServiceByDbIdAsync(
     cwd,
     file.id,
-    "redis",
+    file.kind,
     undefined,
     signal,
   );
   if (!info) throw new Error("docker service not found");
-  const explorer = await openRedisExplorerAsync(
-    info.serviceName,
-    info.env,
-    info.composeDir,
-    signal,
-  );
-  await readThenClose(
-    explorer,
-    () => explorer.listDatabasesAsync(signal),
-    signal,
-  );
-}
-
-// ai-dup-check: allow -- fp: probeRedisSource と同型の
-// 「find + open + close」pre-existing プローブ実装。対象アダプタが違うので
-// 共通化しない。今回の変更とは無関係。
-async function probeEsSource(
-  file: DbFileInfo,
-  cwd: string,
-  signal: AbortSignal,
-): Promise<void> {
-  const info = await findDockerServiceByDbIdAsync(
-    cwd,
-    file.id,
-    "elasticsearch",
-    undefined,
-    signal,
-  );
-  if (!info) throw new Error("docker service not found");
-  const explorer = await openElasticsearchAdapterAsync(
-    info.serviceName,
-    info.env,
-    info.composeDir,
-    signal,
-  );
-  await readThenClose(
-    explorer,
-    () => explorer.listIndicesAsync(signal),
-    signal,
-  );
-}
-
-async function probeS3Source(
-  file: DbFileInfo,
-  cwd: string,
-  signal: AbortSignal,
-): Promise<void> {
-  const info = await findDockerServiceByDbIdAsync(
-    cwd,
-    file.id,
-    "s3",
-    undefined,
-    signal,
-  );
-  if (!info) throw new Error("docker service not found");
-  const explorer = await openS3ExplorerAsync(info, signal);
-  await readThenClose(explorer, () => explorer.listBuckets(signal), signal);
+  const explorer = await open(info);
+  await readThenClose(explorer, () => read(explorer), signal);
 }
 
 type ProbeOutcome =
   | { kind: "ok" }
+  | { kind: "not-checked"; reason: string }
   | { kind: "fail"; reason: string; timedOut: boolean };
 
 // Promise.race + child AbortController. The child signal is wired both to
@@ -1576,12 +1659,10 @@ async function runProbeWithTimeout(
     controller.signal,
   ).then(
     () => ({ kind: "ok" }) as const,
-    (err) =>
-      ({
-        kind: "fail",
-        reason: formatErrorDetail(err),
-        timedOut: false,
-      }) as const,
+    (err): ProbeOutcome =>
+      err instanceof DatastoreNotCheckedError
+        ? { kind: "not-checked", reason: err.message }
+        : { kind: "fail", reason: formatErrorDetail(err), timedOut: false },
   );
   const timeoutPromise = new Promise<ProbeOutcome>((resolve) => {
     timer = setTimeout(() => {
@@ -1620,6 +1701,9 @@ export function buildDatastoreRetryHint(file: DbFileInfo): string {
   }
   if (file.kind === "s3") {
     return `Retry with: code-viewer query s3 buckets --db ${quoted} --json`;
+  }
+  if (file.kind === "dynamodb") {
+    return "DynamoDB has no CLI commands; retry from the Data screen.";
   }
   return `Retry with: code-viewer query schemas --db ${quoted} --json`;
 }
@@ -1689,7 +1773,10 @@ export async function checkDatastoreConnectivity(
       id: `datastore.${file.id}`,
       title: `${file.kind}:${file.id}`,
       status: "warn",
-      detail: `probe failed: ${outcome.reason}`,
+      detail:
+        outcome.kind === "not-checked"
+          ? `not checked: ${outcome.reason}`
+          : `probe failed: ${outcome.reason}`,
       hint: buildDatastoreRetryHint(file),
     };
   });
@@ -1841,6 +1928,18 @@ export async function buildDoctorReport(
   );
   const terminal = await checkTerminalTools(ctx.signal);
   const server = await checkServer(ctx.listenPort, ctx.cwd, ctx.signal);
+  const agentClis = await checkAgentClis(
+    ctx.runAgentCli ??
+      ((argv) =>
+        runCached(
+          versionCache,
+          TTL.version,
+          argv[0],
+          argv.slice(1),
+          TIMEOUT.agentCli,
+          ctx.signal,
+        )),
+  );
   const agentHooks = checkAgentHooks();
   const agentAccounts = checkAgentAccounts();
   const projects = checkProjects();
@@ -1856,6 +1955,7 @@ export async function buildDoctorReport(
     datastore,
     docker,
     terminal,
+    agentClis,
     agentHooks,
     agentAccounts,
     projects,

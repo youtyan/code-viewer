@@ -493,6 +493,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   let PROJECT_NAME = "";
   let PROJECT_BRANCH = "";
   let REPO_WEB_URL: string | null = null;
+  /** 開いているプロジェクトの server の code-viewer の版 (ヘルプのページの見出し)。 */
+  let SERVER_VERSION = "";
 
   let APP_SETTINGS: AppSettingsState = { version: 1 };
   let AGENT_SCREEN_RULES = formatAgentScreenRuleSet(DEFAULT_AGENT_SCREEN_RULES);
@@ -1346,6 +1348,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setProjectName(settings.project || "");
     setProjectBranch(settings.branch || "");
     REPO_WEB_URL = settings.repo_web_url;
+    SERVER_VERSION = settings.server.version;
     const repoLink =
       document.querySelector<HTMLAnchorElement>("#repo-web-link");
     if (repoLink) {
@@ -5290,6 +5293,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     syncHeaderMenu,
     getLanguage: () => STATE.language,
+    codeViewerVersion: () => SERVER_VERSION,
     // ヘルプの本文のボタン名は各画面の i18n から (views/help-guides.ts)。
     // 一覧の列の頭の画面の名前と差分の帯のボタンは app が持つので渡す。
     helpLabels: (lang) => {

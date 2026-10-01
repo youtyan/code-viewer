@@ -96,7 +96,7 @@ function configDirState(path: string): { exists: boolean; error: string } {
   }
 }
 
-function launchCommandsOf(
+export function launchCommandsOf(
   registry: AccountRegistry,
 ): AccountsResponse["launchCommands"] {
   return {

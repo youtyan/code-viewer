@@ -4758,7 +4758,8 @@ body.gdp-help-page #content {
 .bar > span.d { background: var(--danger); }
 
 /* 変更の種類の印: 札ではなく色の付いた 1 文字 (絵の A / M / D)。色は名前の層。
-   U (まだ git に無い) は地の補助の文字、I (無視) は一段薄い文字。 */
+   C (マージの衝突) は手を入れる番なので入力待ちの色。U (まだ git に無い) は地の
+   補助の文字、I (無視) は一段薄い文字。 */
 .badge {
   width: 16px; height: 16px;
   display: inline-flex;
@@ -4777,6 +4778,7 @@ body.gdp-help-page #content {
 .badge.A { color: var(--color-working); }
 .badge.D { color: var(--color-failed); }
 .badge.R { color: var(--color-done); }
+.badge.C { color: var(--color-waiting); }
 .badge.U { color: var(--color-text-2); }
 .badge.I { color: var(--color-text-3); }
 
@@ -24065,6 +24067,18 @@ body.gdp-help-page #content {
   color: var(--color-text);
   font-size: var(--ui-font-page);
   font-weight: 700;
+}
+/* ヘルプの見出しの右: code-viewer の版と、キーボードショートカットの小窓を開くボタン。 */
+.gdp-help-header-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.gdp-help-version {
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .gdp-help-search-row {
   margin-bottom: var(--space-5);

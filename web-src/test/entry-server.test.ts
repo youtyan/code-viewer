@@ -25,6 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
+import type { AgentStatesResponse } from "../core/agent-state";
 import { PROJECT_HEADER } from "../core/api-url";
 import type { EntryBackendFailure } from "../core/types";
 import { SSE_RETRY_MS } from "../server/runtime";
@@ -352,10 +353,11 @@ describe("the entry server", () => {
     const settings = (await (
       await fetch(`${url}p/${key}/_settings`)
     ).json()) as {
-      server: { root: string; pid: number };
+      server: { root: string; pid: number; version: string };
     };
     expect(settings.server.root).toBe(root);
     expect(settings.server.pid).toBe(backendPid(box, root));
+    expect(settings.server.version).toBe(PACKAGE_VERSION);
 
     const origin = new URL(url).origin;
     const write = await fetch(`${url}p/${key}/refresh`, {
@@ -641,6 +643,70 @@ describe("the entry server", () => {
       ((await known.json()) as { state: string }).state,
     );
   });
+
+  // ターミナルの状態を持つのは入口だけ (裏は巡回もフックの受け口もシェルも持たない)。
+  // `/p/<鍵>/_mcp` は裏が答えるので、terminal 系の道具が裏の空の記録を読み書き
+  // していて、画面と `code-viewer terminal list` に出ている状態が MCP では 0 件だった。
+  test("the terminal tools of a project's MCP endpoint read and write the entry's terminal state", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    const { url } = await startEntry(box, root);
+    const key = rootFileKey(root);
+    const reported = await fetch(`${url}_agent/state`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: new URL(url).origin,
+        "X-Code-Viewer-Action": "1",
+      },
+      body: JSON.stringify({ target: "%91", event: "ask", note: "sample" }),
+    });
+    expect(reported.status).toBe(200);
+    const callTool = async (name: string, args: Record<string, unknown>) => {
+      const res = await fetch(`${url}p/${key}/_mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      });
+      const { result } = (await res.json()) as {
+        result: { content: { text: string }[]; isError: boolean };
+      };
+      return { isError: result.isError, text: result.content[0]?.text };
+    };
+    const summary = ({ states }: AgentStatesResponse) =>
+      states.map(({ target, state, note }) => ({ target, state, note }));
+
+    const listed = await callTool("code_viewer_terminal_list", {});
+    expect(listed.isError).toBe(false);
+    expect(summary(JSON.parse(listed.text ?? ""))).toEqual([
+      { target: "%91", state: "waiting", note: "sample" },
+    ]);
+
+    const stated = await callTool("code_viewer_terminal_state", {
+      target: "%92",
+      event: "prompt",
+    });
+    expect(stated.isError).toBe(false);
+    const entryStates = await fetch(`${url}_agent/states`);
+    expect(summary((await entryStates.json()) as AgentStatesResponse)).toEqual([
+      { target: "%91", state: "waiting", note: "sample" },
+      { target: "%92", state: "working", note: "" },
+    ]);
+
+    // シェルも入口にしか無い。入口の答え (状態と本文) をそのまま出す。
+    const capture = await callTool("code_viewer_terminal_capture", {
+      target: "shell-sample",
+    });
+    expect(capture).toEqual({
+      isError: true,
+      text: `terminal capture: GET ${url}_agent/capture?target=shell-sample (HTTP 410 Gone): target is gone`,
+    });
+  }, 30_000);
 
   test("project processes end when the entry is gone, and a restarted entry picks them up", async () => {
     const box = sandbox();

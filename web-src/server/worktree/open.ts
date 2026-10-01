@@ -80,7 +80,7 @@ export type SpawnOptions = {
   backendOf?: number;
   /** `backendOf` の入口が起動ごとに作る本人確認 token。 */
   backendToken?: string;
-  /** 子に足す引数 (`--bin`・git の差分の引数など)。 */
+  /** 子に足す引数 (`--bin`・`--scope-omit-dir`)。 */
   serverArgs?: readonly string[];
 };
 
@@ -137,7 +137,9 @@ export function registryKey(path: string): string {
   }
 }
 
-function settingsIdentity(value: unknown): SettingsResponse["server"] | null {
+function settingsIdentity(
+  value: unknown,
+): Pick<SettingsResponse["server"], "pid" | "root"> | null {
   if (!value || typeof value !== "object") return null;
   const server = (value as { server?: unknown }).server;
   if (!server || typeof server !== "object") return null;

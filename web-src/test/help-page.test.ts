@@ -297,6 +297,7 @@ function renderHelpPage(
     currentRange: () => ({ from: "HEAD", to: "worktree" }),
     syncHeaderMenu: () => undefined,
     getLanguage: () => lang,
+    codeViewerVersion: () => "1.2.3",
     helpLabels: (labelLang) => helpLabels(labelLang, APP_LABELS[labelLang]),
     openAccountsSettings: () => calls.push("openAccountsSettings"),
     toggleKeyboardShortcuts: () => calls.push("toggleKeyboardShortcuts"),
@@ -665,6 +666,19 @@ describe("help page", () => {
       quickHelpText(lang).panelTitle,
       ["toggleKeyboardShortcuts"],
     ]);
+  });
+
+  // 版は server から読む。読めるまでは何も出さない (「code-viewer 」だけを出さない)。
+  test.each<[string, string | undefined]>([
+    ["1.2.3", "code-viewer 1.2.3"],
+    ["", undefined],
+  ])("the header shows the code-viewer version %j", (version, shown) => {
+    renderHelpPage("en", "getting-started", {
+      codeViewerVersion: () => version,
+    });
+    expect(
+      document.querySelector(".gdp-help-header .gdp-help-version")?.textContent,
+    ).toBe(shown);
   });
 
   test("the keys link in the text opens the keyboard shortcuts window", () => {
