@@ -26363,6 +26363,13 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
       (var(--panel-body-top) + 100dvh - var(--chrome-bottom)) / 2
     );
   }
+  /* History は一覧を長く取る: コミットを選ぶと本文に差分が出るので、面を開き直す
+     のはコミットを選び直すときが多く、半分では 2 件ほどしか見えなかった。 */
+  body[data-list-column="history"] {
+    --sp-sheet-mid: calc(
+      var(--panel-body-top) + (100dvh - var(--chrome-bottom) - var(--panel-body-top)) * 0.66
+    );
+  }
   body[data-list-column="history"] #history-panel,
   body[data-list-column="worktree"]:not([data-worktree-overview]) #worktree-panel {
     bottom: calc(100dvh - var(--sp-sheet-mid));
@@ -27103,6 +27110,10 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     background: var(--color-ground);
     scrollbar-width: none;
   }
+  /* 札は 1 行に全部入れる (切れて横に送る札があるとは気づけない)。 */
+  .pane-view-keys .mobile-key {
+    padding: 0 var(--space-1);
+  }
   .pane-view-compose {
     display: flex;
     align-items: flex-end;
@@ -27219,6 +27230,46 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body,
   body[data-sidebar-font-size] {
     --statusbar-h: var(--sp-touch);
+    /* 小さい操作 (ヘッダの絵札・小さい札・検索の欄・タブの札) の高さは
+       密度モードに関わらず指の大きさ。 */
+    --ui-control-sm: var(--sp-touch);
+    --ui-control-md: var(--sp-touch);
+  }
+  /* 見出しの絵札は高さだけ指の大きさ。幅まで 44px にすると名前が 4 文字に
+     なる (名前の塊に絵札が 3 つ入る)。 */
+  .d2h-file-header .gdp-file-header-icon {
+    width: calc(var(--sp-touch) - var(--space-2));
+    flex-basis: calc(var(--sp-touch) - var(--space-2));
+    padding: 0;
+  }
+  .main-tab-close {
+    width: var(--sp-touch);
+    height: var(--sp-touch);
+  }
+  .main-tab-group-menu {
+    width: var(--space-6);
+  }
+  .gdp-file-breadcrumb-part,
+  #history-panel .seg > button,
+  .main-tab-group-toggle,
+  #ref-reset,
+  #reload-prom,
+  #ignore-ws,
+  .gdp-palette-mode-button,
+  .gdp-btn-sm {
+    min-width: var(--space-7);
+  }
+  .gdp-file-breadcrumb-part,
+  .gdp-palette-mode-button,
+  .tools-pane-action,
+  .agents-hook-hint-open,
+  .agents-account-name,
+  .agents-stopped-toggle,
+  .agents-project-toggle,
+  .agents-section-title,
+  .gdp-expand-btn {
+    min-height: var(--sp-touch);
+    box-sizing: border-box;
   }
   /* 検索の欄が 44px になり頭と同じ高さなので、頭の上下の余白は取らない。 */
   .nav-head {
@@ -27323,5 +27374,13 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body,
   body[data-sidebar-font-size] {
     --topbar-h: calc(var(--sp-touch) + var(--space-2) * 2);
+  }
+}
+
+/* 電話の段: Diff の末尾の詰め物を短くする。最後のファイルを画面の頭へ揃える
+   ための 1 画面ぶんの余白は、指で末尾まで送ると何も無い画面になる。 */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
+  body.gdp-diff-page #diff {
+    padding-bottom: var(--space-7);
   }
 }

@@ -374,8 +374,8 @@ describe("面 (一覧の列) と下端の帯", () => {
       selector: "#file-list-rows .tree-file .file-label",
       closes: true,
     },
-    // 面の下の段にそのコミットの変更ファイルが出るので、続けて選べるよう閉じない。
-    { name: "コミットの行", selector: ".history-item", closes: false },
+    // 閉じて本文にそのコミットの差分を出す (開き直すと変更ファイルを選べる)。
+    { name: "コミットの行", selector: ".history-item", closes: true },
     {
       name: "画面の入口",
       selector: '.view-strip-item[data-route="diff"]',
