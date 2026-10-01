@@ -1,3 +1,4 @@
+import { isShellViewport } from "../../core/shell";
 // シェルセッションの HTTP 入口。
 //
 // - GET  /_shell/list             開いているシェルの一覧
@@ -13,7 +14,11 @@
 // onData をそのまま SSE へ橋渡しする。
 
 import { formatErrorDetail } from "../../core/error-detail";
-import { isShellSessionId, type ShellSessionId } from "../../core/shell";
+import {
+  isShellSessionId,
+  MAX_KEY_INPUT_LENGTH,
+  type ShellSessionId,
+} from "../../core/shell";
 import {
   dispatchRoutes,
   handleError,
@@ -21,120 +26,54 @@ import {
   parsePostJsonBody,
   textError,
 } from "../database/handle-shared";
+import { createSseStreamGroup } from "../sse-stream";
 import {
   closeShellSession,
   createShellSession,
   describeShellAvailability,
   listShellSessionsForMatching,
+  operateShellView,
   resizeShell,
   subscribeShell,
   writeToShell,
 } from "./session";
 
-/** 何も出力がない間も接続が生きていることを伝える間隔 (tmux 側と同じ)。 */
-const KEEPALIVE_INTERVAL_MS = 15000;
-
-/** 1 回の送信で受け付ける入力の長さ。貼り付けを想定して広めに取る。 */
-const MAX_KEY_INPUT_LENGTH = 100_000;
-
-const SSE_HEADERS = {
-  "Content-Type": "text/event-stream",
-  "Cache-Control": "no-cache",
-} as const;
-
-type ActiveStream = { close(): void };
-
 /** 開いている購読。サーバ終了時にまとめて閉じる。 */
-const activeStreams = new Set<ActiveStream>();
+const SHELL_STREAMS = createSseStreamGroup();
 
 /** preview.ts の shutdown から呼ぶ。購読が残ったままだと終了できない。 */
 export function closeShellStreams(): void {
-  for (const stream of [...activeStreams]) stream.close();
+  SHELL_STREAMS.closeAll();
 }
 
 function createShellStreamResponse(id: ShellSessionId): Response {
-  const enc = new TextEncoder();
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
-  let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
-  let subscription: { unsubscribe(): void } | null = null;
-  let closed = false;
-
-  const entry: ActiveStream = {
-    close() {
-      stop();
-    },
-  };
-
-  function send(event: string, data: string): void {
-    if (closed || !controller) return;
-    try {
-      controller.enqueue(enc.encode(`event: ${event}\ndata: ${data}\n\n`));
-    } catch {
-      // クライアントが既に切れている。購読を畳む。
-      stop();
+  return SHELL_STREAMS.open((stream) => {
+    const sub = subscribeShell(
+      id,
+      (chunk) => stream.send("output", JSON.stringify({ data: chunk })),
+      (exitCode) => {
+        stream.send("exited", JSON.stringify({ exitCode }));
+        stream.close();
+      },
+    );
+    if (!sub) {
+      stream.send("gone", "1");
+      stream.close();
+      return;
     }
-  }
-
-  function stop(): void {
-    if (closed) return;
-    closed = true;
-    if (keepaliveTimer) clearInterval(keepaliveTimer);
-    keepaliveTimer = null;
-    subscription?.unsubscribe();
-    subscription = null;
-    activeStreams.delete(entry);
-    try {
-      controller?.close();
-    } catch {
-      // 既に閉じられている (cancel 経由)。
+    stream.onClose(() => sub.unsubscribe());
+    stream.send("open", "ok");
+    // 購読していない間に出ていた分を先に流す。開き直したときに画面が
+    // 真っ白にならない。前の購読者に渡った分には流し直しの印を付ける:
+    // 中にある端末への問い合わせ (tmux が attach したときの DA など) には
+    // そのときの端末が答えており、答え直すと、誰も待っていない PTY に
+    // `1;2c` のような文字として入る。まだ誰にも渡っていない分は印を付けず、
+    // 端末に答えさせる (tmux はその答えを待っている)。
+    if (sub.replay) {
+      stream.send("output", JSON.stringify({ data: sub.replay, replay: true }));
     }
-  }
-
-  const stream = new ReadableStream<Uint8Array>({
-    start(ctrl) {
-      controller = ctrl;
-      activeStreams.add(entry);
-      const sub = subscribeShell(
-        id,
-        (chunk) => send("output", JSON.stringify({ data: chunk })),
-        (exitCode) => {
-          send("exited", JSON.stringify({ exitCode }));
-          stop();
-        },
-      );
-      if (!sub) {
-        send("gone", "1");
-        stop();
-        return;
-      }
-      subscription = sub;
-      send("open", "ok");
-      // 購読していない間に出ていた分を先に流す。開き直したときに画面が
-      // 真っ白にならない。前の購読者に渡った分には流し直しの印を付ける:
-      // 中にある端末への問い合わせ (tmux が attach したときの DA など) には
-      // そのときの端末が答えており、答え直すと、誰も待っていない PTY に
-      // `1;2c` のような文字として入る。まだ誰にも渡っていない分は印を付けず、
-      // 端末に答えさせる (tmux はその答えを待っている)。
-      if (sub.replay) {
-        send("output", JSON.stringify({ data: sub.replay, replay: true }));
-      }
-      if (sub.unseen) send("output", JSON.stringify({ data: sub.unseen }));
-      keepaliveTimer = setInterval(() => {
-        if (closed || !controller) return;
-        try {
-          controller.enqueue(enc.encode(": ping\n\n"));
-        } catch {
-          stop();
-        }
-      }, KEEPALIVE_INTERVAL_MS);
-      keepaliveTimer.unref?.();
-    },
-    cancel() {
-      stop();
-    },
+    if (sub.unseen) stream.send("output", JSON.stringify({ data: sub.unseen }));
   });
-
-  return new Response(stream, { headers: SSE_HEADERS });
 }
 
 async function handleList(): Promise<Response> {
@@ -203,20 +142,32 @@ async function readShellBody<T extends { id?: unknown }>(
 }
 
 async function handleKeys(req: Request): Promise<Response> {
-  const parsed = await readShellBody<{ id?: unknown; data?: unknown }>(req);
+  const parsed = await readShellBody<{
+    id?: unknown;
+    data?: unknown;
+    viewport?: unknown;
+  }>(req);
   if (parsed instanceof Response) return parsed;
   const { data } = parsed.body;
   if (typeof data !== "string") return textError("invalid data", 400);
   if (data.length > MAX_KEY_INPUT_LENGTH) {
     return textError("key input too large", 413);
   }
-  const result = writeToShell(parsed.id, data);
+  const { viewport } = parsed.body;
+  if (viewport !== undefined && !isShellViewport(viewport))
+    return textError("invalid viewport", 400);
+  const result = isShellViewport(viewport)
+    ? await operateShellView(parsed.id, viewport, data)
+    : writeToShell(parsed.id, data);
   if (result.status === "gone") return textError("shell is gone", 410);
   if (result.status === "error") {
     console.error("[code-viewer] shell write failed", result.error);
     return textError(formatErrorDetail(result.error), 500);
   }
-  return json({ ok: true });
+  return json({
+    ok: true,
+    ...(isShellViewport(viewport) ? { generation: viewport.sequence } : {}),
+  });
 }
 
 async function handleResize(req: Request): Promise<Response> {
@@ -224,13 +175,19 @@ async function handleResize(req: Request): Promise<Response> {
     id?: unknown;
     cols?: unknown;
     rows?: unknown;
+    viewport?: unknown;
   }>(req);
   if (parsed instanceof Response) return parsed;
   const { cols, rows } = parsed.body;
   if (typeof cols !== "number" || typeof rows !== "number") {
     return textError("invalid size", 400);
   }
-  const result = resizeShell(parsed.id, cols, rows);
+  const { viewport } = parsed.body;
+  if (viewport !== undefined && !isShellViewport(viewport))
+    return textError("invalid viewport", 400);
+  const result = isShellViewport(viewport)
+    ? await operateShellView(parsed.id, viewport)
+    : resizeShell(parsed.id, cols, rows);
   if (result.status === "gone") return textError("shell is gone", 410);
   // 失敗を成功として返すと、呼び出し側が「このサイズで通った」と記録して
   // 二度と送り直さなくなる。表示は続けられるが、桁数はずれたままになる。
@@ -238,7 +195,10 @@ async function handleResize(req: Request): Promise<Response> {
     console.error("[code-viewer] shell resize failed", result.error);
     return textError(formatErrorDetail(result.error), 500);
   }
-  return json({ ok: true });
+  return json({
+    ok: true,
+    ...(isShellViewport(viewport) ? { generation: viewport.sequence } : {}),
+  });
 }
 
 async function handleClose(req: Request): Promise<Response> {

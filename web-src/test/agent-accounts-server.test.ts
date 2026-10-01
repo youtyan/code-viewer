@@ -1185,7 +1185,10 @@ describe("login status (asked from the CLI itself)", () => {
     }
   });
 
-  test("the app-server exchange keeps stdin open until the answer, then closes it", async () => {
+  test.each([
+    false,
+    true,
+  ])("the app-server keeps stdin open through initialization (wait: %s)", async (waitForInitialize) => {
     // 本物の codex の振る舞い: stdin が閉じたら答える前に終わる。答えは
     // account/read を受け取ってから 1 行で返す。
     const fake = [
@@ -1193,6 +1196,7 @@ describe("login status (asked from the CLI itself)", () => {
       "process.stdin.on('data', (c) => { buf += c;",
       "  for (const line of buf.split('\\n').slice(0, -1)) {",
       "    const m = JSON.parse(line);",
+      "    if (m.method === 'initialize') process.stdout.write('shell prefix ' + JSON.stringify({id: m.id, result: {}}) + '\\n');",
       "    if (m.method === 'account/read') setTimeout(() => process.stdout.write(JSON.stringify({ id: m.id, result: { account: { type: 'chatgpt', email: 'sample@example.invalid', planType: 'pro' } } }) + '\\n'), 50);",
       "  }",
       "  buf = buf.slice(buf.lastIndexOf('\\n') + 1); });",
@@ -1203,6 +1207,7 @@ describe("login status (asked from the CLI itself)", () => {
       process.env,
       ACCOUNT_READ_REQUESTS,
       (line) => line.includes(`"id":${ACCOUNT_READ_ID}`),
+      waitForInitialize,
     );
     expect(result).toMatchObject({ code: 0, timedOut: false });
     expect(parseCodexAccountRead(result)).toEqual({

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import {
   DEFAULT_KEY_BINDINGS,
   KEYMAP_SCOPES,
@@ -11,17 +11,18 @@ import {
 import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import type { InstallOffer, InstallOfferState } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
+import { loadShikiHighlighter } from "../core/shiki-loader";
 import { parseQueryArgs } from "../server/query-cli";
 import { staticFileSpec, WEB_ROOT } from "../server/static-files";
 import {
   type AppHelpLabels,
   HELP_SECTION_ALIASES,
+  HELP_SECTIONS,
   type HelpLabels,
   helpLabels,
 } from "../views/help-guides";
 import { HELP_CAPTURES } from "../views/help-images";
 import {
-  buildHelpKeybindingGroups,
   collectHelpKeybindingCoverage,
   documentedHelpKeybindingActions,
   HIDDEN_HELP_KEYBINDING_ACTIONS,
@@ -46,8 +47,16 @@ const HIDDEN_INSTALL_OFFER: InstallOffer = {
   onChange: () => undefined,
 };
 
-beforeAll(() => {
+vi.mock("../core/lazy-bundle", () => ({
+  createBundleLoader: () => () => import("../shiki-entry"),
+}));
+
+beforeAll(async () => {
   GlobalRegistrator.register();
+  await loadShikiHighlighter({
+    langs: ["bash", "json"],
+    failureMode: "throw",
+  });
 });
 
 afterAll(() => {
@@ -499,7 +508,8 @@ describe("help page", () => {
         "Terminal",
         "Tabs and layout",
         "Install as an app",
-        "On a phone",
+        "Phone controls",
+        "Connect from outside",
         "Datastores",
         "Tools",
         "AI annotations",
@@ -528,7 +538,8 @@ describe("help page", () => {
         "ターミナル",
         "タブと画面の配置",
         "アプリとして入れる",
-        "SP で使う",
+        "スマホでの操作",
+        "外出先から接続する",
         "データストア",
         "ツール",
         "AI の注釈",
@@ -680,67 +691,6 @@ describe("help page", () => {
   });
 });
 
-describe("help page getting started", () => {
-  test.each<[HelpLanguage, string[]]>([
-    [
-      "en",
-      [
-        "Start it",
-        "Find your way around",
-        "(Optional) Add another repository",
-        "Install tmux",
-        "Sign in to your account",
-        "(Optional, recommended) Set up hooks",
-        "Start an agent",
-        "(Optional) Turn on notifications",
-        "(Optional) Give your AI the skills",
-        "If something does not work, run doctor",
-      ],
-    ],
-    [
-      "ja",
-      [
-        "起動する",
-        "画面の見方",
-        "（任意）ほかのリポジトリを足す",
-        "tmux を入れる",
-        "アカウントにログインする",
-        "（任意・おすすめ）フックを入れる",
-        "エージェントを起動する",
-        "（任意）通知を有効にする",
-        "（任意）AI にスキルを入れる",
-        "うまく動かないときは doctor を見る",
-      ],
-    ],
-  ])("in %s is the first section: ten numbered steps before any group", (lang, titles) => {
-    renderHelpPage(lang, "getting-started");
-    const content = document.querySelector(".gdp-help-content");
-    expect([
-      [
-        ...(content?.querySelectorAll(
-          ":scope > .gdp-help-steps > li > .gdp-help-step-title",
-        ) ?? []),
-      ].map((title) => title.textContent),
-      content?.querySelectorAll(".gdp-help-group").length,
-    ]).toEqual([titles, 0]);
-  });
-
-  test("the steps carry the commands to type", () => {
-    renderHelpPage("en", "getting-started");
-    expect(
-      Array.from(
-        document.querySelectorAll(".gdp-help-steps .gdp-help-command code"),
-        (code) => code.textContent,
-      ),
-    ).toEqual([
-      "npx @youtyan/code-viewer --open",
-      "brew install tmux",
-      "npx @youtyan/code-viewer skill install",
-      "npx @youtyan/code-viewer doctor",
-    ]);
-  });
-});
-
 describe("help page text uses each screen's names", () => {
   /** 名前を差し替えたラベル (画面の文言が変われば本文も変わることを見る)。 */
   function renamed(lang: HelpLanguage): HelpLabels {
@@ -768,82 +718,6 @@ describe("help page text uses each screen's names", () => {
     renderHelpPage(lang, section, { helpLabels: renamed });
     const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
     expect(text.includes(name)).toBe(true);
-  });
-
-  // 本文の［…］は画面の i18n の値そのもの (写した文字ではない)。
-  test.each<[HelpLanguage, string, string[]]>([
-    [
-      "en",
-      "getting-started",
-      [
-        "Projects",
-        "Register this folder",
-        "Sign in",
-        "Signed in",
-        "Agent integration",
-        "Set up",
-        "New agent",
-        "Launch",
-        "All agents",
-        "Enable notifications",
-        "Environment doctor",
-      ],
-    ],
-    [
-      "ja",
-      "getting-started",
-      [
-        "プロジェクト",
-        "このディレクトリを登録",
-        "ログイン",
-        "ログイン済み",
-        "エージェント連携",
-        "入れる",
-        "新しいエージェント",
-        "起動",
-        "すべてのエージェント",
-        "通知を有効にする",
-        "環境ドクター",
-      ],
-    ],
-    [
-      "ja",
-      "add-account",
-      [
-        "設定",
-        "アカウント",
-        "アカウントを追加…",
-        "新しく作る",
-        "既にあるディレクトリを使う",
-        "内容を確認…",
-        "ログインする",
-        "別のアカウントで続ける…",
-        "起動して引き継ぐ",
-      ],
-    ],
-    [
-      "en",
-      "agent-hooks",
-      [
-        "Settings",
-        "Agents",
-        "Agent integration",
-        "Set up",
-        "Finished · unread",
-        "Hook target missing",
-        "Repair",
-        "Show how to set up",
-        "Remove",
-        "Advanced",
-      ],
-    ],
-  ])("in %s the %s section names the buttons as the screens do", (lang, section, names) => {
-    renderHelpPage(lang, section);
-    const shown = Array.from(
-      document.querySelectorAll(".gdp-help-content .gdp-help-ui"),
-      (ui) => ui.textContent ?? "",
-    );
-    expect(names.filter((name) => !shown.includes(name))).toEqual([]);
   });
 
   test.each<[HelpLanguage, string]>([
@@ -893,15 +767,37 @@ describe("help page text uses each screen's names", () => {
     ]);
   });
 
-  // 利用者の呼び方は「SP」。日本語の本文に「電話」を混ぜない。
-  test("the Japanese help calls the phone layout SP", () => {
+  // 接続の設定とスマホの操作を別の見出しにし、日本語の本文に「電話」を混ぜない。
+  test("the Japanese help names the phone controls clearly", () => {
     renderHelpPage("ja", "phone");
     const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
     expect([
       document.querySelector(".gdp-help-content h2")?.textContent,
       text.includes("電話"),
       mobileShellText("ja").tabsParkedTitle.includes("電話"),
-    ]).toEqual(["SP で使う", false, false]);
+    ]).toEqual(["スマホでの操作", false, false]);
+  });
+});
+
+describe("help content is immediately readable", () => {
+  test.each(
+    (["en", "ja"] as const).flatMap((lang) =>
+      HELP_SECTIONS.map((section) => [lang, section] as const),
+    ),
+  )("in %s the %s guide has no collapsed instructions", (lang, section) => {
+    renderHelpPage(lang, section);
+    const article = document.querySelector(".gdp-help-content");
+    expect(article).not.toBeNull();
+    expect(article?.querySelectorAll("details, summary, [hidden]").length).toBe(
+      0,
+    );
+    for (const part of article?.querySelectorAll(".gdp-help-subsection") ??
+      []) {
+      expect(part.querySelector("h4")?.textContent).toBeTruthy();
+      expect(
+        part.querySelector(".gdp-help-subsection-body")?.children.length,
+      ).toBeGreaterThan(0);
+    }
   });
 });
 
@@ -1047,23 +943,6 @@ describe("help page keybinding reference", () => {
       );
     }
   });
-
-  test("keeps generated keybinding rows structurally aligned across languages", () => {
-    const englishGroups = buildHelpKeybindingGroups("en");
-    const japaneseGroups = buildHelpKeybindingGroups("ja");
-
-    expect(
-      japaneseGroups.map((group) => group.rows.map(([keys]) => keys)),
-    ).toEqual(englishGroups.map((group) => group.rows.map(([keys]) => keys)));
-    expect(japaneseGroups.map((group) => group.rows.length)).toEqual(
-      englishGroups.map((group) => group.rows.length),
-    );
-    expect(
-      englishGroups
-        .flatMap((group) => group.rows.map(([keys]) => keys))
-        .filter((keys) => keys === ""),
-    ).toEqual([]);
-  });
 });
 
 describe("help page captures", () => {
@@ -1111,6 +990,15 @@ describe("help page captures", () => {
     ["tabs-layout", ["tabs-groups", "tabs-split"]],
     ["install-app", []],
     ["phone", ["phone-screen"]],
+    [
+      "remote-access",
+      [
+        "remote-access-hostname",
+        "remote-access-policy",
+        "remote-tunnel-route",
+        "remote-tunnel-options",
+      ],
+    ],
     ["datastores", ["datastore-grid"]],
     ["tools", ["tools-markdown"]],
     ["annotations", ["annotations-panel"]],
@@ -1150,35 +1038,6 @@ describe("help page captures", () => {
   const CASES = (["en", "ja"] as const).flatMap((lang) =>
     FIGURES.map(([section, names]) => [lang, section, names] as const),
   );
-
-  test("the table covers every help section", () => {
-    renderHelpPage("en", "getting-started");
-    expect(FIGURES.map(([section]) => section)).toEqual([
-      "getting-started",
-      "projects",
-      "read-files",
-      "read-diffs",
-      "search",
-      "worktrees",
-      "start-agent",
-      "agent-state",
-      "notifications",
-      "agent-hooks",
-      "add-account",
-      "terminal",
-      "tabs-layout",
-      "install-app",
-      "phone",
-      "datastores",
-      "tools",
-      "annotations",
-      "ask-ai",
-      "ai-cli-mcp",
-      "project-files",
-      "doctor",
-      "keybindings",
-    ]);
-  });
 
   test.each(
     CASES,

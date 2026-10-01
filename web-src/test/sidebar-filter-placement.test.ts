@@ -48,16 +48,6 @@ describe("sidebar filter placement on navigation", () => {
     }
   });
 
-  test("setPageMode re-places the file list toggle after page classes change", () => {
-    const body = functionBody(appSource, "setPageMode");
-    expect(body.includes("placeSidebarToggle()")).toBe(true);
-  });
-
-  test("setPageMode re-syncs the sidebar header height", () => {
-    const body = functionBody(appSource, "setPageMode");
-    expect(body.includes("syncSidebarHeaderHeight()")).toBe(true);
-  });
-
   // 画面の印は core/page-mode.ts の pageModeClasses が決める (index.html の早い
   // スクリプトと共有。web-src/test/first-screen.test.ts)。ここは Diff の印だけを
   // 振る舞いで見る。

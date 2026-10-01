@@ -157,6 +157,7 @@ export type AgentsSidebarText = {
   expand: string;
   resize: string;
   newAgent: string;
+  openProjectTitle: (name: string) => string;
   settings: string;
   help: string;
   /** いま見ているプロジェクトの印のツールチップ。 */
@@ -601,6 +602,7 @@ const EN: AgentsText = {
     expand: "Show sidebar",
     resize: "Resize sidebar",
     newAgent: "New agent",
+    openProjectTitle: (name) => `Open a shell, agent or screen in ${name}`,
     settings: "Settings",
     help: "Help",
     current: "This window shows this project",
@@ -748,6 +750,7 @@ const JA: AgentsText = {
     expand: "サイドバーを表示",
     resize: "サイドバーの幅を変える",
     newAgent: "新しいエージェント",
+    openProjectTitle: (name) => `${name} のシェル・エージェント・画面を開く`,
     settings: "設定",
     help: "ヘルプ",
     current: "この画面がこのプロジェクトです",

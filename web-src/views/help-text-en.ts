@@ -1,7 +1,7 @@
 // The help text in English. The order and names of the sections live in
 // help-guides.ts, the Japanese text in help-text-ja.ts. Button names are { ui }
 // with the value taken from each screen's i18n (w.l). A paragraph is at most
-// 240 characters and a section's body at most 1200 (help-text-length.test.ts).
+// 240 characters and each heading's body at most 1200 (help-text-length.test.ts).
 
 import type { HelpText } from "./help-blocks";
 import type { HelpTexts, HelpWriter } from "./help-guides";
@@ -13,7 +13,7 @@ const ui = (label: string) => ({ ui: label });
 const code = (text: string) => ({ code: text });
 const key = (text: string) => ({ key: text });
 const more = (...items: HelpText[]): HelpBlock => ({
-  kind: "details",
+  kind: "subsection",
   blocks: [{ kind: "list", items }],
 });
 
@@ -718,14 +718,14 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
           ],
         },
         {
-          title: "From a tab group",
+          title: "From the project menu",
           blocks: [
             {
               kind: "paragraph",
               text: [
                 "Choose ",
                 ui(l.mainTabs.newAgentHere),
-                " from a tab group's ▾ to open the same dialog with that project chosen.",
+                " from the + next to a project in the left sidebar or a tab group's ▾ to open the same dialog with that project chosen.",
               ],
             },
           ],
@@ -1159,25 +1159,23 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               items: [
                 "Once you add an account, usage per account shows above the agent list.",
                 [
-                  "For claude, select ",
-                  ui(accounts.statusLineInstall),
-                  " under ",
-                  ui(accounts.usageTitle),
-                  " to start collecting it.",
+                  "Select ",
+                  ui(accounts.usageRefreshAll),
+                  " to fetch current usage.",
                 ],
               ],
             },
             more(
-              "codex usage shows without any setup.",
+              "Usage refreshes every 5 minutes while the account view is open. Neither Claude nor Codex sends a model message or consumes tokens to fetch usage.",
               [
                 "On a claude card, ",
                 ui(accounts.usageEnable),
-                " starts collecting it too.",
+                " is optional. It also collects usage received during your work.",
               ],
               [
-                "When a claude card has no value or an old one, ",
+                "When a card has no value or an old one, ",
                 ui(accounts.usageCheck),
-                " starts claude in the background and sends one short message to get the current value (it uses a little usage).",
+                " refreshes that account alone. If it fails, you can copy the error details.",
               ],
             ),
           ],
@@ -1321,6 +1319,8 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 code("window-size smallest"),
                 " shows the whole window in both.",
               ],
+              "Click, tap or type in a terminal to fit it to that screen. Phone operation uses the phone size; operating on the PC switches it back to the PC size.",
+              "Idle screens do not take the size back. Views of the same pane still share one terminal size.",
               "Powerline symbols and file icons show when a Nerd Font is installed on the machine running the browser.",
               [
                 "If shells cannot be opened, ",
@@ -1476,9 +1476,10 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
       ],
     },
     phone: {
-      title: "On a phone",
+      title: "Phone controls",
       intro:
-        "On a narrow screen, code-viewer keeps to three tasks: answering agents, reading diffs and files, and switching projects.",
+        "This section explains the controls after connecting on a phone: answer agents, read diffs and files, and switch projects.",
+      lead: [w.see("remote-access")],
       groups: [
         {
           title: "What you can do",
@@ -1521,6 +1522,628 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               ],
               "Pinch on a terminal to change its text size.",
             ),
+          ],
+        },
+        {
+          title: "Open an agent",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                "Tap an agent to open only its pane, full screen. Other panes in a split tmux window are not shown, and the PC's window size and layout stay as they are.",
+                [
+                  "Long lines wrap to the phone's width. For full-screen apps such as vim, switch to ",
+                  ui(l.terminal.paneView.screen),
+                  " to see the grid as it is.",
+                ],
+                "When choices are shown, numbered buttons appear. Tap one to send that number.",
+                [
+                  "Type in the field at the bottom and tap ",
+                  ui(l.terminal.paneView.send),
+                  " to paste it and press Enter. Tapping it with the field empty sends only Enter.",
+                ],
+                "Go back (‹ at the top left, or the browser's back) to return to the list.",
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    "remote-access": {
+      title: "Connect from outside",
+      intro:
+        "Set up a connection to code-viewer on your Mac while away from home. Complete the setup on your Mac, then check it in your phone browser.",
+      groups: [
+        {
+          title: "Cloudflare services used in this guide",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                [
+                  {
+                    link: "Cloudflare Tunnel",
+                    href: "https://developers.cloudflare.com/tunnel/",
+                  },
+                  ": forwards connections from your public URL to code-viewer on your Mac. Free on the Free plan.",
+                ],
+                [
+                  {
+                    link: "Cloudflare Access",
+                    href: "https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/",
+                  },
+                  ": requires browser sign-in and allows only your approved email address. The Free plan covers up to 50 users.",
+                ],
+                [
+                  {
+                    link: "Cloudflare DNS",
+                    href: "https://developers.cloudflare.com/dns/",
+                  },
+                  ": manages DNS records and points your public URL to the Tunnel. Free on the Free plan.",
+                ],
+              ],
+            },
+            {
+              kind: "paragraph",
+              text: "For this single-user setup, the Cloudflare services can use free plans. Domain registration and renewal cost extra; prices depend on the registrar and domain extension.",
+            },
+            {
+              kind: "paragraph",
+              text: [
+                "Check pricing: ",
+                {
+                  link: "Zero Trust",
+                  href: "https://www.cloudflare.com/plans/zero-trust-services/",
+                },
+                ", ",
+                {
+                  link: "DNS",
+                  href: "https://developers.cloudflare.com/dns/faq/",
+                },
+                " and ",
+                {
+                  link: "domain registration and renewal",
+                  href: "https://www.cloudflare.com/products/registrar/",
+                },
+                " (checked October 1, 2026).",
+              ],
+            },
+            {
+              kind: "paragraph",
+              text: "Access is in Zero Trust; Tunnel is under Network → Tunnels in the account dashboard. cloudflared connects your Mac to the Tunnel.",
+            },
+            {
+              kind: "paragraph",
+              text: "Connection: phone → Access sign-in → Tunnel → Mac. The real dashboard captures use example values and show the Japanese interface.",
+            },
+            {
+              kind: "paragraph",
+              text: "Already configured? Go to “Starting and stopping”. For first-time setup, follow steps 1–8 in order.",
+            },
+          ],
+        },
+        {
+          title: "Before you start",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                "Have a Mac with code-viewer working, a Cloudflare account, and a domain whose DNS is managed by Cloudflare.",
+                "This guide uses viewer.example.com as an example. Replace example.com with your own domain throughout the steps.",
+                "Keep the Mac online and awake. Actions from your phone run on the Mac.",
+              ],
+            },
+          ],
+        },
+        {
+          title: "First-time setup — follow the steps in order",
+          blocks: [
+            {
+              kind: "subsection",
+              title: "1. Choose the address you will open on your phone",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "Open the Cloudflare dashboard in a browser on your Mac. Under Domains, check that your domain is Active.",
+                },
+                {
+                  kind: "paragraph",
+                  text: "If you own example.com, you can use an unused name such as viewer.example.com. You can choose a different name instead of viewer.",
+                },
+                {
+                  kind: "table",
+                  head: ["Name used in this guide", "Example"],
+                  rows: [
+                    ["Domain", "example.com"],
+                    ["Subdomain", "viewer"],
+                    ["Hostname", "viewer.example.com"],
+                    ["Public URL", "https://viewer.example.com"],
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: "If you do not have a domain, register one and add it to Cloudflare first. Nameserver changes can take time to reach the DNS resolver used by your network.",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "2. Allow only your own account to sign in (Cloudflare)",
+              blocks: [
+                {
+                  kind: "steps",
+                  items: [
+                    {
+                      title: "Open Zero Trust",
+                      text: "Open Zero Trust from your Cloudflare account and choose a team name and the Free plan. Payment details may be required, but the Free plan does not charge you.",
+                    },
+                    {
+                      title: "Add a self-hosted application",
+                      text: "Open Access controls → Applications → Create new application. Select Continue with self-hosted and private (セルフホストとプライベートで続行).",
+                    },
+                    {
+                      title: "Enter the hostname from step 1",
+                      text: "Use viewer for Subdomain, select your Domain, and leave Path empty. Switch to custom input (カスタム入力に切り替える) lets you enter viewer.example.com in one field.",
+                      figures: [
+                        fig(
+                          "remote-access-hostname",
+                          "Access destinations, with the public hostname entered using custom input.",
+                        ),
+                      ],
+                    },
+                    {
+                      title: "Allow your own email address",
+                      text: "Under Access policies, click Create new policy (新しいポリシーを作成). Set Include to Emails, enter your email, and press Enter to add it.",
+                      figures: [
+                        fig(
+                          "remote-access-policy",
+                          "The Include rule of an allow policy: select Emails and press Enter to add your own address.",
+                        ),
+                      ],
+                    },
+                    {
+                      title: "Save the policy and return to the application",
+                      text: "Set Policy name to code-viewer-owner and Action to Allow (許可). Click Save policy (ポリシーを保存), then check that the policy is attached to the application.",
+                    },
+                    {
+                      title: "Check the name and login method",
+                      text: "Under Details, set Name to code-viewer and Session duration to six hours. Under Authentication, choose a login method that uses your allowed email.",
+                    },
+                    {
+                      title: "Click Create",
+                      text: "Create the application. This step is complete when the list shows code-viewer with the code-viewer-owner policy attached.",
+                    },
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: "Do not select Everyone or Bypass. Replace user@example.com in the capture with your own email.",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "3. Copy the two configuration values (Cloudflare)",
+              blocks: [
+                {
+                  kind: "steps",
+                  items: [
+                    {
+                      title: "Copy the Team domain",
+                      text: "In Zero Trust, open Settings → Team name and domain. Copy the domain, such as your-team.cloudflareaccess.com, for teamDomain in step 4.",
+                    },
+                    {
+                      title: "Copy the application's AUD",
+                      text: "Open Access controls → Applications → code-viewer. In Additional settings, find Application Audience (AUD) tag and click Copy.",
+                    },
+                    {
+                      title: "Use both values in step 4",
+                      text: "Team domain has no https:// prefix. Paste the entire 64-character AUD into audience; do not use the application ID or the Tunnel token.",
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "4. Create the configuration file (Mac Terminal)",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "In the Mac Terminal app, run these commands to create a configuration folder and open the file in the nano text editor.",
+                },
+                {
+                  kind: "command",
+                  title: "Open the configuration file",
+                  command:
+                    "mkdir -p ~/.config/code-viewer\nnano ~/.config/code-viewer/remote-access.json",
+                },
+                {
+                  kind: "paragraph",
+                  text: "Paste the example below, replacing origin, teamDomain and audience with your own values. If a configuration already exists, edit the relevant fields instead of pasting another object.",
+                },
+                {
+                  kind: "command",
+                  title: "Contents of remote-access.json",
+                  language: "json",
+                  command:
+                    '{\n  "port": 64161,\n  "origin": "https://viewer.example.com",\n  "teamDomain": "your-team.cloudflareaccess.com",\n  "audience": "REPLACE_WITH_YOUR_64_CHARACTER_AUD"\n}',
+                },
+                {
+                  kind: "table",
+                  head: ["Field", "Value to use"],
+                  rows: [
+                    [
+                      "port",
+                      "Keep 64161, separate from the normal local viewing port",
+                    ],
+                    [
+                      "origin",
+                      "The https:// URL you will open on your phone, without a trailing slash",
+                    ],
+                    ["teamDomain", "The domain from step 3, without https://"],
+                    [
+                      "audience",
+                      "The 64-character AUD copied in step 3; keep the quotation marks",
+                    ],
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: "Press Control+O, then Enter to save; press Control+X to exit nano. Use the Control key, not Command.",
+                },
+                {
+                  kind: "paragraph",
+                  text: "The ~ symbol means your Mac home folder. Keep this file outside your project, and do not put the Tunnel token in it.",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "5. Start code-viewer with this file (Mac)",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "If code-viewer is already running, press Control+C in its terminal first. Choose one of the following commands to match how you normally run it.",
+                },
+                {
+                  kind: "command",
+                  title: "Installed code-viewer",
+                  command:
+                    "code-viewer --remote-access ~/.config/code-viewer/remote-access.json",
+                },
+                {
+                  kind: "command",
+                  title:
+                    "Development checkout (run from the repository folder)",
+                  command:
+                    "pnpm dev --remote-access ~/.config/code-viewer/remote-access.json",
+                },
+                {
+                  kind: "paragraph",
+                  text: "Do not add --standalone. Running only pnpm dev does not enable remote access.",
+                },
+                {
+                  kind: "paragraph",
+                  text: "Look for “code-viewer remote access” and “tunnel target http://127.0.0.1:64161” in the startup output. Leave this terminal running.",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "6. Create a Tunnel and connect your Mac",
+              blocks: [
+                {
+                  kind: "steps",
+                  items: [
+                    {
+                      title: "Create a new Tunnel (Cloudflare)",
+                      text: "From the account dashboard, open Networks → Tunnels → Create tunnel. Select cloudflared if asked for a type, and name the new Tunnel code-viewer.",
+                    },
+                    {
+                      title: "Install the connector (Mac)",
+                      text: "Select macOS on the Tunnel page and follow its installation instructions. If you already have Homebrew, you can use the command below.",
+                    },
+                  ],
+                },
+                {
+                  kind: "command",
+                  title: "Install cloudflared",
+                  command: "brew install cloudflared",
+                },
+                {
+                  kind: "paragraph",
+                  text: "Open a second terminal, separate from code-viewer. Create a private file for the token that lets this Mac connect to this Tunnel.",
+                },
+                {
+                  kind: "command",
+                  title: "Create a file only you can read",
+                  command:
+                    "umask 077\ntouch ~/.config/code-viewer/tunnel-token\nchmod 600 ~/.config/code-viewer/tunnel-token\nnano ~/.config/code-viewer/tunnel-token",
+                },
+                {
+                  kind: "paragraph",
+                  text: "Copy the connection command shown on the Tunnel page. Save only its long token at the end, on one line; do not include --token, service install, or the rest of the command.",
+                },
+                {
+                  kind: "paragraph",
+                  text: "Save with Control+O, Enter, then exit with Control+X and run the command below. Never paste the token into a chat or repository.",
+                },
+                {
+                  kind: "command",
+                  title: "Connect the Tunnel",
+                  command:
+                    "cloudflared tunnel run --token-file ~/.config/code-viewer/tunnel-token",
+                },
+                {
+                  kind: "paragraph",
+                  text: "The log should show “Registered tunnel connection”, and the Tunnel dashboard should report Healthy. Leave this terminal running too.",
+                },
+                {
+                  kind: "paragraph",
+                  text: "Use this new named Tunnel even if you have another one. Do not use Quick Tunnel: its temporary URLs do not support the stream used for terminal output.",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "7-1. Add the public URL route (Cloudflare)",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "Open the new Tunnel, then Add route → Published application. Fill in these fields, then open the additional settings before saving.",
+                },
+                {
+                  kind: "figure",
+                  figure: fig(
+                    "remote-tunnel-route",
+                    "Published application in a Tunnel: example subdomain and service URL. Select your own domain.",
+                  ),
+                },
+                {
+                  kind: "table",
+                  head: ["Field", "Example value"],
+                  rows: [
+                    ["Subdomain", "viewer"],
+                    ["Domain", "example.com"],
+                    ["Path", "Leave empty"],
+                    ["Service URL", "http://127.0.0.1:64161"],
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: "If Type and URL are separate fields, choose HTTP and enter 127.0.0.1:64161. This is the destination on your Mac, not the URL to open on your phone.",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "7-2. Protect the destination with Access",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "Open HTTP and Access under Additional application settings. Set the four fields below, then select Add route and check that the hostname appears in the route list.",
+                },
+                {
+                  kind: "figure",
+                  figure: fig(
+                    "remote-tunnel-options",
+                    "The Access section of additional application settings, with Protect with Access enabled. Replace the example Team name and AUD with your own values.",
+                  ),
+                },
+                {
+                  kind: "table",
+                  head: ["Additional setting", "Value"],
+                  rows: [
+                    [
+                      "HTTP → HTTP Host Header",
+                      "viewer.example.com, without https://",
+                    ],
+                    ["Access → Protect with Access", "On"],
+                    [
+                      "Access → Team name",
+                      "your-team, without .cloudflareaccess.com",
+                    ],
+                    [
+                      "Access → Application Audience (AUD) tag",
+                      "Paste the AUD from step 3 and press Enter",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "7-3. Disable caching",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "Next, open your domain from the account dashboard and create a Cache Rule under Rules. Match only this public hostname.",
+                },
+                {
+                  kind: "table",
+                  head: ["Cache Rule field", "Setting"],
+                  rows: [
+                    ["Rule name", "code-viewer-no-cache"],
+                    [
+                      "Match",
+                      'Custom expression: (http.host eq "viewer.example.com")',
+                    ],
+                    ["Cache eligibility", "Bypass cache"],
+                    ["Browser TTL", "Add the setting and select Bypass cache"],
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: "Select Deploy to enable the rule. This prevents the viewer pages and file contents from being cached.",
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "8. Sign in and check the phone connection",
+              blocks: [
+                {
+                  kind: "steps",
+                  items: [
+                    {
+                      title: "Open your public URL",
+                      text: "In Safari or Chrome on your phone, open https://viewer.example.com. At the Cloudflare login page, sign in with the email allowed in step 2.",
+                    },
+                    {
+                      title: "Check the content",
+                      text: "Select a project and open a file or diff. Check that the agent output updates as well.",
+                    },
+                    {
+                      title: "Check the signed-out view",
+                      text: "Open the same URL in private browsing and confirm it asks you to sign in instead of displaying code-viewer. Other email addresses should not be allowed.",
+                    },
+                  ],
+                },
+                {
+                  kind: "paragraph",
+                  text: "You do not need to install code-viewer or cloudflared on your phone. See “Phone controls” for the phone controls.",
+                },
+                w.see("phone"),
+              ],
+            },
+          ],
+        },
+        {
+          title: "Starting and stopping",
+          blocks: [
+            {
+              kind: "paragraph",
+              text: "After setup, start code-viewer and cloudflared on your Mac, then open your chosen URL on the phone. You do not need to recreate the Cloudflare settings.",
+            },
+            {
+              kind: "subsection",
+              title: "Show startup commands and how to stop",
+              blocks: [
+                {
+                  kind: "command",
+                  title: "Terminal 1: development checkout",
+                  command:
+                    "pnpm dev --remote-access ~/.config/code-viewer/remote-access.json",
+                },
+                {
+                  kind: "command",
+                  title:
+                    "Terminal 1: use this instead for the installed version",
+                  command:
+                    "code-viewer --remote-access ~/.config/code-viewer/remote-access.json",
+                },
+                {
+                  kind: "command",
+                  title: "Terminal 2: connector",
+                  command:
+                    "cloudflared tunnel run --token-file ~/.config/code-viewer/tunnel-token",
+                },
+                {
+                  kind: "list",
+                  items: [
+                    "Use only one of the Terminal 1 commands. Run the development command from the repository folder.",
+                    "To stop phone access only, press Control+C in Terminal 2 where cloudflared is running. You can keep using code-viewer locally on the Mac.",
+                    "This guide does not configure automatic startup. Start both programs again after restarting the Mac, and do not duplicate a cloudflared instance already running as a service.",
+                    "The Mac must stay online and awake. Closing the phone browser does not stop the agents working on your Mac.",
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          title: "If something does not work",
+          blocks: [
+            {
+              kind: "subsection",
+              title: "The URL does not open, or only works on some networks",
+              blocks: [
+                {
+                  kind: "list",
+                  items: [
+                    "Check the URL spelling, then turn off phone Wi-Fi and try mobile data. If only mobile data works, your home network may still have old DNS information.",
+                    "Check that the domain is Active and the Tunnel has a published route for the hostname. After DNS changes, allow time for them to reach your network and try again.",
+                  ],
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "Sign-in fails, or you see 401 or 403",
+              blocks: [
+                {
+                  kind: "list",
+                  items: [
+                    "If the login page denies access, compare the allowed email with the account you actually signed in to. Check that you pressed Enter to add the policy email and saved it.",
+                    "For a 401 after login, check teamDomain and audience in the configuration file, and Team name and AUD on the Tunnel. Read the full error in the code-viewer terminal on your Mac.",
+                    "For a 403, check that the origin URL and Tunnel HTTP Host Header use the same hostname. Keep authentication enabled while fixing the configuration.",
+                  ],
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "502, an inactive Tunnel, or an unreachable destination",
+              blocks: [
+                {
+                  kind: "list",
+                  items: [
+                    "If the Tunnel is inactive, read the errors in the cloudflared terminal. Check that its token belongs to the new Tunnel.",
+                    "If the Tunnel is Healthy but returns 502, check that code-viewer was started with --remote-access. The service URL port must match port in the configuration file.",
+                    "Restart code-viewer after editing the configuration. Pointing the Tunnel at the normal local viewing port does not enable authenticated remote access.",
+                  ],
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "The connection drops or input does not send",
+              blocks: [
+                {
+                  kind: "list",
+                  items: [
+                    "If your login expires, reopen the page and sign in again. After unlocking your phone or switching networks, wait for reconnection.",
+                    "Failed input is not sent again automatically. Check the output on the Mac before repeating the action.",
+                  ],
+                },
+              ],
+            },
+            {
+              kind: "subsection",
+              title: "Open the official documentation",
+              blocks: [
+                {
+                  kind: "list",
+                  items: [
+                    [
+                      {
+                        link: "Cloudflare Access",
+                        href: "https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/",
+                      },
+                    ],
+                    [
+                      {
+                        link: "Cloudflare Tunnel",
+                        href: "https://developers.cloudflare.com/tunnel/get-started/",
+                      },
+                    ],
+                    [
+                      {
+                        link: "HTTP Host Header / Protect with Access",
+                        href: "https://developers.cloudflare.com/tunnel/reference/origin-parameters/",
+                      },
+                    ],
+                    [
+                      {
+                        link: "Cache Rules",
+                        href: "https://developers.cloudflare.com/cache/how-to/cache-rules/",
+                      },
+                    ],
+                  ],
+                },
+              ],
+            },
           ],
         },
       ],

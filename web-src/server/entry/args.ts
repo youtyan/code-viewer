@@ -25,6 +25,7 @@ export const DEFAULT_IDLE_STOP_SECONDS = 600;
 
 export type EntryArgs = {
   port: number;
+  remoteAccess: string | null;
   /** 使われていない裏を止めるまでの秒数。0 は止めない。 */
   idleStopSeconds: number;
   cwd: string | null;
@@ -42,6 +43,7 @@ export type EntryArgsResult =
 export function parseEntryArgs(argv: readonly string[]): EntryArgsResult {
   const args: EntryArgs = {
     port: 0,
+    remoteAccess: null,
     idleStopSeconds: DEFAULT_IDLE_STOP_SECONDS,
     cwd: null,
     open: false,
@@ -50,7 +52,15 @@ export function parseEntryArgs(argv: readonly string[]): EntryArgsResult {
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] ?? "";
-    if (arg === "--port") {
+    if (arg === "--remote-access") {
+      const next = argv[++i];
+      if (!next || next.startsWith("--"))
+        return {
+          ok: false,
+          error: "--remote-access requires a JSON config file",
+        };
+      args.remoteAccess = next;
+    } else if (arg === "--port") {
       const parsed = Number(argv[++i]);
       if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
         return { ok: false, error: "--port requires a TCP port number" };

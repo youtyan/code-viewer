@@ -379,6 +379,140 @@ async function refreshPreview(url: string): Promise<Response> {
 }
 
 describe("preview CLI", () => {
+  test.each([
+    {
+      name: "open path requires POST",
+      path: "/_open_path",
+      method: "GET",
+      body: undefined,
+      headers: {},
+      status: 405,
+      message: "method not allowed",
+    },
+    {
+      name: "open path rejects a foreign origin",
+      path: "/_open_path",
+      headers: { Origin: "https://example.invalid" },
+      status: 403,
+      message: "forbidden",
+    },
+    {
+      name: "open path requires an action header",
+      path: "/_open_path",
+      headers: { "X-Code-Viewer-Action": "" },
+      status: 403,
+      message: "forbidden",
+    },
+    {
+      name: "open path rejects a cross-site request",
+      path: "/_open_path",
+      headers: { "Sec-Fetch-Site": "cross-site" },
+      status: 403,
+      message: "forbidden",
+    },
+    {
+      name: "open path requires JSON",
+      path: "/_open_path",
+      headers: { "Content-Type": "text/plain" },
+      status: 415,
+      message: "unsupported media type",
+    },
+    {
+      name: "open path accepts 1023 bytes for validation",
+      path: "/_open_path",
+      body: '{"kind":"invalid"}'.padEnd(1023),
+      headers: {},
+      status: 400,
+      message: "invalid kind",
+    },
+    {
+      name: "open path accepts 1024 bytes for validation",
+      path: "/_open_path",
+      body: '{"kind":"invalid"}'.padEnd(1024),
+      headers: {},
+      status: 400,
+      message: "invalid kind",
+    },
+    {
+      name: "open path rejects 1025 bytes",
+      path: "/_open_path",
+      body: '{"kind":"invalid"}'.padEnd(1025),
+      headers: {},
+      status: 413,
+      message: "payload too large",
+    },
+    {
+      name: "open path rejects a missing file-parent path",
+      path: "/_open_path",
+      body: '{"kind":"file-parent","path":""}',
+      headers: {},
+      status: 400,
+      message: "invalid path",
+    },
+    {
+      name: "open path rejects traversal outside the worktree",
+      path: "/_open_path",
+      body: '{"kind":"directory","path":".."}',
+      headers: {},
+      status: 400,
+      message: "invalid path",
+    },
+    {
+      name: "open path forbids the Git internal tree",
+      path: "/_open_path",
+      body: '{"kind":"directory","path":".git"}',
+      headers: {},
+      status: 403,
+      message: "forbidden",
+    },
+    {
+      name: "open path requires a directory that exists",
+      path: "/_open_path",
+      body: '{"kind":"directory","path":"missing"}',
+      headers: {},
+      status: 404,
+      message: "not found",
+    },
+    {
+      name: "refresh rejects a foreign origin",
+      path: "/refresh",
+      headers: { Origin: "https://example.invalid" },
+      status: 403,
+      message: "forbidden",
+    },
+    {
+      name: "refresh requires an action header",
+      path: "/refresh",
+      headers: { "X-Code-Viewer-Action": "" },
+      status: 403,
+      message: "forbidden",
+    },
+  ])("$name", async ({ path, headers, status, message, ...request }) => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-request-gate-"));
+    tmpRoots.push(root);
+    git(root, ["init", "-b", "main"]);
+    const preview = await startTestPreview(root);
+    try {
+      const response = await fetch(new URL(path, preview.url), {
+        method: "POST",
+        body: '{"kind":"invalid"}',
+        ...request,
+        headers: {
+          Origin: new URL(preview.url).origin,
+          "X-Code-Viewer-Action": "1",
+          "Content-Type": "application/json",
+          ...headers,
+        },
+      });
+      expect({ status: response.status, body: await response.text() }).toEqual({
+        status,
+        body: message,
+      });
+    } finally {
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
+
   test("a standalone server publishes the same private identity in its registry and endpoint", async () => {
     const root = mkdtempSync(join(tmpdir(), "code-viewer-identity-"));
     tmpRoots.push(root);

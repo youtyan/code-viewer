@@ -1256,9 +1256,24 @@ describe("main tabs view: プロジェクトのグループ", () => {
       return { ...ctx, calls };
     };
 
-    test("既存の項目の上に、区切り線で分けて並ぶ (その下に区切って画面の行)", async () => {
-      const { mount } = await setupWithActions();
-      expect(describeMenu(openGroupMenu(mount, LIB))).toEqual([
+    test.each([
+      {
+        name: "タブのグループ",
+        open: (ctx: { mount: HTMLElement; handle: MainTabsHandle }) =>
+          openGroupMenu(ctx.mount, LIB),
+      },
+      {
+        name: "サイドバー",
+        open: (ctx: { mount: HTMLElement; handle: MainTabsHandle }) => {
+          ctx.handle.openProjectMenu(LIB, ctx.mount);
+          return [
+            ...(document.querySelector(".gdp-context-menu")?.children ?? []),
+          ] as HTMLElement[];
+        },
+      },
+    ])("$name から同じ項目を区切り線で分けて並べる", async ({ open }) => {
+      const ctx = await setupWithActions();
+      expect(describeMenu(open(ctx))).toEqual([
         "sample-lib (disabled)",
         "---",
         "New shell",
@@ -1276,6 +1291,44 @@ describe("main tabs view: プロジェクトのグループ", () => {
         "---",
         "Close this group",
       ]);
+    });
+
+    test.each([
+      {
+        name: "shell",
+        label: "New shell",
+        expected: ["shell:/work/sample-docs:left"],
+      },
+      {
+        name: "agent",
+        label: "New agent…",
+        expected: ["agent:/work/sample-docs"],
+      },
+      {
+        name: "files",
+        label: "repo",
+        expected: ["switch:/work/sample-docs:-:-"],
+      },
+      {
+        name: "history",
+        label: "history",
+        expected: ["switch:/work/sample-docs:history:-"],
+      },
+    ])("サイドバーからタブの無いプロジェクトの $name を開く", async ({
+      label,
+      expected,
+    }) => {
+      const { handle, mount, calls } = await setupWithActions();
+      handle.openProjectMenu("/work/sample-docs", mount);
+      const item = [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          ".gdp-context-menu button",
+        ),
+      ].find((button) => button.textContent === label);
+      if (!item) throw new Error(`missing project menu item: ${label}`);
+      expect(item.disabled).toBe(false);
+      item.click();
+      expect(calls).toEqual(expected);
     });
 
     test.each([

@@ -61,8 +61,8 @@ export type AgentsSidebarDeps = {
   openPane(pane: string, destination?: "opposite"): void;
   /** いまターミナルで見ているペイン (行の選択の印)。 */
   viewingPane(): string | null;
-  /** 「新しいエージェント」の画面。project は選んでおくプロジェクト。 */
-  launch(project?: string): void;
+  /** タブのグループと同じメニューを、選んだプロジェクトの＋から開く。 */
+  openProjectMenu(root: string, anchor: HTMLElement): void;
   /** 行の右クリックのメニューの「別のアカウントで続ける…」(handoff.ts)。 */
   handoff: HandoffMenuActions;
   /** エージェントの全体ボードへ。 */
@@ -231,6 +231,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     button.innerHTML = svg;
     button.title = title;
     button.setAttribute("aria-label", title);
+    button.setAttribute("aria-haspopup", "menu");
     button.addEventListener("click", (event) => {
       // 行 (畳む / 開く) の click にしない。メニューは文書全体の click で
       // 閉じるので、開いたばかりのメニューを閉じさせない。
@@ -367,11 +368,11 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     if (info.git) {
       actions.appendChild(
         iconButton(
-          "nav-project-launch",
-          `launch:${info.root}`,
+          "nav-project-open",
+          `open:${info.root}`,
           iconSvg("octicon-plus", PLUS_16_PATH),
-          current.accounts.launchProjectTitle(info.name),
-          () => deps.launch(info.root),
+          current.sidebar.openProjectTitle(info.name),
+          (_event, button) => deps.openProjectMenu(info.root, button),
         ),
       );
     }

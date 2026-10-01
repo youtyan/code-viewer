@@ -129,10 +129,7 @@ import {
   parseHttpByteRange,
 } from "./range";
 import { type FileMetadata, rawFileHeaders } from "./raw-file-headers";
-import {
-  requestAllowed as requestAllowedForOrigin,
-  sideEffectRequestAllowed as sideEffectRequestAllowedForOrigin,
-} from "./request-origin";
+import { requestAllowed, sideEffectRequestAllowed } from "./request-origin";
 import { ROOT } from "./root";
 import { diffRowBasisFor, readFileHead } from "./row-basis";
 import {
@@ -306,7 +303,7 @@ function parseCli() {
       console.log(`code-viewer ${VERSION}
 
 Usage:
-  code-viewer [--cwd <repo>] [--port <port>] [--open] [--idle-stop <seconds>] [--standalone] [--bin <name>=<path>] [git-diff-args...]
+  code-viewer [--cwd <repo>] [--port <port>] [--open] [--idle-stop <seconds>] [--remote-access <file>] [--standalone] [--bin <name>=<path>] [git-diff-args...]
   code-viewer status [--cwd <repo>] [--bin git=<path>] [--ref <ref>] [--limit <N>] [--json]
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
   code-viewer journal <list|add|edit|tasks|task-add|task-update|task-next|github-issues|task-link-issue|task-claim|task-done|task-delete> [options]
@@ -329,6 +326,11 @@ Each project runs in its own process behind that port; a process nobody has
 used for --idle-stop seconds (default 600, 0 = never) is stopped and started
 again on the next request. --standalone runs a separate server for this
 repository only.
+
+--remote-access <file> adds a separate loopback listener for a named Cloudflare
+Tunnel protected by Access. The JSON file requires port, origin (HTTPS),
+teamDomain and audience (Access AUD). See Help > Connect from outside.
+Do not use --standalone or publish the normal local port through a tunnel.
 
 Getting started: run code-viewer inside a git repository and open the printed
 URL; the repository is listed under Projects in the left sidebar. New agent
@@ -386,6 +388,11 @@ Examples:
       openAfterStart = true;
     } else if (arg === "--standalone") {
       // 1 つで完結するサーバ (今までの動き)。cli.ts がこの印でここへ来る。
+    } else if (arg === "--remote-access") {
+      console.error(
+        "--remote-access requires the entry server; remove --standalone or --backend",
+      );
+      process.exit(1);
     } else if (arg === "--idle-stop") {
       // 入口だけの引数。git の差分の引数として渡ると、分かりにくい git の
       // 失敗になるので、ここで断る。
@@ -636,14 +643,6 @@ function text(body: string, status = 200) {
       "Cache-Control": "no-store",
     },
   });
-}
-
-function requestAllowed(req: Request): boolean {
-  return requestAllowedForOrigin(req);
-}
-
-function sideEffectRequestAllowed(req: Request): boolean {
-  return sideEffectRequestAllowedForOrigin(req);
 }
 
 type EntryOwnerVerification =
@@ -3497,6 +3496,10 @@ const shutdown = createProcessShutdown([
   {
     label: "code-viewer shell stream close",
     run: async () => (await shellHandleModule).closeShellStreams(),
+  },
+  {
+    label: "code-viewer tmux pane stream close",
+    run: async () => (await import("./tmux/pane-stream")).closePaneStreams(),
   },
   {
     label: "code-viewer shell session close",

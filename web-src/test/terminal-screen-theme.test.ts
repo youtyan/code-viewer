@@ -40,7 +40,8 @@ type Options = {
   theme?: { background?: string; foreground?: string; red?: string };
 };
 
-vi.mock("../core/xterm-loader", () => {
+vi.mock("../core/xterm-loader", async () => {
+  const { FakeWebglAddon } = await import("./_fake-dom");
   const noop = () => undefined;
   const disposable = () => ({ dispose: noop });
   class FakeTerminal {
@@ -88,11 +89,6 @@ vi.mock("../core/xterm-loader", () => {
     dispose = noop;
     fit = noop;
     proposeDimensions = () => ({ cols: 80, rows: 24 });
-  }
-  class FakeWebglAddon {
-    activate = noop;
-    dispose = noop;
-    onContextLoss = disposable;
   }
   return {
     loadXterm: () =>
@@ -173,7 +169,10 @@ describe("the terminal colors", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
-        async () => new Response(JSON.stringify({ images: [], rejected: [] })),
+        async () =>
+          new Response(
+            JSON.stringify({ images: [], rejected: [], candidates: [] }),
+          ),
       ),
     );
     vi.stubGlobal(

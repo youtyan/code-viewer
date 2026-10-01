@@ -272,9 +272,20 @@ const LOOKS: Array<{ name: string; look: Look }> = [
 ];
 
 describe("#first-screen は app.ts と同じ印を付ける", () => {
+  // URL の解釈は各経路を 1 回。幅と保存設定は一覧の種類ごとに確かめる。
+  test.each(URLS)("経路: %s", (url) => {
+    const { nav } = runFirstScreen(url, 1600, {});
+    expect(actual()).toEqual(expected(url, 1600, {}, nav));
+  });
+
   for (const { name, look } of LOOKS)
     for (const width of [1100, 1280, 1600, 1900])
-      test.each(URLS)(`${name}・窓 ${width}: %s`, (url) => {
+      test.each([
+        "/",
+        "/history",
+        "/worktree",
+        "/worktree?wt=%2Fsample%2Frepo-a-wt",
+      ])(`${name}・窓 ${width}: %s`, (url) => {
         const { nav } = runFirstScreen(url, width, look);
         expect(actual()).toEqual(expected(url, width, look, nav));
       });

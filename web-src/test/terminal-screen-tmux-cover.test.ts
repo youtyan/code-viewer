@@ -42,7 +42,8 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-vi.mock("../core/xterm-loader", () => {
+vi.mock("../core/xterm-loader", async () => {
+  const { FakeWebglAddon } = await import("./_fake-dom");
   const noop = () => undefined;
   const disposable = () => ({ dispose: noop });
   class FakeTerminal {
@@ -108,7 +109,11 @@ vi.mock("../core/xterm-loader", () => {
   }
   return {
     loadXterm: () =>
-      Promise.resolve({ Terminal: FakeTerminal, FitAddon: FakeFitAddon }),
+      Promise.resolve({
+        Terminal: FakeTerminal,
+        FitAddon: FakeFitAddon,
+        WebglAddon: FakeWebglAddon,
+      }),
   };
 });
 
@@ -149,7 +154,10 @@ describe("tmux のウインドウの外側の覆い", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
-        async () => new Response(JSON.stringify({ images: [], rejected: [] })),
+        async () =>
+          new Response(
+            JSON.stringify({ images: [], rejected: [], candidates: [] }),
+          ),
       ),
     );
     vi.stubGlobal(

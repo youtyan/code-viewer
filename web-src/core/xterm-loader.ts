@@ -63,6 +63,22 @@ export type XtermBufferCell = {
   getChars(): string;
   /** 何マスぶんの字か (全角は 2、その後ろ半分は 0)。 */
   getWidth(): number;
+  // 色と飾り。SP の 1 ペイン表示の「読む」画面が、升目を折り返せる行に起こすときに
+  // 読む (core/pane-reflow.ts)。色は、パレットなら番号、RGB なら 0xRRGGBB。
+  getFgColor(): number;
+  getBgColor(): number;
+  isFgRGB(): boolean;
+  isBgRGB(): boolean;
+  isFgPalette(): boolean;
+  isBgPalette(): boolean;
+  /** 飾りは 0 か 0 でない数 (xterm の決まり)。 */
+  isBold(): number;
+  isItalic(): number;
+  isDim(): number;
+  isUnderline(): number;
+  isInverse(): number;
+  isInvisible(): number;
+  isStrikethrough(): number;
 };
 
 /** バッファの 1 行。文字列に起こして中身を見るためだけに使う。 */
@@ -106,6 +122,9 @@ export type XtermBuffer = {
   readonly cursorY: number;
   /** バッファの行数 (スクロールバック + 画面)。 */
   readonly length: number;
+  readonly cursorX: number;
+  /** 別画面 (alternate) はスクロールバックを持たない。 */
+  readonly type: "normal" | "alternate";
   getLine(y: number): XtermBufferLine | undefined;
 };
 
@@ -131,6 +150,8 @@ export type XtermTerminal = {
   onResize(
     handler: (size: { cols: number; rows: number }) => void,
   ): XtermDisposable;
+  /** 書き込んだ分を解釈し終えた (画面に描くかどうかに関わらず)。 */
+  onWriteParsed(handler: () => void): XtermDisposable;
   attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void;
   /**
    * ホイールを xterm に処理させるか。false を返すと xterm は何もしない

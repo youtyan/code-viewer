@@ -140,6 +140,10 @@ function shellQuote(value: string): string {
 /**
  * 開いたシェルへ打ち込む attach の 1 行。
  *
+ * `-f ignore-size` は付けない: ブラウザのクライアントがウインドウより狭くなり、
+ * tmux 3.7c は右端で切れたペイン枠の名前 (pane-border-status) を描くところで
+ * 約 42 億マスを回し、サーバごと数十秒止まった。
+ *
  * ここで実行ファイル名を解決しておくので、`--bin tmux=...` や
  * CODE_VIEWER_BIN_TMUX がブラウザから開いたシェルでもそのまま効く。
  *

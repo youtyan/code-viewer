@@ -1,24 +1,6 @@
-// 「使用量を確かめる」の部品。全体ボードのアカウントのカード (accounts-band.ts) と、
-// 設定のアカウントの使用量の行 (accounts-settings.ts) が同じものを出す。
-//
-//   [使用量を確かめる]                     ← 値が無い・古い claude のときだけ
-//   確かめています…                         ← 走っている間 (ボタンは押せない)
-//   時間内に使用量が届きませんでした         ← 失敗: 理由
-//   claude が画面で何かを…                   ← 次の手順
-//   ▸ 詳しく                                 ← 判定に使った根拠 (画面の最後の行など)
-//
-// claude の画面 (初回の案内・信頼の確認・ログイン) で止まったときは、次の手順の
-// 文の代わりに、そのフォルダとその場で済ませるボタンを出す:
-//
-//   このフォルダをこのアカウントでまだ信頼していません
-//   ~/work/…/sample-app                      ← 等幅、長ければ真ん中を省略
-//   [このアカウントで開く] [もう一度確かめる]  ← ログインなら [ログイン]
-//   開いたタブで答えてから、「もう一度確かめる」を押してください。  ← 開いた後
-//
-// 押すと確認の画面を出さずにすぐ始める (わずかに使用量を使うことはボタンの
-// title に書く)。codex には出さない (codex はセッション記録から読む)。
-// 状態は AccountsClient が持つので、カードと設定の行で同じ結果が見える。
-// 値が取れたら何も出さず、カードは普段の表示 (使用量のバー) に戻る。
+// 使用量の更新状態を、アカウントのカードと設定画面で共有する。
+// Claude /usage と Codex account/rateLimits/read はモデルに応答を求めない。
+// 更新に失敗したら理由と全文のコピーを出す。旧サーバからの画面待ちの応答も扱う。
 
 import {
   type AccountStatus,
@@ -26,6 +8,7 @@ import {
   usageIsStale,
 } from "../../core/agent-accounts";
 import { abbreviateHome } from "../../core/agent-overview";
+import { showCopyFailure } from "../../core/copy-failure";
 import { formatErrorDetail } from "../../core/error-detail";
 import type { ContextMenuItem } from "../context-menu";
 import type { AccountsClient, UsageCheckState } from "./accounts-client";
@@ -39,38 +22,33 @@ import type { AccountsText } from "./accounts-i18n";
 /** 開いている「詳しく」(アカウントの id と中身)。 */
 const openDetails = new Set<string>();
 
-/** 確かめる意味があるか (claude で、値が無い・古い)。 */
+/** 値が無い・古いときはカードにも更新ボタンを出す。 */
 export function usageCheckWanted(account: AccountStatus, now: number): boolean {
-  if (account.agent !== "claude") return false;
   const usage = account.usage;
   return usage.status !== "ok" || usageIsStale(usage.observedAt, now);
 }
 
 /**
  * カードの中にボタンを出すか。確かめる意味があり、押せば進みうるとき。
- * statusLine を包んでいない (設定で有効にするのが先) と未ログイン (カードに
- * ログインのボタンがある) には出さない。⋯ のメニューからは押せる (理由が返る)。
+ * 未ログインにはログインのボタンを使う。statusLine の設定は不要。
  */
 export function usageCheckOffered(
   account: AccountStatus,
   now: number,
 ): boolean {
   if (!usageCheckWanted(account, now)) return false;
-  if (account.usage.status !== "ok" && account.usage.reason === "not-wrapped")
-    return false;
   return (
     account.login.state !== "logged-out" &&
     account.login.state !== "no-config-dir"
   );
 }
 
-/** ⋯ のメニューの項目。claude だけ。 */
+/** ⋯ のメニューの項目。新しい値があっても取り直せる。 */
 export function usageCheckMenuItem(
   account: AccountStatus,
   client: AccountsClient,
   t: AccountsText,
 ): Exclude<ContextMenuItem, { kind: "separator" }> | null {
-  if (account.agent !== "claude") return null;
   const running = client.usageCheck(account.id)?.running === true;
   return {
     label: running ? t.usageChecking : t.usageCheck,
@@ -181,15 +159,18 @@ export function usageCheckBlock(
   openers: UsageCheckOpeners,
   options: { name?: string } = {},
 ): HTMLElement | null {
-  if (account.agent !== "claude") return null;
   const state = client.usageCheck(account.id);
   const running = state?.running === true;
-  // 失敗は、値が無い・古い間だけ出す (ほかのセッションで値が届いたら消す)。
-  // 閉じられなかったことは値に関係なく出す。
+  // 今回の取得失敗は、保存済みの値が新しくても隠さない。
   const failure = state ? failureLines(state, t) : null;
+  const refreshFailed =
+    (state?.response?.status === "failed" &&
+      state.response.reason === "read-failed") ||
+    !!state?.error;
   const showFailure =
     failure !== null &&
-    (usageCheckWanted(account, now) ||
+    (refreshFailed ||
+      usageCheckWanted(account, now) ||
       (state?.response?.status === "ok" && !!state.response.closeError));
   const stop = showFailure ? (failure?.stop ?? null) : null;
   const offered = usageCheckOffered(account, now);
@@ -210,7 +191,7 @@ export function usageCheckBlock(
     showFailure &&
     state?.response?.status === "failed" &&
     state.response.reason === "start-failed";
-  if (running || (offered && !stop && !startFailed)) {
+  if (running || ((offered || refreshFailed) && !stop && !startFailed)) {
     box.appendChild(
       checkButton(options.name ? t.usageCheckFor(options.name) : t.usageCheck),
     );
@@ -300,8 +281,38 @@ export function usageCheckBlock(
       if (more.open) openDetails.add(key);
       else openDetails.delete(key);
     });
+    const copy = el(
+      "button",
+      "agents-secondary usage-check-copy",
+      t.usageCheckCopy,
+    );
+    copy.type = "button";
+    const copied = el("span", "usage-check-status");
+    copied.setAttribute("role", "status");
+    copy.addEventListener("click", async () => {
+      copy.disabled = true;
+      copied.textContent = "";
+      try {
+        await navigator.clipboard.writeText(failure.more);
+        copied.textContent = t.copiedLocation;
+      } catch (error) {
+        showCopyFailure(
+          copy,
+          "copying usage error details failed",
+          error,
+          t.usageCheckCopy,
+          1500,
+        );
+        copied.textContent = `${t.copyLocationFailed}: ${formatErrorDetail(error)}`;
+      } finally {
+        copy.disabled = false;
+      }
+    });
+    const copyRow = el("div", "usage-check-actions");
+    copyRow.append(copy, copied);
     more.append(
       el("summary", "", t.usageCheckMore),
+      copyRow,
       el("pre", "usage-check-detail terminal-mono", failure.more),
     );
     box.appendChild(more);

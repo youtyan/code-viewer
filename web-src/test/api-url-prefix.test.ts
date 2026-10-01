@@ -172,3 +172,28 @@ describe("requests to another project", () => {
     ]).toEqual([OTHER, KEY]);
   });
 });
+
+test.each([
+  ["same-origin relative", "/_settings", "XMLHttpRequest"],
+  [
+    "same-origin absolute",
+    "https://viewer.example.com/_settings",
+    "XMLHttpRequest",
+  ],
+  ["another origin", "https://other.example.com/_settings", null],
+])("remote AJAX: %s", (_name, input, expected) => {
+  Object.defineProperty(globalThis, "location", {
+    value: new URL("https://viewer.example.com/p/0123456789abcdef/"),
+    configurable: true,
+  });
+  const prepared = projectRequest(input);
+  expect(new Headers(prepared.init?.headers).get("X-Requested-With")).toBe(
+    expected,
+  );
+});
+
+test("reads a remote relative project root for cross-project files", () => {
+  expect(projectKeyOfServerUrl("/p/0123456789abcdef/")).toBe(
+    "0123456789abcdef",
+  );
+});

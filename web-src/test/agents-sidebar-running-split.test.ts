@@ -220,7 +220,7 @@ function mount(
     getText: () => agentsText("en"),
     openPane: () => undefined,
     viewingPane: () => null,
-    launch: () => undefined,
+    openProjectMenu: () => undefined,
     handoff: {
       handoff: () => undefined,
       openHookHelp: () => undefined,

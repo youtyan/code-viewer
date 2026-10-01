@@ -10,7 +10,7 @@
 // - 裏に繋がらなかった (接続拒否など) ときは呼び出し側が 502 にする
 
 import { createLinkedAbortController } from "../abort";
-import { sideEffectRequestAllowed } from "../request-origin";
+import { requestAllowed, sideEffectRequestAllowed } from "../request-origin";
 import { SSE_HEARTBEAT_INTERVAL_MS } from "../runtime";
 
 /** Maximum wait for the project process to return response headers. */
@@ -45,6 +45,7 @@ export type ProxyResult =
 
 type ProxyOptions = {
   fetch?: typeof fetch;
+  publicOrigin?: string;
   /** Tests use a short value; production always uses PROXY_RESPONSE_START_MS. */
   responseStartMs?: number;
   /** 応答の本文が終わった・切れたときに 1 回だけ呼ぶ (SSE の購読の数)。 */
@@ -65,9 +66,25 @@ export async function proxyToBackend(
   const target = new URL(`.${path}${search}`, backendUrl);
   const headers = new Headers();
   req.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP_REQUEST.has(key.toLowerCase())) headers.set(key, value);
+    if (HOP_BY_HOP_REQUEST.has(key)) return;
+    if (
+      options.publicOrigin &&
+      (key.startsWith("cf-") ||
+        key.startsWith("x-forwarded-") ||
+        key === "forwarded" ||
+        key === "cookie" ||
+        key === "authorization")
+    )
+      return;
+    headers.set(key, value);
   });
-  if (req.headers.has("origin") && sideEffectRequestAllowed(req)) {
+  if (
+    req.headers.has("origin") &&
+    (sideEffectRequestAllowed(req, options.publicOrigin) ||
+      (options.publicOrigin &&
+        (req.method === "GET" || req.method === "HEAD") &&
+        requestAllowed(req, options.publicOrigin)))
+  ) {
     headers.set("origin", target.origin);
   }
   const hasBody = req.method !== "GET" && req.method !== "HEAD";

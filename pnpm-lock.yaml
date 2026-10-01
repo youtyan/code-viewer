@@ -59,6 +59,9 @@ importers:
       highlight.js:
         specifier: 11.9.0
         version: 11.9.0
+      jose:
+        specifier: ^6.2.12
+        version: 6.2.12
       markdown-it:
         specifier: 14.1.1
         version: 14.1.1
@@ -1081,6 +1084,9 @@ packages:
 
   is-property@1.0.2:
     resolution: {integrity: sha512-Ks/IoX00TtClbGQr4TWXemAnktAQvYB7HzcCxDGqEZU6oCmb2INHuOoKxbtR+HFkmYWBKv/dOZtGRiAjDhj92g==}
+
+  jose@6.2.12:
+    resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
 
   katex@0.16.47:
     resolution: {integrity: sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg==}
@@ -2585,6 +2591,8 @@ snapshots:
   internmap@2.0.3: {}
 
   is-property@1.0.2: {}
+
+  jose@6.2.12: {}
 
   katex@0.16.47:
     dependencies:

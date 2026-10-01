@@ -197,6 +197,7 @@ function harness(language: "en" | "ja" = "en") {
     planStatusLine: unused("planStatusLine"),
     applyStatusLine: unused("applyStatusLine"),
     clearUsageFailures: unused("clearUsageFailures"),
+    checkAllUsage: unused("checkAllUsage"),
     usageCheck: () => null,
     checkUsage: unused("checkUsage"),
     noteUsageCheckOpened: unused("noteUsageCheckOpened"),
@@ -455,7 +456,7 @@ describe("usage", () => {
       ".agent-accounts-how",
     );
     expect(how?.open).toBe(false);
-    expect(how?.textContent).toContain("can wrap the status line command");
+    expect(how?.textContent).toContain("neither starts a model turn");
     expect(how?.textContent).toContain(
       "Settings file: ~/.claude/settings.json → ~/dotfiles/claude/settings.json",
     );

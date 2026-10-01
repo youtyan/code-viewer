@@ -37,6 +37,9 @@ const CLIENT_FIELDS = [
   // 別のペインを前面にしたのか、別のウインドウへ移したのかを見分ける
   // (terminal/attach-watch.ts)。
   "#{window_id}",
+  // control mode のクライアント (SP の 1 ペイン表示が繋ぐもの。tty が無い)。
+  // #{session_attached} には入るが画面を持たないので、端末の数から引く。
+  "#{client_control_mode}",
 ];
 
 const CLIENT_FORMAT = CLIENT_FIELDS.join(FIELD_SEP);
@@ -54,6 +57,7 @@ const FIELD = {
   statusPosition: 8,
   sessionClients: 9,
   windowId: 10,
+  controlMode: 11,
 } as const;
 
 /** 1 以上の整数でなければ null (空・`-`・小数)。 */
@@ -110,18 +114,32 @@ function parseClientWindow(fields: string[]): TmuxClientWindow | undefined {
  * 行は、宛先としては残し、大きさだけ持たない。
  */
 export function parseTmuxClients(stdout: string): TmuxClient[] {
+  const rows = stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.split(FIELD_SEP))
+    .filter((fields) => fields.length > FIELD.pane);
+  const controls = new Map<string, number>();
+  for (const fields of rows) {
+    if (fields[FIELD.controlMode] !== "1") continue;
+    const session = fields[FIELD.session] ?? "";
+    controls.set(session, (controls.get(session) ?? 0) + 1);
+  }
   const clients: TmuxClient[] = [];
-  for (const line of stdout.split("\n")) {
-    if (!line) continue;
-    const fields = line.split(FIELD_SEP);
-    if (fields.length <= FIELD.pane) continue;
+  for (const fields of rows) {
     const tty = fields[FIELD.tty] ?? "";
     if (!tty) continue;
+    const session = fields[FIELD.session] ?? "";
     const window = parseClientWindow(fields);
+    if (window)
+      window.sessionClients = Math.max(
+        1,
+        window.sessionClients - (controls.get(session) ?? 0),
+      );
     const windowId = fields[FIELD.windowId];
     clients.push({
       tty,
-      session: fields[FIELD.session] ?? "",
+      session,
       pane: fields[FIELD.pane] ?? "",
       ...(windowId ? { windowId } : {}),
       ...(window ? { window } : {}),

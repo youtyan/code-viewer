@@ -15,6 +15,7 @@ import {
   closeShellSession,
   createShellSession,
   listShellSessionsForMatching,
+  operateShellView,
   subscribeShell,
   writeToShellWhenReady,
 } from "../server/shell/session";
@@ -390,5 +391,93 @@ describe("subscribeShell replay split", () => {
 
     expect(sub?.replay).toBe("");
     expect(sub?.unseen.startsWith("y")).toBe(true);
+  });
+});
+
+describe("terminal size follows the operating view", () => {
+  test.each([
+    {
+      name: "idle desktop cannot take the phone size",
+      finalView: "desktop",
+      claim: false,
+      cols: 140,
+      expected: 40,
+    },
+    {
+      name: "desktop operation takes the size back",
+      finalView: "desktop",
+      claim: true,
+      cols: 140,
+      expected: 140,
+    },
+    {
+      name: "phone rotation follows its active view",
+      finalView: "phone",
+      claim: false,
+      cols: 60,
+      expected: 60,
+    },
+  ])("$name", async ({ finalView, claim, cols, expected }) => {
+    const created = await createShellSession(process.cwd());
+    if (created.status !== "ok") throw new Error("test shell did not start");
+    const id = created.session.id;
+    await operateShellView(id, {
+      view: "desktop",
+      sequence: 1,
+      claim: true,
+      cols: 140,
+      rows: 30,
+    });
+    await operateShellView(
+      id,
+      { view: "phone", sequence: 1, claim: true, cols: 40, rows: 30 },
+      "x",
+    );
+    await operateShellView(id, {
+      view: finalView,
+      sequence: 2,
+      claim,
+      cols,
+      rows: 30,
+    });
+    expect(created.session.cols).toBe(expected);
+    expect(pty.write).toHaveBeenCalledWith("x");
+  });
+
+  test("terminal replies from an idle screen do not enter the shared shell", async () => {
+    const created = await createShellSession(process.cwd());
+    if (created.status !== "ok") throw new Error("test shell did not start");
+    await operateShellView(created.session.id, {
+      view: "phone",
+      sequence: 1,
+      claim: true,
+      cols: 40,
+      rows: 30,
+    });
+    await operateShellView(
+      created.session.id,
+      { view: "desktop", sequence: 1, claim: false, cols: 140, rows: 30 },
+      "reply",
+    );
+    expect([created.session.cols, pty.write.mock.calls]).toEqual([40, []]);
+  });
+
+  test("stale size request cannot take ownership but input is preserved", async () => {
+    const created = await createShellSession(process.cwd());
+    if (created.status !== "ok") throw new Error("test shell did not start");
+    await operateShellView(created.session.id, {
+      view: "phone",
+      sequence: 2,
+      claim: true,
+      cols: 40,
+      rows: 30,
+    });
+    await operateShellView(
+      created.session.id,
+      { view: "phone", sequence: 1, claim: true, cols: 140, rows: 30 },
+      "old",
+    );
+    expect(created.session.cols).toBe(40);
+    expect(pty.write).toHaveBeenCalledWith("old");
   });
 });

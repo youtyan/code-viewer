@@ -133,6 +133,7 @@ function setup(planned: StatusLinePlanResponse) {
       };
     },
     clearUsageFailures: unused("clearUsageFailures"),
+    checkAllUsage: unused("checkAllUsage"),
     usageCheck: () => null,
     checkUsage: unused("checkUsage"),
     noteUsageCheckOpened: unused("noteUsageCheckOpened"),

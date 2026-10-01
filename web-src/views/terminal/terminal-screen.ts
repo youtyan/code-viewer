@@ -1,5 +1,7 @@
 import { apiUrl } from "../../core/api-url";
+import { makeId } from "../../core/id";
 import { UNINTERRUPTIBLE_REQUEST_HEADER } from "../../core/network-activity";
+import type { ShellViewport, ShellViewportResponse } from "../../core/shell";
 // ドロワーが映しているターミナルを xterm.js に描き、打鍵を送り返す部分。
 //
 // 映すのは PTY のシェル 1 本だけ。PTY が吐いた分だけが順に届くので、描き方は
@@ -21,6 +23,8 @@ import {
 } from "../../core/mobile-layout";
 import {
   clampShellSize,
+  DEFAULT_SHELL_COLS,
+  DEFAULT_SHELL_ROWS,
   type ShellSession,
   type ShellSessionId,
 } from "../../core/shell";
@@ -320,6 +324,11 @@ export function createTerminalScreen(
   // 送る。並走させると届く順が入れ替わる。
   let pendingInput = "";
   let sending = false;
+  const view = makeId("terminal");
+  let sizeSequence = 0;
+  let hasOperated = false;
+  let inputEvent: Event | null = null;
+  let pendingClaim = false;
   // 溜め置きの出力 (購読前に出ていた分) のうち、xterm がまだ解釈し終えて
   // いない書き込みの数。流し直しの中の問い合わせ (tmux が attach したときの
   // DA など) に xterm は答え直すが、その答えを待つ者はもういないので、PTY へ
@@ -415,8 +424,57 @@ export function createTerminalScreen(
     onStatus: (message) => showStatus(message),
   });
 
-  function enqueueInput(data: string): void {
+  function shellViewport(claim: boolean): ShellViewport {
+    return {
+      view,
+      sequence: ++sizeSequence,
+      claim,
+      ...clampShellSize(
+        term?.cols ?? attached?.cols ?? DEFAULT_SHELL_COLS,
+        term?.rows ?? attached?.rows ?? DEFAULT_SHELL_ROWS,
+      ),
+    };
+  }
+
+  function operate(event: Event): void {
+    if (!event.isTrusted || !inputEnabled || !attached || disposed) return;
+    hasOperated = true;
+    inputEvent = event;
+    // Pointer/touch starts ownership before xterm focuses; programmatic focus does not.
+    // IME commits are emitted asynchronously by xterm, so claim during composition.
+    if (
+      event.type === "pointerdown" ||
+      event.type === "compositionstart" ||
+      event.type === "compositionend"
+    )
+      fitShellToContainer(true);
+  }
+  const operationEvents = [
+    "pointerdown",
+    "keydown",
+    "keypress",
+    "beforeinput",
+    "input",
+    "paste",
+    "mousedown",
+    "wheel",
+    "compositionstart",
+    "compositionend",
+  ];
+  for (const event of operationEvents)
+    screenEl.addEventListener(event, operate, true);
+
+  function enqueueInput(data: string, claim = true): void {
     if (!inputEnabled || !attached || disposed || data.length === 0) return;
+    if (
+      window.location.protocol === "https:" &&
+      source?.readyState !== EventSource.OPEN
+    ) {
+      showStatus(deps.getText().connecting);
+      return;
+    }
+    pendingClaim ||= claim;
+    hasOperated ||= claim;
     pendingInput += data;
     void flushInput();
   }
@@ -427,7 +485,7 @@ export function createTerminalScreen(
    * PTY を作り替えれば、その中で動いているもの (シェルでも tmux でも) が
    * SIGWINCH を受けて自分で追従する。こちらが中身の寸法を気にする必要は無い。
    */
-  function fitShellToContainer(): void {
+  function fitShellToContainer(claim = false, send = true): void {
     if (!term || !fitAddon || !attached) return;
     // 箱が畳まれて幅 0 のときに測ると、最小の桁数が PTY に伝わり、利用者の
     // tmux のウィンドウまで縮む。見えるようになってから測り直す。
@@ -435,10 +493,12 @@ export function createTerminalScreen(
     if (box.width < 1 || box.height < 1) return;
     fitAddon.fit();
     const size = clampShellSize(term.cols, term.rows);
-    if (size.cols === attached.cols && size.rows === attached.rows) return;
+    if (!send) return;
+    if (!claim && size.cols === attached.cols && size.rows === attached.rows)
+      return;
     // 通ってから記録する。先に書き換えると、失敗しても「同じサイズ」と見えて
     // 送り直されず、PTY 側だけ古い桁数のまま残る。
-    void sendShellResize(attached.id, size.cols, size.rows);
+    void sendShellResize(attached.id, size.cols, size.rows, claim);
   }
 
   function refit(): void {
@@ -450,7 +510,7 @@ export function createTerminalScreen(
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       resizeTimer = null;
-      fitShellToContainer();
+      fitShellToContainer(false, hasOperated && document.hasFocus());
     }, RESIZE_DEBOUNCE_MS);
   }
 
@@ -458,7 +518,10 @@ export function createTerminalScreen(
     id: ShellSessionId,
     cols: number,
     rows: number,
+    claim: boolean,
   ): Promise<void> {
+    const myGen = generation;
+    const size = shellViewport(claim);
     try {
       const res = await deps.trackLoad(
         fetch(apiUrl("shellResize"), {
@@ -469,35 +532,58 @@ export function createTerminalScreen(
             // 画面の切替の取消で寸法の送信を捨てない (network-activity)。
             [UNINTERRUPTIBLE_REQUEST_HEADER]: "1",
           },
-          body: JSON.stringify({ id, cols, rows }),
+          body: JSON.stringify({ id, cols, rows, viewport: size }),
         }),
       );
       if (!res.ok) {
-        showStatus(
-          await responseErrorMessage(res, deps.getText().resizeFailed),
+        const message = await responseErrorMessage(
+          res,
+          deps.getText().resizeFailed,
         );
+        console.error("[code-viewer] shell resize request failed", message);
+        if (!disposed && myGen === generation) showStatus(message);
         return;
       }
+      const reply = (await res.json()) as ShellViewportResponse;
+      if (reply.generation !== size.sequence) return;
       // 通った分だけ記録する。切り替え済みなら書き戻さない。
-      if (attached?.id === id) {
+      if (
+        attached?.id === id &&
+        myGen === generation &&
+        size.sequence === sizeSequence &&
+        !disposed
+      ) {
         attached.cols = cols;
         attached.rows = rows;
         // 中の tmux の大きさも変わる。覆いを合わせるため、早めに取り直す。
         deps.onTmuxWindowStale();
       }
     } catch (error) {
-      if (disposed) return;
       console.error("[code-viewer] shell resize request failed", error);
+      if (disposed) return;
       showStatus(`${deps.getText().resizeFailed}\n${formatErrorDetail(error)}`);
     }
   }
 
   async function flushInput(): Promise<void> {
     if (sending || !pendingInput || !attached || disposed) return;
+    if (
+      window.location.protocol === "https:" &&
+      source?.readyState !== EventSource.OPEN
+    ) {
+      pendingInput = "";
+      showStatus(deps.getText().sendFailed);
+      return;
+    }
     sending = true;
     const target = attached;
+    const myGen = generation;
     const data = pendingInput;
+    const claim = pendingClaim;
+    pendingClaim = false;
     pendingInput = "";
+    fitShellToContainer(false, false);
+    const size = shellViewport(claim);
     try {
       const res = await deps.trackLoad(
         fetch(apiUrl("shellKeys"), {
@@ -508,22 +594,26 @@ export function createTerminalScreen(
             // 画面の切替の取消で打鍵を捨てない (打った文字が黙って消える)。
             [UNINTERRUPTIBLE_REQUEST_HEADER]: "1",
           },
-          body: JSON.stringify({ id: target.id, data }),
+          body: JSON.stringify({ id: target.id, data, viewport: size }),
         }),
       );
-      if (disposed) return;
-      if (res.status === 410) {
-        showStatus(await responseErrorMessage(res, deps.getText().shellClosed));
-        deps.onTargetGone(target);
-        return;
-      }
       if (!res.ok) {
-        showStatus(await responseErrorMessage(res, deps.getText().sendFailed));
+        const message = await responseErrorMessage(
+          res,
+          res.status === 410
+            ? deps.getText().shellClosed
+            : deps.getText().sendFailed,
+        );
+        console.error("[code-viewer] shell input request failed", message);
+        if (!disposed && myGen === generation) {
+          showStatus(message);
+          if (res.status === 410) deps.onTargetGone(target);
+        }
       }
     } catch (error) {
       // 中断 (ナビゲーション) と通信断。打った内容は失われるので伝える。
-      if (!disposed) {
-        console.error("[code-viewer] shell input request failed", error);
+      console.error("[code-viewer] shell input request failed", error);
+      if (!disposed && myGen === generation) {
         showStatus(`${deps.getText().sendFailed}\n${formatErrorDetail(error)}`);
       }
     } finally {
@@ -1402,15 +1492,20 @@ export function createTerminalScreen(
   }
 
   async function pasteImage(file: File): Promise<void> {
-    if (!attached) return;
+    if (!attached || disposed) return;
+    const myGen = generation;
     let read: { base64: string; url: string };
     try {
       read = await readAsBase64(file);
     } catch (error) {
       console.error("[code-viewer] pasted image read failed", error);
-      showStatus(`${deps.getText().pasteFailed}\n${formatErrorDetail(error)}`);
+      if (!disposed && myGen === generation)
+        showStatus(
+          `${deps.getText().pasteFailed}\n${formatErrorDetail(error)}`,
+        );
       return;
     }
+    if (disposed || myGen !== generation) return;
     try {
       const res = await deps.trackLoad(
         fetch(apiUrl("agentPaste"), {
@@ -1422,23 +1517,26 @@ export function createTerminalScreen(
           body: JSON.stringify({ mime: file.type, data: read.base64 }),
         }),
       );
-      if (disposed) return;
       if (!res.ok) {
-        showStatus(await responseErrorMessage(res, deps.getText().pasteFailed));
+        const message = await responseErrorMessage(
+          res,
+          deps.getText().pasteFailed,
+        );
+        console.error("[code-viewer] pasted image save failed", message);
+        if (!disposed && myGen === generation) showStatus(message);
         return;
       }
       const saved = (await res.json()) as PasteImageResponse;
-      if (disposed || !attached) return;
+      if (disposed || myGen !== generation || !attached) return;
       // 打ち込んだパスは画面に出るが、ここで問い合わせ済みにしておくので
       // 聞き直さない。別の綴りで出ても、同じ実体なら棚では 1 枚にまとまる。
       queueImagePaths([saved.path]);
       // パスに空白は入らない命名にしてあるが、引用しておけば将来変えても壊れない。
-      pendingInput += `'${saved.path}' `;
-      void flushInput();
+      enqueueInput(`'${saved.path}' `);
       showPasteNotice(deps.getText().pasteSaved(saved.relativePath));
     } catch (error) {
-      if (!disposed) {
-        console.error("[code-viewer] pasted image save failed", error);
+      console.error("[code-viewer] pasted image save failed", error);
+      if (!disposed && myGen === generation) {
         showStatus(
           `${deps.getText().pasteFailed}\n${formatErrorDetail(error)}`,
         );
@@ -1588,7 +1686,12 @@ export function createTerminalScreen(
     });
     created.onData((data) => {
       if (replayWrites > 0) return;
-      enqueueInput(data);
+      // Microtasks can run between capture and xterm's listener. Event phase stays
+      // active until dispatch finishes; later terminal query replies remain passive.
+      enqueueInput(
+        data,
+        inputEvent !== null && inputEvent.eventPhase !== Event.NONE,
+      );
     });
     // Shift+Enter は「送信せずに改行」。xterm の既定では Enter と同じ CR に
     // なってしまい、書きかけのまま送信されるので、ここで横取りする。
@@ -1628,6 +1731,9 @@ export function createTerminalScreen(
     source = stream;
 
     const stale = () => disposed || myGen !== generation;
+    stream.addEventListener("open", () => {
+      if (!stale()) showStatus("");
+    });
 
     stream.addEventListener("output", (event) => {
       if (stale() || !term) return;
@@ -1685,8 +1791,32 @@ export function createTerminalScreen(
     stream.onerror = () => {
       // EventSource は自動で繋ぎ直す。落ちたままなら状態表示だけ残す。
       if (stale()) return;
+      showStatus(deps.getText().connecting);
       if (stream.readyState === EventSource.CLOSED) {
         showStatus(deps.getText().screenFailed);
+        if (window.location.protocol === "https:") {
+          void deps
+            .trackLoad(fetch(apiUrl("settings")))
+            .then(async (response) => {
+              if (!response.ok)
+                throw new Error(
+                  await responseErrorMessage(
+                    response,
+                    "remote connection check",
+                  ),
+                );
+            })
+            .catch((error: unknown) => {
+              console.error(
+                "[code-viewer] remote connection check failed",
+                error,
+              );
+              if (!stale())
+                showStatus(
+                  `${deps.getText().screenFailed}\n${formatErrorDetail(error)}`,
+                );
+            });
+        }
       }
     };
   }
@@ -1697,7 +1827,9 @@ export function createTerminalScreen(
     resetShelf();
     closeSource();
     pendingInput = "";
-    attached = session;
+    pendingClaim = false;
+    hasOperated = false;
+    attached = { ...session };
     // 同じ対象へ戻ってきたなら、前の棚を戻す。タブを行き来しただけで消えると、
     // 流れた後のパスは開き直せない。
     const remembered = rememberedShelves.get(session.id);
@@ -1821,6 +1953,8 @@ export function createTerminalScreen(
     applyImageShelfLayout: () => shelf.applyLayout(),
     dispose() {
       disposed = true;
+      for (const event of operationEvents)
+        screenEl.removeEventListener(event, operate, true);
       generation += 1;
       closeSource();
       shelf.dispose();

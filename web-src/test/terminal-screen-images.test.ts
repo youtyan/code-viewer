@@ -28,6 +28,7 @@ import {
   test,
   vi,
 } from "vitest";
+import { errorWithCause } from "../core/error-detail";
 import type { ShellSession } from "../core/shell";
 import type {
   TerminalImageRef,
@@ -40,6 +41,7 @@ import {
   createTerminalScreen,
   type TerminalScreenHandle,
 } from "../views/terminal/terminal-screen";
+import { type Deferred, deferred } from "./_test-helpers";
 
 // 端末のバッファ。テストから覗くために外へ出しておく (vi.mock の factory は
 // 巻き上げられるので、外の変数を掴めない)。
@@ -62,7 +64,8 @@ function fakeState(): FakeTerminalState {
   ] as FakeTerminalState;
 }
 
-vi.mock("../core/xterm-loader", () => {
+vi.mock("../core/xterm-loader", async () => {
+  const { FakeWebglAddon } = await import("./_fake-dom");
   const noop = () => undefined;
   const disposable = () => ({ dispose: noop });
   const state: FakeTerminalState = {
@@ -183,6 +186,7 @@ vi.mock("../core/xterm-loader", () => {
       Promise.resolve({
         Terminal: FakeTerminal,
         FitAddon: FakeFitAddon,
+        WebglAddon: FakeWebglAddon,
       }),
   };
 });
@@ -1031,9 +1035,19 @@ describe("貼り付けた画像", () => {
       expect(shelfNames(handle)).toEqual(["pasted-image-20260925-143201.png"]),
     );
 
-    expect(requestedBodies[requestedUrls.indexOf("/_shell/keys")]).toBe(
-      JSON.stringify({ id: SHELL.id, data: `'${PASTED.path}' ` }),
-    );
+    expect(
+      JSON.parse(requestedBodies[requestedUrls.indexOf("/_shell/keys")]),
+    ).toEqual({
+      id: SHELL.id,
+      data: `'${PASTED.path}' `,
+      viewport: {
+        view: expect.stringMatching(/^terminal-[a-z0-9]+$/),
+        sequence: 1,
+        claim: true,
+        cols: 80,
+        rows: 24,
+      },
+    });
   });
 
   test("保存した場所 (プロジェクトからの相対パス) を状態の行で知らせる", async () => {
@@ -1068,6 +1082,109 @@ describe("貼り付けた画像", () => {
     expect(shelfNames(handle)).toEqual(["pasted-image-20260925-143201.png"]);
     expect(handle.el.querySelectorAll(".terminal-attachment")).toHaveLength(0);
     expect(handle.el.querySelectorAll("img")).toHaveLength(1);
+  });
+
+  describe.each([
+    { name: "画面を閉じた", leave: async () => handle.dispose() },
+    {
+      name: "別の端末へ切り替えた",
+      leave: async () => attachShell(OTHER_SHELL),
+    },
+  ])("画像の保存中に $name とき", ({ leave }) => {
+    const networkError = errorWithCause(
+      "upload disconnected",
+      new Error("connection reset"),
+    );
+    const body =
+      '{"errors":[{"code":"E1","field":"mime"},{"code":"E2","details":{"reason":"storage unavailable"}}]}';
+
+    test.each([
+      {
+        name: "HTTP エラーの全件・全フィールドを記録する",
+        complete: (pending: Deferred<Response>) =>
+          pending.resolve(new Response(body, { status: 503 })),
+        expectedError: expect.stringContaining(body),
+      },
+      {
+        name: "通信エラーと cause をそのまま記録する",
+        complete: (pending: Deferred<Response>) => pending.reject(networkError),
+        expectedError: networkError,
+      },
+      {
+        name: "不正な JSON 応答の解析エラーを記録する",
+        complete: (pending: Deferred<Response>) =>
+          pending.resolve(new Response("invalid json", { status: 200 })),
+        expectedError: expect.any(SyntaxError),
+      },
+    ])("$name", async ({ complete, expectedError }) => {
+      await attachShell(SHELL);
+      const pending = deferred<Response>();
+      const originalFetch = globalThis.fetch;
+      const request = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation((input, init) =>
+          String(input) === "/_agent/paste"
+            ? pending.promise
+            : originalFetch(input, init),
+        );
+      const errors = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      pastePng();
+      await vi.waitFor(() =>
+        expect(request).toHaveBeenCalledWith(
+          "/_agent/paste",
+          expect.anything(),
+        ),
+      );
+      await leave();
+      statusMessages = [];
+      complete(pending);
+      await vi.waitFor(() =>
+        expect(errors).toHaveBeenCalledWith(
+          "[code-viewer] pasted image save failed",
+          expectedError,
+        ),
+      );
+      expect(statusMessages).toEqual([]);
+      expect(requestedUrls).not.toContain("/_shell/keys");
+    });
+
+    test("保存が完了しても切替先の端末や棚に反映しない", async () => {
+      await attachShell(SHELL);
+      const pending = deferred<Response>();
+      const originalFetch = globalThis.fetch;
+      const request = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation((input, init) =>
+          String(input) === "/_agent/paste"
+            ? pending.promise
+            : originalFetch(input, init),
+        );
+      pastePng();
+      await vi.waitFor(() =>
+        expect(request).toHaveBeenCalledWith(
+          "/_agent/paste",
+          expect.anything(),
+        ),
+      );
+      await leave();
+      statusMessages = [];
+      const response = new Response(
+        JSON.stringify({
+          path: PASTED.path,
+          relativePath: "image.png",
+          name: PASTED.name,
+          bytes: 4,
+        }),
+      );
+      const parsed = vi.spyOn(response, "json");
+      pending.resolve(response);
+      await vi.waitFor(() => expect(parsed).toHaveBeenCalledOnce());
+      expect(statusMessages).toEqual([]);
+      expect(requestedUrls).not.toContain("/_shell/keys");
+      expect(shelfNames(handle)).toEqual([]);
+    });
   });
 });
 
@@ -1203,6 +1320,13 @@ describe("ターミナル入力", () => {
     expect(JSON.parse(requestedBodies[sent] ?? "null")).toEqual({
       id: "shell-abc123",
       data: "ls\n",
+      viewport: {
+        view: expect.stringMatching(/^terminal-[a-z0-9]+$/),
+        sequence: 1,
+        claim: false,
+        cols: 80,
+        rows: 24,
+      },
     });
   });
 

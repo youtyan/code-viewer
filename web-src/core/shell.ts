@@ -77,6 +77,9 @@ export const MAX_SHELL_COLS = 1000;
 export const MIN_SHELL_ROWS = 5;
 export const MAX_SHELL_ROWS = 500;
 
+/** 1 回の送信で受け付ける入力の長さ (シェルと SP の 1 ペイン表示)。貼り付けを想定して広めに取る。 */
+export const MAX_KEY_INPUT_LENGTH = 100_000;
+
 // 同時に開ける数の上限は持たない。tmux のセッション 1 つにつきシェル 1 本と
 // いう対応にしてあるので、本数はユーザーが立てているセッションの数で決まる
 // (数十個立てる使い方が普通にある)。上限を置くと、渡り歩いているうちに
@@ -109,3 +112,30 @@ export function clampShellSize(
     rows: clamp(rows, MIN_SHELL_ROWS, MAX_SHELL_ROWS),
   };
 }
+
+/** One screen's ordered size requests; only an explicit operation may take ownership. */
+export type ShellViewport = {
+  view: string;
+  sequence: number;
+  claim: boolean;
+  cols: number;
+  rows: number;
+};
+
+export function isShellViewport(value: unknown): value is ShellViewport {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.view === "string" &&
+    /^[a-z0-9-]{1,80}$/.test(v.view) &&
+    Number.isSafeInteger(v.sequence) &&
+    Number(v.sequence) > 0 &&
+    typeof v.claim === "boolean" &&
+    typeof v.cols === "number" &&
+    Number.isFinite(v.cols) &&
+    typeof v.rows === "number" &&
+    Number.isFinite(v.rows)
+  );
+}
+
+export type ShellViewportResponse = { ok: true; generation: number };

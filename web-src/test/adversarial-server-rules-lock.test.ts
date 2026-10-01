@@ -8,7 +8,7 @@
 // いまは前のルールのまま、GET は 503 と理由を返す。
 // 状態ディレクトリは CODE_VIEWER_TEST_STATE_DIR (テストの隔離) に従う。
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   type AgentScreenRuleSet,
   DEFAULT_AGENT_SCREEN_RULES,
@@ -45,18 +45,23 @@ describe("reloading terminal rules while another process holds their lock", () =
     );
     expect(held).not.toBeNull();
     try {
+      vi.useFakeTimers();
       const url = new URL("http://127.0.0.1:0/_agent/rules");
-      const response = await handleAgentRoute(
+      const pending = handleAgentRoute(
         new Request(url),
         url,
         "/work/sample-app",
         () => true,
       );
+      // ロックは本物のまま、取得期限と次の試行までの時計だけを進める。
+      await vi.advanceTimersByTimeAsync(5_020);
+      const response = await pending;
       expect(response?.status).toBe(503);
       expect(await response?.json()).toMatchObject({
         errors: [{ path: "$", code: "reload_failed" }],
       });
     } finally {
+      vi.useRealTimers();
       held?.release();
     }
 

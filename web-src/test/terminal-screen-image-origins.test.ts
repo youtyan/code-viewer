@@ -49,7 +49,8 @@ const term = vi.hoisted(() => ({
   scrolledTo: [] as number[],
 }));
 
-vi.mock("../core/xterm-loader", () => {
+vi.mock("../core/xterm-loader", async () => {
+  const { FakeWebglAddon } = await import("./_fake-dom");
   const noop = () => undefined;
   const disposable = () => ({ dispose: noop });
   const bufferLine = (text: string) => ({
@@ -136,11 +137,6 @@ vi.mock("../core/xterm-loader", () => {
     dispose = noop;
     fit = noop;
     proposeDimensions = () => ({ cols: term.cols, rows: term.rows });
-  }
-  class FakeWebglAddon {
-    activate = noop;
-    dispose = noop;
-    onContextLoss = disposable;
   }
   return {
     loadXterm: () =>

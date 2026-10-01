@@ -128,7 +128,8 @@ function calls(): string[] {
   return (globalThis as Record<string, unknown>)[CALLS_KEY] as string[];
 }
 
-vi.mock("../core/xterm-loader", () => {
+vi.mock("../core/xterm-loader", async () => {
+  const { FakeWebglAddon } = await import("./_fake-dom");
   const noop = () => undefined;
   const disposable = () => ({ dispose: noop });
   const log: string[] = [];
@@ -194,7 +195,11 @@ vi.mock("../core/xterm-loader", () => {
   }
   return {
     loadXterm: () =>
-      Promise.resolve({ Terminal: FakeTerminal, FitAddon: FakeFitAddon }),
+      Promise.resolve({
+        Terminal: FakeTerminal,
+        FitAddon: FakeFitAddon,
+        WebglAddon: FakeWebglAddon,
+      }),
   };
 });
 
@@ -221,7 +226,10 @@ describe("attach は寸法を合わせてから端末を作り直す", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
-        async () => new Response(JSON.stringify({ images: [], rejected: [] })),
+        async () =>
+          new Response(
+            JSON.stringify({ images: [], rejected: [], candidates: [] }),
+          ),
       ),
     );
     outputHandlers = [];

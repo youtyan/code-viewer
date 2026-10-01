@@ -165,6 +165,8 @@ Requires Node.js 20 or newer. Development uses
   on it, or use Move up / Move down in its right-click menu; the order is saved
   with the project list, so every browser and window shows the same one. Each project is a
   bold heading with its state mark and agent count (＋ and … on hover); its
+  ＋ opens the same menu as the tab group's ▾: a new shell, a new agent, or
+  that project's Files / Diff / History / Worktrees / Data / Work log screens. Its
   agents sit under it as indented two-line cards: the task title (or the kind)
   with a badge when it started waiting or finished while you were away, then
   the kind, state, elapsed time and worktree. Click a project name to switch
@@ -212,20 +214,17 @@ Requires Node.js 20 or newer. Development uses
   and `codex app-server`), never from reading tokens. Sign in once per account
   with the official command, opened in a new tmux window. The Agents list then
   shows which account each agent runs with, a band of account cards with every
-  quota window present in the latest record and its reset time (codex from its
-  session logs; claude through an optional status line wrapper that returns
-  your status line unchanged), and New agent starts claude or codex with a
+  quota window present in the latest record and its reset time, and New agent
+  starts claude or codex with a
   chosen account and project in a new tmux window, showing the exact command
   with a copy button. Missing windows are not
   invented; when one config directory holds records from two accounts, the card
   keeps the newest values and adds a Mixed note that says how to separate them.
-  When a claude card has no value yet or an old one, Check usage starts claude
-  with that account in a background tmux session, in a folder kept only for this
-  check (`usage-check` in code-viewer's state directory, so the folder trust
-  question comes once per account), sends one short message (this
-  uses a little usage), waits for the new value and closes that session; if
-  claude stops at its first-run setup, the folder trust question or sign-in,
-  the card says so and what to do next.
+  Usage refreshes every five minutes while the account view is open; Refresh all
+  checks immediately. Claude uses its local `/usage` command and Codex reads
+  `account/rateLimits/read`, without starting a model turn. Errors stay visible
+  with copyable details and a retry button. Newer values from Codex session logs
+  or the optional Claude status line wrapper are also shown.
   When a project has its own status line in `.claude/settings.json` or
   `.claude/settings.local.json`, claude started from code-viewer is given that
   status line wrapped with `--settings`, so its usage is still recorded.
@@ -397,6 +396,11 @@ Requires Node.js 20 or newer. Development uses
   so no font ships with the package. Panes need `tmux` on `PATH`; shells work
   without it.
   Opening shells needs the optional `@lydell/node-pty` package.
+- Terminal size follows the screen you operate: click, tap or type on a phone
+  to use its size, then operate on the PC to switch back. Idle browser screens
+  cannot reclaim the size through background resizing. Size and input are sent
+  together, so returning to a screen also works when its container has not changed.
+  Views of the same tmux pane still share one size.
 - One tmux caveat worth knowing: a tmux window can only have one size, so when
   the same session is attached from both a terminal tab and another terminal, they
   share it. With tmux's default `window-size latest` the window snaps to
@@ -449,7 +453,7 @@ Requires Node.js 20 or newer. Development uses
 5. When something does not work, `code-viewer doctor` lists what is missing
    (git, tmux, an old code-viewer still running, …) and how to fix it.
 
-### On a phone
+### Phone controls
 
 In a window 640px wide or less (or a phone turned sideways) the layout is
 reduced to three tasks: checking agents and answering one that needs input,
@@ -476,6 +480,15 @@ status bar and thins the bottom bar. Settings open as contents first; pick a
 section, and the row at the top goes back. Browser notifications
 need a secure page (https, or localhost on the same machine), so they are not
 available when the page is opened over plain http from another device.
+
+Opening an agent there shows only its pane, full screen, without attaching to
+tmux: other panes of a split window stay hidden, and the PC's window size and
+layout do not change. Long lines wrap to the phone's width; **Screen** shows
+the grid as it is for full-screen apps such as vim (pinch to change its text
+size). Numbered choices on the screen become buttons that send the number,
+the soft keys sit under the output, and the field at the bottom pastes what
+you type and presses Enter (**Send** with an empty field presses Enter only).
+Back (‹ or the browser's back) returns to the list.
 
 ## Usage
 
@@ -1501,3 +1514,41 @@ npm pack --dry-run
 
 MIT. Third-party licenses for bundled browser assets are included under
 `web/vendor/*`.
+
+## 外出先から接続する
+
+Cloudflareの名前付きTunnelとAccessで、自分のMac上のcode-viewerに接続できます。
+使うサービスはCloudflare Tunnel（Macへの接続）、Cloudflare Access（ログインと利用者の制限）、
+Cloudflare DNS（公開URLのドメイン管理）です。TunnelとAccessはZero Trustの管理画面で設定し、
+Macでは接続用ソフトのcloudflaredを動かします。
+アプリのヘルプ →「外出先から接続する」に、Cloudflareの設定画面のキャプチャを添えた8つの初回手順があります。接続後の使い方は「スマホでの操作」にまとめています。
+冒頭の構成図で、スマホ・Cloudflare・Macのつながりと、Macで動かす2つのソフトを確認できます。
+Cloudflareで開く画面、入力例、Team domain・AUDのコピー元、Macでのファイル作成と保存、
+接続できたかの確認まで、各項目を開いて順に操作できます。設定後の起動・停止と、
+DNS・ログイン・Tunnelのエラー別の確認方法も載せています。
+
+1. Cloudflare Accessで公開ホスト名全体を保護し、自分のメールだけを許可します。
+2. 次の設定例を自分の値に置き換え、`~/.config/code-viewer/remote-access.json` に保存します。
+
+```json
+{
+  "port": 64161,
+  "origin": "https://viewer.example.com",
+  "teamDomain": "example.cloudflareaccess.com",
+  "audience": "<Access application AUD>"
+}
+```
+
+3. 起動済みの入口を止め、`code-viewer --remote-access ~/.config/code-viewer/remote-access.json` で起動します。
+   開発版は `pnpm dev --remote-access ~/.config/code-viewer/remote-access.json`。`--standalone` は使いません。
+4. Tunnelの接続先は `http://127.0.0.1:64161`。HTTP Host Headerは公開ホスト名に合わせ、
+   Protect with AccessにTeam名とAUDを設定します。公開ホストのキャッシュはBypassにします。
+5. スマホで公開HTTPS URLを開いてログインします。未ログイン・別アカウントで画面とAPIに入れないことも確認します。
+
+通常のローカルポートやプロジェクトのポートはTunnelへ接続しません。設定ファイルにTunnelトークンは不要です。
+Macは起動したままにします。切断してもMac上の作業は続き、送信に失敗した操作は自動再送しません。
+外部接続を止めるには専用のconnectorを停止します。Quick TunnelはSSE非対応のため使えません。
+
+公式手順: [Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)、
+[Tunnel](https://developers.cloudflare.com/tunnel/get-started/)、
+[接続先の設定](https://developers.cloudflare.com/tunnel/reference/origin-parameters/)。

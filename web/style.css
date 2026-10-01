@@ -19502,15 +19502,14 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   transform: rotate(45deg);
   box-shadow: 0 0 8px color-mix(in srgb, var(--color-waiting) 45%, transparent);
 }
-/* 作業中は回さない (欠けた輪と作業中の色で示す)。エージェントが作業している間は
-   ずっと出ているので、回すとその間ページが毎秒 60 回描き直され、端末の打鍵が
-   画面に出るまでが遅れた。コマ送り (steps) でも描き直しの要求は毎フレーム残った。 */
+/* 作業中の弧は transform だけを動かし、レイアウトや色の再計算を避ける。 */
 .terminal-mark-working {
   border: 1.75px solid var(--color-working);
   border-top-color: transparent;
   border-right-color: transparent;
   border-radius: 50%;
-  transform: rotate(-45deg);
+  animation: gdp-spin 0.9s linear infinite;
+  will-change: transform;
 }
 .terminal-mark-done {
   width: var(--icon-sm);
@@ -19523,6 +19522,10 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 .terminal-mark-idle {
   border: 1.5px solid var(--color-idle);
   border-radius: 50%;
+}
+.agent-status:not(.agent-status-busy) .terminal-mark-working {
+  animation: none;
+  will-change: auto;
 }
 @media (prefers-reduced-motion: reduce) {
   .terminal-mark-working {
@@ -21384,7 +21387,21 @@ button.agents-section-title:focus-visible {
   border-radius: var(--radius-md);
   background: var(--color-doc);
 }
-/* 1 行目: 利用者が付けた名前 (太字・本文の色)・種類とプランの札・⋯。 */
+.agents-account-kind {
+  flex: none;
+  color: var(--color-text);
+  font-size: var(--ui-font-section);
+  font-weight: 600;
+  line-height: 1.2;
+  text-transform: capitalize;
+}
+.agents-account-card[data-agent="claude"] .agents-account-kind {
+  color: var(--project-orange);
+}
+.agents-account-card[data-agent="codex"] .agents-account-kind {
+  color: var(--project-blue);
+}
+/* 1 行目: 種類・利用者が付けた名前・プラン・⋯。 */
 .agents-account-card-head {
   display: flex;
   align-items: center;
@@ -21398,10 +21415,10 @@ button.agents-section-title:focus-visible {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--color-text);
+  color: var(--color-text-2);
   font: inherit;
-  font-size: var(--ui-font-section);
-  font-weight: 600;
+  font-size: var(--ui-font-lg);
+  font-weight: 500;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -21410,8 +21427,10 @@ button.agents-section-title:focus-visible {
 button.agents-account-name:hover {
   text-decoration: underline;
 }
-.agents-account-card-head > .agents-chip {
+.agents-account-plan {
   flex: none;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
 }
 /* 2 行目: ログイン中のメールアドレス (無ければログインの状態)。本文より一段小さく、
    薄い灰色にはしない。 */
@@ -24277,10 +24296,13 @@ body.gdp-help-page #content {
    階層は ページの見出し > 分類・節の見出し > 群の見出し > 本文 > 補足 を、大きさ・
    太さ・色の濃さで分ける。本文は本来の文字色 (薄い灰色にしない)。一段薄い
    --color-text-2 は補足 (要約・説明・注記) だけ。まとまりは余白で分ける: 中は詰め、
-   まとまりの間は --space-7 (枠や面では囲まない)。1 行の長さは --doc-measure
-   (英語 70 字前後・日本語 40 字前後。em / ch なので文字の大きさに比例する)。
+   まとまりの間は --space-7 (枠や面では囲まない)。幅は --doc-measure で決め、
+   ヘルプは本文欄いっぱい、設定の説明は英語 70 字前後・日本語 40 字前後まで。
    強調色 (--color-accent) は押せるもの (リンク・ボタン) と目次の選択だけ。 */
 .gdp-help-shell {
+  /* 画像の通常表示の上限。広い本文や表示密度でも巨大化させない。 */
+  --help-figure-max-w: 800px;
+  --help-figure-max-h: 600px;
   --doc-measure: 68ch;
   --doc-line-height: 1.75;
   --help-step-mark: calc(var(--space-unit) * 7);
@@ -24288,6 +24310,9 @@ body.gdp-help-page #content {
 }
 .gdp-help-shell[lang="ja"] {
   --doc-measure: 40em;
+}
+.gdp-help-shell[data-page="help"] {
+  --doc-measure: 100%;
 }
 .gdp-help-content {
   color: var(--color-text);
@@ -24325,7 +24350,7 @@ body.gdp-help-page #content {
 .gdp-help-list,
 .gdp-help-table,
 .gdp-help-note,
-.gdp-help-details,
+.gdp-help-subsection,
 .gdp-help-command {
   max-width: var(--doc-measure);
 }
@@ -24421,11 +24446,12 @@ body.gdp-help-page #content {
   color: var(--color-text-2);
   font-size: var(--ui-font-lg);
 }
-/* 画面のキャプチャ (views/help-images.ts)。本文の幅まで。押すと大きく開く
+/* 画面のキャプチャ (views/help-images.ts)。本文とは別に表示サイズを制限。押すと大きく開く
    (views/terminal/image-lightbox.ts)。 */
 .gdp-help-figure {
   display: block;
-  max-width: min(100%, var(--doc-measure));
+  width: fit-content;
+  max-width: min(100%, var(--help-figure-max-w));
   margin: var(--space-3) 0 var(--space-5);
   overflow: hidden;
   border: 1px solid var(--color-line);
@@ -24442,8 +24468,10 @@ body.gdp-help-page #content {
 }
 .gdp-help-figure img {
   display: block;
-  width: 100%;
+  width: auto;
   height: auto;
+  max-width: 100%;
+  max-height: var(--help-figure-max-h);
 }
 .gdp-help-steps > li > .gdp-help-figure {
   margin: var(--space-2) 0 var(--space-3);
@@ -24480,6 +24508,9 @@ body.gdp-help-page #content {
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.gdp-help-command span[style] {
+  color: var(--shiki-light);
 }
 .gdp-help-command-copy {
   position: absolute;
@@ -24544,40 +24575,18 @@ body.gdp-help-page #content {
 .gdp-help-note-body > p + p {
   margin-top: var(--space-2);
 }
-/* 畳める「詳しく」。開くと左の線の内側に中身。 */
-.gdp-help-details {
-  margin: var(--space-5) 0 var(--space-4);
+/* 小節と補足は、見出しも本文も常に表示する。 */
+.gdp-help-subsection {
+  margin: var(--space-6) 0 var(--space-4);
 }
-.gdp-help-details > summary {
-  width: fit-content;
+.gdp-help-subsection > h4 {
+  margin: 0 0 var(--space-3);
   color: var(--color-text);
+  font-size: var(--ui-font-lg);
   font-weight: 600;
-  list-style: none;
-  cursor: pointer;
+  line-height: 1.4;
 }
-.gdp-help-details > summary::-webkit-details-marker {
-  display: none;
-}
-.gdp-help-details > summary::before {
-  content: "";
-  display: inline-block;
-  width: 0.45em;
-  height: 0.45em;
-  margin: 0 var(--space-2) 0.15em var(--space-1);
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(-45deg);
-}
-.gdp-help-details[open] > summary::before {
-  transform: rotate(45deg);
-}
-.gdp-help-details > summary:focus-visible {
-  outline: none;
-  border-radius: var(--radius-sm);
-  box-shadow: var(--focus-ring);
-}
-.gdp-help-details-body {
-  margin-top: var(--space-3);
+.gdp-help-subsection-body {
   padding-left: var(--space-4);
   border-left: 2px solid var(--color-line);
 }
@@ -26769,6 +26778,221 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
       margin: 0 0 0 var(--space-1);
       transform: rotate(135deg);
     }
+  }
+
+  /* ---- 1 ペイン表示 (views/terminal/pane-view.ts) ----
+     エージェントのペインを 1 つだけ全画面で映す。上から 見出し・本文・選択肢・
+     操作札・返事の欄。下端はソフトキーボードの上 (--sp-keyboard-h は
+     mobile-shell.ts)。面ごと端末の色 ([data-terminal-surface]) で塗る。 */
+  .pane-view:not([hidden]) {
+    position: fixed;
+    inset: 0 0 var(--sp-keyboard-h, 0px) 0;
+    z-index: 80;
+    display: flex;
+    flex-direction: column;
+    padding: var(--sp-safe-top) var(--sp-safe-right) var(--sp-safe-bottom) var(--sp-safe-left);
+    background: var(--color-term);
+    color: var(--color-term-text);
+  }
+  /* キーボードが出ている間は、下の安全領域もキーボードの下にある。 */
+  body.mobile-keyboard-open .pane-view:not([hidden]) {
+    padding-bottom: 0;
+  }
+  /* 縮むのは本文だけ。本文の元の高さ (履歴の全文) で縮み方を割り振ると、
+     本文が長いほど札や返事の欄まで潰れる。 */
+  .pane-view-head,
+  .pane-view-choices,
+  .pane-view-keys,
+  .pane-view-compose {
+    flex: none;
+  }
+  .pane-view-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--pad-face);
+    background: var(--color-ground);
+    color: var(--color-text);
+    border-bottom: 1px solid var(--color-line-soft);
+  }
+  .pane-view-back {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--sp-touch);
+    height: var(--sp-touch);
+    margin-left: calc(var(--pad-face) * -1);
+    border: 0;
+    background: none;
+    color: inherit;
+  }
+  .pane-view-back-icon {
+    width: var(--space-4);
+    height: var(--space-4);
+  }
+  .pane-view-titles {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .pane-view-title,
+  .pane-view-detail {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .pane-view-title {
+    font-weight: 600;
+  }
+  .pane-view-detail {
+    color: var(--color-text-3);
+    font-size: var(--ui-font-sm);
+  }
+  /* .seg は高さを決め打ちして中を切るので、指で押せる高さのボタンに合わせて外す。 */
+  .pane-view-mode {
+    flex: none;
+    height: auto;
+  }
+  .pane-view-mode button {
+    min-height: var(--sp-touch);
+  }
+  .pane-view-body {
+    position: relative;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: var(--space-2) var(--pad-face);
+    font-family: var(--font-mono);
+    font-size: var(--ui-font-md);
+    line-height: 1.45;
+  }
+  /* 端末の 1 行 (折り返しを繋いだもの) を幅で折り返す。枠の線だけの行は折り返さずに切る。 */
+  .pane-line {
+    min-height: 1.45em;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .pane-line-rule {
+    white-space: pre;
+    overflow: hidden;
+  }
+  .pane-view-screen {
+    overflow-x: auto;
+  }
+  .pane-view-older:not([hidden]) {
+    display: block;
+    min-height: var(--sp-touch);
+    margin: 0 auto var(--space-2);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    background: var(--color-raised);
+    color: var(--color-text);
+  }
+  .pane-view-latest:not([hidden]) {
+    position: sticky;
+    bottom: var(--space-2);
+    display: block;
+    min-height: var(--sp-touch);
+    margin: var(--space-2) auto 0;
+    padding: 0 var(--space-4);
+    border: 0;
+    border-radius: var(--radius-lg);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    font-family: var(--font-ui);
+  }
+  .pane-view-status:not([hidden]) {
+    position: sticky;
+    top: 0;
+    margin-bottom: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    background: var(--color-raised);
+    color: var(--color-text);
+    font-family: var(--font-ui);
+    white-space: pre-wrap;
+  }
+  /* 選択肢は 1 列で横にスクロールする (本文の高さを削らない)。全文は本文に出ている。 */
+  .pane-view-choices:not([hidden]) {
+    display: flex;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--pad-face) 0;
+    overflow-x: auto;
+    background: var(--color-ground);
+    scrollbar-width: none;
+  }
+  .pane-view-choice {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    max-width: 70%;
+    min-height: var(--sp-touch);
+    padding: 0 var(--space-3) 0 var(--space-1);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    background: var(--color-raised);
+    color: var(--color-text);
+  }
+  .pane-view-choice-key {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--space-5);
+    height: var(--space-5);
+    border-radius: var(--radius-sm);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    font-weight: 700;
+  }
+  .pane-view-choice-label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .pane-view-keys {
+    display: flex;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--pad-face);
+    overflow-x: auto;
+    background: var(--color-ground);
+    scrollbar-width: none;
+  }
+  .pane-view-compose {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-2);
+    padding: 0 var(--pad-face) var(--space-2);
+    background: var(--color-ground);
+  }
+  .pane-view-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: var(--sp-touch);
+    max-height: calc(var(--sp-touch) * 3);
+    box-sizing: border-box;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    background: var(--color-inset);
+    color: var(--color-text);
+    resize: none;
+    field-sizing: content;
+  }
+  .pane-view-send {
+    flex: none;
+    min-width: var(--sp-touch);
+    min-height: var(--sp-touch);
+    padding: 0 var(--space-3);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    font-weight: 600;
+  }
+  .pane-view :disabled {
+    opacity: 0.5;
   }
 }
 

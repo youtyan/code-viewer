@@ -12,6 +12,21 @@ export type TerminalLang = "en" | "ja";
 
 export type TerminalText = {
   connecting: string;
+  /** SP の 1 ペイン表示 (pane-view.ts)。 */
+  paneView: {
+    back: string;
+    read: string;
+    screen: string;
+    modeLabel: string;
+    latest: string;
+    older: string;
+    placeholder: string;
+    send: string;
+    keys: string;
+    choices: string;
+    gone: string;
+    failed: string;
+  };
   /** 選んだペインが閉じられていた。 */
   paneClosed: string;
   /** ペインを開けなかった。 */
@@ -191,6 +206,20 @@ function elapsedFormatter(
 
 const EN: TerminalText = {
   connecting: "Connecting…",
+  paneView: {
+    back: "Back",
+    read: "Read",
+    screen: "Screen",
+    modeLabel: "How to show the pane",
+    latest: "Latest",
+    older: "Show earlier output",
+    placeholder: "Type a reply",
+    send: "Send",
+    keys: "Keys",
+    choices: "Choices",
+    gone: "This pane has closed.",
+    failed: "Could not show the pane.",
+  },
   paneClosed: "This pane has been closed.",
   paneOpenFailed: "Could not open this pane.",
   screenFailed: "Cannot read this terminal.",
@@ -317,6 +346,20 @@ const EN: TerminalText = {
 
 const JA: TerminalText = {
   connecting: "接続しています…",
+  paneView: {
+    back: "戻る",
+    read: "読む",
+    screen: "画面",
+    modeLabel: "表示のしかた",
+    latest: "最新へ",
+    older: "前の出力を表示",
+    placeholder: "返事を入力",
+    send: "送信",
+    keys: "キー",
+    choices: "選択肢",
+    gone: "このペインは閉じました。",
+    failed: "ペインを映せませんでした。",
+  },
   paneClosed: "このペインは閉じられました。",
   paneOpenFailed: "このペインを開けませんでした。",
   screenFailed: "このターミナルの画面を取得できません。",

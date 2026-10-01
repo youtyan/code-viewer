@@ -25,3 +25,10 @@ export function closestFor<T extends { matches(selector: string): boolean }>(
   }
   return null;
 }
+
+/** 画素を描かない端末テスト用。描画の失敗は terminal-renderer.test.ts が扱う。 */
+export class FakeWebglAddon {
+  activate = () => undefined;
+  dispose = () => undefined;
+  onContextLoss = () => ({ dispose: this.dispose });
+}

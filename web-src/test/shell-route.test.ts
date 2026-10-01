@@ -93,6 +93,10 @@ describe("shell input validation", () => {
     { name: "refuses a missing id", body: { data: "x" } },
     { name: "refuses a tmux pane id", body: { id: "%12", data: "x" } },
     { name: "refuses a numeric id", body: { id: 1, data: "x" } },
+    {
+      name: "refuses a broken viewport",
+      body: { id: "shell-abc123", data: "x", viewport: {} },
+    },
     { name: "refuses missing data", body: { id: "shell-abc123" } },
     { name: "refuses non-string data", body: { id: "shell-abc123", data: 1 } },
   ])("$name", async ({ body }) => {

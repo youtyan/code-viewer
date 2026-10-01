@@ -406,6 +406,28 @@ describe("端末の操作札", () => {
   });
 });
 
+describe("1 ペイン表示", () => {
+  const rules = withTiers(PHONE);
+
+  // 縮むのは本文だけ。本文の元の高さ (履歴の全文) で縮み方を割り振ると、本文が
+  // 長いほど操作札が潰れて返事の欄の下に隠れた (iPhone で 52px の帯が 10px に)。
+  test.each([
+    { name: "本文", selector: ".pane-view-body", expected: "1 1 0" },
+    { name: "見出し", selector: ".pane-view-head", expected: "none" },
+    { name: "選択肢", selector: ".pane-view-choices", expected: "none" },
+    { name: "操作札", selector: ".pane-view-keys", expected: "none" },
+    { name: "返事の欄", selector: ".pane-view-compose", expected: "none" },
+  ])("$name → flex $expected", ({ selector, expected }) => {
+    expect(declarationsOf(rules, [selector]).get("flex")).toBe(expected);
+  });
+
+  test("下端はソフトキーボードの上に置く", () => {
+    expect(
+      declarationsOf(rules, [".pane-view:not([hidden])"]).get("inset"),
+    ).toBe("0 0 var(--sp-keyboard-h, 0px) 0");
+  });
+});
+
 describe("指の画面の押せる大きさ", () => {
   const rules = withTiers(SOFT_KEYS, TOUCH);
   const vars = bodyVariables(rules);

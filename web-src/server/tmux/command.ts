@@ -70,6 +70,16 @@ export function tmuxArgs(args: string[]): string[] {
   return [commandForExternal("tmux"), ...args];
 }
 
+/**
+ * 利用者の文字を、tmux の引数 1 つとしてそのまま届く形にする。tmux は `;` で
+ * 終わる引数をコマンドの区切りとして読み (末尾の `;` を落とす)、`\;` で終わる
+ * 引数は `;` で終わる文字として読む (cmd-parse.y の cmd_parse_from_arguments)。
+ * だから末尾が `;` なら、その前に `\` を 1 つ足す。
+ */
+export function tmuxLiteralArg(value: string): string {
+  return value.endsWith(";") ? `${value.slice(0, -1)}\\;` : value;
+}
+
 function stderrIncludesAny(stderr: string, markers: string[]): boolean {
   const lower = stderr.toLowerCase();
   return markers.some((marker) => lower.includes(marker));
