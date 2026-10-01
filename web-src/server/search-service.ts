@@ -394,11 +394,11 @@ async function grepWorktreeAsync(
     };
   }
   if (req.regex) {
+    // 組み込みの検索は固定文字列だけ。空の結果で返すと「見つからない」と区別できない。
     return {
-      ref: "worktree",
-      engine: "fallback",
-      truncated: false,
-      matches: [],
+      error:
+        "regex search needs ripgrep (rg), which the code-viewer server cannot run. Install ripgrep and add it to PATH, or start code-viewer with --bin rg=/absolute/path. Search without regex works without rg.",
+      status: 500,
     };
   }
   const matches = await grepWorktreeFallback(
