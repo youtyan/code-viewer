@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import type { AgentStatesResponse } from "../core/agent-state";
 import { PROJECT_HEADER } from "../core/api-url";
+import type { RemoteAccessStatus } from "../core/remote-access";
 import type { EntryBackendFailure } from "../core/types";
 import { SSE_RETRY_MS } from "../server/runtime";
 import { rootFileKey } from "../server/server-registry";
@@ -642,6 +643,29 @@ describe("the entry server", () => {
     expect(["absent", "starting", "running"]).toContain(
       ((await known.json()) as { state: string }).state,
     );
+  });
+
+  // 外部接続は入口が持つ (設定の画面が /_entry/remote* を叩く)。設定ファイルは
+  // 状態フォルダに置き、書き込み系は副作用の印の無い要求を断る。
+  test("remote access answers on the entry and keeps its file in the state folder", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    const { url } = await startEntry(box, root);
+
+    const status = await fetch(`${url}_entry/remote`);
+    const refused = await fetch(`${url}_entry/remote/start`, {
+      method: "POST",
+    });
+
+    expect(status.status).toBe(200);
+    const body = (await status.json()) as RemoteAccessStatus;
+    expect([body.configPath, body.config, body.listener, body.tunnel]).toEqual([
+      join(box.stateDir, "remote-access.json"),
+      { state: "absent" },
+      { state: "stopped" },
+      { state: "stopped" },
+    ]);
+    expect(refused.status).toBe(403);
   });
 
   // ターミナルの状態を持つのは入口だけ (裏は巡回もフックの受け口もシェルも持たない)。

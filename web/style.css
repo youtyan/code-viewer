@@ -17527,7 +17527,8 @@ body.gdp-search-page {
   font-weight: 700;
   line-height: 1.4;
 }
-.agent-accounts-section > .agent-accounts-subtitle:first-child {
+.agent-accounts-section > .agent-accounts-subtitle:first-child,
+.remote-access-section > .agent-accounts-subtitle:first-child {
   margin-top: 0;
 }
 .agent-accounts-subtitle-row > .agent-accounts-subtitle {
@@ -17610,6 +17611,32 @@ body.gdp-search-page {
   width: calc(var(--space-unit) * 64);
   height: var(--ui-control-sm);
   margin-top: 0;
+}
+/* 設定の「外部接続」(views/remote-access-settings.ts)。状態の行は「エージェント連携」の
+   行の形 (.agent-hooks-row) で、名前の列を cloudflared が収まる幅にし、操作の列を持たない。 */
+.agent-hooks-row.remote-access-row {
+  grid-template-columns: 7em 13em minmax(0, 1fr);
+}
+.remote-access-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin: var(--space-3) 0 var(--space-2);
+}
+/* 開始と停止は同じ幅で並べる。 */
+.remote-access-start,
+.remote-access-stop {
+  inline-size: 8em;
+}
+/* 「cloudflared を入れる」は入れられるときだけ (.gdp-btn の display より強く隠す)。 */
+.remote-access-actions > [hidden] {
+  display: none;
+}
+.remote-access-fields .gdp-dialog-input {
+  margin-top: 0;
+}
+.remote-access-path {
+  overflow-wrap: anywhere;
 }
 /* 入力の画面に置く排他の選択 (.seg) は中身の幅にする (欄いっぱいに伸ばさない)。 */
 .worktree-field > .seg {

@@ -890,6 +890,8 @@ find web-src -name '*.ts' -not -path 'web-src/server/*' -not -path 'web-src/test
 | `<状態>/server-logs/` | code-viewer が起こしたサーバ・裏の出力（起動に失敗したとき・落ちたとき末尾を理由に添える） | 同上 |
 | `<状態>/entry.json`・`entry.json.start.lock` | 動いている入口の `{url, pid, token, version, started_at}` と起動の排他 | 同上 |
 | `<状態>/agent-screen-rules.json`・`agent-screen-rules.migrated` | 画面ルールの保存済み上書き（ユーザー単位）と、リポジトリから写した・保存した・戻した印 | 同上 |
+| `<状態>/remote-access.json`・`tunnel-token` | 外部接続の値と Tunnel のトークン（どちらも 0600。`server/entry/remote-control.ts`）。`--remote-access <file>` で起動したときは値だけそのファイル（トークンは状態フォルダのまま。渡したファイルの隣はリポジトリの中でありうる）。読めない設定は上書きせず `.broken-<時刻>` へ退かしてから書く | 同上 |
+| `<状態>/remote-access-cloudflared.pid` | 入口が起こした cloudflared の `{pid, tokenPath}`。終われば消す。残っていれば次の入口が起動時と開始の前に、ps で同じトークンの cloudflared と確かめてから止める | 同上 |
 | `~/.cache/code-viewer/servers/` | サーバ登録簿（1 リポジトリ 1 ファイル、起動ロック） | `CODE_VIEWER_TEST_SERVER_REGISTRY_DIR` |
 | `<リポジトリ>/.code-viewer/settings.json` | リポジトリごとの設定（ユーザー単位の項目は初回の引き継ぎ元） | テストは一時ディレクトリのリポジトリで |
 | `<リポジトリ>/.code-viewer/agent-screen-rules.json` | 以前の画面ルールの上書き。ユーザー単位のものが無いときに 1 度だけ写す（読むだけ） | 同上 |

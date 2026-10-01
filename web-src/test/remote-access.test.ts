@@ -1,15 +1,16 @@
-import { needsRemoteLogin } from "../views/remote-access";
-import { generateKeyPair, SignJWT, type JWTPayload } from "jose";
+import { generateKeyPair, type JWTPayload, SignJWT } from "jose";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
+import { proxyToBackend } from "../server/entry/proxy";
 import {
   createRemoteAccess,
-  parseRemoteAccessConfig,
+  parseRemoteAccessFile,
+  parseRemoteAccessValues,
 } from "../server/entry/remote-access";
-import { proxyToBackend } from "../server/entry/proxy";
 import {
   requestAllowed,
   sideEffectRequestAllowed,
 } from "../server/request-origin";
+import { needsRemoteLogin } from "../views/remote-access";
 
 const config = {
   port: 64161,
@@ -64,13 +65,36 @@ test.each([
   ["missing AUD", { ...config, audience: "" }],
   ["unknown field", { ...config, enabled: true }],
 ])("rejects %s configuration", (_name, value) => {
-  expect(() => parseRemoteAccessConfig(value)).toThrow();
+  expect(() => parseRemoteAccessValues(value)).toThrow();
+});
+
+test.each([
+  { name: "on", file: { ...config, autoStart: true }, autoStart: true },
+  { name: "off", file: { ...config, autoStart: false }, autoStart: false },
+  { name: "left out", file: config, autoStart: false },
+])("reads start with code-viewer when it is $name", ({ file, autoStart }) => {
+  expect(parseRemoteAccessFile(file)).toEqual({ values: config, autoStart });
+});
+
+test.each([
+  [
+    "text autoStart",
+    { ...config, autoStart: "yes" },
+    "autoStart must be true or false",
+  ],
+  [
+    "unknown field next to autoStart",
+    { ...config, autoStart: true, enabled: true },
+    "unknown remote access fields: enabled",
+  ],
+])("rejects a config file with %s", (_name, value, message) => {
+  expect(() => parseRemoteAccessFile(value)).toThrow(message);
 });
 
 test.each([
   1, 64161, 65535,
 ])("accepts port %s and the fixed Access issuer", (port) => {
-  expect(parseRemoteAccessConfig({ ...config, port })).toEqual({
+  expect(parseRemoteAccessValues({ ...config, port })).toEqual({
     ...config,
     port,
   });
@@ -143,6 +167,27 @@ test.each([
     path: "/p/0123456789abcdef/_entry/adopt",
     headers: {},
     method: "GET",
+    status: 403,
+  },
+  {
+    name: "remote access status",
+    path: "/_entry/remote",
+    headers: {},
+    method: "GET",
+    status: 403,
+  },
+  {
+    name: "remote access start",
+    path: "/_entry/remote/start",
+    headers: { origin: config.origin, "x-code-viewer-action": "1" },
+    method: "POST",
+    status: 403,
+  },
+  {
+    name: "remote access token change",
+    path: "/_entry/remote/config",
+    headers: { origin: config.origin, "x-code-viewer-action": "1" },
+    method: "POST",
     status: 403,
   },
   {
@@ -300,4 +345,22 @@ test.each([
   expect(needsRemoteLogin(response, "https://viewer.example.com")).toBe(
     expected,
   );
+});
+
+// 外から開いた画面は、この code を見て「Mac の画面で操作してください」と出す。
+test("the remote listener refuses remote access control with the local-only code", async () => {
+  const next = vi.fn();
+  const response = await createRemoteAccess(config, async () => keys.publicKey)(
+    request(await token(), "/_entry/remote/start", {
+      method: "POST",
+      headers: { origin: config.origin, "x-code-viewer-action": "1" },
+    }),
+    next,
+  );
+
+  expect(await response.json()).toEqual({
+    code: "remote-local-only",
+    error: "This route is available only on the local listener",
+  });
+  expect(next).not.toHaveBeenCalled();
 });

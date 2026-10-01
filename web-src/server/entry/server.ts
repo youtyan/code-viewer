@@ -82,7 +82,13 @@ import {
 } from "./entry-file";
 import { createEntryProjects, type EntryProjects } from "./projects";
 import { isConnectionFailure, proxyToBackend } from "./proxy";
-import { createRemoteAccess, readRemoteAccessConfig } from "./remote-access";
+import { readRemoteAccessFile } from "./remote-access";
+import {
+  createRemoteControl,
+  defaultRemoteAccessConfigPath,
+  type RemoteControl,
+  remoteLocalOnlyResponse,
+} from "./remote-control";
 import { readPageLook, unknownProjectPage } from "./unknown-project-page";
 
 const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
@@ -240,9 +246,9 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
   const parsed = parseEntryArgs(argv);
   if (parsed.ok === false) fail(parsed.error);
   const args: EntryArgs = parsed.args;
-  const remoteConfig = args.remoteAccess
-    ? readRemoteAccessConfig(args.remoteAccess)
-    : null;
+  // 渡された設定ファイルは、入口を起こす前に読めることを確かめる (読めなければ
+  // ここで止まる。動いている入口へ委ねる前にも同じ)。
+  if (args.remoteAccess) readRemoteAccessFile(args.remoteAccess);
   const overrides = [];
   for (const bin of args.bins) {
     const override = parseExternalCommandOverride(bin);
@@ -272,7 +278,7 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
       );
     }
     if (decision.kind === "delegate") {
-      if (remoteConfig)
+      if (args.remoteAccess)
         fail(
           `code-viewer is already running at ${decision.url}. Stop that entry server and restart it with --remote-access; remote settings were not applied.`,
         );
@@ -342,6 +348,14 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
     backends,
     lastProject: createLastProject(launchRoot),
     paneListOptions: { worktreePaths: worktreePathsInsideGit() },
+    remote: createRemoteControl({
+      configPath: args.remoteAccess ?? defaultRemoteAccessConfigPath(),
+      configFromFlag: args.remoteAccess !== null,
+      forward: (req, publicOrigin) =>
+        handleEntryRequest(req, context, publicOrigin),
+      onListenerError: (error) =>
+        reportFatalAndShutdown("remote server error", error, shutdown.run),
+    }),
   };
   try {
     await registerLaunchRoot(launchRoot);
@@ -383,7 +397,6 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
     throw error;
   }
   lock.release();
-  let remoteServer: Awaited<ReturnType<typeof startServer>> | null = null;
   const shutdown = createProcessShutdown([
     {
       label: "code-viewer entry record cleanup",
@@ -415,10 +428,8 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
         (await import("../terminal/activity")).stopAgentActivityWatch(),
     },
     {
-      label: "code-viewer remote server close",
-      run: async () => {
-        if (remoteServer) await remoteServer.close();
-      },
+      label: "code-viewer remote access stop",
+      run: () => context.remote.shutdown(),
     },
     { label: "code-viewer entry server close", run: () => server.close() },
   ]);
@@ -453,31 +464,15 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
   // 開発中の読み直し (index.html・style.css・app.js) は裏の SSE が送る
   // (裏も CODE_VIEWER_DEV を受け継ぎ、startDevAssetReload を動かす)。
 
-  if (remoteConfig) {
-    try {
-      const remote = createRemoteAccess(remoteConfig);
-      remoteServer = await startServer({
-        hostname: "127.0.0.1",
-        port: remoteConfig.port,
-        fetch: (req) =>
-          remote(req, (authenticated) =>
-            handleEntryRequest(authenticated, context, remoteConfig.origin),
-          ),
-        onError: (error) =>
-          reportFatalAndShutdown("remote server error", error, shutdown.run),
-      });
-      console.log(
-        `code-viewer remote access: ${remoteConfig.origin} (tunnel target http://127.0.0.1:${remoteServer.port})`,
-      );
-    } catch (error) {
-      reportFatalAndShutdown(
-        "remote access startup failed",
-        error,
-        shutdown.run,
-      );
-      return;
-    }
+  // --remote-access で起動したら待ち受けを開く (開けなければ止まる)。設定の
+  // 「起動時に開始する」なら cloudflared まで開始する (失敗は設定画面に出す)。
+  try {
+    if (args.remoteAccess) await context.remote.startListenerFromFlag();
+  } catch (error) {
+    reportFatalAndShutdown("remote access startup failed", error, shutdown.run);
+    return;
   }
+  void context.remote.startOnLaunch();
 
   const { startAgentActivityWatch } = await import("../terminal/activity");
   startAgentActivityWatch(launchRoot, context.paneListOptions);
@@ -605,6 +600,7 @@ type EntryContext = {
   backends: EntryBackends;
   lastProject: LastProject;
   paneListOptions: ListTmuxPanesOptions;
+  remote: RemoteControl;
 };
 
 function projectUrl(ctx: EntryContext, root: string, requestUrl: URL): string {
@@ -900,6 +896,14 @@ async function handleEntryRequest(
   }
   if (path === "/_entry/backend" && req.method === "GET") {
     return handleEntryBackend(ctx, req);
+  }
+  if (path === "/_entry/remote" || path.startsWith("/_entry/remote/")) {
+    // 外から来た要求は関所 (remote-access.ts) が先に断る。ここでも断る。
+    if (publicOrigin) return remoteLocalOnlyResponse();
+    return (
+      (await ctx.remote.handleRoute(req, url, mutationAllowed)) ??
+      textError("not found", 404)
+    );
   }
   if (path === "/_entry/open" || path === "/_entry/restart") {
     if (req.method !== "POST") return textError("method not allowed", 405);

@@ -327,10 +327,12 @@ used for --idle-stop seconds (default 600, 0 = never) is stopped and started
 again on the next request. --standalone runs a separate server for this
 repository only.
 
---remote-access <file> adds a separate loopback listener for a named Cloudflare
-Tunnel protected by Access. The JSON file requires port, origin (HTTPS),
-teamDomain and audience (Access AUD). See Help > Connect from outside.
-Do not use --standalone or publish the normal local port through a tunnel.
+Remote access through a named Cloudflare Tunnel protected by Access is set up
+and started in Settings > Remote access (code-viewer runs cloudflared). See
+Help > Connect from outside. --remote-access <file> uses that JSON file (port,
+origin, teamDomain, audience, optional autoStart) and opens its loopback
+listener on start. Do not use --standalone or publish the normal local port
+through a tunnel.
 
 Getting started: run code-viewer inside a git repository and open the printed
 URL; the repository is listed under Projects in the left sidebar. New agent

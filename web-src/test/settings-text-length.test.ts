@@ -4,13 +4,14 @@
 //
 // 対象は設定の画面が使う文言の表すべて: 設定のフォーム (viewer-settings-i18n)・
 // フックの節・アカウントの節 (帯・確認の画面と共有の表なので表ごと)・
-// ショートカットの節。段落は文字列の中の改行で分ける。文言を返す関数は、
+// ショートカットの節・外部接続の節。段落は文字列の中の改行で分ける。文言を返す関数は、
 // どの引数にも短い代わりの値 ("x") を渡して、文の部分だけを測る (差し込む
 // パスや理由の長さは文言の書き方では決まらないため)。
 
 import { describe, expect, test } from "vitest";
 import { agentsText } from "../views/agents/i18n";
 import { SHORTCUT_SETTINGS_TEXT } from "../views/help-keybinding-editor";
+import { REMOTE_ACCESS_SETTINGS_TEXT } from "../views/remote-access-settings-i18n";
 import { VIEWER_SETTINGS_TEXT } from "../views/viewer-settings-i18n";
 
 type Language = "en" | "ja";
@@ -59,6 +60,7 @@ function tables(lang: Language): Array<[string, unknown]> {
     ["hooks", agentsText(lang).hooks],
     ["accounts", agentsText(lang).accounts],
     ["shortcuts", SHORTCUT_SETTINGS_TEXT[lang]],
+    ["remote", REMOTE_ACCESS_SETTINGS_TEXT[lang]],
   ];
 }
 
