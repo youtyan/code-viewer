@@ -27,13 +27,19 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   AGENT_EVENTS,
+  type AgentStatesResponse,
+  clipAgentStateText,
   isAgentEvent,
   needsAttention,
 } from "../core/agent-state";
-import { formatErrorDetail } from "../core/error-detail";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
 import { isGlobPathQuery, rankPathMatches } from "../core/fuzzy-search";
 import { AGENT_GUIDES, buildAgentHelpIndex } from "./agent-help";
-import { resolveRepoRootSafe } from "./cli-helpers";
+import { resolveRepoRootSafe, type ServerUrlResult } from "./cli-helpers";
 import {
   createDbColumnsResponse,
   createDbDdlResponse,
@@ -89,6 +95,7 @@ import {
   DEFAULT_CAPTURE_HISTORY_LINES,
   terminalKindOf,
 } from "./terminal/capture";
+import { postToServer } from "./terminal/hook-report";
 import { MAX_TMUX_HISTORY_LINES } from "./tmux/capture";
 
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -167,6 +174,20 @@ export type DefaultMcpToolsOptions = {
   cwd?: string;
   omitDirNames?: string[];
   generation?: number;
+  /**
+   * The server that holds the terminal state, when it is not this process. A
+   * project process behind the entry server (`--backend`) holds none: the
+   * entry runs the tmux sweep, receives the hooks and owns the browser shells.
+   * Given, the terminal tools ask that server the same `/_agent/*` routes
+   * `code-viewer terminal` asks (terminal-cli.ts). Omitted (a `--standalone`
+   * server), they use this process's own state.
+   */
+  terminalServer?: () => ServerUrlResult;
+  /**
+   * The MCP request's own signal (`req.signal`). A terminal tool asking
+   * `terminalServer` stops when the client that called it goes away.
+   */
+  signal?: AbortSignal;
 };
 
 // Build the default tool inventory. Exported so preview.ts can mount it
@@ -459,7 +480,7 @@ export function defaultMcpTools(
       name: "code_viewer_search_code",
       title: "code-viewer search code",
       description:
-        "Returns the same GrepResponse shape `/_grep` and `code-viewer search code --json` emit: ref, engine ('rg' / 'git' / 'fallback'), truncated, and matches (path / line / column / preview). Read-only. Uses ripgrep when available and falls back to git grep / a fixed-string scanner with identical scope filtering.",
+        "Returns the same GrepResponse shape `/_grep` and `code-viewer search code --json` emit: ref, engine ('rg' / 'git' / 'fallback'), truncated, and matches (path / line / column / preview). Read-only. The working tree is searched with ripgrep, or with a built-in fixed-string scanner when rg is missing; a regex search of the working tree without rg fails (isError) with a message saying rg is needed. Any other ref is searched with git grep. Scope filtering is the same on every engine.",
       inputSchema: {
         type: "object",
         properties: {
@@ -482,7 +503,7 @@ export function defaultMcpTools(
           regex: {
             type: "boolean",
             description:
-              "Treat `term` as an extended regex instead of a fixed string. Defaults to false.",
+              "Treat `term` as an extended regex instead of a fixed string. Defaults to false. On the working tree this needs ripgrep (rg); without it the call fails instead of falling back.",
           },
           caseSensitive: {
             type: "boolean",
@@ -671,7 +692,7 @@ export function defaultMcpTools(
       name: "code_viewer_datastore_query",
       title: "code-viewer datastore query",
       description:
-        "Executes a read-only SQL query against one SQL datastore and returns the same JSON payload `code-viewer query exec --json` and `/_db/query` emit: dbId, schema, columns, columnTypes, rows, rowCount, truncated, elapsedMs, executedSql (success) or the same shape with `error` (failure). Only SELECT / PRAGMA / EXPLAIN / WITH are accepted; any INSERT / UPDATE / DELETE / DROP / ALTER / CREATE / ATTACH / DETACH / REPLACE / VACUUM / REINDEX / LOAD_EXTENSION keyword is rejected. History is never saved.",
+        "Executes a read-only SQL query against one SQL datastore and returns the same JSON payload `code-viewer query exec --json` and `/_db/query` emit: dbId, schema, columns, columnTypes, rows, rowCount, truncated, elapsedMs, executedSql (success) or the same shape with `error` (failure). Accepted first keywords depend on the engine: SQLite and D1 take SELECT / PRAGMA / EXPLAIN / WITH; PostgreSQL and MySQL take SELECT / EXPLAIN / WITH / SHOW / DESCRIBE and run in a read-only transaction. A write keyword anywhere is rejected (SQLite and D1: INSERT / UPDATE / DELETE / DROP / ALTER / CREATE / ATTACH / DETACH / REPLACE / VACUUM / REINDEX / LOAD_EXTENSION; PostgreSQL and MySQL: INSERT / UPDATE / DELETE / DROP / ALTER / CREATE / ATTACH / DETACH / REPLACE / VACUUM / TRUNCATE / GRANT / REVOKE). History is never saved.",
       inputSchema: {
         type: "object",
         properties: {
@@ -683,7 +704,7 @@ export function defaultMcpTools(
           sql: {
             type: "string",
             description:
-              "SQL statement to run. Must start with SELECT, PRAGMA, EXPLAIN, or WITH; write keywords are rejected by the adapter.",
+              "SQL statement to run. Must start with SELECT, PRAGMA, EXPLAIN, or WITH on SQLite and D1, or with SELECT, EXPLAIN, WITH, SHOW, or DESCRIBE on PostgreSQL and MySQL; write keywords are rejected by the adapter.",
           },
           schema: {
             type: "string",
@@ -755,7 +776,7 @@ export function defaultMcpTools(
         additionalProperties: false,
       },
       run(input) {
-        return runTerminalListTool(input);
+        return runTerminalListTool(input, options);
       },
     },
     {
@@ -823,24 +844,116 @@ export function defaultMcpTools(
         additionalProperties: false,
       },
       run(input) {
-        return runTerminalStateTool(input);
+        return runTerminalStateTool(input, options);
       },
     },
   ];
 }
 
-function runTerminalListTool(input: unknown): McpToolRunReturn {
+type TerminalServerAnswer =
+  | { ok: true; body: unknown; request: string }
+  | { ok: false; failure: McpToolRunReturn };
+
+/**
+ * How long a terminal tool waits for the server holding the terminal state.
+ * That server answers these routes from memory or one bounded tmux capture,
+ * and the entry stops waiting for this project process after 120 seconds, so
+ * the MCP call must give up (and say on which request) well before that.
+ */
+const TERMINAL_SERVER_TIMEOUT_MS = 10_000;
+
+/**
+ * One request to the server that holds the terminal state, on the route
+ * `code-viewer terminal` uses. A failure keeps the operation, the request,
+ * the HTTP status and the server's own message (or the whole cause chain when
+ * nothing, or nothing readable, answered). `request` names the call so a
+ * caller that rejects the body's shape can say which one.
+ */
+async function askTerminalServer(
+  server: () => ServerUrlResult,
+  signal: AbortSignal | undefined,
+  operation: string,
+  path: string,
+  body?: unknown,
+): Promise<TerminalServerAnswer> {
+  const fail = (text: string): TerminalServerAnswer => ({
+    ok: false,
+    failure: { text, isError: true },
+  });
+  const resolved = server();
+  if (resolved.status === "error") {
+    return fail(`${operation}: ${resolved.message}`);
+  }
+  const url = `${resolved.url}${path}`;
+  const request = `${operation}: ${body === undefined ? "GET" : "POST"} ${url}`;
+  const timeout = AbortSignal.timeout(TERMINAL_SERVER_TIMEOUT_MS);
+  const stop = signal ? AbortSignal.any([timeout, signal]) : timeout;
+  let status: number;
+  let text: string;
+  try {
+    const res =
+      body === undefined
+        ? await fetch(url, { signal: stop })
+        : await postToServer(url, body, stop);
+    if (!res.ok) return fail(await responseErrorMessage(res, request));
+    status = res.status;
+    text = await res.text();
+  } catch (error) {
+    const outcome = timeout.aborted
+      ? `did not finish within ${TERMINAL_SERVER_TIMEOUT_MS / 1000} seconds`
+      : "failed";
+    return fail(
+      formatErrorDetail(errorWithCause(`${request} ${outcome}`, error)),
+    );
+  }
+  try {
+    return { ok: true, body: JSON.parse(text), request };
+  } catch (error) {
+    return fail(
+      formatErrorDetail(
+        errorWithCause(
+          `${request} answered HTTP ${status} with a body that is not JSON: ${text}`,
+          error,
+        ),
+      ),
+    );
+  }
+}
+
+async function runTerminalListTool(
+  input: unknown,
+  options: DefaultMcpToolsOptions,
+): Promise<McpToolRunReturn> {
   const params = isPlainObject(input) ? input : {};
   const attentionOnly = params.attentionOnly;
   if (attentionOnly !== undefined && typeof attentionOnly !== "boolean") {
     return { text: "attentionOnly must be a boolean", isError: true };
   }
-  const all = listAgentStates();
+  let response: AgentStatesResponse;
+  if (options.terminalServer) {
+    const answer = await askTerminalServer(
+      options.terminalServer,
+      options.signal,
+      "terminal list",
+      "/_agent/states",
+    );
+    if (answer.ok === false) return answer.failure;
+    const body = answer.body as Partial<AgentStatesResponse> | null;
+    if (!Array.isArray(body?.states) || !Array.isArray(body?.errors)) {
+      return {
+        text: `${answer.request} answered without states and errors lists: ${JSON.stringify(answer.body)}`,
+        isError: true,
+      };
+    }
+    response = { states: body.states, errors: body.errors };
+  } else {
+    response = { states: listAgentStates(), errors: getAgentActivityErrors() };
+  }
   const states = attentionOnly
-    ? all.filter((record) => needsAttention(record.state))
-    : all;
+    ? response.states.filter((record) => needsAttention(record.state))
+    : response.states;
   return {
-    text: JSON.stringify({ states, errors: getAgentActivityErrors() }, null, 2),
+    text: JSON.stringify({ states, errors: response.errors }, null, 2),
   };
 }
 
@@ -863,6 +976,20 @@ async function runTerminalCaptureTool(
   const historyRaw = params.history;
   if (historyRaw !== undefined && typeof historyRaw !== "number") {
     return { text: "history must be an integer", isError: true };
+  }
+  if (options.terminalServer) {
+    const query = new URLSearchParams({ target });
+    if (typeof cursorRaw === "string") query.set("cursor", cursorRaw);
+    if (typeof historyRaw === "number")
+      query.set("history", String(clampHistoryLines(historyRaw)));
+    const answer = await askTerminalServer(
+      options.terminalServer,
+      options.signal,
+      "terminal capture",
+      `/_agent/capture?${query.toString()}`,
+    );
+    if (answer.ok === false) return answer.failure;
+    return { text: JSON.stringify(answer.body, null, 2) };
   }
   const result = await captureTerminal(
     target,
@@ -894,7 +1021,10 @@ async function runTerminalCaptureTool(
   };
 }
 
-function runTerminalStateTool(input: unknown): McpToolRunReturn {
+async function runTerminalStateTool(
+  input: unknown,
+  options: DefaultMcpToolsOptions,
+): Promise<McpToolRunReturn> {
   const params = isPlainObject(input) ? input : {};
   const target = params.target;
   if (typeof target !== "string" || !terminalKindOf(target)) {
@@ -916,6 +1046,29 @@ function runTerminalStateTool(input: unknown): McpToolRunReturn {
   }
   if (note !== undefined && typeof note !== "string") {
     return { text: "note must be a string", isError: true };
+  }
+  if (options.terminalServer) {
+    // `at` as the CLI sends it: the server drops a report older than one it has.
+    // Clipped here as the server clips them, so a long text is not refused by
+    // the size limit of the request body before it is clipped there.
+    const answer = await askTerminalServer(
+      options.terminalServer,
+      options.signal,
+      "terminal state",
+      "/_agent/state",
+      {
+        target,
+        event: params.event,
+        at: Date.now(),
+        lastPrompt:
+          typeof lastPrompt === "string"
+            ? clipAgentStateText(lastPrompt)
+            : undefined,
+        note: typeof note === "string" ? clipAgentStateText(note) : undefined,
+      },
+    );
+    if (answer.ok === false) return answer.failure;
+    return { text: JSON.stringify(answer.body, null, 2) };
   }
   const record = recordAgentState({
     target,
@@ -1990,13 +2143,13 @@ export function buildMcpInstructions(): string {
     "  - code_viewer_file_history: commit history for one path (follows renames).",
     "  - code_viewer_file_diff: unified diff for one path (preview-capped by default).",
     "  - code_viewer_search_files: rank repo paths by fuzzy or glob match.",
-    "  - code_viewer_search_code: grep the repo (rg / git grep / fallback).",
+    "  - code_viewer_search_code: grep the repo (working tree: rg, or a fixed-string scanner without rg; other refs: git grep).",
     "  - code_viewer_datastore_sources: discover read-only datastore source ids.",
     "  - code_viewer_datastore_schemas: list schemas for one SQL datastore.",
     "  - code_viewer_datastore_schema: inspect tables, indexes, FKs, and columns.",
     "  - code_viewer_datastore_columns: inspect columns for one SQL table.",
     "  - code_viewer_datastore_ddl: inspect CREATE statement and triggers.",
-    "  - code_viewer_datastore_query: run read-only SELECT / PRAGMA / EXPLAIN / WITH.",
+    "  - code_viewer_datastore_query: run a read-only query (SQLite / D1: SELECT / PRAGMA / EXPLAIN / WITH; PostgreSQL / MySQL: SELECT / EXPLAIN / WITH / SHOW / DESCRIBE).",
     "  - code_viewer_datastore_history: inspect saved query history.",
     "",
     "The CLI subcommands referenced by code_viewer_agent_help are:",

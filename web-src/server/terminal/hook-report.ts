@@ -24,6 +24,7 @@ import {
 } from "../../core/agent-hooks";
 import {
   type AgentEvent,
+  clipAgentStateText,
   conversationFromHookInput,
   MAX_CONVERSATION_FIELD,
 } from "../../core/agent-state";
@@ -47,9 +48,6 @@ import { terminalKindOf } from "./capture";
 
 /** サーバ 1 つあたりの待ち時間。ローカルのサーバはふつう数ミリ秒で返す。 */
 export const REPORT_TIMEOUT_MS = 1000;
-
-/** 申告に添える指示文の上限。サーバ側 (handle.ts) の上限と同じ。 */
-const MAX_PROMPT_LENGTH = 2000;
 
 export type HookReportDeps = {
   now(): number;
@@ -222,7 +220,7 @@ export async function reportAgentHook(
   // 本人確認が終わる前は、送信先ごとの処理にも prompt 本文を作らない。
   const prompt =
     event === "prompt" && typeof input.prompt === "string"
-      ? input.prompt.slice(0, MAX_PROMPT_LENGTH)
+      ? clipAgentStateText(input.prompt)
       : undefined;
   // 会話の場所 (session_id・transcript_path・cwd)。「別のアカウントで続ける」が
   // 次の担当に記録の場所を渡すのに使う。記録の中身は読まない。受け取れない

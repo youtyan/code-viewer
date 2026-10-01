@@ -20,7 +20,11 @@ import type {
   AgentStateSource,
   ReportedAgent,
 } from "../../core/agent-state";
-import { agentStateForEvent, needsAttention } from "../../core/agent-state";
+import {
+  agentStateForEvent,
+  clipAgentStateText,
+  needsAttention,
+} from "../../core/agent-state";
 import { isTmuxPaneId } from "../../core/tmux";
 import { noteAgentStateChange } from "./unread";
 
@@ -29,9 +33,6 @@ import { noteAgentStateChange } from "./unread";
  * 溢れたら更新が古いものから捨てる。
  */
 export const MAX_TRACKED_TARGETS = 200;
-
-/** 申告に添えられる文字列の上限。指示文がそのまま来るので長くなりうる。 */
-const MAX_TEXT_LENGTH = 2000;
 
 /** フックが知らせた会話の場所。ペインごとに最新の 1 つ。 */
 export type AgentConversationEntry = {
@@ -87,12 +88,6 @@ export function setAgentTmuxGeneration(generation: string): {
     conversations.set(agentTargetKey(entry.target), entry);
   if (hadConversations) noteConversationsChanged();
   return { changed: previous !== null, previous };
-}
-
-function clip(value: string): string {
-  return value.length > MAX_TEXT_LENGTH
-    ? value.slice(0, MAX_TEXT_LENGTH)
-    : value;
 }
 
 function evictOldest(): void {
@@ -205,8 +200,10 @@ export function recordAgentState(
             : true,
     // 添え物は送られてこなければ前の値を残す。ターンの途中で毎回指示文を
     // 送り直させないため。
-    lastPrompt: clip(input.lastPrompt ?? previous?.lastPrompt ?? ""),
-    note: clip(input.note ?? previous?.note ?? ""),
+    lastPrompt: clipAgentStateText(
+      input.lastPrompt ?? previous?.lastPrompt ?? "",
+    ),
+    note: clipAgentStateText(input.note ?? previous?.note ?? ""),
   };
   // 種類と終了の印は申告だけが決める。画面観測の記録でも前の値を引き継ぐ。
   const agent = input.agent ?? previous?.agent;

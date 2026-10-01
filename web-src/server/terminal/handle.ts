@@ -39,6 +39,7 @@ import type { AgentOverviewResponse } from "../../core/agent-overview";
 import type { AgentScreenRuleIssue } from "../../core/agent-screen";
 import {
   type AgentStatesResponse,
+  clipAgentStateText,
   isAgentConversation,
   isAgentEvent,
   isReportedAgent,
@@ -139,19 +140,17 @@ import {
 } from "./rules";
 import { clearAgentUnread, noteAgentUnread } from "./unread";
 
-/** 申告 1 件の本文上限。指示文が丸ごと来ても収まる程度。 */
-const MAX_STATE_TEXT = 2000;
 const MAX_AGENT_ACTION_BODY_BYTES = 16 * 1024;
 /**
- * 申告 (/_agent/state) の本文の上限。指示文 (MAX_STATE_TEXT 文字。制御文字は
- * JSON で 6 バイトになる) と会話の場所の 3 つの欄 (MAX_CONVERSATION_FIELD
- * 文字、1 文字 3 バイトまで) が最悪の文字でも収まる大きさ。
+ * 申告 (/_agent/state) の本文の上限。指示文 (core/agent-state.ts の
+ * MAX_AGENT_STATE_TEXT 文字。制御文字は JSON で 6 バイトになる) と会話の場所の
+ * 3 つの欄 (MAX_CONVERSATION_FIELD 文字、1 文字 3 バイトまで) が最悪の文字でも
+ * 収まる大きさ。
  */
 const MAX_AGENT_STATE_BODY_BYTES = 32 * 1024;
 
 function textField(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  return value.slice(0, MAX_STATE_TEXT);
+  return typeof value === "string" ? clipAgentStateText(value) : undefined;
 }
 
 /**
