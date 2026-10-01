@@ -416,21 +416,22 @@ export function pwaKeyBindings(mac: boolean): KeyBinding[] {
       for (const key of keys)
         rows.push({ action, key, meta: true, shift: true, ...tab });
   // ⌘← / ⌘→ (mac 以外は Ctrl)。入力欄では行の先頭・末尾へ動く今の働きのまま
-  // (入力欄では効かない)。端末の中ではタブを移る。
+  // (入力欄では効かない)。端末の中では ⌘ のときだけタブを移る (Ctrl+← / → は
+  // シェルの単語移動。上の行の Ctrl のキーと同じ)。
   rows.push(
     {
       action: "main-tab-previous",
       key: "arrowleft",
       ...primary,
       pwa: true,
-      terminal: true,
+      terminal: mac,
     },
     {
       action: "main-tab-next",
       key: "arrowright",
       ...primary,
       pwa: true,
-      terminal: true,
+      terminal: mac,
     },
   );
   return rows;
