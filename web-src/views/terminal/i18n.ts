@@ -26,6 +26,9 @@ export type TerminalText = {
     choices: string;
     gone: string;
     failed: string;
+    /** SP でペインを映しているシェルのタブ。1 ペイン表示を閉じた後の面に出す。 */
+    tabShowsPane: string;
+    openPane: string;
   };
   /** 選んだペインが閉じられていた。 */
   paneClosed: string;
@@ -219,6 +222,8 @@ const EN: TerminalText = {
     choices: "Choices",
     gone: "This pane has closed.",
     failed: "Could not show the pane.",
+    tabShowsPane: "This tab shows a tmux pane.",
+    openPane: "Open the pane",
   },
   paneClosed: "This pane has been closed.",
   paneOpenFailed: "Could not open this pane.",
@@ -359,6 +364,8 @@ const JA: TerminalText = {
     choices: "選択肢",
     gone: "このペインは閉じました。",
     failed: "ペインを映せませんでした。",
+    tabShowsPane: "このタブは tmux のペインを映しています。",
+    openPane: "ペインを開く",
   },
   paneClosed: "このペインは閉じられました。",
   paneOpenFailed: "このペインを開けませんでした。",

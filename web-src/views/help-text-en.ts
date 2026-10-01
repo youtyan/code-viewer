@@ -1530,7 +1530,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
             {
               kind: "list",
               items: [
-                "Tap an agent to open only its pane, full screen. Other panes in a split tmux window are not shown, and the PC's window size and layout stay as they are.",
+                "Opening an agent, or a tab that shows a tmux pane, shows only that pane, full screen. Other panes in a split tmux window are not shown, and the PC's window size and layout stay as they are.",
                 [
                   "Long lines wrap to the phone's width. For full-screen apps such as vim, switch to ",
                   ui(l.terminal.paneView.screen),
