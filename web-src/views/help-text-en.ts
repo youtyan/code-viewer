@@ -1501,6 +1501,8 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ".",
                 ],
                 [ui(l.mobile.agents), " shows how many agents need input."],
+                "The tab strip shows only the tab in front. The square with a number at its right end lists every open tab.",
+                "History opens with its commit list. Each commit takes two lines, so the whole subject shows.",
                 "A terminal tab shows keys the on-screen keyboard lacks, such as Esc, Tab and Ctrl+C.",
                 "Touch and hold for the right-click menu.",
                 "There is no split view. A saved split comes back on a wide window.",
@@ -1516,9 +1518,9 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
             },
             more(
               [
-                "Diffs show as one column, and ",
+                "Diffs show as one column with long lines wrapped. Turn ",
                 ui(l.mobile.wrap),
-                " at the end of the Diff bar wraps long lines.",
+                " off at the end of the Diff bar to scroll them sideways.",
               ],
               "Pinch on a terminal to change its text size.",
             ),
@@ -1532,9 +1534,9 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               items: [
                 "Opening an agent, or a tab that shows a tmux pane, shows only that pane, full screen. Other panes in a split tmux window are not shown, and the PC's window size and layout stay as they are.",
                 [
-                  "Long lines wrap to the phone's width. For full-screen apps such as vim, switch to ",
+                  "Long lines, and text the agent folded at the PC pane's width, wrap to the phone's width. ",
                   ui(l.terminal.paneView.screen),
-                  " to see the grid as it is.",
+                  " wraps them at the PC pane's width in small text, and shows full-screen apps such as vim as the terminal itself.",
                 ],
                 "When choices are shown, numbered buttons appear. Tap one to send that number.",
                 [
@@ -1542,7 +1544,9 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(l.terminal.paneView.send),
                   " to paste it and press Enter. Tapping it with the field empty sends only Enter.",
                 ],
-                "Go back (‹ at the top left, or the browser's back) to return to the list.",
+                "Scroll to the top to read earlier output, up to 3,000 lines.",
+                "The image button left of the field attaches a photo or screenshot. It is saved like an image pasted into a terminal, and its path is added to the field.",
+                "Go back (‹ at the top left, or the browser's back) to return to where you opened it, such as the sidebar or the + menu.",
               ],
             },
           ],
