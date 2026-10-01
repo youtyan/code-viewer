@@ -227,10 +227,17 @@ const PG_RECORD_SEPARATOR = "\x1e";
 // Unit Separator (0x1F) は通常のテキストには現れないため、psql の fieldsep と
 // パーサの両方で使用する。
 const PG_FIELD_SEPARATOR = "\x1f";
+// 行の値を読む問い合わせで、NULL を書く印。psql の -A は NULL を空文字で
+// 書くので、印が無いと NULL と空文字が見分けられない (Data の表で NULL の
+// 日時の列が <empty> と出ていた)。ドライバの経路も同じ印にそろえる (以前の
+// "\N" は文字列の値 "\N" と区別できなかった)。File Separator (0x1C) は
+// 通常のテキストに現れず、ほかの区切り (0x1D〜0x1F) とも重ならない。
+const SQL_NULL = String.fromCharCode(28);
 
 function buildExecInvocation(
   config: SqlCliConfig,
   sql: string,
+  markNull = false,
 ): { args: string[]; env: NodeJS.ProcessEnv } {
   if (!config.containerName) {
     throw new Error("direct SQL connections use the built-in driver");
@@ -259,6 +266,7 @@ function buildExecInvocation(
         PG_RECORD_SEPARATOR,
         "-v",
         "ON_ERROR_STOP=1",
+        ...(markNull ? ["-P", `null=${SQL_NULL}`] : []),
         "-c",
         sql,
       ],
@@ -294,7 +302,7 @@ function sqlDriverValue(value: unknown, nullValue: string): string {
   return String(value);
 }
 
-function pgDriverResult(raw: unknown): SqlDriverResult {
+function pgDriverResult(raw: unknown, nullText: string): SqlDriverResult {
   const results = Array.isArray(raw) ? raw : [raw];
   const reversed = [...results].reverse();
   const result =
@@ -322,11 +330,13 @@ function pgDriverResult(raw: unknown): SqlDriverResult {
     : [];
   return {
     columns: fields.map((field) => String(field.name ?? "")),
-    rows: rows.map((row) => row.map((value) => sqlDriverValue(value, "\\N"))),
+    rows: rows.map((row) =>
+      row.map((value) => sqlDriverValue(value, nullText)),
+    ),
   };
 }
 
-function mysqlDriverResult(raw: unknown): SqlDriverResult {
+function mysqlDriverResult(raw: unknown, nullText: string): SqlDriverResult {
   if (!Array.isArray(raw) || raw.length < 2) return { columns: [], rows: [] };
   const [allRows, allFields] = raw as [unknown, unknown];
   let rows = allRows;
@@ -355,13 +365,18 @@ function mysqlDriverResult(raw: unknown): SqlDriverResult {
   return {
     columns: fieldList.map((field) => String(field.name ?? "")),
     rows: rowList.map((row) =>
-      row.map((value) => sqlDriverValue(value, "NULL")),
+      row.map((value) => sqlDriverValue(value, nullText)),
     ),
   };
 }
 
 function createSqlDriverExecutor(config: SqlCliConfig): {
-  exec(sql: string, signal?: AbortSignal): Promise<SqlDriverResult>;
+  /** markNull: NULL を SQL_NULL で返す (行の値を読む問い合わせ)。 */
+  exec(
+    sql: string,
+    signal?: AbortSignal,
+    markNull?: boolean,
+  ): Promise<SqlDriverResult>;
   close(): void;
 } {
   if (!config.host || !config.port) {
@@ -380,7 +395,7 @@ function createSqlDriverExecutor(config: SqlCliConfig): {
       query_timeout: 10_000,
     });
     return {
-      async exec(sql, signal) {
+      async exec(sql, signal, markNull) {
         throwIfAborted(signal, "query aborted");
         const client = await waitForAbortableResource(
           pool.connect(),
@@ -399,6 +414,7 @@ function createSqlDriverExecutor(config: SqlCliConfig): {
           throwIfAborted(signal, "query aborted");
           return pgDriverResult(
             await client.query({ text: sql, rowMode: "array" }),
+            markNull ? SQL_NULL : "\\N",
           );
         } catch (error) {
           if (signal?.aborted) throw abortError("query aborted");
@@ -436,7 +452,7 @@ function createSqlDriverExecutor(config: SqlCliConfig): {
     dateStrings: true,
   });
   return {
-    async exec(sql, signal) {
+    async exec(sql, signal, markNull) {
       throwIfAborted(signal, "query aborted");
       const connection = await waitForAbortableResource(
         pool.getConnection(),
@@ -455,6 +471,7 @@ function createSqlDriverExecutor(config: SqlCliConfig): {
         throwIfAborted(signal, "query aborted");
         return mysqlDriverResult(
           await connection.query({ sql, rowsAsArray: true, timeout: 10_000 }),
+          markNull ? SQL_NULL : "NULL",
         );
       } catch (error) {
         if (signal?.aborted) throw abortError("query aborted");
@@ -476,8 +493,9 @@ function execInContainer(
   config: SqlCliConfig,
   sql: string,
   timeoutMs = 10000,
+  markNull = false,
 ): ExecResult {
-  const { args, env } = buildExecInvocation(config, sql);
+  const { args, env } = buildExecInvocation(config, sql, markNull);
   const proc = spawnSyncImpl(args[0], args.slice(1), {
     encoding: "utf8",
     env,
@@ -526,15 +544,16 @@ async function execInContainerAsync(
   sql: string,
   timeoutMs = 10000,
   signal?: AbortSignal,
+  markNull = false,
 ): Promise<ExecResult> {
   recordSql(sql);
   let result: ExecResult;
   if (spawnSyncImpl !== spawnSync) {
-    result = execInContainer(config, sql, timeoutMs);
+    result = execInContainer(config, sql, timeoutMs, markNull);
     throwIfDockerCommandUnavailableResult(result);
     return result;
   }
-  const { args, env } = buildExecInvocation(config, sql);
+  const { args, env } = buildExecInvocation(config, sql, markNull);
   result = await execWithNodeSpawn(args, env, timeoutMs, signal);
   if (config.containerName) throwIfDockerCommandUnavailableResult(result);
   return result;
@@ -689,16 +708,24 @@ function observeBackgroundRejection<T>(promise: Promise<T>): Promise<T> {
 export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
   const driver = config.containerName ? null : createSqlDriverExecutor(config);
 
+  // markNull: 行の値を読む問い合わせ。NULL を SQL_NULL で受け取る (toDbValue)。
   async function execAsync(
     sql: string,
     signal?: AbortSignal,
+    markNull = false,
   ): Promise<{ columns: string[]; rows: string[][] }> {
     if (driver) {
       recordSql(sql);
-      return driver.exec(sql, signal);
+      return driver.exec(sql, signal, markNull);
     }
     // recordSql は execInContainerAsync 内部で 1 度だけ呼ぶ (重複防止)。
-    const result = await execInContainerAsync(config, sql, 10000, signal);
+    const result = await execInContainerAsync(
+      config,
+      sql,
+      10000,
+      signal,
+      markNull,
+    );
     if (result.code !== 0) {
       throw new Error(
         result.stderr.trim() || `query failed (exit ${result.code})`,
@@ -712,8 +739,12 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
     );
   }
 
+  // execAsync(..., markNull = true) で読んだ行の値を DbValue にする。NULL は
+  // SQL_NULL で来る。mysql の CLI (--batch) だけは NULL の書き方を変えられず
+  // "NULL" と書くので、その経路では文字列の "NULL" も NULL と読む (見分けられない)。
   function toDbValue(val: string): DbValue {
-    if (val === "NULL" || val === "\\N") return null;
+    if (val === SQL_NULL) return null;
+    if (!driver && config.kind === "mysql" && val === "NULL") return null;
     return val;
   }
 
@@ -1074,7 +1105,7 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
       );
       const selectList = buildTableSelectList(columns, config.kind);
       const dataSql = `SELECT ${selectList} FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
-      const dataPromise = execAsync(dataSql, signal);
+      const dataPromise = execAsync(dataSql, signal, true);
       let dataResult: { columns: string[]; rows: string[][] };
       let totalRows: number;
       try {
@@ -1120,7 +1151,7 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
       const countResultPromise = execAsync(countSql, signal);
       const selectList = buildTableSelectList(columns, config.kind);
       const dataSql = `SELECT ${selectList} FROM ${id}${whereClause}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
-      const dataPromise = execAsync(dataSql, signal);
+      const dataPromise = execAsync(dataSql, signal, true);
       let dataResult: { columns: string[]; rows: string[][] };
       let countResult: { columns: string[]; rows: string[][] };
       try {
@@ -1155,7 +1186,7 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
       );
       const selectList = buildTableSelectList(cols, config.kind);
       const sql = `SELECT ${selectList} FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
-      const result = await execAsync(sql, signal);
+      const result = await execAsync(sql, signal, true);
       if (result.rows.length === 0) {
         return {
           columns: cols.map((c: DbColumn) => c.name),
@@ -1209,7 +1240,7 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
         config.kind === "postgresql"
           ? `BEGIN TRANSACTION READ ONLY; SET LOCAL search_path = ${sanitizeIdentifier(currentPostgresSchema(), config.kind)}; ${stripped}; COMMIT`
           : `SET SESSION TRANSACTION READ ONLY; ${stripped}; SET SESSION TRANSACTION READ WRITE`;
-      const result = await execAsync(limited, signal);
+      const result = await execAsync(limited, signal, true);
       const columnNames =
         config.kind === "mysql" && result.columns.length > 0
           ? result.columns
