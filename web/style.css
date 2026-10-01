@@ -16264,8 +16264,9 @@ body.db-resizing {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-muted);
 }
-.search-results-controls { padding: 6px 10px 0; }
-.search-results-status { padding: 6px 10px; }
+/* 一覧が長くても、切替と件数の行は潰れない (潰れて切替が件数に重なった)。 */
+.search-results-controls { flex: none; padding: 6px 10px 0; }
+.search-results-status { flex: none; padding: 6px 10px; }
 .search-results-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -24334,10 +24335,16 @@ body.gdp-help-page #content {
 }
 /* 画面のキャプチャ (views/help-images.ts)。本文とは別に表示サイズを制限。押すと大きく開く
    (views/terminal/image-lightbox.ts)。 */
+/* 幅は画像の縦横の比 (--help-figure-ratio。help-blocks.ts) から決める。画像が届く前は
+   中身の幅が分からず、届いたときに箱が伸びて下の本文が押し下がっていた。
+   幅は本文欄・上限の幅・画像を上限の高さに収める幅 (と枠の 2px) のうち小さいもの。 */
 .gdp-help-figure {
   display: block;
-  width: fit-content;
-  max-width: min(100%, var(--help-figure-max-w));
+  width: min(
+    100%,
+    var(--help-figure-max-w),
+    calc(var(--help-figure-max-h) * var(--help-figure-ratio) + 2px)
+  );
   margin: var(--space-3) 0 var(--space-5);
   overflow: hidden;
   border: 1px solid var(--color-line);
@@ -24354,10 +24361,9 @@ body.gdp-help-page #content {
 }
 .gdp-help-figure img {
   display: block;
-  width: auto;
+  width: 100%;
   height: auto;
-  max-width: 100%;
-  max-height: var(--help-figure-max-h);
+  aspect-ratio: var(--help-figure-ratio);
 }
 .gdp-help-steps > li > .gdp-help-figure {
   margin: var(--space-2) 0 var(--space-3);

@@ -3744,7 +3744,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function ensureSyntaxHighlighterForRoute(): void {
-    if (!routeCanUseSyntaxHighlighter()) return;
+    // 読み込み済みなら、カードは描いたときに色を付けている。画面を移るたびに
+    // 読み込んだカードを全部描き直していた (Diff から History へ 300ms 止まった)。
+    if (!routeCanUseSyntaxHighlighter() || getHljs()) return;
     loadSyntaxHighlighter().then((hljsRef) => {
       if (!hljsRef) return;
       rerenderLoadedDiffs();
@@ -10202,7 +10204,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     STATE.syntaxHighlight = on;
     if (persist) patchSettings({ syntaxHighlight: on });
     setHighlightButton(on && getHljs() ? "loaded" : "idle");
-    if (on) {
+    if (on && !getHljs()) {
       ensureSyntaxHighlighterForRoute();
     } else {
       rerenderLoadedDiffs();

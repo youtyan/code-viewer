@@ -308,6 +308,9 @@ export function createSearchResultsView(
     }
     const myGeneration = ++generation;
     if (status) status.textContent = text().searching;
+    // 探している間は「検索する前」の案内を出さない (結果が届いたときに案内の
+    // 高さぶん一覧が上へ跳ねていた)。
+    idle?.replaceChildren();
     const ref = deps.getRef();
     const regex = deps.getGrepRegex();
     const caseSensitive = deps.getGrepCaseSensitive();

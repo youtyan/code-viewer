@@ -3388,9 +3388,10 @@ const server = await startServer({
           start(controller) {
             ctrl = controller;
             sseClients.add(controller);
-            controller.enqueue(
-              enc.encode(`retry: ${SSE_RETRY_MS}\nevent: open\ndata: ok\n\n`),
-            );
+            // 最初の行は注釈 (": ok") にする。`event: open` だと EventSource は
+            // 自分の open に続けてもう 1 度 open を配り、画面は繋ぎ直しと読んで
+            // 開くたびに全部を取り直していた (app.ts の connectEventSource)。
+            controller.enqueue(enc.encode(`retry: ${SSE_RETRY_MS}\n: ok\n\n`));
             if (watchLimitReached !== null) {
               controller.enqueue(
                 enc.encode(

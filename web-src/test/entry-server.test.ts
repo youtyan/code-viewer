@@ -525,9 +525,11 @@ describe("the entry server", () => {
     });
     const first = await events.body?.getReader().read();
     leave.abort();
-    expect(new TextDecoder().decode(first?.value)).toMatch(
-      new RegExp(`^retry: ${SSE_RETRY_MS}\n`),
-    );
+    const text = new TextDecoder().decode(first?.value);
+    expect(text).toMatch(new RegExp(`^retry: ${SSE_RETRY_MS}\n`));
+    // `event: open` は EventSource の open と同じ名前で、画面が繋ぎ直しと読んで
+    // 開くたびに全部を取り直していた。
+    expect(text).not.toContain("event: open");
   }, 30_000);
 
   // 明暗・テーマは全プロジェクト共通の設定。あるプロジェクトの窓で変えると、別の

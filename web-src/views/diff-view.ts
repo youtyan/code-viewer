@@ -1526,6 +1526,10 @@ export function createDiffView(deps: DiffViewDeps) {
     document
       .querySelectorAll<DiffCardElement>(".gdp-file-shell.pending")
       .forEach((card) => {
+        // 描かれていないカード (ファイルの画面の裏の Diff は display: none) の箱は
+        // 全部 0 で、画面の中に数えると変更ファイル全部を読み込んでいた。出たときは
+        // 見張り (setupLazyObserver) が読む。
+        if (card.getClientRects().length === 0) return;
         const rect = card.getBoundingClientRect();
         if (rect.top > viewportBottom) return;
         const f =
