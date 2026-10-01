@@ -8,18 +8,25 @@ import type {
   DbFilesResponse,
   DbKind,
 } from "../core/database/types";
-import { __setDockerSpawnSyncForTest } from "../server/database/adapters/docker";
+import { errorWithCause } from "../core/error-detail";
+import {
+  __setDockerSpawnSyncForTest,
+  __setSqlDriverFactoriesForTest,
+} from "../server/database/adapters/docker";
 import {
   __clearDockerComposeContainerNameCacheForTest,
   __clearSupabaseContainerCacheForTest,
   __setDockerComposeSpawnSyncForTest,
 } from "../server/database/adapters/docker-utils";
+import { __setEsFetchForTest } from "../server/database/adapters/elasticsearch";
+import { __setRedisClientFactoryForTest } from "../server/database/adapters/redis";
+import { saveDatastoreConnection } from "../server/database/connections-store";
+import { readThenClose } from "../server/database/handle-shared";
 import {
   buildDatastoreRetryHint,
   checkDatastoreConnectivity,
   type DatastoreConnectivityDeps,
   DEFAULT_DATASTORE_CONNECTIVITY_DEPS,
-  readThenClose,
 } from "../server/doctor";
 
 type SpawnSyncLike = typeof spawnSync;
@@ -115,6 +122,266 @@ describe("buildDatastoreRetryHint", () => {
     ).toBe(
       "Retry with: code-viewer query s3 buckets --db 'docker:s3-svc/sample-bucket' --json",
     );
+  });
+
+  test("DynamoDB has no CLI, so its hint does not suggest a command that fails", () => {
+    expect(
+      buildDatastoreRetryHint(sampleFile("dynamodb", "docker:sample-svc")),
+    ).toBe("DynamoDB has no CLI commands; retry from the Data screen.");
+  });
+});
+
+// 保存した接続 (D1・手で足したホストも) と compose で見つけた LocalStack の
+// DynamoDB も、実際に開いて最小の読み取りをする。偽の接続先は失敗を返すので、
+// 繋がずに「成功」と出す・docker の経路に誤って振ると、その理由が行に残らない。
+describe("checkDatastoreConnectivity connects to each kind of source", () => {
+  const failure = new Error("sample probe failure");
+  const failingFetch = (async () => {
+    throw failure;
+  }) as typeof fetch;
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    __setSqlDriverFactoriesForTest({});
+    __setRedisClientFactoryForTest(null);
+    __setEsFetchForTest(null);
+    globalThis.fetch = originalFetch;
+  });
+  const sqlServer = {
+    host: "db.example.test",
+    user: "sample_user",
+    password: "example-password",
+    database: "sample_database",
+  };
+  const awsKeys = {
+    region: "example-region-1",
+    accessKeyId: "example-access-key",
+    secretAccessKey: "example-secret-key",
+  };
+  test.each([
+    {
+      name: "a saved PostgreSQL connection",
+      saved: { kind: "postgresql", port: 5432, ...sqlServer },
+      setup: () =>
+        __setSqlDriverFactoriesForTest({
+          pg: () => ({
+            connect: () => Promise.reject(failure),
+            end: () => Promise.resolve(),
+          }),
+        }),
+    },
+    {
+      name: "a saved MySQL connection",
+      saved: { kind: "mysql", port: 3306, ...sqlServer },
+      setup: () =>
+        __setSqlDriverFactoriesForTest({
+          mysql: () => ({
+            getConnection: () => Promise.reject(failure),
+            end: () => Promise.resolve(),
+          }),
+        }),
+    },
+    {
+      name: "a saved Redis connection",
+      saved: { kind: "redis", host: "cache.example.test", port: 6379 },
+      setup: () =>
+        __setRedisClientFactoryForTest(() => {
+          const client = {
+            on: () => client,
+            connect: () => Promise.reject(failure),
+            sendCommand: () => Promise.reject(failure),
+            withAbortSignal: () => client,
+            destroy: () => undefined,
+          };
+          return client;
+        }),
+    },
+    {
+      name: "a saved Elasticsearch connection",
+      saved: { kind: "elasticsearch", endpoint: "https://search.example.test" },
+      setup: () => __setEsFetchForTest(failingFetch),
+    },
+    {
+      name: "a saved S3 connection",
+      saved: {
+        kind: "s3",
+        endpoint: "https://objects.example.test",
+        ...awsKeys,
+      },
+      setup: () => {
+        globalThis.fetch = failingFetch;
+      },
+    },
+    {
+      name: "a saved DynamoDB connection",
+      saved: {
+        kind: "dynamodb",
+        endpoint: "https://documents.example.test",
+        ...awsKeys,
+      },
+      setup: () => {
+        globalThis.fetch = failingFetch;
+      },
+    },
+    {
+      name: "a saved Cloudflare D1 connection",
+      saved: {
+        kind: "d1",
+        accountId: "example-account",
+        databaseId: "example-database",
+        apiToken: "example-token",
+      },
+      setup: () => {
+        globalThis.fetch = failingFetch;
+      },
+    },
+    {
+      name: "a LocalStack DynamoDB found in docker compose",
+      compose:
+        'services:\n  localstack:\n    image: localstack/localstack:latest\n    ports:\n      - "4566:4566"\n    environment:\n      SERVICES: dynamodb\n',
+      setup: () => {
+        globalThis.fetch = failingFetch;
+      },
+    },
+  ])("reads $name and keeps the failure reason", async ({
+    saved,
+    compose,
+    setup,
+  }) => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-doctor-probe-"));
+    try {
+      setup();
+      if (saved) {
+        await saveDatastoreConnection(dir, { name: "Example", ...saved });
+      }
+      if (compose) writeFileSync(join(dir, "docker-compose.yml"), compose);
+      const group = await checkDatastoreConnectivity(dir, [], undefined);
+      expect(group.rows).toHaveLength(1);
+      expect(group.rows[0].status).toBe("warn");
+      expect(group.rows[0].detail).toContain("sample probe failure");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ドライバのエラーは秘密の値を含みうる (接続文字列なら URL の形で)。doctor の行
+  // (画面・CLI・JSON) には素の形も URL の形も残さず、秘密でない部分は残す。
+  const secret = "example p@ss/word";
+  test.each([
+    {
+      name: "a PostgreSQL password",
+      saved: { kind: "postgresql", port: 5432, ...sqlServer, password: secret },
+      secrets: [secret],
+      fail: (error: Error) =>
+        __setSqlDriverFactoriesForTest({
+          pg: () => ({
+            connect: () => Promise.reject(error),
+            end: () => Promise.resolve(),
+          }),
+        }),
+    },
+    {
+      name: "a D1 API token",
+      saved: {
+        kind: "d1",
+        accountId: "example-account",
+        databaseId: "example-database",
+        apiToken: secret,
+      },
+      secrets: [secret],
+      fail: (error: Error) => {
+        globalThis.fetch = (() => Promise.reject(error)) as typeof fetch;
+      },
+    },
+    {
+      name: "an S3 secret key and session token",
+      saved: {
+        kind: "s3",
+        endpoint: "https://objects.example.test",
+        ...awsKeys,
+        secretAccessKey: secret,
+        sessionToken: "example session/token",
+      },
+      secrets: [secret, "example session/token"],
+      fail: (error: Error) => {
+        globalThis.fetch = (() => Promise.reject(error)) as typeof fetch;
+      },
+    },
+  ])("masks $name in the row", async ({ saved, secrets, fail }) => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-doctor-mask-"));
+    try {
+      const forms = secrets.flatMap((value) => [
+        value,
+        encodeURIComponent(value),
+      ]);
+      fail(
+        errorWithCause(
+          `sample login to db.example.test with ${forms.join(" ")}`,
+          new Error(`sample cause with ${forms.join(" ")}`),
+        ),
+      );
+      await saveDatastoreConnection(dir, { name: "Example", ...saved });
+      const rows = JSON.stringify(
+        (await checkDatastoreConnectivity(dir, [], undefined)).rows,
+      );
+      for (const value of forms) expect(rows).not.toContain(value);
+      const masked = forms.map(() => "***").join(" ");
+      expect(rows).toContain(`sample login to db.example.test with ${masked}`);
+      expect(rows).toContain(`sample cause with ${masked}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // 別プロセスの `code-viewer doctor` は、保存したプロセスのメモリにある資格
+  // 情報を持たない。繋いで認証の失敗と出さず、確かめていないと出す。
+  test("does not connect to a saved connection whose credentials this process lacks", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-doctor-no-secret-"));
+    let connects = 0;
+    __setSqlDriverFactoriesForTest({
+      pg: () => ({
+        connect: () => {
+          connects++;
+          return Promise.reject(failure);
+        },
+        end: () => Promise.resolve(),
+      }),
+    });
+    const id = "connection:eeeeeeeeeeeeeeee";
+    try {
+      mkdirSync(join(dir, ".code-viewer"));
+      writeFileSync(
+        join(dir, ".code-viewer", "datastore-connections.json"),
+        JSON.stringify({
+          version: 1,
+          connections: [
+            {
+              id,
+              name: "Example",
+              kind: "postgresql",
+              host: "db.example.test",
+              port: 5432,
+              database: "sample_database",
+              tls: false,
+            },
+          ],
+        }),
+      );
+      const group = await checkDatastoreConnectivity(dir, [], undefined);
+      expect(connects).toBe(0);
+      expect(group.rows).toEqual([
+        {
+          id: `datastore.${id}`,
+          title: `postgresql:${id}`,
+          status: "warn",
+          detail: expect.stringMatching(
+            /^not checked: this process has no credentials for the saved connection/,
+          ),
+          hint: `Retry with: code-viewer query schemas --db '${id}' --json`,
+        },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -14,7 +14,7 @@ import type {
   QueryHistoryState,
   RowMutation,
 } from "../../core/database/types";
-import { formatErrorDetail } from "../../core/error-detail";
+import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { makeId } from "../../core/id";
 import { createLinkedAbortController } from "../abort";
 import { loadDbUiState, patchDbUiState } from "../state-store";
@@ -45,9 +45,11 @@ import {
 import {
   connectionToFileInfo,
   type D1Connection,
+  type DatastoreConnection,
   deleteDatastoreConnection,
   findDatastoreConnection,
   loadDatastoreConnections,
+  maskConnectionError,
   publicConnection,
   type SqlConnection,
   saveDatastoreConnection,
@@ -81,9 +83,11 @@ import {
   json,
   jsonLoadResponse,
   logResponseWithReason,
+  openSavedConnection,
   parseBoundedJsonBody,
   parsePostJsonBody,
   readBoundedJsonBody,
+  readThenClose,
   textError,
 } from "./handle-shared";
 import {
@@ -123,13 +127,16 @@ async function getAdapter(
   if (r.d1) {
     const connection = r.d1;
     return dockerAdapterCache.getOrOpenAsync(r.dbId, () =>
-      createD1Adapter(connection),
+      openSavedConnection(connection, () => createD1Adapter(connection)),
     );
   }
   if (r.saved) {
+    const saved = r.saved;
     const cacheKey = r.schema ? `${r.dbId}\0schema=${r.schema}` : r.dbId;
     return dockerAdapterCache.getOrOpenAsync(cacheKey, () =>
-      createSqlCliAdapter({ ...r.saved, schema: r.schema }),
+      openSavedConnection(saved, () =>
+        createSqlCliAdapter({ ...saved, schema: r.schema }),
+      ),
     );
   }
   if (r.docker) {
@@ -2219,63 +2226,72 @@ async function handleConnections(cwd: string, req: Request): Promise<Response> {
   return json({ ok: true, secretsRemoved });
 }
 
-async function probeDatastoreConnection(
-  connection: import("./connections-store").DatastoreConnection,
+// 接続の確認 (/_db/connections/test) と doctor の Datastore connectivity が使う。
+// 失敗は秘密の値を伏せた全文で投げる (ドライバのエラーは password を含みうる)。
+export async function probeDatastoreConnection(
+  connection: DatastoreConnection,
   signal: AbortSignal,
 ): Promise<void> {
-  if (connection.kind === "postgresql" || connection.kind === "mysql") {
-    const adapter = createSqlCliAdapter(connection);
-    try {
-      await adapter.getTablesAsync(signal);
-    } finally {
-      adapter.close();
-    }
-    return;
-  }
-  if (connection.kind === "d1") {
-    const adapter = createD1Adapter(connection);
-    try {
-      await adapter.getTablesAsync(signal);
-    } finally {
-      adapter.close();
-    }
-    return;
-  }
-  if (connection.kind === "redis") {
-    const adapter = createRedisAdapter(connection);
-    try {
-      await adapter.listDatabasesAsync(signal);
-    } finally {
-      adapter.close();
-    }
-    return;
-  }
-  if (connection.kind === "elasticsearch") {
-    const adapter = createElasticsearchAdapter(connection);
-    try {
-      await adapter.listIndicesAsync(signal);
-    } finally {
-      adapter.close();
-    }
-    return;
-  }
-  if (connection.kind === "s3") {
-    const adapter = createS3Adapter(connection);
-    try {
-      await adapter.listBuckets(signal);
-    } finally {
-      adapter.close();
-    }
-    return;
-  }
-  if (connection.kind !== "dynamodb") {
-    throw new Error("invalid datastore connection");
-  }
-  const adapter = createDynamoDbAdapter(connection);
   try {
-    await adapter.listTablesAsync({ limit: 1, signal });
-  } finally {
-    adapter.close();
+    await readConnectionOnce(connection, signal);
+  } catch (error) {
+    throw errorWithCause(
+      `probing the ${connection.kind} connection failed`,
+      maskConnectionError(connection, error),
+    );
+  }
+}
+
+function readConnectionOnce(
+  connection: DatastoreConnection,
+  signal: AbortSignal,
+): Promise<void> {
+  switch (connection.kind) {
+    case "postgresql":
+    case "mysql": {
+      const adapter = createSqlCliAdapter(connection);
+      return readThenClose(
+        adapter,
+        () => adapter.getTablesAsync(signal),
+        signal,
+      );
+    }
+    case "d1": {
+      const adapter = createD1Adapter(connection);
+      return readThenClose(
+        adapter,
+        () => adapter.getTablesAsync(signal),
+        signal,
+      );
+    }
+    case "redis": {
+      const adapter = createRedisAdapter(connection);
+      return readThenClose(
+        adapter,
+        () => adapter.listDatabasesAsync(signal),
+        signal,
+      );
+    }
+    case "elasticsearch": {
+      const adapter = createElasticsearchAdapter(connection);
+      return readThenClose(
+        adapter,
+        () => adapter.listIndicesAsync(signal),
+        signal,
+      );
+    }
+    case "s3": {
+      const adapter = createS3Adapter(connection);
+      return readThenClose(adapter, () => adapter.listBuckets(signal), signal);
+    }
+    case "dynamodb": {
+      const adapter = createDynamoDbAdapter(connection);
+      return readThenClose(
+        adapter,
+        () => adapter.listTablesAsync({ limit: 1, signal }),
+        signal,
+      );
+    }
   }
 }
 
@@ -2313,6 +2329,9 @@ async function handleConnectionTest(
     ) {
       return textError(err.message, 400);
     }
+    // 応答は一般的な文面のまま返す。理由は秘密の値を伏せた全文で記録する
+    // (probeDatastoreConnection が伏せて投げる)。
+    console.error("[code-viewer] the datastore connection test failed:", err);
     return textError("connection failed", 400);
   }
 }

@@ -1,11 +1,16 @@
 import type { DbKind } from "../../core/database/types";
-import { formatErrorDetail } from "../../core/error-detail";
+import {
+  errorWithCause,
+  errorWithCauses,
+  formatErrorDetail,
+} from "../../core/error-detail";
 import { abortError, isAbortLikeError } from "./adapters/abort";
 import { isD1HttpError } from "./adapters/d1";
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
 import {
   type DatastoreConnection,
   findDatastoreConnection,
+  maskConnectionError,
 } from "./connections-store";
 import {
   type DockerDbInfo,
@@ -16,6 +21,85 @@ import {
 export type CloseableDatabaseHandle = {
   close(): void;
 };
+
+// 最小の読み取りの後に閉じる。閉じる失敗も失敗として出す (読み取りも
+// 失敗していたら、両方を並べる)。接続の確認と doctor の probe が使う。
+export async function readThenClose(
+  resource: CloseableDatabaseHandle,
+  read: () => Promise<unknown>,
+  signal: AbortSignal,
+): Promise<void> {
+  let readFailure: { error: unknown } | null = null;
+  try {
+    signal.throwIfAborted();
+    await read();
+  } catch (error) {
+    readFailure = { error };
+  }
+  try {
+    resource.close();
+  } catch (closeError) {
+    throw readFailure
+      ? errorWithCauses("the probe failed, and closing it also failed", [
+          readFailure.error,
+          closeError,
+        ])
+      : errorWithCause("closing after the probe failed", closeError);
+  }
+  if (readFailure) throw readFailure.error;
+}
+
+// 保存した接続を開く口 (getAdapter と resolveDatastoreExplorerAsync) はここを
+// 通す。開くときもどのメソッドの失敗も、その接続の秘密の値を伏せた写しで
+// 投げるので、応答・サーバのログ・クエリ履歴・スナップショットの記録・CLI・
+// MCP のどこへ流れても伏せたまま (ドライバのエラーは password を含みうる)。
+export async function openSavedConnection<T extends object>(
+  connection: DatastoreConnection,
+  open: () => T | Promise<T>,
+): Promise<T> {
+  const mask = (error: unknown) => maskConnectionError(connection, error);
+  let adapter: T;
+  try {
+    adapter = await open();
+  } catch (error) {
+    throw mask(error);
+  }
+  return new Proxy(adapter, {
+    get(target, key) {
+      const member = Reflect.get(target, key);
+      if (typeof member !== "function") return member;
+      return (...args: unknown[]) => {
+        let result: unknown;
+        try {
+          result = member.apply(target, args);
+        } catch (error) {
+          throw mask(error);
+        }
+        if (result instanceof Promise) {
+          return result.catch((error: unknown) => {
+            throw mask(error);
+          });
+        }
+        return result &&
+          typeof result === "object" &&
+          Symbol.asyncIterator in result
+          ? maskIteration(result as AsyncIterable<unknown>, mask)
+          : result;
+      };
+    },
+  });
+}
+
+async function* maskIteration<T>(
+  iterable: AsyncIterable<T>,
+  mask: (error: unknown) => unknown,
+): AsyncGenerator<T> {
+  try {
+    yield* iterable;
+  } catch (error) {
+    throw mask(error);
+  }
+}
 
 type AdapterCacheEntry<T extends CloseableDatabaseHandle> = {
   adapter: T;
@@ -417,7 +501,9 @@ export async function resolveDatastoreExplorerAsync<
     }
     try {
       const explorer = await waitForCallerAbort(
-        cache.getOrOpenAsync(dbParam, () => openSaved(connection)),
+        cache.getOrOpenAsync(dbParam, () =>
+          openSavedConnection(connection, () => openSaved(connection)),
+        ),
         signal,
         `${kind} open aborted`,
       );
