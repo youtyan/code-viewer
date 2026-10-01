@@ -2509,6 +2509,14 @@ export async function untrackedMetaAsync(
   };
 }
 
+/**
+ * 変更ファイルの並び: パスの文字の順 (大文字が小文字より先)。Diff の画面
+ * (preview.ts の computePayload) と作業ツリーの画面が同じ並びにする。
+ */
+export function comparePaths(a: { path: string }, b: { path: string }): number {
+  return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+}
+
 export async function fileMetaResultAsync(
   args: string[],
   cwd: string,
@@ -2540,7 +2548,8 @@ export async function fileMetaResultAsync(
   if (!includeUntracked) return { files };
   const untracked = await untrackedMetaAsync(cwd);
   return {
-    files: files.concat(untracked.files),
+    // 未追跡は git の並びの後ろにまとめて付くので、パスの順に混ぜ直す。
+    files: files.concat(untracked.files).sort(comparePaths),
     ...(untracked.error
       ? { error: untracked.error, status: untracked.status }
       : {}),

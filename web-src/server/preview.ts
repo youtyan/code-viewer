@@ -924,9 +924,7 @@ async function computePayload(
           (file) => file.path === pathFilter || file.old_path === pathFilter,
         )
     : files;
-  filteredFiles.sort((a, b) =>
-    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
-  );
+  filteredFiles.sort(git.comparePaths);
   filteredFiles.forEach((file, i) => {
     file.order = i + 1;
   });

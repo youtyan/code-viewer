@@ -285,6 +285,23 @@ describe("divergence from the base branch", () => {
 });
 
 describe("changed files", () => {
+  // 未追跡のファイルが git の並びの後ろにまとめて付き、作業ツリーの画面の
+  // 一覧 (木) と差分のカードの並びが食い違った。Diff の画面と同じパスの順。
+  test("lists uncommitted files in path order, untracked ones included", async () => {
+    await post("/_worktree/add", { name: "feature-x" });
+    const added = await listedPath((entry) => entry.name === "feature-x");
+    writeFileSync(join(added, "sample.txt"), "edited\n");
+    writeFileSync(join(added, "a-new.txt"), "new\n");
+
+    const entry = (await listWorktrees()).worktrees.find(
+      (item) => item.name === "feature-x",
+    );
+    expect(entry?.files.map((file) => [file.path, file.status])).toEqual([
+      ["a-new.txt", "U"],
+      ["sample.txt", "M"],
+    ]);
+  });
+
   test("lists uncommitted work and commits made since the branch point", async () => {
     await post("/_worktree/add", { name: "feature-x" });
     const added = await listedPath((entry) => entry.name === "feature-x");

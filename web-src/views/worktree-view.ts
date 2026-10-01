@@ -1666,14 +1666,18 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
 
   // ---- 中央: サイドバーの変更ファイル一覧 ----
 
-  /** パスを 1 段ずつ畳んだ木。ディレクトリは Map で順序を保つ。 */
+  /**
+   * パスを 1 段ずつ畳んだ木。並び (order) はファイルの並びで最初に出てきた順:
+   * フォルダを先に寄せると、一覧を上から読む順と差分のカードの順が食い違った。
+   */
   type FileTree = {
     dirs: Map<string, FileTree>;
     files: WorktreeFileChange[];
+    order: Array<{ dir: string } | { file: WorktreeFileChange }>;
   };
 
   function emptyTree(): FileTree {
-    return { dirs: new Map(), files: [] };
+    return { dirs: new Map(), files: [], order: [] };
   }
 
   function buildTree(files: WorktreeFileChange[]): FileTree {
@@ -1687,10 +1691,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         if (!child) {
           child = emptyTree();
           node.dirs.set(name, child);
+          node.order.push({ dir: name });
         }
         node = child;
       }
       node.files.push(file);
+      node.order.push({ file });
     }
     return root;
   }
@@ -1763,8 +1769,22 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     depth: number,
     path: string,
   ): void {
-    for (const [rawName, rawChild] of node.dirs) {
-      const [label, child] = collapseChain(rawName, rawChild);
+    for (const entry of node.order) {
+      if ("file" in entry) {
+        const parts = entry.file.path.split("/");
+        parent.appendChild(
+          fileRow(
+            item,
+            entry.file,
+            depth,
+            parts[parts.length - 1] || entry.file.path,
+          ),
+        );
+        continue;
+      }
+      const rawChild = node.dirs.get(entry.dir);
+      if (!rawChild) throw new Error(`worktree tree: ${entry.dir} has no node`);
+      const [label, child] = collapseChain(entry.dir, rawChild);
       const li = el("li", "tree-dir");
       li.tabIndex = -1;
       li.dataset.type = "tree";
@@ -1796,12 +1816,6 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       const children = el("ul", "tree-children");
       renderTreeInto(children, item, child, depth + 1, `${path}/${label}`);
       parent.appendChild(children);
-    }
-    for (const file of node.files) {
-      const parts = file.path.split("/");
-      parent.appendChild(
-        fileRow(item, file, depth, parts[parts.length - 1] || file.path),
-      );
     }
   }
 
