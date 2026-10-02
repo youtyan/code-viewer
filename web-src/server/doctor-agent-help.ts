@@ -1,3 +1,5 @@
+import { REQUIRED_NODE_VERSION } from "./node-requirement";
+
 export const DOCTOR_AGENT_HELP = `code-viewer doctor — agent guide
 
 You are an AI coding agent. Use this command to inspect the human's local
@@ -69,7 +71,7 @@ The exit code is 1 iff \`worstStatus === "error"\` — never on \`warn\`.
 
 - Filter to actionable rows: \`.groups[].rows[] | select(.status != "ok")\`.
 - \`hint\` is the human-readable fix; quote it verbatim when reporting back.
-- A \`runtime.node\` row failing means Node < 20 — almost everything else
+- A \`runtime.node\` row failing means Node < ${REQUIRED_NODE_VERSION} — almost everything else
   is downstream of that. Fix it first.
 - A \`github.gh\` row warning means GitHub Issue listing/linking cannot use
   the GitHub CLI yet. Install \`gh\` or pass \`--bin gh=/absolute/path\`.

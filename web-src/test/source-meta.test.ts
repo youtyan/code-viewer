@@ -52,9 +52,14 @@ describe("source metadata", () => {
   test.each([
     ["en", /^Sep \d+, 2026/],
     ["ja", /^2026年9月\d+日/],
-  ])("formats file dates in the setting language (%s), not the browser's", (language, expected) => {
-    expect(formatFileDate("2026-09-22T12:00:00Z", language)).toMatch(expected);
-  });
+  ])(
+    "formats file dates in the setting language (%s), not the browser's",
+    (language, expected) => {
+      expect(formatFileDate("2026-09-22T12:00:00Z", language)).toMatch(
+        expected,
+      );
+    },
+  );
 
   test.each([
     {
@@ -99,16 +104,13 @@ describe("source metadata", () => {
       en: "Internal metadata",
       ja: "内部のファイル",
     },
-  ])("names the file kind of $path ($fallback) in the setting language", ({
-    path,
-    mime,
-    fallback,
-    en,
-    ja,
-  }) => {
-    expect(humanFileKind(path, mime, fallback, "en")).toBe(en);
-    expect(humanFileKind(path, mime, fallback, "ja")).toBe(ja);
-  });
+  ])(
+    "names the file kind of $path ($fallback) in the setting language",
+    ({ path, mime, fallback, en, ja }) => {
+      expect(humanFileKind(path, mime, fallback, "en")).toBe(en);
+      expect(humanFileKind(path, mime, fallback, "ja")).toBe(ja);
+    },
+  );
 
   test("treats dotenv examples and variants as text sources", () => {
     expect(sourceDisplayKind("apps/mastra/.env.example")).toBe("text");

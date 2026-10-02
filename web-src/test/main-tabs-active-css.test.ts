@@ -1,6 +1,7 @@
 // 選択中のタブの印 (ui-surface.md の「タブの決まり」)。実物の style.css を happy-dom に
 // 流し込み、計算値で見る (happy-dom は変数を解決する。::before は返さないので、
-// フォーカスのある面の強調色の線は main-tabs-drag-css.test.ts の宣言の検査)。
+// フォーカスのある面の強調色の線は main-tabs-drag-css.test.ts の宣言の検査。
+// -webkit-text-stroke も返さないので、名前の太さは末尾で宣言を見る)。
 //
 // 守ること:
 // - 選択中でない / もう一方の面の選択中 / フォーカスのある面の選択中の 3 つが、
@@ -58,15 +59,14 @@ function parts(state: State) {
   };
 }
 
-/** 見た目の印 (面・文字・上の辺の線・絵・名前の太さ)。 */
+/** 見た目の印 (面・文字・上の辺の線・絵)。 */
 function looks(state: State) {
-  const { tab, icon, name } = parts(state);
+  const { tab, icon } = parts(state);
   return {
     background: tab.backgroundColor,
     color: tab.color,
     edge: tab.boxShadow,
     icon: icon.color,
-    stroke: name.getPropertyValue("-webkit-text-stroke"),
   };
 }
 
@@ -104,46 +104,41 @@ const CASES = [
 ] as const;
 
 describe("the selected tab", () => {
-  test.each(
-    CASES,
-  )("$name: plain, other side's and focused side's selected tabs look different", ({
-    theme,
-    split,
-  }) => {
-    renderTabs(theme, split);
-    const plain = looks("plain");
-    const otherSide = looks("otherSide");
-    const focused = looks("focused");
-    expect([
-      plain.background !== otherSide.background,
-      plain.color !== otherSide.color,
-      plain.edge !== otherSide.edge,
-      otherSide.icon !== focused.icon,
-      otherSide.stroke !== focused.stroke,
-    ]).toEqual([true, true, true, true, true]);
-  });
+  test.each(CASES)(
+    "$name: plain, other side's and focused side's selected tabs look different",
+    ({ theme, split }) => {
+      renderTabs(theme, split);
+      const plain = looks("plain");
+      const otherSide = looks("otherSide");
+      const focused = looks("focused");
+      expect([
+        plain.background !== otherSide.background,
+        plain.color !== otherSide.color,
+        plain.edge !== otherSide.edge,
+        otherSide.icon !== focused.icon,
+      ]).toEqual([true, true, true, true]);
+    },
+  );
 
-  test.each(
-    CASES,
-  )("$name: the focused side's selected tab draws its icon in the accent colour", ({
-    theme,
-    split,
-  }) => {
-    renderTabs(theme, split);
-    const accent = getComputedStyle(document.documentElement)
-      .getPropertyValue("--color-accent")
-      .trim();
-    expect(looks("focused").icon).toBe(accent);
-  });
+  test.each(CASES)(
+    "$name: the focused side's selected tab draws its icon in the accent colour",
+    ({ theme, split }) => {
+      renderTabs(theme, split);
+      const accent = getComputedStyle(document.documentElement)
+        .getPropertyValue("--color-accent")
+        .trim();
+      expect(looks("focused").icon).toBe(accent);
+    },
+  );
 
-  test.each(CASES)("$name: selecting a tab does not change its size", ({
-    theme,
-    split,
-  }) => {
-    renderTabs(theme, split);
-    const plain = sizes("plain");
-    expect([sizes("otherSide"), sizes("focused")]).toEqual([plain, plain]);
-  });
+  test.each(CASES)(
+    "$name: selecting a tab does not change its size",
+    ({ theme, split }) => {
+      renderTabs(theme, split);
+      const plain = sizes("plain");
+      expect([sizes("otherSide"), sizes("focused")]).toEqual([plain, plain]);
+    },
+  );
 });
 
 // happy-dom は color-mix() の宣言を捨てるので、フォーカスのある面の選択中の面の色は
@@ -162,5 +157,25 @@ test("the focused side's selected tab tints its face with the accent colour", ()
   ]).toEqual([
     "var(--color-tab-active)",
     "color-mix(in srgb, var(--color-accent) 18%, var(--color-tab-active))",
+  ]);
+});
+
+// happy-dom (20.14 から) は -webkit-text-stroke を計算値に出さないので、フォーカスの
+// ある面の選択中の名前の太さも宣言で見る。もう一方の面の選択中には付かないこと。
+test("only the focused side's selected tab strokes its name", () => {
+  const rules = baseRules(loadStyleSheet());
+  const onName = (classes: string[]) =>
+    cascadedDeclarations(rules, (selector) =>
+      [
+        ".main-tab-name",
+        ...classes.map((name) => `.${name} .main-tab-name`),
+        ...classes.map((name) => `.main-tab.${name} .main-tab-name`),
+      ].includes(selector),
+    ).get("-webkit-text-stroke");
+  const otherSide = onName(["main-tab-active"]);
+  const focused = onName(["main-tab-active", "main-tab-focused"]);
+  expect([focused === undefined, otherSide === focused]).toEqual([
+    false,
+    false,
   ]);
 });

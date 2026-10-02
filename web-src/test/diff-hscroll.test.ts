@@ -20,15 +20,13 @@ describe("数え方", () => {
     { scrollWidth: 1021, clientWidth: 1020, max: 1, needs: false },
     { scrollWidth: 1020, clientWidth: 1020, max: 0, needs: false },
     { scrollWidth: 0, clientWidth: 510, max: 0, needs: false },
-  ])("scrollWidth $scrollWidth / clientWidth $clientWidth → 送れる量 $max・バー $needs", ({
-    scrollWidth,
-    clientWidth,
-    max,
-    needs,
-  }) => {
-    expect(maxScrollLeft({ scrollWidth, clientWidth })).toBe(max);
-    expect(needsProxyScrollbar({ scrollWidth, clientWidth })).toBe(needs);
-  });
+  ])(
+    "scrollWidth $scrollWidth / clientWidth $clientWidth → 送れる量 $max・バー $needs",
+    ({ scrollWidth, clientWidth, max, needs }) => {
+      expect(maxScrollLeft({ scrollWidth, clientWidth })).toBe(max);
+      expect(needsProxyScrollbar({ scrollWidth, clientWidth })).toBe(needs);
+    },
+  );
 
   test.each([
     // 範囲の中はそのまま (整数に丸める)
@@ -210,23 +208,22 @@ describe("配線", () => {
   test.each([
     { scrollWidth: 1057, clientWidth: 510, tabindex: "0" },
     { scrollWidth: 510, clientWidth: 510, tabindex: null },
-  ])("中にボタンのある箱 (scrollWidth $scrollWidth / clientWidth $clientWidth) の tabindex は $tabindex", async ({
-    scrollWidth,
-    clientWidth,
-    tabindex,
-  }) => {
-    const { attachStickyHScroll } = await importView();
-    const shell = card(0);
-    const code = document.createElement("div");
-    code.className = "d2h-code-wrapper";
-    const expand = document.createElement("button");
-    expand.className = "gdp-expand-btn";
-    code.append(expand);
-    scrollable(code, scrollWidth, clientWidth);
-    shell.querySelector(".d2h-file-wrapper")?.append(code);
-    attachStickyHScroll(shell);
-    expect(code.getAttribute("tabindex")).toBe(tabindex);
-  });
+  ])(
+    "中にボタンのある箱 (scrollWidth $scrollWidth / clientWidth $clientWidth) の tabindex は $tabindex",
+    async ({ scrollWidth, clientWidth, tabindex }) => {
+      const { attachStickyHScroll } = await importView();
+      const shell = card(0);
+      const code = document.createElement("div");
+      code.className = "d2h-code-wrapper";
+      const expand = document.createElement("button");
+      expand.className = "gdp-expand-btn";
+      code.append(expand);
+      scrollable(code, scrollWidth, clientWidth);
+      shell.querySelector(".d2h-file-wrapper")?.append(code);
+      attachStickyHScroll(shell);
+      expect(code.getAttribute("tabindex")).toBe(tabindex);
+    },
+  );
 
   test("送れなくなった箱は止まり場所から外す", async () => {
     const { attachStickyHScroll } = await importView();

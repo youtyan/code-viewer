@@ -350,24 +350,24 @@ describe("usage collection that is off", () => {
     { state: "plain", button: true },
     // 読めない設定ファイルは確認の画面を作れない (理由は設定の行に出る)。
     { state: "unreadable", button: false },
-  ] as const)("statusLine $state: button shown = $button", async ({
-    state,
-    button,
-  }) => {
-    const calls: string[] = [];
-    const { card } = render([off(state)], ACCOUNTS_EN, calls)("claude-work");
-    expect(card.querySelector(".agents-account-usage-why")?.textContent).toBe(
-      ACCOUNTS_EN.usageReasonShort["not-wrapped"],
-    );
-    const enable = card.querySelector<HTMLButtonElement>(
-      ".agents-account-enable-usage",
-    );
-    expect(enable?.textContent ?? null).toBe(
-      button ? ACCOUNTS_EN.usageEnable : null,
-    );
-    enable?.click();
-    await Promise.resolve();
-    // その場で statusLine の確認の画面 (差分つき) を開く。
-    expect(calls).toEqual(button ? ["statusLine claude-work install"] : []);
-  });
+  ] as const)(
+    "statusLine $state: button shown = $button",
+    async ({ state, button }) => {
+      const calls: string[] = [];
+      const { card } = render([off(state)], ACCOUNTS_EN, calls)("claude-work");
+      expect(card.querySelector(".agents-account-usage-why")?.textContent).toBe(
+        ACCOUNTS_EN.usageReasonShort["not-wrapped"],
+      );
+      const enable = card.querySelector<HTMLButtonElement>(
+        ".agents-account-enable-usage",
+      );
+      expect(enable?.textContent ?? null).toBe(
+        button ? ACCOUNTS_EN.usageEnable : null,
+      );
+      enable?.click();
+      await Promise.resolve();
+      // その場で statusLine の確認の画面 (差分つき) を開く。
+      expect(calls).toEqual(button ? ["statusLine claude-work install"] : []);
+    },
+  );
 });

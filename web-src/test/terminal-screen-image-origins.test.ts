@@ -450,22 +450,22 @@ describe("出た所ごとのまとまり (tmux)", () => {
     { title: "⠋ 作業中", expected: "Pane 1 · 作業中" },
     // 題名が無い (tmux の既定のホスト名はサーバが空にする) ときは コマンド · フォルダ。
     { title: "", expected: "Pane 1 · node · sample-app" },
-  ])("題名の頭の状態の記号は見出しに出さない ($title)", async ({
-    title,
-    expected,
-  }) => {
-    imagesBody = () => ({
-      layout: {
-        ...LAYOUT,
-        panes: LAYOUT.panes.map((pane) =>
-          pane.id === "%2" ? { ...pane, title } : pane,
-        ),
-      },
-      sightings: SIGHTINGS,
-    });
-    await showImage();
-    expect(shelfGroups()[0]?.head).toBe(expected);
-  });
+  ])(
+    "題名の頭の状態の記号は見出しに出さない ($title)",
+    async ({ title, expected }) => {
+      imagesBody = () => ({
+        layout: {
+          ...LAYOUT,
+          panes: LAYOUT.panes.map((pane) =>
+            pane.id === "%2" ? { ...pane, title } : pane,
+          ),
+        },
+        sightings: SIGHTINGS,
+      });
+      await showImage();
+      expect(shelfGroups()[0]?.head).toBe(expected);
+    },
+  );
 
   test("エージェントのペインは、題名よりサイドバーと同じ名前を見出しにする", async () => {
     agentNames.set("%2", "claude · 図を書く");

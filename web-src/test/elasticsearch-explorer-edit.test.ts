@@ -186,39 +186,35 @@ describe("elasticsearch explorer failures", () => {
         where: ".db-detail-pane .db-pane-error",
       },
     ]),
-  )("$operation の $via の失敗は理由を画面と console に出す", async ({
-    operation,
-    httpOperation,
-    via,
-    fails,
-    open,
-    where,
-  }) => {
-    const failure = failureWithCause(`${operation} request failed`);
-    installFetch((url) => (fails(url) ? failureFor(via, failure) : null));
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const view = createElasticsearchExplorer();
-    try {
-      document.body.append(view.sidebarSlot, view.el);
-      await view.load("docker:es", { index: "my-index" });
-      await open(view);
-      await expectReportedFailure(
-        operation,
-        failure,
-        () => document.body.querySelector(where)?.textContent,
-        consoleError,
-        via === "http"
-          ? `${httpOperation} (HTTP 500): sample failure`
-          : undefined,
-      );
-    } finally {
-      view.dispose();
-      document.body.innerHTML = "";
-      consoleError.mockRestore();
-    }
-  });
+  )(
+    "$operation の $via の失敗は理由を画面と console に出す",
+    async ({ operation, httpOperation, via, fails, open, where }) => {
+      const failure = failureWithCause(`${operation} request failed`);
+      installFetch((url) => (fails(url) ? failureFor(via, failure) : null));
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      const view = createElasticsearchExplorer();
+      try {
+        document.body.append(view.sidebarSlot, view.el);
+        await view.load("docker:es", { index: "my-index" });
+        await open(view);
+        await expectReportedFailure(
+          operation,
+          failure,
+          () => document.body.querySelector(where)?.textContent,
+          consoleError,
+          via === "http"
+            ? `${httpOperation} (HTTP 500): sample failure`
+            : undefined,
+        );
+      } finally {
+        view.dispose();
+        document.body.innerHTML = "";
+        consoleError.mockRestore();
+      }
+    },
+  );
 
   test.each(
     withFailureKinds([
@@ -265,39 +261,36 @@ describe("elasticsearch explorer failures", () => {
         where: ".es-new-doc-form .es-doc-edit-status",
       },
     ]),
-  )("$operation の $via の失敗は理由を画面と console に出す", async ({
-    operation,
-    httpOperation,
-    via,
-    act,
-    where,
-  }) => {
-    const failure = failureWithCause(`${operation} request failed`);
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const view = await setupWithDoc((url) =>
-      url.includes("/_db/elasticsearch/write")
-        ? failureFor(via, failure)
-        : null,
-    );
-    try {
-      await act(view);
-      await expectReportedFailure(
-        operation,
-        failure,
-        () => view.el.querySelector(where)?.textContent,
-        consoleError,
-        via === "http"
-          ? `${httpOperation} (HTTP 500): sample failure`
-          : undefined,
+  )(
+    "$operation の $via の失敗は理由を画面と console に出す",
+    async ({ operation, httpOperation, via, act, where }) => {
+      const failure = failureWithCause(`${operation} request failed`);
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      const view = await setupWithDoc((url) =>
+        url.includes("/_db/elasticsearch/write")
+          ? failureFor(via, failure)
+          : null,
       );
-    } finally {
-      view.dispose();
-      document.body.innerHTML = "";
-      consoleError.mockRestore();
-    }
-  });
+      try {
+        await act(view);
+        await expectReportedFailure(
+          operation,
+          failure,
+          () => view.el.querySelector(where)?.textContent,
+          consoleError,
+          via === "http"
+            ? `${httpOperation} (HTTP 500): sample failure`
+            : undefined,
+        );
+      } finally {
+        view.dispose();
+        document.body.innerHTML = "";
+        consoleError.mockRestore();
+      }
+    },
+  );
 });
 
 // 直す前は日本語の設定でも、件数の札と読み込み中の表示が英語のままだった。
@@ -305,22 +298,22 @@ describe("elasticsearch explorer text", () => {
   test.each([
     { language: "en" as const, meta: /^1 docs \/ / },
     { language: "ja" as const, meta: /^1 件 \/ / },
-  ])("index の件数の札を表示の言語で描く: $language", async ({
-    language,
-    meta,
-  }) => {
-    installFetch();
-    const view = createElasticsearchExplorer({
-      getText: () => dbText(language),
-    });
-    document.body.append(view.sidebarSlot, view.el);
-    await view.load("docker:es");
-    expect(
-      view.sidebarSlot.querySelector(".es-index-meta")?.textContent,
-    ).toMatch(meta);
-    view.dispose();
-    document.body.innerHTML = "";
-  });
+  ])(
+    "index の件数の札を表示の言語で描く: $language",
+    async ({ language, meta }) => {
+      installFetch();
+      const view = createElasticsearchExplorer({
+        getText: () => dbText(language),
+      });
+      document.body.append(view.sidebarSlot, view.el);
+      await view.load("docker:es");
+      expect(
+        view.sidebarSlot.querySelector(".es-index-meta")?.textContent,
+      ).toMatch(meta);
+      view.dispose();
+      document.body.innerHTML = "";
+    },
+  );
 
   test("言語を切り替えると件数の札も描き直す", async () => {
     installFetch();
@@ -404,22 +397,22 @@ describe("elasticsearch explorer edit UI", () => {
       },
       submit: ".es-new-doc-form .db-btn-primary",
     },
-  ])("invalid JSON in the $form form blocks the save and shows why", async ({
-    open,
-    submit,
-  }) => {
-    const view = await setupWithDoc();
-    await open(view);
-    const ta = q<HTMLTextAreaElement>(view.el, ".es-doc-edit-textarea");
-    ta.value = "{ not json";
-    q<HTMLButtonElement>(view.el, submit).click();
-    await tick();
-    expect(writeCalls.length).toBe(0);
-    expect(q(view.el, ".es-doc-edit-status").textContent).toMatch(
-      /^Invalid JSON: SyntaxError: .+/,
-    );
-    view.dispose();
-  });
+  ])(
+    "invalid JSON in the $form form blocks the save and shows why",
+    async ({ open, submit }) => {
+      const view = await setupWithDoc();
+      await open(view);
+      const ta = q<HTMLTextAreaElement>(view.el, ".es-doc-edit-textarea");
+      ta.value = "{ not json";
+      q<HTMLButtonElement>(view.el, submit).click();
+      await tick();
+      expect(writeCalls.length).toBe(0);
+      expect(q(view.el, ".es-doc-edit-status").textContent).toMatch(
+        /^Invalid JSON: SyntaxError: .+/,
+      );
+      view.dispose();
+    },
+  );
 
   test("deleting a doc posts op=delete after confirm", async () => {
     const view = await setupWithDoc();

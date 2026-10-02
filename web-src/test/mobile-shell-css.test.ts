@@ -137,19 +137,18 @@ describe("電話の段の骨格", () => {
       variable: "--page-right",
       expected: "env(safe-area-inset-right, 0px)",
     },
-  ])("$name でもデスクトップの上書きに負けない", ({
-    selector,
-    variable,
-    expected,
-  }) => {
-    const vars = new Map([
-      ...bodyVariables(rules),
-      ...[...declarationsOf(rules, [selector])].filter(([n]) =>
-        n.startsWith("--"),
-      ),
-    ]);
-    expect(resolveVar(vars.get(variable) ?? "", vars)).toBe(expected);
-  });
+  ])(
+    "$name でもデスクトップの上書きに負けない",
+    ({ selector, variable, expected }) => {
+      const vars = new Map([
+        ...bodyVariables(rules),
+        ...[...declarationsOf(rules, [selector])].filter(([n]) =>
+          n.startsWith("--"),
+        ),
+      ]);
+      expect(resolveVar(vars.get(variable) ?? "", vars)).toBe(expected);
+    },
+  );
 
   test("下端は最下段と切替の帯 (ホームバーの安全領域込み)", () => {
     const vars = bodyVariables(rules);
@@ -223,16 +222,16 @@ describe("電話の段の骨格", () => {
   });
 
   // 面に出すのはファイル一覧 (#file-list) か、一覧を出す画面ではその一覧。
-  test.each([
-    ["#sidebar", "body[data-list-column] #sidebar"],
-    ["#file-list"],
-  ])("面の一覧 %s は面の頭の下から最下段の上まで、画面の幅いっぱい", (...selectors) => {
-    const box = declarationsOf(rules, selectors);
-    expect(box.get("top")).toBe("var(--panel-body-top)");
-    expect(box.get("bottom")).toBe("var(--chrome-bottom)");
-    expect(box.get("left")).toBe("var(--chrome-left)");
-    expect(box.get("right")).toBe("var(--chrome-right)");
-  });
+  test.each([["#sidebar", "body[data-list-column] #sidebar"], ["#file-list"]])(
+    "面の一覧 %s は面の頭の下から最下段の上まで、画面の幅いっぱい",
+    (...selectors) => {
+      const box = declarationsOf(rules, selectors);
+      expect(box.get("top")).toBe("var(--panel-body-top)");
+      expect(box.get("bottom")).toBe("var(--chrome-bottom)");
+      expect(box.get("left")).toBe("var(--chrome-left)");
+      expect(box.get("right")).toBe("var(--chrome-right)");
+    },
+  );
 
   test.each([
     '.main-tabs-pane[data-side="right"]',
@@ -1014,22 +1013,22 @@ describe("text size on a phone", () => {
     ).toEqual([null, null, null]);
   });
 
-  test.each([
-    "textarea",
-    "select",
-  ])("%s is 16px so iOS does not zoom in", (selector) => {
-    const vars = bodyVariables(phone);
-    const value = declarationsOf(phone, [selector]).get("font-size") ?? "";
-    expect({
-      // 欄ごとの id の規則に負けないよう !important (style.css のコメント)。
-      important: value.endsWith("!important"),
-      phone: resolveVar(value.replace(/\s*!important$/, ""), vars),
-      desktop:
-        declarationsOf(baseRules(sheet), [selector]).get("font-size") ?? null,
-    }).toEqual({
-      important: true,
-      phone: "16px",
-      desktop: expect.not.stringMatching(/^16px$/),
-    });
-  });
+  test.each(["textarea", "select"])(
+    "%s is 16px so iOS does not zoom in",
+    (selector) => {
+      const vars = bodyVariables(phone);
+      const value = declarationsOf(phone, [selector]).get("font-size") ?? "";
+      expect({
+        // 欄ごとの id の規則に負けないよう !important (style.css のコメント)。
+        important: value.endsWith("!important"),
+        phone: resolveVar(value.replace(/\s*!important$/, ""), vars),
+        desktop:
+          declarationsOf(baseRules(sheet), [selector]).get("font-size") ?? null,
+      }).toEqual({
+        important: true,
+        phone: "16px",
+        desktop: expect.not.stringMatching(/^16px$/),
+      });
+    },
+  );
 });

@@ -179,44 +179,40 @@ describe("redis explorer failures", () => {
         clickKey: true,
       },
     ]),
-  )("$operation の $via の失敗は理由を画面と console に出す", async ({
-    operation,
-    httpOperation,
-    via,
-    fails,
-    where,
-    clickKey,
-  }) => {
-    const failure = failureWithCause(`${operation} request failed`);
-    installFetch({
-      fail: (url) => (fails(url) ? failureFor(via, failure) : null),
-    });
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const view = createRedisExplorer();
-    try {
-      document.body.append(view.sidebarSlot, view.el);
-      await view.load("docker:redis", { dbIndex: 0 });
-      if (clickKey) {
-        await waitFor(() => !!view.el.querySelector(".redis-key-item"));
-        q<HTMLElement>(view.el, ".redis-key-item").click();
+  )(
+    "$operation の $via の失敗は理由を画面と console に出す",
+    async ({ operation, httpOperation, via, fails, where, clickKey }) => {
+      const failure = failureWithCause(`${operation} request failed`);
+      installFetch({
+        fail: (url) => (fails(url) ? failureFor(via, failure) : null),
+      });
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      const view = createRedisExplorer();
+      try {
+        document.body.append(view.sidebarSlot, view.el);
+        await view.load("docker:redis", { dbIndex: 0 });
+        if (clickKey) {
+          await waitFor(() => !!view.el.querySelector(".redis-key-item"));
+          q<HTMLElement>(view.el, ".redis-key-item").click();
+        }
+        await expectReportedFailure(
+          operation,
+          failure,
+          () => document.body.querySelector(where)?.textContent,
+          consoleError,
+          via === "http"
+            ? `${httpOperation} (HTTP 500): sample failure`
+            : undefined,
+        );
+      } finally {
+        view.dispose();
+        document.body.innerHTML = "";
+        consoleError.mockRestore();
       }
-      await expectReportedFailure(
-        operation,
-        failure,
-        () => document.body.querySelector(where)?.textContent,
-        consoleError,
-        via === "http"
-          ? `${httpOperation} (HTTP 500): sample failure`
-          : undefined,
-      );
-    } finally {
-      view.dispose();
-      document.body.innerHTML = "";
-      consoleError.mockRestore();
-    }
-  });
+    },
+  );
 
   test.each(
     withFailureKinds([
@@ -261,38 +257,35 @@ describe("redis explorer failures", () => {
         where: ".redis-new-key-form .redis-value-edit-status",
       },
     ]),
-  )("$operation の $via の失敗は理由を画面と console に出す", async ({
-    operation,
-    httpOperation,
-    via,
-    act,
-    where,
-  }) => {
-    const failure = failureWithCause(`${operation} request failed`);
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const view = await setupSelectedKey({
-      fail: (url) =>
-        url.includes("/_db/redis/write") ? failureFor(via, failure) : null,
-    });
-    try {
-      await act(view);
-      await expectReportedFailure(
-        operation,
-        failure,
-        () => view.el.querySelector(where)?.textContent,
-        consoleError,
-        via === "http"
-          ? `${httpOperation} (HTTP 500): sample failure`
-          : undefined,
-      );
-    } finally {
-      view.dispose();
-      document.body.innerHTML = "";
-      consoleError.mockRestore();
-    }
-  });
+  )(
+    "$operation の $via の失敗は理由を画面と console に出す",
+    async ({ operation, httpOperation, via, act, where }) => {
+      const failure = failureWithCause(`${operation} request failed`);
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      const view = await setupSelectedKey({
+        fail: (url) =>
+          url.includes("/_db/redis/write") ? failureFor(via, failure) : null,
+      });
+      try {
+        await act(view);
+        await expectReportedFailure(
+          operation,
+          failure,
+          () => view.el.querySelector(where)?.textContent,
+          consoleError,
+          via === "http"
+            ? `${httpOperation} (HTTP 500): sample failure`
+            : undefined,
+        );
+      } finally {
+        view.dispose();
+        document.body.innerHTML = "";
+        consoleError.mockRestore();
+      }
+    },
+  );
 });
 
 // 直す前は日本語の設定でも、ハッシュの列見出し・切り詰めの注記・読み込み中の
@@ -316,24 +309,23 @@ describe("redis explorer text", () => {
       headers: ["フィールド", "値"],
       notice: "(3 フィールドのうち 1 件を表示。残りは省略)",
     },
-  ])("ハッシュの見出しと切り詰めの注記を表示の言語で描く: $language", async ({
-    language,
-    headers,
-    notice,
-  }) => {
-    const view = await setupSelectedKey({ value: truncatedHash }, () =>
-      dbText(language),
-    );
-    expect(
-      Array.from(view.el.querySelectorAll(".redis-value-hash-table th")).map(
-        (th) => th.textContent,
-      ),
-    ).toEqual(headers);
-    expect(view.el.querySelector(".redis-value-body")?.textContent).toContain(
-      notice,
-    );
-    view.dispose();
-  });
+  ])(
+    "ハッシュの見出しと切り詰めの注記を表示の言語で描く: $language",
+    async ({ language, headers, notice }) => {
+      const view = await setupSelectedKey({ value: truncatedHash }, () =>
+        dbText(language),
+      );
+      expect(
+        Array.from(view.el.querySelectorAll(".redis-value-hash-table th")).map(
+          (th) => th.textContent,
+        ),
+      ).toEqual(headers);
+      expect(view.el.querySelector(".redis-value-body")?.textContent).toContain(
+        notice,
+      );
+      view.dispose();
+    },
+  );
 
   test("言語を切り替えると描いた値も描き直す", async () => {
     let language: "en" | "ja" = "en";

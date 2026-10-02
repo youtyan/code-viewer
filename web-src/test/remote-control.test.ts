@@ -592,20 +592,20 @@ describe("createRemoteControl", () => {
   test.each([
     { autoStart: true, expected: "running" },
     { autoStart: false, expected: "stopped" },
-  ])("start on launch with autoStart $autoStart leaves the listener $expected", async ({
-    autoStart,
-    expected,
-  }) => {
-    const target = create(fakeCloudflared(STAYS_UP));
-    await route(target, "/_entry/remote/config", {
-      values: { ...VALUES, port: await freePort() },
-      autoStart,
-    });
+  ])(
+    "start on launch with autoStart $autoStart leaves the listener $expected",
+    async ({ autoStart, expected }) => {
+      const target = create(fakeCloudflared(STAYS_UP));
+      await route(target, "/_entry/remote/config", {
+        values: { ...VALUES, port: await freePort() },
+        autoStart,
+      });
 
-    await target.startOnLaunch();
+      await target.startOnLaunch();
 
-    expect(target.status().listener.state).toBe(expected);
-  });
+      expect(target.status().listener.state).toBe(expected);
+    },
+  );
 
   test("an unreadable config is moved aside, not overwritten, when values are saved", async () => {
     const target = create(fakeCloudflared(STAYS_UP));

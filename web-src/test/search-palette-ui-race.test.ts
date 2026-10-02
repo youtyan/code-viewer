@@ -732,21 +732,24 @@ describe("grep search palette master/detail behavior", () => {
         }),
       true,
     ],
-  ])("%s opens the grep result in a kept tab: %s", async (_label, event, expected) => {
-    const { input, palette, routes, kept } = await setupGrep();
-    try {
-      const made = event();
-      if (made instanceof KeyboardEvent) input.dispatchEvent(made);
-      else q<HTMLElement>(document, ".gdp-palette-row").dispatchEvent(made);
-      await waitFor(() => routes.length === 1);
-      expect({ routes, kept }).toMatchObject({
-        routes: [{ screen: "file" }],
-        kept: [expected],
-      });
-    } finally {
-      palette.closeSearchPalette();
-    }
-  });
+  ])(
+    "%s opens the grep result in a kept tab: %s",
+    async (_label, event, expected) => {
+      const { input, palette, routes, kept } = await setupGrep();
+      try {
+        const made = event();
+        if (made instanceof KeyboardEvent) input.dispatchEvent(made);
+        else q<HTMLElement>(document, ".gdp-palette-row").dispatchEvent(made);
+        await waitFor(() => routes.length === 1);
+        expect({ routes, kept }).toMatchObject({
+          routes: [{ screen: "file" }],
+          kept: [expected],
+        });
+      } finally {
+        palette.closeSearchPalette();
+      }
+    },
+  );
 
   test("opens a grep result with one click", async () => {
     const { palette, patches, routes } = await setupGrep();

@@ -517,18 +517,17 @@ describe("withFinishedAsDone", () => {
     { state: "waiting", transition: "waiting", expected: "waiting" },
     { state: "working", transition: "finished", expected: "working" },
     { state: "done", transition: "finished", expected: "done" },
-  ])("$state + 未読 $transition → $expected", ({
-    state,
-    transition,
-    expected,
-  }) => {
-    const unread = new Map<string, AgentTransition>(
-      transition ? [["%1", transition]] : [],
-    );
-    expect(
-      withFinishedAsDone([pane({ id: "%1", state })], unread)[0]?.state,
-    ).toBe(expected);
-  });
+  ])(
+    "$state + 未読 $transition → $expected",
+    ({ state, transition, expected }) => {
+      const unread = new Map<string, AgentTransition>(
+        transition ? [["%1", transition]] : [],
+      );
+      expect(
+        withFinishedAsDone([pane({ id: "%1", state })], unread)[0]?.state,
+      ).toBe(expected);
+    },
+  );
 });
 
 // 許可の窓を閉じただけ (default のまま) は、訊いた後なら「もう一度求める」。
@@ -543,13 +542,12 @@ describe("notifyPermissionView", () => {
     { permission: "default", asked: true, expected: "ask-again" },
     { permission: "default", asked: false, expected: "ask" },
     { permission: "unsupported", asked: false, expected: "unsupported" },
-  ])("$permission (asked: $asked) → $expected", ({
-    permission,
-    asked,
-    expected,
-  }) => {
-    expect(notifyPermissionView(permission, asked)).toBe(expected);
-  });
+  ])(
+    "$permission (asked: $asked) → $expected",
+    ({ permission, asked, expected }) => {
+      expect(notifyPermissionView(permission, asked)).toBe(expected);
+    },
+  );
 });
 
 describe("shouldNotifyAgent", () => {

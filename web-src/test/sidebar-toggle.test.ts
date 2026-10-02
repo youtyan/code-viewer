@@ -345,42 +345,45 @@ describe("project name and view entries placement", () => {
       toggleAt: "first",
       stripAt: "first",
     },
-  ])("$name", ({
-    hidden,
-    screenHidesTree,
-    host,
-    toggleHost,
-    stripHost,
-    toggleAt,
-    stripAt,
-  }) => {
-    const dom = installFakeDom();
-    dom.sidebar.visible = !screenHidesTree;
-    const sidebar = createSidebarForTest({ sidebarHidden: hidden });
-    sidebar.placeSidebarToggle();
-    expect([
-      dom.viewHead.parentElement === dom[host],
-      document.querySelector<HTMLElement>("#sidebar-toggle")?.parentElement ===
-        (dom[toggleHost] as unknown as HTMLElement),
-      dom.strip.parentElement === dom[stripHost],
-      dom.brand.parentElement === dom.projectHead,
-      dom.leftHead.children[0] === dom.projectHead,
-    ]).toEqual([true, true, true, true, true]);
-    // 置き場所の中の順は見た目の順 (Tab で移る順): 畳むボタンは絵柄の行の右端の
-    // 置き場所 (中はボタンだけ)。一覧の列の頭では絵柄が行の頭。
-    const at = (element: FakeElement) => {
-      const siblings = element.parentElement?.children ?? [];
-      return siblings[0] === element
-        ? "first"
-        : siblings[siblings.length - 1] === element
-          ? "last"
-          : "middle";
-    };
-    const toggle = document.querySelector(
-      "#sidebar-toggle",
-    ) as unknown as FakeElement;
-    expect([at(toggle), at(dom.strip)]).toEqual([toggleAt, stripAt]);
-  });
+  ])(
+    "$name",
+    ({
+      hidden,
+      screenHidesTree,
+      host,
+      toggleHost,
+      stripHost,
+      toggleAt,
+      stripAt,
+    }) => {
+      const dom = installFakeDom();
+      dom.sidebar.visible = !screenHidesTree;
+      const sidebar = createSidebarForTest({ sidebarHidden: hidden });
+      sidebar.placeSidebarToggle();
+      expect([
+        dom.viewHead.parentElement === dom[host],
+        document.querySelector<HTMLElement>("#sidebar-toggle")
+          ?.parentElement === (dom[toggleHost] as unknown as HTMLElement),
+        dom.strip.parentElement === dom[stripHost],
+        dom.brand.parentElement === dom.projectHead,
+        dom.leftHead.children[0] === dom.projectHead,
+      ]).toEqual([true, true, true, true, true]);
+      // 置き場所の中の順は見た目の順 (Tab で移る順): 畳むボタンは絵柄の行の右端の
+      // 置き場所 (中はボタンだけ)。一覧の列の頭では絵柄が行の頭。
+      const at = (element: FakeElement) => {
+        const siblings = element.parentElement?.children ?? [];
+        return siblings[0] === element
+          ? "first"
+          : siblings[siblings.length - 1] === element
+            ? "last"
+            : "middle";
+      };
+      const toggle = document.querySelector(
+        "#sidebar-toggle",
+      ) as unknown as FakeElement;
+      expect([at(toggle), at(dom.strip)]).toEqual([toggleAt, stripAt]);
+    },
+  );
 
   test("folding and unfolding keeps the view icons and the toggle in the head row", () => {
     const dom = installFakeDom();

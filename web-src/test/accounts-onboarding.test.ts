@@ -78,18 +78,18 @@ describe("markClaudeOnboarded", () => {
       reason: "is not valid JSON",
     },
     { name: "配列", text: "[1, 2]", reason: "is not a JSON object" },
-  ])("$name なら書かずに理由を返す (中身は理由に載せない)", async ({
-    text,
-    reason,
-  }) => {
-    writeFileSync(file(), text);
-    const out = await markClaudeOnboarded(dir);
-    expect(out.status).toBe("failed");
-    const detail = out.status === "failed" ? out.detail : "";
-    expect(detail).toContain(reason);
-    expect(detail).not.toContain("sample-secret-value");
-    expect(readFileSync(file(), "utf8")).toBe(text);
-  });
+  ])(
+    "$name なら書かずに理由を返す (中身は理由に載せない)",
+    async ({ text, reason }) => {
+      writeFileSync(file(), text);
+      const out = await markClaudeOnboarded(dir);
+      expect(out.status).toBe("failed");
+      const detail = out.status === "failed" ? out.detail : "";
+      expect(detail).toContain(reason);
+      expect(detail).not.toContain("sample-secret-value");
+      expect(readFileSync(file(), "utf8")).toBe(text);
+    },
+  );
 });
 
 describe("login check marks only code-viewer's own claude accounts", () => {

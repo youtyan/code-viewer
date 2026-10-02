@@ -432,21 +432,24 @@ describe("settings page", () => {
   test.each<[string, SettingsCategory]>([
     ["sample-accounts-title", "accounts"],
     ["sample-shortcuts-title", "shortcuts"],
-  ])("openSettingsAt(%s) opens the settings page on the %s category", (id, expected) => {
-    const view = renderSettings();
-    view.page.openSettingsAt(id);
-    expect([
-      view.route().screen,
-      view.category(),
-      navItems().filter((item) => item.endsWith(" *")),
-    ]).toEqual([
-      "settings",
-      expected,
-      [
-        `${SAMPLE_CATEGORIES.find((category) => category.id === expected)?.label} *`,
-      ],
-    ]);
-  });
+  ])(
+    "openSettingsAt(%s) opens the settings page on the %s category",
+    (id, expected) => {
+      const view = renderSettings();
+      view.page.openSettingsAt(id);
+      expect([
+        view.route().screen,
+        view.category(),
+        navItems().filter((item) => item.endsWith(" *")),
+      ]).toEqual([
+        "settings",
+        expected,
+        [
+          `${SAMPLE_CATEGORIES.find((category) => category.id === expected)?.label} *`,
+        ],
+      ]);
+    },
+  );
 
   // 設定とヘルプが 1 つのページだった頃の /help#<設定の見出し> を設定へ移すかの判断。
   test.each<[string, string | null]>([
@@ -465,21 +468,24 @@ describe("settings page", () => {
     ["ja", "accounts", "add-account", "ヘルプ › アカウントを追加する"],
     ["en", "shortcuts", "keybindings", "Help › Keyboard shortcuts"],
     ["ja", "shortcuts", "keybindings", "ヘルプ › キーボードショートカット"],
-  ])("in %s the %s category links to the help section %s", (lang, category, section, label) => {
-    const view = renderSettings(lang);
-    view.page.openSettingsAt(`sample-${category}-title`);
-    const link = document.querySelector<HTMLAnchorElement>(
-      ".gdp-help-content .gdp-help-shortcut-link a",
-    );
-    link?.click();
-    expect([
-      link?.textContent,
-      link?.getAttribute("href"),
-      view.openedHelp,
-    ]).toEqual([label, `/help?section=${section}`, [section]]);
-    // リンクの文字はヘルプの左の列の名前と同じ。
-    expect(label.endsWith(helpSectionName(lang, section))).toBe(true);
-  });
+  ])(
+    "in %s the %s category links to the help section %s",
+    (lang, category, section, label) => {
+      const view = renderSettings(lang);
+      view.page.openSettingsAt(`sample-${category}-title`);
+      const link = document.querySelector<HTMLAnchorElement>(
+        ".gdp-help-content .gdp-help-shortcut-link a",
+      );
+      link?.click();
+      expect([
+        link?.textContent,
+        link?.getAttribute("href"),
+        view.openedHelp,
+      ]).toEqual([label, `/help?section=${section}`, [section]]);
+      // リンクの文字はヘルプの左の列の名前と同じ。
+      expect(label.endsWith(helpSectionName(lang, section))).toBe(true);
+    },
+  );
 
   test("a category without a help note shows none", () => {
     renderSettings();
@@ -551,14 +557,17 @@ describe("help page", () => {
         "キーボードショートカット",
       ],
     ],
-  ])("in %s lists the help sections in the order people use them, under %s", (lang, title, nav) => {
-    renderHelpPage(lang, "getting-started");
-    expect({
-      title: document.querySelector(".gdp-help-header h1")?.textContent,
-      nav: navItems(),
-      search: document.querySelector(".gdp-help-search-row"),
-    }).toEqual({ title, nav, search: null });
-  });
+  ])(
+    "in %s lists the help sections in the order people use them, under %s",
+    (lang, title, nav) => {
+      renderHelpPage(lang, "getting-started");
+      expect({
+        title: document.querySelector(".gdp-help-header h1")?.textContent,
+        nav: navItems(),
+        search: document.querySelector(".gdp-help-search-row"),
+      }).toEqual({ title, nav, search: null });
+    },
+  );
 
   // 設定の節だった値は route が設定のページへ移す (routes.test.ts)。ここに来たら
   // 先頭の節を出す。
@@ -653,20 +662,20 @@ describe("help page", () => {
     ]);
   });
 
-  test.each<HelpLanguage>([
-    "en",
-    "ja",
-  ])("in %s the header button opens the keyboard shortcuts window by its name", (lang) => {
-    const view = renderHelpPage(lang, "getting-started");
-    const button = document.querySelector<HTMLButtonElement>(
-      ".gdp-help-header button[data-quick-help-trigger]",
-    );
-    button?.click();
-    expect([button?.textContent, view.calls]).toEqual([
-      quickHelpText(lang).panelTitle,
-      ["toggleKeyboardShortcuts"],
-    ]);
-  });
+  test.each<HelpLanguage>(["en", "ja"])(
+    "in %s the header button opens the keyboard shortcuts window by its name",
+    (lang) => {
+      const view = renderHelpPage(lang, "getting-started");
+      const button = document.querySelector<HTMLButtonElement>(
+        ".gdp-help-header button[data-quick-help-trigger]",
+      );
+      button?.click();
+      expect([button?.textContent, view.calls]).toEqual([
+        quickHelpText(lang).panelTitle,
+        ["toggleKeyboardShortcuts"],
+      ]);
+    },
+  );
 
   // 版は server から読む。読めるまでは何も出さない (「code-viewer 」だけを出さない)。
   test.each<[string, string | undefined]>([
@@ -728,58 +737,65 @@ describe("help page text uses each screen's names", () => {
     ["en", "getting-started", "Sample sign in"],
     ["ja", "start-agent", "Sample new agent"],
     ["ja", "add-account", "Sample sign in now"],
-  ])("in %s the %s section shows a renamed button %j", (lang, section, name) => {
-    renderHelpPage(lang, section, { helpLabels: renamed });
-    const text = document.querySelector(".gdp-help-content")?.textContent ?? "";
-    expect(text.includes(name)).toBe(true);
-  });
+  ])(
+    "in %s the %s section shows a renamed button %j",
+    (lang, section, name) => {
+      renderHelpPage(lang, section, { helpLabels: renamed });
+      const text =
+        document.querySelector(".gdp-help-content")?.textContent ?? "";
+      expect(text.includes(name)).toBe(true);
+    },
+  );
 
   test.each<[HelpLanguage, string]>([
     ["en", "Settings › Accounts"],
     ["ja", "設定 › アカウント"],
-  ])("in %s the account section links to %s and warns about the browser account", (lang, label) => {
-    const view = renderHelpPage(lang, "add-account");
-    const link = [
-      ...document.querySelectorAll<HTMLAnchorElement>(".gdp-help-content a"),
-    ].find((a) => a.textContent === label);
-    link?.click();
-    expect([
-      link?.getAttribute("href"),
-      view.calls,
-      document.querySelectorAll(
-        ".gdp-help-content .gdp-help-note[data-kind='warning']",
-      ).length,
-    ]).toEqual(["/settings", ["openAccountsSettings"], 1]);
-  });
+  ])(
+    "in %s the account section links to %s and warns about the browser account",
+    (lang, label) => {
+      const view = renderHelpPage(lang, "add-account");
+      const link = [
+        ...document.querySelectorAll<HTMLAnchorElement>(".gdp-help-content a"),
+      ].find((a) => a.textContent === label);
+      link?.click();
+      expect([
+        link?.getAttribute("href"),
+        view.calls,
+        document.querySelectorAll(
+          ".gdp-help-content .gdp-help-note[data-kind='warning']",
+        ).length,
+      ]).toEqual(["/settings", ["openAccountsSettings"], 1]);
+    },
+  );
 
-  test.each<HelpLanguage>([
-    "en",
-    "ja",
-  ])("in %s the AI section shows the skill install commands and every skill", (lang) => {
-    renderHelpPage(lang, "ask-ai");
-    const commands = Array.from(
-      document.querySelectorAll(".gdp-help-command code"),
-      (code) => code.textContent,
-    );
-    const skills = Array.from(
-      document.querySelectorAll(".gdp-help-table tbody tr td:first-child"),
-      (cell) => cell.textContent,
-    );
-    expect([commands, skills]).toEqual([
-      [
-        "code-viewer skill install",
-        "code-viewer skill install --agent claude,codex",
-        "code-viewer skill install --agent all --global",
-      ],
-      [
-        "code-viewer-accounts",
-        "code-viewer-annotate",
-        "code-viewer-journal",
-        "code-viewer-query",
-        "code-viewer-snapshot",
-      ],
-    ]);
-  });
+  test.each<HelpLanguage>(["en", "ja"])(
+    "in %s the AI section shows the skill install commands and every skill",
+    (lang) => {
+      renderHelpPage(lang, "ask-ai");
+      const commands = Array.from(
+        document.querySelectorAll(".gdp-help-command code"),
+        (code) => code.textContent,
+      );
+      const skills = Array.from(
+        document.querySelectorAll(".gdp-help-table tbody tr td:first-child"),
+        (cell) => cell.textContent,
+      );
+      expect([commands, skills]).toEqual([
+        [
+          "code-viewer skill install",
+          "code-viewer skill install --agent claude,codex",
+          "code-viewer skill install --agent all --global",
+        ],
+        [
+          "code-viewer-accounts",
+          "code-viewer-annotate",
+          "code-viewer-journal",
+          "code-viewer-query",
+          "code-viewer-snapshot",
+        ],
+      ]);
+    },
+  );
 
   // 接続の設定とスマホの操作を別の見出しにし、日本語の本文に「電話」を混ぜない。
   test("the Japanese help names the phone controls clearly", () => {
@@ -879,12 +895,15 @@ describe("help page install guide", () => {
     ["en", "manual", [[], 2]],
     ["ja", "manual", [[], 2]],
     ["en", "hidden", null],
-  ])("in %s with the offer %s the install section shows %j", (lang, state, expected) => {
-    renderHelpPage(lang, "install-app", {
-      installOffer: switchableOffer(state),
-    });
-    expect(installGuide()).toEqual(expected);
-  });
+  ])(
+    "in %s with the offer %s the install section shows %j",
+    (lang, state, expected) => {
+      renderHelpPage(lang, "install-app", {
+        installOffer: switchableOffer(state),
+      });
+      expect(installGuide()).toEqual(expected);
+    },
+  );
 
   test("the install button appears when the browser starts offering, and asks the browser once", () => {
     const offer = switchableOffer("manual");
@@ -1060,16 +1079,17 @@ describe("help page captures", () => {
     FIGURES.map(([section, names]) => [lang, section, names] as const),
   );
 
-  test.each(
-    CASES,
-  )("in %s the %s section shows its captures, each with a description", (lang, section, names) => {
-    const figures = renderedFigures(lang, section);
-    expect(
-      figures.map(({ href, src, alt }) => [href === src, src, alt !== ""]),
-    ).toEqual(
-      names.map((name) => [true, `/help-images/${name}.${lang}.webp`, true]),
-    );
-  });
+  test.each(CASES)(
+    "in %s the %s section shows its captures, each with a description",
+    (lang, section, names) => {
+      const figures = renderedFigures(lang, section);
+      expect(
+        figures.map(({ href, src, alt }) => [href === src, src, alt !== ""]),
+      ).toEqual(
+        names.map((name) => [true, `/help-images/${name}.${lang}.webp`, true]),
+      );
+    },
+  );
 
   test("ships exactly the captures the help shows", () => {
     const shown = [

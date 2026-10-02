@@ -140,15 +140,15 @@ describe("closing an image tab opened from a terminal", () => {
   test.each([
     { name: "a shell", pane: "left" as const, message: "a terminal tab" },
     { name: "nothing", pane: "right" as const, message: "empty" },
-  ])("closing when the pane front is $name throws instead of closing another tab", ({
-    pane,
-    message,
-  }) => {
-    const tabs = tabsOver(onePane());
-    const back = createImageTabReturn(tabs);
+  ])(
+    "closing when the pane front is $name throws instead of closing another tab",
+    ({ pane, message }) => {
+      const tabs = tabsOver(onePane());
+      const back = createImageTabReturn(tabs);
 
-    expect(() => back.close(pane)).toThrow(
-      `image tab close: the ${pane} pane front is ${message}, not an image tab`,
-    );
-  });
+      expect(() => back.close(pane)).toThrow(
+        `image tab close: the ${pane} pane front is ${message}, not an image tab`,
+      );
+    },
+  );
 });

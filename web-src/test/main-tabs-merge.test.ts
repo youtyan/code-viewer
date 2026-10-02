@@ -245,30 +245,30 @@ describe("mergeLayouts", () => {
       regrouped: false,
       expected: "x [y] l",
     },
-  ])("元はこの窓のグループの順に並べ直して比べる: $name", ({
-    regrouped,
-    expected,
-  }) => {
-    const lib = (layout: Layout): Layout => {
-      for (const pane of [layout.panes.left, layout.panes.right])
-        for (const tab of pane?.tabs ?? [])
-          if (tab.id === "l" && tab.target.kind === "file")
-            tab.target = { ...tab.target, project: "/w/q" };
-      return layout;
-    };
-    // この窓のグループの順: /w/p (x, y) → /w/q (l)。保存は別の窓の順 (l が先頭)。
-    const rank = (tab: { target: TabTarget }) =>
-      tab.target.kind !== "terminal" && tab.target.project === "/w/q" ? 1 : 0;
-    const base = lib(layoutOf("l x [y]"));
-    const mine = regroup(lib(layoutOf("l x [y]")), rank);
-    const theirs = lib(layoutOf("x [y] | [l]"));
-    const merged = mergeLayouts(
-      regrouped ? regroup(base, rank) : base,
-      mine,
-      theirs,
-    );
-    expect(show(merged.layout)).toBe(expected);
-  });
+  ])(
+    "元はこの窓のグループの順に並べ直して比べる: $name",
+    ({ regrouped, expected }) => {
+      const lib = (layout: Layout): Layout => {
+        for (const pane of [layout.panes.left, layout.panes.right])
+          for (const tab of pane?.tabs ?? [])
+            if (tab.id === "l" && tab.target.kind === "file")
+              tab.target = { ...tab.target, project: "/w/q" };
+        return layout;
+      };
+      // この窓のグループの順: /w/p (x, y) → /w/q (l)。保存は別の窓の順 (l が先頭)。
+      const rank = (tab: { target: TabTarget }) =>
+        tab.target.kind !== "terminal" && tab.target.project === "/w/q" ? 1 : 0;
+      const base = lib(layoutOf("l x [y]"));
+      const mine = regroup(lib(layoutOf("l x [y]")), rank);
+      const theirs = lib(layoutOf("x [y] | [l]"));
+      const merged = mergeLayouts(
+        regrouped ? regroup(base, rank) : base,
+        mine,
+        theirs,
+      );
+      expect(show(merged.layout)).toBe(expected);
+    },
+  );
 });
 
 // 2 つの窓がそれぞれ閉じる・開く・動かすを 1〜3 手ずつした後に重ねても、

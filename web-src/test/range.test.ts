@@ -253,29 +253,29 @@ describe("cancelling the rest of a stream", () => {
         ),
       expected: "one",
     },
-  ])("$name keeps what it read and logs a failed cancel", async ({
-    read,
-    expected,
-  }) => {
-    const failure = new Error("sample cancel failure");
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode("one\ntwo\nthree\n"));
-      },
-      cancel() {
-        throw failure;
-      },
-    });
-    const errors = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    try {
-      expect(await read(stream)).toEqual(expected);
-      expect(errors.mock.calls).toEqual([
-        ["[code-viewer] could not cancel the rest of a stream", failure],
-      ]);
-    } finally {
-      errors.mockRestore();
-    }
-  });
+  ])(
+    "$name keeps what it read and logs a failed cancel",
+    async ({ read, expected }) => {
+      const failure = new Error("sample cancel failure");
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("one\ntwo\nthree\n"));
+        },
+        cancel() {
+          throw failure;
+        },
+      });
+      const errors = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      try {
+        expect(await read(stream)).toEqual(expected);
+        expect(errors.mock.calls).toEqual([
+          ["[code-viewer] could not cancel the rest of a stream", failure],
+        ]);
+      } finally {
+        errors.mockRestore();
+      }
+    },
+  );
 });

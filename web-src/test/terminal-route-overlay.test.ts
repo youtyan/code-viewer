@@ -135,10 +135,9 @@ test.each([
   { href: "/todif", search: "?from=HEAD", expected: "/todif" },
   { href: "/", search: "?terminal=", expected: "/" },
   { href: "/", search: "?terminal=%12", expected: "/" },
-])("projectSwitchPath($href, $search) = $expected", ({
-  href,
-  search,
-  expected,
-}) => {
-  expect(projectSwitchPath(href, search)).toBe(expected);
-});
+])(
+  "projectSwitchPath($href, $search) = $expected",
+  ({ href, search, expected }) => {
+    expect(projectSwitchPath(href, search)).toBe(expected);
+  },
+);

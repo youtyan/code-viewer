@@ -181,55 +181,56 @@ describe("annotation URL state", () => {
       expectedDetailHidden: false,
       expectedActiveEntry: "entry-1",
     },
-  ])("restores $name after reload", async ({
-    url,
-    expectedDetailHidden,
-    expectedActiveEntry,
-  }) => {
-    setupDom();
-    window.history.replaceState(null, "", url);
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      ({
-        ok: true,
-        json: async () => ({
-          version: 1,
-          sessions: [
-            {
-              id: "session-1",
-              title: "Sample session",
-              created_at: "2026-01-01T00:00:00.000Z",
-              entries: [
-                {
-                  id: "entry-1",
-                  path: "sample.ts",
-                  line: { start: 2, end: 2 },
-                  range: { from: "HEAD", to: "worktree" },
-                  title: "Sample note",
-                  body: "Sample body",
-                  created_at: "2026-01-01T00:00:00.000Z",
-                },
-              ],
-            },
-          ],
-        }),
-      }) as Response) as unknown as typeof fetch;
-    try {
-      const ui = createAnnotationsUi(createDeps());
-      await ui.refreshAnnotations();
+  ])(
+    "restores $name after reload",
+    async ({ url, expectedDetailHidden, expectedActiveEntry }) => {
+      setupDom();
+      window.history.replaceState(null, "", url);
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () =>
+        ({
+          ok: true,
+          json: async () => ({
+            version: 1,
+            sessions: [
+              {
+                id: "session-1",
+                title: "Sample session",
+                created_at: "2026-01-01T00:00:00.000Z",
+                entries: [
+                  {
+                    id: "entry-1",
+                    path: "sample.ts",
+                    line: { start: 2, end: 2 },
+                    range: { from: "HEAD", to: "worktree" },
+                    title: "Sample note",
+                    body: "Sample body",
+                    created_at: "2026-01-01T00:00:00.000Z",
+                  },
+                ],
+              },
+            ],
+          }),
+        }) as Response) as unknown as typeof fetch;
+      try {
+        const ui = createAnnotationsUi(createDeps());
+        await ui.refreshAnnotations();
 
-      expect(q<HTMLElement>(document, "#annotation-panel").hidden).toBe(false);
-      expect(q<HTMLElement>(document, "#annotation-detail").hidden).toBe(
-        expectedDetailHidden,
-      );
-      expect(
-        document.querySelector<HTMLElement>(".annotation-entries li.active")
-          ?.dataset.entryId ?? null,
-      ).toBe(expectedActiveEntry);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
+        expect(q<HTMLElement>(document, "#annotation-panel").hidden).toBe(
+          false,
+        );
+        expect(q<HTMLElement>(document, "#annotation-detail").hidden).toBe(
+          expectedDetailHidden,
+        );
+        expect(
+          document.querySelector<HTMLElement>(".annotation-entries li.active")
+            ?.dataset.entryId ?? null,
+        ).toBe(expectedActiveEntry);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+  );
 });
 
 describe("annotation panel open state persistence", () => {
@@ -696,34 +697,37 @@ const searchQueries = [
 ];
 
 describe("annotation library workflow", () => {
-  test.each(
-    searchQueries,
-  )("searches the complete library for %j and keeps original step numbers", async (query) => {
-    await annotationHarness();
-    const input = q<HTMLInputElement>(document, "#annotation-search");
-    input.value = query;
-    input.dispatchEvent(new Event("input"));
-    const literal = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const oracle = new RegExp(literal, "i");
-    const expected = noteSession.entries.filter((entry) =>
-      oracle.test(
-        [noteSession.title, entry.title, entry.body, entry.path].join("\n"),
-      ),
-    );
-    expect(
-      [...document.querySelectorAll<HTMLElement>(".annotation-entries li")].map(
-        (row) => row.dataset.entryId,
-      ),
-    ).toEqual(expected.map((entry) => entry.id));
-    expect(
-      [...document.querySelectorAll<HTMLElement>(".annotation-entry-open")].map(
-        (button) => Number(button.dataset.step),
-      ),
-    ).toEqual(expected.map((entry) => noteSession.entries.indexOf(entry) + 1));
-    expect(q(document, "#annotation-list-count").textContent).toBe(
-      `${expected.length} / 3 notes`,
-    );
-  });
+  test.each(searchQueries)(
+    "searches the complete library for %j and keeps original step numbers",
+    async (query) => {
+      await annotationHarness();
+      const input = q<HTMLInputElement>(document, "#annotation-search");
+      input.value = query;
+      input.dispatchEvent(new Event("input"));
+      const literal = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const oracle = new RegExp(literal, "i");
+      const expected = noteSession.entries.filter((entry) =>
+        oracle.test(
+          [noteSession.title, entry.title, entry.body, entry.path].join("\n"),
+        ),
+      );
+      expect(
+        [
+          ...document.querySelectorAll<HTMLElement>(".annotation-entries li"),
+        ].map((row) => row.dataset.entryId),
+      ).toEqual(expected.map((entry) => entry.id));
+      expect(
+        [
+          ...document.querySelectorAll<HTMLElement>(".annotation-entry-open"),
+        ].map((button) => Number(button.dataset.step)),
+      ).toEqual(
+        expected.map((entry) => noteSession.entries.indexOf(entry) + 1),
+      );
+      expect(q(document, "#annotation-list-count").textContent).toBe(
+        `${expected.length} / 3 notes`,
+      );
+    },
+  );
 
   test("scopes notes to the current file and restores all locations", async () => {
     await annotationHarness();
@@ -756,37 +760,37 @@ describe("annotation library workflow", () => {
 });
 
 describe("annotation editor workflow", () => {
-  test.each([
-    false,
-    true,
-  ])("preserves Markdown when switching preview and refreshing (edit=%s)", async (edit) => {
-    const { ui, state } = await annotationHarness({
-      getAnnotationFollow: () => true,
-    });
-    await openNoteEditor(ui, edit);
-    const body = inputNote("body", "## Finding\n\n**Keep this draft**");
-    q<HTMLButtonElement>(
-      document,
-      ".annotation-editor-tabs button:last-child",
-    ).click();
-    expect(q(document, ".annotation-editor-preview h2").textContent).toBe(
-      "Finding #",
-    );
-    expect(q(document, ".annotation-editor-preview strong").textContent).toBe(
-      "Keep this draft",
-    );
-    state.sessions[0].entries[0].body = "Background update";
-    ui.handleSse(JSON.stringify({ kind: "add", entry_id: "note-beta" }));
-    await ui.refreshAnnotations();
-    expect(q(document, '.annotation-edit-form [name="body"]')).toBe(body);
-    expect(body.value).toBe("## Finding\n\n**Keep this draft**");
-    expect(ui.getActiveSessionEntries()).toEqual([]);
-    q<HTMLButtonElement>(
-      document,
-      ".annotation-editor-tabs button:first-child",
-    ).click();
-    expect(body.hidden).toBe(false);
-  });
+  test.each([false, true])(
+    "preserves Markdown when switching preview and refreshing (edit=%s)",
+    async (edit) => {
+      const { ui, state } = await annotationHarness({
+        getAnnotationFollow: () => true,
+      });
+      await openNoteEditor(ui, edit);
+      const body = inputNote("body", "## Finding\n\n**Keep this draft**");
+      q<HTMLButtonElement>(
+        document,
+        ".annotation-editor-tabs button:last-child",
+      ).click();
+      expect(q(document, ".annotation-editor-preview h2").textContent).toBe(
+        "Finding #",
+      );
+      expect(q(document, ".annotation-editor-preview strong").textContent).toBe(
+        "Keep this draft",
+      );
+      state.sessions[0].entries[0].body = "Background update";
+      ui.handleSse(JSON.stringify({ kind: "add", entry_id: "note-beta" }));
+      await ui.refreshAnnotations();
+      expect(q(document, '.annotation-edit-form [name="body"]')).toBe(body);
+      expect(body.value).toBe("## Finding\n\n**Keep this draft**");
+      expect(ui.getActiveSessionEntries()).toEqual([]);
+      q<HTMLButtonElement>(
+        document,
+        ".annotation-editor-tabs button:first-child",
+      ).click();
+      expect(body.hidden).toBe(false);
+    },
+  );
 
   test.each([
     { start: "", end: "", valid: true, line: undefined },
@@ -796,49 +800,47 @@ describe("annotation editor workflow", () => {
     { start: "", end: "2", valid: false },
     { start: "0", end: "2", valid: false },
     { start: "1.5", end: "2", valid: false },
-  ])("validates line bounds $start–$end before saving", async ({
-    start,
-    end,
-    valid,
-    line,
-  }) => {
-    const { ui, state } = await annotationHarness();
-    const posted: Record<string, unknown>[] = [];
-    globalThis.fetch = async (_input, init) => {
-      if (init?.method === "POST") {
-        const payload = JSON.parse(String(init.body));
-        posted.push(payload);
-        return new Response(
-          JSON.stringify({
-            entry: state.sessions[0].entries[0],
-            session_id: noteSession.id,
-            session_title: noteSession.title,
-          }),
-        );
-      }
-      return new Response(JSON.stringify(state));
-    };
-    await openNoteEditor(ui);
-    inputNote("body", "A new note");
-    inputNote("start", start);
-    inputNote("end", end);
-    q<HTMLFormElement>(document, ".annotation-edit-form").dispatchEvent(
-      new Event("submit", { bubbles: true, cancelable: true }),
-    );
-    await vi.waitFor(() => expect(posted.length).toBe(valid ? 1 : 0));
-    if (valid) {
-      expect(posted[0]).toMatchObject({
-        action: "add",
-        path: "src/example.ts",
-        body: "A new note",
-        range: { from: "HEAD~1", to: "worktree" },
-      });
-      expect(posted[0].line).toEqual(line);
-    } else
-      expect(
-        q<HTMLFormElement>(document, ".annotation-edit-form").checkValidity(),
-      ).toBe(false);
-  });
+  ])(
+    "validates line bounds $start–$end before saving",
+    async ({ start, end, valid, line }) => {
+      const { ui, state } = await annotationHarness();
+      const posted: Record<string, unknown>[] = [];
+      globalThis.fetch = async (_input, init) => {
+        if (init?.method === "POST") {
+          const payload = JSON.parse(String(init.body));
+          posted.push(payload);
+          return new Response(
+            JSON.stringify({
+              entry: state.sessions[0].entries[0],
+              session_id: noteSession.id,
+              session_title: noteSession.title,
+            }),
+          );
+        }
+        return new Response(JSON.stringify(state));
+      };
+      await openNoteEditor(ui);
+      inputNote("body", "A new note");
+      inputNote("start", start);
+      inputNote("end", end);
+      q<HTMLFormElement>(document, ".annotation-edit-form").dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+      await vi.waitFor(() => expect(posted.length).toBe(valid ? 1 : 0));
+      if (valid) {
+        expect(posted[0]).toMatchObject({
+          action: "add",
+          path: "src/example.ts",
+          body: "A new note",
+          range: { from: "HEAD~1", to: "worktree" },
+        });
+        expect(posted[0].line).toEqual(line);
+      } else
+        expect(
+          q<HTMLFormElement>(document, ".annotation-edit-form").checkValidity(),
+        ).toBe(false);
+    },
+  );
 
   test("captures the data target including filters without adding a code line", async () => {
     const target = {
@@ -973,35 +975,35 @@ describe("annotation editor workflow", () => {
     { ctrlKey: false, metaKey: true, isComposing: false, expected: 1 },
     { ctrlKey: true, metaKey: false, isComposing: true, expected: 0 },
     { ctrlKey: false, metaKey: false, isComposing: false, expected: 0 },
-  ])("saves with the platform shortcut without interrupting composition: %j", async ({
-    expected,
-    ...modifiers
-  }) => {
-    const { ui, state } = await annotationHarness();
-    await openNoteEditor(ui);
-    const body = inputNote("body", "Keyboard note");
-    let posts = 0;
-    globalThis.fetch = async (_input, init) => {
-      if (init?.method === "POST") {
-        posts++;
-        return new Response(
-          JSON.stringify({
-            session_id: noteSession.id,
-            entry: state.sessions[0].entries[0],
-          }),
-        );
-      }
-      return new Response(JSON.stringify(state));
-    };
-    body.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        bubbles: true,
-        ...modifiers,
-      }),
-    );
-    await vi.waitFor(() => expect(posts).toBe(expected));
-  });
+  ])(
+    "saves with the platform shortcut without interrupting composition: %j",
+    async ({ expected, ...modifiers }) => {
+      const { ui, state } = await annotationHarness();
+      await openNoteEditor(ui);
+      const body = inputNote("body", "Keyboard note");
+      let posts = 0;
+      globalThis.fetch = async (_input, init) => {
+        if (init?.method === "POST") {
+          posts++;
+          return new Response(
+            JSON.stringify({
+              session_id: noteSession.id,
+              entry: state.sessions[0].entries[0],
+            }),
+          );
+        }
+        return new Response(JSON.stringify(state));
+      };
+      body.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          ...modifiers,
+        }),
+      );
+      await vi.waitFor(() => expect(posts).toBe(expected));
+    },
+  );
 });
 
 describe("reading notes beneath code", () => {
@@ -1028,33 +1030,32 @@ describe("reading notes beneath code", () => {
   test.each([
     { language: "en" as const, expected: "Lines 2–4", read: "Read in panel" },
     { language: "ja" as const, expected: "2–4行の注釈", read: "パネルで読む" },
-  ])("shows readable text and target lines with the panel open: $language", async ({
-    language,
-    expected,
-    read,
-  }) => {
-    const { ui } = await inlineHarness({ getLanguage: () => language });
-    await ui.openAnnotationEntry("note-alpha");
-    const row = q(
-      document,
-      '.gdp-annotation-row[data-annotation-id="note-alpha"]',
-    );
-    const body = q<HTMLElement>(row, ".gdp-annotation-inline-body");
-    const toggle = q<HTMLButtonElement>(row, ".gdp-annotation-expand");
-    expect(body.hidden).toBe(false);
-    expect(body.textContent).toContain("Detailed finding");
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(
-      document.getElementById(toggle.getAttribute("aria-controls") || ""),
-    ).toBe(body);
-    expect(q(row, ".gdp-annotation-inline-location").textContent).toBe(
-      expected,
-    );
-    expect(q(row, ".gdp-annotation-read").textContent).toBe(read);
-    expect(q(row, '[role="note"]').getAttribute("aria-labelledby")).toBe(
-      q(row, ".gdp-annotation-inline-title").id,
-    );
-  });
+  ])(
+    "shows readable text and target lines with the panel open: $language",
+    async ({ language, expected, read }) => {
+      const { ui } = await inlineHarness({ getLanguage: () => language });
+      await ui.openAnnotationEntry("note-alpha");
+      const row = q(
+        document,
+        '.gdp-annotation-row[data-annotation-id="note-alpha"]',
+      );
+      const body = q<HTMLElement>(row, ".gdp-annotation-inline-body");
+      const toggle = q<HTMLButtonElement>(row, ".gdp-annotation-expand");
+      expect(body.hidden).toBe(false);
+      expect(body.textContent).toContain("Detailed finding");
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      expect(
+        document.getElementById(toggle.getAttribute("aria-controls") || ""),
+      ).toBe(body);
+      expect(q(row, ".gdp-annotation-inline-location").textContent).toBe(
+        expected,
+      );
+      expect(q(row, ".gdp-annotation-read").textContent).toBe(read);
+      expect(q(row, '[role="note"]').getAttribute("aria-labelledby")).toBe(
+        q(row, ".gdp-annotation-inline-title").id,
+      );
+    },
+  );
 
   test.each([
     {
@@ -1064,24 +1065,24 @@ describe("reading notes beneath code", () => {
         "A long explanation about the input, its transformation, and the returned value that must remain readable without losing the final words",
     },
     { title: "", expected: "Note" },
-  ])("wraps the complete title without substituting raw Markdown: $title", async ({
-    title,
-    expected,
-  }) => {
-    const { ui, state } = await inlineHarness();
-    state.sessions[0].entries[0].title = title;
-    state.sessions[0].entries[0].body =
-      "## Example heading\n\n**Example explanation**";
-    await ui.refreshAnnotations();
-    await ui.openAnnotationEntry("note-alpha");
-    const heading = q(
-      document,
-      '.gdp-annotation-row[data-annotation-id="note-alpha"] .gdp-annotation-inline-title',
-    );
-    expect(heading.textContent).toBe(expected);
-    expect(getComputedStyle(heading).whiteSpace).toBe("normal");
-    expect(getComputedStyle(heading).overflowWrap).toBe("anywhere");
-  });
+  ])(
+    "wraps the complete title without substituting raw Markdown: $title",
+    async ({ title, expected }) => {
+      const { ui, state } = await inlineHarness();
+      state.sessions[0].entries[0].title = title;
+      state.sessions[0].entries[0].body =
+        "## Example heading\n\n**Example explanation**";
+      await ui.refreshAnnotations();
+      await ui.openAnnotationEntry("note-alpha");
+      const heading = q(
+        document,
+        '.gdp-annotation-row[data-annotation-id="note-alpha"] .gdp-annotation-inline-title',
+      );
+      expect(heading.textContent).toBe(expected);
+      expect(getComputedStyle(heading).whiteSpace).toBe("normal");
+      expect(getComputedStyle(heading).overflowWrap).toBe("anywhere");
+    },
+  );
 
   test("keeps each explicit collapse choice through updates and panel changes", async () => {
     const { ui } = await inlineHarness();
@@ -1193,33 +1194,35 @@ describe("reading notes beneath code", () => {
       language: "ja" as const,
       expected: "データストア / sample.db / sample_table / data",
     },
-  ])("labels a data note's location in the list: $language", async ({
-    language,
-    expected,
-  }) => {
-    const { ui, state } = await inlineHarness({ getLanguage: () => language });
-    const entries: AnnotationEntry[] = state.sessions[0].entries;
-    entries.push({
-      id: "note-data",
-      created_at: "2026-01-01T00:00:00.000Z",
-      path: "",
-      range: { from: "HEAD", to: "worktree" },
-      target: {
-        kind: "database",
-        db: "sample.db",
-        table: "sample_table",
-        tab: "data",
-      },
-      title: "Data finding",
-      body: "A note about a table",
-    });
-    await ui.refreshAnnotations();
-    const location = q(
-      document,
-      '[data-entry-id="note-data"] .annotation-entry-location',
-    );
-    expect(location.textContent).toBe(expected);
-  });
+  ])(
+    "labels a data note's location in the list: $language",
+    async ({ language, expected }) => {
+      const { ui, state } = await inlineHarness({
+        getLanguage: () => language,
+      });
+      const entries: AnnotationEntry[] = state.sessions[0].entries;
+      entries.push({
+        id: "note-data",
+        created_at: "2026-01-01T00:00:00.000Z",
+        path: "",
+        range: { from: "HEAD", to: "worktree" },
+        target: {
+          kind: "database",
+          db: "sample.db",
+          table: "sample_table",
+          tab: "data",
+        },
+        title: "Data finding",
+        body: "A note about a table",
+      });
+      await ui.refreshAnnotations();
+      const location = q(
+        document,
+        '[data-entry-id="note-data"] .annotation-entry-location',
+      );
+      expect(location.textContent).toBe(expected);
+    },
+  );
 
   test("updates inline controls when the language changes", async () => {
     let language: "en" | "ja" = "en";

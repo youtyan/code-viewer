@@ -63,25 +63,26 @@ describe("a request that waits for an idle stop that fails", () => {
       name: "画面の再起動 (restart)",
       call: (b: ReturnType<typeof createEntryBackends>) => b.restart(ROOT),
     },
-  ])("$name: 止められなかった停止を待った要求は、動いたままの裏で ok になる", async ({
-    call,
-  }) => {
-    const { b, clock, stopping } = backendsWithFailingStop();
-    await b.target(ROOT);
-    clock.now += IDLE_MS;
-    const sweep = b
-      .stopIdleBackends()
-      .then(() => null)
-      .catch((error: unknown) => error);
-    const waiting = call(b)
-      .then((target) => ({ target }))
-      .catch((error: unknown) => ({ error }));
-    stopping.fail?.(new Error("sample: kill failed"));
+  ])(
+    "$name: 止められなかった停止を待った要求は、動いたままの裏で ok になる",
+    async ({ call }) => {
+      const { b, clock, stopping } = backendsWithFailingStop();
+      await b.target(ROOT);
+      clock.now += IDLE_MS;
+      const sweep = b
+        .stopIdleBackends()
+        .then(() => null)
+        .catch((error: unknown) => error);
+      const waiting = call(b)
+        .then((target) => ({ target }))
+        .catch((error: unknown) => ({ error }));
+      stopping.fail?.(new Error("sample: kill failed"));
 
-    // 止める周期の失敗は周期の側に出る (これは今のまま)。
-    expect(await sweep).toBeInstanceOf(Error);
-    expect(b.state(ROOT)).toBe("running");
-    // 待っていた要求は、動いている裏で答えられる。
-    expect(await waiting).toMatchObject({ target: { status: "ok" } });
-  });
+      // 止める周期の失敗は周期の側に出る (これは今のまま)。
+      expect(await sweep).toBeInstanceOf(Error);
+      expect(b.state(ROOT)).toBe("running");
+      // 待っていた要求は、動いている裏で答えられる。
+      expect(await waiting).toMatchObject({ target: { status: "ok" } });
+    },
+  );
 });

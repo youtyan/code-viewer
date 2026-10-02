@@ -47,13 +47,13 @@ describe("tmuxAttachCommandLine", () => {
       pane: "%12",
       line: "env -u TMUX 'tmux' attach-session -t '%12' && exit\r",
     },
-  ] as const)("$pane を引用し、TMUX を外して attach し、抜けたらシェルも終える 1 行を返す", ({
-    pane,
-    line,
-  }) => {
-    const typed = tmuxAttachCommandLine(pane);
-    expect([typed, /kill-|detach/.test(typed)]).toEqual([line, false]);
-  });
+  ] as const)(
+    "$pane を引用し、TMUX を外して attach し、抜けたらシェルも終える 1 行を返す",
+    ({ pane, line }) => {
+      const typed = tmuxAttachCommandLine(pane);
+      expect([typed, /kill-|detach/.test(typed)]).toEqual([line, false]);
+    },
+  );
 
   test("実行するために改行で終える", () => {
     // 改行が無いと打ち込まれるだけで走らない。

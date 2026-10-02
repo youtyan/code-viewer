@@ -158,31 +158,32 @@ describe("terminal view: シェルの作成と停止", () => {
   test.each([
     { name: "same pane", side: "left" as const },
     { name: "opposite pane", side: "right" as const },
-  ])("returning to a recent shell preserves its screen: $name", async ({
-    side,
-  }) => {
-    const first = shell("shell-a1");
-    const second = shell("shell-a2");
-    const { view } = setup([
-      () => json({ available: true, sessions: [first, second] }),
-    ]);
-    await view.loadShells();
-    await view.showInTab(first.id, "left");
-    const firstElement = view.tabPaneFor("left").firstElementChild;
-    await view.showInTab(second.id, "left");
-    await view.showInTab(first.id, side);
-    expect(terminalScreenState.screens[0]).toMatchObject({
-      attached: first,
-      attachCount: 1,
-    });
-    expect(view.tabPaneFor(side).firstElementChild).toBe(firstElement);
-    view.releaseTab(first.id);
-    expect(terminalScreenState.screens[0]?.attached).toBeNull();
-    view.dispose();
-    expect(terminalScreenState.screens.every((screen) => screen.disposed)).toBe(
-      true,
-    );
-  });
+  ])(
+    "returning to a recent shell preserves its screen: $name",
+    async ({ side }) => {
+      const first = shell("shell-a1");
+      const second = shell("shell-a2");
+      const { view } = setup([
+        () => json({ available: true, sessions: [first, second] }),
+      ]);
+      await view.loadShells();
+      await view.showInTab(first.id, "left");
+      const firstElement = view.tabPaneFor("left").firstElementChild;
+      await view.showInTab(second.id, "left");
+      await view.showInTab(first.id, side);
+      expect(terminalScreenState.screens[0]).toMatchObject({
+        attached: first,
+        attachCount: 1,
+      });
+      expect(view.tabPaneFor(side).firstElementChild).toBe(firstElement);
+      view.releaseTab(first.id);
+      expect(terminalScreenState.screens[0]?.attached).toBeNull();
+      view.dispose();
+      expect(
+        terminalScreenState.screens.every((screen) => screen.disposed),
+      ).toBe(true);
+    },
+  );
 
   test("many shell switches keep a bounded number of screens and preserve the opposite pane", async () => {
     const sessions = Array.from({ length: 8 }, (_, i) => shell(`shell-${i}`));
@@ -272,18 +273,18 @@ describe("terminal view: シェルの作成と停止", () => {
       respond: () => Promise.reject(new TypeError("network down")),
       message: "Could not open this pane.\nTypeError: network down",
     },
-  ])("ペインを開けなければ理由を知らせにも渡し、タブは開かない ($name)", async ({
-    respond,
-    message,
-  }) => {
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const { view, opened, openFailures } = setup([respond]);
-    await view.openPaneInTab("%1", "left");
-    consoleError.mockRestore();
-    expect([opened, openFailures]).toEqual([[], [message]]);
-  });
+  ])(
+    "ペインを開けなければ理由を知らせにも渡し、タブは開かない ($name)",
+    async ({ respond, message }) => {
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      const { view, opened, openFailures } = setup([respond]);
+      await view.openPaneInTab("%1", "left");
+      consoleError.mockRestore();
+      expect([opened, openFailures]).toEqual([[], [message]]);
+    },
+  );
 
   test.each([
     {
@@ -297,14 +298,16 @@ describe("terminal view: シェルの作成と停止", () => {
       status: 500,
       message: "Could not open a shell. (HTTP 500): limit 8",
     },
-  ])("作れなければ理由と本文ごと reject し、タブは開かない ($name)", async ({
-    status,
-    message,
-  }) => {
-    const { view, opened } = setup([() => new Response("limit 8", { status })]);
-    await expect(view.createShell("left")).rejects.toThrow(message);
-    expect([opened, view.knownShells()]).toEqual([[], null]);
-  });
+  ])(
+    "作れなければ理由と本文ごと reject し、タブは開かない ($name)",
+    async ({ status, message }) => {
+      const { view, opened } = setup([
+        () => new Response("limit 8", { status }),
+      ]);
+      await expect(view.createShell("left")).rejects.toThrow(message);
+      expect([opened, view.knownShells()]).toEqual([[], null]);
+    },
+  );
 
   test("止めたシェルは一覧から外す。止められなければ一覧はそのまま", async () => {
     const { view, requests } = setup([
@@ -569,42 +572,42 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
       sent: "sample-other-key",
     },
     { name: "このページのプロジェクトのグループ", key: undefined, sent: null },
-  ])("「新しいシェルで開き直す」はそのタブのグループのプロジェクトの鍵で開く: $name", async ({
-    key,
-    sent,
-  }) => {
-    const reopened = { ...shell("shell-p6"), tty: "/dev/sample-new" };
-    const asked: string[] = [];
-    const { view, session, requests, projects } = await showing(
-      "shell-p6",
-      [() => json({ session: reopened })],
-      {
-        reopenProject: async (id) => {
-          asked.push(id);
-          return key;
+  ])(
+    "「新しいシェルで開き直す」はそのタブのグループのプロジェクトの鍵で開く: $name",
+    async ({ key, sent }) => {
+      const reopened = { ...shell("shell-p6"), tty: "/dev/sample-new" };
+      const asked: string[] = [];
+      const { view, session, requests, projects } = await showing(
+        "shell-p6",
+        [() => json({ session: reopened })],
+        {
+          reopenProject: async (id) => {
+            asked.push(id);
+            return key;
+          },
         },
-      },
-    );
-    view.markEnded(session.id);
+      );
+      view.markEnded(session.id);
 
-    view
-      .tabPaneFor("left")
-      .querySelector<HTMLButtonElement>(".empty-action-primary")
-      ?.click();
-    await vi.waitFor(() =>
-      expect(terminalScreenState.screens[0]?.attached).toEqual(reopened),
-    );
+      view
+        .tabPaneFor("left")
+        .querySelector<HTMLButtonElement>(".empty-action-primary")
+        ?.click();
+      await vi.waitFor(() =>
+        expect(terminalScreenState.screens[0]?.attached).toEqual(reopened),
+      );
 
-    expect([
-      asked,
-      requests[requests.length - 1],
-      projects[projects.length - 1],
-    ]).toEqual([
-      ["shell-p6"],
-      'POST /_shell/create {"id":"shell-p6","cols":80,"rows":24}',
-      sent,
-    ]);
-  });
+      expect([
+        asked,
+        requests[requests.length - 1],
+        projects[projects.length - 1],
+      ]).toEqual([
+        ["shell-p6"],
+        'POST /_shell/create {"id":"shell-p6","cols":80,"rows":24}',
+        sent,
+      ]);
+    },
+  );
 
   test("開き直せなければ理由を知らせ、案内を残す", async () => {
     const consoleError = vi

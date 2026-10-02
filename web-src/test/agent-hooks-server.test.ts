@@ -141,23 +141,22 @@ describe("paths", () => {
     agent: HookAgent;
     env: Record<string, string>;
     expected: string;
-  }[])("default settings directory of $agent with $env", ({
-    agent,
-    env,
-    expected,
-  }) => {
-    expect(defaultAgentConfigDir(agent, env, "/home/sample")).toBe(expected);
-  });
+  }[])(
+    "default settings directory of $agent with $env",
+    ({ agent, env, expected }) => {
+      expect(defaultAgentConfigDir(agent, env, "/home/sample")).toBe(expected);
+    },
+  );
 
   test.each([
     { agent: "claude", file: "settings.json" },
     { agent: "codex", file: "hooks.json" },
-  ] satisfies { agent: HookAgent; file: string }[])("$agent writes $file", ({
-    agent,
-    file,
-  }) => {
-    expect(agentHookFile(agent, "/cfg")).toBe(join("/cfg", file));
-  });
+  ] satisfies { agent: HookAgent; file: string }[])(
+    "$agent writes $file",
+    ({ agent, file }) => {
+      expect(agentHookFile(agent, "/cfg")).toBe(join("/cfg", file));
+    },
+  );
 
   test("the command names only the launcher and the agent", () => {
     expect(agentHookCommand({ ...launcher, path: "/s/x-hook" }, "codex")).toBe(
@@ -185,49 +184,52 @@ describe("install and uninstall", () => {
   ] satisfies {
     name: string;
     initial: string | null;
-  }[])("install, reinstall, uninstall round-trips ($name)", async ({
-    initial,
-  }) => {
-    for (const agent of ["claude", "codex"] as const) {
-      const path = settingsPath(agent);
-      if (initial !== null) writeFileSync(path, initial, "utf8");
+  }[])(
+    "install, reinstall, uninstall round-trips ($name)",
+    async ({ initial }) => {
+      for (const agent of ["claude", "codex"] as const) {
+        const path = settingsPath(agent);
+        if (initial !== null) writeFileSync(path, initial, "utf8");
 
-      const first = await apply("install", agent);
-      expect(first.result.changed).toBe(true);
-      const afterInstall = readFileSync(path, "utf8");
-      // 確認画面の計画と、実際に書いた中身が一致する。
-      const expected = planHookChange(
-        initial === null ? null : JSON.parse(initial),
-        "install",
-        HOOK_SPECS[agent],
-        agentHookCommand(launcher, agent),
-      ).next;
-      expect(JSON.parse(afterInstall)).toEqual(expected);
-      expect(
-        first.plan.added.map((change: { entry: unknown }) => change.entry),
-      ).toEqual(
-        HOOK_SPECS[agent].map(
-          (spec) =>
-            (expected.hooks as Record<string, unknown[]>)[spec.event]?.slice(
-              -1,
-            )[0],
-        ),
-      );
-      expect(agentHookStatus(target(agent), launcher).state).toBe("installed");
+        const first = await apply("install", agent);
+        expect(first.result.changed).toBe(true);
+        const afterInstall = readFileSync(path, "utf8");
+        // 確認画面の計画と、実際に書いた中身が一致する。
+        const expected = planHookChange(
+          initial === null ? null : JSON.parse(initial),
+          "install",
+          HOOK_SPECS[agent],
+          agentHookCommand(launcher, agent),
+        ).next;
+        expect(JSON.parse(afterInstall)).toEqual(expected);
+        expect(
+          first.plan.added.map((change: { entry: unknown }) => change.entry),
+        ).toEqual(
+          HOOK_SPECS[agent].map(
+            (spec) =>
+              (expected.hooks as Record<string, unknown[]>)[spec.event]?.slice(
+                -1,
+              )[0],
+          ),
+        );
+        expect(agentHookStatus(target(agent), launcher).state).toBe(
+          "installed",
+        );
 
-      const second = await apply("install", agent);
-      expect(second.result.changed).toBe(false);
-      expect(second.result.backupPath).toBeNull();
-      expect(readFileSync(path, "utf8")).toBe(afterInstall);
+        const second = await apply("install", agent);
+        expect(second.result.changed).toBe(false);
+        expect(second.result.backupPath).toBeNull();
+        expect(readFileSync(path, "utf8")).toBe(afterInstall);
 
-      const removed = await apply("uninstall", agent);
-      expect(removed.result.changed).toBe(true);
-      // 無かったファイルは消さずに空のオブジェクトとして残す (作ったのが
-      // 自分かどうかを外すときには見分けられず、ファイルは消さない)。
-      expect(readFileSync(path, "utf8")).toBe(initial ?? "{}\n");
-      expect(agentHookStatus(target(agent), launcher).state).toBe("none");
-    }
-  });
+        const removed = await apply("uninstall", agent);
+        expect(removed.result.changed).toBe(true);
+        // 無かったファイルは消さずに空のオブジェクトとして残す (作ったのが
+        // 自分かどうかを外すときには見分けられず、ファイルは消さない)。
+        expect(readFileSync(path, "utf8")).toBe(initial ?? "{}\n");
+        expect(agentHookStatus(target(agent), launcher).state).toBe("none");
+      }
+    },
+  );
 
   test("keeps other tools' hooks and reports how many", async () => {
     writeFileSync(settingsPath(), JSON.stringify(FOREIGN), "utf8");
@@ -469,33 +471,33 @@ describe("file properties", () => {
       replacement: '{"model":"changed"}\n',
       reasons: ["resolved path", "file identity", "content"],
     },
-  ])("rejects a symlink retargeted to $name and reports every conflict", async ({
-    replacement,
-    reasons,
-  }) => {
-    const linked = join(root, "linked");
-    mkdirSync(linked);
-    const first = join(linked, "first.json");
-    const second = join(linked, "second.json");
-    writeFileSync(first, "{}\n", "utf8");
-    writeFileSync(second, replacement, "utf8");
-    symlinkSync(first, settingsPath());
-    const plan = planAgentHooks(target(), "install", launcher, NOW);
-    rmSync(settingsPath());
-    symlinkSync(second, settingsPath());
+  ])(
+    "rejects a symlink retargeted to $name and reports every conflict",
+    async ({ replacement, reasons }) => {
+      const linked = join(root, "linked");
+      mkdirSync(linked);
+      const first = join(linked, "first.json");
+      const second = join(linked, "second.json");
+      writeFileSync(first, "{}\n", "utf8");
+      writeFileSync(second, replacement, "utf8");
+      symlinkSync(first, settingsPath());
+      const plan = planAgentHooks(target(), "install", launcher, NOW);
+      rmSync(settingsPath());
+      symlinkSync(second, settingsPath());
 
-    let caught: unknown;
-    try {
-      await applyAgentHooks(target(), "install", launcher, plan, NOW);
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toMatchObject({ code: "conflict" });
-    for (const reason of reasons) {
-      expect((caught as Error).message).toContain(reason);
-    }
-    expect(readFileSync(second, "utf8")).toBe(replacement);
-  });
+      let caught: unknown;
+      try {
+        await applyAgentHooks(target(), "install", launcher, plan, NOW);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toMatchObject({ code: "conflict" });
+      for (const reason of reasons) {
+        expect((caught as Error).message).toContain(reason);
+      }
+      expect(readFileSync(second, "utf8")).toBe(replacement);
+    },
+  );
 
   test("a link whose target is read-only is reported, not written", async () => {
     const linked = join(root, "linked");

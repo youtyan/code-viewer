@@ -200,7 +200,7 @@ describe("useWebglRenderer", () => {
     expect(fallbacks).toEqual(["dom"]);
     expect(warnings).toHaveLength(1);
     expect(String(warnings[0]?.[0])).toContain("WebGL renderer is unavailable");
-    expect((warnings[0]?.[1] as Error).message).toBe("WebGL2 not supported");
+    expect((warnings[0][1] as Error).message).toBe("WebGL2 not supported");
   });
 
   test("context を失ったら addon を外して DOM に戻し、理由を出す", async () => {

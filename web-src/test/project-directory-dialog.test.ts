@@ -160,19 +160,18 @@ describe("going through folders", () => {
       asked: "~",
       shown: "/home/sample",
     },
-  ])("Enter in the path goes to $name, without registering", async ({
-    typed,
-    asked,
-    shown,
-  }) => {
-    const { list, register } = open();
-    await shows("/work");
-    typeAndEnter(typed);
-    await shows(shown);
-    expect(list).toHaveBeenLastCalledWith(asked, false);
-    expect(register).not.toHaveBeenCalled();
-    expect(document.querySelector(".gdp-dialog-backdrop")).not.toBeNull();
-  });
+  ])(
+    "Enter in the path goes to $name, without registering",
+    async ({ typed, asked, shown }) => {
+      const { list, register } = open();
+      await shows("/work");
+      typeAndEnter(typed);
+      await shows(shown);
+      expect(list).toHaveBeenLastCalledWith(asked, false);
+      expect(register).not.toHaveBeenCalled();
+      expect(document.querySelector(".gdp-dialog-backdrop")).not.toBeNull();
+    },
+  );
 
   test("a row goes into that folder, and the up row goes back", async () => {
     const { list } = open();

@@ -244,16 +244,16 @@ describe("state store", () => {
     { value: true, expected: { navStoppedProjectsOpen: true } },
     { value: false, expected: { navStoppedProjectsOpen: false } },
     { value: "yes", expected: {} },
-  ])("the stopped projects section keeps only a boolean: $value", async ({
-    value,
-    expected,
-  }) => {
-    await withTempProject(async (dir) => {
-      expect(
-        await patchAppSettingsState(dir, { navStoppedProjectsOpen: value }),
-      ).toEqual({ version: 1, ...expected });
-    });
-  });
+  ])(
+    "the stopped projects section keeps only a boolean: $value",
+    async ({ value, expected }) => {
+      await withTempProject(async (dir) => {
+        expect(
+          await patchAppSettingsState(dir, { navStoppedProjectsOpen: value }),
+        ).toEqual({ version: 1, ...expected });
+      });
+    },
+  );
 
   // テーマ (配色)。以前の「ダークの色違い」(palette) は近いテーマに読み替え、書き戻す
   // ときは colorTheme だけが残る。
@@ -309,18 +309,18 @@ describe("state store", () => {
     { patch: { terminalTone: "match" }, expected: { terminalTone: "match" } },
     { patch: { terminalTone: "light" }, expected: {} },
     { patch: { terminalTone: true }, expected: {} },
-  ])("the terminal colors setting keeps $patch.terminalTone only when known", async ({
-    patch,
-    expected,
-  }) => {
-    await withTempProject(async (dir) => {
-      const saved = await patchAppSettingsState(dir, patch);
-      expect({ saved, reloaded: await loadAppSettingsState(dir) }).toEqual({
-        saved: { version: 1, ...expected },
-        reloaded: { version: 1, ...expected },
+  ])(
+    "the terminal colors setting keeps $patch.terminalTone only when known",
+    async ({ patch, expected }) => {
+      await withTempProject(async (dir) => {
+        const saved = await patchAppSettingsState(dir, patch);
+        expect({ saved, reloaded: await loadAppSettingsState(dir) }).toEqual({
+          saved: { version: 1, ...expected },
+          reloaded: { version: 1, ...expected },
+        });
       });
-    });
-  });
+    },
+  );
 
   test("grep selection history keeps the newest one hundred valid paths", async () => {
     await withTempProject(async (dir) => {
@@ -367,16 +367,16 @@ describe("state store", () => {
   test.each([
     { name: "enabled", input: true, expected: true },
     { name: "disabled", input: false, expected: false },
-  ])("grep file grouping round-trips when $name", async ({
-    input,
-    expected,
-  }) => {
-    await withTempProject(async (dir) => {
-      expect(
-        await patchAppSettingsState(dir, { grepGroupByFile: input }),
-      ).toEqual({ version: 1, grepGroupByFile: expected });
-    });
-  });
+  ])(
+    "grep file grouping round-trips when $name",
+    async ({ input, expected }) => {
+      await withTempProject(async (dir) => {
+        expect(
+          await patchAppSettingsState(dir, { grepGroupByFile: input }),
+        ).toEqual({ version: 1, grepGroupByFile: expected });
+      });
+    },
+  );
 
   test("upload toggle round-trips through settings patch and notifies subscribers", async () => {
     await withTempProject(async (dir) => {

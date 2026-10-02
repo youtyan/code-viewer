@@ -965,23 +965,23 @@ describe("worktree media files", () => {
     },
     { name: "video", file: "added.mp4", contentType: "video/mp4" },
     { name: "audio", file: "added.mp3", contentType: "audio/mpeg" },
-  ])("returns the expected Content-Type for $name", async ({
-    file,
-    contentType,
-  }) => {
-    const current = await listedPath((entry) => entry.current);
-    writeFileSync(join(current, file), UPDATED_MEDIA_BYTES);
+  ])(
+    "returns the expected Content-Type for $name",
+    async ({ file, contentType }) => {
+      const current = await listedPath((entry) => entry.current);
+      writeFileSync(join(current, file), UPDATED_MEDIA_BYTES);
 
-    const res = await mediaOf({
-      path: current,
-      file,
-      origin: "uncommitted",
-      side: "after",
-    });
+      const res = await mediaOf({
+        path: current,
+        file,
+        origin: "uncommitted",
+        side: "after",
+      });
 
-    expect(res.status).toBe(200);
-    expect(res.headers.get("Content-Type")).toBe(contentType);
-  });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe(contentType);
+    },
+  );
 
   test.each([
     {

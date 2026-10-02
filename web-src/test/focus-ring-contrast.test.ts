@@ -146,15 +146,14 @@ describe("the focus ring is visible on every surface", () => {
         SURFACES.map((surface) => ({ theme, kind, color, surface, vars })),
       ),
     ),
-  )("$theme, $kind ring on $surface: 3:1 or more", ({
-    color,
-    surface,
-    vars,
-  }) => {
-    const bg = parseColor(resolveVar(`var(${surface})`, vars));
-    const ring = over(parseColor(color(vars)), bg);
-    expect(contrast(ring, bg)).toBeGreaterThanOrEqual(3);
-  });
+  )(
+    "$theme, $kind ring on $surface: 3:1 or more",
+    ({ color, surface, vars }) => {
+      const bg = parseColor(resolveVar(`var(${surface})`, vars));
+      const ring = over(parseColor(color(vars)), bg);
+      expect(contrast(ring, bg)).toBeGreaterThanOrEqual(3);
+    },
+  );
 });
 
 // 塗りのボタン (地がアクセント。Register repo・New agent・dialog の確定など)。
@@ -540,13 +539,13 @@ describe("a focused control draws the ring that fits where it sits", () => {
   });
 
   // タブ列の操作は窓の上端にいる (＋は最後のタブのすぐ右、分割は右端)。
-  test.each([
-    "tab-new",
-    "tab-split",
-  ])("the tab strip's #%s draws inside", (id) => {
-    expect(focusedRing(id)).toEqual({
-      outline: "none",
-      shadow: resolveVar(INSET, light),
-    });
-  });
+  test.each(["tab-new", "tab-split"])(
+    "the tab strip's #%s draws inside",
+    (id) => {
+      expect(focusedRing(id)).toEqual({
+        outline: "none",
+        shadow: resolveVar(INSET, light),
+      });
+    },
+  );
 });

@@ -250,28 +250,29 @@ describe("repo view route races", () => {
       name: "folder",
       load: (view: ReturnType<typeof makeRepoView>["view"]) => view.loadRepo(),
     },
-  ])("project change drops a previous project's response for the same ref and path: $name", async ({
-    load,
-  }) => {
-    installNullDocument();
-    const pending = deferred<Response>();
-    globalThis.fetch = (() => pending.promise) as typeof fetch;
-    const { view, calls } = makeRepoView({
-      screen: "repo",
-      ref: "worktree",
-      path: "",
-      range,
-    });
-    const loading = load(view);
-    view.resetProject();
-    pending.resolve(jsonResponse(treeResponse("old.txt")));
-    await loading;
-    expect([
-      calls.sidebarRenders,
-      calls.projectNames,
-      calls.headerSyncs,
-    ]).toEqual([[], [], 0]);
-  });
+  ])(
+    "project change drops a previous project's response for the same ref and path: $name",
+    async ({ load }) => {
+      installNullDocument();
+      const pending = deferred<Response>();
+      globalThis.fetch = (() => pending.promise) as typeof fetch;
+      const { view, calls } = makeRepoView({
+        screen: "repo",
+        ref: "worktree",
+        path: "",
+        range,
+      });
+      const loading = load(view);
+      view.resetProject();
+      pending.resolve(jsonResponse(treeResponse("old.txt")));
+      await loading;
+      expect([
+        calls.sidebarRenders,
+        calls.projectNames,
+        calls.headerSyncs,
+      ]).toEqual([[], [], 0]);
+    },
+  );
 
   test("loadRepo drops a tree response when the route leaves repo before fetch resolves", async () => {
     const pending = deferred<Response>();
@@ -449,33 +450,32 @@ describe("the file list on screens other than Files", () => {
       renders: 0,
     },
     { name: "not loaded yet", loaded: false, fetches: 1, renders: 1 },
-  ])("$name: fetches $fetches, renders $renders", async ({
-    loaded,
-    fetches,
-    renders,
-  }) => {
-    installFilelistDocument(() => loaded);
-    const urls: string[] = [];
-    globalThis.fetch = ((input: RequestInfo | URL) => {
-      urls.push(String(input));
-      return Promise.resolve(jsonResponse(treeResponse()));
-    }) as unknown as typeof fetch;
-    const { view, calls } = makeRepoView(diffRoute, {
-      repoMode: true,
-      repoSidebarRef: loaded ? "worktree" : null,
-      repoSidebarDomReady: loaded,
-      filesColumnRef: "worktree",
-    });
+  ])(
+    "$name: fetches $fetches, renders $renders",
+    async ({ loaded, fetches, renders }) => {
+      installFilelistDocument(() => loaded);
+      const urls: string[] = [];
+      globalThis.fetch = ((input: RequestInfo | URL) => {
+        urls.push(String(input));
+        return Promise.resolve(jsonResponse(treeResponse()));
+      }) as unknown as typeof fetch;
+      const { view, calls } = makeRepoView(diffRoute, {
+        repoMode: true,
+        repoSidebarRef: loaded ? "worktree" : null,
+        repoSidebarDomReady: loaded,
+        filesColumnRef: "worktree",
+      });
 
-    await view.ensureFileList("worktree");
+      await view.ensureFileList("worktree");
 
-    expect({
-      fetches: urls.length,
-      renders: calls.sidebarRenders.length,
-      // 読み込み済みなら選んでいる行を付け直さない (スクロールも動かさない)。
-      marked: loaded ? calls.activePaths : [],
-    }).toEqual({ fetches, renders, marked: [] });
-  });
+      expect({
+        fetches: urls.length,
+        renders: calls.sidebarRenders.length,
+        // 読み込み済みなら選んでいる行を付け直さない (スクロールも動かさない)。
+        marked: loaded ? calls.activePaths : [],
+      }).toEqual({ fetches, renders, marked: [] });
+    },
+  );
 });
 
 describe("repo sidebar refresh failures", () => {
@@ -490,25 +490,29 @@ describe("repo sidebar refresh failures", () => {
       error: new Error("sample failure"),
       level: "error" as const,
     },
-  ])("retains the reason for $name after project reset", async ({
-    error,
-    level,
-  }) => {
-    installFilelistDocument(() => true);
-    const pending = deferred<Response>();
-    globalThis.fetch = (() => pending.promise) as typeof fetch;
-    const log = vi.spyOn(console, level);
-    const { view } = makeRepoView(
-      { screen: "repo", ref: "worktree", path: "", range },
-      { repoMode: true, repoSidebarRef: "worktree", repoSidebarDomReady: true },
-    );
-    const refreshing = view.refreshRepoSidebar();
-    view.resetProject();
-    pending.reject(error);
-    await refreshing;
-    expect(log.mock.calls.flat()).toContain(error);
-    log.mockRestore();
-  });
+  ])(
+    "retains the reason for $name after project reset",
+    async ({ error, level }) => {
+      installFilelistDocument(() => true);
+      const pending = deferred<Response>();
+      globalThis.fetch = (() => pending.promise) as typeof fetch;
+      const log = vi.spyOn(console, level);
+      const { view } = makeRepoView(
+        { screen: "repo", ref: "worktree", path: "", range },
+        {
+          repoMode: true,
+          repoSidebarRef: "worktree",
+          repoSidebarDomReady: true,
+        },
+      );
+      const refreshing = view.refreshRepoSidebar();
+      view.resetProject();
+      pending.reject(error);
+      await refreshing;
+      expect(log.mock.calls.flat()).toContain(error);
+      log.mockRestore();
+    },
+  );
 
   // 直す前は catch が引数を受け取らず、console にも画面にも理由が残らなかった
   // (同じファイルのほかの 3 か所は理由を出していた)。

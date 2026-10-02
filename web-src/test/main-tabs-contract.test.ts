@@ -1309,15 +1309,15 @@ describe("main tabs contract: operation purity and invariants", () => {
       start: one([tab("a", FILE_A), tab("b", FILE_B)]),
       run: (state: Layout) => activateIndex(state, 2),
     },
-  ])("$name leaves its input untouched and preserves invariants", ({
-    start,
-    run,
-  }) => {
-    const before = structuredClone(start);
-    const result = run(start);
-    expect(start).toEqual(before);
-    expectValid(result);
-  });
+  ])(
+    "$name leaves its input untouched and preserves invariants",
+    ({ start, run }) => {
+      const before = structuredClone(start);
+      const result = run(start);
+      expect(start).toEqual(before);
+      expectValid(result);
+    },
+  );
 });
 
 describe("main tabs contract: persistence", () => {

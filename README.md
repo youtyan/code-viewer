@@ -34,7 +34,7 @@ One code-viewer serves every project from one port. It listens on `127.0.0.1` on
 
 | What | Needed for |
 |---|---|
-| Node.js 20 or newer, git | Everything |
+| Node.js 22.14 or newer, git | Everything |
 | [tmux](https://github.com/tmux/tmux) | Agents, account sign-in and tmux panes (shells work without it) |
 | claude and / or codex CLI | Running agents |
 | `better-sqlite3` (optional dependency, installed with the package) | SQLite viewer, snapshots and `code-viewer query` |
@@ -64,7 +64,7 @@ If something does not work, run `npx @youtyan/code-viewer doctor`. The in-app **
 
 ```sh
 npx @youtyan/code-viewer                  # run without installing
-pnpm dlx --allow-build=better-sqlite3 @youtyan/code-viewer   # same, with pnpm
+pnpm dlx @youtyan/code-viewer             # same, with pnpm
 npm install -g @youtyan/code-viewer       # or install it
 code-viewer
 ```
@@ -92,13 +92,12 @@ code-viewer
 - When a code-viewer is already running, `--port`, `--idle-stop`, `--bin` and `--scope-omit-dir` are not applied to it (it prints a warning); `--remote-access` stops with an error.
 - `--remote-access` and `--idle-stop` cannot be combined with `--standalone`.
 
-### SQLite and install scripts
+### SQLite
 
-`better-sqlite3` builds a native module when it is installed. Without it, the SQLite viewer, snapshots and every `code-viewer query` command fail; the rest works. `code-viewer doctor` shows whether the driver loads.
+`better-sqlite3` comes with prebuilt binaries for macOS, Linux and Windows (x64 and arm64), so nothing is built when it is installed. Without it, the SQLite viewer, snapshots and every `code-viewer query` command fail; the rest works. `code-viewer doctor` shows whether the driver loads.
 
-- npm 11 may list packages whose install scripts have not been reviewed. The scripts still run. To allow it explicitly: `npm install -g --allow-scripts=better-sqlite3 @youtyan/code-viewer`, or `npm config set allow-scripts=better-sqlite3 --location=user` (also covers npx).
-- `pnpm dlx` skips the build unless you pass `--allow-build=better-sqlite3`.
-- If the build is missing, run `npm rebuild better-sqlite3` where code-viewer is installed.
+- `pnpm dlx` prints "Ignored build scripts: better-sqlite3". The prebuilt binary is used, so you can ignore it.
+- On other platforms, run `npm run build-release` in the installed `better-sqlite3` folder (needs Python and a C++ compiler). `code-viewer doctor` shows the folder.
 
 ## Features
 

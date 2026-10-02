@@ -2,12 +2,9 @@
 #
 # allowBuilds: インストール時にビルドスクリプトを実行してよい依存。既定では
 # 全て実行されないので、ネイティブモジュールはここで明示する。
-# - better-sqlite3: prebuild-install がネイティブバイナリを取得する。これが
-#   走らないと SQLite ビューアとスナップショットが使えない。
+# - better-sqlite3: false。13 からは各 OS 向けのビルド済みバイナリを同梱し、
+#   読み込みはそちらを先に探す。ここで組み立てても使われないので走らせない。
 # - esbuild: プラットフォーム別のバイナリを配置する。ビルド全体がこれに依存する。
 allowBuilds:
-  better-sqlite3: true
+  better-sqlite3: false
   esbuild: true
-
-patchedDependencies:
-  prebuild-install@7.1.3: patches/prebuild-install@7.1.3.patch

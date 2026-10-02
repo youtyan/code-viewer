@@ -1206,20 +1206,20 @@ describe("棚のサムネイルと端末の文字", () => {
   test.each([
     { name: "カーソル", enter: "pointerenter", leave: "pointerleave" },
     { name: "フォーカス", enter: "focus", leave: "blur" },
-  ])("$name が載ると端末の中のパスを強く強調し、離れると外す", async ({
-    enter,
-    leave,
-  }) => {
-    await shelfWithOut();
-    shelfOpen().dispatchEvent(new Event(enter));
-    // "wrote docs/out.png" はバッファの 1 行目 (0 始まり) の 6 桁目から 12 桁。
-    expect(marks(".terminal-link-hover")).toEqual([
-      { row: 1, col: 6, cols: 12 },
-    ]);
+  ])(
+    "$name が載ると端末の中のパスを強く強調し、離れると外す",
+    async ({ enter, leave }) => {
+      await shelfWithOut();
+      shelfOpen().dispatchEvent(new Event(enter));
+      // "wrote docs/out.png" はバッファの 1 行目 (0 始まり) の 6 桁目から 12 桁。
+      expect(marks(".terminal-link-hover")).toEqual([
+        { row: 1, col: 6, cols: 12 },
+      ]);
 
-    shelfOpen().dispatchEvent(new Event(leave));
-    expect(marks(".terminal-link-hover")).toEqual([]);
-  });
+      shelfOpen().dispatchEvent(new Event(leave));
+      expect(marks(".terminal-link-hover")).toEqual([]);
+    },
+  );
 
   test.each([
     {

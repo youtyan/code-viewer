@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         node-version:
-          - "20"
+          - "22.14"
           - "24"
     steps:
       - uses: actions/checkout@v7
@@ -31,7 +31,7 @@ jobs:
       # 版は package.json の packageManager に従う。
       - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm

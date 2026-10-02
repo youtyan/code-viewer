@@ -212,92 +212,90 @@ describe("S3 explorer UI", () => {
         "(スキャンした先頭 1,000 件に一致するものがありません。プレフィックスを絞って検索し直してください)",
       cap: "スキャンの上限に達しました。プレフィックスを絞るとより正確に検索できます",
     },
-  ])("スキャン上限の文言を表示の言語で描く: $language", async ({
-    language,
-    empty,
-    cap,
-  }) => {
-    const fetchMock = globalThis.fetch;
-    globalThis.fetch = (async (
-      input: RequestInfo | URL,
-      init?: RequestInit,
-    ) => {
-      const url = new URL(String(input), "http://localhost");
-      if (url.pathname === "/_db/s3/objects") {
-        return json({
-          dbId: "mock",
-          bucket: "media",
-          prefix: "",
-          search: "sample",
-          mode: "contains",
-          sort: "key",
-          objects: [],
-          truncated: true,
-          scannedObjects: 1000,
-          scannedPages: 1,
-          scanLimitReached: true,
-        });
-      }
-      return fetchMock(input, init);
-    }) as typeof fetch;
-    const view = await mountExplorer({ getText: () => dbText(language) });
-    const list = () =>
-      view.sidebarSlot.querySelector(".s3-object-list")?.textContent;
-    await waitFor(() => list() === empty);
-    expect(
-      view.sidebarSlot.querySelector(".s3-object-status")?.textContent,
-    ).toContain(cap);
-  });
+  ])(
+    "スキャン上限の文言を表示の言語で描く: $language",
+    async ({ language, empty, cap }) => {
+      const fetchMock = globalThis.fetch;
+      globalThis.fetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/_db/s3/objects") {
+          return json({
+            dbId: "mock",
+            bucket: "media",
+            prefix: "",
+            search: "sample",
+            mode: "contains",
+            sort: "key",
+            objects: [],
+            truncated: true,
+            scannedObjects: 1000,
+            scannedPages: 1,
+            scanLimitReached: true,
+          });
+        }
+        return fetchMock(input, init);
+      }) as typeof fetch;
+      const view = await mountExplorer({ getText: () => dbText(language) });
+      const list = () =>
+        view.sidebarSlot.querySelector(".s3-object-list")?.textContent;
+      await waitFor(() => list() === empty);
+      expect(
+        view.sidebarSlot.querySelector(".s3-object-status")?.textContent,
+      ).toContain(cap);
+    },
+  );
 
   test.each([
     { language: "en" as const, loading: "Loading…", empty: "(empty)" },
     { language: "ja" as const, loading: "読み込み中…", empty: "(空)" },
-  ])("フォルダの読み込み中と空の行を表示の言語で描く: $language", async ({
-    language,
-    loading,
-    empty,
-  }) => {
-    let release: (() => void) | undefined;
-    const fetchMock = globalThis.fetch;
-    globalThis.fetch = (async (
-      input: RequestInfo | URL,
-      init?: RequestInit,
-    ) => {
-      const url = new URL(String(input), "http://localhost");
-      if (
-        url.pathname === "/_db/s3/folder" &&
-        url.searchParams.get("prefix") === "videos/"
-      ) {
-        await new Promise<void>((resolve) => {
-          release = resolve;
-        });
-        return json({
-          dbId: "mock",
-          bucket: "media",
-          prefix: "videos/",
-          folders: [],
-          objects: [],
-        });
-      }
-      return fetchMock(input, init);
-    }) as typeof fetch;
-    const view = await mountExplorer({ getText: () => dbText(language) });
-    await switchToExplorer(view);
-    click(
-      [...view.sidebarSlot.querySelectorAll(".s3-tree .tree-dir")].find(
-        (dir) => dir.querySelector(".dir-name")?.textContent === "videos",
-      ),
-    );
-    await waitFor(() => release !== undefined);
-    expect(
-      view.sidebarSlot.querySelector(".s3-tree-loading")?.textContent,
-    ).toContain(loading);
-    release?.();
-    await waitFor(() => !!view.sidebarSlot.querySelector(".s3-tree-empty"));
-    expect(
-      view.sidebarSlot.querySelector(".s3-tree-empty")?.textContent,
-    ).toContain(empty);
-  });
+  ])(
+    "フォルダの読み込み中と空の行を表示の言語で描く: $language",
+    async ({ language, loading, empty }) => {
+      let release: (() => void) | undefined;
+      const fetchMock = globalThis.fetch;
+      globalThis.fetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = new URL(String(input), "http://localhost");
+        if (
+          url.pathname === "/_db/s3/folder" &&
+          url.searchParams.get("prefix") === "videos/"
+        ) {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return json({
+            dbId: "mock",
+            bucket: "media",
+            prefix: "videos/",
+            folders: [],
+            objects: [],
+          });
+        }
+        return fetchMock(input, init);
+      }) as typeof fetch;
+      const view = await mountExplorer({ getText: () => dbText(language) });
+      await switchToExplorer(view);
+      click(
+        [...view.sidebarSlot.querySelectorAll(".s3-tree .tree-dir")].find(
+          (dir) => dir.querySelector(".dir-name")?.textContent === "videos",
+        ),
+      );
+      await waitFor(() => release !== undefined);
+      expect(
+        view.sidebarSlot.querySelector(".s3-tree-loading")?.textContent,
+      ).toContain(loading);
+      release?.();
+      await waitFor(() => !!view.sidebarSlot.querySelector(".s3-tree-empty"));
+      expect(
+        view.sidebarSlot.querySelector(".s3-tree-empty")?.textContent,
+      ).toContain(empty);
+    },
+  );
 
   test("Explorer に切り替えると List 専用の検索/ソート行が hidden になる", async () => {
     const view = await mountExplorer();
@@ -515,56 +513,52 @@ describe("S3 explorer UI", () => {
       { ...failureCase, via: "network" as const },
       { ...failureCase, via: "http" as const },
     ]),
-  )("$operation の $via の失敗は理由を画面と console に出す", async ({
-    operation,
-    httpOperation,
-    via,
-    fails,
-    open,
-    where,
-  }) => {
-    const failure = Object.assign(new Error(`${operation} request failed`), {
-      cause: new Error("network is unreachable"),
-    });
-    installFetchMock((url) =>
-      fails(url)
-        ? via === "network"
-          ? failure
-          : new Response("sample failure", { status: 500 })
-        : null,
-    );
-    const logged: unknown[][] = [];
-    const originalError = console.error;
-    console.error = (...args: unknown[]) => {
-      logged.push(args);
-    };
-    try {
-      const view = await mountExplorer();
-      await open(view);
-      const root = document.body;
-      await waitFor(() => !!root.querySelector(where));
-
-      const shown = root.querySelector(where)?.textContent ?? "";
-      expect(shown).not.toContain("Error: Error:");
-      const s3Logs = logged.filter(
-        (args) => args[0] === `[code-viewer] S3 ${operation} failed`,
+  )(
+    "$operation の $via の失敗は理由を画面と console に出す",
+    async ({ operation, httpOperation, via, fails, open, where }) => {
+      const failure = Object.assign(new Error(`${operation} request failed`), {
+        cause: new Error("network is unreachable"),
+      });
+      installFetchMock((url) =>
+        fails(url)
+          ? via === "network"
+            ? failure
+            : new Response("sample failure", { status: 500 })
+          : null,
       );
-      expect(s3Logs.length).toBe(1);
-      const logged0 = s3Logs[0]?.[s3Logs[0].length - 1];
-      if (via === "network") {
-        expect(shown).toContain(`${operation} request failed`);
-        expect(shown).toContain("Caused by");
-        expect(shown).toContain("network is unreachable");
-        expect(logged0).toBe(failure);
-      } else {
-        const detail = `${httpOperation} (HTTP 500): sample failure`;
-        expect(shown).toContain(`Error: ${detail}`);
-        expect((logged0 as Error).message).toBe(detail);
+      const logged: unknown[][] = [];
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => {
+        logged.push(args);
+      };
+      try {
+        const view = await mountExplorer();
+        await open(view);
+        const root = document.body;
+        await waitFor(() => !!root.querySelector(where));
+
+        const shown = root.querySelector(where)?.textContent ?? "";
+        expect(shown).not.toContain("Error: Error:");
+        const s3Logs = logged.filter(
+          (args) => args[0] === `[code-viewer] S3 ${operation} failed`,
+        );
+        expect(s3Logs.length).toBe(1);
+        const logged0 = s3Logs[0]?.[s3Logs[0].length - 1];
+        if (via === "network") {
+          expect(shown).toContain(`${operation} request failed`);
+          expect(shown).toContain("Caused by");
+          expect(shown).toContain("network is unreachable");
+          expect(logged0).toBe(failure);
+        } else {
+          const detail = `${httpOperation} (HTTP 500): sample failure`;
+          expect(shown).toContain(`Error: ${detail}`);
+          expect((logged0 as Error).message).toBe(detail);
+        }
+      } finally {
+        console.error = originalError;
       }
-    } finally {
-      console.error = originalError;
-    }
-  });
+    },
+  );
 
   test("HTTP の失敗の操作名を表示の言語で出す", async () => {
     installFetchMock((url) =>

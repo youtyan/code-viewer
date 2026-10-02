@@ -74,25 +74,26 @@ describe("最下段の接続状態 (#status) は状態で幅を変えない", ()
 
   const LABELS = ["Live", "Loading", "Error", "Idle"];
 
-  test.each(
-    LABELS,
-  )("%s を見せても、升には 4 つの文言が同じ順に入る", (current) => {
-    const host = document.createElement("span");
-    renderStatusLabel(host, LABELS, current);
-    expect({
-      texts: [...host.children].map((child) => child.textContent),
-      current: currentStatusLabel(host),
-      shown: [...host.querySelectorAll(".is-current")].length,
-      hiddenFromReaders: [...host.querySelectorAll('[aria-hidden="true"]')].map(
-        (child) => child.textContent,
-      ),
-    }).toEqual({
-      texts: LABELS,
-      current,
-      shown: 1,
-      hiddenFromReaders: LABELS.filter((label) => label !== current),
-    });
-  });
+  test.each(LABELS)(
+    "%s を見せても、升には 4 つの文言が同じ順に入る",
+    (current) => {
+      const host = document.createElement("span");
+      renderStatusLabel(host, LABELS, current);
+      expect({
+        texts: [...host.children].map((child) => child.textContent),
+        current: currentStatusLabel(host),
+        shown: [...host.querySelectorAll(".is-current")].length,
+        hiddenFromReaders: [
+          ...host.querySelectorAll('[aria-hidden="true"]'),
+        ].map((child) => child.textContent),
+      }).toEqual({
+        texts: LABELS,
+        current,
+        shown: 1,
+        hiddenFromReaders: LABELS.filter((label) => label !== current),
+      });
+    },
+  );
 
   test("文言は同じ升に重ね、今の 1 つだけ見せる", () => {
     const at = (selector: string) =>

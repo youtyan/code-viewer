@@ -118,25 +118,27 @@ describe("install and uninstall", () => {
       initial: { statusLine: { type: "command", command: ORIGINAL } },
       indent: "\t",
     },
-  ])("round trip with $name: install twice adds nothing, uninstall restores the bytes", async ({
-    initial,
-    indent,
-  }) => {
-    const original = write(initial, indent as unknown as number);
-    const first = await roundTrip("install");
-    expect(first.changed).toBe(true);
-    const installed = readFileSync(settingsPath(), "utf8");
-    const again = await roundTrip("install");
-    expect(again.changed).toBe(false);
-    expect(readFileSync(settingsPath(), "utf8")).toBe(installed);
-    const parsed = JSON.parse(installed) as { statusLine: { command: string } };
-    expect(parseWrappedCommand(parsed.statusLine.command)).toEqual({
-      kind: "wrapped",
-      original: "statusLine" in initial ? ORIGINAL : null,
-    });
-    await roundTrip("uninstall");
-    expect(readFileSync(settingsPath(), "utf8")).toBe(original);
-  });
+  ])(
+    "round trip with $name: install twice adds nothing, uninstall restores the bytes",
+    async ({ initial, indent }) => {
+      const original = write(initial, indent as unknown as number);
+      const first = await roundTrip("install");
+      expect(first.changed).toBe(true);
+      const installed = readFileSync(settingsPath(), "utf8");
+      const again = await roundTrip("install");
+      expect(again.changed).toBe(false);
+      expect(readFileSync(settingsPath(), "utf8")).toBe(installed);
+      const parsed = JSON.parse(installed) as {
+        statusLine: { command: string };
+      };
+      expect(parseWrappedCommand(parsed.statusLine.command)).toEqual({
+        kind: "wrapped",
+        original: "statusLine" in initial ? ORIGINAL : null,
+      });
+      await roundTrip("uninstall");
+      expect(readFileSync(settingsPath(), "utf8")).toBe(original);
+    },
+  );
 
   test("a missing file is created with a minimal statusLine and removed again", async () => {
     await roundTrip("install");
@@ -352,20 +354,20 @@ describe("the wrapper script", () => {
       env: { CLAUDE_CONFIG_DIR: "/home/sample/w" },
       key: "/home/sample/w",
     },
-  ])("returns the original output and exit code, and saves the input ($name)", async ({
-    env,
-    key,
-  }) => {
-    const wrapped = await install({
-      statusLine: { type: "command", command: `${ORIGINAL}; exit 3` },
-    });
-    const plain = run(`${ORIGINAL}; exit 3`, env);
-    const out = run(wrapped, env);
-    expect(out.stdout).toBe(plain.stdout);
-    expect(out.status).toBe(3);
-    expect(out.stderr).toBe("");
-    expect(readFileSync(claudeUsageFile(usageDir, key), "utf8")).toBe(INPUT);
-  });
+  ])(
+    "returns the original output and exit code, and saves the input ($name)",
+    async ({ env, key }) => {
+      const wrapped = await install({
+        statusLine: { type: "command", command: `${ORIGINAL}; exit 3` },
+      });
+      const plain = run(`${ORIGINAL}; exit 3`, env);
+      const out = run(wrapped, env);
+      expect(out.stdout).toBe(plain.stdout);
+      expect(out.status).toBe(3);
+      expect(out.stderr).toBe("");
+      expect(readFileSync(claudeUsageFile(usageDir, key), "utf8")).toBe(INPUT);
+    },
+  );
 
   test("the original sees exactly the same bytes (no newline added or lost)", async () => {
     const wrapped = await install({
@@ -386,24 +388,24 @@ describe("the wrapper script", () => {
       input: INPUT,
     },
     { name: "the input is empty", prepare: () => undefined, input: "" },
-  ])("a failed save ($name) still returns the original output and is recorded", async ({
-    prepare,
-    input,
-  }) => {
-    const wrapped = await install({
-      statusLine: { type: "command", command: ORIGINAL },
-    });
-    prepare();
-    const out = run(wrapped, {}, input);
-    expect(out.stdout).toBe(run(ORIGINAL, {}, input).stdout);
-    expect(out.status).toBe(0);
-    expect(readFileSync(join(usageDir, "failures.log"), "utf8")).toContain(
-      "could not save the statusline input",
-    );
-    expect(
-      readdirSync(usageDir).filter((name) => name.startsWith(".claude-")),
-    ).toEqual([]);
-  });
+  ])(
+    "a failed save ($name) still returns the original output and is recorded",
+    async ({ prepare, input }) => {
+      const wrapped = await install({
+        statusLine: { type: "command", command: ORIGINAL },
+      });
+      prepare();
+      const out = run(wrapped, {}, input);
+      expect(out.stdout).toBe(run(ORIGINAL, {}, input).stdout);
+      expect(out.status).toBe(0);
+      expect(readFileSync(join(usageDir, "failures.log"), "utf8")).toContain(
+        "could not save the statusline input",
+      );
+      expect(
+        readdirSync(usageDir).filter((name) => name.startsWith(".claude-")),
+      ).toEqual([]);
+    },
+  );
 
   test("an unwritable usage directory still returns the original output", async () => {
     const wrapped = await install({
@@ -427,13 +429,13 @@ describe("the wrapper script", () => {
       input: '{"session_id":"x"}',
       expected: "usage: n/a\n",
     },
-  ])("without an original status line it prints usage in one line: $name", async ({
-    input,
-    expected,
-  }) => {
-    const wrapped = await install({});
-    expect(run(wrapped, {}, input).stdout).toBe(expected);
-  });
+  ])(
+    "without an original status line it prints usage in one line: $name",
+    async ({ input, expected }) => {
+      const wrapped = await install({});
+      expect(run(wrapped, {}, input).stdout).toBe(expected);
+    },
+  );
 });
 
 describe("the wrapper is interrupted", () => {

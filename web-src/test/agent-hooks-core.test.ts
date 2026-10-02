@@ -91,28 +91,27 @@ describe("agentEventForHook", () => {
     ["codex", { hook_event_name: "PostToolUse" }, null],
     ["codex", { hook_event_name: "Notification" }, null],
     ["codex", {}, null],
-  ] satisfies [
-    HookAgent,
-    Json,
-    AgentEvent | null,
-  ][])("%s %j -> %s", (agent, input, expected) => {
-    expect(agentEventForHook(agent, input)).toBe(expected);
-  });
+  ] satisfies [HookAgent, Json, AgentEvent | null][])(
+    "%s %j -> %s",
+    (agent, input, expected) => {
+      expect(agentEventForHook(agent, input)).toBe(expected);
+    },
+  );
 
-  test.each([
-    "claude",
-    "codex",
-  ] satisfies HookAgent[])("%s: every installed hook is reported as some event", (agent) => {
-    for (const spec of HOOK_SPECS[agent]) {
-      expect(
-        agentEventForHook(agent, {
-          hook_event_name: spec.event,
-          source: "startup",
-          notification_type: "permission_prompt",
-        }),
-      ).not.toBeNull();
-    }
-  });
+  test.each(["claude", "codex"] satisfies HookAgent[])(
+    "%s: every installed hook is reported as some event",
+    (agent) => {
+      for (const spec of HOOK_SPECS[agent]) {
+        expect(
+          agentEventForHook(agent, {
+            hook_event_name: spec.event,
+            source: "startup",
+            notification_type: "permission_prompt",
+          }),
+        ).not.toBeNull();
+      }
+    },
+  );
 });
 
 describe("checkHookShape", () => {
@@ -252,13 +251,13 @@ describe("planHookChange", () => {
       root: { hooks: { Stop: [], PreToolUse: [FOREIGN_PRE] } },
       expected: { hooks: { PreToolUse: [FOREIGN_PRE] } },
     },
-  ])("containers that were empty before install are tidied on uninstall ($name)", ({
-    root,
-    expected,
-  }) => {
-    const plan = planHookChange(installed(root), "uninstall", SPECS, COMMAND);
-    expect(plan.next).toEqual(expected);
-  });
+  ])(
+    "containers that were empty before install are tidied on uninstall ($name)",
+    ({ root, expected }) => {
+      const plan = planHookChange(installed(root), "uninstall", SPECS, COMMAND);
+      expect(plan.next).toEqual(expected);
+    },
+  );
 
   test("uninstall keeps containers that are already empty", () => {
     const root = { hooks: { Stop: [], PreToolUse: [{ hooks: [] }] } };
@@ -495,13 +494,11 @@ describe("hookRowTone and hookRowAction", () => {
     blocked: string;
     tone: HookRowTone;
     kind: HookRowAction["kind"] | null;
-  }[])("$state (write blocked: '$blocked') -> $tone / $kind", ({
-    state,
-    blocked,
-    tone,
-    kind,
-  }) => {
-    expect(hookRowTone(row(state, blocked))).toBe(tone);
-    expect(hookRowAction(row(state, blocked))?.kind ?? null).toBe(kind);
-  });
+  }[])(
+    "$state (write blocked: '$blocked') -> $tone / $kind",
+    ({ state, blocked, tone, kind }) => {
+      expect(hookRowTone(row(state, blocked))).toBe(tone);
+      expect(hookRowAction(row(state, blocked))?.kind ?? null).toBe(kind);
+    },
+  );
 });

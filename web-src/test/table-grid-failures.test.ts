@@ -118,42 +118,40 @@ describe("table-grid failures", () => {
       },
       where: ".db-grid-edit-status",
     },
-  ])("$operation の失敗は理由を cause ごと画面と console に出す", async ({
-    operation,
-    failing,
-    open,
-    where,
-  }) => {
-    const failure = failureWithCause(`${operation} request failed`);
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const fail = () => Promise.reject(failure);
-    const grid = createTableGrid({
-      fetchPage: failing === "fetchPage" ? fail : async () => initialData(),
-      fetchRelatedPage:
-        failing === "fetchRelatedPage" ? fail : async () => initialData(),
-      applyMutations:
-        failing === "applyMutations" ? fail : async () => undefined,
-      getDbId: () => "sample.db",
-      getColumnWidths: () => ({}),
-      setColumnWidths: () => undefined,
-      getText: () => dbText("en"),
-      getForeignKeys: () => FK,
-      getEditable: () => true,
-    });
-    document.body.appendChild(grid.el);
-    await open(grid);
+  ])(
+    "$operation の失敗は理由を cause ごと画面と console に出す",
+    async ({ operation, failing, open, where }) => {
+      const failure = failureWithCause(`${operation} request failed`);
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      const fail = () => Promise.reject(failure);
+      const grid = createTableGrid({
+        fetchPage: failing === "fetchPage" ? fail : async () => initialData(),
+        fetchRelatedPage:
+          failing === "fetchRelatedPage" ? fail : async () => initialData(),
+        applyMutations:
+          failing === "applyMutations" ? fail : async () => undefined,
+        getDbId: () => "sample.db",
+        getColumnWidths: () => ({}),
+        setColumnWidths: () => undefined,
+        getText: () => dbText("en"),
+        getForeignKeys: () => FK,
+        getEditable: () => true,
+      });
+      document.body.appendChild(grid.el);
+      await open(grid);
 
-    const shown = () => grid.el.querySelector(where)?.textContent ?? "";
-    await waitFor(() => shown().includes("Caused by"));
-    expect(shown()).toContain(`${operation} request failed`);
-    expect(shown()).toContain("network is unreachable");
-    const logs = consoleError.mock.calls.filter(
-      (args) => args[0] === `[code-viewer] SQL ${operation} failed`,
-    );
-    expect(logs.length).toBe(1);
-    expect(logs[0]?.[logs[0].length - 1]).toBe(failure);
-    grid.destroy();
-  });
+      const shown = () => grid.el.querySelector(where)?.textContent ?? "";
+      await waitFor(() => shown().includes("Caused by"));
+      expect(shown()).toContain(`${operation} request failed`);
+      expect(shown()).toContain("network is unreachable");
+      const logs = consoleError.mock.calls.filter(
+        (args) => args[0] === `[code-viewer] SQL ${operation} failed`,
+      );
+      expect(logs.length).toBe(1);
+      expect(logs[0]?.[logs[0].length - 1]).toBe(failure);
+      grid.destroy();
+    },
+  );
 });

@@ -77,20 +77,26 @@ describe("entry.json", () => {
       JSON.stringify({ ...record, token: "" }),
       "token: expected 16 lower-case hexadecimal characters",
     ],
-  ])("a broken record (%s) is reported, not treated as absent", (_label, text, reason) => {
-    const file = join(mkdtempSync(join(tmpdir(), "entry-file-")), "entry.json");
-    writeFileSync(file, text);
-    const read = readEntryRecord(file);
-    expect(read.ok).toBe(false);
-    expect(read.ok === false && read.error).toContain(reason);
-    expect(() => liveEntryUrl(file)).toThrow(reason);
-    const removed = removeEntryRecord(process.pid, file);
-    expect(removed.status).toBe("unreadable");
-    expect(removed.status === "unreadable" && removed.error.message).toContain(
-      reason,
-    );
-    expect(readFileSync(file, "utf8")).toBe(text);
-  });
+  ])(
+    "a broken record (%s) is reported, not treated as absent",
+    (_label, text, reason) => {
+      const file = join(
+        mkdtempSync(join(tmpdir(), "entry-file-")),
+        "entry.json",
+      );
+      writeFileSync(file, text);
+      const read = readEntryRecord(file);
+      expect(read.ok).toBe(false);
+      expect(read.ok === false && read.error).toContain(reason);
+      expect(() => liveEntryUrl(file)).toThrow(reason);
+      const removed = removeEntryRecord(process.pid, file);
+      expect(removed.status).toBe("unreadable");
+      expect(
+        removed.status === "unreadable" && removed.error.message,
+      ).toContain(reason);
+      expect(readFileSync(file, "utf8")).toBe(text);
+    },
+  );
 
   test("only one CLI at a time becomes the entry", () => {
     const file = join(mkdtempSync(join(tmpdir(), "entry-file-")), "entry.json");
@@ -323,17 +329,20 @@ describe("the project processes the entry starts", () => {
       { status: "error", error: new Error("exited: sample") },
       "exited: sample",
     ],
-  ])("fails with the reason and the log when %s (503)", async (_label, outcome, reason) => {
-    const { b } = backends([outcome]);
-    const target = (await b.target(ROOT)) as Extract<
-      BackendTarget,
-      { status: "failed" }
-    >;
-    expect(target.status).toBe("failed");
-    expect(target.detail).toContain(reason);
-    expect(target.log).toBe("server output: sample tail");
-    expect(b.state(ROOT)).toBe("absent");
-  });
+  ])(
+    "fails with the reason and the log when %s (503)",
+    async (_label, outcome, reason) => {
+      const { b } = backends([outcome]);
+      const target = (await b.target(ROOT)) as Extract<
+        BackendTarget,
+        { status: "failed" }
+      >;
+      expect(target.status).toBe("failed");
+      expect(target.detail).toContain(reason);
+      expect(target.log).toBe("server output: sample tail");
+      expect(b.state(ROOT)).toBe("absent");
+    },
+  );
 
   // 子が起動中に終わったときの理由 (worktree/open.ts) は、同じ出力の末尾を
   // 既に含む。出力は log の欄に 1 度だけ (画面・500 の本文は detail と log を繋ぐ)。
@@ -343,24 +352,29 @@ describe("the project processes the entry starts", () => {
       "the entry is out of date",
       (message: string) => new EntryOutdatedError(message),
     ],
-  ])("shows the server output once when the reason already carries it (%s)", async (_label, makeError) => {
-    const { b } = backends([
-      {
-        status: "error",
-        error: makeError(
-          "exited before it was ready (exit code 3)\nserver output: sample tail",
-        ),
-      },
-    ]);
-    const target = (await b.target(ROOT)) as Extract<
-      BackendTarget,
-      { status: "failed" }
-    >;
-    const shown = [target.detail, target.log].filter(Boolean).join("\n");
-    expect(shown.split("server output: sample tail")).toHaveLength(2);
-    expect(target.log).toBe("server output: sample tail");
-    expect(target.detail).toContain("exited before it was ready (exit code 3)");
-  });
+  ])(
+    "shows the server output once when the reason already carries it (%s)",
+    async (_label, makeError) => {
+      const { b } = backends([
+        {
+          status: "error",
+          error: makeError(
+            "exited before it was ready (exit code 3)\nserver output: sample tail",
+          ),
+        },
+      ]);
+      const target = (await b.target(ROOT)) as Extract<
+        BackendTarget,
+        { status: "failed" }
+      >;
+      const shown = [target.detail, target.log].filter(Boolean).join("\n");
+      expect(shown.split("server output: sample tail")).toHaveLength(2);
+      expect(target.log).toBe("server output: sample tail");
+      expect(target.detail).toContain(
+        "exited before it was ready (exit code 3)",
+      );
+    },
+  );
 
   test("notes once that the entry is older than the installed code-viewer, stops starting processes for it, and tries again on restart", async () => {
     const { b, opens, lines } = backends([
@@ -406,20 +420,20 @@ describe("the project processes the entry starts", () => {
       } as const,
       reason: "sample registry read failed",
     },
-  ])("fails instead of starting with pid null when $name", async ({
-    registry,
-    reason,
-  }) => {
-    const { b } = backends([ok(65001)], {
-      registryEntry: () => registry,
-    });
+  ])(
+    "fails instead of starting with pid null when $name",
+    async ({ registry, reason }) => {
+      const { b } = backends([ok(65001)], {
+        registryEntry: () => registry,
+      });
 
-    const result = await b.target(ROOT);
+      const result = await b.target(ROOT);
 
-    expect(result.status).toBe("failed");
-    expect(result.status === "failed" && result.detail).toContain(reason);
-    expect(b.state(ROOT)).toBe("absent");
-  });
+      expect(result.status).toBe("failed");
+      expect(result.status === "failed" && result.detail).toContain(reason);
+      expect(b.state(ROOT)).toBe("absent");
+    },
+  );
 
   test("after it became unreachable: not started by ordinary requests, once by the SSE reconnect, again by restart", async () => {
     const { b, opens } = backends([ok(65001), ok(65002), ok(65003)]);

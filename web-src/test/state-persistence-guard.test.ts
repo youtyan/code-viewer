@@ -14,15 +14,15 @@ describe("viewer state persistence error handling", () => {
     );
   });
 
-  test.each([
-    "save viewer settings",
-    "save viewer state",
-  ])("%s preserves the HTTP response and reports the failure", (operation) => {
-    expect(appSource).toContain(
-      `await responseErrorMessage(response, "${operation}")`,
-    );
-    expect(appSource).toContain(
-      `reportPersistenceError("${operation}", error)`,
-    );
-  });
+  test.each(["save viewer settings", "save viewer state"])(
+    "%s preserves the HTTP response and reports the failure",
+    (operation) => {
+      expect(appSource).toContain(
+        `await responseErrorMessage(response, "${operation}")`,
+      );
+      expect(appSource).toContain(
+        `reportPersistenceError("${operation}", error)`,
+      );
+    },
+  );
 });

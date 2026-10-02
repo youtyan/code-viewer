@@ -127,53 +127,53 @@ describe("repository ref picker", () => {
         'failed to search commits: Error: searching commits for "" (from 0) (HTTP 503 Service Unavailable): sample refs failure',
       logged: '[code-viewer] searching commits for "" (from 0) failed',
     },
-  ])("shows why the $tab could not be loaded", async ({
-    tab,
-    url,
-    shown,
-    logged,
-  }) => {
-    installRefPickerDom();
-    const originalFetch = globalThis.fetch;
-    const logs: unknown[] = [];
-    const originalError = console.error;
-    console.error = (...args: unknown[]) => {
-      logs.push(args[0]);
-    };
-    globalThis.fetch = ((input: string | URL | Request) =>
-      Promise.resolve({
-        ok: false,
-        status: 503,
-        statusText: "Service Unavailable",
-        text: async () =>
-          String(input).startsWith(url) ? "sample refs failure" : "",
-        json: async () => ({}),
-      } as Response)) as typeof fetch;
-    try {
-      const { picker } = createPickerForRoute({
-        screen: "repo",
-        ref: "worktree",
-        path: "web-src/views",
-        range: { from: "HEAD", to: "worktree" },
-      });
-      const input = document.querySelector<HTMLInputElement>("#repo-target");
-      if (!input) throw new Error("missing repo target");
-      picker.openPopover(input);
-      document.querySelector<HTMLButtonElement>(`[data-tab="${tab}"]`)?.click();
-      await waitFor(
-        () =>
-          document.querySelector(".rp-body")?.textContent?.includes(shown) ===
-          true,
-      );
-      expect([
-        document.querySelector(".rp-body [role=alert]")?.textContent,
-        logs.includes(logged),
-      ]).toEqual([shown, true]);
-    } finally {
-      globalThis.fetch = originalFetch;
-      console.error = originalError;
-    }
-  });
+  ])(
+    "shows why the $tab could not be loaded",
+    async ({ tab, url, shown, logged }) => {
+      installRefPickerDom();
+      const originalFetch = globalThis.fetch;
+      const logs: unknown[] = [];
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => {
+        logs.push(args[0]);
+      };
+      globalThis.fetch = ((input: string | URL | Request) =>
+        Promise.resolve({
+          ok: false,
+          status: 503,
+          statusText: "Service Unavailable",
+          text: async () =>
+            String(input).startsWith(url) ? "sample refs failure" : "",
+          json: async () => ({}),
+        } as Response)) as typeof fetch;
+      try {
+        const { picker } = createPickerForRoute({
+          screen: "repo",
+          ref: "worktree",
+          path: "web-src/views",
+          range: { from: "HEAD", to: "worktree" },
+        });
+        const input = document.querySelector<HTMLInputElement>("#repo-target");
+        if (!input) throw new Error("missing repo target");
+        picker.openPopover(input);
+        document
+          .querySelector<HTMLButtonElement>(`[data-tab="${tab}"]`)
+          ?.click();
+        await waitFor(
+          () =>
+            document.querySelector(".rp-body")?.textContent?.includes(shown) ===
+            true,
+        );
+        expect([
+          document.querySelector(".rp-body [role=alert]")?.textContent,
+          logs.includes(logged),
+        ]).toEqual([shown, true]);
+      } finally {
+        globalThis.fetch = originalFetch;
+        console.error = originalError;
+      }
+    },
+  );
 
   test("repository target is only displayed in repository sidebar modes", () => {
     const style = document.createElement("style");

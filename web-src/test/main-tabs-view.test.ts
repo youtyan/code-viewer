@@ -308,54 +308,53 @@ describe("main tabs view: 読み戻し", () => {
         "failed to back up main tabs: sample disk failure",
       ],
     },
-  ])("壊れた保存値: $name (理由は全部 console.error に)", async ({
-    backupSaved,
-    saved,
-    message,
-  }) => {
-    vi.useFakeTimers();
-    const error = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const broken = {
-      version: 0,
-      focused: "left",
-      panes: [
-        {
-          side: "left",
-          activeId: "zz",
-          tabs: [
-            { id: "a", preview: true, target: { kind: "file", path: "a" } },
-            { id: "b", preview: true, target: { kind: "file", path: "b" } },
-          ],
-        },
-      ],
-    };
-    const { handle, names, saves, backups } = setup(
-      async () => broken,
-      undefined,
-      backupSaved,
-    );
-    await handle.restore();
-    handle.syncRoute(fileRoute("src/other.ts"));
-    vi.advanceTimersByTime(1000);
-    vi.useRealTimers();
-    expect([backups.length, names(), Math.min(saves.length, 1)]).toEqual([
-      1,
-      [">other.ts (preview)"],
-      saved,
-    ]);
-    const logged = error.mock.calls.map((call) => call.map(String).join(" "));
-    expect(logged).toHaveLength(1);
-    for (const reason of [
-      ...message,
-      JSON.stringify(broken),
-      "version is 0, expected one of 1, 2, 3",
-      "panes[0] has 2 preview tabs (a, b); at most 1",
-      'panes[0].activeId "zz" is not a tab of the pane',
-    ])
-      expect(logged[0]).toContain(reason);
-  });
+  ])(
+    "壊れた保存値: $name (理由は全部 console.error に)",
+    async ({ backupSaved, saved, message }) => {
+      vi.useFakeTimers();
+      const error = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      const broken = {
+        version: 0,
+        focused: "left",
+        panes: [
+          {
+            side: "left",
+            activeId: "zz",
+            tabs: [
+              { id: "a", preview: true, target: { kind: "file", path: "a" } },
+              { id: "b", preview: true, target: { kind: "file", path: "b" } },
+            ],
+          },
+        ],
+      };
+      const { handle, names, saves, backups } = setup(
+        async () => broken,
+        undefined,
+        backupSaved,
+      );
+      await handle.restore();
+      handle.syncRoute(fileRoute("src/other.ts"));
+      vi.advanceTimersByTime(1000);
+      vi.useRealTimers();
+      expect([backups.length, names(), Math.min(saves.length, 1)]).toEqual([
+        1,
+        [">other.ts (preview)"],
+        saved,
+      ]);
+      const logged = error.mock.calls.map((call) => call.map(String).join(" "));
+      expect(logged).toHaveLength(1);
+      for (const reason of [
+        ...message,
+        JSON.stringify(broken),
+        "version is 0, expected one of 1, 2, 3",
+        "panes[0] has 2 preview tabs (a, b); at most 1",
+        'panes[0].activeId "zz" is not a tab of the pane',
+      ])
+        expect(logged[0]).toContain(reason);
+    },
+  );
 
   // 古い版のアプリへ戻したとき: 新しい版で保存した配置は読めないが、上書き
   // すると新しい版へ戻ったときに消える。使わず、このページでは保存しない。
@@ -783,31 +782,31 @@ describe("main tabs view: プロジェクトのグループ", () => {
       inPlace: false,
       calls: [`switch:${LIB}:lib.ts:l1`],
     },
-  ])("別のプロジェクトのファイル: $name", async ({
-    inPlace,
-    calls: expected,
-  }) => {
-    const calls: string[] = [];
-    const { handle, mount, navigations } = setup(
-      async () => saved,
-      undefined,
-      undefined,
-      fileRoute("src/app.ts"),
-      APP,
-      groupDeps(calls, { foreignInPlace: () => inPlace }),
-    );
-    await handle.restore();
-    const before = navigations.length;
-    mount.querySelector<HTMLElement>('.main-tab[data-tab-id="l1"]')?.click();
-    // 本文 (このページの route) は移らない: ファイルは面の箱に出す (app.ts)。
-    expect([
-      calls,
-      navigations.slice(before),
-      handle.panes().fronts.left?.id,
-      handle.isRouteTab(handle.panes().fronts.left),
-      handle.paneRoute("right"),
-    ]).toEqual([expected, [], "l1", false, null]);
-  });
+  ])(
+    "別のプロジェクトのファイル: $name",
+    async ({ inPlace, calls: expected }) => {
+      const calls: string[] = [];
+      const { handle, mount, navigations } = setup(
+        async () => saved,
+        undefined,
+        undefined,
+        fileRoute("src/app.ts"),
+        APP,
+        groupDeps(calls, { foreignInPlace: () => inPlace }),
+      );
+      await handle.restore();
+      const before = navigations.length;
+      mount.querySelector<HTMLElement>('.main-tab[data-tab-id="l1"]')?.click();
+      // 本文 (このページの route) は移らない: ファイルは面の箱に出す (app.ts)。
+      expect([
+        calls,
+        navigations.slice(before),
+        handle.panes().fronts.left?.id,
+        handle.isRouteTab(handle.panes().fronts.left),
+        handle.paneRoute("right"),
+      ]).toEqual([expected, [], "l1", false, null]);
+    },
+  );
 
   test.each([
     {
@@ -822,45 +821,46 @@ describe("main tabs view: プロジェクトのグループ", () => {
       seen: ["a2"],
       expected: null,
     },
-  ])("閉じたあとの前面が別のプロジェクトの画面になるなら、移らない: $name", async ({
-    tabs,
-    seen,
-    expected,
-  }) => {
-    const calls: string[] = [];
-    const all = saved.panes[0].tabs;
-    const layout = {
-      ...saved,
-      panes: [
-        {
-          side: "left",
-          activeId: seen[0],
-          tabs: tabs.map((id) => all.find((tab) => tab.id === id)),
-        },
-      ],
-    };
-    const { handle, mount } = setup(
-      async () => layout,
-      undefined,
-      undefined,
-      fileRoute("README.md"),
-      APP,
-      groupDeps(calls),
-    );
-    await handle.restore();
-    for (const id of seen)
+  ])(
+    "閉じたあとの前面が別のプロジェクトの画面になるなら、移らない: $name",
+    async ({ tabs, seen, expected }) => {
+      const calls: string[] = [];
+      const all = saved.panes[0].tabs;
+      const layout = {
+        ...saved,
+        panes: [
+          {
+            side: "left",
+            activeId: seen[0],
+            tabs: tabs.map((id) => all.find((tab) => tab.id === id)),
+          },
+        ],
+      };
+      const { handle, mount } = setup(
+        async () => layout,
+        undefined,
+        undefined,
+        fileRoute("README.md"),
+        APP,
+        groupDeps(calls),
+      );
+      await handle.restore();
+      for (const id of seen)
+        mount
+          .querySelector<HTMLElement>(`.main-tab[data-tab-id="${id}"]`)
+          ?.click();
+      // 最後に見た a2 を閉じる: 並びの隣は別のプロジェクトの Diff。
       mount
-        .querySelector<HTMLElement>(`.main-tab[data-tab-id="${id}"]`)
+        .querySelector<HTMLElement>(
+          '.main-tab[data-tab-id="a2"] .main-tab-close',
+        )
         ?.click();
-    // 最後に見た a2 を閉じる: 並びの隣は別のプロジェクトの Diff。
-    mount
-      .querySelector<HTMLElement>('.main-tab[data-tab-id="a2"] .main-tab-close')
-      ?.click();
-    expect([calls, handle.panes().fronts.left?.id ?? null]).toEqual([
-      [],
-      expected,
-    ]);
-  });
+      expect([calls, handle.panes().fronts.left?.id ?? null]).toEqual([
+        [],
+        expected,
+      ]);
+    },
+  );
 
   test("このページのプロジェクトで開いたファイルは、このプロジェクトのグループに入る", async () => {
     const { handle, mount } = setup(
@@ -1088,17 +1088,17 @@ describe("main tabs view: プロジェクトのグループ", () => {
         initial: { screen: "agents", range } as AppRoute,
         expected: null,
       },
-    ])("本文が $name なら、いま見ているプロジェクトの印はその行", async ({
-      initial,
-      expected,
-    }) => {
-      const { mount } = await setupScreens(initial);
-      const checked = openMenu(mount, APP)
-        .filter((item) => item.getAttribute("aria-checked") === "true")
-        .map((item) => item.firstChild?.nextSibling?.textContent);
-      closeContextMenu();
-      expect(checked).toEqual(expected === null ? [] : [expected]);
-    });
+    ])(
+      "本文が $name なら、いま見ているプロジェクトの印はその行",
+      async ({ initial, expected }) => {
+        const { mount } = await setupScreens(initial);
+        const checked = openMenu(mount, APP)
+          .filter((item) => item.getAttribute("aria-checked") === "true")
+          .map((item) => item.firstChild?.nextSibling?.textContent);
+        closeContextMenu();
+        expect(checked).toEqual(expected === null ? [] : [expected]);
+      },
+    );
 
     test("左の面の前面がターミナル (本文が隠れている) なら印は無い", async () => {
       const { mount, handle } = await setupScreens();
@@ -1314,22 +1314,22 @@ describe("main tabs view: プロジェクトのグループ", () => {
         label: "history",
         expected: ["switch:/work/sample-docs:history:-"],
       },
-    ])("サイドバーからタブの無いプロジェクトの $name を開く", async ({
-      label,
-      expected,
-    }) => {
-      const { handle, mount, calls } = await setupWithActions();
-      handle.openProjectMenu("/work/sample-docs", mount);
-      const item = [
-        ...document.querySelectorAll<HTMLButtonElement>(
-          ".gdp-context-menu button",
-        ),
-      ].find((button) => button.textContent === label);
-      if (!item) throw new Error(`missing project menu item: ${label}`);
-      expect(item.disabled).toBe(false);
-      item.click();
-      expect(calls).toEqual(expected);
-    });
+    ])(
+      "サイドバーからタブの無いプロジェクトの $name を開く",
+      async ({ label, expected }) => {
+        const { handle, mount, calls } = await setupWithActions();
+        handle.openProjectMenu("/work/sample-docs", mount);
+        const item = [
+          ...document.querySelectorAll<HTMLButtonElement>(
+            ".gdp-context-menu button",
+          ),
+        ].find((button) => button.textContent === label);
+        if (!item) throw new Error(`missing project menu item: ${label}`);
+        expect(item.disabled).toBe(false);
+        item.click();
+        expect(calls).toEqual(expected);
+      },
+    );
 
     test.each([
       {
@@ -1357,25 +1357,29 @@ describe("main tabs view: プロジェクトのグループ", () => {
           "-(agents)",
         ],
       },
-    ])("新しいシェル: $name のプロジェクトで作り、できたタブはそのグループに入って前面になる", async ({
-      root,
-      expected,
-    }) => {
-      const { mount, calls } = await setupWithActions();
-      pick(mount, root, "New shell");
-      expect([calls, strip(mount)]).toEqual([[`shell:${root}:left`], expected]);
-    });
+    ])(
+      "新しいシェル: $name のプロジェクトで作り、できたタブはそのグループに入って前面になる",
+      async ({ root, expected }) => {
+        const { mount, calls } = await setupWithActions();
+        pick(mount, root, "New shell");
+        expect([calls, strip(mount)]).toEqual([
+          [`shell:${root}:left`],
+          expected,
+        ]);
+      },
+    );
 
     test.each([
       { name: "いま見ているプロジェクト", root: APP },
       { name: "別のプロジェクト", root: LIB },
-    ])("新しいエージェント…: $name を選んだ起動の画面を開く (移らない)", async ({
-      root,
-    }) => {
-      const { mount, calls } = await setupWithActions();
-      pick(mount, root, "New agent…");
-      expect(calls).toEqual([`agent:${root}`]);
-    });
+    ])(
+      "新しいエージェント…: $name を選んだ起動の画面を開く (移らない)",
+      async ({ root }) => {
+        const { mount, calls } = await setupWithActions();
+        pick(mount, root, "New agent…");
+        expect(calls).toEqual([`agent:${root}`]);
+      },
+    );
 
     test.each([
       {
@@ -1428,27 +1432,26 @@ describe("main tabs view: プロジェクトのグループ", () => {
           "New agent… [Start an agent in sample-app]",
         ],
       },
-    ])("押せないときは理由を title に出す: $name", async ({
-      facts,
-      foreignInPlace,
-      root,
-      expected,
-    }) => {
-      const { mount, calls } = await setupWithActions(facts, foreignInPlace);
-      const items = openGroupMenu(mount, root)
-        .filter((item) => /^New /.test(item.textContent ?? ""))
-        .map(
-          (item) =>
-            `${describeMenu([item])[0]} [${(item as HTMLButtonElement).title}]`,
-        );
-      // 押せない項目を押しても何も作らない。
-      for (const label of ["New shell", "New agent…"]) pick(mount, root, label);
-      closeContextMenu();
-      expect([items, calls.length]).toEqual([
-        expected,
-        expected.filter((item) => !item.includes("(disabled)")).length,
-      ]);
-    });
+    ])(
+      "押せないときは理由を title に出す: $name",
+      async ({ facts, foreignInPlace, root, expected }) => {
+        const { mount, calls } = await setupWithActions(facts, foreignInPlace);
+        const items = openGroupMenu(mount, root)
+          .filter((item) => /^New /.test(item.textContent ?? ""))
+          .map(
+            (item) =>
+              `${describeMenu([item])[0]} [${(item as HTMLButtonElement).title}]`,
+          );
+        // 押せない項目を押しても何も作らない。
+        for (const label of ["New shell", "New agent…"])
+          pick(mount, root, label);
+        closeContextMenu();
+        expect([items, calls.length]).toEqual([
+          expected,
+          expected.filter((item) => !item.includes("(disabled)")).length,
+        ]);
+      },
+    );
   });
 
   test("別のグループの間には落とせない (印も出さない)。同じグループの中は落とせる", async () => {
@@ -1686,28 +1689,28 @@ describe("main tabs view: 操作", () => {
       label: "app.ts @ 1a2b3c4",
     },
     { name: "HEAD はそのまま", ref: "HEAD", label: "app.ts @ HEAD" },
-  ])("作業ツリーの版の横に $name の版を別のタブで開く", async ({
-    ref,
-    label,
-  }) => {
-    const { handle, mount, names } = setup(async () => null);
-    await handle.restore();
-    handle.openingNewTab(() =>
-      handle.syncRoute({
-        screen: "file",
-        path: "src/app.ts",
-        ref,
-        range,
-        view: "blob",
-      }),
-    );
-    const front = mount.querySelector<HTMLElement>(".main-tab-active");
-    expect([names(), front?.title]).toEqual([
-      // 作業ツリーの版の仮のタブは差し替わらずに残る。
-      ["app.ts (preview)", `>${label}`],
-      `src/app.ts @ ${ref}`,
-    ]);
-  });
+  ])(
+    "作業ツリーの版の横に $name の版を別のタブで開く",
+    async ({ ref, label }) => {
+      const { handle, mount, names } = setup(async () => null);
+      await handle.restore();
+      handle.openingNewTab(() =>
+        handle.syncRoute({
+          screen: "file",
+          path: "src/app.ts",
+          ref,
+          range,
+          view: "blob",
+        }),
+      );
+      const front = mount.querySelector<HTMLElement>(".main-tab-active");
+      expect([names(), front?.title]).toEqual([
+        // 作業ツリーの版の仮のタブは差し替わらずに残る。
+        ["app.ts (preview)", `>${label}`],
+        `src/app.ts @ ${ref}`,
+      ]);
+    },
+  );
 
   // ＋ は最後のタブのすぐ右 (列の右端でなく、タブと一緒に動き一緒に送られる)。
   // tablist にはタブだけ。分割のボタンは列の外の右端。タブが 0 枚なら ＋ は列の左端。
@@ -2133,28 +2136,26 @@ describe("main tabs view: ターミナルのタブ", () => {
       search: "?open-pane=%253",
       front: ">Shell shell-ab12cd",
     },
-  ])("保存の前面がターミナルで $url を開く → $front", async ({
-    route,
-    search,
-    front,
-    ...row
-  }) => {
-    const saved: unknown =
-      "saved" in row && row.saved ? row.saved : terminalFront;
-    const { handle, names } = setup(
-      async () => saved,
-      undefined,
-      undefined,
-      route,
-    );
-    await handle.restore({
-      keepSavedFront: urlKeepsSavedFront(
-        search,
-        "reloaded" in row && row.reloaded === true,
-      ),
-    });
-    expect(names().filter((name) => name.startsWith(">"))).toEqual([front]);
-  });
+  ])(
+    "保存の前面がターミナルで $url を開く → $front",
+    async ({ route, search, front, ...row }) => {
+      const saved: unknown =
+        "saved" in row && row.saved ? row.saved : terminalFront;
+      const { handle, names } = setup(
+        async () => saved,
+        undefined,
+        undefined,
+        route,
+      );
+      await handle.restore({
+        keepSavedFront: urlKeepsSavedFront(
+          search,
+          "reloaded" in row && row.reloaded === true,
+        ),
+      });
+      expect(names().filter((name) => name.startsWith(">"))).toEqual([front]);
+    },
+  );
 
   test("読み戻したターミナルのタブは残し、開いているシェルを知らせる", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -2952,89 +2953,86 @@ describe("main tabs view: 左右 2 面", () => {
       parked: false,
       filesFolded: false,
     },
-  ] as const)("$screen・窓 $window px: 一覧の列 $column px・右の面を預けるか $parked・ファイル一覧を畳む $filesFolded", async ({
-    screen,
-    window,
-    column,
-    parked,
-    filesFolded,
-  }) => {
-    const holdsList = screen !== "Files";
-    Object.defineProperty(document.documentElement, "clientWidth", {
-      configurable: true,
-      value: window - 280,
-    });
-    const files = 240;
-    const layout = listColumnLayout({
-      room: window - 280,
-      files,
-      filesRail: 40,
-      filesKeptOpen: false,
-      preferred: holdsList ? HISTORY_WIDTH.default : 0,
-      compact: HISTORY_WIDTH.min,
-      tree: screen === "History" ? 240 : 0,
-      treeRail: 28,
-      treeKeptOpen: false,
-      need: COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH,
-    });
-    const listWidth =
-      (layout.filesFolded ? 40 : files) + layout.width + layout.tree;
-    const saved = {
-      version: 3,
-      focused: "left",
-      split: 0.5,
-      panes: [
-        {
-          side: "left",
-          activeId: "a",
-          tabs: [
-            {
-              id: "a",
-              preview: false,
-              target: { kind: "file", path: "src/app.ts" },
-            },
-          ],
-        },
-        {
-          side: "right",
-          activeId: "t",
-          tabs: [
-            {
-              id: "t",
-              preview: false,
-              target: { kind: "terminal", session: "shell-a1" },
-            },
-          ],
-        },
-      ],
-    };
-    const { handle, mount } = setup(
-      async () => saved,
-      () => listWidth,
-      undefined,
-      undefined,
-      undefined,
-      { listColumnHoldsList: () => holdsList },
-    );
-    await handle.restore();
-    const split = panes(handle).split;
-    expect({
-      column: listWidth,
-      parked: !split,
-      filesFolded: layout.filesFolded,
-      // 預けた理由は、一覧のために預けたとき専用の説明
-      reason: !split
-        ? splitButton(mount)?.title.startsWith(
-            "The right side (1 tab) is set aside to make room for this screen's list",
-          )
-        : null,
-    }).toEqual({
-      column,
-      parked,
-      filesFolded,
-      reason: parked ? true : null,
-    });
-  });
+  ] as const)(
+    "$screen・窓 $window px: 一覧の列 $column px・右の面を預けるか $parked・ファイル一覧を畳む $filesFolded",
+    async ({ screen, window, column, parked, filesFolded }) => {
+      const holdsList = screen !== "Files";
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: window - 280,
+      });
+      const files = 240;
+      const layout = listColumnLayout({
+        room: window - 280,
+        files,
+        filesRail: 40,
+        filesKeptOpen: false,
+        preferred: holdsList ? HISTORY_WIDTH.default : 0,
+        compact: HISTORY_WIDTH.min,
+        tree: screen === "History" ? 240 : 0,
+        treeRail: 28,
+        treeKeptOpen: false,
+        need: COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH,
+      });
+      const listWidth =
+        (layout.filesFolded ? 40 : files) + layout.width + layout.tree;
+      const saved = {
+        version: 3,
+        focused: "left",
+        split: 0.5,
+        panes: [
+          {
+            side: "left",
+            activeId: "a",
+            tabs: [
+              {
+                id: "a",
+                preview: false,
+                target: { kind: "file", path: "src/app.ts" },
+              },
+            ],
+          },
+          {
+            side: "right",
+            activeId: "t",
+            tabs: [
+              {
+                id: "t",
+                preview: false,
+                target: { kind: "terminal", session: "shell-a1" },
+              },
+            ],
+          },
+        ],
+      };
+      const { handle, mount } = setup(
+        async () => saved,
+        () => listWidth,
+        undefined,
+        undefined,
+        undefined,
+        { listColumnHoldsList: () => holdsList },
+      );
+      await handle.restore();
+      const split = panes(handle).split;
+      expect({
+        column: listWidth,
+        parked: !split,
+        filesFolded: layout.filesFolded,
+        // 預けた理由は、一覧のために預けたとき専用の説明
+        reason: !split
+          ? splitButton(mount)?.title.startsWith(
+              "The right side (1 tab) is set aside to make room for this screen's list",
+            )
+          : null,
+      }).toEqual({
+        column,
+        parked,
+        filesFolded,
+        reason: parked ? true : null,
+      });
+    },
+  );
 
   // 2 面を置ける下限は、詰めたときの面の幅 (320) 2 つ分 + 仕切り 1 = 641px。
   // 本文 (一覧の列の右) の幅で数える。ゆとりのある幅 (480 * 2 + 1 = 961) に
@@ -3045,25 +3043,24 @@ describe("main tabs view: 左右 2 面", () => {
     { window: 640, column: 0, split: false },
     { window: 641, column: 0, split: true },
     { window: 1201, column: 240, split: true },
-  ])("窓 $window px・一覧の列 $column px なら分割できるか: $split", async ({
-    window,
-    column,
-    split,
-  }) => {
-    Object.defineProperty(document.documentElement, "clientWidth", {
-      configurable: true,
-      value: window,
-    });
-    const { handle, mount } = setup(
-      async () => null,
-      () => column,
-    );
-    await handle.restore();
-    handle.syncRoute({ screen: "diff", range });
-    handle.openTerminal("shell-a1");
-    splitButton(mount)?.click();
-    expect(panes(handle).split).toBe(split);
-  });
+  ])(
+    "窓 $window px・一覧の列 $column px なら分割できるか: $split",
+    async ({ window, column, split }) => {
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: window,
+      });
+      const { handle, mount } = setup(
+        async () => null,
+        () => column,
+      );
+      await handle.restore();
+      handle.syncRoute({ screen: "diff", range });
+      handle.openTerminal("shell-a1");
+      splitButton(mount)?.click();
+      expect(panes(handle).split).toBe(split);
+    },
+  );
 
   // 本文の左端 = 一覧の列の頭 (タブ列の行の左端 = 左のサイドバーの右) の左端 +
   // 一覧の列。タブ列 (mount) はその頭の右から始まるので、タブ列の左端からは
@@ -3071,31 +3068,31 @@ describe("main tabs view: 左右 2 面", () => {
   test.each([
     { window: 1160, split: false },
     { window: 1161, split: true },
-  ])("左のサイドバー 280・一覧の列 240・窓 $window px なら分割できるか: $split", async ({
-    window,
-    split,
-  }) => {
-    Object.defineProperty(document.documentElement, "clientWidth", {
-      configurable: true,
-      value: window,
-    });
-    const columnHead = document.createElement("div");
-    columnHead.getBoundingClientRect = () => new DOMRect(280, 0, 240, 34);
-    const { handle, mount } = setup(
-      async () => null,
-      () => 240,
-      undefined,
-      undefined,
-      undefined,
-      { columnHead },
-    );
-    mount.getBoundingClientRect = () => new DOMRect(520, 0, window - 520, 34);
-    await handle.restore();
-    handle.syncRoute({ screen: "diff", range });
-    handle.openTerminal("shell-a1");
-    splitButton(mount)?.click();
-    expect(panes(handle).split).toBe(split);
-  });
+  ])(
+    "左のサイドバー 280・一覧の列 240・窓 $window px なら分割できるか: $split",
+    async ({ window, split }) => {
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: window,
+      });
+      const columnHead = document.createElement("div");
+      columnHead.getBoundingClientRect = () => new DOMRect(280, 0, 240, 34);
+      const { handle, mount } = setup(
+        async () => null,
+        () => 240,
+        undefined,
+        undefined,
+        undefined,
+        { columnHead },
+      );
+      mount.getBoundingClientRect = () => new DOMRect(520, 0, window - 520, 34);
+      await handle.restore();
+      handle.syncRoute({ screen: "diff", range });
+      handle.openTerminal("shell-a1");
+      splitButton(mount)?.click();
+      expect(panes(handle).split).toBe(split);
+    },
+  );
 
   // 2 面を置けるかは、2 面にしたときの一覧の列の幅 (幅が足りなければ詰めて畳んだ
   // 幅) で数える。1 面の今の幅 (ファイル一覧 240 + 一覧 240) で数えると、1280 の窓
@@ -3108,30 +3105,30 @@ describe("main tabs view: 左右 2 面", () => {
       splitColumn: undefined,
       split: false,
     },
-  ])("本文の場所 1000・1 面の一覧の列 480: $name → 分割できるか $split", async ({
-    splitColumn,
-    split,
-  }) => {
-    Object.defineProperty(document.documentElement, "clientWidth", {
-      configurable: true,
-      value: 1000,
-    });
-    const { handle, mount } = setup(
-      async () => null,
-      () => 480,
-      undefined,
-      undefined,
-      undefined,
-      splitColumn === undefined
-        ? {}
-        : { splitListColumnWidth: () => splitColumn },
-    );
-    await handle.restore();
-    handle.syncRoute({ screen: "diff", range });
-    handle.openTerminal("shell-a1");
-    splitButton(mount)?.click();
-    expect(panes(handle).split).toBe(split);
-  });
+  ])(
+    "本文の場所 1000・1 面の一覧の列 480: $name → 分割できるか $split",
+    async ({ splitColumn, split }) => {
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: 1000,
+      });
+      const { handle, mount } = setup(
+        async () => null,
+        () => 480,
+        undefined,
+        undefined,
+        undefined,
+        splitColumn === undefined
+          ? {}
+          : { splitListColumnWidth: () => splitColumn },
+      );
+      await handle.restore();
+      handle.syncRoute({ screen: "diff", range });
+      handle.openTerminal("shell-a1");
+      splitButton(mount)?.click();
+      expect(panes(handle).split).toBe(split);
+    },
+  );
 
   // 詰めたときは、右の面を先に畳まず両面を同じ比で縮める (下限 320)。
   test("ゆとりの無い幅では面を同じ比で縮める", async () => {
@@ -3219,22 +3216,22 @@ describe("main tabs view: 左右 2 面", () => {
     { name: "page のタブ", kind: "page", dropZone: false },
     { name: "ファイルのタブ", kind: "file", dropZone: true },
     { name: "ターミナルのタブ", kind: "terminal", dropZone: true },
-  ])("ドラッグ中の右に分割の落とす先は、右に置ける種類だけ ($name)", async ({
-    kind,
-    dropZone,
-  }) => {
-    const { handle, mount } = setup(async () => null);
-    await handle.restore();
-    handle.syncRoute({ screen: "diff", range });
-    handle.openTerminal("shell-a1");
-    const dragged = mount.querySelector<HTMLElement>(
-      `.main-tab[data-kind="${kind}"]`,
-    );
-    if (!dragged) throw new Error(`no ${kind} tab to drag`);
-    dragged.dispatchEvent(new Event("dragstart", { bubbles: true }));
-    const zone = document.querySelector<HTMLElement>(".main-split-drop");
-    expect(zone?.hidden).toBe(!dropZone);
-  });
+  ])(
+    "ドラッグ中の右に分割の落とす先は、右に置ける種類だけ ($name)",
+    async ({ kind, dropZone }) => {
+      const { handle, mount } = setup(async () => null);
+      await handle.restore();
+      handle.syncRoute({ screen: "diff", range });
+      handle.openTerminal("shell-a1");
+      const dragged = mount.querySelector<HTMLElement>(
+        `.main-tab[data-kind="${kind}"]`,
+      );
+      if (!dragged) throw new Error(`no ${kind} tab to drag`);
+      dragged.dispatchEvent(new Event("dragstart", { bubbles: true }));
+      const zone = document.querySelector<HTMLElement>(".main-split-drop");
+      expect(zone?.hidden).toBe(!dropZone);
+    },
+  );
 
   // 掴んでいる最中にタブ列を描き直しても、掴んだタブの印は付いたまま。
   // 要素が外れて dragend が届かなくても、ボタンを離した移動で印を片付ける。
@@ -3282,28 +3279,28 @@ describe("main tabs view: 左右 2 面", () => {
   test.each([
     { kind: "page", accepts: false },
     { kind: "file", accepts: true },
-  ])("右の面のタブ列が $kind のタブを受けるか (dragover): $accepts", async ({
-    kind,
-    accepts,
-  }) => {
-    const { handle, mount } = setup(async () => null);
-    await handle.restore();
-    handle.syncRoute({ screen: "diff", range });
-    handle.openTerminal("shell-a1");
-    splitButton(mount)?.click();
-    const dragged = mount.querySelector<HTMLElement>(
-      `.main-tab[data-kind="${kind}"]`,
-    );
-    if (!dragged) throw new Error(`no ${kind} tab to drag`);
-    dragged.dispatchEvent(new Event("dragstart", { bubbles: true }));
-    const over = new Event("dragover", { bubbles: true, cancelable: true });
-    mount
-      .querySelector<HTMLElement>(
-        '.main-tabs-pane[data-side="right"] .main-tabs-strip',
-      )
-      ?.dispatchEvent(over);
-    expect(over.defaultPrevented).toBe(accepts);
-  });
+  ])(
+    "右の面のタブ列が $kind のタブを受けるか (dragover): $accepts",
+    async ({ kind, accepts }) => {
+      const { handle, mount } = setup(async () => null);
+      await handle.restore();
+      handle.syncRoute({ screen: "diff", range });
+      handle.openTerminal("shell-a1");
+      splitButton(mount)?.click();
+      const dragged = mount.querySelector<HTMLElement>(
+        `.main-tab[data-kind="${kind}"]`,
+      );
+      if (!dragged) throw new Error(`no ${kind} tab to drag`);
+      dragged.dispatchEvent(new Event("dragstart", { bubbles: true }));
+      const over = new Event("dragover", { bubbles: true, cancelable: true });
+      mount
+        .querySelector<HTMLElement>(
+          '.main-tabs-pane[data-side="right"] .main-tabs-strip',
+        )
+        ?.dispatchEvent(over);
+      expect(over.defaultPrevented).toBe(accepts);
+    },
+  );
 
   test("保存した 2 面・比・画像の前面が戻る (URL が下に残った route を指していても)", async () => {
     const saved = {

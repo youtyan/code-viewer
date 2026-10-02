@@ -173,12 +173,12 @@ describe("the diff and code rules read the measured tokens", () => {
   });
 
   // diff2html の既定の左の線 (#eee) は暗い地で白い縦線になっていた。
-  test.each([
-    ".d2h-code-side-linenumber",
-    ".d2h-code-linenumber",
-  ])("%s drops diff2html's left border", (selector) => {
-    expect(exactly(selector).get("border-left")).toBe("0 !important");
-  });
+  test.each([".d2h-code-side-linenumber", ".d2h-code-linenumber"])(
+    "%s drops diff2html's left border",
+    (selector) => {
+      expect(exactly(selector).get("border-left")).toBe("0 !important");
+    },
+  );
 });
 
 // 同じ種類は shiki の面 (ソース表示・Markdown・Data・Tools) でも highlight.js の面
@@ -283,13 +283,12 @@ describe("shiki and highlight.js give the same kind the same color", () => {
     KINDS.flatMap((kind) =>
       HLJS_SURFACES.map((surface) => ({ ...kind, surface })),
     ),
-  )("$kind (highlight.js .hljs-$hljs on $surface)", ({
-    hljs,
-    surface,
-    token: name,
-  }) => {
-    expect(exactly(`${surface} .hljs-${hljs}`).get("color")).toBe(
-      `var(${name}) !important`,
-    );
-  });
+  )(
+    "$kind (highlight.js .hljs-$hljs on $surface)",
+    ({ hljs, surface, token: name }) => {
+      expect(exactly(`${surface} .hljs-${hljs}`).get("color")).toBe(
+        `var(${name}) !important`,
+      );
+    },
+  );
 });

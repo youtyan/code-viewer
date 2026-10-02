@@ -273,11 +273,14 @@ describe("changing the registry", () => {
     ["the last to the end", "/work/b", null],
     ["before the next one", "/work/a", "/work/b"],
     ["before itself", "/work/a", "/work/a"],
-  ])("placeProject that changes nothing returns the same registry (%s)", (_label, root, before) => {
-    const start = registry("/work/a", "/work/b");
-    const result = placeProject(start, root, before);
-    expect(result.ok && result.registry).toBe(start);
-  });
+  ])(
+    "placeProject that changes nothing returns the same registry (%s)",
+    (_label, root, before) => {
+      const start = registry("/work/a", "/work/b");
+      const result = placeProject(start, root, before);
+      expect(result.ok && result.registry).toBe(start);
+    },
+  );
 
   test.each<[string, string, string | null, string]>([
     ["an unknown project", "/work/x", "/work/a", "/work/x"],
@@ -564,15 +567,14 @@ describe("projectDestination", () => {
     );
   });
 
-  test.each([
-    "/../admin",
-    "/%2e%2e/admin",
-    "/a/../../admin",
-  ])("keeps an escaping path inside the project prefix: %s", (path) => {
-    expect(
-      projectDestination("http://127.0.0.1:64101/p/0123456789abcdef/", path),
-    ).toBe("http://127.0.0.1:64101/p/0123456789abcdef/");
-  });
+  test.each(["/../admin", "/%2e%2e/admin", "/a/../../admin"])(
+    "keeps an escaping path inside the project prefix: %s",
+    (path) => {
+      expect(
+        projectDestination("http://127.0.0.1:64101/p/0123456789abcdef/", path),
+      ).toBe("http://127.0.0.1:64101/p/0123456789abcdef/");
+    },
+  );
 });
 
 describe("matchesProjectQuery", () => {
@@ -652,34 +654,37 @@ describe("groupAgentPanes with registered projects", () => {
     ["waiting in an unregistered one", ["idle", "idle", "waiting", "idle"]],
     ["working in the last registered", ["idle", "idle", "idle", "working"]],
     ["mixed", ["done", "waiting", "working", "idle"]],
-  ])("the board and the sidebar list projects in the same order (%s)", (_label, states) => {
-    const mixed = panes.map((item, index) => ({
-      ...item,
-      state: states[index] ?? "idle",
-    }));
-    const board = groupAgentPanes(mixed, projects, {
-      includeEmptyRegistered: true,
-    }).map((group) => group.info.root);
-    const sidebar = groupAgentPanesByPlace(mixed, projects, {
-      includeEmptyRegistered: true,
-    }).map((group) => group.info.root);
-    expect([board, sidebar]).toEqual([
-      [
-        "/work/reg-first",
-        "/work/reg-second",
-        "/work/reg-idle",
-        "/work/other-idle",
-        "/work/other-waiting",
-      ],
-      [
-        "/work/reg-first",
-        "/work/reg-second",
-        "/work/reg-idle",
-        "/work/other-idle",
-        "/work/other-waiting",
-      ],
-    ]);
-  });
+  ])(
+    "the board and the sidebar list projects in the same order (%s)",
+    (_label, states) => {
+      const mixed = panes.map((item, index) => ({
+        ...item,
+        state: states[index] ?? "idle",
+      }));
+      const board = groupAgentPanes(mixed, projects, {
+        includeEmptyRegistered: true,
+      }).map((group) => group.info.root);
+      const sidebar = groupAgentPanesByPlace(mixed, projects, {
+        includeEmptyRegistered: true,
+      }).map((group) => group.info.root);
+      expect([board, sidebar]).toEqual([
+        [
+          "/work/reg-first",
+          "/work/reg-second",
+          "/work/reg-idle",
+          "/work/other-idle",
+          "/work/other-waiting",
+        ],
+        [
+          "/work/reg-first",
+          "/work/reg-second",
+          "/work/reg-idle",
+          "/work/other-idle",
+          "/work/other-waiting",
+        ],
+      ]);
+    },
+  );
 
   test("registered projects without agents are left out while filtering", () => {
     const order = groupAgentPanes(panes, projects).map(

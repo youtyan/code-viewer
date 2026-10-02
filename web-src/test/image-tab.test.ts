@@ -408,24 +408,24 @@ describe("image tab close", () => {
   test.each([
     { name: "English", language: "en" as const, label: "Close" },
     { name: "Japanese", language: "ja" as const, label: "閉じる" },
-  ])("the close button shows the X, the word and Esc ($name)", ({
-    language,
-    label,
-  }) => {
-    const view = createView({ language });
+  ])(
+    "the close button shows the X, the word and Esc ($name)",
+    ({ language, label }) => {
+      const view = createView({ language });
 
-    const close = view.el.querySelector<HTMLButtonElement>(
-      '.image-tab-actions [data-action="close"]',
-    );
+      const close = view.el.querySelector<HTMLButtonElement>(
+        '.image-tab-actions [data-action="close"]',
+      );
 
-    expect({
-      icon: close?.querySelector("svg.image-tab-icon") !== null,
-      label: close?.querySelector("span")?.textContent,
-      key: close?.querySelector("kbd")?.textContent,
-      name: close?.getAttribute("aria-label"),
-      last: close?.parentElement?.lastElementChild === close,
-    }).toEqual({ icon: true, label, key: "Esc", name: label, last: true });
-  });
+      expect({
+        icon: close?.querySelector("svg.image-tab-icon") !== null,
+        label: close?.querySelector("span")?.textContent,
+        key: close?.querySelector("kbd")?.textContent,
+        name: close?.getAttribute("aria-label"),
+        last: close?.parentElement?.lastElementChild === close,
+      }).toEqual({ icon: true, label, key: "Esc", name: label, last: true });
+    },
+  );
 
   test("switching the language relabels the close button", () => {
     const view = createView();
@@ -515,20 +515,19 @@ describe("image tab close look", () => {
 
   // 枠の色だけを比べる (ほかのボタンの枠は border の一括指定の最後の語)。
   // 全部のテーマ × 明暗。
-  test.each(
-    themeVariants(rules),
-  )("the close border stands out more than the other buttons' ($name)", ({
-    vars,
-  }) => {
-    const ground = resolveVar(toolbar.get("background") ?? "", vars);
-    const plainBorder = resolveVar(
-      (plain.get("border") ?? "").split(" ").pop() ?? "",
-      vars,
-    );
-    const closeBorder = resolveVar(close.get("border-color") ?? "", vars);
+  test.each(themeVariants(rules))(
+    "the close border stands out more than the other buttons' ($name)",
+    ({ vars }) => {
+      const ground = resolveVar(toolbar.get("background") ?? "", vars);
+      const plainBorder = resolveVar(
+        (plain.get("border") ?? "").split(" ").pop() ?? "",
+        vars,
+      );
+      const closeBorder = resolveVar(close.get("border-color") ?? "", vars);
 
-    expect(contrastRatio(closeBorder, ground)).toBeGreaterThan(
-      contrastRatio(plainBorder, ground),
-    );
-  });
+      expect(contrastRatio(closeBorder, ground)).toBeGreaterThan(
+        contrastRatio(plainBorder, ground),
+      );
+    },
+  );
 });

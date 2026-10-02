@@ -31,17 +31,18 @@ describe("agentCliVersionIn", () => {
   });
 
   // doctor は記録と手元の版を文字列で比べるので、記録は出力から読む形のまま書く。
-  test.each(
-    Object.entries(CHECKED_AGENT_CLI_VERSIONS),
-  )("the checked %s version is written the way --version prints it", (_agent, checked) => {
-    expect([
-      agentCliVersionIn(checked.version),
-      /^\d{4}-\d{2}-\d{2}$/.test(checked.checkedOn),
-      new Date(`${checked.checkedOn}T00:00:00Z`)
-        .toISOString()
-        .startsWith(checked.checkedOn),
-    ]).toEqual([checked.version, true, true]);
-  });
+  test.each(Object.entries(CHECKED_AGENT_CLI_VERSIONS))(
+    "the checked %s version is written the way --version prints it",
+    (_agent, checked) => {
+      expect([
+        agentCliVersionIn(checked.version),
+        /^\d{4}-\d{2}-\d{2}$/.test(checked.checkedOn),
+        new Date(`${checked.checkedOn}T00:00:00Z`)
+          .toISOString()
+          .startsWith(checked.checkedOn),
+      ]).toEqual([checked.version, true, true]);
+    },
+  );
 });
 
 describe("doctor: agent CLIs", () => {

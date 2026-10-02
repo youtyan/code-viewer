@@ -202,44 +202,43 @@ describe("the remote access section", () => {
       start: false,
       stop: true,
     },
-  ])("when $name, start is $start and stop is $stop", async ({
-    status,
-    start,
-    stop,
-  }) => {
-    serve(() => Response.json(status));
-    const section = await mount();
+  ])(
+    "when $name, start is $start and stop is $stop",
+    async ({ status, start, stop }) => {
+      serve(() => Response.json(status));
+      const section = await mount();
 
-    expect({
-      start: !q<HTMLButtonElement>(section.element, ".remote-access-start")
-        .disabled,
-      stop: !q<HTMLButtonElement>(section.element, ".remote-access-stop")
-        .disabled,
-    }).toEqual({ start, stop });
-  });
+      expect({
+        start: !q<HTMLButtonElement>(section.element, ".remote-access-start")
+          .disabled,
+        stop: !q<HTMLButtonElement>(section.element, ".remote-access-stop")
+          .disabled,
+      }).toEqual({ start, stop });
+    },
+  );
 
   test.each([
     { button: ".remote-access-start", path: "/_entry/remote/start" },
     { button: ".remote-access-stop", path: "/_entry/remote/stop" },
-  ])("$button posts to $path with the action header", async ({
-    button,
-    path,
-  }) => {
-    const calls = serve(() =>
-      Response.json({ ...RUNNING, tunnel: { state: "exited", error: "x" } }),
-    );
-    const section = await mount();
+  ])(
+    "$button posts to $path with the action header",
+    async ({ button, path }) => {
+      const calls = serve(() =>
+        Response.json({ ...RUNNING, tunnel: { state: "exited", error: "x" } }),
+      );
+      const section = await mount();
 
-    q<HTMLButtonElement>(section.element, button).click();
-    await waitFor(() => calls.length === 2);
+      q<HTMLButtonElement>(section.element, button).click();
+      await waitFor(() => calls.length === 2);
 
-    expect(calls[1]).toEqual({
-      method: "POST",
-      path,
-      body: null,
-      action: true,
-    });
-  });
+      expect(calls[1]).toEqual({
+        method: "POST",
+        path,
+        body: null,
+        action: true,
+      });
+    },
+  );
 
   test("the first load asks the server to check cloudflared again with a POST and the action header", async () => {
     const calls = serve(() => Response.json(STOPPED));
@@ -439,23 +438,22 @@ describe("the remote access section", () => {
       shown: false,
       disabled: false,
     },
-  ])("the install button when cloudflared is $name", async ({
-    cloudflared,
-    shown,
-    disabled,
-  }) => {
-    serve(() => Response.json({ ...STOPPED, cloudflared }));
-    const section = await mount();
-    const button = q<HTMLButtonElement>(
-      section.element,
-      ".remote-access-install",
-    );
+  ])(
+    "the install button when cloudflared is $name",
+    async ({ cloudflared, shown, disabled }) => {
+      serve(() => Response.json({ ...STOPPED, cloudflared }));
+      const section = await mount();
+      const button = q<HTMLButtonElement>(
+        section.element,
+        ".remote-access-install",
+      );
 
-    expect({ shown: !button.hidden, disabled: button.disabled }).toEqual({
-      shown,
-      disabled,
-    });
-  });
+      expect({ shown: !button.hidden, disabled: button.disabled }).toEqual({
+        shown,
+        disabled,
+      });
+    },
+  );
 
   test("pressing install asks the server to install cloudflared", async () => {
     const calls = serve(() =>

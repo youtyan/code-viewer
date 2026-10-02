@@ -336,16 +336,16 @@ describe("the usage popover", () => {
     ).toBe(true);
   });
 
-  test.each([
-    "Enter",
-    " ",
-  ])("the %j key on the status-bar usage opens it", (key) => {
-    mount([account({ id: "claude:default" })]);
-    const item =
-      harness.root.querySelector<HTMLButtonElement>(".usage-status-item");
-    item?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
-    expect(popover()).not.toBeNull();
-  });
+  test.each(["Enter", " "])(
+    "the %j key on the status-bar usage opens it",
+    (key) => {
+      mount([account({ id: "claude:default" })]);
+      const item =
+        harness.root.querySelector<HTMLButtonElement>(".usage-status-item");
+      item?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      expect(popover()).not.toBeNull();
+    },
+  );
 
   test("a press outside closes it; a press inside does not", () => {
     mount([account({ id: "claude:default" })]);

@@ -109,32 +109,30 @@ test.each([
   { density: "regular", top: 8, side: 8, bottom: 4 },
   { density: "large", top: 9, side: 9, bottom: 4.5 },
   { density: "xlarge", top: 10, side: 10, bottom: 5 },
-] as const)("density $density: the search field is inset $top px from the top and $side px from the sides", ({
-  density,
-  top,
-  side,
-  bottom,
-}) => {
-  const vars = densities[density];
-  const [padTop, padSide, padBottom] = declared(".nav-head", "padding")
-    .split(/\s+/)
-    .map((value) => px(resolveVar(value, vars)));
-  expect({
-    top: padTop,
-    side: padSide,
-    bottom: padBottom,
-    headHeight: declared(".nav-head", "height"),
-    searchHeight: block(".nav-search").get("height") ?? null,
-    searchStretch: declared(".nav-search", "align-self"),
-  }).toEqual({
-    top,
-    side,
-    bottom,
-    headHeight: "var(--main-tabs-h)",
-    searchHeight: null,
-    searchStretch: "stretch",
-  });
-});
+] as const)(
+  "density $density: the search field is inset $top px from the top and $side px from the sides",
+  ({ density, top, side, bottom }) => {
+    const vars = densities[density];
+    const [padTop, padSide, padBottom] = declared(".nav-head", "padding")
+      .split(/\s+/)
+      .map((value) => px(resolveVar(value, vars)));
+    expect({
+      top: padTop,
+      side: padSide,
+      bottom: padBottom,
+      headHeight: declared(".nav-head", "height"),
+      searchHeight: block(".nav-search").get("height") ?? null,
+      searchStretch: declared(".nav-search", "align-self"),
+    }).toEqual({
+      top,
+      side,
+      bottom,
+      headHeight: "var(--main-tabs-h)",
+      searchHeight: null,
+      searchStretch: "stretch",
+    });
+  },
+);
 
 test("a card is two lines; at the most compact density the sidebar folds it to one", () => {
   const rows = (areas: string) => areas.match(/"[^"]*"/g)?.length ?? 0;
@@ -151,54 +149,52 @@ test("a card is two lines; at the most compact density the sidebar folds it to o
 
 // ダークは変えていない: 行の面は本文の面 (--color-doc。以前 .nav-agent と
 // .agents-row が直に読んでいた色) で、線は引かない。
-test.each(
-  darkThemes,
-)("$name: a row sits on a lighter surface than the ground under it", ({
-  vars,
-}) => {
-  const color = (value: string) => luminance(resolveVar(value, vars));
-  const face = declared(".agent-card", "background-color");
-  expect({
-    face: resolveVar(face, vars),
-    rule: resolveVar("var(--color-agent-row-rule)", vars),
-    sidebar: color(face) > color(declared("#app-nav", "background")),
-    board: color(face) > color(declared(".agents-page", "background")),
-  }).toEqual({
-    face: resolveVar("var(--color-doc)", vars),
-    rule: "transparent",
-    sidebar: true,
-    board: true,
-  });
-});
+test.each(darkThemes)(
+  "$name: a row sits on a lighter surface than the ground under it",
+  ({ vars }) => {
+    const color = (value: string) => luminance(resolveVar(value, vars));
+    const face = declared(".agent-card", "background-color");
+    expect({
+      face: resolveVar(face, vars),
+      rule: resolveVar("var(--color-agent-row-rule)", vars),
+      sidebar: color(face) > color(declared("#app-nav", "background")),
+      board: color(face) > color(declared(".agents-page", "background")),
+    }).toEqual({
+      face: resolveVar("var(--color-doc)", vars),
+      rule: "transparent",
+      sidebar: true,
+      board: true,
+    });
+  },
+);
 
 // ライトは行ごとの面が無く、行の間の線 (表の区切りと同じ --color-line-row) が
 // サイドバーの地・全体ボードの地・hover の面のどれにも 1.5:1 以上で見える。
-test.each(
-  lightThemes,
-)("$name: rows have no face of their own and a visible rule between them", ({
-  vars,
-}) => {
-  const rule = resolveVar("var(--color-agent-row-rule)", vars);
-  const on = (value: string) =>
-    contrastRatio(rule, resolveVar(value, vars)) >= 1.5;
-  expect({
-    face: resolveVar(declared(".agent-card", "background-color"), vars),
-    rule: declared(".agent-card", "background-image").replace(/\s+/g, ""),
-    ruleSize: declared(".agent-card", "background-size"),
-    ruleAt: declared(".agent-card", "background-position"),
-    sidebar: on(declared("#app-nav", "background")),
-    board: on(declared(".agents-page", "background")),
-    hover: on("var(--color-raised)"),
-  }).toEqual({
-    face: "transparent",
-    rule: "linear-gradient(var(--color-agent-row-rule),var(--color-agent-row-rule))",
-    ruleSize: "100% 1px",
-    ruleAt: "bottom",
-    sidebar: true,
-    board: true,
-    hover: true,
-  });
-});
+test.each(lightThemes)(
+  "$name: rows have no face of their own and a visible rule between them",
+  ({ vars }) => {
+    const rule = resolveVar("var(--color-agent-row-rule)", vars);
+    const on = (value: string) =>
+      contrastRatio(rule, resolveVar(value, vars)) >= 1.5;
+    expect({
+      face: resolveVar(declared(".agent-card", "background-color"), vars),
+      rule: declared(".agent-card", "background-image").replace(/\s+/g, ""),
+      ruleSize: declared(".agent-card", "background-size"),
+      ruleAt: declared(".agent-card", "background-position"),
+      sidebar: on(declared("#app-nav", "background")),
+      board: on(declared(".agents-page", "background")),
+      hover: on("var(--color-raised)"),
+    }).toEqual({
+      face: "transparent",
+      rule: "linear-gradient(var(--color-agent-row-rule),var(--color-agent-row-rule))",
+      ruleSize: "100% 1px",
+      ruleAt: "bottom",
+      sidebar: true,
+      board: true,
+      hover: true,
+    });
+  },
+);
 
 // 箱の形は明暗で同じ: 枠線は無く、線は行の間だけ (最後の行の下には引かない)。
 // hover と選択中は面の色に替わる (background ごと。線もその行だけ消える)。

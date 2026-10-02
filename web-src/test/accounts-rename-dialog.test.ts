@@ -178,17 +178,17 @@ describe("rename dialog", () => {
       value: "other",
       reason: 'Another codex account is already named "Other".',
     },
-  ])("refuses $value before sending, with the reason", async ({
-    value,
-    reason,
-  }) => {
-    const sent: string[] = [];
-    void dialogs(async (id, name) => {
-      sent.push(`${id}:${name}`);
-      return stored(name);
-    }).rename(PERSONAL);
-    expect([await submitWith(value), sent]).toEqual([reason, []]);
-  });
+  ])(
+    "refuses $value before sending, with the reason",
+    async ({ value, reason }) => {
+      const sent: string[] = [];
+      void dialogs(async (id, name) => {
+        sent.push(`${id}:${name}`);
+        return stored(name);
+      }).rename(PERSONAL);
+      expect([await submitWith(value), sent]).toEqual([reason, []]);
+    },
+  );
 
   test("shows the reason the server gave and stays open", async () => {
     void dialogs(async () => {

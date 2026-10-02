@@ -237,54 +237,58 @@ describe("repo view commit entries", () => {
     [".ts", ["Alpha.ts", "beta.ts"], "2 / 3 items"],
     ["missing", [], "0 / 3 items"],
     ["", ["Alpha.ts", "beta.ts", "readme.md"], "3 / 3 items"],
-  ])("filters names with %s and keeps the query while sorting", async (query, names, count) => {
-    setupDom();
-    globalThis.fetch = (async () =>
-      response({
+  ])(
+    "filters names with %s and keeps the query while sorting",
+    async (query, names, count) => {
+      setupDom();
+      globalThis.fetch = (async () =>
+        response({
+          ref: "HEAD",
+          path: "",
+          project: "sample-repo",
+          entries: ["Alpha.ts", "beta.ts", "readme.md"].map((name) => ({
+            name,
+            path: name,
+            type: "blob",
+          })),
+        })) as typeof fetch;
+      const { view } = makeRepoView({
+        screen: "repo",
         ref: "HEAD",
         path: "",
-        project: "sample-repo",
-        entries: ["Alpha.ts", "beta.ts", "readme.md"].map((name) => ({
-          name,
-          path: name,
-          type: "blob",
-        })),
-      })) as typeof fetch;
-    const { view } = makeRepoView({
-      screen: "repo",
-      ref: "HEAD",
-      path: "",
-      range,
-    });
-    await view.loadRepo();
-    const input = document.querySelector<HTMLInputElement>(".gdp-repo-filter");
-    if (!input) throw new Error("missing repository filter");
-    input.value = query;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    const visibleNames = () =>
-      Array.from(
-        document.querySelectorAll(".gdp-repo-row .name"),
-        (el) => el.textContent,
-      );
-    expect(visibleNames()).toEqual(names);
-    expect(document.querySelector(".gdp-repo-result-count")?.textContent).toBe(
-      count,
-    );
-    if (!names.length)
+        range,
+      });
+      await view.loadRepo();
+      const input =
+        document.querySelector<HTMLInputElement>(".gdp-repo-filter");
+      if (!input) throw new Error("missing repository filter");
+      input.value = query;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const visibleNames = () =>
+        Array.from(
+          document.querySelectorAll(".gdp-repo-row .name"),
+          (el) => el.textContent,
+        );
+      expect(visibleNames()).toEqual(names);
       expect(
-        document.querySelector(".gdp-repo-file-list")?.textContent,
-      ).toContain("No matches");
-    document
-      .querySelector<HTMLButtonElement>('[data-repo-sort="name"]')
-      ?.click();
-    expect(visibleNames()).toEqual([...names].reverse());
-    expect(input.value).toBe(query);
-    input.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-    );
-    expect(input.value).toBe("");
-    expect(document.querySelectorAll(".gdp-repo-row")).toHaveLength(3);
-  });
+        document.querySelector(".gdp-repo-result-count")?.textContent,
+      ).toBe(count);
+      if (!names.length)
+        expect(
+          document.querySelector(".gdp-repo-file-list")?.textContent,
+        ).toContain("No matches");
+      document
+        .querySelector<HTMLButtonElement>('[data-repo-sort="name"]')
+        ?.click();
+      expect(visibleNames()).toEqual([...names].reverse());
+      expect(input.value).toBe(query);
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      expect(input.value).toBe("");
+      expect(document.querySelectorAll(".gdp-repo-row")).toHaveLength(3);
+    },
+  );
 
   // ui-surface.md の「タブの決まり」: ファイルの右クリックで固定のタブ・反対の面に開ける。
   test.each([
@@ -343,109 +347,112 @@ describe("repo view commit entries", () => {
           new Event("pointerdown", { bubbles: true }),
         ),
     ],
-  ])("the row menu is the one shared menu and closes on %s", async (_name, close) => {
-    setupDom();
-    globalThis.fetch = (async () =>
-      response({
+  ])(
+    "the row menu is the one shared menu and closes on %s",
+    async (_name, close) => {
+      setupDom();
+      globalThis.fetch = (async () =>
+        response({
+          ref: "worktree",
+          path: "",
+          project: "sample-repo",
+          entries: [{ name: "alpha.ts", path: "alpha.ts", type: "blob" }],
+        })) as typeof fetch;
+      const { view } = makeRepoView({
+        screen: "repo",
         ref: "worktree",
         path: "",
-        project: "sample-repo",
-        entries: [{ name: "alpha.ts", path: "alpha.ts", type: "blob" }],
-      })) as typeof fetch;
-    const { view } = makeRepoView({
-      screen: "repo",
-      ref: "worktree",
-      path: "",
-      range,
-    });
-    await view.loadRepo();
-    const other = document.createElement("button");
-    document.body.append(other);
-    showContextMenu(other, [
-      {
-        label: "Other menu",
-        onSelect() {
-          /* noop */
+        range,
+      });
+      await view.loadRepo();
+      const other = document.createElement("button");
+      document.body.append(other);
+      showContextMenu(other, [
+        {
+          label: "Other menu",
+          onSelect() {
+            /* noop */
+          },
         },
-      },
-    ]);
-    document
-      .querySelector(".gdp-repo-row")
-      ?.dispatchEvent(
-        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
-      );
-    const opened = [
-      [...document.querySelectorAll(".gdp-context-menu")].map(
-        (menu) => menu.querySelector("button")?.textContent,
-      ),
-      isContextMenuOpen(),
-    ];
-    close();
-    const arrow = new KeyboardEvent("keydown", {
-      key: "ArrowDown",
-      bubbles: true,
-      cancelable: true,
-    });
-    document.dispatchEvent(arrow);
-    expect([
-      opened,
-      document.querySelectorAll(".gdp-context-menu").length,
-      isContextMenuOpen(),
-      arrow.defaultPrevented,
-    ]).toEqual([[["Open in new tab"], true], 0, false, false]);
-  });
+      ]);
+      document
+        .querySelector(".gdp-repo-row")
+        ?.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+        );
+      const opened = [
+        [...document.querySelectorAll(".gdp-context-menu")].map(
+          (menu) => menu.querySelector("button")?.textContent,
+        ),
+        isContextMenuOpen(),
+      ];
+      close();
+      const arrow = new KeyboardEvent("keydown", {
+        key: "ArrowDown",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(arrow);
+      expect([
+        opened,
+        document.querySelectorAll(".gdp-context-menu").length,
+        isContextMenuOpen(),
+        arrow.defaultPrevented,
+      ]).toEqual([[["Open in new tab"], true], 0, false, false]);
+    },
+  );
 
   test.each([
     { ref: "worktree", localDate: true },
     { ref: "HEAD", localDate: false },
-  ])("keeps commit and local dates separate at $ref", async ({
-    ref,
-    localDate,
-  }) => {
-    setupDom();
-    const style = document.createElement("style");
-    style.textContent = readFileSync("web/style.css", "utf8");
-    document.body.appendChild(style);
-    const root: RepoTreeResponse = {
-      ref,
-      path: "",
-      project: "sample-repo",
-      entries: [
-        {
-          name: "tracked.txt",
-          path: "tracked.txt",
-          type: "blob",
-          updated_at: "2030-01-01T00:00:00Z",
-          commit_updated_at: "2025-01-02T03:04:05Z",
-        },
-        {
-          name: "new.txt",
-          path: "new.txt",
-          type: "blob",
-          updated_at: "2030-01-01T00:00:00Z",
-          status: "U",
-        },
-      ],
-    };
-    globalThis.fetch = (async () => response(root)) as typeof fetch;
-    const { view } = makeRepoView({ screen: "repo", ref, path: "", range });
-    await view.loadRepo();
-    const row = document.querySelectorAll(".gdp-repo-row")[1];
-    expect(row.querySelector("time")?.getAttribute("datetime")).toBe(
-      "2025-01-02T03:04:05Z",
-    );
-    expect(row.querySelector("time")?.getAttribute("title")).toContain(
-      "2025-01-02T03:04:05Z",
-    );
-    expect(row.querySelector(".meta")?.textContent !== "-").toBe(localDate);
-    expect(document.querySelector(".gdp-repo-row time")?.textContent).toBe(
-      "No commit history",
-    );
-    const dates = document.querySelectorAll(".gdp-repo-row time");
-    expect(getComputedStyle(dates[0]).padding).toBe(
-      getComputedStyle(dates[1]).padding,
-    );
-  });
+  ])(
+    "keeps commit and local dates separate at $ref",
+    async ({ ref, localDate }) => {
+      setupDom();
+      const style = document.createElement("style");
+      style.textContent = readFileSync("web/style.css", "utf8");
+      document.body.appendChild(style);
+      const root: RepoTreeResponse = {
+        ref,
+        path: "",
+        project: "sample-repo",
+        entries: [
+          {
+            name: "tracked.txt",
+            path: "tracked.txt",
+            type: "blob",
+            updated_at: "2030-01-01T00:00:00Z",
+            commit_updated_at: "2025-01-02T03:04:05Z",
+          },
+          {
+            name: "new.txt",
+            path: "new.txt",
+            type: "blob",
+            updated_at: "2030-01-01T00:00:00Z",
+            status: "U",
+          },
+        ],
+      };
+      globalThis.fetch = (async () => response(root)) as typeof fetch;
+      const { view } = makeRepoView({ screen: "repo", ref, path: "", range });
+      await view.loadRepo();
+      const row = document.querySelectorAll(".gdp-repo-row")[1];
+      expect(row.querySelector("time")?.getAttribute("datetime")).toBe(
+        "2025-01-02T03:04:05Z",
+      );
+      expect(row.querySelector("time")?.getAttribute("title")).toContain(
+        "2025-01-02T03:04:05Z",
+      );
+      expect(row.querySelector(".meta")?.textContent !== "-").toBe(localDate);
+      expect(document.querySelector(".gdp-repo-row time")?.textContent).toBe(
+        "No commit history",
+      );
+      const dates = document.querySelectorAll(".gdp-repo-row time");
+      expect(getComputedStyle(dates[0]).padding).toBe(
+        getComputedStyle(dates[1]).padding,
+      );
+    },
+  );
 
   test.each([
     {
@@ -464,61 +471,60 @@ describe("repo view commit entries", () => {
     { key: "size", clicks: 2, names: ["alpha.txt", "beta.txt", "new.txt"] },
     { key: "name", clicks: 1, names: ["new.txt", "beta.txt", "alpha.txt"] },
     { key: "name", clicks: 2, names: ["alpha.txt", "beta.txt", "new.txt"] },
-  ])("sorts $key after $clicks clicks with missing values last", async ({
-    key,
-    clicks,
-    names,
-  }) => {
-    setupDom();
-    const root: RepoTreeResponse = {
-      ref: "worktree",
-      path: "",
-      project: "sample-repo",
-      entries: [
-        {
-          name: "alpha.txt",
-          path: "alpha.txt",
-          type: "blob",
-          size: 1,
-          updated_at: "2030-01-02T00:00:00Z",
-          commit_updated_at: "2025-01-01T00:00:00Z",
-        },
-        {
-          name: "beta.txt",
-          path: "beta.txt",
-          type: "blob",
-          size: 2,
-          updated_at: "2030-01-01T00:00:00Z",
-          commit_updated_at: "2025-01-02T00:00:00Z",
-        },
-        {
-          name: "new.txt",
-          path: "new.txt",
-          type: "blob",
-          updated_at: "2030-01-03T00:00:00Z",
-          status: "U",
-        },
-      ],
-    };
-    globalThis.fetch = (async () => response(root)) as typeof fetch;
-    const { view } = makeRepoView({
-      screen: "repo",
-      ref: "worktree",
-      path: "",
-      range,
-    });
-    await view.loadRepo();
-    for (let i = 0; i < clicks; i++)
-      document
-        .querySelector<HTMLButtonElement>(`[data-repo-sort="${key}"]`)
-        ?.click();
-    expect(
-      [...document.querySelectorAll(".gdp-repo-row .name")].map(
-        (name) => name.textContent,
-      ),
-    ).toEqual(names);
-    expect(document.activeElement?.getAttribute("data-repo-sort")).toBe(key);
-  });
+  ])(
+    "sorts $key after $clicks clicks with missing values last",
+    async ({ key, clicks, names }) => {
+      setupDom();
+      const root: RepoTreeResponse = {
+        ref: "worktree",
+        path: "",
+        project: "sample-repo",
+        entries: [
+          {
+            name: "alpha.txt",
+            path: "alpha.txt",
+            type: "blob",
+            size: 1,
+            updated_at: "2030-01-02T00:00:00Z",
+            commit_updated_at: "2025-01-01T00:00:00Z",
+          },
+          {
+            name: "beta.txt",
+            path: "beta.txt",
+            type: "blob",
+            size: 2,
+            updated_at: "2030-01-01T00:00:00Z",
+            commit_updated_at: "2025-01-02T00:00:00Z",
+          },
+          {
+            name: "new.txt",
+            path: "new.txt",
+            type: "blob",
+            updated_at: "2030-01-03T00:00:00Z",
+            status: "U",
+          },
+        ],
+      };
+      globalThis.fetch = (async () => response(root)) as typeof fetch;
+      const { view } = makeRepoView({
+        screen: "repo",
+        ref: "worktree",
+        path: "",
+        range,
+      });
+      await view.loadRepo();
+      for (let i = 0; i < clicks; i++)
+        document
+          .querySelector<HTMLButtonElement>(`[data-repo-sort="${key}"]`)
+          ?.click();
+      expect(
+        [...document.querySelectorAll(".gdp-repo-row .name")].map(
+          (name) => name.textContent,
+        ),
+      ).toEqual(names);
+      expect(document.activeElement?.getAttribute("data-repo-sort")).toBe(key);
+    },
+  );
 
   test("does not replace fresh commit dates with an older response for the same folder", async () => {
     setupDom();

@@ -204,22 +204,21 @@ describe("definition cell offsets", () => {
     { name: "nested mark", part: "marked", nodeOffset: 2, expected: 6 },
     { name: "last text node", part: "last", nodeOffset: 1, expected: 7 },
     { name: "cell element boundary", part: "cell", nodeOffset: 3, expected: 8 },
-  ])("normalizes the $name to a cell offset", ({
-    part,
-    nodeOffset,
-    expected,
-  }) => {
-    document.body.innerHTML = `
+  ])(
+    "normalizes the $name to a cell offset",
+    ({ part, nodeOffset, expected }) => {
+      document.body.innerHTML = `
         <code class="target"><span data-part="first">ab</span><span data-part="middle">cd<mark data-part="marked">ef</mark></span><span data-part="last">gh</span></code>
       `;
-    const cell = q<HTMLElement>(document, ".target");
-    const partElement =
-      part === "cell" ? cell : q<HTMLElement>(cell, `[data-part="${part}"]`);
-    const node = part === "cell" ? partElement : partElement.firstChild;
-    if (!node) throw new Error(`missing text node for ${part}`);
+      const cell = q<HTMLElement>(document, ".target");
+      const partElement =
+        part === "cell" ? cell : q<HTMLElement>(cell, `[data-part="${part}"]`);
+      const node = part === "cell" ? partElement : partElement.firstChild;
+      if (!node) throw new Error(`missing text node for ${part}`);
 
-    expect(offsetInCell(cell, node, nodeOffset)).toBe(expected);
-  });
+      expect(offsetInCell(cell, node, nodeOffset)).toBe(expected);
+    },
+  );
 });
 
 describe("definition source context", () => {
@@ -625,40 +624,39 @@ describe("definition search flow", () => {
       expectedPath: "src/sample-use.ts",
       expectedLine: 30,
     },
-  ])("previews the initially highlighted $name", async ({
-    grepResponses,
-    expectedPath,
-    expectedLine,
-  }) => {
-    const responses = grepResponses();
-    const flow = setupDefinitionFlow(
-      async () => {
-        const response = responses.shift();
-        if (!response) throw new Error("missing sample grep response");
-        return response;
-      },
-      {
-        previewResponse: async () =>
-          previewResponse(expectedPath, expectedLine),
-      },
-    );
+  ])(
+    "previews the initially highlighted $name",
+    async ({ grepResponses, expectedPath, expectedLine }) => {
+      const responses = grepResponses();
+      const flow = setupDefinitionFlow(
+        async () => {
+          const response = responses.shift();
+          if (!response) throw new Error("missing sample grep response");
+          return response;
+        },
+        {
+          previewResponse: async () =>
+            previewResponse(expectedPath, expectedLine),
+        },
+      );
 
-    flow.click();
-    await waitFor(() => flow.previewRequests.length === 1);
-    await waitFor(
-      () =>
-        document.querySelector(".gdp-code-preview-location")?.textContent ===
-        `${expectedPath}:${expectedLine}`,
-    );
+      flow.click();
+      await waitFor(() => flow.previewRequests.length === 1);
+      await waitFor(
+        () =>
+          document.querySelector(".gdp-code-preview-location")?.textContent ===
+          `${expectedPath}:${expectedLine}`,
+      );
 
-    expect(flow.previewRequests[0]?.url.searchParams.get("path")).toBe(
-      expectedPath,
-    );
-    expect(q(document, ".gdp-grep-match").textContent).toBe("sampleThing");
-    expect(
-      q(document, ".gdp-definition-preview-flyout").hasAttribute("hidden"),
-    ).toBe(false);
-  });
+      expect(flow.previewRequests[0]?.url.searchParams.get("path")).toBe(
+        expectedPath,
+      );
+      expect(q(document, ".gdp-grep-match").textContent).toBe("sampleThing");
+      expect(
+        q(document, ".gdp-definition-preview-flyout").hasAttribute("hidden"),
+      ).toBe(false);
+    },
+  );
 
   test("switches previews on highlight and deduplicates the same candidate", async () => {
     const flow = setupDefinitionFlow(async () =>

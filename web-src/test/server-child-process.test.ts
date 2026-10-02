@@ -83,13 +83,14 @@ describe("server child processes are detached from the terminal", () => {
           )
         ).lines.join("\n"),
     },
-  ])("$entry starts the child as its own process group leader", async ({
-    run,
-  }) => {
-    const [pid, pgid] = (await run()).trim().split(/\s+/).map(Number);
-    expect(pid).toBeGreaterThan(0);
-    expect(pgid).toBe(pid);
-  });
+  ])(
+    "$entry starts the child as its own process group leader",
+    async ({ run }) => {
+      const [pid, pgid] = (await run()).trim().split(/\s+/).map(Number);
+      expect(pid).toBeGreaterThan(0);
+      expect(pgid).toBe(pid);
+    },
+  );
 
   test("a timeout stops the whole group, so a grandchild holding stdout does not keep the call waiting", async () => {
     // sh は sleep を fork して待つ。sh だけを止めると sleep が stdout を持った

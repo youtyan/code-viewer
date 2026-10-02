@@ -793,8 +793,11 @@ describe("routes", () => {
       },
       "/help?section=add-account",
     ],
-  ])("parseRoute(%s%s) is %j and builds back to %s", (path, search, route, url) => {
-    const parsed = parseRoute(path, search, defaultRange);
-    expect([parsed, buildRoute(parsed)]).toEqual([route, url]);
-  });
+  ])(
+    "parseRoute(%s%s) is %j and builds back to %s",
+    (path, search, route, url) => {
+      const parsed = parseRoute(path, search, defaultRange);
+      expect([parsed, buildRoute(parsed)]).toEqual([route, url]);
+    },
+  );
 });

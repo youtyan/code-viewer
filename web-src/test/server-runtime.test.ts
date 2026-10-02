@@ -196,54 +196,56 @@ describe("server runtime compatibility helpers", () => {
       },
       stderr: "could not write the input to anything: write EACCES",
     },
-  ])("$entry reports a stdin write failure that is not EPIPE", async ({
-    run,
-    stderr,
-  }) => {
-    vi.resetModules();
-    const { EventEmitter } = await import("node:events");
-    const { PassThrough, Writable } = await import("node:stream");
-    const child = new EventEmitter() as InstanceType<typeof EventEmitter> & {
-      stdin: InstanceType<typeof Writable>;
-      stdout: InstanceType<typeof PassThrough>;
-      stderr: InstanceType<typeof PassThrough>;
-      kill(signal?: string): void;
-    };
-    child.stdout = new PassThrough();
-    child.stderr = new PassThrough();
-    child.stdin = new Writable({
-      write(_chunk, _encoding, callback) {
-        callback(Object.assign(new Error("write EACCES"), { code: "EACCES" }));
-      },
-    });
-    child.kill = () => {
-      // 入力が届かなかった子は止めるが、この偽の子には送る先が無い。
-    };
-    vi.doMock("node:child_process", async () => ({
-      ...(await vi.importActual<typeof import("node:child_process")>(
-        "node:child_process",
-      )),
-      spawn: () => child,
-    }));
-    try {
-      const pending = run();
-      // 起こした側が子の終わりを待ち始めてから終わらせる。固定の待ち (10ms) では、
-      // 負荷の高いマシンでモジュールの読み込みが間に合わず、待ち始める前に close が
-      // 出て、永遠に待って時間切れになっていた。
-      await vi.waitFor(() =>
-        expect(child.listenerCount("close")).toBeGreaterThan(0),
-      );
-      child.stdout.end();
-      child.stderr.end();
-      child.emit("close", 0);
-
-      // 子が 0 で終わっても、入力が届かなかったのは失敗として返す。
-      await expect(pending).resolves.toEqual({ code: 1, stderr });
-    } finally {
-      vi.doUnmock("node:child_process");
+  ])(
+    "$entry reports a stdin write failure that is not EPIPE",
+    async ({ run, stderr }) => {
       vi.resetModules();
-    }
-  });
+      const { EventEmitter } = await import("node:events");
+      const { PassThrough, Writable } = await import("node:stream");
+      const child = new EventEmitter() as InstanceType<typeof EventEmitter> & {
+        stdin: InstanceType<typeof Writable>;
+        stdout: InstanceType<typeof PassThrough>;
+        stderr: InstanceType<typeof PassThrough>;
+        kill(signal?: string): void;
+      };
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.stdin = new Writable({
+        write(_chunk, _encoding, callback) {
+          callback(
+            Object.assign(new Error("write EACCES"), { code: "EACCES" }),
+          );
+        },
+      });
+      child.kill = () => {
+        // 入力が届かなかった子は止めるが、この偽の子には送る先が無い。
+      };
+      vi.doMock("node:child_process", async () => ({
+        ...(await vi.importActual<typeof import("node:child_process")>(
+          "node:child_process",
+        )),
+        spawn: () => child,
+      }));
+      try {
+        const pending = run();
+        // 起こした側が子の終わりを待ち始めてから終わらせる。固定の待ち (10ms) では、
+        // 負荷の高いマシンでモジュールの読み込みが間に合わず、待ち始める前に close が
+        // 出て、永遠に待って時間切れになっていた。
+        await vi.waitFor(() =>
+          expect(child.listenerCount("close")).toBeGreaterThan(0),
+        );
+        child.stdout.end();
+        child.stderr.end();
+        child.emit("close", 0);
+
+        // 子が 0 で終わっても、入力が届かなかったのは失敗として返す。
+        await expect(pending).resolves.toEqual({ code: 1, stderr });
+      } finally {
+        vi.doUnmock("node:child_process");
+        vi.resetModules();
+      }
+    },
+  );
 
   // 直す前は listen した後のエラーを console に出すだけで、壊れたサーバのまま
   // 動き続けていた。今は呼び出し側 (preview / entry) の終了処理へ渡る。

@@ -291,24 +291,24 @@ describe("a command", () => {
       language: "json",
       text: '{"value": "<sample>", "port": 1234}',
     },
-  ] as const)("highlights $name without changing the code or copy", async ({
-    language,
-    text,
-  }) => {
-    const writeText = vi.fn(() => Promise.resolve());
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    });
-    const block = helpBlocks("en").command(text, undefined, language);
-    await vi.waitFor(() =>
-      expect(block.querySelector("code span[style]")).not.toBeNull(),
-    );
-    expect(block.querySelector("code")?.textContent).toBe(text);
-    expect(block.querySelector("sample")).toBeNull();
-    block.querySelector<HTMLButtonElement>("button")?.click();
-    expect(writeText.mock.calls).toEqual([[text]]);
-  });
+  ] as const)(
+    "highlights $name without changing the code or copy",
+    async ({ language, text }) => {
+      const writeText = vi.fn(() => Promise.resolve());
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+      const block = helpBlocks("en").command(text, undefined, language);
+      await vi.waitFor(() =>
+        expect(block.querySelector("code span[style]")).not.toBeNull(),
+      );
+      expect(block.querySelector("code")?.textContent).toBe(text);
+      expect(block.querySelector("sample")).toBeNull();
+      block.querySelector<HTMLButtonElement>("button")?.click();
+      expect(writeText.mock.calls).toEqual([[text]]);
+    },
+  );
 
   test.each([
     {
@@ -331,24 +331,26 @@ describe("a command", () => {
       result: () => Promise.resolve({ codeToHtml: () => "" }),
       reason: "No highlighted HTML",
     },
-  ])("a failed $name keeps the code and reports the reason", async ({
-    result,
-    reason,
-  }) => {
-    vi.spyOn(shiki, "loadShikiHighlighter").mockImplementationOnce(result);
-    const errors = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const block = helpBlocks("en").command('echo "sample"');
-    await vi.waitFor(() =>
-      expect(
-        block.querySelector("pre")?.classList.contains("gdp-highlight-failed"),
-      ).toBe(true),
-    );
-    expect(block.querySelector("code")?.textContent).toBe('echo "sample"');
-    expect(block.querySelector("pre")?.title).toContain(reason);
-    expect(errors.mock.calls).toEqual([[expect.any(Error)]]);
-  });
+  ])(
+    "a failed $name keeps the code and reports the reason",
+    async ({ result, reason }) => {
+      vi.spyOn(shiki, "loadShikiHighlighter").mockImplementationOnce(result);
+      const errors = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      const block = helpBlocks("en").command('echo "sample"');
+      await vi.waitFor(() =>
+        expect(
+          block
+            .querySelector("pre")
+            ?.classList.contains("gdp-highlight-failed"),
+        ).toBe(true),
+      );
+      expect(block.querySelector("code")?.textContent).toBe('echo "sample"');
+      expect(block.querySelector("pre")?.title).toContain(reason);
+      expect(errors.mock.calls).toEqual([[expect.any(Error)]]);
+    },
+  );
 
   test("shows the command with an optional title", () => {
     const blocks = helpBlocks("en");
@@ -367,29 +369,27 @@ describe("a command", () => {
   test.each([
     { lang: "en", label: "Copy the command" },
     { lang: "ja", label: "コマンドをコピー" },
-  ] as const)("the copy button copies the command ($lang)", async ({
-    lang,
-    label,
-  }) => {
-    const writeText = vi.fn(() => Promise.resolve());
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    });
-    const block = helpBlocks(lang).command("code-viewer skill install");
-    const copy = block.querySelector<HTMLButtonElement>(
-      ".gdp-help-command-copy",
-    );
-    const labelBefore = copy?.getAttribute("aria-label");
-    copy?.click();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect([labelBefore, writeText.mock.calls, copy?.dataset.copied]).toEqual([
-      label,
-      [["code-viewer skill install"]],
-      "true",
-    ]);
-  });
+  ] as const)(
+    "the copy button copies the command ($lang)",
+    async ({ lang, label }) => {
+      const writeText = vi.fn(() => Promise.resolve());
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+      const block = helpBlocks(lang).command("code-viewer skill install");
+      const copy = block.querySelector<HTMLButtonElement>(
+        ".gdp-help-command-copy",
+      );
+      const labelBefore = copy?.getAttribute("aria-label");
+      copy?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect([labelBefore, writeText.mock.calls, copy?.dataset.copied]).toEqual(
+        [label, [["code-viewer skill install"]], "true"],
+      );
+    },
+  );
 
   test("a failed copy shows the reason on the button and the console", async () => {
     const errors = vi
@@ -506,21 +506,23 @@ describe("lists and tables", () => {
   test.each([
     { lang: "en", head: ["Key", "Action"] },
     { lang: "ja", head: ["キー", "操作"] },
-  ] as const)("the key table of the help has a head row ($lang)", ({
-    lang,
-    head,
-  }) => {
-    const table = helpBlocks(lang).keyTable([["t", "Toggle the theme"]]);
-    expect({
-      classes: [...table.classList],
-      head: [...table.querySelectorAll("thead th")].map((th) => th.textContent),
-      rowHeader: table.querySelector("tbody th")?.getAttribute("scope"),
-    }).toEqual({
-      classes: ["ui-table", "ui-table-keys"],
-      head: [...head],
-      rowHeader: "row",
-    });
-  });
+  ] as const)(
+    "the key table of the help has a head row ($lang)",
+    ({ lang, head }) => {
+      const table = helpBlocks(lang).keyTable([["t", "Toggle the theme"]]);
+      expect({
+        classes: [...table.classList],
+        head: [...table.querySelectorAll("thead th")].map(
+          (th) => th.textContent,
+        ),
+        rowHeader: table.querySelector("tbody th")?.getAttribute("scope"),
+      }).toEqual({
+        classes: ["ui-table", "ui-table-keys"],
+        head: [...head],
+        rowHeader: "row",
+      });
+    },
+  );
 
   // 行の多い表だけ 1 行おきに面を敷く (境目は UI_TABLE_STRIPE_MIN_ROWS)。
   test.each([
