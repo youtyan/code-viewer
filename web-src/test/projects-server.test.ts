@@ -695,7 +695,7 @@ describe("/_state/settings across two repositories", () => {
       ...(patch ? { body: JSON.stringify(patch) } : {}),
     });
     const res = await handleStateRoute(req, url, root, () => true);
-    if (!res || res.status !== 200) {
+    if (res?.status !== 200) {
       throw new Error(`HTTP ${res?.status}: ${await res?.text()}`);
     }
     return (await res.json()) as AppSettingsState;

@@ -52,7 +52,7 @@ describe("highlight language registration", () => {
     expect(grammar?.name).toBe(displayName);
     expect(grammar?.aliases).toEqual(aliases);
     expect(
-      (grammar?.keywords as Record<string, string>).keyword.includes(
+      (grammar.keywords as Record<string, string>).keyword.includes(
         keywordSample,
       ),
     ).toBe(true);

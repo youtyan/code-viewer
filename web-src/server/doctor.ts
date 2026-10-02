@@ -119,7 +119,7 @@ export type DoctorContext = {
 };
 
 const SNAPSHOT_DB_REL = ".code-viewer/db-snapshots.sqlite";
-const REQUIRED_NODE_MAJOR = 20;
+const REQUIRED_NODE_MAJOR = 22;
 
 const TTL = {
   version: 5 * 60_000,

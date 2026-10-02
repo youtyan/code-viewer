@@ -150,7 +150,7 @@ describe("global search view", () => {
       q<HTMLButtonElement>(view.el, ".db-global-search-cancel").hidden,
     ).toBe(true);
     expect(logs(operation).length).toBe(1);
-    expect((logs(operation)[0]?.slice(-1)[0] as Error).message).toBe(detail);
+    expect((logs(operation)[0].slice(-1)[0] as Error).message).toBe(detail);
     view.dispose();
   });
 

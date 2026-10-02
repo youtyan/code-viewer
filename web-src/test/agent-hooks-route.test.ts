@@ -272,7 +272,7 @@ describe("/_agent/hooks", () => {
     expect(status.agents[0]).toMatchObject({ state: "unreadable" });
     const res = await call("/_agent/hooks/plan?agent=claude&action=install");
     expect(res?.status).toBe(422);
-    expect(((await res?.json()) as { error: string }).error).toContain(
+    expect(((await res.json()) as { error: string }).error).toContain(
       "$.hooks: hooks must be an object",
     );
   });

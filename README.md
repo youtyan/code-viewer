@@ -34,7 +34,7 @@ One code-viewer serves every project from one port. It listens on `127.0.0.1` on
 
 | What | Needed for |
 |---|---|
-| Node.js 20 or newer, git | Everything |
+| Node.js 22 or newer, git | Everything |
 | [tmux](https://github.com/tmux/tmux) | Agents, account sign-in and tmux panes (shells work without it) |
 | claude and / or codex CLI | Running agents |
 | `better-sqlite3` (optional dependency, installed with the package) | SQLite viewer, snapshots and `code-viewer query` |

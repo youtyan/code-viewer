@@ -2,7 +2,7 @@
 
 export {};
 
-const REQUIRED_NODE_MAJOR = 20;
+const REQUIRED_NODE_MAJOR = 22;
 const nodeMajor = Number.parseInt(
   (process.versions.node || "0").split(".")[0] || "0",
   10,

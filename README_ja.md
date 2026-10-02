@@ -33,7 +33,7 @@ code-viewer を 1 つ起動すれば、すべてのプロジェクトを同じ�
 
 | もの | 使う機能 |
 |---|---|
-| Node.js 20 以上、git | すべて |
+| Node.js 22 以上、git | すべて |
 | [tmux](https://github.com/tmux/tmux) | エージェント、アカウントのログイン、tmux のペイン（シェルは tmux が無くても使えます） |
 | claude か codex の CLI（両方でも可） | エージェントを動かす |
 | `better-sqlite3`（任意の依存。パッケージと一緒に入ります） | SQLite の表示、スナップショット、`code-viewer query` |
