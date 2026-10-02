@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
+import { REQUIRED_NODE_VERSION } from "../server/node-requirement";
 
 const root = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 
@@ -18,7 +19,8 @@ describe("node cli package metadata", () => {
     expect(pkg.bin["code-viewer"]).toBe("dist/code-viewer.js");
     expect(pkg.bin["git-diff-preview"]).toBe("dist/code-viewer.js");
     expect(pkg.files.includes("dist")).toBe(true);
-    expect(typeof pkg.engines?.node).toBe("string");
+    // engines と起動時の確認 (server/node-requirement.ts) は同じ版を指す。
+    expect(pkg.engines?.node).toBe(`>=${REQUIRED_NODE_VERSION}`);
   });
 
   test("production server entrypoints do not use Bun runtime globals directly", () => {

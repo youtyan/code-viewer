@@ -29,7 +29,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
     "getting-started": {
       title: "導入手順",
       intro:
-        "code-viewer は、リポジトリをブラウザで読み、AI エージェントを動かして見守る道具です。上から順にやれば使い始められます（Node.js 22 以上と git が要ります）。",
+        "code-viewer は、リポジトリをブラウザで読み、AI エージェントを動かして見守る道具です。上から順にやれば使い始められます（Node.js 22.14 以上と git が要ります）。",
       lead: [
         {
           kind: "steps",

@@ -94,7 +94,7 @@
   },
   "packageManager": "pnpm@10.34.0",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.14.0"
   },
   "dependencies": {
     "@redis/client": "6.2.1",

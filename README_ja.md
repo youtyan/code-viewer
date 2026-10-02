@@ -33,7 +33,7 @@ code-viewer を 1 つ起動すれば、すべてのプロジェクトを同じ�
 
 | もの | 使う機能 |
 |---|---|
-| Node.js 22 以上、git | すべて |
+| Node.js 22.14 以上、git | すべて |
 | [tmux](https://github.com/tmux/tmux) | エージェント、アカウントのログイン、tmux のペイン（シェルは tmux が無くても使えます） |
 | claude か codex の CLI（両方でも可） | エージェントを動かす |
 | `better-sqlite3`（任意の依存。パッケージと一緒に入ります） | SQLite の表示、スナップショット、`code-viewer query` |
@@ -63,7 +63,7 @@ code-viewer を 1 つ起動すれば、すべてのプロジェクトを同じ�
 
 ```sh
 npx @youtyan/code-viewer                  # 入れずに実行
-pnpm dlx --allow-build=better-sqlite3 @youtyan/code-viewer   # pnpm で同じこと
+pnpm dlx @youtyan/code-viewer             # pnpm で同じこと
 npm install -g @youtyan/code-viewer       # 入れて使う
 code-viewer
 ```
@@ -91,13 +91,12 @@ code-viewer
 - code-viewer が既に動いているときは、`--port`・`--idle-stop`・`--bin`・`--scope-omit-dir` は動いている code-viewer には反映されません（警告が出ます）。`--remote-access` はエラーになって止まります。
 - `--remote-access` と `--idle-stop` は `--standalone` と一緒に使えません。
 
-### SQLite とインストールスクリプト
+### SQLite
 
-`better-sqlite3` は、入れるときにネイティブモジュールをビルドします。これが無いと、SQLite の表示・スナップショット・`code-viewer query` のすべてのコマンドが失敗します。ほかの機能は動きます。ドライバを読み込めているかは `code-viewer doctor` で分かります。
+`better-sqlite3` は macOS・Linux・Windows（x64・arm64）向けのビルド済みのバイナリを同梱しているので、入れるときにビルドしません。これが無いと、SQLite の表示・スナップショット・`code-viewer query` のすべてのコマンドが失敗します。ほかの機能は動きます。ドライバを読み込めているかは `code-viewer doctor` で分かります。
 
-- npm 11 は、インストールスクリプトを確認していないパッケージの一覧を出すことがあります。スクリプトはそのまま動きます。明示的に許可するなら `npm install -g --allow-scripts=better-sqlite3 @youtyan/code-viewer`、または `npm config set allow-scripts=better-sqlite3 --location=user`（npx にも効きます）。
-- `pnpm dlx` は、`--allow-build=better-sqlite3` を付けないとビルドを飛ばします。
-- ビルドされていないときは、code-viewer を入れた場所で `npm rebuild better-sqlite3` を実行します。
+- `pnpm dlx` は「Ignored build scripts: better-sqlite3」と出しますが、同梱のバイナリを使うので気にしなくて構いません。
+- ほかの OS では、入った `better-sqlite3` のフォルダで `npm run build-release` を実行します（Python と C++ のコンパイラが要ります）。フォルダの場所は `code-viewer doctor` に出ます。
 
 ## できること
 

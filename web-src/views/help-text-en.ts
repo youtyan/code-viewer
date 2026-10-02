@@ -30,7 +30,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
     "getting-started": {
       title: "Getting started",
       intro:
-        "code-viewer lets you read a repository in the browser and run and watch AI coding agents. Follow these steps from the top (you need Node.js 22 or newer and git).",
+        "code-viewer lets you read a repository in the browser and run and watch AI coding agents. Follow these steps from the top (you need Node.js 22.14 or newer and git).",
       lead: [
         {
           kind: "steps",

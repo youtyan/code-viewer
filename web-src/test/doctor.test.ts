@@ -64,8 +64,8 @@ describe("sqlite driver diagnostics", () => {
     expect(_parseSqliteAbiMismatchMessage("")).toBeNull();
   });
 
-  // DB を開けなかった理由ごとの状態と直し方。部品が無い (install スクリプトが
-  // 走っていない) のは「入れ直す」でなく rebuild を案内する。
+  // DB を開けなかった理由ごとの状態と直し方。同梱のバイナリが無い OS では
+  // 「入れ直す」でなく、その場でのビルドを案内する。
   test.each([
     [
       "NODE_MODULE_VERSION 127. This version of Node.js requires NODE_MODULE_VERSION 137.",
@@ -73,14 +73,9 @@ describe("sqlite driver diagnostics", () => {
       "rm -rf ~/.npm/_npx",
     ],
     [
-      "Could not locate the bindings file. Tried:\n → /x/build/better_sqlite3.node",
+      "Error: Cannot find module '/x/node_modules/better-sqlite3/build/Release/better_sqlite3.node'\nRequire stack:\n- /x/node_modules/better-sqlite3/lib/binding.js",
       "unavailable",
-      "npm rebuild better-sqlite3",
-    ],
-    [
-      "Could not locate the bindings file. Tried:\n → /x/build/better_sqlite3.node",
-      "unavailable",
-      "pnpm dlx --allow-build=better-sqlite3",
+      "npm run build-release",
     ],
     [
       "Cannot find package 'better-sqlite3' imported from /x/dist/code-viewer.js",

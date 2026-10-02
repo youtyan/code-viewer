@@ -69,6 +69,10 @@ import {
   type SqliteDriverStatus,
 } from "./database/sqlite-driver";
 import { worktreeListResultAsync } from "./git";
+import {
+  nodeVersionSupported,
+  REQUIRED_NODE_VERSION,
+} from "./node-requirement";
 import { projectRegistryPath, readProjectRegistry } from "./projects/registry";
 import type { RunResult } from "./runtime";
 import {
@@ -119,7 +123,6 @@ export type DoctorContext = {
 };
 
 const SNAPSHOT_DB_REL = ".code-viewer/db-snapshots.sqlite";
-const REQUIRED_NODE_MAJOR = 22;
 
 const TTL = {
   version: 5 * 60_000,
@@ -232,17 +235,17 @@ function commandVersionFailureDetail(
 function checkRuntime(): DoctorGroup {
   const rows: DoctorRow[] = [];
   const node = process.versions.node || "unknown";
-  const nodeMajor = Number.parseInt(node.split(".")[0] || "0", 10);
+  const supported = nodeVersionSupported(node);
   const abi = process.versions.modules || "?";
   rows.push({
     id: "runtime.node",
     title: "Node.js",
-    status: nodeMajor >= REQUIRED_NODE_MAJOR ? "ok" : "error",
+    status: supported ? "ok" : "error",
     detail: `v${node} (NODE_MODULE_VERSION=${abi})`,
-    ...(nodeMajor >= REQUIRED_NODE_MAJOR
+    ...(supported
       ? {}
       : {
-          hint: `code-viewer requires Node.js >= ${REQUIRED_NODE_MAJOR}. Upgrade via nvm / volta / your package manager.`,
+          hint: `code-viewer requires Node.js >= ${REQUIRED_NODE_VERSION}. Upgrade via nvm / volta / your package manager.`,
         }),
   });
   if (process.versions.bun) {

@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 
-export {};
+import {
+  nodeVersionSupported,
+  REQUIRED_NODE_VERSION,
+} from "./node-requirement";
 
-const REQUIRED_NODE_MAJOR = 22;
-const nodeMajor = Number.parseInt(
-  (process.versions.node || "0").split(".")[0] || "0",
-  10,
-);
-if (!Number.isFinite(nodeMajor) || nodeMajor < REQUIRED_NODE_MAJOR) {
+if (!nodeVersionSupported(process.versions.node || "")) {
   process.stderr.write(
-    `code-viewer requires Node.js >= ${REQUIRED_NODE_MAJOR}.0.0, but found ${process.versions.node}.\n` +
+    `code-viewer requires Node.js >= ${REQUIRED_NODE_VERSION}, but found ${process.versions.node}.\n` +
       `Please upgrade Node.js (e.g. via nvm, volta, or your package manager) and retry.\n`,
   );
   process.exit(1);
