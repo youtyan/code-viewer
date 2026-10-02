@@ -89,8 +89,8 @@ importers:
         specifier: ^1.2.0-beta.14
         version: 1.2.0-beta.14
       better-sqlite3:
-        specifier: 13.0.2
-        version: 13.0.2
+        specifier: 13.0.3
+        version: 13.0.3
 
 packages:
 
@@ -818,8 +818,8 @@ packages:
     resolution: {integrity: sha512-NZKeq9AfyQvEeNlN0zSYAaWrmBffJh3IELMZfRpJVWgrpEbtEpnjvzqBPf+mxoI287JohRDoa+/nsfqqiZmF6g==}
     engines: {node: '>= 6.0.0'}
 
-  better-sqlite3@13.0.2:
-    resolution: {integrity: sha512-jW6oufeDhXZaiX9Lw5A+oerVClx4iFrI6uDj1zu7SqUAjak9vbJvA0NEcKLNxHiQHb6kYCoFzzXYV0YOauhV3g==}
+  better-sqlite3@13.0.3:
+    resolution: {integrity: sha512-RbOBxmLBG8uvFUc15X9+9SFemKcQ0WBuISBVkpuiaUB2qblC8UWlHEjdWVoZ8AdhSwmoEgsiXKfopX0CQxaACQ==}
     engines: {node: '>=22'}
 
   buffer-image-size@0.6.4:
@@ -2142,7 +2142,7 @@ snapshots:
 
   aws-ssl-profiles@1.1.2: {}
 
-  better-sqlite3@13.0.2:
+  better-sqlite3@13.0.3:
     dependencies:
       node-addon-api: 8.9.2
     optional: true
