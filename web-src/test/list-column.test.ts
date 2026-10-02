@@ -322,25 +322,19 @@ describe("listColumnLayout", () => {
       filesFolded: true,
     },
   ];
-  test.each(
-    rows,
-  )("$name → 一覧 $width・変更ファイルの一覧 $tree・ファイル一覧を畳む $filesFolded", ({
-    room,
-    need,
-    input: extra,
-    width,
-    tree,
-    filesFolded,
-  }) => {
-    const input = { ...base, ...extra, room, need };
-    expect(listColumnLayout(input)).toEqual({
-      width,
-      compact: width !== input.preferred,
-      tree,
-      treeFolded: input.tree > 0 && tree !== input.tree,
-      filesFolded,
-    });
-  });
+  test.each(rows)(
+    "$name → 一覧 $width・変更ファイルの一覧 $tree・ファイル一覧を畳む $filesFolded",
+    ({ room, need, input: extra, width, tree, filesFolded }) => {
+      const input = { ...base, ...extra, room, need };
+      expect(listColumnLayout(input)).toEqual({
+        width,
+        compact: width !== input.preferred,
+        tree,
+        treeFolded: input.tree > 0 && tree !== input.tree,
+        filesFolded,
+      });
+    },
+  );
 });
 
 // 一覧の列に出す一覧 (core/list-column.ts の listColumnKindFor)。列は前面の
@@ -425,20 +419,18 @@ describe("listColumnKindFor", () => {
       kind: null,
     },
   ];
-  test.each(rows)("$name ($front) → $kind", ({
-    classes,
-    overview,
-    front,
-    kind,
-  }) => {
-    expect(
-      listColumnKindFor({
-        has: (pageClass) => classes.includes(pageClass),
-        worktreeOverview: overview === true,
-        leftFrontIsPage: front === "page",
-      }),
-    ).toBe(kind);
-  });
+  test.each(rows)(
+    "$name ($front) → $kind",
+    ({ classes, overview, front, kind }) => {
+      expect(
+        listColumnKindFor({
+          has: (pageClass) => classes.includes(pageClass),
+          worktreeOverview: overview === true,
+          leftFrontIsPage: front === "page",
+        }),
+      ).toBe(kind);
+    },
+  );
 });
 
 // 保存した一覧の列の幅の読み戻し。範囲 (240〜800) の中はそのまま、外は既定の 320
@@ -513,20 +505,17 @@ describe("listColumnDrag", () => {
       start: 420,
       max: 700,
     },
-  ])("$name → 開始 $start・上限 $max", ({
-    shown,
-    preferred,
-    fits,
-    start,
-    max,
-  }) => {
-    expect(
-      listColumnDrag({ shown, preferred, fits, size: HISTORY_WIDTH }),
-    ).toEqual({
-      start,
-      max,
-    });
-  });
+  ])(
+    "$name → 開始 $start・上限 $max",
+    ({ shown, preferred, fits, start, max }) => {
+      expect(
+        listColumnDrag({ shown, preferred, fits, size: HISTORY_WIDTH }),
+      ).toEqual({
+        start,
+        max,
+      });
+    },
+  );
 });
 
 // 変更ファイルの一覧 (#sidebar) の見出し。ファイル一覧 (#file-list) の「Files」と

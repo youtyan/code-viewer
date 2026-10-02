@@ -211,22 +211,25 @@ describe("the project registry on disk", () => {
       "the wrong shape",
       JSON.stringify({ version: 1, projects: [{ root: "x" }] }),
     ],
-  ])("a broken registry (%s) is reported and never overwritten", async (_label, text) => {
-    const root = makeRepo("sample-repo");
-    mkdirSync(join(dir, "state"), { recursive: true });
-    writeFileSync(registryPath, text);
-    const read = readProjectRegistry(registryPath);
-    expect(read.ok).toBe(false);
-    const error = await changeProjects(
-      { action: "add", path: root },
-      root,
-      1,
-      registryPath,
-    ).catch((caught: unknown) => caught);
-    expect((error as ProjectRegistryError).code).toBe("unreadable");
-    expect((error as Error).message).toContain(registryPath);
-    expect(readFileSync(registryPath, "utf8")).toBe(text);
-  });
+  ])(
+    "a broken registry (%s) is reported and never overwritten",
+    async (_label, text) => {
+      const root = makeRepo("sample-repo");
+      mkdirSync(join(dir, "state"), { recursive: true });
+      writeFileSync(registryPath, text);
+      const read = readProjectRegistry(registryPath);
+      expect(read.ok).toBe(false);
+      const error = await changeProjects(
+        { action: "add", path: root },
+        root,
+        1,
+        registryPath,
+      ).catch((caught: unknown) => caught);
+      expect((error as ProjectRegistryError).code).toBe("unreadable");
+      expect((error as Error).message).toContain(registryPath);
+      expect(readFileSync(registryPath, "utf8")).toBe(text);
+    },
+  );
 
   // 色の無い版が書いた登録簿: 最初に一覧が読んだとき、登録の順で配って保存する。
   test("an older registry without colors gets them in its order when the list first reads it, and keeps them", async () => {

@@ -78,31 +78,31 @@ describe("tryAcquireFileLock: two takers of the same stale lock", () => {
         utimesSync(file, old, old);
       },
     },
-  ])("$name: 先に奪った 1 人だけが持ち、もう 1 人は null", ({
-    after,
-    leave,
-  }) => {
-    const dir = mkdtempSync(join(tmpdir(), "cv-adversarial-lock-"));
-    const file = join(dir, "shared.json.lock");
-    leave(file);
-    // 読めないロックを奪うときの理由の行 (takeOverUnreadableLock) は溜めておく。
-    const logged: unknown[][] = [];
-    const errors = vi
-      .spyOn(console, "error")
-      .mockImplementation((...args: unknown[]) => {
-        logged.push(args);
-      });
-    let first: ReturnType<typeof tryAcquireFileLock> = null;
-    // 2 人目が古いロックを読み終えた (stat し終えた) 瞬間に、1 人目が奪い終える。
-    pending.hook = {
-      after,
-      run: () => {
-        first = tryAcquireFileLock(file, { staleMs: STALE_MS, now: NOW });
-      },
-    };
-    const second = tryAcquireFileLock(file, { staleMs: STALE_MS, now: NOW });
-    errors.mockRestore();
-    expect(first).not.toBeNull();
-    expect(second).toBeNull();
-  });
+  ])(
+    "$name: 先に奪った 1 人だけが持ち、もう 1 人は null",
+    ({ after, leave }) => {
+      const dir = mkdtempSync(join(tmpdir(), "cv-adversarial-lock-"));
+      const file = join(dir, "shared.json.lock");
+      leave(file);
+      // 読めないロックを奪うときの理由の行 (takeOverUnreadableLock) は溜めておく。
+      const logged: unknown[][] = [];
+      const errors = vi
+        .spyOn(console, "error")
+        .mockImplementation((...args: unknown[]) => {
+          logged.push(args);
+        });
+      let first: ReturnType<typeof tryAcquireFileLock> = null;
+      // 2 人目が古いロックを読み終えた (stat し終えた) 瞬間に、1 人目が奪い終える。
+      pending.hook = {
+        after,
+        run: () => {
+          first = tryAcquireFileLock(file, { staleMs: STALE_MS, now: NOW });
+        },
+      };
+      const second = tryAcquireFileLock(file, { staleMs: STALE_MS, now: NOW });
+      errors.mockRestore();
+      expect(first).not.toBeNull();
+      expect(second).toBeNull();
+    },
+  );
 });

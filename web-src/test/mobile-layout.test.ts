@@ -131,9 +131,12 @@ describe("diffLayoutFor", () => {
     ["phone", "line-by-line", null, "line-by-line"],
     ["phone", "line-by-line", "side-by-side", "side-by-side"],
     ["phone", "side-by-side", "line-by-line", "line-by-line"],
-  ] as const)("%s, saved %s, chosen on the phone %s → %s", (tier, saved, chosen, expected) => {
-    expect(diffLayoutFor(tier, saved, chosen)).toBe(expected);
-  });
+  ] as const)(
+    "%s, saved %s, chosen on the phone %s → %s",
+    (tier, saved, chosen, expected) => {
+      expect(diffLayoutFor(tier, saved, chosen)).toBe(expected);
+    },
+  );
 });
 
 describe("edgeSwipeAction", () => {

@@ -185,20 +185,21 @@ describe("createShellSession PTY terminal resolution", () => {
       expected:
         "Error: failed to resolve the PTY terminal\nCaused by: Error: ps execution failed\nCaused by: Error: spawn failed",
     },
-  ])("returns every detail for $name and closes the child", async ({
-    arrange,
-    expected,
-  }) => {
-    arrange();
+  ])(
+    "returns every detail for $name and closes the child",
+    async ({ arrange, expected }) => {
+      arrange();
 
-    const result = await createShellSession(process.cwd());
+      const result = await createShellSession(process.cwd());
 
-    expect(result).toMatchObject({ status: "error" });
-    if (result.status !== "error") throw new Error("expected an error result");
-    expect(result.error).toBeInstanceOf(Error);
-    expect(formatErrorDetail(result.error)).toBe(expected);
-    expect(pty.kill).toHaveBeenCalledTimes(1);
-  });
+      expect(result).toMatchObject({ status: "error" });
+      if (result.status !== "error")
+        throw new Error("expected an error result");
+      expect(result.error).toBeInstanceOf(Error);
+      expect(formatErrorDetail(result.error)).toBe(expected);
+      expect(pty.kill).toHaveBeenCalledTimes(1);
+    },
+  );
 
   test("keeps terminal resolution and child cleanup failures as separate errors", async () => {
     mocks.runAsync.mockRejectedValue(

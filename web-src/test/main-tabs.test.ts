@@ -299,15 +299,14 @@ describe("open", () => {
       target: image("img"),
       expected: "a [~img] | [~c] (left)",
     },
-  ])("面を指定しても、$name は反対の面の同じタブを前面に出す", ({
-    before,
-    target,
-    expected,
-  }) => {
-    const after = open(before, target, { pane: "right", newId: ids() });
-    assertLayout(after);
-    expect(show(after)).toBe(expected);
-  });
+  ])(
+    "面を指定しても、$name は反対の面の同じタブを前面に出す",
+    ({ before, target, expected }) => {
+      const after = open(before, target, { pane: "right", newId: ids() });
+      assertLayout(after);
+      expect(show(after)).toBe(expected);
+    },
+  );
 
   test.each([
     {
@@ -1821,15 +1820,14 @@ describe("groups", () => {
     { id: "b:1", left: false, right: true },
     { id: "b:2", left: true, right: false },
     { id: "a:1", left: false, right: false },
-  ])("右クリックの左へ・右へはグループの中だけ ($id)", ({
-    id,
-    left,
-    right,
-  }) => {
-    const layout = layoutWith(["b:1", "b:2", "a:1", "-:x"]);
-    const menu = tabMenu(layout, id, keyOf);
-    expect([menu.moveLeft, menu.moveRight]).toEqual([left, right]);
-  });
+  ])(
+    "右クリックの左へ・右へはグループの中だけ ($id)",
+    ({ id, left, right }) => {
+      const layout = layoutWith(["b:1", "b:2", "a:1", "-:x"]);
+      const menu = tabMenu(layout, id, keyOf);
+      expect([menu.moveLeft, menu.moveRight]).toEqual([left, right]);
+    },
+  );
 
   test("グループの前面を覚え、グループの前面のタブを返す (無ければ先頭)", () => {
     const layout = noteGroupFronts(
@@ -1970,13 +1968,14 @@ describe("persistence of projects and groups", () => {
       name: "ウインドウの番号が小数",
       place: { pane: "%3", session: "sample", window: 0.5 },
     },
-  ])("壊れた場所 ($name) は壊れた配置として場所と値を添えて投げる", ({
-    place,
-  }) => {
-    expect(() => parseLayout(savedWithTmux({ s1: place }))).toThrow(
-      `terminalTmux["s1"] is ${JSON.stringify(place)}`,
-    );
-  });
+  ])(
+    "壊れた場所 ($name) は壊れた配置として場所と値を添えて投げる",
+    ({ place }) => {
+      expect(() => parseLayout(savedWithTmux({ s1: place }))).toThrow(
+        `terminalTmux["s1"] is ${JSON.stringify(place)}`,
+      );
+    },
+  );
 
   test("4 までの (プロジェクトごとの) 配置は、渡したプロジェクトの持ち物として読む", () => {
     const parsed = parseLayout(

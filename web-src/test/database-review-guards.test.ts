@@ -207,34 +207,32 @@ describe("database file response fault isolation", () => {
 
   // データベースを列挙するのは PostgreSQL と MySQL だけ。ほかの種類を mysql の
   // 経路で数えると、発見のたびに docker exec が失敗して dockerError が出る。
-  test.each([
-    "redis",
-    "elasticsearch",
-    "s3",
-    "dynamodb",
-  ] as const)("does not list databases inside a %s service", async (kind) => {
-    const body = await createDbFilesResponse("/workspace", [], undefined, {
-      discoverSqliteFiles: async () => [],
-      discoverDockerDatabases: async () =>
-        dockerDiscovery(dockerService({ kind })),
-      listDockerDatabases: async () => {
-        throw new Error("listed databases of a non-SQL service");
-      },
-      discoverSupabaseCliProjects: async () => [],
-    });
-
-    expect(body).toEqual({
-      files: [
-        {
-          id: "docker:pg",
-          path: "docker:pg",
-          name: "pg (postgresql)",
-          sizeBytes: 0,
-          kind,
+  test.each(["redis", "elasticsearch", "s3", "dynamodb"] as const)(
+    "does not list databases inside a %s service",
+    async (kind) => {
+      const body = await createDbFilesResponse("/workspace", [], undefined, {
+        discoverSqliteFiles: async () => [],
+        discoverDockerDatabases: async () =>
+          dockerDiscovery(dockerService({ kind })),
+        listDockerDatabases: async () => {
+          throw new Error("listed databases of a non-SQL service");
         },
-      ],
-    });
-  });
+        discoverSupabaseCliProjects: async () => [],
+      });
+
+      expect(body).toEqual({
+        files: [
+          {
+            id: "docker:pg",
+            path: "docker:pg",
+            name: "pg (postgresql)",
+            sizeBytes: 0,
+            kind,
+          },
+        ],
+      });
+    },
+  );
 });
 
 describe("snapshot container canonicalization", () => {

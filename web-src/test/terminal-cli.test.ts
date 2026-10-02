@@ -291,31 +291,30 @@ describe("runTerminalCli — 形の違う応答", () => {
       body: null,
       expected: `terminal capture: GET ${SERVER}/_agent/capture?target=shell-abc123 answered without content and cursor strings: null`,
     },
-  ])("$name なら URL と本文を出して exit 1", async ({
-    argv,
-    body,
-    expected,
-  }) => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json(body)),
-    );
-    const logs: string[] = [];
-    const errs: string[] = [];
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
-    });
-    vi.spyOn(console, "error").mockImplementation((...args) => {
-      errs.push(args.join(" "));
-    });
-    vi.spyOn(process, "exit").mockImplementation((code) => {
-      throw new Error(`exit ${code}`);
-    });
-    await expect(runTerminalCli([...argv, "--server", SERVER])).rejects.toThrow(
-      "exit 1",
-    );
-    expect({ logs, errs }).toEqual({ logs: [], errs: [expected] });
-  });
+  ])(
+    "$name なら URL と本文を出して exit 1",
+    async ({ argv, body, expected }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json(body)),
+      );
+      const logs: string[] = [];
+      const errs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) => {
+        logs.push(args.join(" "));
+      });
+      vi.spyOn(console, "error").mockImplementation((...args) => {
+        errs.push(args.join(" "));
+      });
+      vi.spyOn(process, "exit").mockImplementation((code) => {
+        throw new Error(`exit ${code}`);
+      });
+      await expect(
+        runTerminalCli([...argv, "--server", SERVER]),
+      ).rejects.toThrow("exit 1");
+      expect({ logs, errs }).toEqual({ logs: [], errs: [expected] });
+    },
+  );
 });
 
 // サーバは申告の本文を 32 KB で断る。長い --prompt / --note はサーバと同じ

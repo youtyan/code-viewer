@@ -525,36 +525,33 @@ describe("agents sidebar actions", () => {
       click: null,
       called: [],
     },
-  ])("右クリックの「別のアカウントで続ける…」: $name", ({
-    over,
-    hookStates,
-    items,
-    click,
-    called,
-  }) => {
-    const data = overview(
-      [{ ...pane("%1", "work:0.0", "/work/sample-app", "idle"), ...over }],
-      REGISTERED,
-    );
-    const { root, handoffs } = mount(data, undefined, undefined, {
-      hookStates,
-    });
-    root
-      .querySelector<HTMLElement>('[data-nav-item="pane:%1"]')
-      ?.dispatchEvent(
-        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+  ])(
+    "右クリックの「別のアカウントで続ける…」: $name",
+    ({ over, hookStates, items, click, called }) => {
+      const data = overview(
+        [{ ...pane("%1", "work:0.0", "/work/sample-app", "idle"), ...over }],
+        REGISTERED,
       );
-    const buttons = [
-      ...document.querySelectorAll<HTMLButtonElement>(
-        ".gdp-context-menu button",
-      ),
-    ].slice(2);
-    expect(
-      buttons.map((button) => [button.textContent, button.disabled]),
-    ).toEqual(items);
-    buttons.find((button) => button.textContent === click)?.click();
-    expect(handoffs).toEqual(called);
-  });
+      const { root, handoffs } = mount(data, undefined, undefined, {
+        hookStates,
+      });
+      root
+        .querySelector<HTMLElement>('[data-nav-item="pane:%1"]')
+        ?.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+        );
+      const buttons = [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          ".gdp-context-menu button",
+        ),
+      ].slice(2);
+      expect(
+        buttons.map((button) => [button.textContent, button.disabled]),
+      ).toEqual(items);
+      buttons.find((button) => button.textContent === click)?.click();
+      expect(handoffs).toEqual(called);
+    },
+  );
 });
 
 describe("agents sidebar heading marks", () => {
@@ -842,38 +839,37 @@ describe("agents sidebar notification hint", () => {
     { requested: "default" as const, dismissed: false, again: true },
     { requested: "granted" as const, dismissed: true, again: false },
     { requested: "denied" as const, dismissed: true, again: false },
-  ])("allowing and answering $requested → dismissed: $dismissed", async ({
-    requested,
-    dismissed: expected,
-    again,
-  }) => {
-    const { root, dismissed } = mount(
-      overview([], REGISTERED),
-      undefined,
-      undefined,
-      { sawWaiting: true, requested },
-    );
-    const en = agentsText("en");
-    [...root.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent === en.notifyEnable)
-      ?.click();
-    await vi.waitFor(() => {
-      const buttons = [...root.querySelectorAll("button")].map(
-        (button) => button.textContent,
+  ])(
+    "allowing and answering $requested → dismissed: $dismissed",
+    async ({ requested, dismissed: expected, again }) => {
+      const { root, dismissed } = mount(
+        overview([], REGISTERED),
+        undefined,
+        undefined,
+        { sawWaiting: true, requested },
       );
-      expect({
-        dismissed: dismissed(),
-        notYet: root.textContent?.includes(en.notifyNotYet),
-        askAgain: buttons.includes(en.notifyAskAgain),
-        enable: buttons.includes(en.notifyEnable),
-      }).toEqual({
-        dismissed: expected,
-        notYet: again,
-        askAgain: again,
-        enable: false,
+      const en = agentsText("en");
+      [...root.querySelectorAll<HTMLButtonElement>("button")]
+        .find((button) => button.textContent === en.notifyEnable)
+        ?.click();
+      await vi.waitFor(() => {
+        const buttons = [...root.querySelectorAll("button")].map(
+          (button) => button.textContent,
+        );
+        expect({
+          dismissed: dismissed(),
+          notYet: root.textContent?.includes(en.notifyNotYet),
+          askAgain: buttons.includes(en.notifyAskAgain),
+          enable: buttons.includes(en.notifyEnable),
+        }).toEqual({
+          dismissed: expected,
+          notYet: again,
+          askAgain: again,
+          enable: false,
+        });
       });
-    });
-  });
+    },
+  );
 
   test("Hide this saves the choice and removes the hint", () => {
     const { root, dismissed } = mount(

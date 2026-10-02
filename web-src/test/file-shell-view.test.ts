@@ -746,45 +746,44 @@ describe("blame and file header failures", () => {
       },
       expected: ["Caused by: TypeError: sample network failure"],
     },
-  ])("blame shows the full reason when $name", async ({
-    failPath,
-    fail,
-    expected,
-  }) => {
-    const passThrough = globalThis.fetch;
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: (async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = new URL(String(input), "http://localhost");
-        if (url.pathname === failPath) return fail();
-        return passThrough(input, init);
-      }) as typeof fetch,
-    });
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {
-      /* asserted below */
-    });
-    try {
-      const state: { route: AppRoute } = {
-        route: {
-          screen: "file",
-          path: "README.md",
-          ref: "worktree",
-          view: "blame",
-          range: RANGE,
-        } satisfies AppRoute,
-      };
-      const blame = createBlameView(testDeps(state, []));
-      await blame.renderBlamePage({ path: "README.md", ref: "worktree" });
+  ])(
+    "blame shows the full reason when $name",
+    async ({ failPath, fail, expected }) => {
+      const passThrough = globalThis.fetch;
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        writable: true,
+        value: (async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = new URL(String(input), "http://localhost");
+          if (url.pathname === failPath) return fail();
+          return passThrough(input, init);
+        }) as typeof fetch,
+      });
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {
+        /* asserted below */
+      });
+      try {
+        const state: { route: AppRoute } = {
+          route: {
+            screen: "file",
+            path: "README.md",
+            ref: "worktree",
+            view: "blame",
+            range: RANGE,
+          } satisfies AppRoute,
+        };
+        const blame = createBlameView(testDeps(state, []));
+        await blame.renderBlamePage({ path: "README.md", ref: "worktree" });
 
-      const error = document.querySelector(".gdp-blame-error")?.textContent;
-      for (const part of expected) expect(error).toContain(part);
-      expect(document.querySelector(".gdp-blame-table")).toBeNull();
-      expect(errorSpy).toHaveBeenCalledOnce();
-    } finally {
-      errorSpy.mockRestore();
-    }
-  });
+        const error = document.querySelector(".gdp-blame-error")?.textContent;
+        for (const part of expected) expect(error).toContain(part);
+        expect(document.querySelector(".gdp-blame-table")).toBeNull();
+        expect(errorSpy).toHaveBeenCalledOnce();
+      } finally {
+        errorSpy.mockRestore();
+      }
+    },
+  );
 
   test.each([
     {

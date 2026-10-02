@@ -517,16 +517,19 @@ describe("the tab keys of an installed window", () => {
     [false, true, "terminal", "ArrowRight", null],
     [false, true, "input", "ArrowRight", null],
     [false, false, "page", "ArrowRight", null],
-  ])("mac %s, installed window %s, %s: the primary key + %s", (mac, standalone, target, key, expected) => {
-    expect(
-      resolvePwaKey(keyEvent(key, mac ? "cmd" : "ctrl"), {
-        standalone,
-        mac,
-        target,
-        composing: false,
-      }),
-    ).toEqual(expected);
-  });
+  ])(
+    "mac %s, installed window %s, %s: the primary key + %s",
+    (mac, standalone, target, key, expected) => {
+      expect(
+        resolvePwaKey(keyEvent(key, mac ? "cmd" : "ctrl"), {
+          standalone,
+          mac,
+          target,
+          composing: false,
+        }),
+      ).toEqual(expected);
+    },
+  );
 
   test("keys typed while an IME is composing are left alone", () => {
     expect(
@@ -606,18 +609,17 @@ describe("the window frame color follows the app theme", () => {
   });
   afterAll(() => GlobalRegistrator.unregister());
 
-  test.each(VARIANTS)("$name paints both theme colors with its ground", ({
-    theme,
-    mode,
-    vars,
-  }) => {
-    const ground = vars.get("--color-ground");
-    if (!ground)
-      throw new Error(`${theme} ${mode} does not set --color-ground`);
-    setLook(mode, theme);
-    syncThemeColor(document);
-    expect(themeColors()).toEqual([ground, ground]);
-  });
+  test.each(VARIANTS)(
+    "$name paints both theme colors with its ground",
+    ({ theme, mode, vars }) => {
+      const ground = vars.get("--color-ground");
+      if (!ground)
+        throw new Error(`${theme} ${mode} does not set --color-ground`);
+      setLook(mode, theme);
+      syncThemeColor(document);
+      expect(themeColors()).toEqual([ground, ground]);
+    },
+  );
 
   test("switching back and forth repaints every time", () => {
     const seen: (string | null)[] = [];
@@ -637,16 +639,19 @@ describe("the window frame color follows the app theme", () => {
   test.each([
     ["light", ":root"],
     ["dark", '[data-theme="dark"]'],
-  ])("theme %s paints the current project's color from %s", (theme, selector) => {
-    const green = cascadedDeclarations(
-      baseRules(loadStyleSheet()),
-      (s) => s === selector,
-    ).get("--project-green");
-    if (!green) throw new Error(`${selector} does not set --project-green`);
-    setLook(theme as "light" | "dark", "default");
-    syncThemeColor(document, "--project-green");
-    expect(themeColors()).toEqual([green, green]);
-  });
+  ])(
+    "theme %s paints the current project's color from %s",
+    (theme, selector) => {
+      const green = cascadedDeclarations(
+        baseRules(loadStyleSheet()),
+        (s) => s === selector,
+      ).get("--project-green");
+      if (!green) throw new Error(`${selector} does not set --project-green`);
+      setLook(theme as "light" | "dark", "default");
+      syncThemeColor(document, "--project-green");
+      expect(themeColors()).toEqual([green, green]);
+    },
+  );
 
   test("a page without the stylesheet is reported instead of painting an empty color", () => {
     style.remove();
@@ -724,23 +729,23 @@ describe("the install offer", () => {
     expect(isChromeBrowser(brands)).toBe(expected);
   });
 
-  test.each([
-    "accepted",
-    "dismissed",
-  ] as const)("installing shows the browser's prompt once, returns %s and drops the button", async (outcome) => {
-    const win = fakeWindow(CHROME);
-    const offer = createInstallOffer(win);
-    const states: InstallOfferState[] = [];
-    offer.onChange(() => states.push(offer.state()));
-    const event = new FakeInstallPrompt(outcome);
-    win.dispatchEvent(event);
-    await expect(offer.install()).resolves.toBe(outcome);
-    expect(event.prompted).toBe(1);
-    expect(states).toEqual(["prompt", "manual"]);
-    await expect(offer.install()).rejects.toThrow(
-      "pwa: the browser has not offered an install prompt",
-    );
-  });
+  test.each(["accepted", "dismissed"] as const)(
+    "installing shows the browser's prompt once, returns %s and drops the button",
+    async (outcome) => {
+      const win = fakeWindow(CHROME);
+      const offer = createInstallOffer(win);
+      const states: InstallOfferState[] = [];
+      offer.onChange(() => states.push(offer.state()));
+      const event = new FakeInstallPrompt(outcome);
+      win.dispatchEvent(event);
+      await expect(offer.install()).resolves.toBe(outcome);
+      expect(event.prompted).toBe(1);
+      expect(states).toEqual(["prompt", "manual"]);
+      await expect(offer.install()).rejects.toThrow(
+        "pwa: the browser has not offered an install prompt",
+      );
+    },
+  );
 
   test("once installed, only the steps are left", () => {
     const win = fakeWindow(CHROME);

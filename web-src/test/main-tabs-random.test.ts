@@ -189,27 +189,28 @@ function extraProblems(layout: Layout): string[] {
 }
 
 describe("main tab layout under random operation sequences", () => {
-  test.each(
-    Array.from({ length: 100 }, (_, seed) => seed + 1),
-  )("seed %i keeps every invariant for 60 steps", (seed) => {
-    const pick = rng(seed);
-    let layout = emptyLayout();
-    const history: string[] = [];
-    for (let step = 0; step < 60; step++) {
-      const next = randomStep(pick, layout);
-      history.push(next.name);
-      try {
-        layout = next.apply(layout);
-        assertLayout(layout);
-        const extra = extraProblems(layout);
-        if (extra.length > 0) throw new Error(extra.join("\n"));
-      } catch (error) {
-        throw errorWithCause(
-          `seed ${seed}, step ${step + 1}:\n${history.map((s, i) => `  ${i + 1}. ${s}`).join("\n")}`,
-          error,
-        );
+  test.each(Array.from({ length: 100 }, (_, seed) => seed + 1))(
+    "seed %i keeps every invariant for 60 steps",
+    (seed) => {
+      const pick = rng(seed);
+      let layout = emptyLayout();
+      const history: string[] = [];
+      for (let step = 0; step < 60; step++) {
+        const next = randomStep(pick, layout);
+        history.push(next.name);
+        try {
+          layout = next.apply(layout);
+          assertLayout(layout);
+          const extra = extraProblems(layout);
+          if (extra.length > 0) throw new Error(extra.join("\n"));
+        } catch (error) {
+          throw errorWithCause(
+            `seed ${seed}, step ${step + 1}:\n${history.map((s, i) => `  ${i + 1}. ${s}`).join("\n")}`,
+            error,
+          );
+        }
       }
-    }
-    expect(history).toHaveLength(60);
-  });
+      expect(history).toHaveLength(60);
+    },
+  );
 });

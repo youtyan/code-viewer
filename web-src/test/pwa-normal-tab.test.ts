@@ -73,49 +73,49 @@ const TARGETS = [
   { name: "blocked", editable: false, terminal: false, blocked: true },
 ];
 
-test.each([
-  true,
-  false,
-])("a normal browser tab passes every installed-window key to the browser (mac: %s)", (mac) => {
-  const standalone = window.matchMedia(STANDALONE_MEDIA_QUERY).matches;
-  const bindings = defaultKeyBindings(mac);
-  const resolve = (
-    event: KeyboardEvent,
-    target: (typeof TARGETS)[number],
-    inWindow: boolean,
-  ) =>
-    resolveKeyOutcome(
-      event,
-      {
-        scope: "global",
-        editable: target.editable,
-        terminal: target.terminal,
-        pageKeymapBlocked: target.blocked,
-        standalone: inWindow,
-        mac,
-      },
-      bindings,
+test.each([true, false])(
+  "a normal browser tab passes every installed-window key to the browser (mac: %s)",
+  (mac) => {
+    const standalone = window.matchMedia(STANDALONE_MEDIA_QUERY).matches;
+    const bindings = defaultKeyBindings(mac);
+    const resolve = (
+      event: KeyboardEvent,
+      target: (typeof TARGETS)[number],
+      inWindow: boolean,
+    ) =>
+      resolveKeyOutcome(
+        event,
+        {
+          scope: "global",
+          editable: target.editable,
+          terminal: target.terminal,
+          pageKeymapBlocked: target.blocked,
+          standalone: inWindow,
+          mac,
+        },
+        bindings,
+      );
+    const events = eventsFor(mac);
+    const outcomes = events.flatMap(({ label, event }) =>
+      TARGETS.map((target) => ({
+        label,
+        target: target.name,
+        outcome: resolve(event, target, standalone),
+      })),
     );
-  const events = eventsFor(mac);
-  const outcomes = events.flatMap(({ label, event }) =>
-    TARGETS.map((target) => ({
+    // イベントの組み方の担保: 同じ押し方は、インストールした窓の本文では受ける。
+    const inStandalone = events.map(({ label, event }) => ({
       label,
-      target: target.name,
-      outcome: resolve(event, target, standalone),
-    })),
-  );
-  // イベントの組み方の担保: 同じ押し方は、インストールした窓の本文では受ける。
-  const inStandalone = events.map(({ label, event }) => ({
-    label,
-    handled: resolve(event, TARGETS[0], true) !== null,
-  }));
-  expect([
-    standalone,
-    events
-      .map((item) => item.label)
-      .filter((label) => /(^|\+)(w|t|ArrowLeft|ArrowRight)$/.test(label))
-      .length,
-    outcomes.filter((item) => item.outcome !== null),
-    inStandalone.filter((item) => !item.handled),
-  ]).toEqual([false, 8, [], []]);
-});
+      handled: resolve(event, TARGETS[0], true) !== null,
+    }));
+    expect([
+      standalone,
+      events
+        .map((item) => item.label)
+        .filter((label) => /(^|\+)(w|t|ArrowLeft|ArrowRight)$/.test(label))
+        .length,
+      outcomes.filter((item) => item.outcome !== null),
+      inStandalone.filter((item) => !item.handled),
+    ]).toEqual([false, 8, [], []]);
+  },
+);

@@ -579,32 +579,31 @@ describe("worktree update watcher", () => {
       argument: undefined,
       expected: [] as unknown[],
     },
-  ])("reports $name without confusing it with normal close", ({
-    event,
-    argument,
-    expected,
-  }) => {
-    const listeners = new Map<string, (error?: unknown) => void>();
-    const errors: unknown[] = [];
+  ])(
+    "reports $name without confusing it with normal close",
+    ({ event, argument, expected }) => {
+      const listeners = new Map<string, (error?: unknown) => void>();
+      const errors: unknown[] = [];
 
-    startWorktreeUpdateWatch({
-      root: "/repo",
-      omitDirNames: [],
-      excludeNames: [],
-      watch: (() => ({
-        on: (name: string, listener: (error?: unknown) => void) => {
-          listeners.set(name, listener);
-        },
-      })) as WatchFn,
-      readdirSync: () => [],
-      onUpdate: () => undefined,
-      onError: (error) => errors.push(error),
-    });
+      startWorktreeUpdateWatch({
+        root: "/repo",
+        omitDirNames: [],
+        excludeNames: [],
+        watch: (() => ({
+          on: (name: string, listener: (error?: unknown) => void) => {
+            listeners.set(name, listener);
+          },
+        })) as WatchFn,
+        readdirSync: () => [],
+        onUpdate: () => undefined,
+        onError: (error) => errors.push(error),
+      });
 
-    listeners.get(event)?.(argument);
+      listeners.get(event)?.(argument);
 
-    expect(errors).toStrictEqual(expected);
-  });
+      expect(errors).toStrictEqual(expected);
+    },
+  );
 
   test("reports close failures from the returned watch handle", () => {
     const errors: unknown[] = [];

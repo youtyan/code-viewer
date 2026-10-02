@@ -202,22 +202,23 @@ describe("bounded activity sweep", () => {
     );
   });
 
-  test.each([
-    24, 48, 60, 100,
-  ])("every one of %i panes is captured within ceil(n / panes read per sweep) congested sweeps", async (count) => {
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const ids = manyPaneIds(count);
-    const reads: string[] = [];
-    mocks.listPanes.mockResolvedValue(tmuxPanes(ids));
-    mocks.capturePane.mockImplementation(congestedCapture(reads));
-    startAgentActivityWatch("/work/sample");
+  test.each([24, 48, 60, 100])(
+    "every one of %i panes is captured within ceil(n / panes read per sweep) congested sweeps",
+    async (count) => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const ids = manyPaneIds(count);
+      const reads: string[] = [];
+      mocks.listPanes.mockResolvedValue(tmuxPanes(ids));
+      mocks.capturePane.mockImplementation(congestedCapture(reads));
+      startAgentActivityWatch("/work/sample");
 
-    const sweeps = Math.ceil(count / READ_PER_SWEEP);
-    for (let turn = 0; turn < sweeps; turn += 1) await runNextSweep();
+      const sweeps = Math.ceil(count / READ_PER_SWEEP);
+      for (let turn = 0; turn < sweeps; turn += 1) await runNextSweep();
 
-    expect(mocks.listPanes).toHaveBeenCalledTimes(sweeps);
-    expect(new Set(reads)).toEqual(new Set(ids));
-  });
+      expect(mocks.listPanes).toHaveBeenCalledTimes(sweeps);
+      expect(new Set(reads)).toEqual(new Set(ids));
+    },
+  );
 
   test("the first deferred pane leads the next sweep and each sweep logs one line without a stack", async () => {
     const warned = vi
@@ -259,43 +260,43 @@ describe("bounded activity sweep", () => {
       readFirst: false,
       lastCaptured: "not captured since this server started watching",
     },
-  ])("a pane deferred for consecutive sweeps becomes an observation error $name and clears once captured", async ({
-    readFirst,
-    lastCaptured,
-  }) => {
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
-    startAgentActivityWatch("/work/sample");
-    if (readFirst) await runNextSweep();
-    // 一覧を取るだけで期限を使い切るほど混んでいる。
-    mocks.listPanes.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          setTimeout(
-            () => resolve(tmuxPanesFixture()),
-            ACTIVITY_SWEEP_TIMEOUT_MS,
-          );
-        }),
-    );
+  ])(
+    "a pane deferred for consecutive sweeps becomes an observation error $name and clears once captured",
+    async ({ readFirst, lastCaptured }) => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      startAgentActivityWatch("/work/sample");
+      if (readFirst) await runNextSweep();
+      // 一覧を取るだけで期限を使い切るほど混んでいる。
+      mocks.listPanes.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(
+              () => resolve(tmuxPanesFixture()),
+              ACTIVITY_SWEEP_TIMEOUT_MS,
+            );
+          }),
+      );
 
-    for (let turn = 1; turn < ACTIVITY_DEFERRED_ERROR_STREAK; turn += 1) {
+      for (let turn = 1; turn < ACTIVITY_DEFERRED_ERROR_STREAK; turn += 1) {
+        await runNextSweep();
+      }
+      expect(getAgentActivityErrors()).toEqual([]);
       await runNextSweep();
-    }
-    expect(getAgentActivityErrors()).toEqual([]);
-    await runNextSweep();
 
-    const errors = getAgentActivityErrors();
-    expect(errors.map((error) => error.target)).toEqual(paneIds);
-    expect(errors[0]).toMatchObject({
-      operation: "capture_screen",
-      detail: `capture could not start before the 6000ms activity sweep deadline for ${ACTIVITY_DEFERRED_ERROR_STREAK} consecutive sweeps; ${lastCaptured}`,
-      stack: "",
-    });
+      const errors = getAgentActivityErrors();
+      expect(errors.map((error) => error.target)).toEqual(paneIds);
+      expect(errors[0]).toMatchObject({
+        operation: "capture_screen",
+        detail: `capture could not start before the 6000ms activity sweep deadline for ${ACTIVITY_DEFERRED_ERROR_STREAK} consecutive sweeps; ${lastCaptured}`,
+        stack: "",
+      });
 
-    mocks.listPanes.mockResolvedValue(tmuxPanesFixture());
-    await runNextSweep();
-    expect(getAgentActivityErrors()).toEqual([]);
-  });
+      mocks.listPanes.mockResolvedValue(tmuxPanesFixture());
+      await runNextSweep();
+      expect(getAgentActivityErrors()).toEqual([]);
+    },
+  );
 
   test("an overview watch request starts a stale sweep without awaiting it", async () => {
     startAgentActivityWatch("/work/sample");

@@ -50,18 +50,21 @@ describe("the agent integration section", () => {
       "入れると、claude と codex が作業中・入力待ち・完了を自分で知らせるので、状態の表示が確かになります。ファイルにあるほかのフックはそのまま残ります。",
       "入れ方と、入れると何が変わるかは Help › sample section (ja) にあります。",
     ],
-  ] as const)("in %s says what the hooks are for, then links to the help", (lang, intro, help) => {
-    const { section } = setup(lang);
-    const [title, first, second] = Array.from(
-      section.element.children,
-      (child) => child.textContent,
-    );
-    expect([title, first, second]).toEqual([
-      agentsText(lang).hooks.title,
-      intro,
-      help,
-    ]);
-  });
+  ] as const)(
+    "in %s says what the hooks are for, then links to the help",
+    (lang, intro, help) => {
+      const { section } = setup(lang);
+      const [title, first, second] = Array.from(
+        section.element.children,
+        (child) => child.textContent,
+      );
+      expect([title, first, second]).toEqual([
+        agentsText(lang).hooks.title,
+        intro,
+        help,
+      ]);
+    },
+  );
 
   test("the link opens the help section in the app", () => {
     const { section, opened } = setup("en");

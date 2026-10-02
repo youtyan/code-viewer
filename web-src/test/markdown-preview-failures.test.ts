@@ -70,16 +70,15 @@ describe("markdown preview failure paths", () => {
       path: "docs/other.md",
       hash: "part%ZZ",
     },
-  ])("$name keeps the link as written and returns the decode failure", ({
-    href,
-    path,
-    hash,
-  }) => {
-    const link = resolveMarkdownLinkTarget(TARGET.path, href);
-    expect(link).toMatchObject({ path, hash, directory: false });
-    expect(link?.decodeError?.message).toContain("invalid percent-encoding");
-    expect(link?.decodeError).toMatchObject({ cause: expect.any(URIError) });
-  });
+  ])(
+    "$name keeps the link as written and returns the decode failure",
+    ({ href, path, hash }) => {
+      const link = resolveMarkdownLinkTarget(TARGET.path, href);
+      expect(link).toMatchObject({ path, hash, directory: false });
+      expect(link?.decodeError?.message).toContain("invalid percent-encoding");
+      expect(link?.decodeError).toMatchObject({ cause: expect.any(URIError) });
+    },
+  );
 
   test("a link that cannot be decoded is marked with the reason", () => {
     captureConsoleErrors();
@@ -156,26 +155,27 @@ describe("markdown preview failure paths", () => {
         "Error: sample render failure",
       ],
     },
-  ])("when $name the diagram shows the reason", async ({
-    arrange,
-    title,
-    detail,
-  }) => {
-    captureConsoleErrors();
-    mermaidLoad.next = arrange;
-    const root = await renderMarkdownPreview(
-      "```mermaid\ngraph TD; A-->B\n```",
-      TARGET,
-      { syntaxHighlight: false },
-    );
-    await settle();
-    expect(root.querySelector(".mkdp-mermaid-error-title")?.textContent).toBe(
-      title,
-    );
-    const text = root.querySelector(".mkdp-mermaid-error-detail")?.textContent;
-    for (const part of detail) expect(text).toContain(part);
-    expect(errorSpy).toHaveBeenCalledOnce();
-  });
+  ])(
+    "when $name the diagram shows the reason",
+    async ({ arrange, title, detail }) => {
+      captureConsoleErrors();
+      mermaidLoad.next = arrange;
+      const root = await renderMarkdownPreview(
+        "```mermaid\ngraph TD; A-->B\n```",
+        TARGET,
+        { syntaxHighlight: false },
+      );
+      await settle();
+      expect(root.querySelector(".mkdp-mermaid-error-title")?.textContent).toBe(
+        title,
+      );
+      const text = root.querySelector(
+        ".mkdp-mermaid-error-detail",
+      )?.textContent;
+      for (const part of detail) expect(text).toContain(part);
+      expect(errorSpy).toHaveBeenCalledOnce();
+    },
+  );
 
   test("a diagram that cannot be measured opens with the layout size and says so", async () => {
     captureConsoleErrors();

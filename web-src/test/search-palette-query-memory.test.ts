@@ -195,22 +195,22 @@ describe("search palette query memory", () => {
   test.each([
     { name: "file -> grep", from: "file" as const, to: "grep" as const },
     { name: "grep -> file", from: "grep" as const, to: "file" as const },
-  ])("switching mode while open carries the live query over ($name)", async ({
-    from,
-    to,
-  }) => {
-    const { palette } = await setup({ files: ["src/sample.ts"] });
-    try {
-      palette.openSearchPalette(from);
-      typeQuery("carried");
-      palette.openSearchPalette(to);
-      expect(palette.paletteMode()).toBe(to);
-      expect(input().value).toBe("carried");
-      expect(input().selectionEnd).toBe("carried".length);
-    } finally {
-      palette.closeSearchPalette();
-    }
-  });
+  ])(
+    "switching mode while open carries the live query over ($name)",
+    async ({ from, to }) => {
+      const { palette } = await setup({ files: ["src/sample.ts"] });
+      try {
+        palette.openSearchPalette(from);
+        typeQuery("carried");
+        palette.openSearchPalette(to);
+        expect(palette.paletteMode()).toBe(to);
+        expect(input().value).toBe("carried");
+        expect(input().selectionEnd).toBe("carried".length);
+      } finally {
+        palette.closeSearchPalette();
+      }
+    },
+  );
 
   test("the label row offers mode-switch buttons that change the palette mode", async () => {
     const { palette } = await setup({ files: ["src/sample.ts"] });

@@ -133,26 +133,24 @@ describe("global search view", () => {
       },
       detail: "cancel search (HTTP 500): sample failure",
     },
-  ])("$operation の HTTP の失敗は諦めて、理由を画面と console に出す", async ({
-    operation,
-    route,
-    act,
-    detail,
-  }) => {
-    const { view, progress, logs } = mountSearch(route);
+  ])(
+    "$operation の HTTP の失敗は諦めて、理由を画面と console に出す",
+    async ({ operation, route, act, detail }) => {
+      const { view, progress, logs } = mountSearch(route);
 
-    view.setSearch("sample", { autoRun: true });
-    await act(view, progress);
-    await waitFor(() => progress().includes("HTTP"));
+      view.setSearch("sample", { autoRun: true });
+      await act(view, progress);
+      await waitFor(() => progress().includes("HTTP"));
 
-    expect(progress()).toBe(`Error: ${detail}`);
-    expect(
-      q<HTMLButtonElement>(view.el, ".db-global-search-cancel").hidden,
-    ).toBe(true);
-    expect(logs(operation).length).toBe(1);
-    expect((logs(operation)[0].slice(-1)[0] as Error).message).toBe(detail);
-    view.dispose();
-  });
+      expect(progress()).toBe(`Error: ${detail}`);
+      expect(
+        q<HTMLButtonElement>(view.el, ".db-global-search-cancel").hidden,
+      ).toBe(true);
+      expect(logs(operation).length).toBe(1);
+      expect((logs(operation)[0].slice(-1)[0] as Error).message).toBe(detail);
+      view.dispose();
+    },
+  );
 
   test("進み具合を取りに行けなかったら、理由を console に出して取り直す", async () => {
     const failure = new TypeError("network is unreachable");

@@ -242,19 +242,18 @@ describe("開いているプロジェクトのグループ", () => {
         ],
       },
     },
-  ])("前面のタブのグループの札にだけ印: $name", async ({
-    saved,
-    route,
-    expected,
-  }) => {
-    const { mount } = await open(saved, APP, route);
-    expect({
-      front: [
-        ...mount.querySelectorAll<HTMLElement>(".main-tab-group-front"),
-      ].map((head) => head.dataset.group),
-      strip: strip(mount),
-    }).toEqual(expected);
-  });
+  ])(
+    "前面のタブのグループの札にだけ印: $name",
+    async ({ saved, route, expected }) => {
+      const { mount } = await open(saved, APP, route);
+      expect({
+        front: [
+          ...mount.querySelectorAll<HTMLElement>(".main-tab-group-front"),
+        ].map((head) => head.dataset.group),
+        strip: strip(mount),
+      }).toEqual(expected);
+    },
+  );
 
   test("このプロジェクトの最後のタブを閉じてフォルダ表示に戻っても、札は残る", async () => {
     const { mount } = await open(withAppReadme, APP, fileRoute("README.md"));

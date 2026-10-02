@@ -63,25 +63,25 @@ describe("ER diagram", () => {
       shown:
         "Error: Failed to render ER diagram.\nCaused by: TypeError: sample render crash",
     },
-  ])("shows why the diagram is missing when $name", async ({
-    arrange,
-    shown,
-  }) => {
-    arrange();
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const diagram = createErDiagram();
-    document.body.appendChild(diagram.el);
+  ])(
+    "shows why the diagram is missing when $name",
+    async ({ arrange, shown }) => {
+      arrange();
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      const diagram = createErDiagram();
+      document.body.appendChild(diagram.el);
 
-    await diagram.render(SAMPLE_SCHEMA, SAMPLE_COLUMNS);
+      await diagram.render(SAMPLE_SCHEMA, SAMPLE_COLUMNS);
 
-    expect(diagram.el.querySelector(".db-er-svg-wrap")?.textContent).toBe(
-      shown,
-    );
-    expect(consoleError).toHaveBeenCalledTimes(1);
-    diagram.dispose();
-  });
+      expect(diagram.el.querySelector(".db-er-svg-wrap")?.textContent).toBe(
+        shown,
+      );
+      expect(consoleError).toHaveBeenCalledTimes(1);
+      diagram.dispose();
+    },
+  );
 
   afterAll(() => {
     GlobalRegistrator.unregister();

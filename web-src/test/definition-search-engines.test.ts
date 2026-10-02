@@ -187,19 +187,20 @@ describe("definition patterns with git grep -E", () => {
 });
 
 describe.skipIf(!RG_AVAILABLE)("definition patterns with rg", () => {
-  test.each(
-    ENGINE_CASES,
-  )("matches the same %s lines as git grep -E", async (lang, lines) => {
-    const gitResult = await searchWithEngine(lang, "main");
-    const rgResult = await searchWithEngine(lang, "worktree");
-    expect(rgResult.engine).toBe("rg");
-    expect(rgResult.hits).toEqual(gitResult.hits);
-    expect(rgResult.hits.filter((item) => item.path === pathFor(lang))).toEqual(
-      expectedHits(lang, lines),
-    );
-    expect(rgResult.hits).not.toContainEqual({
-      path: "ignored/sample.ts",
-      line: 1,
-    });
-  });
+  test.each(ENGINE_CASES)(
+    "matches the same %s lines as git grep -E",
+    async (lang, lines) => {
+      const gitResult = await searchWithEngine(lang, "main");
+      const rgResult = await searchWithEngine(lang, "worktree");
+      expect(rgResult.engine).toBe("rg");
+      expect(rgResult.hits).toEqual(gitResult.hits);
+      expect(
+        rgResult.hits.filter((item) => item.path === pathFor(lang)),
+      ).toEqual(expectedHits(lang, lines));
+      expect(rgResult.hits).not.toContainEqual({
+        path: "ignored/sample.ts",
+        line: 1,
+      });
+    },
+  );
 });

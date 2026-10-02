@@ -632,24 +632,22 @@ describe("usage windows", () => {
     { used: 80, resetsAt: NOW + 1, warn: true, expired: false },
     { used: 99, resetsAt: NOW, warn: false, expired: true },
     { used: 95, resetsAt: 0, warn: true, expired: false },
-  ])("$used% resetting at $resetsAt → warn $warn, expired $expired", ({
-    used,
-    resetsAt,
-    warn,
-    expired,
-  }) => {
-    const [view] = usageWindowViews(
-      {
-        status: "ok",
-        observedAt: NOW,
-        windows: [
-          { kind: "five_hour", minutes: 300, usedPercent: used, resetsAt },
-        ],
-      },
-      NOW,
-    );
-    expect(view).toMatchObject({ warn, expired });
-  });
+  ])(
+    "$used% resetting at $resetsAt → warn $warn, expired $expired",
+    ({ used, resetsAt, warn, expired }) => {
+      const [view] = usageWindowViews(
+        {
+          status: "ok",
+          observedAt: NOW,
+          windows: [
+            { kind: "five_hour", minutes: 300, usedPercent: used, resetsAt },
+          ],
+        },
+        NOW,
+      );
+      expect(view).toMatchObject({ warn, expired });
+    },
+  );
 
   test("windows are shown 5 hours, then week, then others", () => {
     const views = usageWindowViews(
@@ -1005,14 +1003,12 @@ describe("what a new account may share", () => {
       reason: null,
     },
     { agent: "codex", name: "skills", category: "optional", reason: null },
-  ] as const)("$agent $name → $category", ({
-    agent,
-    name,
-    category,
-    reason,
-  }) => {
-    expect(classifyShareEntry(agent, name)).toEqual({ category, reason });
-  });
+  ] as const)(
+    "$agent $name → $category",
+    ({ agent, name, category, reason }) => {
+      expect(classifyShareEntry(agent, name)).toEqual({ category, reason });
+    },
+  );
 
   const ENTRIES: ShareEntry[] = [
     {

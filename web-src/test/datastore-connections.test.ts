@@ -170,26 +170,26 @@ describe("datastore connection store", () => {
     }
   });
 
-  test.each(CASES)("never returns credentials for $name", async ({
-    id,
-    input,
-  }) => {
-    const dir = mkdtempSync(join(tmpdir(), "code-viewer-connections-"));
-    try {
-      const stored = await saveDatastoreConnection(dir, {
-        id,
-        name: "Example datastore",
-        ...input,
-      });
-      const safe = publicConnection(stored);
+  test.each(CASES)(
+    "never returns credentials for $name",
+    async ({ id, input }) => {
+      const dir = mkdtempSync(join(tmpdir(), "code-viewer-connections-"));
+      try {
+        const stored = await saveDatastoreConnection(dir, {
+          id,
+          name: "Example datastore",
+          ...input,
+        });
+        const safe = publicConnection(stored);
 
-      expect(
-        Object.keys(safe).filter((key) => CREDENTIAL_FIELDS.includes(key)),
-      ).toEqual([]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+        expect(
+          Object.keys(safe).filter((key) => CREDENTIAL_FIELDS.includes(key)),
+        ).toEqual([]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("does not persist authentication fields", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-connections-"));
@@ -578,39 +578,39 @@ describe("connection test route", () => {
           )) as typeof fetch;
       },
     },
-  ])("probes an unsaved $name connection without persisting it", async ({
-    input,
-    setup,
-  }) => {
-    const dir = mkdtempSync(join(tmpdir(), "code-viewer-connections-"));
-    setup();
-    try {
-      const request = new Request("http://localhost/_db/connections/test", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Code-Viewer-Action": "1",
-        },
-        body: JSON.stringify({
-          name: "Example datastore",
-          ...input,
-        }),
-      });
-      const response = await handleDatabaseRoute(
-        request,
-        new URL(request.url),
-        dir,
-        [],
-        () => true,
-      );
+  ])(
+    "probes an unsaved $name connection without persisting it",
+    async ({ input, setup }) => {
+      const dir = mkdtempSync(join(tmpdir(), "code-viewer-connections-"));
+      setup();
+      try {
+        const request = new Request("http://localhost/_db/connections/test", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1",
+          },
+          body: JSON.stringify({
+            name: "Example datastore",
+            ...input,
+          }),
+        });
+        const response = await handleDatabaseRoute(
+          request,
+          new URL(request.url),
+          dir,
+          [],
+          () => true,
+        );
 
-      expect(response?.status).toBe(200);
-      expect(await response?.json()).toEqual({ ok: true });
-      expect(await loadDatastoreConnections(dir)).toEqual([]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+        expect(response?.status).toBe(200);
+        expect(await response?.json()).toEqual({ ok: true });
+        expect(await loadDatastoreConnections(dir)).toEqual([]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   test.each([
     {
@@ -885,55 +885,52 @@ describe("saved connection failures over the Data screen routes", () => {
       },
       status: 403,
     },
-  ])("masks the secret in $name", async ({
-    id,
-    saved,
-    request,
-    setup,
-    status,
-  }) => {
-    const dir = mkdtempSync(join(tmpdir(), "code-viewer-connections-"));
-    const originals = [console.error, console.log, console.warn];
-    const logged: string[] = [];
-    const capture = (...args: unknown[]) => {
-      logged.push(args.map((arg) => inspect(arg, { depth: 8 })).join(" "));
-    };
-    console.error = capture;
-    console.log = capture;
-    console.warn = capture;
-    try {
-      setup();
-      await saveDatastoreConnection(dir, { id, name: "Example", ...saved });
-      const req = request(id);
-      const response = await handleDatabaseRoute(
-        req,
-        new URL(req.url),
-        dir,
-        [],
-        () => true,
-      );
-      const body = (await response?.text()) ?? "";
-      const stored = readdirSync(join(dir, ".code-viewer"), {
-        recursive: true,
-        encoding: "utf8",
-      })
-        .map((path) => join(dir, ".code-viewer", path))
-        .filter((path) => statSync(path).isFile())
-        .map((path) => readFileSync(path, "utf8"))
-        .join("\n");
+  ])(
+    "masks the secret in $name",
+    async ({ id, saved, request, setup, status }) => {
+      const dir = mkdtempSync(join(tmpdir(), "code-viewer-connections-"));
+      const originals = [console.error, console.log, console.warn];
+      const logged: string[] = [];
+      const capture = (...args: unknown[]) => {
+        logged.push(args.map((arg) => inspect(arg, { depth: 8 })).join(" "));
+      };
+      console.error = capture;
+      console.log = capture;
+      console.warn = capture;
+      try {
+        setup();
+        await saveDatastoreConnection(dir, { id, name: "Example", ...saved });
+        const req = request(id);
+        const response = await handleDatabaseRoute(
+          req,
+          new URL(req.url),
+          dir,
+          [],
+          () => true,
+        );
+        const body = (await response?.text()) ?? "";
+        const stored = readdirSync(join(dir, ".code-viewer"), {
+          recursive: true,
+          encoding: "utf8",
+        })
+          .map((path) => join(dir, ".code-viewer", path))
+          .filter((path) => statSync(path).isFile())
+          .map((path) => readFileSync(path, "utf8"))
+          .join("\n");
 
-      if (status) expect(response?.status).toBe(status);
-      expect(body).toContain("***");
-      for (const form of forms) {
-        expect(body).not.toContain(form);
-        expect(logged.join("\n")).not.toContain(form);
-        expect(stored).not.toContain(form);
+        if (status) expect(response?.status).toBe(status);
+        expect(body).toContain("***");
+        for (const form of forms) {
+          expect(body).not.toContain(form);
+          expect(logged.join("\n")).not.toContain(form);
+          expect(stored).not.toContain(form);
+        }
+      } finally {
+        [console.error, console.log, console.warn] = originals;
+        rmSync(dir, { recursive: true, force: true });
       }
-    } finally {
-      [console.error, console.log, console.warn] = originals;
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 });
 
 describe("direct non-SQL connections", () => {

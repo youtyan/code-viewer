@@ -199,41 +199,41 @@ describe("query editor value display", () => {
     editor.dispose();
   });
 
-  test.each([
-    "ctrlKey",
-    "metaKey",
-  ] as const)("%s + Enter runs the query", async (modifier) => {
-    let executions = 0;
-    const editor = createQueryEditor({
-      getKind: () => "sqlite",
-      executeQuery: async () => {
-        executions++;
-        return {
-          dbId: "sample.db",
-          columns: [],
-          columnTypes: [],
-          rows: [],
-          rowCount: 0,
-          truncated: false,
-          elapsedMs: 1,
-        };
-      },
-    });
-    document.body.appendChild(editor.el);
-    editor.setSql("SELECT sample_column FROM sample_table");
+  test.each(["ctrlKey", "metaKey"] as const)(
+    "%s + Enter runs the query",
+    async (modifier) => {
+      let executions = 0;
+      const editor = createQueryEditor({
+        getKind: () => "sqlite",
+        executeQuery: async () => {
+          executions++;
+          return {
+            dbId: "sample.db",
+            columns: [],
+            columnTypes: [],
+            rows: [],
+            rowCount: 0,
+            truncated: false,
+            elapsedMs: 1,
+          };
+        },
+      });
+      document.body.appendChild(editor.el);
+      editor.setSql("SELECT sample_column FROM sample_table");
 
-    editor.el.querySelector("textarea")?.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        [modifier]: true,
-        bubbles: true,
-      }),
-    );
-    await Promise.resolve();
+      editor.el.querySelector("textarea")?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          [modifier]: true,
+          bubbles: true,
+        }),
+      );
+      await Promise.resolve();
 
-    expect(executions).toBe(1);
-    editor.dispose();
-  });
+      expect(executions).toBe(1);
+      editor.dispose();
+    },
+  );
 
   test("shows the complete Local History load failure", async () => {
     const failure = new TypeError("history connection lost");
@@ -291,39 +291,38 @@ describe("query editor value display", () => {
       expectedScreen:
         "Error: query request failed\nCaused by: TypeError: database connection lost",
     },
-  ])("$name keeps the screen message and complete error in the console", async ({
-    invoke,
-    expectedOperation,
-    expectedScreen,
-  }) => {
-    const cause = new TypeError("database connection lost");
-    const failure = Object.assign(new Error("query request failed"), {
-      cause,
-    });
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const editor = createQueryEditor({
-      getKind: () => "sqlite",
-      executeQuery: () => Promise.reject(failure),
-    });
-    document.body.appendChild(editor.el);
-    editor.setSql("SELECT sample_column FROM sample_table");
+  ])(
+    "$name keeps the screen message and complete error in the console",
+    async ({ invoke, expectedOperation, expectedScreen }) => {
+      const cause = new TypeError("database connection lost");
+      const failure = Object.assign(new Error("query request failed"), {
+        cause,
+      });
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      const editor = createQueryEditor({
+        getKind: () => "sqlite",
+        executeQuery: () => Promise.reject(failure),
+      });
+      document.body.appendChild(editor.el);
+      editor.setSql("SELECT sample_column FROM sample_table");
 
-    await invoke(editor);
+      await invoke(editor);
 
-    expect(editor.el.querySelector(".db-query-error")?.textContent).toBe(
-      expectedScreen,
-    );
-    expect(consoleError).toHaveBeenCalledWith(expectedOperation, failure);
-    expect(consoleError.mock.calls[0]?.[1]).toBe(failure);
-    const logged = consoleError.mock.calls[0]?.[1] as Error & {
-      cause?: unknown;
-    };
-    expect(logged.cause).toBe(cause);
-    expect(logged.stack).toBe(failure.stack);
-    editor.dispose();
-  });
+      expect(editor.el.querySelector(".db-query-error")?.textContent).toBe(
+        expectedScreen,
+      );
+      expect(consoleError).toHaveBeenCalledWith(expectedOperation, failure);
+      expect(consoleError.mock.calls[0]?.[1]).toBe(failure);
+      const logged = consoleError.mock.calls[0]?.[1] as Error & {
+        cause?: unknown;
+      };
+      expect(logged.cause).toBe(cause);
+      expect(logged.stack).toBe(failure.stack);
+      editor.dispose();
+    },
+  );
 
   // 直す前は日本語の設定でも「Explain」とその結果の状態が英語のままだった。
   test.each([
@@ -337,35 +336,34 @@ describe("query editor value display", () => {
       button: "実行計画",
       status: "実行計画 (3ms)",
     },
-  ])("labels Explain and its status in the display language: $language", async ({
-    language,
-    button,
-    status,
-  }) => {
-    const editor = createQueryEditor({
-      getKind: () => "sqlite",
-      getText: () => dbText(language),
-      executeQuery: async () => ({
-        dbId: "sample.db",
-        columns: ["detail"],
-        columnTypes: ["TEXT"],
-        rows: [["SCAN sample_table"]],
-        rowCount: 1,
-        truncated: false,
-        elapsedMs: 3,
-      }),
-    });
-    document.body.appendChild(editor.el);
-    const explain =
-      editor.el.querySelector<HTMLButtonElement>(".db-query-explain");
-    expect(explain?.textContent).toBe(button);
+  ])(
+    "labels Explain and its status in the display language: $language",
+    async ({ language, button, status }) => {
+      const editor = createQueryEditor({
+        getKind: () => "sqlite",
+        getText: () => dbText(language),
+        executeQuery: async () => ({
+          dbId: "sample.db",
+          columns: ["detail"],
+          columnTypes: ["TEXT"],
+          rows: [["SCAN sample_table"]],
+          rowCount: 1,
+          truncated: false,
+          elapsedMs: 3,
+        }),
+      });
+      document.body.appendChild(editor.el);
+      const explain =
+        editor.el.querySelector<HTMLButtonElement>(".db-query-explain");
+      expect(explain?.textContent).toBe(button);
 
-    editor.setSql("SELECT * FROM sample_table");
-    await editor.explain();
+      editor.setSql("SELECT * FROM sample_table");
+      await editor.explain();
 
-    expect(editor.el.textContent).toContain(status);
-    editor.dispose();
-  });
+      expect(editor.el.textContent).toContain(status);
+      editor.dispose();
+    },
+  );
 
   test("relabels Explain when the display language changes", () => {
     let language: "en" | "ja" = "en";

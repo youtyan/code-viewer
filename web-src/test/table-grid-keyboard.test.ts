@@ -261,22 +261,25 @@ describe("table-grid arrow-key cell navigation", () => {
     ["outside the left edge", 2, "ArrowLeft", 200, 110],
     ["back to the first column", 1, "ArrowLeft", 110, 0],
     ["outside the right edge", 0, "ArrowRight", 0, 70],
-  ])("keeps the active cell visible: %s", async (_name, column, key, offset, expected) => {
-    const { grid } = setup();
-    try {
-      await expect
-        .poll(() => grid.el.querySelectorAll(".db-grid-row").length)
-        .toBe(4);
-      const viewport = q<HTMLElement>(grid.el, ".db-grid-viewport");
-      Object.defineProperty(viewport, "clientWidth", { value: 200 });
-      clickCell(grid.el, 0, column);
-      viewport.scrollLeft = offset;
-      press(grid.el, key);
-      expect(viewport.scrollLeft).toBe(expected);
-    } finally {
-      grid.destroy();
-    }
-  });
+  ])(
+    "keeps the active cell visible: %s",
+    async (_name, column, key, offset, expected) => {
+      const { grid } = setup();
+      try {
+        await expect
+          .poll(() => grid.el.querySelectorAll(".db-grid-row").length)
+          .toBe(4);
+        const viewport = q<HTMLElement>(grid.el, ".db-grid-viewport");
+        Object.defineProperty(viewport, "clientWidth", { value: 200 });
+        clickCell(grid.el, 0, column);
+        viewport.scrollLeft = offset;
+        press(grid.el, key);
+        expect(viewport.scrollLeft).toBe(expected);
+      } finally {
+        grid.destroy();
+      }
+    },
+  );
 
   // Ctrl / Meta / Alt 付きの矢印はアプリ側のスクロール等に予約されて
   // いるので、グリッドは触らない。Shift 付きは範囲を伸ばす

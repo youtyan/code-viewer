@@ -358,26 +358,25 @@ describe("markdown preview", () => {
     { fence: "gd", code: "func _ready():", expected: "gdscript" },
     { fence: "godot", code: "func _ready():", expected: "gdscript" },
     { fence: "gdscript", code: "func _ready():", expected: "gdscript" },
-  ])("normalizes a $fence fence to the $expected Shiki language", ({
-    fence,
-    code,
-    expected,
-  }) => {
-    const seen: string[] = [];
-    const highlighter = {
-      codeToHtml: (_code: string, options: { lang: string }) => {
-        seen.push(options.lang);
-        return '<pre class="shiki"><code><span class="line">x</span></code></pre>';
-      },
-    };
-    const html = renderMarkdownHtml(
-      `\`\`\`${fence}\n${code}\n\`\`\``,
-      { path: "README.md", ref: "worktree" },
-      highlighter,
-    );
-    expect(seen).toEqual([expected]);
-    expect(html.includes('class="shiki"')).toBe(true);
-  });
+  ])(
+    "normalizes a $fence fence to the $expected Shiki language",
+    ({ fence, code, expected }) => {
+      const seen: string[] = [];
+      const highlighter = {
+        codeToHtml: (_code: string, options: { lang: string }) => {
+          seen.push(options.lang);
+          return '<pre class="shiki"><code><span class="line">x</span></code></pre>';
+        },
+      };
+      const html = renderMarkdownHtml(
+        `\`\`\`${fence}\n${code}\n\`\`\``,
+        { path: "README.md", ref: "worktree" },
+        highlighter,
+      );
+      expect(seen).toEqual([expected]);
+      expect(html.includes('class="shiki"')).toBe(true);
+    },
+  );
 
   test("slugifies Japanese and duplicate-safe heading ids deterministically", () => {
     expect(markdownSlugify("Hello World!")).toBe("hello-world");

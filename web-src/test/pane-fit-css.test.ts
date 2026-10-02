@@ -139,16 +139,19 @@ test.each([
   ["68em", "#topbar .seg .seg-label", "display", "none"],
   ["68em", "#topbar #meta .chip-next-unviewed", "display", "none"],
   ["56em", "#topbar .ref-selector .ref-selector-icon", "display", "none"],
-])("narrow topbar (%s): %s has %s: %s", (width, selector, property, expected) => {
-  expect(
-    cascadedDeclarations(
-      allRules.filter(
-        (rule) => rule.atRule === `@container topbar (max-width: ${width})`,
-      ),
-      (candidate) => candidate === selector,
-    ).get(property),
-  ).toBe(expected);
-});
+])(
+  "narrow topbar (%s): %s has %s: %s",
+  (width, selector, property, expected) => {
+    expect(
+      cascadedDeclarations(
+        allRules.filter(
+          (rule) => rule.atRule === `@container topbar (max-width: ${width})`,
+        ),
+        (candidate) => candidate === selector,
+      ).get(property),
+    ).toBe(expected);
+  },
+);
 
 // ファイルの見出しの 2 段目 (Code / Blame / History・行数・行へ移動・コピー): 行数が
 // 4 桁以上だと 31em〜約 33em で入らず、コピーだけが 2 行目に落ちた。34em 以下では
@@ -354,20 +357,23 @@ test.each([
     "flex",
     "1 1 calc(100% - var(--ui-control-sm) - var(--space-2))",
   ],
-])("diff card head (%s): %s has %s: %s", (width, selector, property, expected) => {
-  const scope =
-    width === null
-      ? rules
-      : allRules.filter(
-          (rule) =>
-            rule.atRule === `@container diff-file (max-width: ${width})`,
-        );
-  expect(
-    cascadedDeclarations(scope, (candidate) => candidate === selector).get(
-      property,
-    ),
-  ).toBe(expected);
-});
+])(
+  "diff card head (%s): %s has %s: %s",
+  (width, selector, property, expected) => {
+    const scope =
+      width === null
+        ? rules
+        : allRules.filter(
+            (rule) =>
+              rule.atRule === `@container diff-file (max-width: ${width})`,
+          );
+    expect(
+      cascadedDeclarations(scope, (candidate) => candidate === selector).get(
+        property,
+      ),
+    ).toBe(expected);
+  },
+);
 
 // 見出しの件数を省く境目は見出しの文字の大きさに比例 (px だと特大で件数が残り、
 // 左の列 319px の題が切れた)。
@@ -439,19 +445,23 @@ test.each([
   [null, ".db-grid-filter-input", "min-width", "min(100%, 12em)"],
   ["560px", ".db-grid-filter-bar", "flex-wrap", "wrap"],
   ["560px", ".db-grid-edit-controls", "flex-wrap", "wrap"],
-])("data grid filter (%s): %s has %s: %s", (width, selector, property, expected) => {
-  const scope =
-    width === null
-      ? rules
-      : allRules.filter(
-          (rule) => rule.atRule === `@container db-pane (max-width: ${width})`,
-        );
-  expect(
-    cascadedDeclarations(scope, (candidate) => candidate === selector).get(
-      property,
-    ),
-  ).toBe(expected);
-});
+])(
+  "data grid filter (%s): %s has %s: %s",
+  (width, selector, property, expected) => {
+    const scope =
+      width === null
+        ? rules
+        : allRules.filter(
+            (rule) =>
+              rule.atRule === `@container db-pane (max-width: ${width})`,
+          );
+    expect(
+      cascadedDeclarations(scope, (candidate) => candidate === selector).get(
+        property,
+      ),
+    ).toBe(expected);
+  },
+);
 
 // Markdown の見出しへ URL の # で送ったとき、貼り付いたファイルの見出しの下に
 // 潜らない (見出しの高さは source-view.ts が --doc-head-h に書く)。目次で送る

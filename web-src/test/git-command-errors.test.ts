@@ -293,23 +293,23 @@ describe("git command failures", () => {
   test.each([
     { name: "missing", configure: configureMissingGit, status: 503 },
     { name: "failing", configure: configureFailingGit, status: undefined },
-  ])("verifyCommitAsync reports whether $name git could run", async ({
-    configure,
-    status,
-  }) => {
-    const cwd = tempRoot("code-viewer-verify-commit-cwd-");
-    configure(cwd);
-    const originalError = console.error;
-    console.error = () => {
-      // gitFailureMessage のログはここでは見ない
-    };
-    try {
-      const result = await verifyCommitAsync("HEAD", cwd);
-      expect(result.ok === false ? result.status : "ok").toBe(status);
-    } finally {
-      console.error = originalError;
-    }
-  });
+  ])(
+    "verifyCommitAsync reports whether $name git could run",
+    async ({ configure, status }) => {
+      const cwd = tempRoot("code-viewer-verify-commit-cwd-");
+      configure(cwd);
+      const originalError = console.error;
+      console.error = () => {
+        // gitFailureMessage のログはここでは見ない
+      };
+      try {
+        const result = await verifyCommitAsync("HEAD", cwd);
+        expect(result.ok === false ? result.status : "ok").toBe(status);
+      } finally {
+        console.error = originalError;
+      }
+    },
+  );
 
   test("preserves and logs stderr from an ordinary git failure", async () => {
     const cwd = tempRoot("code-viewer-failing-git-cwd-");
@@ -535,18 +535,17 @@ describe("commit date failures", () => {
       code: 2,
       stderr: "fatal: simulated git failure\n",
     },
-  ])("preserves $name instead of returning no history", async ({
-    configure,
-    code,
-    stderr,
-  }) => {
-    const root = tempRoot("code-viewer-commit-date-errors-");
-    configure(root);
-    await expect(
-      lastCommitDateForPathAsync("HEAD", "sample.txt", root),
-    ).rejects.toMatchObject({ cause: { code, stderr } });
-    await expect(
-      worktreeCommitDatesAsync(["sample.txt"], root),
-    ).rejects.toMatchObject({ cause: { code, stderr } });
-  });
+  ])(
+    "preserves $name instead of returning no history",
+    async ({ configure, code, stderr }) => {
+      const root = tempRoot("code-viewer-commit-date-errors-");
+      configure(root);
+      await expect(
+        lastCommitDateForPathAsync("HEAD", "sample.txt", root),
+      ).rejects.toMatchObject({ cause: { code, stderr } });
+      await expect(
+        worktreeCommitDatesAsync(["sample.txt"], root),
+      ).rejects.toMatchObject({ cause: { code, stderr } });
+    },
+  );
 });

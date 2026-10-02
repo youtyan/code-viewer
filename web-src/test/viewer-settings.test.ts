@@ -877,33 +877,34 @@ describe("viewer settings form", () => {
   ] satisfies Array<{
     selector: string;
     choice: Partial<ViewerSettingsChoices>;
-  }>)("picking $selector applies and saves it at once, without the save button", ({
-    selector,
-    choice,
-  }) => {
-    const { settings, host, calls } = setup();
-    settings.mount(host);
+  }>)(
+    "picking $selector applies and saves it at once, without the save button",
+    ({ selector, choice }) => {
+      const { settings, host, calls } = setup();
+      settings.mount(host);
 
-    const field = q<HTMLInputElement | HTMLSelectElement>(document, selector);
-    const [value] = Object.values(choice);
-    if (typeof value === "boolean") (field as HTMLInputElement).checked = value;
-    else field.value = value;
-    fire(field, "change");
+      const field = q<HTMLInputElement | HTMLSelectElement>(document, selector);
+      const [value] = Object.values(choice);
+      if (typeof value === "boolean")
+        (field as HTMLInputElement).checked = value;
+      else field.value = value;
+      fire(field, "change");
 
-    expect({
-      chosen: calls.choose,
-      saved: calls.save,
-      state: q<HTMLElement>(document, "#scope-settings-save-status").dataset
-        .state,
-      saveDisabled: q<HTMLButtonElement>(document, "#scope-settings-save")
-        .disabled,
-    }).toEqual({
-      chosen: [choice],
-      saved: [],
-      state: "clean",
-      saveDisabled: true,
-    });
-  });
+      expect({
+        chosen: calls.choose,
+        saved: calls.save,
+        state: q<HTMLElement>(document, "#scope-settings-save-status").dataset
+          .state,
+        saveDisabled: q<HTMLButtonElement>(document, "#scope-settings-save")
+          .disabled,
+      }).toEqual({
+        chosen: [choice],
+        saved: [],
+        state: "clean",
+        saveDisabled: true,
+      });
+    },
+  );
 
   // ターミナルの明暗は 2 択。既定 (常にダーク) が先頭で、保存してある値を映す。
   test.each([
@@ -1070,25 +1071,26 @@ describe("viewer settings form", () => {
   test.each([
     { name: "a theme", pick: "forest" as const },
     { name: "the default back", pick: "default" as const },
-  ])("picking $name applies it at once, without the save button", ({
-    pick,
-  }) => {
-    const { settings, host, calls, look } = setup();
-    look.set({ colorTheme: "indigo" });
-    settings.mount(host);
+  ])(
+    "picking $name applies it at once, without the save button",
+    ({ pick }) => {
+      const { settings, host, calls, look } = setup();
+      look.set({ colorTheme: "indigo" });
+      settings.mount(host);
 
-    q<HTMLButtonElement>(
-      document,
-      `.theme-choice[data-color-theme-choice="${pick}"]`,
-    ).click();
+      q<HTMLButtonElement>(
+        document,
+        `.theme-choice[data-color-theme-choice="${pick}"]`,
+      ).click();
 
-    expect({
-      picked: calls.colorTheme,
-      saved: calls.save,
-      saveDisabled: q<HTMLButtonElement>(document, "#scope-settings-save")
-        .disabled,
-    }).toEqual({ picked: [pick], saved: [], saveDisabled: true });
-  });
+      expect({
+        picked: calls.colorTheme,
+        saved: calls.save,
+        saveDisabled: q<HTMLButtonElement>(document, "#scope-settings-save")
+          .disabled,
+      }).toEqual({ picked: [pick], saved: [], saveDisabled: true });
+    },
+  );
 
   // 別の窓・⌘K・T のキーで変わった明暗とテーマを、開いている設定のページにも映す。
   test("syncTheme shows a theme and a mode changed elsewhere", () => {

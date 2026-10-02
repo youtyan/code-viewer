@@ -196,19 +196,18 @@ describe("reportAgentHook の会話の場所", () => {
         cwd: "/work/sample-app",
       },
     },
-  ])("$agent の公式の入力から申告に載せる", async ({
-    agent,
-    input,
-    conversation,
-  }) => {
-    const { deps, posted, failures } = hookDeps({ TMUX_PANE: "%7" });
-    const outcome = await reportAgentHook(agent, JSON.stringify(input), deps);
-    expect([outcome.kind, posted[0]?.conversation, failures]).toEqual([
-      "reported",
-      conversation,
-      [],
-    ]);
-  });
+  ])(
+    "$agent の公式の入力から申告に載せる",
+    async ({ agent, input, conversation }) => {
+      const { deps, posted, failures } = hookDeps({ TMUX_PANE: "%7" });
+      const outcome = await reportAgentHook(agent, JSON.stringify(input), deps);
+      expect([outcome.kind, posted[0]?.conversation, failures]).toEqual([
+        "reported",
+        conversation,
+        [],
+      ]);
+    },
+  );
 
   test("受け取れない欄は空にして申告は届け、欄の名前を失敗の記録に残す", async () => {
     const { deps, posted, failures } = hookDeps({ TMUX_PANE: "%7" });
@@ -334,20 +333,21 @@ describe("申告の会話の場所 → 状態の記録 → overview", () => {
       name: "制御文字",
       value: { ...conversation, cwd: "/work/sample\u0007app" },
     },
-  ])("受け取れない会話の場所は 400 で断り、状態も変えない ($name)", async ({
-    value,
-  }) => {
-    const res = await post("/_agent/state", {
-      target: "%3",
-      event: "prompt",
-      conversation: value,
-    });
-    expect([res?.status, await res?.text(), getAgentState("%3")]).toEqual([
-      400,
-      "invalid conversation",
-      null,
-    ]);
-  });
+  ])(
+    "受け取れない会話の場所は 400 で断り、状態も変えない ($name)",
+    async ({ value }) => {
+      const res = await post("/_agent/state", {
+        target: "%3",
+        event: "prompt",
+        conversation: value,
+      });
+      expect([res?.status, await res?.text(), getAgentState("%3")]).toEqual([
+        400,
+        "invalid conversation",
+        null,
+      ]);
+    },
+  );
 });
 
 describe("引き継ぎの起動の引数", () => {

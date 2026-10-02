@@ -51,17 +51,15 @@ describe("makeTimedId", () => {
       bytes: [9, 9, 9, 9, 9, 9],
       expected: "n-zz999999",
     },
-  ])("combines base36 timestamp and crypto-sourced base36 suffix for $prefix", ({
-    prefix,
-    now,
-    bytes,
-    expected,
-  }) => {
-    const id = withMockedNow(now, () =>
-      withMockedCrypto(bytes, () => makeTimedId(prefix)),
-    );
-    expect(id).toBe(expected);
-  });
+  ])(
+    "combines base36 timestamp and crypto-sourced base36 suffix for $prefix",
+    ({ prefix, now, bytes, expected }) => {
+      const id = withMockedNow(now, () =>
+        withMockedCrypto(bytes, () => makeTimedId(prefix)),
+      );
+      expect(id).toBe(expected);
+    },
+  );
 
   test("draws the random suffix from crypto.getRandomValues, not Math.random", () => {
     const originalRandom = Math.random;

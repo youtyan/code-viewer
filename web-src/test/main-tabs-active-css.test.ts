@@ -104,45 +104,41 @@ const CASES = [
 ] as const;
 
 describe("the selected tab", () => {
-  test.each(
-    CASES,
-  )("$name: plain, other side's and focused side's selected tabs look different", ({
-    theme,
-    split,
-  }) => {
-    renderTabs(theme, split);
-    const plain = looks("plain");
-    const otherSide = looks("otherSide");
-    const focused = looks("focused");
-    expect([
-      plain.background !== otherSide.background,
-      plain.color !== otherSide.color,
-      plain.edge !== otherSide.edge,
-      otherSide.icon !== focused.icon,
-    ]).toEqual([true, true, true, true]);
-  });
+  test.each(CASES)(
+    "$name: plain, other side's and focused side's selected tabs look different",
+    ({ theme, split }) => {
+      renderTabs(theme, split);
+      const plain = looks("plain");
+      const otherSide = looks("otherSide");
+      const focused = looks("focused");
+      expect([
+        plain.background !== otherSide.background,
+        plain.color !== otherSide.color,
+        plain.edge !== otherSide.edge,
+        otherSide.icon !== focused.icon,
+      ]).toEqual([true, true, true, true]);
+    },
+  );
 
-  test.each(
-    CASES,
-  )("$name: the focused side's selected tab draws its icon in the accent colour", ({
-    theme,
-    split,
-  }) => {
-    renderTabs(theme, split);
-    const accent = getComputedStyle(document.documentElement)
-      .getPropertyValue("--color-accent")
-      .trim();
-    expect(looks("focused").icon).toBe(accent);
-  });
+  test.each(CASES)(
+    "$name: the focused side's selected tab draws its icon in the accent colour",
+    ({ theme, split }) => {
+      renderTabs(theme, split);
+      const accent = getComputedStyle(document.documentElement)
+        .getPropertyValue("--color-accent")
+        .trim();
+      expect(looks("focused").icon).toBe(accent);
+    },
+  );
 
-  test.each(CASES)("$name: selecting a tab does not change its size", ({
-    theme,
-    split,
-  }) => {
-    renderTabs(theme, split);
-    const plain = sizes("plain");
-    expect([sizes("otherSide"), sizes("focused")]).toEqual([plain, plain]);
-  });
+  test.each(CASES)(
+    "$name: selecting a tab does not change its size",
+    ({ theme, split }) => {
+      renderTabs(theme, split);
+      const plain = sizes("plain");
+      expect([sizes("otherSide"), sizes("focused")]).toEqual([plain, plain]);
+    },
+  );
 });
 
 // happy-dom は color-mix() の宣言を捨てるので、フォーカスのある面の選択中の面の色は
@@ -178,5 +174,8 @@ test("only the focused side's selected tab strokes its name", () => {
     ).get("-webkit-text-stroke");
   const otherSide = onName(["main-tab-active"]);
   const focused = onName(["main-tab-active", "main-tab-focused"]);
-  expect([focused === undefined, otherSide === focused]).toEqual([false, false]);
+  expect([focused === undefined, otherSide === focused]).toEqual([
+    false,
+    false,
+  ]);
 });

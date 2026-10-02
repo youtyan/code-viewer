@@ -301,38 +301,39 @@ describe("adapters keep the reason of a failure", () => {
       read: (adapter: ReturnType<typeof createSqlCliAdapter>) =>
         adapter.getCreateStatementAsync?.("sample_table") ?? Promise.resolve(),
     },
-  ])("a failed $name query is an error, not an empty list", async ({
-    read,
-  }) => {
-    const failure = new Error("sample permission denied");
-    __setSqlDriverFactoriesForTest({
-      pg: () => ({
-        async connect() {
-          return {
-            async query() {
-              throw failure;
-            },
-            release() {
-              // Test double has no socket to release.
-            },
-          };
-        },
-        async end() {
-          // Test double has no pool to end.
-        },
-      }),
-    });
-    const adapter = createSqlCliAdapter({
-      kind: "postgresql",
-      host: "db.example.test",
-      port: 5432,
-      user: "sample_user",
-      password: "example-password",
-      database: "sample_database",
-    });
-    await expect(read(adapter)).rejects.toBe(failure);
-    adapter.close();
-  });
+  ])(
+    "a failed $name query is an error, not an empty list",
+    async ({ read }) => {
+      const failure = new Error("sample permission denied");
+      __setSqlDriverFactoriesForTest({
+        pg: () => ({
+          async connect() {
+            return {
+              async query() {
+                throw failure;
+              },
+              release() {
+                // Test double has no socket to release.
+              },
+            };
+          },
+          async end() {
+            // Test double has no pool to end.
+          },
+        }),
+      });
+      const adapter = createSqlCliAdapter({
+        kind: "postgresql",
+        host: "db.example.test",
+        port: 5432,
+        user: "sample_user",
+        password: "example-password",
+        database: "sample_database",
+      });
+      await expect(read(adapter)).rejects.toBe(failure);
+      adapter.close();
+    },
+  );
 
   test("a table that cannot be counted has no count instead of 0", async () => {
     const failure = new Error("sample permission denied");

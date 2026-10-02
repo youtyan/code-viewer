@@ -140,15 +140,15 @@ describe("置き場所と大きさ", () => {
     { placement: "left", orientation: "vertical" },
     { placement: "bottom", orientation: "horizontal" },
     { placement: "top", orientation: "horizontal" },
-  ] as const)("$placement に置くと、掴みは $orientation の縁", ({
-    placement,
-    orientation,
-  }) => {
-    layout = { ...layout, placement };
-    shelf.applyLayout();
-    expect(shelf.el.dataset.placement).toBe(placement);
-    expect(resizer().getAttribute("aria-orientation")).toBe(orientation);
-  });
+  ] as const)(
+    "$placement に置くと、掴みは $orientation の縁",
+    ({ placement, orientation }) => {
+      layout = { ...layout, placement };
+      shelf.applyLayout();
+      expect(shelf.el.dataset.placement).toBe(placement);
+      expect(resizer().getAttribute("aria-orientation")).toBe(orientation);
+    },
+  );
 
   test("見出しの ⋯ から置き場所を選ぶと、設定に書いてもらう", () => {
     shelf.el
@@ -181,16 +181,15 @@ describe("置き場所と大きさ", () => {
     { placement: "left", key: "ArrowRight", patch: { width: 236 } },
     { placement: "bottom", key: "ArrowUp", patch: { height: 196 } },
     { placement: "top", key: "ArrowDown", patch: { height: 196 } },
-  ] as const)("$placement: 縁を端末の側へ動かすと広がり、終わりに覚える", ({
-    placement,
-    key,
-    patch,
-  }) => {
-    layout = { ...layout, placement };
-    shelf.applyLayout();
-    resizer().dispatchEvent(new KeyboardEvent("keydown", { key }));
-    expect(layoutChanges).toEqual([patch]);
-  });
+  ] as const)(
+    "$placement: 縁を端末の側へ動かすと広がり、終わりに覚える",
+    ({ placement, key, patch }) => {
+      layout = { ...layout, placement };
+      shelf.applyLayout();
+      resizer().dispatchEvent(new KeyboardEvent("keydown", { key }));
+      expect(layoutChanges).toEqual([patch]);
+    },
+  );
 });
 
 describe("端末が狭いときの畳み方", () => {
@@ -211,20 +210,18 @@ describe("端末が狭いときの畳み方", () => {
           wide: { width: 1200, height: 180 + SHELF_AUTO_COLLAPSE_ROOM.height },
         };
 
-  test.each([
-    "right",
-    "left",
-    "bottom",
-    "top",
-  ] as const)("%s: 狭ければ設定を変えずに畳み、広がれば開く", (placement) => {
-    layout = { ...layout, placement };
-    shelf.applyLayout();
-    shelf.setRoom(room(placement).narrow);
-    expect(shelf.el.dataset.collapsed).toBe("true");
-    shelf.setRoom(room(placement).wide);
-    expect(shelf.el.dataset.collapsed).toBe("false");
-    expect(collapsedChanges).toEqual([]);
-  });
+  test.each(["right", "left", "bottom", "top"] as const)(
+    "%s: 狭ければ設定を変えずに畳み、広がれば開く",
+    (placement) => {
+      layout = { ...layout, placement };
+      shelf.applyLayout();
+      shelf.setRoom(room(placement).narrow);
+      expect(shelf.el.dataset.collapsed).toBe("true");
+      shelf.setRoom(room(placement).wide);
+      expect(shelf.el.dataset.collapsed).toBe("false");
+      expect(collapsedChanges).toEqual([]);
+    },
+  );
 
   test("狭くて畳んだ帯を押せば開く (設定は書かない)。一度広がってまた狭まれば畳む", () => {
     shelf.setRoom(room("right").narrow);
@@ -279,25 +276,27 @@ describe("見出しの行の詳しい表示 (浮く札は作らない)", () => {
   test.each([
     { name: "カーソル", enter: "pointerenter", leave: "pointerleave" },
     { name: "フォーカス", enter: "focus", leave: "blur" },
-  ])("$name が載っている間だけ、題と件数の代わりにパスを出す", ({
-    enter,
-    leave,
-  }) => {
-    expect(shown()).toEqual({ title: true, detail: null });
-    open().dispatchEvent(new Event(enter));
-    // パスはディレクトリとファイル名に分け、省略はディレクトリの側だけ (CSS)。
-    expect(shown()).toEqual({
-      title: false,
-      detail: ["/repo/out/", "a.png", ""],
-    });
-    // 全文はその行の title (パスは 1 回だけ)。
-    expect(head().title).toBe("/repo/out/a.png");
-    // 見出しの行の中だけで切り替える (浮く札を作らない)。
-    expect(document.querySelector(".title-tooltip, [role=tooltip]")).toBeNull();
-    open().dispatchEvent(new Event(leave));
-    expect(shown()).toEqual({ title: true, detail: null });
-    expect(head().hasAttribute("title")).toBe(false);
-  });
+  ])(
+    "$name が載っている間だけ、題と件数の代わりにパスを出す",
+    ({ enter, leave }) => {
+      expect(shown()).toEqual({ title: true, detail: null });
+      open().dispatchEvent(new Event(enter));
+      // パスはディレクトリとファイル名に分け、省略はディレクトリの側だけ (CSS)。
+      expect(shown()).toEqual({
+        title: false,
+        detail: ["/repo/out/", "a.png", ""],
+      });
+      // 全文はその行の title (パスは 1 回だけ)。
+      expect(head().title).toBe("/repo/out/a.png");
+      // 見出しの行の中だけで切り替える (浮く札を作らない)。
+      expect(
+        document.querySelector(".title-tooltip, [role=tooltip]"),
+      ).toBeNull();
+      open().dispatchEvent(new Event(leave));
+      expect(shown()).toEqual({ title: true, detail: null });
+      expect(head().hasAttribute("title")).toBe(false);
+    },
+  );
 
   test("読めなかった画像は理由を出す", () => {
     shelf.render([
@@ -313,17 +312,18 @@ describe("見出しの行の詳しい表示 (浮く札は作らない)", () => {
     expect(head().title).toBe("Too large (30 MB)\n/repo/out/a.png");
   });
 
-  test.each([
-    "right",
-    "bottom",
-  ] as const)("%s に置いても同じ見出しの行で切り替える", (placement) => {
-    layout = { ...layout, placement };
-    shelf.applyLayout();
-    open().dispatchEvent(new Event("pointerenter"));
-    expect(
-      head().querySelector<HTMLElement>(".terminal-image-shelf-detail")?.hidden,
-    ).toBe(false);
-  });
+  test.each(["right", "bottom"] as const)(
+    "%s に置いても同じ見出しの行で切り替える",
+    (placement) => {
+      layout = { ...layout, placement };
+      shelf.applyLayout();
+      open().dispatchEvent(new Event("pointerenter"));
+      expect(
+        head().querySelector<HTMLElement>(".terminal-image-shelf-detail")
+          ?.hidden,
+      ).toBe(false);
+    },
+  );
 });
 
 describe("見た目 (style.css の計算値)", () => {
@@ -375,18 +375,18 @@ describe("見た目 (style.css の計算値)", () => {
     });
   });
 
-  test.each([
-    "bottom",
-    "top",
-  ] as const)("%s: ペインの見出しは横書き (回転させない)", (placement) => {
-    layout = { ...layout, placement };
-    shelf.applyLayout();
-    withStyle(() => {
-      const head = shelf.el.querySelector<HTMLElement>(
-        ".terminal-image-shelf-group-head",
-      );
-      if (!head) throw new Error("no group head");
-      expect(getComputedStyle(head).writingMode).not.toMatch(/vertical/);
-    });
-  });
+  test.each(["bottom", "top"] as const)(
+    "%s: ペインの見出しは横書き (回転させない)",
+    (placement) => {
+      layout = { ...layout, placement };
+      shelf.applyLayout();
+      withStyle(() => {
+        const head = shelf.el.querySelector<HTMLElement>(
+          ".terminal-image-shelf-group-head",
+        );
+        if (!head) throw new Error("no group head");
+        expect(getComputedStyle(head).writingMode).not.toMatch(/vertical/);
+      });
+    },
+  );
 });

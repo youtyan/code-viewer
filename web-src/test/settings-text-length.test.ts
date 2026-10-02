@@ -80,12 +80,12 @@ function tooLong(lang: Language): string[] {
 }
 
 describe("settings text", () => {
-  test.each<Language>([
-    "en",
-    "ja",
-  ])("no paragraph in %s is longer than the limit", (lang) => {
-    expect(tooLong(lang)).toEqual([]);
-  });
+  test.each<Language>(["en", "ja"])(
+    "no paragraph in %s is longer than the limit",
+    (lang) => {
+      expect(tooLong(lang)).toEqual([]);
+    },
+  );
 
   // 例外の一覧が古くならないように: 挙げた欄が実在する。
   test("every exception names a text that exists", () => {

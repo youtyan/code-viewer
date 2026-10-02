@@ -215,18 +215,19 @@ describe("pruneDeadServerRegistry", () => {
   test.each([
     { name: "whose pid is reused by a live process", pid: () => process.pid },
     { name: "whose process is gone", pid: deadPid },
-  ])("an old-form entry without a token or version $name is removed as legacy", async ({
-    pid,
-  }) => {
-    const file = join(registryDir, "old.json");
-    writeFileSync(file, entry("/sample/old", pid(), {}), "utf8");
-    const result = await pruneDeadServerRegistry();
-    expect([result.removed, result.removedLegacy, existsSync(file)]).toEqual([
-      [],
-      [{ file, root: "/sample/old", url: "http://127.0.0.1:4321/" }],
-      false,
-    ]);
-  });
+  ])(
+    "an old-form entry without a token or version $name is removed as legacy",
+    async ({ pid }) => {
+      const file = join(registryDir, "old.json");
+      writeFileSync(file, entry("/sample/old", pid(), {}), "utf8");
+      const result = await pruneDeadServerRegistry();
+      expect([result.removed, result.removedLegacy, existsSync(file)]).toEqual([
+        [],
+        [{ file, root: "/sample/old", url: "http://127.0.0.1:4321/" }],
+        false,
+      ]);
+    },
+  );
 
   test("a mixed registry keeps live and unreadable entries and other files", async () => {
     const live = join(registryDir, "live.json");

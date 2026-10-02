@@ -170,45 +170,43 @@ describe("datastore connection dialog required fields", () => {
       field: "Access key ID",
       expectedPort: undefined,
     },
-  ])("requires $name again while editing", async ({
-    id,
-    connection,
-    field,
-    expectedPort,
-  }) => {
-    let requests = 0;
-    globalThis.fetch = (async (
-      _input: RequestInfo | URL,
-      _init?: RequestInit,
-    ) => {
-      requests++;
-      return new Response(JSON.stringify({ connections: [connection] }), {
-        status: 200,
-      });
-    }) as typeof fetch;
-    const promise = showDatastoreConnectionDialog(
-      { language: "en", trackLoad: (load) => load },
-      id,
-    );
-    await tick();
-    const requiredInput = inputFor(field);
-    const testButton = getOpenDialog().querySelector<HTMLButtonElement>(
-      ".db-connection-test-button",
-    );
-    const status = getOpenDialog().querySelector<HTMLElement>(
-      ".db-connection-test-status",
-    );
-    if (!testButton || !status) throw new Error("test controls missing");
+  ])(
+    "requires $name again while editing",
+    async ({ id, connection, field, expectedPort }) => {
+      let requests = 0;
+      globalThis.fetch = (async (
+        _input: RequestInfo | URL,
+        _init?: RequestInit,
+      ) => {
+        requests++;
+        return new Response(JSON.stringify({ connections: [connection] }), {
+          status: 200,
+        });
+      }) as typeof fetch;
+      const promise = showDatastoreConnectionDialog(
+        { language: "en", trackLoad: (load) => load },
+        id,
+      );
+      await tick();
+      const requiredInput = inputFor(field);
+      const testButton = getOpenDialog().querySelector<HTMLButtonElement>(
+        ".db-connection-test-button",
+      );
+      const status = getOpenDialog().querySelector<HTMLElement>(
+        ".db-connection-test-status",
+      );
+      if (!testButton || !status) throw new Error("test controls missing");
 
-    expect(requiredInput.required).toBe(true);
-    expect(requiredInput.placeholder).toBe("");
-    if (expectedPort) expect(inputFor("Port").value).toBe(expectedPort);
-    testButton.click();
-    expect(status.textContent).toBe("Complete the required fields");
-    expect(requests).toBe(1);
-    dialogButtons()[0].click();
-    expect(await promise).toBeNull();
-  });
+      expect(requiredInput.required).toBe(true);
+      expect(requiredInput.placeholder).toBe("");
+      if (expectedPort) expect(inputFor("Port").value).toBe(expectedPort);
+      testButton.click();
+      expect(status.textContent).toBe("Complete the required fields");
+      expect(requests).toBe(1);
+      dialogButtons()[0].click();
+      expect(await promise).toBeNull();
+    },
+  );
 });
 
 describe("datastore connection test action", () => {

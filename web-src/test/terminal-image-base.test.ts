@@ -227,24 +227,24 @@ describe("terminalImageBase", () => {
       },
       pane: "%7",
     },
-  ])("$name ときは理由を残してシェルの場所から解く", async ({
-    setup,
-    pane,
-  }) => {
-    // 失敗を黙って別の起点に差し替えない。理由は応答に載り、ログにも出る。
-    setup();
-    const errors = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    try {
-      const result = await terminalImageBase(REPO, SHELL_ID);
-      expect(result.pane).toBe(pane);
-      expect(result.base.source).toBe("shell");
-      expect(result.base.cwd).toBe(SESSION.cwd);
-      expect(result.base.error).toContain("stderr: boom");
-      expect(errors).toHaveBeenCalledTimes(1);
-    } finally {
-      errors.mockRestore();
-    }
-  });
+  ])(
+    "$name ときは理由を残してシェルの場所から解く",
+    async ({ setup, pane }) => {
+      // 失敗を黙って別の起点に差し替えない。理由は応答に載り、ログにも出る。
+      setup();
+      const errors = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      try {
+        const result = await terminalImageBase(REPO, SHELL_ID);
+        expect(result.pane).toBe(pane);
+        expect(result.base.source).toBe("shell");
+        expect(result.base.cwd).toBe(SESSION.cwd);
+        expect(result.base.error).toContain("stderr: boom");
+        expect(errors).toHaveBeenCalledTimes(1);
+      } finally {
+        errors.mockRestore();
+      }
+    },
+  );
 });

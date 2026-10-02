@@ -38,19 +38,16 @@ describe("OS opener command selection", () => {
       expectedArgs: ["xdg-open", "/repo/sample"],
       expectedCwd: "/repo/sample",
     },
-  ])("$name", async ({
-    platform,
-    release,
-    path,
-    expectedArgs,
-    expectedCwd,
-  }) => {
-    await openDirectoryInOs(path, platform, release);
+  ])(
+    "$name",
+    async ({ platform, release, path, expectedArgs, expectedCwd }) => {
+      await openDirectoryInOs(path, platform, release);
 
-    expect(runAsync).toHaveBeenCalledWith(expectedArgs, expectedCwd, {
-      timeout: 15_000,
-    });
-  });
+      expect(runAsync).toHaveBeenCalledWith(expectedArgs, expectedCwd, {
+        timeout: 15_000,
+      });
+    },
+  );
 
   test("WSL converts the directory and starts it from a Windows working directory", async () => {
     runAsync

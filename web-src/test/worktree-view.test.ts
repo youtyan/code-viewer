@@ -539,18 +539,17 @@ describe("worktree list panel", () => {
       displayPath: ".worktrees/feature-x",
     },
     { name: "repo", path: "/repo", displayPath: "." },
-  ])("shows the full folder path for $name", async ({
-    name,
-    path,
-    displayPath,
-  }) => {
-    const { panel } = await mountWith(
-      response([item({ name, path, displayPath })]),
-    );
-    const line = panel.querySelector<HTMLElement>(".worktree-row-path");
-    expect(line?.textContent).toBe(path);
-    expect(line?.title).toBe(path);
-  });
+  ])(
+    "shows the full folder path for $name",
+    async ({ name, path, displayPath }) => {
+      const { panel } = await mountWith(
+        response([item({ name, path, displayPath })]),
+      );
+      const line = panel.querySelector<HTMLElement>(".worktree-row-path");
+      expect(line?.textContent).toBe(path);
+      expect(line?.title).toBe(path);
+    },
+  );
 
   test("explains each badge on hover", async () => {
     const { panel } = await mountWith(
@@ -937,51 +936,52 @@ describe("remove dialog", () => {
   test.each([
     { name: "folder gone", missing: true },
     { name: "folder still there", missing: false },
-  ])("a locked worktree ($name): shows the command, unlocks, and lets it be removed", async ({
-    missing,
-  }) => {
-    const mounted = await openRemoveDialog(
-      response([
-        item({ name: "repo", current: true }),
-        item({
-          name: "feature-x",
-          path: "/repo/.worktrees/feature x",
-          branch: "feature-x",
-          missing,
-          locked: true,
-        }),
-      ]),
-      "/repo/.worktrees/feature x",
-    );
-    const dialog = openDialog();
-    // 開いた直後の Enter でロックが外れないよう、焦点は［キャンセル］にある。
-    expect(document.activeElement).toBe(
-      dialog.querySelector(".gdp-dialog-cancel"),
-    );
-    const block = dialog.querySelector<HTMLElement>(".worktree-unlock");
-    // 押す前に、実行するコマンドを出す (空白のあるパスは引用する)。
-    expect(block?.querySelector(".worktree-unlock-command")?.textContent).toBe(
-      "git worktree unlock '/repo/.worktrees/feature x'",
-    );
-    block?.querySelector<HTMLButtonElement>("button")?.click();
-    await flush();
-    expect(mounted.posts).toEqual([
-      {
-        url: "/_worktree/unlock",
-        body: { path: "/repo/.worktrees/feature x" },
-      },
-    ]);
-    expect(dialog.querySelector(".worktree-unlock")?.textContent).toBe(
-      TEXT.removeDialog.unlocked,
-    );
-    // 画面は閉じず、そのまま消せる。
-    dialogSubmit(dialog).click();
-    await flush();
-    expect(mounted.posts.map((post) => post.url)).toEqual([
-      "/_worktree/unlock",
-      "/_worktree/remove",
-    ]);
-  });
+  ])(
+    "a locked worktree ($name): shows the command, unlocks, and lets it be removed",
+    async ({ missing }) => {
+      const mounted = await openRemoveDialog(
+        response([
+          item({ name: "repo", current: true }),
+          item({
+            name: "feature-x",
+            path: "/repo/.worktrees/feature x",
+            branch: "feature-x",
+            missing,
+            locked: true,
+          }),
+        ]),
+        "/repo/.worktrees/feature x",
+      );
+      const dialog = openDialog();
+      // 開いた直後の Enter でロックが外れないよう、焦点は［キャンセル］にある。
+      expect(document.activeElement).toBe(
+        dialog.querySelector(".gdp-dialog-cancel"),
+      );
+      const block = dialog.querySelector<HTMLElement>(".worktree-unlock");
+      // 押す前に、実行するコマンドを出す (空白のあるパスは引用する)。
+      expect(
+        block?.querySelector(".worktree-unlock-command")?.textContent,
+      ).toBe("git worktree unlock '/repo/.worktrees/feature x'");
+      block?.querySelector<HTMLButtonElement>("button")?.click();
+      await flush();
+      expect(mounted.posts).toEqual([
+        {
+          url: "/_worktree/unlock",
+          body: { path: "/repo/.worktrees/feature x" },
+        },
+      ]);
+      expect(dialog.querySelector(".worktree-unlock")?.textContent).toBe(
+        TEXT.removeDialog.unlocked,
+      );
+      // 画面は閉じず、そのまま消せる。
+      dialogSubmit(dialog).click();
+      await flush();
+      expect(mounted.posts.map((post) => post.url)).toEqual([
+        "/_worktree/unlock",
+        "/_worktree/remove",
+      ]);
+    },
+  );
 
   test("a failed unlock shows git's whole output and keeps the button", async () => {
     await openRemoveDialog(
@@ -1779,25 +1779,25 @@ describe("diffs", () => {
   test.each([
     { status: "U", untracked: "1", title: "untracked" },
     { status: "C", untracked: null, title: "conflicted (merge conflict)" },
-  ])("a $status file: untracked=$untracked, badge titled $title", async ({
-    status,
-    untracked,
-    title,
-  }) => {
-    const { diffUrls, filelist } = await mountWith(
-      response([
-        item({ name: "repo", files: [file({ path: "new.ts", status })] }),
-      ]),
-      { route: { wt: "/repo" }, diff: { diff: "@@ -0,0 +1 @@\n+a\n" } },
-    );
-    expect({
-      untracked: new URLSearchParams(diffUrls[0].split("?")[1]).get(
-        "untracked",
-      ),
-      title: filelist.querySelector<HTMLElement>(".tree-file[data-key] .badge")
-        ?.title,
-    }).toEqual({ untracked, title });
-  });
+  ])(
+    "a $status file: untracked=$untracked, badge titled $title",
+    async ({ status, untracked, title }) => {
+      const { diffUrls, filelist } = await mountWith(
+        response([
+          item({ name: "repo", files: [file({ path: "new.ts", status })] }),
+        ]),
+        { route: { wt: "/repo" }, diff: { diff: "@@ -0,0 +1 @@\n+a\n" } },
+      );
+      expect({
+        untracked: new URLSearchParams(diffUrls[0].split("?")[1]).get(
+          "untracked",
+        ),
+        title: filelist.querySelector<HTMLElement>(
+          ".tree-file[data-key] .badge",
+        )?.title,
+      }).toEqual({ untracked, title });
+    },
+  );
 
   test("hands each diff text to the renderer", async () => {
     await mountWith(twoFiles(), {

@@ -92,18 +92,19 @@ describe("PUT /_state/tabs from a page of the previous version", () => {
         },
       },
     },
-  ])("版の番号の無い PUT ($name) は断り、今の保存を消さない", async ({
-    body,
-  }) => {
-    const path = join(dir, "main-tabs.json");
-    writeFileSync(path, saved);
-    const res = await put(body);
-    expect([res.status, res.text, readFileSync(path, "utf8")]).toEqual([
-      400,
-      "main tabs body has a bad baseRev: undefined",
-      saved,
-    ]);
-  });
+  ])(
+    "版の番号の無い PUT ($name) は断り、今の保存を消さない",
+    async ({ body }) => {
+      const path = join(dir, "main-tabs.json");
+      writeFileSync(path, saved);
+      const res = await put(body);
+      expect([res.status, res.text, readFileSync(path, "utf8")]).toEqual([
+        400,
+        "main tabs body has a bad baseRev: undefined",
+        saved,
+      ]);
+    },
+  );
 
   test("前の版の画面が読むと、新しい版の配置が返る (その画面は保存しない)", async () => {
     writeFileSync(join(dir, "main-tabs.json"), saved);

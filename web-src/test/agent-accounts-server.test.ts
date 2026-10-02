@@ -260,35 +260,34 @@ describe("creating an account", () => {
       code: "invalid",
       message: "mcp.json is listed twice",
     },
-  ])("refuses a selection with $name and creates nothing", async ({
-    share,
-    code,
-    message,
-  }) => {
-    seedMixedClaude();
-    let caught: unknown;
-    try {
-      await create(share);
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(AccountError);
-    expect((caught as AccountError).code).toBe(code);
-    expect((caught as Error).message).toContain(message);
-    expect(existsSync(join(paths.managedRoot, "claude-work"))).toBe(false);
-    expect(existsSync(paths.registry)).toBe(false);
-  });
+  ])(
+    "refuses a selection with $name and creates nothing",
+    async ({ share, code, message }) => {
+      seedMixedClaude();
+      let caught: unknown;
+      try {
+        await create(share);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(AccountError);
+      expect((caught as AccountError).code).toBe(code);
+      expect((caught as Error).message).toContain(message);
+      expect(existsSync(join(paths.managedRoot, "claude-work"))).toBe(false);
+      expect(existsSync(paths.registry)).toBe(false);
+    },
+  );
 
-  test.each([
-    "claude",
-    "codex",
-  ] as const)("the %s shared list never names an auth, identity or history file", (agent) => {
-    const unsafe =
-      /credential|auth|\.claude\.json|history|session|installation_id|projects/i;
-    for (const name of SHARED_CONFIG_ENTRIES[agent]) {
-      expect(name).not.toMatch(unsafe);
-    }
-  });
+  test.each(["claude", "codex"] as const)(
+    "the %s shared list never names an auth, identity or history file",
+    (agent) => {
+      const unsafe =
+        /credential|auth|\.claude\.json|history|session|installation_id|projects/i;
+      for (const name of SHARED_CONFIG_ENTRIES[agent]) {
+        expect(name).not.toMatch(unsafe);
+      }
+    },
+  );
 
   test("codex: config, instructions, hooks and rules are shared; auth.json cannot be", async () => {
     const dir = join(paths.home, ".codex");
@@ -489,26 +488,25 @@ describe("registering, removing and a broken registry", () => {
       code: "invalid",
       message: /invalid account name \(empty\)/,
     },
-  ])("renaming to $name is refused with the reason", async ({
-    next,
-    code,
-    message,
-  }) => {
-    const one = join(root, "one");
-    const two = join(root, "two");
-    mkdirSync(one);
-    mkdirSync(two);
-    const added = await applyRegisterAccount(paths, "codex", "Personal", one);
-    await applyRegisterAccount(paths, "codex", "Other", two);
-    const rename = applyRenameAccount(paths, added.id, next);
-    await expect(rename).rejects.toMatchObject({ code });
-    await expect(rename).rejects.toThrow(message);
-    const read = readAccountRegistry(paths.registry);
-    expect(read.ok && read.registry.accounts.map((a) => a.name)).toEqual([
-      "Personal",
-      "Other",
-    ]);
-  });
+  ])(
+    "renaming to $name is refused with the reason",
+    async ({ next, code, message }) => {
+      const one = join(root, "one");
+      const two = join(root, "two");
+      mkdirSync(one);
+      mkdirSync(two);
+      const added = await applyRegisterAccount(paths, "codex", "Personal", one);
+      await applyRegisterAccount(paths, "codex", "Other", two);
+      const rename = applyRenameAccount(paths, added.id, next);
+      await expect(rename).rejects.toMatchObject({ code });
+      await expect(rename).rejects.toThrow(message);
+      const read = readAccountRegistry(paths.registry);
+      expect(read.ok && read.registry.accounts.map((a) => a.name)).toEqual([
+        "Personal",
+        "Other",
+      ]);
+    },
+  );
 
   test.each([
     { id: "claude:default", code: "builtin" },
@@ -529,25 +527,26 @@ describe("registering, removing and a broken registry", () => {
   test.each([
     { name: "not JSON", text: "{ broken" },
     { name: "an unexpected shape", text: '{"version":1,"accounts":"x"}' },
-  ])("a registry that is $name is reported and never overwritten", async ({
-    text,
-  }) => {
-    mkdirSync(paths.stateDir, { recursive: true });
-    writeFileSync(paths.registry, text);
-    const read = readAccountRegistry(paths.registry);
-    expect(read.ok).toBe(false);
-    const dir = join(root, "existing");
-    mkdirSync(dir);
-    let caught: unknown;
-    try {
-      await applyRegisterAccount(paths, "codex", "x", dir);
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(AccountError);
-    expect((caught as AccountError).code).toBe("unreadable");
-    expect(readFileSync(paths.registry, "utf8")).toBe(text);
-  });
+  ])(
+    "a registry that is $name is reported and never overwritten",
+    async ({ text }) => {
+      mkdirSync(paths.stateDir, { recursive: true });
+      writeFileSync(paths.registry, text);
+      const read = readAccountRegistry(paths.registry);
+      expect(read.ok).toBe(false);
+      const dir = join(root, "existing");
+      mkdirSync(dir);
+      let caught: unknown;
+      try {
+        await applyRegisterAccount(paths, "codex", "x", dir);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(AccountError);
+      expect((caught as AccountError).code).toBe("unreadable");
+      expect(readFileSync(paths.registry, "utf8")).toBe(text);
+    },
+  );
 });
 
 describe("process environment", () => {
@@ -701,14 +700,14 @@ describe("process environment", () => {
       reason:
         'Error: ps eww exited with 2\nCaused by: Error: spawn ps EAGAIN\nDetails: {"code":"EAGAIN"}',
     },
-  ])("when $name the reason and its cause are kept for the row", async ({
-    over,
-    reason,
-  }) => {
-    const { value } = deps(over);
-    const out = await createProcessEnvProber(value).probe(targets);
-    expect(out.get("%1")).toEqual({ status: "error", reason });
-  });
+  ])(
+    "when $name the reason and its cause are kept for the row",
+    async ({ over, reason }) => {
+      const { value } = deps(over);
+      const out = await createProcessEnvProber(value).probe(targets);
+      expect(out.get("%1")).toEqual({ status: "error", reason });
+    },
+  );
 });
 
 describe("login status (asked from the CLI itself)", () => {
@@ -1185,37 +1184,37 @@ describe("login status (asked from the CLI itself)", () => {
     }
   });
 
-  test.each([
-    false,
-    true,
-  ])("the app-server keeps stdin open through initialization (wait: %s)", async (waitForInitialize) => {
-    // 本物の codex の振る舞い: stdin が閉じたら答える前に終わる。答えは
-    // account/read を受け取ってから 1 行で返す。
-    const fake = [
-      "let buf = '';",
-      "process.stdin.on('data', (c) => { buf += c;",
-      "  for (const line of buf.split('\\n').slice(0, -1)) {",
-      "    const m = JSON.parse(line);",
-      "    if (m.method === 'initialize') process.stdout.write('shell prefix ' + JSON.stringify({id: m.id, result: {}}) + '\\n');",
-      "    if (m.method === 'account/read') setTimeout(() => process.stdout.write(JSON.stringify({ id: m.id, result: { account: { type: 'chatgpt', email: 'sample@example.invalid', planType: 'pro' } } }) + '\\n'), 50);",
-      "  }",
-      "  buf = buf.slice(buf.lastIndexOf('\\n') + 1); });",
-      "process.stdin.on('end', () => process.exit(0));",
-    ].join("\n");
-    const result = await DEFAULT_LOGIN_DEPS.rpc(
-      [process.execPath, "-e", fake],
-      process.env,
-      ACCOUNT_READ_REQUESTS,
-      (line) => line.includes(`"id":${ACCOUNT_READ_ID}`),
-      waitForInitialize,
-    );
-    expect(result).toMatchObject({ code: 0, timedOut: false });
-    expect(parseCodexAccountRead(result)).toEqual({
-      who: "sample@example.invalid",
-      plan: "pro",
-      whoDetail: "",
-    });
-  });
+  test.each([false, true])(
+    "the app-server keeps stdin open through initialization (wait: %s)",
+    async (waitForInitialize) => {
+      // 本物の codex の振る舞い: stdin が閉じたら答える前に終わる。答えは
+      // account/read を受け取ってから 1 行で返す。
+      const fake = [
+        "let buf = '';",
+        "process.stdin.on('data', (c) => { buf += c;",
+        "  for (const line of buf.split('\\n').slice(0, -1)) {",
+        "    const m = JSON.parse(line);",
+        "    if (m.method === 'initialize') process.stdout.write('shell prefix ' + JSON.stringify({id: m.id, result: {}}) + '\\n');",
+        "    if (m.method === 'account/read') setTimeout(() => process.stdout.write(JSON.stringify({ id: m.id, result: { account: { type: 'chatgpt', email: 'sample@example.invalid', planType: 'pro' } } }) + '\\n'), 50);",
+        "  }",
+        "  buf = buf.slice(buf.lastIndexOf('\\n') + 1); });",
+        "process.stdin.on('end', () => process.exit(0));",
+      ].join("\n");
+      const result = await DEFAULT_LOGIN_DEPS.rpc(
+        [process.execPath, "-e", fake],
+        process.env,
+        ACCOUNT_READ_REQUESTS,
+        (line) => line.includes(`"id":${ACCOUNT_READ_ID}`),
+        waitForInitialize,
+      );
+      expect(result).toMatchObject({ code: 0, timedOut: false });
+      expect(parseCodexAccountRead(result)).toEqual({
+        who: "sample@example.invalid",
+        plan: "pro",
+        whoDetail: "",
+      });
+    },
+  );
 
   test("the account list carries the email and plan, never other fields, and logs nothing from the output", async () => {
     const spies = (["log", "info", "warn", "error", "debug"] as const).map(
@@ -1591,32 +1590,30 @@ describe("usage", () => {
       older: [0, [5, 168]],
       mixed: false,
     },
-  ] as const)("codex mixed detection: $name", ({
-    name,
-    newer,
-    older,
-    mixed,
-  }) => {
-    const codexHome = join(root, `codex-window-${name.replace(/ /g, "-")}`);
-    const day = join(codexHome, "sessions", "2026", "01", "02");
-    mkdirSync(day, { recursive: true });
-    const newerFile = join(day, "rollout-newer.jsonl");
-    const olderFile = join(day, "rollout-older.jsonl");
-    writeFileSync(
-      newerFile,
-      `${tokenLine(rateLimitsAt(4, newer[1]), new Date(usageBaseMs + newer[0] * hourMs).toISOString())}\n`,
-    );
-    writeFileSync(
-      olderFile,
-      `${tokenLine(rateLimitsAt(97, older[1]), new Date(usageBaseMs + older[0] * hourMs).toISOString())}\n`,
-    );
-    utimesSync(newerFile, 200, 200);
-    utimesSync(olderFile, 100, 100);
+  ] as const)(
+    "codex mixed detection: $name",
+    ({ name, newer, older, mixed }) => {
+      const codexHome = join(root, `codex-window-${name.replace(/ /g, "-")}`);
+      const day = join(codexHome, "sessions", "2026", "01", "02");
+      mkdirSync(day, { recursive: true });
+      const newerFile = join(day, "rollout-newer.jsonl");
+      const olderFile = join(day, "rollout-older.jsonl");
+      writeFileSync(
+        newerFile,
+        `${tokenLine(rateLimitsAt(4, newer[1]), new Date(usageBaseMs + newer[0] * hourMs).toISOString())}\n`,
+      );
+      writeFileSync(
+        olderFile,
+        `${tokenLine(rateLimitsAt(97, older[1]), new Date(usageBaseMs + older[0] * hourMs).toISOString())}\n`,
+      );
+      utimesSync(newerFile, 200, 200);
+      utimesSync(olderFile, 100, 100);
 
-    const usage = readCodexUsage(codexHome);
-    expect(usage.status).toBe("ok");
-    expect(usage.status === "ok" && Boolean(usage.mixed)).toBe(mixed);
-  });
+      const usage = readCodexUsage(codexHome);
+      expect(usage.status).toBe("ok");
+      expect(usage.status === "ok" && Boolean(usage.mixed)).toBe(mixed);
+    },
+  );
 
   test("codex: logs from two accounts in one home are flagged as mixed, same account is not", () => {
     const codexHome = join(root, "codex-mixed");
@@ -1665,22 +1662,24 @@ describe("usage", () => {
 });
 
 describe("the login window", () => {
-  test.each([
-    "claude",
-    "codex",
-  ] as const)("%s: runs the command with separate arguments, then waits for Enter in the same shell", (agent) => {
-    // 起動コマンドの代わりに printf。足す引数 (auth login / login) がそのまま届き、
-    // 同じシェルの中で Enter を待ってから閉じる。
-    const argv = loginWindowArgv(agent, "printf '[%s]'", { SHELL: "/bin/sh" });
-    const out = spawnSync(argv[0] ?? "", argv.slice(1), {
-      input: "\n",
-      encoding: "utf8",
-    });
-    expect(out.stdout).toBe(
-      `${agent === "claude" ? "[auth][login]" : "[login]"}\n[code-viewer] sign-in command exited with 0. Press Enter to close this window.\n`,
-    );
-    expect(out.status).toBe(0);
-  });
+  test.each(["claude", "codex"] as const)(
+    "%s: runs the command with separate arguments, then waits for Enter in the same shell",
+    (agent) => {
+      // 起動コマンドの代わりに printf。足す引数 (auth login / login) がそのまま届き、
+      // 同じシェルの中で Enter を待ってから閉じる。
+      const argv = loginWindowArgv(agent, "printf '[%s]'", {
+        SHELL: "/bin/sh",
+      });
+      const out = spawnSync(argv[0] ?? "", argv.slice(1), {
+        input: "\n",
+        encoding: "utf8",
+      });
+      expect(out.stdout).toBe(
+        `${agent === "claude" ? "[auth][login]" : "[login]"}\n[code-viewer] sign-in command exited with 0. Press Enter to close this window.\n`,
+      );
+      expect(out.status).toBe(0);
+    },
+  );
 });
 
 describe("the launch command is the one login and status use", () => {

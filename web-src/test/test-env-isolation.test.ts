@@ -12,10 +12,10 @@ describe("the tmux environment every test inherits", () => {
     expect(process.env.TMUX_TMPDIR?.startsWith(tmpdir())).toBe(true);
   });
 
-  test.each([
-    ["TMUX"],
-    ["TMUX_PANE"],
-  ])("%s is not set (tmux would prefer the developer's server)", (name) => {
-    expect(process.env[name]).toBeUndefined();
-  });
+  test.each([["TMUX"], ["TMUX_PANE"]])(
+    "%s is not set (tmux would prefer the developer's server)",
+    (name) => {
+      expect(process.env[name]).toBeUndefined();
+    },
+  );
 });

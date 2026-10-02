@@ -953,85 +953,90 @@ describe("the entry server", () => {
   test.each([
     { how: "stopped listening", stop: "close" as const },
     { how: "accepts connections but never answers", stop: "silence" as const },
-  ])("a restarted entry adopts a project process even when the old entry's pid now belongs to another program ($how)", async ({
-    stop,
-  }) => {
-    const box = sandbox();
-    const root = repo(box, "sample-app");
-    // 古い入口の pid を別のプログラムが使っている: pid は生きているが、古い
-    // 入口の URL はもう答えない。
-    const reused = spawn(
-      process.execPath,
-      ["-e", "setInterval(() => {}, 1 << 30)"],
-      { stdio: "ignore" },
-    );
-    children.push(reused);
-    const reusedPid = reused.pid as number;
-    const newToken = "fedcba9876543210";
-    const oldEntry = await identityServer({
-      pid: reusedPid,
-      token: SAMPLE_TOKEN,
-      version: PACKAGE_VERSION,
-    });
-    writeEntryJson(box, {
-      url: oldEntry.url,
-      pid: reusedPid,
-      token: SAMPLE_TOKEN,
-      version: PACKAGE_VERSION,
-    });
-    const { proc, output } = startBackend(box, root, reusedPid, SAMPLE_TOKEN);
-    expect(
-      await waitUntil(
-        () => registeredPids(box.registryDir).includes(proc.pid ?? -1),
-        5000,
-      ),
-    ).toBe(true);
-    const backendUrl = JSON.parse(
-      readFileSync(join(box.registryDir, `${rootFileKey(root)}.json`), "utf8"),
-    ).url as string;
-    const newEntry = await identityServer({
-      pid: process.pid,
-      token: newToken,
-      version: PACKAGE_VERSION,
-    });
-    writeEntryJson(box, {
-      url: newEntry.url,
-      pid: process.pid,
-      token: newToken,
-      version: PACKAGE_VERSION,
-    });
-    const adopt = () =>
-      fetch(`${backendUrl}_entry/adopt`, {
-        method: "POST",
-        headers: {
-          Origin: new URL(backendUrl).origin,
-          "X-Code-Viewer-Action": "1",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ pid: process.pid, token: newToken }),
+  ])(
+    "a restarted entry adopts a project process even when the old entry's pid now belongs to another program ($how)",
+    async ({ stop }) => {
+      const box = sandbox();
+      const root = repo(box, "sample-app");
+      // 古い入口の pid を別のプログラムが使っている: pid は生きているが、古い
+      // 入口の URL はもう答えない。
+      const reused = spawn(
+        process.execPath,
+        ["-e", "setInterval(() => {}, 1 << 30)"],
+        { stdio: "ignore" },
+      );
+      children.push(reused);
+      const reusedPid = reused.pid as number;
+      const newToken = "fedcba9876543210";
+      const oldEntry = await identityServer({
+        pid: reusedPid,
+        token: SAMPLE_TOKEN,
+        version: PACKAGE_VERSION,
       });
+      writeEntryJson(box, {
+        url: oldEntry.url,
+        pid: reusedPid,
+        token: SAMPLE_TOKEN,
+        version: PACKAGE_VERSION,
+      });
+      const { proc, output } = startBackend(box, root, reusedPid, SAMPLE_TOKEN);
+      expect(
+        await waitUntil(
+          () => registeredPids(box.registryDir).includes(proc.pid ?? -1),
+          5000,
+        ),
+      ).toBe(true);
+      const backendUrl = JSON.parse(
+        readFileSync(
+          join(box.registryDir, `${rootFileKey(root)}.json`),
+          "utf8",
+        ),
+      ).url as string;
+      const newEntry = await identityServer({
+        pid: process.pid,
+        token: newToken,
+        version: PACKAGE_VERSION,
+      });
+      writeEntryJson(box, {
+        url: newEntry.url,
+        pid: process.pid,
+        token: newToken,
+        version: PACKAGE_VERSION,
+      });
+      const adopt = () =>
+        fetch(`${backendUrl}_entry/adopt`, {
+          method: "POST",
+          headers: {
+            Origin: new URL(backendUrl).origin,
+            "X-Code-Viewer-Action": "1",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ pid: process.pid, token: newToken }),
+        });
 
-    // 古い入口が token で答える間は、持ち主を渡さない。
-    const refused = await adopt();
-    expect([refused.status, await refused.text()]).toEqual([
-      409,
-      `entry owner pid ${reusedPid} is still alive`,
-    ]);
-    // 古い入口が答えなくなれば、pid が生きていても新しい入口を採用する。
-    if (stop === "close") await oldEntry.close();
-    else oldEntry.silence();
-    const startedAt = Date.now();
-    const adopted = await adopt();
-    const tookMs = Date.now() - startedAt;
-    expect([adopted.status, await adopted.text()]).toEqual([
-      200,
-      JSON.stringify({ ok: true, adopted: true }),
-    ]);
-    expect(tookMs).toBeLessThan(1000);
-    expect(output()).toContain(
-      `the code-viewer entry server restarted (pid ${reusedPid} -> ${process.pid})`,
-    );
-  }, 25_000);
+      // 古い入口が token で答える間は、持ち主を渡さない。
+      const refused = await adopt();
+      expect([refused.status, await refused.text()]).toEqual([
+        409,
+        `entry owner pid ${reusedPid} is still alive`,
+      ]);
+      // 古い入口が答えなくなれば、pid が生きていても新しい入口を採用する。
+      if (stop === "close") await oldEntry.close();
+      else oldEntry.silence();
+      const startedAt = Date.now();
+      const adopted = await adopt();
+      const tookMs = Date.now() - startedAt;
+      expect([adopted.status, await adopted.text()]).toEqual([
+        200,
+        JSON.stringify({ ok: true, adopted: true }),
+      ]);
+      expect(tookMs).toBeLessThan(1000);
+      expect(output()).toContain(
+        `the code-viewer entry server restarted (pid ${reusedPid} -> ${process.pid})`,
+      );
+    },
+    25_000,
+  );
 });
 
 describe("`code-viewer` in another folder", () => {
@@ -1181,22 +1186,23 @@ describe("CLI commands that need the project's process", () => {
     { args: ["query", "sources", "--json"], stdout: '"files": []' },
     { args: ["journal", "list", "--json"], stdout: "[" },
     { args: ["search", "files", "--term", "README"], stdout: "README.md" },
-  ])("`code-viewer $args.0 $args.1` starts the project process through the running entry server", async ({
-    args,
-    stdout,
-  }) => {
-    const box = sandbox();
-    const root = repo(box, "sample-app");
-    const { url } = await startEntry(box, root);
-    // 入口は画面を開くまで裏を起こさない。
-    expect(existsSync(registryFile(box, root))).toBe(false);
+  ])(
+    "`code-viewer $args.0 $args.1` starts the project process through the running entry server",
+    async ({ args, stdout }) => {
+      const box = sandbox();
+      const root = repo(box, "sample-app");
+      const { url } = await startEntry(box, root);
+      // 入口は画面を開くまで裏を起こさない。
+      expect(existsSync(registryFile(box, root))).toBe(false);
 
-    const result = await runCli(box, root, args);
-    expect(result.stderr).toContain(startingLine(root, url));
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain(stdout);
-    expect(existsSync(registryFile(box, root))).toBe(true);
-  }, 30_000);
+      const result = await runCli(box, root, args);
+      expect(result.stderr).toContain(startingLine(root, url));
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(stdout);
+      expect(existsSync(registryFile(box, root))).toBe(true);
+    },
+    30_000,
+  );
 
   test("a project process stopped by --idle-stop is started again for the CLI", async () => {
     const box = sandbox();

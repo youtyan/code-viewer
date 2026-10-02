@@ -145,14 +145,14 @@ describe("parsePaneLayout", () => {
       title: "✳ Claude Code",
       expected: "✳ Claude Code",
     },
-  ])("題名がホスト名 (tmux の既定) なら空にする: $name", ({
-    title,
-    expected,
-  }) => {
-    expect(
-      parsePaneLayout(paneLine({ title }), STATUS).layout.panes[0]?.title,
-    ).toBe(expected);
-  });
+  ])(
+    "題名がホスト名 (tmux の既定) なら空にする: $name",
+    ({ title, expected }) => {
+      expect(
+        parsePaneLayout(paneLine({ title }), STATUS).layout.panes[0]?.title,
+      ).toBe(expected);
+    },
+  );
 
   test.each([
     { name: "列が足りない", line: layoutLine("%1", "0", "0", "0", "80") },

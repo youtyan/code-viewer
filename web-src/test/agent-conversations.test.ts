@@ -350,28 +350,29 @@ describe("サーバの中の保存と読み戻し", () => {
   test.each([
     { name: "JSON でない", text: "{" },
     { name: "形が違う", text: '{"version":1,"entries":[{"target":"%3"}]}' },
-  ])("壊れた保存 ($name) は使わず、上書きもせず、理由を出す", async ({
-    text,
-  }) => {
-    mkdirSync(join(root, "state"));
-    writeFileSync(path, text);
-    boot("g1");
-    report("stop");
-    await flushConversationPersistence();
-    expect([
-      readFileSync(path, "utf8"),
-      getConversationStoreErrors().map((error) => [
-        error.operation,
-        error.target,
-      ]),
-    ]).toEqual([
-      text,
-      [
-        ["restore_conversations", path],
-        ["save_conversations", path],
-      ],
-    ]);
-  });
+  ])(
+    "壊れた保存 ($name) は使わず、上書きもせず、理由を出す",
+    async ({ text }) => {
+      mkdirSync(join(root, "state"));
+      writeFileSync(path, text);
+      boot("g1");
+      report("stop");
+      await flushConversationPersistence();
+      expect([
+        readFileSync(path, "utf8"),
+        getConversationStoreErrors().map((error) => [
+          error.operation,
+          error.target,
+        ]),
+      ]).toEqual([
+        text,
+        [
+          ["restore_conversations", path],
+          ["save_conversations", path],
+        ],
+      ]);
+    },
+  );
 
   test("読めない保存 (権限) も使わず、理由を出す", async () => {
     mkdirSync(join(root, "state"));

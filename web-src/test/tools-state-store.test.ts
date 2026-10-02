@@ -220,15 +220,16 @@ describe("tools state patching", () => {
     { name: "an unknown tool name", value: "spreadsheet" },
     { name: "a number", value: 7 },
     { name: "an object", value: { nested: true } },
-  ])("ignores $name as activeTool and keeps the stored one", async ({
-    value,
-  }) => {
-    await withTempProject(async (dir) => {
-      await patchToolsState(dir, { activeTool: "json" });
-      const after = await patchToolsState(dir, { activeTool: value });
-      expect(after.activeTool).toBe("json");
-    });
-  });
+  ])(
+    "ignores $name as activeTool and keeps the stored one",
+    async ({ value }) => {
+      await withTempProject(async (dir) => {
+        await patchToolsState(dir, { activeTool: "json" });
+        const after = await patchToolsState(dir, { activeTool: value });
+        expect(after.activeTool).toBe("json");
+      });
+    },
+  );
 
   test.each([
     { name: "a string", value: "wide" },
