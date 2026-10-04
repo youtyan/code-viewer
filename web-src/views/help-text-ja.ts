@@ -749,6 +749,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   " で保存します。",
                 ],
                 "起動の画面には、実行するコマンドがそのまま出ます。",
+                "claude は全画面表示の設定があっても通常の表示で起動します。全画面表示では過去の出力が tmux に残らず、スマホで読めないためです。",
               ],
             },
             more(

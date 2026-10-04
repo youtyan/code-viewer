@@ -417,6 +417,7 @@ describe("引き継ぎの起動の引数", () => {
       "--",
       "env",
       "CLAUDE_CONFIG_DIR=/home/sample/.local/state/code-viewer/accounts/claude-work",
+      "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1",
       "/bin/zsh",
       "-i",
       "-c",

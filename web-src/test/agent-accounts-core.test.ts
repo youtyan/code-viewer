@@ -741,6 +741,8 @@ describe("launch", () => {
         "env",
         "-u",
         "CLAUDE_CONFIG_DIR",
+        // 全画面表示を外す (スマホの読む画面で過去の行を読むため。LAUNCH_ENV)。
+        "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1",
         "/bin/zsh",
         "-i",
         "-c",
@@ -765,6 +767,7 @@ describe("launch", () => {
         "--",
         "env",
         "CLAUDE_CONFIG_DIR=/home/sample/it's a dir",
+        "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1",
         "/bin/zsh",
         "-i",
         "-c",
@@ -1073,7 +1076,7 @@ describe("launchCommandLine (what the launch dialog shows)", () => {
       agent: "claude",
       dir: null,
       command: "claude",
-      expected: "claude",
+      expected: "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 claude",
     },
     {
       name: "under home",
@@ -1081,7 +1084,7 @@ describe("launchCommandLine (what the launch dialog shows)", () => {
       dir: "/home/sample/.local/state/code-viewer/accounts/claude-work",
       command: "claude",
       expected:
-        "CLAUDE_CONFIG_DIR=~/.local/state/code-viewer/accounts/claude-work claude",
+        "CLAUDE_CONFIG_DIR=~/.local/state/code-viewer/accounts/claude-work CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 claude",
     },
     {
       name: "a space under home is quoted in full",
@@ -1095,7 +1098,8 @@ describe("launchCommandLine (what the launch dialog shows)", () => {
       agent: "claude",
       dir: "/opt/it's",
       command: "claude-wrapper",
-      expected: "CLAUDE_CONFIG_DIR='/opt/it'\\''s' claude-wrapper",
+      expected:
+        "CLAUDE_CONFIG_DIR='/opt/it'\\''s' CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 claude-wrapper",
     },
   ] as const)("$name", ({ agent, dir, command, expected }) => {
     expect(launchCommandLine(agent, dir, command, HOME)).toBe(expected);

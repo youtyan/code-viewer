@@ -1101,6 +1101,19 @@ function shellQuoteForDisplay(value: string): string {
  * ホーム配下は `~/` で縮める (代入の右辺の先頭の ~ はシェルが展開する)。
  * 縮めた残りに引用が要る文字があるときは、縮めずに全体を引用符で囲む。
  */
+/**
+ * code-viewer から起こすエージェントに足す環境変数。claude の全画面表示 (設定の
+ * `"tui": "fullscreen"`) は会話を別画面に描き、tmux に過去の行が残らないので、
+ * スマホの「読む」画面で過去のやり取りが読めなかった。公式の
+ * CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN は tui の設定より優先され、会話を端末の
+ * 普通のスクロールに残す (https://code.claude.com/docs/en/env-vars)。利用者が自分の
+ * シェルで起こすものには足さない。
+ */
+export const LAUNCH_ENV: Record<AccountAgent, readonly string[]> = {
+  claude: ["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1"],
+  codex: [],
+};
+
 export function launchCommandLine(
   agent: AccountAgent,
   configDir: string | null,
@@ -1108,7 +1121,11 @@ export function launchCommandLine(
   home: string,
   args: readonly string[] = [],
 ): string {
-  const line = [command, ...args.map(shellQuoteForDisplay)].join(" ");
+  const line = [
+    ...LAUNCH_ENV[agent],
+    command,
+    ...args.map(shellQuoteForDisplay),
+  ].join(" ");
   if (configDir === null) return line;
   const short = abbreviateHome(configDir, home);
   const value =
@@ -1211,10 +1228,12 @@ export type LaunchRequest = {
  */
 export function tmuxLaunchArgs(request: LaunchRequest): string[] {
   const name = ACCOUNT_ENV[request.agent];
-  const env =
-    request.configDir === null
+  const env = [
+    ...(request.configDir === null
       ? ["env", "-u", name]
-      : ["env", `${name}=${request.configDir}`];
+      : ["env", `${name}=${request.configDir}`]),
+    ...LAUNCH_ENV[request.agent],
+  ];
   const place = request.sessionExists
     ? ["new-window", "-t", `=${request.session}:`, "-n", request.windowName]
     : ["new-session", "-d", "-s", request.session, "-n", request.windowName];
