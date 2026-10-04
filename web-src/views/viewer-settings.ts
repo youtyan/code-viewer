@@ -25,6 +25,8 @@ export type ViewerSettingsText = {
   display: string;
   theme: string;
   themeHelp: string;
+  /** 明暗を切り替えるキー (指の画面では出さない)。 */
+  themeKeyHelp: string;
   themeNames: Record<ThemeChoice, string>;
   colorTheme: string;
   colorThemeHelp: string;
@@ -1037,7 +1039,10 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     watchTitle.textContent = text.watchTitle;
     agentRulesTitle.textContent = text.agentRulesTitle;
     themeLabel.textContent = text.theme;
-    themeHelp.textContent = text.themeHelp;
+    const themeKeyHelp = document.createElement("span");
+    themeKeyHelp.className = "gdp-key-hint";
+    themeKeyHelp.textContent = text.themeKeyHelp;
+    themeHelp.replaceChildren(text.themeHelp, themeKeyHelp);
     colorThemeLabel.textContent = text.colorTheme;
     colorThemeHelp.textContent = text.colorThemeHelp;
     colorThemes.localize(text.colorThemeNames);

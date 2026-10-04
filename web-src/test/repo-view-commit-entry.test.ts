@@ -175,7 +175,7 @@ function makeRepoView(
     },
     newFolderButtonTitle: () => "new folder",
     openDirectoryInOsTitle: () => "open this folder in OS",
-    moveFolderToTrashTitle: () => "move folder to Trash",
+    moveToTrashTitle: (kind) => `move ${kind} to Trash`,
     uploadButtonLabel: () => "Upload files",
     dropFilesIntoCopy: (target) => `Drop files into ${target}`,
     uploadFailedMessage: () => "Upload failed",

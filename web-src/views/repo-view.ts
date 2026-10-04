@@ -110,7 +110,8 @@ export type RepoViewDeps = {
   syncSidebarHeaderHeight(): void;
   newFolderButtonTitle(): string;
   openDirectoryInOsTitle(): string;
-  moveFolderToTrashTitle(): string;
+  /** ゴミ箱へ移すボタンの名前 (ファイルとフォルダで言い分ける)。 */
+  moveToTrashTitle(kind: "file" | "folder"): string;
   uploadButtonLabel(): string;
   dropFilesIntoCopy(target: string): string;
   uploadFailedMessage(): string;
@@ -198,7 +199,7 @@ export function createRepoView(deps: RepoViewDeps) {
     pushUndo,
     newFolderButtonTitle,
     openDirectoryInOsTitle,
-    moveFolderToTrashTitle,
+    moveToTrashTitle,
     uploadButtonLabel,
     dropFilesIntoCopy,
     uploadFailedMessage,
@@ -565,11 +566,15 @@ export function createRepoView(deps: RepoViewDeps) {
       markActive(entry.path);
   }
 
-  function createMoveToTrashButton(path: string, onDeleted: () => void) {
+  function createMoveToTrashButton(
+    path: string,
+    kind: "file" | "folder",
+    onDeleted: () => void,
+  ) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "gdp-file-header-icon gdp-trash-path";
-    const trashTitle = moveFolderToTrashTitle();
+    const trashTitle = moveToTrashTitle(kind);
     button.title = trashTitle;
     button.setAttribute("aria-label", trashTitle);
     button.innerHTML = iconSvg("octicon-trash", TRASH_16_PATH);
@@ -793,7 +798,7 @@ export function createRepoView(deps: RepoViewDeps) {
       );
       if (meta.path) {
         toolbar.appendChild(
-          createMoveToTrashButton(meta.path, () => {
+          createMoveToTrashButton(meta.path, "folder", () => {
             const parent = meta.path.split("/").slice(0, -1).join("/");
             setRoute(repoRoute(meta.ref, parent));
             loadRepo();

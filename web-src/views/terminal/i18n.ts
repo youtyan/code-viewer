@@ -101,6 +101,8 @@ export type TerminalText = {
   shellTarget: string;
   /** タブ列の「＋」のメニュー。 */
   newTabOpenFile: string;
+  /** ファイルを開くキー (指の画面では出さない)。 */
+  newTabOpenFileKeys: string;
   /** 一覧の行がタブで開いているときの添え書き。 */
   inTab: string;
   /** 未読の印 (● ) の説明。 */
@@ -280,7 +282,8 @@ const EN: TerminalText = {
   fontSmaller: "Smaller text",
   fontLarger: "Larger text",
   shellTarget: "Shell",
-  newTabOpenFile: "Open a file… (⌘K)",
+  newTabOpenFile: "Open a file…",
+  newTabOpenFileKeys: "⌘K",
   inTab: "in a tab",
   unreadTitle: "● = unread: it changed state while you were away",
   markAllRead: (count) => `Mark all as read (${count})`,
@@ -428,7 +431,8 @@ const JA: TerminalText = {
   fontSmaller: "文字を小さく",
   fontLarger: "文字を大きく",
   shellTarget: "シェル",
-  newTabOpenFile: "ファイルを開く… (⌘K)",
+  newTabOpenFile: "ファイルを開く…",
+  newTabOpenFileKeys: "⌘K",
   inTab: "タブで表示中",
   unreadTitle: "● = 未読: 離れている間に状態が変わりました",
   markAllRead: (count) => `すべて読んだことにする (${count})`,

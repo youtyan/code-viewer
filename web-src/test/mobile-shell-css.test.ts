@@ -445,6 +445,54 @@ describe("電話の段の骨格", () => {
     },
   );
 
+  // 点検の軽微: Files の絞り込みの段・Tools の Markdown の余白・作業ツリーの札。
+  test.each([
+    {
+      selector: ".gdp-repo-filter-clear:disabled",
+      property: "display",
+      phone: "none",
+    },
+    { selector: ".gdp-repo-search-bar", property: "flex-wrap", phone: "wrap" },
+    {
+      selector: ".tools-pane-markdown .gdp-markdown-preview",
+      property: "padding-inline",
+      phone: "0",
+    },
+    {
+      selector:
+        "body[data-worktree-overview] #worktree-panel .worktree-row-head",
+      property: "flex-wrap",
+      phone: "wrap",
+    },
+  ])(
+    "電話の段の $selector の $property は $phone",
+    ({ selector, property, phone }) => {
+      expect(declarationsOf(rules, [selector]).get(property)).toBe(phone);
+    },
+  );
+
+  test("キーボードの案内は指の画面で出さず、横向きでは差分の 2 列を選べる", () => {
+    expect({
+      keyHint: declarationsOf(withTiers(TOUCH), [".gdp-key-hint"]).get(
+        "display",
+      ),
+      portraitSeg: declarationsOf(rules, ["#topbar .controls .seg"]).get(
+        "display",
+      ),
+      landscapeSeg: declarationsOf(withTiers(PHONE, PHONE_LANDSCAPE), [
+        "#topbar .controls .seg",
+      ]).get("display"),
+      darkControls: declarationsOf(baseRules(sheet), [
+        ':root[data-theme="dark"]',
+      ]).get("color-scheme"),
+    }).toEqual({
+      keyHint: "none",
+      portraitSeg: "none",
+      landscapeSeg: "inline-flex",
+      darkControls: "dark",
+    });
+  });
+
   test("端末の操作札の Enter (端末は ⌨ も) は帯の右端に留める", () => {
     const tier = withTiers(SOFT_KEYS);
     expect({

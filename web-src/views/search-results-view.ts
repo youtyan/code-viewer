@@ -226,6 +226,17 @@ export function createSearchResultsView(
       return;
     }
     const { response, term } = lastResponse;
+    // 当たらなかったら、件数の欄の「0 件」だけで画面が空にならないよう一言出す。
+    if (response.matches.length === 0) {
+      idle.appendChild(
+        renderEmptyState({
+          icon: SEARCH_16_PATH,
+          title: text().resultsNone,
+          compact: true,
+        }),
+      );
+      return;
+    }
     const grouped = new Map<string, GrepResponse["matches"]>();
     for (const match of response.matches) {
       const bucket = grouped.get(match.path) ?? [];

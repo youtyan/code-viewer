@@ -138,6 +138,7 @@ import {
   diffLayoutFor,
   PHONE_MEDIA_QUERY,
   PHONE_TERMINAL_FONT_SIZE,
+  TOUCH_MEDIA_QUERY,
 } from "./core/mobile-layout";
 import { createNetworkActivityTracker } from "./core/network-activity";
 import {
@@ -1253,6 +1254,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** 電話の段 (core/mobile-layout.ts。style.css の SP の節と同じ条件)。 */
   const PHONE_QUERY = window.matchMedia(PHONE_MEDIA_QUERY);
+  /** 指の画面 (キーの案内を出さない)。 */
+  const TOUCH_QUERY = window.matchMedia(TOUCH_MEDIA_QUERY);
   /** 電話の段で切り替えた差分の並べ方 (保存しない。diffLayoutFor)。 */
   let phoneDiffLayout: LayoutMode | null = null;
 
@@ -2259,7 +2262,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       REPO_VIEW.createFileDetailMeta(target, meta),
     createOpenPathButton,
     createMoveToTrashButton: (path, onDeleted) =>
-      REPO_VIEW.createMoveToTrashButton(path, onDeleted),
+      REPO_VIEW.createMoveToTrashButton(path, "file", onDeleted),
     canTrashWorktreeRef: (ref) => REPO_VIEW.canTrashWorktreeRef(ref),
     loadRawFileInfo: (target) => REPO_VIEW.loadRawFileInfo(target),
     loadSyntaxHighlighter,
@@ -2392,7 +2395,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     newFolderButtonTitle: () => uiText().repo.newFolder,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
-    moveFolderToTrashTitle: () => uiText().repo.moveFolderToTrash,
+    moveToTrashTitle: (kind) =>
+      kind === "file"
+        ? uiText().repo.moveFileToTrash
+        : uiText().repo.moveFolderToTrash,
     uploadButtonLabel: () => uiText().repo.uploadButton,
     dropFilesIntoCopy: (target) => uiText().repo.dropFilesInto(target),
     uploadFailedMessage: () => uiText().repo.uploadFailed,
@@ -2592,6 +2598,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         treeTitle: string;
         flatTitle: string;
         filter: string;
+        /** 欄に移るキー (指の画面では出さない)。 */
+        filterKeys: string;
         filterTitle: string;
         filterCountTitle: (visible: number, total: number) => string;
         filterClear: string;
@@ -2618,6 +2626,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       repo: {
         newFolder: string;
         moveFolderToTrash: string;
+        moveFileToTrash: string;
         uploadButton: string;
         dropFilesInto: (target: string) => string;
         uploadFailed: string;
@@ -2758,7 +2767,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         flat: "flat",
         treeTitle: "tree view",
         flatTitle: "flat list",
-        filter: "Filter files…  /  ⌘K",
+        filter: "Filter files…",
+        filterKeys: "/  ⌘K",
         filterTitle:
           "Filter files. Plain text matches anywhere in the path; /pattern/ is a regex, ~text is a fuzzy match, *.ts or src/** is a glob. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for keyboard shortcuts.",
         filterCountTitle: (visible, total) =>
@@ -2789,6 +2799,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       repo: {
         newFolder: "new folder",
         moveFolderToTrash: "move folder to Trash",
+        moveFileToTrash: "move file to Trash",
         uploadButton: "Upload files",
         dropFilesInto: (target) => `Drop files into ${target}`,
         uploadFailed: "Upload failed",
@@ -3022,7 +3033,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         flat: "一覧",
         treeTitle: "ツリー表示",
         flatTitle: "一覧表示",
-        filter: "ファイル絞り込み…  /  ⌘K",
+        filter: "ファイル絞り込み…",
+        filterKeys: "/  ⌘K",
         filterTitle:
           "ファイルを絞り込みます。文字列はパスの部分一致、/pattern/ は正規表現、~text はあいまい一致、*.ts や src/** は glob。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でキーボードショートカット。",
         filterCountTitle: (visible, total) =>
@@ -3055,6 +3067,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       repo: {
         newFolder: "新規フォルダ",
         moveFolderToTrash: "フォルダをゴミ箱へ移動",
+        moveFileToTrash: "ファイルをゴミ箱へ移動",
         uploadButton: "ファイルをアップロード",
         dropFilesInto: (target) => `${target} にファイルをドロップ`,
         uploadFailed: "アップロードに失敗しました",
@@ -3393,7 +3406,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       }
       const filter = document.querySelector<HTMLInputElement>(dom.filter);
       if (filter) {
-        filter.placeholder = text.sidebar.filter;
+        // キーの案内は指の画面では出さない (キーボードが無い)。
+        filter.placeholder = TOUCH_QUERY.matches
+          ? text.sidebar.filter
+          : `${text.sidebar.filter}  ${text.sidebar.filterKeys}`;
         filter.title = text.sidebar.filterTitle;
         filter.setAttribute("aria-label", text.sidebar.filterLabel);
       }
@@ -8098,7 +8114,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     const reopenNewTabMenu = returnOnPhone(() => MAIN_TABS.openNewTabMenu());
     const items: ContextMenuItem[] = [
       {
-        label: t.newTabOpenFile,
+        label: TOUCH_QUERY.matches
+          ? t.newTabOpenFile
+          : `${t.newTabOpenFile} (${t.newTabOpenFileKeys})`,
         // その面の＋から開いたファイルは、その面に開く (右の面にも置ける)。
         onSelect: () => {
           MAIN_TABS.focusSide(side);

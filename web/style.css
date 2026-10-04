@@ -239,6 +239,11 @@
    画面がライトでも面の中はそのテーマのダークになる。塊の後ろの並びと詳細度は
    html のダークと同じ順 (:root → ダーク → テーマ → テーマのダーク) になるよう、
    テーマの塊にはテーマの属性を足した形で書く (terminal-tone-css.test.ts)。 */
+/* 色を決めていない部品 (日付の欄・チェックボックス・スクロールバーの角) もダーク
+   で描く。無いとダークの画面に白い四角が出た。 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
 [data-theme="dark"],
 [data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:       #101014;
@@ -27466,6 +27471,19 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   #topbar .controls .seg {
     display: none;
   }
+  /* Files のフォルダの絞り込み: 解除するものが無い間は「絞り込みを解除」を出さない
+     (出したままだと欄が狭まり、「このフォルダ内を絞り…」と案内が切れた)。 */
+  .gdp-repo-filter-clear:disabled {
+    display: none;
+  }
+  /* 絞り込みの欄と件数を 1 段目に、ファイルのアップロードを 2 段目に置く (同じ段に
+     並べると欄が 130px になり、案内が「このフォルダ」で切れた)。 */
+  .gdp-repo-search-bar {
+    flex-wrap: wrap;
+  }
+  .gdp-repo-search-bar .gdp-upload-panel {
+    flex-basis: 100%;
+  }
   #topbar {
     mask-image: linear-gradient(to right, #000 calc(100% - var(--space-6)), transparent);
   }
@@ -27505,6 +27523,21 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
   .shortcut-name {
     white-space: normal;
+  }
+  /* 作業ツリーの一覧のカードの札 (このフォルダ・起動中) は名前の下へ折り返す
+     (375px で「起動…」と切れた。右の列は［開く］が取る)。 */
+  body[data-worktree-overview] #worktree-panel .worktree-row-head {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+  body[data-worktree-overview] #worktree-panel .worktree-row-badges {
+    overflow: visible;
+    white-space: normal;
+  }
+  /* Tools の Markdown のプレビューは内側の左右の余白を取らない (面の余白と重なり、
+     本文が画面の左から 48px で始まった)。 */
+  .tools-pane-markdown .gdp-markdown-preview {
+    padding-inline: 0;
   }
   /* ヘルプの表は表の中で横に送る (表の幅で記事ごと横に送れた)。 */
   .gdp-help-table {
@@ -28187,6 +28220,10 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 /* ---- 1'. 横向きの電話 (core/mobile-layout.ts の PHONE_LANDSCAPE_MEDIA_QUERY):
    残る高さが少ないので、下端の帯を細くする。 ---- */
 @media (pointer: coarse) and (max-height: 500px) {
+  /* 横向きは幅があるので、差分の 2 列 (分割 / 統合の切替) を出す (縦向きでは隠す)。 */
+  #topbar .controls .seg {
+    display: inline-flex;
+  }
   /* 端末と面の高さを取る: 下端の帯を細くする (絵と名前を横に並べる。帯の入口は
      横に長いので当たりの幅は十分)。 */
   body,
@@ -28395,18 +28432,27 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .db-query-history-action,
   .scope-settings-actions button,
   .shortcut-row-head,
-  .tools-pane-action {
+  .tools-pane-action,
+  .journal-markdown-toolbar button,
+  .journal-label-filter,
+  .journal-section-head > button {
     min-height: var(--sp-touch);
     box-sizing: border-box;
   }
   .db-tabs-chip-close,
   .db-icon-btn,
   .db-grid-pager-btn,
-  .tools-pane-action {
+  .tools-pane-action,
+  .journal-markdown-toolbar button {
     min-width: var(--sp-touch);
   }
   .gdp-dialog-input {
     height: var(--sp-touch);
+  }
+  /* キーボードの案内 (⌘K・↑↓ 移動・T キー) は出さない。指の画面にキーボードは
+     無い (案内の部分にこの印を付ける。欄の中の文字は TS が分ける)。 */
+  .gdp-key-hint {
+    display: none;
   }
   /* 浮く帯の × (選んだ行の参照の帯) は帯の角に重ねる小さな丸。押せる大きさに。 */
   #line-ref-pill-close {

@@ -26,6 +26,7 @@ import {
   headerAgentCounts,
 } from "../../core/agent-overview";
 import { CHEVRON_DOWN_12_PATH, iconSvg } from "../../core/icons";
+import { TOUCH_MEDIA_QUERY } from "../../core/mobile-layout";
 import {
   partitionProjectsByRunning,
   runningProjectRoots,
@@ -344,7 +345,7 @@ export function mountProjectSwitcher(
     const title = document.createElement("strong");
     title.textContent = t.switcherTitle;
     hint = document.createElement("span");
-    hint.className = "project-switcher-hint";
+    hint.className = "project-switcher-hint gdp-key-hint";
     hint.textContent = t.switcherHint;
     head.append(title, hint);
     input = document.createElement("input");
@@ -404,7 +405,9 @@ export function mountProjectSwitcher(
     };
     if (input.hidden) {
       extra.querySelector<HTMLElement>("button")?.focus();
-    } else {
+    } else if (!window.matchMedia?.(TOUCH_MEDIA_QUERY).matches) {
+      // 指の画面では絞り込みの欄に焦点を置かない (ソフトキーボードが出て、選ぶ
+      // 一覧を隠した)。
       input.focus();
     }
   }
