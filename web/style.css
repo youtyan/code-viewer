@@ -11398,7 +11398,7 @@ body.journal-task-editor-resizing * {
 }
 .db-history-pane[hidden] { display: none; }
 
-/* ---------- Icon toolbar (案 B 改: TablePlus / Beekeeper 風) ---------- */
+/* ---------- Icon toolbar (案 B 改: 一覧の上端のアイコンの帯) ---------- */
 .db-icon-toolbar {
   display: flex;
   flex-direction: row;

@@ -2722,7 +2722,7 @@ function createTabPane(
   };
 }
 
-// ----- アイコンツールバー (案 B 改: TablePlus / Beekeeper 風) -----
+// ----- アイコンツールバー (案 B 改: 一覧の上端のアイコンの帯) -----
 // octicon / bootstrap-icons ベースの 16x16 path。currentColor で描画して
 // hover / active 時の色変更を CSS から制御できるようにする。
 
