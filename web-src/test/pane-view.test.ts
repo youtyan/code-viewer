@@ -289,6 +289,57 @@ describe("流しから届いた画面", () => {
     ]);
   });
 
+  // 全画面で描くエージェント (Claude Code の全画面表示) は会話と入力欄の間を空行で
+  // 埋めるので、読む画面が 50 行以上の空白になった。「PC と同じ」は画面のまま。
+  test.each([
+    { mode: "read", shown: ["reply", "", "✻ Working…", "❯"] },
+    { mode: "screen", shown: ["reply", "", "", "", "✻ Working…", "❯"] },
+  ] as const)("今の画面の続く空行: $mode", async ({ mode, shown }) => {
+    await openWith("reply\n\n\n\n✻ Working…\n❯", {
+      height: 6,
+      cursorX: 1,
+      cursorY: 5,
+    });
+    if (mode === "screen") {
+      view.el
+        .querySelector<HTMLButtonElement>(".pane-view-mode button:last-child")
+        ?.click();
+    }
+    await vi.waitFor(() => expect(shownText()).toEqual(shown));
+  });
+
+  // ログインのペインの承認の URL をスマホのブラウザで開く (文字のままでは押せず、
+  // 長くて選べなかった)。色の区切りをまたぐ URL も 1 つのリンク先にする。
+  test("出力の中の URL を別のタブで開くリンクにする", async () => {
+    await openWith(
+      "visit: https://example.com/\x1b[33mauth?code=true\x1b[0m done",
+    );
+    const links = [
+      ...view.el.querySelectorAll<HTMLAnchorElement>(".pane-link"),
+    ];
+    expect(
+      links.map((link) => [
+        link.getAttribute("href"),
+        link.textContent,
+        link.target,
+        link.rel,
+      ]),
+    ).toEqual([
+      [
+        "https://example.com/auth?code=true",
+        "https://example.com/",
+        "_blank",
+        "noopener noreferrer",
+      ],
+      [
+        "https://example.com/auth?code=true",
+        "auth?code=true",
+        "_blank",
+        "noopener noreferrer",
+      ],
+    ]);
+  });
+
   test("画面と過去の行を消したら、消えた行を出さない", async () => {
     const lines = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`);
     await openWith(lines.join("\n"), { height: 5, cursorX: 7, cursorY: 4 });

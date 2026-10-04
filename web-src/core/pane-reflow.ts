@@ -340,6 +340,26 @@ function continuation(
 }
 
 /**
+ * 読む画面に残す字下げの上限 (桁)。読む画面は 320px の幅で 32 桁しかない。PC の
+ * 広いペインで右に寄せた行 (378 桁のペインの Claude Code の更新の知らせが 338 桁)
+ * を字下げのまま出すと、中身の幅が 0 になって字が 1 字ずつ縦に並び、その 1 行が
+ * 画面の高さを使い切って返事が読めなかった。
+ */
+const READ_INDENT_MAX = 16;
+
+/** 行頭の空白を count 字まで落とす (色の区切りをまたいで)。 */
+function dropLeadingSpace(runs: ReflowRun[], count: number): ReflowRun[] {
+  let left = count;
+  return runs.flatMap((run) => {
+    const space = Math.min(left, run.text.search(/\S|$/));
+    left = space === run.text.length ? left - space : 0;
+    return space === run.text.length
+      ? []
+      : [{ ...run, text: run.text.slice(space) }];
+  });
+}
+
+/**
  * from 行目から to 行目の前までの行を、アプリがペインの幅で入れた改行を繋いだ
  * 段落にして読む (読む画面。スマホの幅で折り返し直すので、ペインの幅の改行が
  * 残ると行の端が細切れになった)。cols はペインの桁。
@@ -353,9 +373,15 @@ export function readParagraphs(
   const out: ReflowLine[] = [];
   const widthAt = wrapWidths(buffer, cols);
   for (const read of readLogicalLines(buffer, from, to)) {
+    const shape = read.rule ? null : rowShape(buffer, read.start);
+    const over = Math.max(0, (shape?.indent ?? 0) - READ_INDENT_MAX);
     const line = read.rule
       ? read
-      : { ...read, hang: rowShape(buffer, read.start)?.textStart ?? 0 };
+      : {
+          ...read,
+          runs: dropLeadingSpace(read.runs, over),
+          hang: (shape?.textStart ?? 0) - over,
+        };
     const prev = out[out.length - 1];
     const how =
       prev && !prev.rule && !line.rule
@@ -365,8 +391,7 @@ export function readParagraphs(
       out.push(line);
       continue;
     }
-    const runs = line.runs.map((run) => ({ ...run }));
-    if (runs[0]) runs[0].text = runs[0].text.replace(/^\s+/, "");
+    const runs = dropLeadingSpace(line.runs, Number.POSITIVE_INFINITY);
     out[out.length - 1] = {
       ...prev,
       end: line.end,
@@ -380,7 +405,7 @@ export function readParagraphs(
               },
             ]
           : []),
-        ...runs.filter((run) => run.text.length > 0),
+        ...runs,
       ],
     };
   }
@@ -414,15 +439,20 @@ function transientLine(line: ReflowLine): boolean {
  * 埋まった (4 割以上)。外した後に続く空行は 1 つにまとめる。
  */
 export function withoutTransient(lines: ReflowLine[]): ReflowLine[] {
-  const out: ReflowLine[] = [];
-  for (const line of lines) {
-    if (transientLine(line)) continue;
-    const prev = out[out.length - 1];
-    const blank = lineText(line).trim() === "";
-    if (blank && prev && lineText(prev).trim() === "") continue;
-    out.push(line);
-  }
-  return out;
+  return collapseBlankLines(lines.filter((line) => !transientLine(line)));
+}
+
+/**
+ * 続く空行を 1 つにまとめる (読む画面)。全画面で描くエージェント (Claude Code の
+ * 全画面表示) は会話と入力欄の間を空行で埋めるので、今の画面の行がそのまま 50 行
+ * 以上の空白になった。
+ */
+export function collapseBlankLines(lines: ReflowLine[]): ReflowLine[] {
+  const blank = (line: ReflowLine | undefined) =>
+    line !== undefined && lineText(line).trim() === "";
+  return lines.filter(
+    (line, index) => !(blank(line) && blank(lines[index - 1])),
+  );
 }
 
 /** y 行目を含む段落 (readParagraphs の 1 行) の先頭の行。 */

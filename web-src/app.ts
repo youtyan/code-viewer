@@ -6841,6 +6841,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     escapeHtml,
     getRoute: () => STATE.route,
     setRoute,
+    listIsPage: () => PHONE_QUERY.matches,
+    showList: () => MOBILE_SHELL.openSheet(),
     applyCommitRange: (range, pathFilter) => {
       cancelInFlightRequests();
       DIFF_VIEW.clearLoadQueue();

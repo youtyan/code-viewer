@@ -12,6 +12,7 @@ import type { HelpText } from "./help-blocks";
 import type { HelpBlock, HelpLanguage, HelpSectionContent } from "./help-page";
 import { helpTextEn } from "./help-text-en";
 import { helpTextJa } from "./help-text-ja";
+import { historyText } from "./history-view";
 import { mainTabsText } from "./main-tabs/i18n";
 import { mobileShellText } from "./mobile-shell-i18n";
 import { quickHelpText } from "./quick-help-i18n";
@@ -151,6 +152,7 @@ export type HelpLabels = {
   database: ReturnType<typeof dbText>;
   diff: (typeof DIFF_SCREEN_TEXT)[HelpLanguage];
   doctor: ReturnType<typeof doctorText>;
+  history: ReturnType<typeof historyText>;
   mainTabs: ReturnType<typeof mainTabsText>;
   mobile: ReturnType<typeof mobileShellText>;
   quickHelp: ReturnType<typeof quickHelpText>;
@@ -170,6 +172,7 @@ export function helpLabels(lang: HelpLanguage, app: AppHelpLabels): HelpLabels {
     database: dbText(lang),
     diff: DIFF_SCREEN_TEXT[lang],
     doctor: doctorText(lang),
+    history: historyText(lang),
     mainTabs: mainTabsText(lang),
     mobile: mobileShellText(lang),
     quickHelp: quickHelpText(lang),

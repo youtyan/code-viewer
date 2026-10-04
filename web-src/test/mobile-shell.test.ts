@@ -113,7 +113,8 @@ beforeEach(() => {
   routeClicks = [];
   language = "en";
   document.documentElement.lang = "en";
-  document.body.className = "";
+  // 一覧のある画面 (帯の「一覧」と面は、一覧のある画面だけで開く)。
+  document.body.className = "gdp-diff-page";
   document.body.innerHTML = `
     <div id="app">
       <aside id="app-nav">
@@ -126,6 +127,7 @@ beforeEach(() => {
         <a id="nav-board-link" data-route="agents" href="/agents">All agents</a>
       </aside>
       <div id="tabs-lead"></div>
+      <nav id="main-tabs"><button class="main-tab" type="button">tab</button></nav>
       <header id="topbar"><div class="controls"></div></header>
       <div class="main-pane-host" data-side="left" data-kind="terminal">
         <textarea class="xterm-helper-textarea"></textarea>
@@ -218,8 +220,9 @@ describe("幅の段で部品を出し分ける", () => {
   });
 
   test("デスクトップでは body の class も引き出しの inert も付けない", () => {
+    const before = document.body.className;
     install(DESKTOP);
-    expect(document.body.className).toBe("");
+    expect(document.body.className).toBe(before);
     expect(q<HTMLElement>(document, "#app-nav").inert).toBe(false);
   });
 
@@ -381,6 +384,8 @@ describe("面 (一覧の列) と下端の帯", () => {
       selector: '.view-strip-item[data-route="diff"]',
       closes: true,
     },
+    // 面はタブ列を覆わない (＋のメニューなどが面の下に出る)。
+    { name: "タブ列のタブ", selector: "#main-tabs .main-tab", closes: true },
     {
       name: "フォルダの行 (開くだけ)",
       selector: "#filelist .tree-dir .dir-label",
@@ -396,6 +401,22 @@ describe("面 (一覧の列) と下端の帯", () => {
     barButton(5).click();
     q<HTMLElement>(document, selector).click();
     expect(document.body.classList.contains("mobile-sheet-open")).toBe(!closes);
+  });
+
+  // 一覧の無い画面 (エージェントなど) で押すと、関係の無いファイルの木が出た。
+  test("一覧の無い画面では帯の「一覧」を隠し、開いていた面を閉じ、押しても開かない", async () => {
+    install(PHONE);
+    barButton(5).click();
+    document.body.classList.replace("gdp-diff-page", "gdp-agents-page");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const closedOnLeave =
+      !document.body.classList.contains("mobile-sheet-open");
+    barButton(5).click();
+    expect({
+      closedOnLeave,
+      hidden: barButton(5).hidden,
+      opened: document.body.classList.contains("mobile-sheet-open"),
+    }).toEqual({ closedOnLeave: true, hidden: true, opened: false });
   });
 
   test.each([

@@ -151,12 +151,12 @@ describe("電話の段の骨格", () => {
     expect(resolveVar(vars.get(variable) ?? "", vars)).toBe(expected);
   });
 
-  test("下端は最下段と切替の帯 (ホームバーの安全領域込み)", () => {
+  // 最下段は出さない (件数は帯の「エージェント」の札、どの画面でも 44px を取った)。
+  test("下端は切替の帯だけ (ホームバーの安全領域込み)", () => {
     const vars = bodyVariables(rules);
-    vars.set("--statusbar-h", "S");
     vars.set("--sp-touch", "T");
     expect(resolveVar(vars.get("--chrome-bottom") ?? "", vars)).toBe(
-      "calc(S + calc(T + env(safe-area-inset-bottom, 0px)))",
+      "calc(T + env(safe-area-inset-bottom, 0px))",
     );
   });
 
@@ -242,10 +242,34 @@ describe("電話の段の骨格", () => {
     "#app-nav-resizer",
     "#sidebar-toggle",
     "#history-resizer",
-    "#statusbar .usage-status",
-    "#statusbar .statusbar-actions",
+    "#statusbar",
+    // 電話で使えない・場所だけ取るもの: キーの案内・キーボードショートカットの
+    // ボタン・設定の保存の帯の説明・アカウントの表の見出しの行。
+    ".empty-keys",
+    ".gdp-help-header-end [data-quick-help-trigger]",
+    "#scope-settings-save-note",
+    ".agent-accounts-row.agent-accounts-head",
+    // 名前に幅を回す: タブ (ターミナル以外) と差分の見出しの種類の絵、札の ▾。
+    '.main-tab:not([data-kind="terminal"]) .main-tab-icon',
+    ".d2h-file-header .d2h-file-name-wrapper > .d2h-icon",
+    ".main-tab-group-menu",
+    // 帯の「一覧」は一覧の無い画面では hidden (display を決める規則に負けない)。
+    ".mobile-bar-item[hidden]",
+    // ファイルの表示の「行へ移る」欄 (幅を取り、コピーのボタンが次の行へ落ちた)。
+    '.gdp-source-tabs:has([data-source-tab="code"].active) .gdp-source-line-jump',
   ])("2 面・幅の掴み・最下段の細部は出さない: %s", (selector) => {
     expect(declarationsOf(rules, [selector]).get("display")).toMatch(/^none/);
+  });
+
+  // 選んだコミットの差分の頭の「‹ 履歴の一覧」は、一覧と差分が別のページになる
+  // 電話の段だけ。
+  test.each([
+    { name: "デスクトップ", css: () => baseRules(sheet), display: "none" },
+    { name: "電話", css: () => rules, display: "block" },
+  ])("$name の履歴の一覧へ戻るボタン", ({ css, display }) => {
+    expect(declarationsOf(css(), [".hci-back-slot"]).get("display")).toBe(
+      display,
+    );
   });
 
   test("切替の帯は下端に貼り、ホームバーの分だけ内側を空ける", () => {
@@ -258,17 +282,32 @@ describe("電話の段の骨格", () => {
     );
   });
 
+  // ダイアログは見えている高さに収める (100vh は iPhone の Safari では上下の帯を畳んだ
+  // 高さで、見出しとボタンが切れた)。「新しいエージェント」の行は見出しを上・中身を
+  // 下に積む (2 列ではアカウントのカードが 130px になり、使用量がはみ出した)。
+  test("ダイアログは見えている高さに収め、新しいエージェントの行は 1 列", () => {
+    expect({
+      maxHeight: declarationsOf(baseRules(sheet), [".gdp-dialog"]).get(
+        "max-height",
+      ),
+      launchRow: declarationsOf(rules, [".agent-launch-row"]).get(
+        "grid-template-columns",
+      ),
+    }).toEqual({
+      maxHeight: "calc(100dvh - var(--space-4) * 2)",
+      launchRow: "minmax(0, 1fr)",
+    });
+  });
+
+  // 一覧は本文と同じ場所を全部使うページ (上に本文をのぞかせると、後ろの画面が
+  // 透けた重ね物に見えた)。
   test.each([
-    { name: "縦向き", tiers: [SOFT_KEYS, PHONE], expected: "calc(H + 12vh)" },
-    {
-      name: "横向き",
-      tiers: [SOFT_KEYS, PHONE, PHONE_LANDSCAPE],
-      expected: "H",
-    },
-  ])("$name の面の上端", ({ tiers, expected }) => {
+    { name: "縦向き", tiers: [SOFT_KEYS, PHONE] },
+    { name: "横向き", tiers: [SOFT_KEYS, PHONE, PHONE_LANDSCAPE] },
+  ])("$name の一覧の上端はタブ列のすぐ下", ({ tiers }) => {
     const vars = bodyVariables(withTiers(...tiers));
     vars.set("--global-header-h", "H");
-    expect(resolveVar(vars.get("--sp-sheet-top") ?? "", vars)).toBe(expected);
+    expect(resolveVar(vars.get("--sp-sheet-top") ?? "", vars)).toBe("H");
   });
 
   test("横向きでは引き出しの下の項目を横 1 列にし、名前は読み上げ用に残す", () => {
@@ -288,7 +327,7 @@ describe("電話の段の骨格", () => {
     vars.set("--main-tabs-h", "M");
     vars.set("--view-head-h", "V");
     expect(resolveVar(vars.get("--panel-body-top") ?? "", vars)).toBe(
-      "calc(calc(H + 12vh) + calc(M + V))",
+      "calc(H + calc(M + V))",
     );
     expect(
       declarationsOf(withTiers(SOFT_KEYS, PHONE), ["#panel-head"]).get(
@@ -941,11 +980,16 @@ describe("a landscape phone gives the height back", () => {
     ]);
   });
 
-  test("a portrait phone keeps the status bar", () => {
-    const portrait = withTiers(SOFT_KEYS, PHONE);
-    expect(declarationsOf(portrait, ["#statusbar"]).get("display")).not.toBe(
-      "none",
-    );
+  // 一覧の頭は 1 段 (2 段では高さ 390 のうち一覧にコミット 1 件ほどしか残らなかった)。
+  test("the list head is one row", () => {
+    const vars = bodyVariables(landscape);
+    vars.set("--main-tabs-h", "M");
+    expect({
+      height: resolveVar(vars.get("--column-head-h") ?? "", vars),
+      direction: declarationsOf(landscape, ["#panel-head"]).get(
+        "flex-direction",
+      ),
+    }).toEqual({ height: "M", direction: "row" });
   });
 });
 

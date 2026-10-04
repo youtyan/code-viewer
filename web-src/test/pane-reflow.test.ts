@@ -5,6 +5,7 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
+  collapseBlankLines,
   DEFAULT_COLOR,
   findChoices,
   paragraphStart,
@@ -13,9 +14,9 @@ import {
   readLogicalLines,
   readParagraphs,
   runCss,
-  withoutTransient,
   STYLE,
   terminalPalette,
+  withoutTransient,
 } from "../core/pane-reflow";
 import { paneSnapshotSequence, type TmuxPaneSnapshot } from "../core/tmux";
 import type { XtermTerminal } from "../core/xterm-loader";
@@ -210,14 +211,42 @@ describe("readParagraphs", () => {
   });
 
   // スマホの幅で折り返した 2 行目以降を、文の始まり (箇条書きなら頭の後ろ) に揃える。
+  // 字下げは 16 桁で止める (広いペインで右に寄せた行が、スマホでは字下げだけになった)。
   test.each([
-    { name: "箇条書き", data: "  - item text here\r\n    continues", hang: 4 },
-    { name: "字下げだけ", data: "  plain text", hang: 2 },
-    { name: "字下げなし", data: "top", hang: 0 },
-  ])("揃える桁: $name", async ({ data, hang }) => {
-    const term = await terminal(20, 2, data);
+    {
+      name: "箇条書き",
+      data: "  - item text here",
+      hang: 4,
+      text: "  - item text here",
+    },
+    { name: "字下げだけ", data: "  plain text", hang: 2, text: "  plain text" },
+    { name: "字下げなし", data: "top", hang: 0, text: "top" },
+    {
+      name: "16 桁まではそのまま",
+      data: `${" ".repeat(16)}deep`,
+      hang: 16,
+      text: `${" ".repeat(16)}deep`,
+    },
+    {
+      name: "右に寄せた行は 16 桁で止める",
+      data: `${" ".repeat(60)}✔ note`,
+      hang: 16,
+      text: `${" ".repeat(16)}✔ note`,
+    },
+    {
+      name: "深い箇条書きは頭ごと寄せる",
+      data: `${" ".repeat(40)}- item`,
+      hang: 18,
+      text: `${" ".repeat(16)}- item`,
+    },
+  ])("揃える桁: $name", async ({ data, hang, text }) => {
+    const term = await terminal(80, 1, data);
     const buffer = term.buffer.active;
-    expect(readParagraphs(buffer, 0, buffer.length, 20)[0]?.hang).toBe(hang);
+    const lines = readParagraphs(buffer, 0, buffer.length, 80);
+    expect({ hang: lines[0]?.hang, text: texts(lines)[0] }).toEqual({
+      hang,
+      text,
+    });
   });
 
   test("段落の続きの行からは、段落の頭の行までさかのぼる", async () => {
@@ -236,6 +265,29 @@ describe("readParagraphs", () => {
 // PC のペインが低いと、Claude Code が書き換えのたびに作業中の表示を上へ押し出し、
 // 過去の行がそれで埋まって読む画面が読めなかった (作業中の印の行と入力欄の罫線が
 // 4 割以上)。過去の行からだけ外す。
+describe("collapseBlankLines", () => {
+  test.each([
+    {
+      name: "続く空行は 1 つ",
+      data: "a\r\n\r\n\r\n\r\nb",
+      expected: ["a", "", "b"],
+    },
+    {
+      name: "1 つの空行はそのまま",
+      data: "a\r\n\r\nb",
+      expected: ["a", "", "b"],
+    },
+    { name: "空行が無ければそのまま", data: "a\r\nb", expected: ["a", "b"] },
+  ])("$name", async ({ data, expected }) => {
+    // 行の数は中身と同じ (空いた行を並べない)。
+    const term = await terminal(20, data.split("\r\n").length, data);
+    const buffer = term.buffer.active;
+    expect(
+      texts(collapseBlankLines(readLogicalLines(buffer, 0, buffer.length))),
+    ).toEqual(expected);
+  });
+});
+
 describe("withoutTransient", () => {
   test("作業中の印・入力欄の罫線と空の入力行・Waiting… を外し、続く空行をまとめる", async () => {
     const rule = "─".repeat(40);

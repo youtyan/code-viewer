@@ -25,6 +25,7 @@ import {
 } from "../core/history";
 import {
   CHECK_16_PATHS,
+  CHEVRON_LEFT_16_PATH,
   COPY_16_PATHS,
   iconSvg,
   SYNC_16_PATH,
@@ -78,6 +79,7 @@ export type HistoryText = {
   refTitle: (kind: HistoryCommitRef["kind"], name: string) => string;
   panelLabel: string;
   selectedCommit: string;
+  backToList: string;
 };
 
 type HistoryRefreshStatus = { type: "none" } | { type: "pending" };
@@ -87,6 +89,7 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     worktreeLabel: "Uncommitted changes (Working tree)",
     panelLabel: "Commit history",
     selectedCommit: "Selected commit",
+    backToList: "History list",
     bodyExpandClose: "Collapse",
     bodyExpandMore: (n) => `Show more (${n} lines)`,
     refreshLabel: "Refresh",
@@ -122,6 +125,7 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     worktreeLabel: "未コミット変更 (Working tree)",
     panelLabel: "コミットの履歴",
     selectedCommit: "選んだコミット",
+    backToList: "履歴の一覧",
     bodyExpandClose: "閉じる",
     bodyExpandMore: (n) => `もっと見る (${n} 行)`,
     refreshLabel: "更新",
@@ -182,6 +186,13 @@ export type HistoryViewDeps = {
   // not a web host. Optional so tests and minimal hosts can omit it.
   commitWebLink?(sha: string): HTMLAnchorElement | null;
   copyText?(text: string): Promise<void>;
+  /**
+   * 一覧と差分が別のページか (電話の段)。そうなら一覧から選んだコミットを
+   * ブラウザの履歴に積み (戻るで一覧へ)、差分の頭に一覧へ戻るボタンを出す。
+   */
+  listIsPage?(): boolean;
+  /** 一覧のページを出す (電話の段)。 */
+  showList?(): void;
 };
 
 export type HistoryViewMount = {
@@ -353,6 +364,12 @@ export function buildHistoryCommitInfoDom(
   if (page) body.id = "hci-body";
   body.className = "hci-body";
   body.hidden = true;
+  // 電話の段で一覧へ戻るボタン (選ぶたびに作る。デスクトップでは CSS が隠す)。
+  if (page) {
+    const back = document.createElement("div");
+    back.className = "hci-back-slot";
+    info.append(back);
+  }
   info.append(head, subject, body);
   return info;
 }
@@ -469,6 +486,8 @@ export function createHistoryView(deps: HistoryViewDeps) {
   // than its first parent: the "from" sha of a Shift+click range, or the
   // second parent of a merge.
   let compareSha = "";
+  // 電話の段で、今の選択の 1 つ前のブラウザの履歴が一覧か (一覧から選んで積んだ)。
+  let listEntry = false;
   let authorsLoadedFor = "";
   // git log -L range when the log is restricted to a few lines of a file.
   let lineRange: HistoryLineRange | undefined;
@@ -945,6 +964,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       if (el) el.textContent = text;
     };
     info.querySelector<HTMLElement>(".hci-head")?.removeAttribute("hidden");
+    renderBack(info);
     set(".hci-sha", commit.sha);
     set(".hci-author", commit.author);
     renderCommitActions(info, commit);
@@ -1059,6 +1079,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const info = commitInfoElement();
     if (!info) return;
     info.querySelector<HTMLElement>(".hci-head")?.setAttribute("hidden", "");
+    renderBack(info);
     const subject = info.querySelector<HTMLElement>(".hci-subject");
     if (subject) {
       subject.textContent = historyWorktreeLabel(deps.getLanguage());
@@ -1176,9 +1197,44 @@ export function createHistoryView(deps: HistoryViewDeps) {
   // `compare` ("" = first parent, the default) decides what the commit is
   // diffed against. It is explicit on every caller so a plain click always
   // clears a previous range / parent choice.
+  /**
+   * 電話の段で一覧から選んだら、差分をブラウザの履歴に積む (戻るで一覧へ戻る)。
+   * それ以外は置き換える (デスクトップで選び直すたびに履歴が増えない)。
+   */
+  function pushesSelection(fromList: boolean | undefined): boolean {
+    if (fromList !== true || deps.listIsPage?.() !== true) return false;
+    // 差分の上に一覧を開き直して選び直したときは置き換える (1 つ前は一覧のまま)。
+    const push = !listEntry;
+    listEntry = true;
+    return push;
+  }
+
+  /** 差分の頭の「一覧へ戻る」。一覧から積んだならブラウザの戻るで積んだ項を戻す。 */
+  function backToList() {
+    if (listEntry) {
+      listEntry = false;
+      history.back();
+    } else deps.showList?.();
+  }
+
+  function renderBack(info: HTMLElement) {
+    const slot = info.querySelector<HTMLElement>(".hci-back-slot");
+    if (!slot) return;
+    const label = historyText(deps.getLanguage()).backToList;
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "gdp-btn hci-back";
+    back.innerHTML = iconSvg("hci-back-icon", [CHEVRON_LEFT_16_PATH]);
+    const name = document.createElement("span");
+    name.textContent = label;
+    back.append(name);
+    back.addEventListener("click", backToList);
+    slot.replaceChildren(back);
+  }
+
   async function selectCommit(
     commit: HistoryCommit,
-    options: { updateUrl?: boolean; compare?: string } = {},
+    options: { updateUrl?: boolean; compare?: string; fromList?: boolean } = {},
   ) {
     const selectionGen = ++selectionGeneration;
     const gen = generation;
@@ -1191,12 +1247,13 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const range = compareSha
       ? { from: compareSha, to: commit.sha }
       : commitDiffRange(commit);
-    if (options.updateUrl !== false) {
+    // URL から当て直した選択 (開き直し・ブラウザの戻る・進む) は、1 つ前が一覧か分からない。
+    if (options.updateUrl === false) listEntry = false;
+    else
       deps.setRoute(
         routeFor({ commit: commit.sha, compare: compareSha }),
-        true,
+        !pushesSelection(options.fromList),
       );
-    }
     if (selectionGen !== selectionGeneration || gen !== generation) return;
     await deps.applyCommitRange(range, pathFilter || undefined);
     if (selectionGen !== selectionGeneration || gen !== generation) return;
@@ -1219,7 +1276,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
     });
   }
 
-  async function selectWorktree(options: { updateUrl?: boolean } = {}) {
+  async function selectWorktree(
+    options: { updateUrl?: boolean; fromList?: boolean } = {},
+  ) {
     const selectionGen = ++selectionGeneration;
     const gen = generation;
     selectedSha = HISTORY_WORKTREE_COMMIT;
@@ -1227,9 +1286,12 @@ export function createHistoryView(deps: HistoryViewDeps) {
     updateActiveRow();
     updateWorktreeInfo();
     const range = worktreeDiffRange();
-    if (options.updateUrl !== false) {
-      deps.setRoute(routeFor({ commit: selectedSha }), true);
-    }
+    if (options.updateUrl === false) listEntry = false;
+    else
+      deps.setRoute(
+        routeFor({ commit: selectedSha }),
+        !pushesSelection(options.fromList),
+      );
     if (selectionGen !== selectionGeneration || gen !== generation) return;
     await deps.applyCommitRange(range, pathFilter || undefined);
     if (selectionGen !== selectionGeneration || gen !== generation) return;
@@ -1392,6 +1454,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     } else {
       selectionGeneration++;
       selectedSha = "";
+      listEntry = false;
       updateActiveRow();
       await updateCommitInfo(null);
       deps.showEmptyDiffPane();
@@ -1413,6 +1476,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
 
   function leaveHistory() {
     generation++;
+    listEntry = false;
     loading = false;
     inFlight = null;
     compareSha = "";
@@ -1434,7 +1498,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     // Keyboard focus follows the click so j / k act on this list.
     panel.focus?.();
     if (row.dataset.sha === HISTORY_WORKTREE_COMMIT) {
-      void selectWorktree();
+      void selectWorktree({ fromList: true });
       return;
     }
     const commit = commits.find((c) => c.sha === row.dataset.sha);
@@ -1443,7 +1507,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       void selectRange(commit);
       return;
     }
-    void selectCommit(commit, { compare: "" });
+    void selectCommit(commit, { compare: "", fromList: true });
   }
 
   // Server-side filter (syntax: core/history.ts tokenizeHistoryQuery). Keeps

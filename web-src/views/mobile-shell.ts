@@ -25,6 +25,7 @@ import {
   longPressMoved,
   type MobileBarView,
   mobileBarCurrent,
+  mobileListAvailable,
   PHONE_MEDIA_QUERY,
   pinchFontSize,
   softKeyboardInset,
@@ -37,13 +38,13 @@ import {
 import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from "../core/tmux";
 import type { TabListEntry } from "./main-tabs/main-tabs-view";
 import { CLOSE_ICON_PATH, pageIconPaths } from "./main-tabs/tab-icons";
-import { projectMark } from "./projects/project-looks";
 import {
   type MobileShellLang,
   type MobileShellText,
   mobileShellText,
   SOFT_KEY_CAPS,
 } from "./mobile-shell-i18n";
+import { projectMark } from "./projects/project-looks";
 
 export type MobileShellDeps = {
   getLanguage(): MobileShellLang;
@@ -100,13 +101,15 @@ const DRAWER_CLOSING_TARGETS =
   ".nav-agent, .nav-project-toggle, a[href], #nav-launch, #search-btn";
 
 /**
- * 押したら面を閉じるもの (ファイル・コミット・画面の入口)。フォルダの行では
- * 閉じない。コミットは閉じて、本文にそのコミットの差分を出す (閉じないと、
+ * 押したら面を閉じるもの (ファイル・コミット・画面の入口・タブ列)。フォルダの行
+ * では閉じない。コミットは閉じて、本文にそのコミットの差分を出す (閉じないと、
  * 押した結果が面の下に隠れ、何が起きたか分からない)。ファイルを絞りたいときは
- * 「一覧」を開き直すと、そのコミットの変更ファイルが面の下の段に出る。
+ * 「一覧」を開き直すと、そのコミットの変更ファイルが面の下の段に出る。面は
+ * タブ列の下を全部使い、タブ列は覆わない (＋のメニューなどが面の下に出る)。
  */
 function closesSheet(target: Element): boolean {
-  if (target.closest(".view-strip-item, .history-item")) return true;
+  if (target.closest(".view-strip-item, .history-item, #main-tabs"))
+    return true;
   // ファイル一覧 (#file-list-rows) と変更ファイルの一覧 (#filelist) の行。
   const row = target.closest("#filelist li, #file-list-rows li");
   return row !== null && !row.classList.contains("tree-dir");
@@ -397,15 +400,39 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
       : null;
   }
 
-  /** 帯の入口に「いま見ている画面」の印と、入力待ちの件数を付け直す。 */
+  function hasPageClass(name: string): boolean {
+    return document.body.classList.contains(name);
+  }
+
+  /** 左の面の前面がタブ (端末・画像など) で、画面が隠れているか。 */
+  function coveredByTab(): boolean {
+    return (
+      document
+        .querySelector('.main-pane-host[data-side="left"]')
+        ?.classList.contains("is-shown") ?? false
+    );
+  }
+
+  /**
+   * 今の画面に一覧があるか。帯の「一覧」と面はその画面だけ (画面を移った直後
+   * でも正しいように、見張りを待たずに body の印から読む)。
+   */
+  function listAvailable(): boolean {
+    return mobileListAvailable(
+      hasPageClass,
+      coveredByTab(),
+      document.body.hasAttribute("data-worktree-overview"),
+    );
+  }
+
+  /**
+   * 帯の入口に「いま見ている画面」の印と、入力待ちの件数を付け直す。開いたまま
+   * 一覧の無い画面へ移ったら面を閉じる。
+   */
   function syncBar(): void {
-    const leftHost = document.querySelector(
-      '.main-pane-host[data-side="left"]',
-    );
-    const now = mobileBarCurrent(
-      (name) => document.body.classList.contains(name),
-      leftHost?.classList.contains("is-shown") ?? false,
-    );
+    const now = mobileBarCurrent(hasPageClass, coveredByTab());
+    barItems.list.hidden = !listAvailable();
+    if (barItems.list.hidden && open === "sheet") close();
     for (const [view, button] of Object.entries(pageViews)) {
       if (view === now) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
@@ -455,7 +482,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   }
 
   function setOpen(next: Panel | null): void {
-    if (next === open) return;
+    if (next === open || (next === "sheet" && !listAvailable())) return;
     const wasOpen = open;
     open = next;
     for (const panel of ["drawer", "sheet", "tabs"] as const) {
@@ -879,7 +906,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   const pageObserver = new MutationObserver(syncBar);
   pageObserver.observe(document.body, {
     attributes: true,
-    attributeFilter: ["class"],
+    attributeFilter: ["class", "data-worktree-overview"],
   });
   const leftHost = document.querySelector('.main-pane-host[data-side="left"]');
   if (leftHost)

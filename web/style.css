@@ -3322,6 +3322,11 @@ body.gdp-history-page #topbar .ref-pickers {
   background: transparent;
   color: var(--fg-muted);
 }
+/* 一覧へ戻るボタン (history-view.ts の renderBack)。一覧と差分が別のページになる
+   電話の段だけ出す (SP の節)。 */
+.hci-back-slot {
+  display: none;
+}
 #history-commit-info .hci-actions,
 .history-commit-info .hci-actions {
   display: inline-flex;
@@ -22173,7 +22178,9 @@ button.agents-account-name:hover {
   display: flex;
   flex-direction: column;
   width: min(calc(var(--space-unit) * 120), calc(100vw - var(--space-6)));
-  max-height: calc(100vh - var(--space-4) * 2);
+  /* 見えている高さ (dvh) から。iPhone の Safari の 100vh は上下の帯を畳んだときの
+     高さで、帯が出ている間は見出しとボタンが画面の外に切れた。 */
+  max-height: calc(100dvh - var(--space-4) * 2);
   padding: calc(var(--space-unit) * 7);
   border-radius: var(--radius-lg);
   background: var(--color-overlay);
@@ -26694,14 +26701,16 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     --column-head-w: 0px;
     --chrome-right: var(--sp-safe-right);
     --page-right: var(--chrome-right);
-    /* 下: 最下段の下に切替の帯。 */
-    --chrome-bottom: calc(var(--statusbar-h) + var(--sp-bar-h));
+    /* 下: 切替の帯だけ (最下段は出さない。下の「最下段」)。 */
+    --chrome-bottom: var(--sp-bar-h);
     /* 高さの T2 は、ブラウザの上下の帯が出ている間の見えている高さ (dvh) から
        引く (電話の 100vh は帯を畳んだときの高さで、下端が帯に隠れる)。 */
     --content-h: calc(100dvh - var(--chrome-h) - var(--chrome-bottom));
     --main-pane-h: calc(100dvh - var(--global-header-h) - var(--main-bottom));
-    /* 下から出す面の上端 (T2)。上に本文を少し残し、面であると分かるようにする。 */
-    --sp-sheet-top: calc(var(--global-header-h) + 12vh);
+    /* 一覧・タブの一覧の上端 (T2)。タブ列のすぐ下から、本文と同じ場所を全部使う
+       ページにする (上に本文を残して面に見せると、後ろの画面が透けて見え、履歴の
+       ように一覧が主な中身の画面でも仮の重ね物に見えた)。 */
+    --sp-sheet-top: var(--global-header-h);
     --panel-body-top: calc(var(--sp-sheet-top) + var(--column-head-h));
   }
   /* ソフトキーボードが出ている間は、帯と最下段を隠して端末を広く取る。
@@ -26714,7 +26723,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body.mobile-keyboard-open[data-list-column]:not([data-list-column-hidden]) {
     --chrome-bottom: var(--sp-keyboard-h, 0px);
   }
-  body.mobile-keyboard-open #statusbar,
   body.mobile-keyboard-open .mobile-bar {
     display: none;
   }
@@ -26737,6 +26745,114 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   #content {
     /* 本文の左右の余白 (T3) を詰める。 */
     --content-pad-x: var(--space-3);
+  }
+  /* ダイアログの内側の余白を詰める (28px では 390px の幅の中身が 300px を切った)。 */
+  .gdp-dialog {
+    padding: var(--space-4);
+  }
+  /* 「新しいエージェント」は見出しを上、選ぶものを下に積む。左に 144px の見出しの列を
+     取ると、アカウントのカードが 130px に押し込まれて名前が 1 文字になり、使用量の行
+     がカードの外へはみ出した。 */
+  .agent-launch-row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-1);
+  }
+  .agent-launch-label {
+    min-height: 0;
+  }
+  /* 右クリック・＋のメニューの幅 (T0 の上書き)。240px では「開いているシェルはありま…」
+     「すべてのプロジェクトのセッ…」と項目が切れた。 */
+  :root {
+    --context-menu-w: min(calc(var(--space-unit) * 80), calc(100vw - var(--space-6)));
+  }
+  /* 設定の保存の帯は状態とボタンの 1 行。説明の 2 文 (打ち込む欄は保存まで効かない・
+     選ぶ設定はすぐ効く) は帯から外す: 4 行とボタンで画面の下 200px を取り続けた。 */
+  #scope-settings-save-note {
+    display: none;
+  }
+  .scope-settings-footer {
+    padding-block: var(--space-2);
+  }
+  /* ヘルプの見出し: キーボードショートカットの小窓のボタンは出さない (電話にキー
+     ボードは無い)。ボタンが幅を取り、見出しが「ヘ/ル/プ」と縦に折れて、版とボタンが
+     画面の外へはみ出した。 */
+  .gdp-help-header-end [data-quick-help-trigger] {
+    display: none;
+  }
+  .gdp-help-header h1 {
+    flex: none;
+  }
+  /* 設定のアカウントの表は 1 アカウントを縦に積む: 名前・メール・状態と確かめた
+     時刻・場所・操作。4 列の表は 330px に入らず、見出しの行の名前が重なり、状態の
+     印が名前に被った。見出しの行は出さない (並びで分かる)。 */
+  .agent-accounts-table {
+    display: block;
+  }
+  .agent-accounts-row.agent-accounts-head {
+    display: none;
+  }
+  .agent-accounts-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--space-3);
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--color-line-row);
+  }
+  .agent-accounts-row > .agent-accounts-name-cell,
+  .agent-accounts-row > .agent-accounts-email,
+  .agent-accounts-row > .agent-accounts-path,
+  .agent-accounts-row > .agent-accounts-actions,
+  .agent-accounts-row > .agent-hooks-detail,
+  .agent-accounts-row > .agent-hooks-result {
+    flex: 1 1 100%;
+  }
+  .agent-accounts-row > .agent-accounts-path {
+    order: 1;
+  }
+  .agent-accounts-row > .agent-accounts-actions {
+    order: 2;
+  }
+  .agent-accounts-row > .agent-hooks-detail,
+  .agent-accounts-row > .agent-hooks-result {
+    order: 3;
+  }
+  /* 空の状態の案内のキー (Enter・⌘G・⌘K など) は出さない。電話にキーボードは無い。 */
+  .empty-keys {
+    display: none;
+  }
+  /* 差分のファイルの見出し: 名前は折り返して全部出す (切ると、大事な末尾のファイル名
+     が「src/config…」で消えた)。種類の絵は外して名前に幅を回す。 */
+  .d2h-file-header .d2h-file-name-wrapper > .d2h-icon {
+    display: none;
+  }
+  .d2h-file-header .d2h-file-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  /* 前面のタブの名前に幅を回す: 画面・ファイルのタブは種類の絵を出さない (「作業
+     ツリー」が「作…」まで切れた)。ターミナルのタブの絵は状態の印なので残す。 */
+  .main-tab:not([data-kind="terminal"]) .main-tab-icon {
+    display: none;
+  }
+  /* プロジェクトの札の ▾ も出さない (同じメニューは札の長押しで開き、行き先は一覧の
+     頭の画面の入口と同じ)。 */
+  .main-tab-group-menu {
+    display: none;
+  }
+  /* ファイルの表示の「行へ移る」欄は出さない (スマホはスクロールで読む)。欄が
+     幅を取り、ソースのコピーのボタンが次の行へ 1 つだけ折り返していた。 */
+  .gdp-source-tabs:has([data-source-tab="code"].active) .gdp-source-line-jump {
+    display: none;
+  }
+  /* Files のフォルダ表示は文書の面の枠 (角丸・面の色・内側の余白) を外し、本文の
+     幅を全部使う。390px では本文の外の 12px と面の内側の 20px が重なり、名前の
+     列が狭く、カードの中の一覧に見えた。 */
+  .gdp-repo-shell {
+    --pad-doc: 0px;
+    padding-top: var(--space-2);
+    border-radius: 0;
+    background: none;
   }
 
   /* タブ列: 安全領域の下から。一覧の列の頭は面へ移すので、左端から右端まで。 */
@@ -26830,8 +26946,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     display: none;
     background: color-mix(in srgb, var(--color-ground) 60%, transparent);
   }
-  body.mobile-nav-open .mobile-scrim:not([hidden]),
-  body.mobile-sheet-open .mobile-scrim:not([hidden]) {
+  body.mobile-nav-open .mobile-scrim:not([hidden]) {
     display: block;
   }
 
@@ -26896,8 +27011,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     width: auto;
     height: var(--column-head-h);
     padding: 0 var(--pad-face);
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    box-shadow: 0 -1px 0 var(--color-line-soft);
   }
   /* 上の 640px の古い節の .app-menu (flex: 1 1 0) は縦に並べた頭の中で高さを
      0 に潰すので、絵柄の列の高さを戻す。ファイル一覧を畳んでも (一覧を出す画面・
@@ -26956,6 +27069,28 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body[data-list-column="worktree"] #sidebar-resizer {
     display: none;
   }
+  /* 選んだコミットの差分の頭の「‹ 履歴の一覧」。一覧は差分と別のページで、
+     下端の帯の「一覧」だけでは戻り方が分からなかった。 */
+  /* 件名 (order: -1) より上。左の余白を戻して、絵を件名の左端にそろえる。 */
+  .hci-back-slot {
+    display: block;
+    order: -2;
+    margin-left: calc(var(--space-2) * -1);
+  }
+  .hci-back {
+    gap: var(--space-1);
+    min-height: var(--sp-touch);
+    padding: 0 var(--space-2);
+    border: 0;
+    background: none;
+    color: var(--color-accent-strong);
+    font-size: var(--ui-font-md);
+  }
+  .hci-back-icon {
+    width: var(--icon-md);
+    height: var(--icon-md);
+    fill: currentColor;
+  }
   /* コミットを選ぶまでは下の段 (変更ファイル) が空なので、一覧に面の全部を使う
      (半分では 3 件ほどしか見えなかった)。 */
   body[data-list-column="history"]:not(:has(.history-item.active)) #history-panel {
@@ -26976,6 +27111,12 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
   #history-panel .history-item .history-graph-cell {
     grid-row: 1 / 3;
+  }
+  /* 枝の線の列は線の本数の幅だけ (デスクトップの 72px の列では、線 1 本の左右が
+     空き、件名が画面の 4 分の 1 から始まった)。線の無い行 (未コミット変更) は 2 本分。 */
+  #history-panel .history-graph-cell {
+    width: max-content;
+    min-width: calc(var(--space-unit) * 6);
   }
   /* グラフは行の高さを決めない (高さの指定の無い SVG は 150px として行を
      押し広げた)。行が決まってから、その高さいっぱいに描く。 */
@@ -27088,14 +27229,10 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     border-right: 0;
   }
 
-  /* ---- 最下段 = 要点だけ (エージェントの件数・サーバの状態・診断) ---- */
+  /* ---- 最下段は出さない ----
+     残っていたのはエージェントの件数 (入力待ちは帯の「エージェント」の札に出る) と
+     サーバの状態の点だけで、どの画面でも本文から 1 行 (44px) を取っていた。 */
   #statusbar {
-    bottom: var(--sp-bar-h);
-    padding: 0 calc(var(--pad-face) + var(--sp-safe-right)) 0 calc(var(--pad-face) + var(--sp-safe-left));
-  }
-  #statusbar .usage-status,
-  #statusbar .statusbar-actions,
-  #statusbar .statusbar-sep {
     display: none;
   }
 
@@ -27130,6 +27267,9 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     font-size: var(--ui-font-xs);
     touch-action: manipulation;
     cursor: pointer;
+  }
+  .mobile-bar-item[hidden] {
+    display: none;
   }
   .mobile-bar-item[aria-expanded="true"] {
     color: var(--color-accent-strong);
@@ -27307,8 +27447,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     display: flex;
     flex-direction: column;
     background: var(--color-nav);
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    box-shadow: 0 -1px 0 var(--color-line-soft);
     transform: translateY(100vh);
     visibility: hidden;
     transition: transform var(--motion-fast), visibility var(--motion-fast);
@@ -27587,6 +27725,11 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     white-space: pre;
     overflow: hidden;
   }
+  /* 出力の中の URL (pane-view.ts の runHtml)。色は端末の色のまま、下線で示す。 */
+  .pane-link {
+    color: inherit;
+    text-decoration: underline;
+  }
   /* 「画面」の通常の画面: 読む画面と同じ行を PC のペインの桁で折り返し、その桁が
      幅に入る字の大きさで出す (pane-view.ts の fitScreenFont)。ピンチで大きく
      したら、この箱が横に送る。 */
@@ -27745,23 +27888,33 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 }
 
 /* ---- 1'. 横向きの電話 (core/mobile-layout.ts の PHONE_LANDSCAPE_MEDIA_QUERY):
-   面に残る高さが少ないので、面をタブ列のすぐ下から出す (上に本文をのぞかせない)。 ---- */
+   残る高さが少ないので、下端の帯を細くする。 ---- */
 @media (pointer: coarse) and (max-height: 500px) {
-  /* 端末と面の高さを取る: 最下段を隠し (入力待ちの件数は帯の「エージェント」の
-     札に出る)、下端の帯を細くする (絵と名前を横に並べる。帯の入口は横に長いので
-     当たりの幅は十分)。 */
+  /* 端末と面の高さを取る: 下端の帯を細くする (絵と名前を横に並べる。帯の入口は
+     横に長いので当たりの幅は十分)。 */
   body,
   body.gdp-sidebar-hidden,
   body.main-split,
   body[data-list-column]:not([data-list-column-hidden]) {
-    --sp-sheet-top: var(--global-header-h);
     /* 横向きの下端の帯の高さ (T1)。 */
     --sp-bar-compact-h: calc(var(--space-unit) * 9);
     --sp-bar-h: calc(var(--sp-bar-compact-h) + var(--sp-safe-bottom));
-    --chrome-bottom: var(--sp-bar-h);
+    /* 一覧の頭は 1 段 (下の #panel-head)。 */
+    --column-head-h: var(--main-tabs-h);
   }
-  #statusbar {
-    display: none;
+  /* 一覧の頭のプロジェクトの行と画面の入口の絵柄を横 1 段に並べる。2 段のままだと、
+     高さ 390 のうち一覧に残る所がコミット 1 件ほどだった。 */
+  #panel-head,
+  body.gdp-sidebar-hidden #panel-head {
+    flex-direction: row;
+    align-items: center;
+  }
+  #panel-head > #project-head {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  #panel-head > #view-head {
+    flex: none;
   }
   .mobile-bar-item {
     flex-direction: row;
