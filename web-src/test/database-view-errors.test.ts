@@ -104,7 +104,7 @@ class FakeText {
 }
 
 // 本物の style は setProperty を持つ。プレーンなオブジェクトのままだと
-// CSS 変数を書くコード (table-grid の --db-grid-scrollbar-w など) が
+// CSS 変数を書くコード (table-grid の --db-related-list-w など) が
 // TypeError で落ちるので、最低限の API を実装しておく。
 class FakeStyle {
   [key: string]: unknown;

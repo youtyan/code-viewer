@@ -12017,17 +12017,19 @@ body.journal-task-editor-resizing * {
   font-size: var(--db-font-base);
 }
 
+/* 列の見出しと絞り込みの行の頭。本文と同じスクロールの箱 (.db-grid-viewport)
+   の中で上に貼り付け、横にはブラウザが本文と一緒に動かす (table-grid.ts)。
+   箱を分けて JS で scrollLeft を合わせていた頃は、iPhone の Safari で横に
+   送ると見出しが遅れて引っかかった。頭の中の箱は overflow を持たない (持つと
+   行番号の列の sticky がその箱の中で止まる)。 */
+.db-grid-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  width: max-content;
+  min-width: 100%;
+}
 .db-grid-header-wrap {
-  flex-shrink: 0;
-  overflow: hidden;
-  /* 本文 (.db-grid-viewport) の縦スクロールバーが食う幅を、右端に透明な
-     border として空ける。空けないと「見える幅」が本文だけ狭くなり、本文が
-     右へ余分にスクロールできてしまう。ヘッダは scrollLeft を同期しても
-     そこまで追随できず、右端で列がスクロールバー幅ぶんずれる。
-     scrollbar-gutter は overflow:hidden だと見た目の幅しか縮まず、
-     スクロール範囲は縮まないので使えない (実測済み)。
-     幅は table-grid.ts が実測して --db-grid-scrollbar-w に入れる。 */
-  border-right: var(--db-grid-scrollbar-w, 0px) solid transparent;
   border-bottom: 2px solid var(--border);
   background: var(--bg-soft);
 }
@@ -12072,9 +12074,8 @@ body.journal-task-editor-resizing * {
   flex: 1;
   overflow: auto;
   position: relative;
-  /* 行が少なくて縦スクロールバーが出ないときも幅を変えない。ここを可変に
-     すると、ヘッダ / フィルタ行に渡す --db-grid-scrollbar-w が行数やフィルタで
-     変わり、列の位置が動く。 */
+  /* 行が少なくて縦スクロールバーが出ないときも幅を変えない (行数やフィルタで
+     列の位置が動かない)。 */
   scrollbar-gutter: stable;
 }
 /* 矢印キーでセルを移動するため viewport 自体がフォーカスを受け取る
@@ -12088,6 +12089,10 @@ body.journal-task-editor-resizing * {
   box-shadow: inset var(--db-focus-ring);
 }
 
+/* 行の箱 (頭の下)。.db-grid-body はこの箱の上端から translateY で置く。 */
+.db-grid-rows {
+  position: relative;
+}
 .db-grid-spacer {
   width: 1px;
   pointer-events: none;
@@ -12745,10 +12750,6 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 
 /* ---------- Data Grid: Column Filter Row ---------- */
 .db-grid-filter-row-wrap {
-  flex-shrink: 0;
-  overflow: hidden;
-  /* ヘッダと同じ理由でスクロールバー幅を空ける (.db-grid-header-wrap 参照)。 */
-  border-right: var(--db-grid-scrollbar-w, 0px) solid transparent;
   border-bottom: 1px solid var(--border);
   background: var(--bg-soft);
 }
@@ -27261,6 +27262,12 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .es-explorer .db-detail-pane,
   .dynamodb-explorer .db-detail-pane {
     min-height: 0;
+  }
+  /* 表の「変更」の列は左に固定しない (行番号と合わせて 145px を取り、データの
+     列に幅が残らなかった)。行番号だけ固定する (table-grid.ts の pinnedWidth)。 */
+  .db-root .db-grid-recency-header,
+  .db-root .db-grid-recency {
+    position: static;
   }
   /* Markdown の表は表の中で横に送る。表の幅で本文ごと横に送れて、縦に読む指が
      少し横にずれるだけで画面が左右に揺れた (コードの枠は前から中で送る)。 */

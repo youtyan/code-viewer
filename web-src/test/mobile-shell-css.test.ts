@@ -306,6 +306,12 @@ describe("電話の段の骨格", () => {
       property: "overflow-x",
       value: "auto",
     },
+    // 表の「変更」の列は固定しない (行番号と合わせてデータの列の幅を食った)。
+    {
+      selector: ".db-root .db-grid-recency",
+      property: "position",
+      value: "static",
+    },
   ])(
     "電話の段の $selector の $property は $value",
     ({ selector, property, value }) => {
