@@ -97,7 +97,8 @@ export function renderEmptyState(options: EmptyStateOptions): HTMLElement {
   }
   if (keys.length > 0) {
     const list = document.createElement("dl");
-    list.className = "empty-keys";
+    // キーの説明は指の画面では出さない (style.css の gdp-key-hint)。
+    list.className = "empty-keys gdp-key-hint";
     list.setAttribute("aria-label", options.keysLabel as string);
     for (const key of keys) {
       const item = document.createElement("div");

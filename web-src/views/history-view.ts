@@ -365,12 +365,10 @@ export function buildHistoryCommitInfoDom(
   body.className = "hci-body";
   body.hidden = true;
   // 電話の段で一覧へ戻るボタン (選ぶたびに作る。デスクトップでは CSS が隠す)。
-  if (page) {
-    const back = document.createElement("div");
-    back.className = "hci-back-slot";
-    info.append(back);
-  }
-  info.append(head, subject, body);
+  // ファイルの履歴のタブも、電話の段では一覧とコミットが別のページ。
+  const back = document.createElement("div");
+  back.className = "hci-back-slot";
+  info.append(back, head, subject, body);
   return info;
 }
 
@@ -1209,12 +1207,28 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return push;
   }
 
-  /** 差分の頭の「一覧へ戻る」。一覧から積んだならブラウザの戻るで積んだ項を戻す。 */
+  /**
+   * 差分の頭の「一覧へ戻る」。一覧から積んだならブラウザの戻るで積んだ項を戻す。
+   * ファイルの履歴のタブは一覧が同じ箱の中にあるので、選択を外して一覧を出す。
+   */
   function backToList() {
     if (listEntry) {
       listEntry = false;
       history.back();
+    } else if (mode === "file") {
+      deps.setRoute(routeFor({}), true);
+      void showNoSelection();
     } else deps.showList?.();
+  }
+
+  /** 選んでいるコミットを外し、差分の箱を「未選択」に戻す。 */
+  async function showNoSelection() {
+    selectionGeneration++;
+    selectedSha = "";
+    listEntry = false;
+    updateActiveRow();
+    await updateCommitInfo(null);
+    deps.showEmptyDiffPane();
   }
 
   function renderBack(info: HTMLElement) {
@@ -1452,12 +1466,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (scope2.commit) {
       await resolveDeepLink(scope2.commit);
     } else {
-      selectionGeneration++;
-      selectedSha = "";
-      listEntry = false;
-      updateActiveRow();
-      await updateCommitInfo(null);
-      deps.showEmptyDiffPane();
+      await showNoSelection();
     }
   }
 
@@ -1495,8 +1504,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function handleListClick(e: MouseEvent) {
     const row = (e.target as Element).closest<HTMLElement>(".history-item");
     if (!row?.dataset.sha) return;
-    // Keyboard focus follows the click so j / k act on this list.
-    panel.focus?.();
+    // Keyboard focus follows the click so j / k act on this list. 箱を見える
+    // 位置へ送らない: 電話の段のファイルの履歴では、送った分だけ次に出す
+    // コミットの頭 (一覧へ戻るボタン) が上の固定の段の下に隠れた。
+    panel.focus?.({ preventScroll: true });
     if (row.dataset.sha === HISTORY_WORKTREE_COMMIT) {
       void selectWorktree({ fromList: true });
       return;

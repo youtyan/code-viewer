@@ -15,6 +15,12 @@ import {
   type ImageTabText,
   imageTabText,
 } from "./image-tab-i18n";
+import {
+  createMediaElement,
+  type MediaElement,
+  mediaErrorDetail,
+  onMediaReady,
+} from "./terminal/media-element";
 
 const NARROW_WIDTH = 720;
 const COPY_FEEDBACK_MS = 1200;
@@ -34,6 +40,8 @@ export type ImageTabDeps = {
   language: ImageTabLanguage;
   /** 前へ・次へ回す並び。無ければ移動ボタンは無効。 */
   images?: readonly TerminalImageRef[];
+  /** 出す画像が変わった (開いた・前後へ送った)。棚の印を合わせてもらう。 */
+  onShow?(image: TerminalImageRef): void;
 };
 
 export type ImageTabHandle = {
@@ -162,7 +170,7 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
   let language = deps.language;
   let images: readonly TerminalImageRef[] = [];
   let index = 0;
-  let picture: HTMLImageElement | null = null;
+  let picture: MediaElement | null = null;
   let naturalWidth = 0;
   let naturalHeight = 0;
   let scale = 1;
@@ -293,6 +301,7 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
 
   function showCurrent(): void {
     const image = current();
+    deps.onShow?.(image);
     const myVersion = ++loadVersion;
     if (copiedTimer) clearTimeout(copiedTimer);
     copiedTimer = null;
@@ -327,14 +336,13 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
       return;
     }
 
-    const nextPicture = document.createElement("img");
-    nextPicture.alt = image.name;
+    // 動画は再生の操作つきの video (media-element.ts)。寸法と拡大縮小は画像と同じ。
+    const nextPicture = createMediaElement({ ...image, url }, "player");
     nextPicture.draggable = false;
-    nextPicture.decoding = "async";
-    nextPicture.addEventListener("load", () => {
+    onMediaReady(nextPicture, (size) => {
       if (myVersion !== loadVersion || picture !== nextPicture) return;
-      naturalWidth = nextPicture.naturalWidth;
-      naturalHeight = nextPicture.naturalHeight;
+      naturalWidth = size.width;
+      naturalHeight = size.height;
       if (naturalWidth <= 0 || naturalHeight <= 0) {
         setStatus(
           "error",
@@ -356,18 +364,22 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
       setStatus(
         "error",
         (text) =>
-          `${text.imageLoadFailed}\n${text.pathLabel}: ${image.path}\n${text.eventLabel}: ${event.type}`,
+          `${text.imageLoadFailed}\n${text.pathLabel}: ${image.path}\n${text.eventLabel}: ${[event.type, mediaErrorDetail(nextPicture)].filter(Boolean).join(" · ")}`,
       );
     });
     picture = nextPicture;
     stage.replaceChildren(nextPicture);
-    nextPicture.src = url;
   }
 
   function navigate(direction: -1 | 1): void {
     if (images.length < 2) return;
     index = (index + direction + images.length) % images.length;
+    // 動画の操作にフォーカスがあると、差し替えで動画ごと消えてフォーカスが
+    // 外れ、続けて送れず Esc も効かなくなる。タブに残す。
+    const focused = el.contains(document.activeElement);
     showCurrent();
+    if (focused && !el.contains(document.activeElement))
+      el.focus({ preventScroll: true });
   }
 
   function setCopyIcon(copied: boolean): void {
@@ -468,10 +480,13 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
       case "1":
         applyFit();
         break;
+      // 上下も前後 (縦に並ぶ棚から開いたとき、棚と同じ向きで送れる)。
       case "ArrowLeft":
+      case "ArrowUp":
         navigate(-1);
         break;
       case "ArrowRight":
+      case "ArrowDown":
         navigate(1);
         break;
       case "Escape":

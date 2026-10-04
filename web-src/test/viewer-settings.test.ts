@@ -56,6 +56,7 @@ const EN_TEXT: ViewerSettingsText = {
   display: "Display",
   theme: "Light or dark",
   themeHelp: "Applies right away.",
+  themeKeyHelp: "Press T to switch.",
   themeNames: {
     dark: "Dark",
     light: "Light",

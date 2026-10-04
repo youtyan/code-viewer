@@ -130,6 +130,18 @@ describe("search results sheet", () => {
     );
   });
 
+  test("a search with no hits says so instead of leaving the sheet empty", async () => {
+    const { view } = setup({ matches: [] });
+    view.open("missing");
+    await waitFor(() =>
+      q(document, ".search-results-status").textContent.includes("0"),
+    );
+    expect([
+      q(document, ".search-results-idle").querySelector("h2")?.textContent,
+      document.querySelectorAll(".gdp-palette-row").length,
+    ]).toEqual(["No matching lines", 0]);
+  });
+
   test("changing project clears results and repeats the same query against the new project", async () => {
     const { view, urls } = setup();
     view.open("needle");

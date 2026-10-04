@@ -81,6 +81,8 @@ export type SearchPaletteText = CodePreviewText & {
   resultsIdleHint: string;
   resultsIdleKeys: { run: string; anywhere: string; openFile: string };
   resultsIdleKeysLabel: string;
+  /** 検索して 1 つも当たらなかったとき。 */
+  resultsNone: string;
   resultsScope: (ref: string) => string;
   // Ctrl+K に混ぜるプロジェクト・エージェント・セッション・操作 (search-palette-ui.ts の PaletteCommand)。
   searchEverything: string;
@@ -201,6 +203,7 @@ const EN: SearchPaletteText = {
   resultsRun: "Search",
   resultsPlaceholder: "Search text (path:<dir or glob> narrows)",
   resultsIdle: "Type a search and press Enter",
+  resultsNone: "No matching lines",
   resultsIdleHint:
     "Every file of the project is searched. Add path:src/ to narrow it to a folder.",
   resultsIdleKeys: {
@@ -326,6 +329,7 @@ const JA: SearchPaletteText = {
   resultsPlaceholder:
     "検索するコード（path:<ディレクトリ or glob> で絞り込み）",
   resultsIdle: "検索語を入力して Enter",
+  resultsNone: "一致する行はありません",
   resultsIdleHint:
     "プロジェクトのすべてのファイルから探します。path:src/ を足すとフォルダを絞れます。",
   resultsIdleKeys: {

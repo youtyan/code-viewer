@@ -5,6 +5,7 @@
 import { createDiagramViewport } from "../../core/diagram-viewport";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { loadMermaid } from "../../core/mermaid-loader";
+import { PHONE_MEDIA_QUERY } from "../../core/mobile-layout";
 import type { ToolsText } from "./i18n";
 import {
   createPaneAction,
@@ -69,7 +70,17 @@ export function createMermaidTool(
         }
         if (signal.aborted) return;
         // 解析に失敗したときは例外ではなく「SVG が生えない」形で返ってくる。
-        if (node.querySelector("svg")) {
+        const svg = node.querySelector("svg");
+        if (svg) {
+          // 電話の段では図をもとの大きさで描き、指で動かして読む (面の幅に縮める
+          // とノードの文字が 5px になった)。mermaid はもとの幅を max-width に書く。
+          if (
+            window.matchMedia?.(PHONE_MEDIA_QUERY).matches &&
+            svg.style.maxWidth
+          ) {
+            svg.style.width = svg.style.maxWidth;
+            svg.style.maxWidth = "none";
+          }
           pane.setStatus("");
           return;
         }

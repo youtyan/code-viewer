@@ -15,6 +15,7 @@ import {
 import { PassThrough, Readable, Writable } from "node:stream";
 import { hasControlCharacter } from "../core/control-chars";
 import { errorWithCause, formatErrorDetail } from "../core/error-detail";
+import { type ByteRange, parseHttpByteRange } from "./range";
 
 /** `/events` sends this often; the entry proxy allows three missed beats. */
 export const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
@@ -592,6 +593,44 @@ export function fileByteRangeResponseBody(
   return Readable.toWeb(
     createReadStream(path, { start, end: endInclusive }),
   ) as unknown as ReadableStream<Uint8Array>;
+}
+
+/**
+ * 実ファイル 1 つを、要求の Range を見て返す (部分は 206、範囲外は 416、
+ * Range が無いか読めない形なら全体を 200)。Safari の video は Range で取りに
+ * くるので、全体しか返さないと再生できない。
+ *
+ * @param headersFor 返すヘッダ。range は部分を返すときだけ渡す
+ */
+export function rangedFileResponse(
+  req: Request,
+  path: string,
+  size: number,
+  headersFor: (range?: ByteRange) => HeadersInit,
+): Response {
+  const header = req.headers.get("range");
+  const result = header ? parseHttpByteRange(header, size) : null;
+  if (result?.kind === "unsatisfiable") {
+    return new Response(null, {
+      status: 416,
+      headers: {
+        ...headersFor(),
+        "Content-Range": `bytes */${size}`,
+        "Content-Length": "0",
+      },
+    });
+  }
+  const range = result?.kind === "range" ? result.range : undefined;
+  const body =
+    req.method === "HEAD"
+      ? null
+      : range
+        ? fileByteRangeResponseBody(path, range.start, range.end)
+        : fileReadableStream(path);
+  return new Response(body, {
+    status: range ? 206 : 200,
+    headers: headersFor(range),
+  });
 }
 
 export async function readFileTextRange(

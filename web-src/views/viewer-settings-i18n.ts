@@ -38,8 +38,9 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
   en: {
     display: "Display",
     theme: "Light or dark",
-    themeHelp:
-      "Applies as soon as you pick it. The T key switches between light and dark.",
+    themeHelp: "Applies as soon as you pick it.",
+    // 前の文と同じ段落に続ける (日本語は句点で区切れるので空けない)。
+    themeKeyHelp: " The T key switches between light and dark.",
     themeNames: {
       dark: "Dark",
       light: "Light",
@@ -184,7 +185,8 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
   ja: {
     display: "表示",
     theme: "明暗",
-    themeHelp: "選ぶとすぐ効きます。T キーでライトとダークを切り替えます。",
+    themeHelp: "選ぶとすぐ効きます。",
+    themeKeyHelp: "T キーでライトとダークを切り替えます。",
     themeNames: {
       dark: "ダーク",
       light: "ライト",

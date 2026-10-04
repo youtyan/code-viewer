@@ -1286,7 +1286,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(l.terminal.readOnly),
                   " from the tab's right-click menu.",
                 ],
-                "Images whose paths appear in the terminal are listed on the shelf at the right; select one to open it in an image tab.",
+                "Images and videos (MP4, WebM, MOV) whose paths appear in the terminal are listed on the shelf at the right; select one to open it in an image tab, then use the arrow keys to move to the next or previous one.",
                 [
                   "The shelf groups images by the pane they came from; hover one to outline that pane and show its path in the shelf header. Choose ",
                   ui(l.terminal.imageShowInTerminal),
@@ -1505,6 +1505,13 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   " shows only on Files, Diff, History and Worktrees, and opens that screen's list.",
                 ],
                 "The tab strip shows only the tab in front. The square with a number at its right end lists every open tab.",
+                [
+                  "Data shows the table full screen. ",
+                  ui(l.database.nav.phoneList),
+                  " at the top opens the list; tap a table or key, or ",
+                  ui(l.database.nav.phoneListBack),
+                  " above the list, to go back.",
+                ],
                 [
                   "History opens with its commit list. Tap a commit for its diff; ",
                   ui(l.history.backToList),

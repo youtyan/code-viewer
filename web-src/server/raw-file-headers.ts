@@ -100,7 +100,7 @@ export function fileMetadataHeaders(
 export function rawFileHeaders(
   path: string,
   opts: RawFileHeaderOptions = {},
-): HeadersInit {
+): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": inferRawContentType(path, opts),
     "Cache-Control": "no-store",

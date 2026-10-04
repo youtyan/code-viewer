@@ -24,6 +24,8 @@ import {
   responseErrorMessage,
 } from "../../core/error-detail";
 import {
+  CHEVRON_LEFT_16_PATH,
+  iconSvg,
   PENCIL_16_PATH,
   PLUS_16_PATH,
   SEARCH_16_PATH,
@@ -594,7 +596,10 @@ function createTabPane(
 
   const tableList = createTableList({
     getLanguage: () => outerDeps.getLanguage?.() ?? "en",
-    onSelectTable: (table) => selectTable(table),
+    onSelectTable: (table) => {
+      closePhoneList();
+      void selectTable(table);
+    },
     onViewCreateTable: (table) => showDdl(table),
     onViewDefinition: (table) => showSchema(table),
     getColumns: (table) => fetchColumns(table),
@@ -1247,6 +1252,53 @@ function createTabPane(
 
   const container = document.createElement("div");
   container.className = "db-container";
+
+  // 電話の段: 接続とテーブルの一覧を、表 (Redis などの画面も) と別のページにする。
+  // 縦に積むと表の行の高さが 0 になり、データが 1 行も見えなかった。一覧はこの
+  // ボタンで開き、テーブルを選ぶか接続を切り替えたら閉じる (出し分けは style.css
+  // の SP の節。デスクトップではボタンを出さない)。
+  const phoneListButton = document.createElement("button");
+  phoneListButton.type = "button";
+  phoneListButton.className = "db-phone-list-open";
+  phoneListButton.innerHTML = iconSvg("db-phone-list-open-icon", [
+    CHEVRON_LEFT_16_PATH,
+  ]);
+  const phoneListLabel = document.createElement("span");
+  phoneListButton.append(phoneListLabel);
+  reloc(() => {
+    phoneListLabel.textContent = paneText().nav.phoneList;
+  });
+  phoneListButton.addEventListener("click", () => {
+    container.classList.add("db-phone-list");
+  });
+  mainContent.prepend(phoneListButton);
+  // 一覧のページから表へ戻る (テーブルを選び直すほかに戻り方が無かった)。
+  const phoneListBack = document.createElement("button");
+  phoneListBack.type = "button";
+  phoneListBack.className = "db-phone-list-back";
+  phoneListBack.innerHTML = iconSvg("db-phone-list-open-icon", [
+    CHEVRON_LEFT_16_PATH,
+  ]);
+  const phoneListBackLabel = document.createElement("span");
+  phoneListBack.append(phoneListBackLabel);
+  reloc(() => {
+    phoneListBackLabel.textContent = paneText().nav.phoneListBack;
+  });
+  phoneListBack.addEventListener("click", () => closePhoneList());
+  sidebar.prepend(phoneListBack);
+  function closePhoneList(): void {
+    container.classList.remove("db-phone-list");
+  }
+  // Redis・Elasticsearch・DynamoDB・S3 の一覧も一覧の側にある。中身を表の側に出す
+  // 項目 (DB・インデックス・テーブル・オブジェクト) を押したら表の側に戻す
+  // (SQL のテーブルは onSelectTable。開閉の三角を押しても閉じないように)。
+  sidebar.addEventListener("click", (event) => {
+    if (
+      event.target instanceof Element &&
+      event.target.closest(PHONE_LIST_EXPLORER_ITEMS)
+    )
+      closePhoneList();
+  });
   // 下から: dock (タブストリップ常駐) → resizer (pane open 時のみ表示) → pane
   // → 上に upperArea。表示順は flex column で上から upperArea → resizer
   // → pane → dock。
@@ -2131,6 +2183,7 @@ function createTabPane(
   }
 
   dbSelect.addEventListener("change", () => {
+    closePhoneList();
     void handleDbSelectChange();
   });
 
@@ -2683,7 +2736,7 @@ function createTabPane(
   };
 }
 
-// ----- アイコンツールバー (案 B 改: TablePlus / Beekeeper 風) -----
+// ----- アイコンツールバー (案 B 改: 一覧の上端のアイコンの帯) -----
 // octicon / bootstrap-icons ベースの 16x16 path。currentColor で描画して
 // hover / active 時の色変更を CSS から制御できるようにする。
 
@@ -2724,6 +2777,14 @@ function makeIconButton(opts: {
 }
 
 /** アイコンボタンの title / aria-label を言語切替時に再適用する。 */
+/**
+ * 押したら電話の段で一覧の側を閉じる、各 explorer の一覧の項目と、ER 図・横断
+ * 検索・スナップショットのボタン (結果は表の側に出る。閉じないと押しても一覧の
+ * ままで何も起きないように見えた)。
+ */
+const PHONE_LIST_EXPLORER_ITEMS =
+  ".redis-db-item, .es-index-item, .dynamodb-table-item, .s3-object-item, .tree-file, .db-icon-toolbar .db-icon-btn";
+
 function localizeIconButton(
   btn: HTMLButtonElement,
   label: string,

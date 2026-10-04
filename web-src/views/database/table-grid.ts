@@ -25,6 +25,7 @@ import {
   SYNC_16_PATH,
 } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
+import { PHONE_MEDIA_QUERY } from "../../core/mobile-layout";
 import {
   highlightToInnerHtml,
   loadShikiHighlighter,
@@ -498,8 +499,23 @@ export function createTableGrid(
   detailResize.addEventListener("mousedown", startDetailResize);
   detailPanel.appendChild(detailResize);
 
-  viewport.append(spacer, body, filteredEmpty);
-  el.append(filterBar, headerWrap, filterRowWrap, viewport, detailPanel);
+  // 列の見出しと絞り込みの行は、本文と同じスクロールの箱の中で上に貼り付ける
+  // (style.css の .db-grid-head)。別の箱にして本文の scroll のたびに JS で
+  // scrollLeft を合わせていた頃は、iPhone の Safari で横に送ると見出しが遅れて
+  // 引っかかり、遅かった。行 (spacer と body) は頭の下の箱に置く。
+  const head = document.createElement("div");
+  head.className = "db-grid-head";
+  head.append(headerWrap, filterRowWrap);
+  const rowsArea = document.createElement("div");
+  rowsArea.className = "db-grid-rows";
+  rowsArea.append(spacer, body);
+  viewport.append(head, rowsArea, filteredEmpty);
+  el.append(filterBar, viewport, detailPanel);
+
+  /** 行が見える高さ (本文の箱から、上に貼り付けた頭の高さを引く)。 */
+  function rowsViewHeight(): number {
+    return Math.max(0, viewport.clientHeight - head.offsetHeight);
+  }
 
   // セルの範囲を選んでコピーする (ドラッグ・Shift・⌘/Ctrl+A・⌘/Ctrl+C)。
   const rangeSelect = createGridRangeSelect({
@@ -566,8 +582,14 @@ export function createTableGrid(
   function leadingCellCount(): number {
     return recency.shown() ? 2 : 1;
   }
+  /**
+   * 左に固定した列の幅。電話の段では「変更」の列を固定しない (行番号と合わせて
+   * 145px を取り、データの列に幅が残らなかった。style.css の SP の節)。
+   */
   function pinnedWidth(): number {
-    return ROWNUM_WIDTH + (recency.shown() ? RECENCY_COLUMN_WIDTH : 0);
+    const recencyPinned =
+      recency.shown() && !window.matchMedia?.(PHONE_MEDIA_QUERY).matches;
+    return ROWNUM_WIDTH + (recencyPinned ? RECENCY_COLUMN_WIDTH : 0);
   }
 
   function setActiveCell(rowIndex: number, colIndex: number) {
@@ -609,15 +631,6 @@ export function createTableGrid(
     setActiveCell(-1, -1);
   }
 
-  // ヘッダ / フィルタ行の横位置を本文に合わせる。scroll イベントだけで呼ぶと、
-  // 本文がスクロールしないまま両者がずれた場合 (ヘッダ再構築での scrollLeft
-  // リセット、フィルタ入力へのフォーカスによる自動スクロール、幅変化に伴う
-  // clamp) にずれたままになるので、描画のたびに引き直す。
-  function syncHorizontalScroll() {
-    headerWrap.scrollLeft = viewport.scrollLeft;
-    filterRowWrap.scrollLeft = viewport.scrollLeft;
-  }
-
   // クリックでも矢印キーでも「いまどのセルに居るか」をここで確定する。
   // viewport へフォーカスを移すのは、直後の矢印キーをこのグリッドで
   // 受けるため (viewport は tabIndex=0)。
@@ -649,7 +662,7 @@ export function createTableGrid(
   // 1 セルずつ動かすたびに画面が飛ぶため)。clientHeight / clientWidth が 0
   // のとき (非表示・レイアウト前) は測れないので何もしない。
   function scrollCellIntoView(rowIndex: number, colIndex: number) {
-    const viewHeight = viewport.clientHeight;
+    const viewHeight = rowsViewHeight();
     if (viewHeight > 0) {
       const top = rowIndex * currentRowHeight();
       const bottom = top + currentRowHeight();
@@ -929,6 +942,9 @@ export function createTableGrid(
   // 相対位置を計算するために参照する (CSS transform を regex で読むのは
   // translate3d 等のフォーマット変更で簡単に壊れるので state を持つ)。
   let renderStartRow = 0;
+  // 描いてある行の終わり (含まない) と、次の描画で作り直すか (renderViewport)。
+  let renderedEndRow = 0;
+  let rebuildPending = true;
   // 現在のテーブルで外部キーを持つカラム名（ヘッダーのリンクアイコン表示用）。
   const fkColumns = new Set<string>();
 
@@ -2194,7 +2210,6 @@ export function createTableGrid(
     }
     renderFilterRow();
     syncContentWidth();
-    syncHorizontalScroll();
   }
 
   function startResize(colIndex: number, startEvent: MouseEvent) {
@@ -2289,24 +2304,6 @@ export function createTableGrid(
     }, FILTER_DEBOUNCE_MS);
   }
 
-  // 本文の縦スクロールバーが食う幅。ヘッダ / フィルタ行はこの幅ぶんを右端に
-  // 空けることで、横スクロールできる範囲を本文と一致させる (空けないと本文
-  // だけ余分に右へスクロールでき、右端で列がずれる)。viewport 側は
-  // scrollbar-gutter: stable なので、行数やフィルタで値が動かない。
-  let scrollbarGutterPx = -1;
-  function syncScrollbarGutter() {
-    // 非表示のタブやレイアウト前は 0 しか返らないので、両方が実寸を返す
-    // ときだけ更新する。片方でも欠けた値で計算すると、前回測った正しい値を
-    // 壊してしまう。
-    const outer = viewport.offsetWidth;
-    const inner = viewport.clientWidth;
-    if (!(outer > 0) || !(inner > 0)) return;
-    const gutter = outer - inner;
-    if (gutter === scrollbarGutterPx) return;
-    scrollbarGutterPx = gutter;
-    el.style.setProperty("--db-grid-scrollbar-w", `${gutter}px`);
-  }
-
   // 列の合計幅 = ヘッダセルの実寸の合計。
   // headerRow.scrollWidth を使ってはいけない。.db-grid-header は
   // min-width:100% なので、列より枠が広いときはコンテナ幅まで膨らんだ値を
@@ -2325,7 +2322,6 @@ export function createTableGrid(
 
   function syncContentWidth() {
     requestAnimationFrame(() => {
-      syncScrollbarGutter();
       const w = measureContentWidth();
       if (w > 0) {
         spacer.style.minWidth = `${w}px`;
@@ -2922,24 +2918,32 @@ export function createTableGrid(
     return row;
   }
 
-  function renderViewport() {
+  /**
+   * 行を描く。スクロールで呼ぶときは "scroll": 描いてある行 (見える範囲の上下に
+   * OVERSCAN 行ずつ) が見える範囲を覆っている間は作り直さない。指で送る間、毎
+   * フレーム 50 行ほどを組み直し、スマホ (CPU 6 倍遅く) で 1 フレーム 45ms・
+   * 22fps になってカクついた。ほかの呼び出し (読み込み・並べ替え・編集など) は
+   * 中身が変わるので必ず作り直す。同じフレームに両方が来ても作り直しを落とさない
+   * よう、作り直しの要求は rebuildPending に残す。
+   */
+  function renderViewport(reason: "scroll" | "rebuild" = "rebuild") {
+    if (reason === "rebuild") rebuildPending = true;
     cancelAnimationFrame(rafId);
     rafId = requestAnimationFrame(() => {
       // IME 変換中は body を作り直すと入力中の composition が中断されるので、
       // この描画はスキップする (compositionend 後に再描画でキャッチアップする)。
       if (isComposing) return;
       const scrollTop = viewport.scrollTop;
-      const viewHeight = viewport.clientHeight;
+      const viewHeight = rowsViewHeight();
+      const rowHeight = currentRowHeight();
       const startRow = Math.max(
         0,
-        Math.floor(scrollTop / currentRowHeight()) - OVERSCAN,
+        Math.floor(scrollTop / rowHeight) - OVERSCAN,
       );
-      // setActiveCell が body 内インデックスを計算するために参照する。
-      renderStartRow = startRow;
       // 編集モードでは末尾に新規行ドラフトを足すので表示行数が増える。
       const endRow = Math.min(
         displayRowCount(),
-        Math.ceil((scrollTop + viewHeight) / currentRowHeight()) + OVERSCAN,
+        Math.ceil((scrollTop + viewHeight) / rowHeight) + OVERSCAN,
       );
 
       // ページ取得はデータ行 (< totalRows) の範囲だけ行う。
@@ -2951,6 +2955,22 @@ export function createTableGrid(
           ensurePage(p);
         }
       }
+
+      const covered =
+        !rebuildPending &&
+        Math.floor(scrollTop / rowHeight) >= renderStartRow &&
+        Math.min(
+          displayRowCount(),
+          Math.ceil((scrollTop + viewHeight) / rowHeight),
+        ) <= renderedEndRow;
+      if (covered) {
+        syncPager(scrollTop, viewHeight);
+        return;
+      }
+      rebuildPending = false;
+      // setActiveCell が body 内インデックスを計算するために参照する。
+      renderStartRow = startRow;
+      renderedEndRow = endRow;
 
       // 編集モードでは body 全体を作り直すとフォーカス中のセル入力が破棄され、
       // スクロールのたびにキャレットが飛ぶ。再描画前に「どのセルを編集中か」と
@@ -2984,7 +3004,7 @@ export function createTableGrid(
       body.innerHTML = "";
       selectedRowElement = null;
       activeCellElement = null;
-      body.style.transform = `translateY(${startRow * currentRowHeight()}px)`;
+      body.style.transform = `translateY(${startRow * rowHeight}px)`;
 
       for (let i = startRow; i < endRow; i++) {
         body.appendChild(
@@ -2993,9 +3013,6 @@ export function createTableGrid(
       }
       syncFilteredEmptyState();
       syncPager(scrollTop, viewHeight);
-      // 行を組み直すとヘッダ側の scrollLeft が clamp されることがあるので、
-      // 幅が確定したこのタイミングで横位置を引き直す。
-      syncHorizontalScroll();
 
       if (focusRestore) {
         const next = body.querySelector<HTMLInputElement>(
@@ -3055,10 +3072,7 @@ export function createTableGrid(
         // 1 画面ぶん (見えている最後の行が次の画面の先頭に残るよう 1 行引く)。
         viewport.scrollTop +=
           direction *
-          Math.max(
-            currentRowHeight(),
-            viewport.clientHeight - currentRowHeight(),
-          );
+          Math.max(currentRowHeight(), rowsViewHeight() - currentRowHeight());
       });
       return b;
     };
@@ -3075,7 +3089,7 @@ export function createTableGrid(
    */
   function syncPager(
     scrollTop = viewport.scrollTop,
-    viewHeight = viewport.clientHeight,
+    viewHeight = rowsViewHeight(),
   ): void {
     if (!pagerEl) return;
     const t = text().grid;
@@ -3269,27 +3283,10 @@ export function createTableGrid(
   });
 
   const onViewportScroll = () => {
-    syncHorizontalScroll();
-    renderViewport();
+    renderViewport("scroll");
   };
-  // ヘッダ / フィルタ行のラップは overflow:hidden だが、中の列フィルタ入力に
-  // フォーカスが入ると、ブラウザがそれを見せようとしてラップ自身を横スクロール
-  // させる。放っておくとフィルタ行だけが本文とずれたまま残る (本文がスクロール
-  // するまで直らない)。この場合の正しい挙動は「グリッド全体をその列まで動かす」
-  // ことなので、本文側へ反映して 3 つを同じ位置に揃え直す。
-  const onWrapScroll = (wrap: HTMLElement) => () => {
-    if (wrap.scrollLeft === viewport.scrollLeft) return;
-    viewport.scrollLeft = wrap.scrollLeft;
-    syncHorizontalScroll();
-  };
-  const onHeaderWrapScroll = onWrapScroll(headerWrap);
-  const onFilterWrapScroll = onWrapScroll(filterRowWrap);
   viewport.addEventListener("scroll", onViewportScroll, { passive: true });
   viewport.addEventListener("keydown", onViewportKeydown);
-  headerWrap.addEventListener("scroll", onHeaderWrapScroll, { passive: true });
-  filterRowWrap.addEventListener("scroll", onFilterWrapScroll, {
-    passive: true,
-  });
 
   // 編集セル入力の IME 変換境界を捕捉する (composition イベントは body から
   // バブリングする)。変換中は renderViewport をスキップし、確定後に再描画する。
@@ -3330,8 +3327,6 @@ export function createTableGrid(
     relatedListResizeDetach = null;
     viewport.removeEventListener("scroll", onViewportScroll);
     viewport.removeEventListener("keydown", onViewportKeydown);
-    headerWrap.removeEventListener("scroll", onHeaderWrapScroll);
-    filterRowWrap.removeEventListener("scroll", onFilterWrapScroll);
     body.removeEventListener("compositionstart", onCompositionStart);
     body.removeEventListener("compositionend", onCompositionEnd);
     // ドラッグ中の window リスナーが残らないよう、teardown 時に外す。

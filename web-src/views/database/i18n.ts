@@ -13,6 +13,10 @@ export type DbText = {
   nav: {
     dataTab: string;
     schemaTab: string;
+    /** 電話の段で接続とテーブルの一覧のページを開くボタン。 */
+    phoneList: string;
+    /** 電話の段で一覧のページから表 (中身の側) へ戻るボタン。 */
+    phoneListBack: string;
     selectDatastore: string;
     selectSchema: string;
     refreshDatastores: string;
@@ -582,6 +586,8 @@ export type DbText = {
 const EN: DbText = {
   nav: {
     dataTab: "Data",
+    phoneList: "Datastores and tables",
+    phoneListBack: "Back to the table",
     schemaTab: "Schema",
     selectDatastore: "Select datastore",
     selectSchema: "Select PostgreSQL schema",
@@ -1186,6 +1192,8 @@ const EN: DbText = {
 const JA: DbText = {
   nav: {
     dataTab: "データ",
+    phoneList: "接続とテーブル",
+    phoneListBack: "表に戻る",
     schemaTab: "スキーマ",
     selectDatastore: "データストアを選択",
     selectSchema: "PostgreSQL スキーマを選択",

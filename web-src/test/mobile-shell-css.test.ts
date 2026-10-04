@@ -260,14 +260,277 @@ describe("電話の段の骨格", () => {
     expect(declarationsOf(rules, [selector]).get("display")).toMatch(/^none/);
   });
 
-  // 選んだコミットの差分の頭の「‹ 履歴の一覧」は、一覧と差分が別のページになる
-  // 電話の段だけ。
+  // 一覧と中身が別のページになる電話の段だけに出す戻るボタン: 選んだコミットの
+  // 差分の頭の「‹ 履歴の一覧」と、データストアの「‹ 接続とテーブル」。
   test.each([
-    { name: "デスクトップ", css: () => baseRules(sheet), display: "none" },
-    { name: "電話", css: () => rules, display: "block" },
-  ])("$name の履歴の一覧へ戻るボタン", ({ css, display }) => {
-    expect(declarationsOf(css(), [".hci-back-slot"]).get("display")).toBe(
-      display,
+    { selector: ".hci-back-slot", desktop: "none", phone: "block" },
+    { selector: ".db-phone-list-open", desktop: "none", phone: "flex" },
+  ])(
+    "$selector はデスクトップ $desktop・電話 $phone",
+    ({ selector, desktop, phone }) => {
+      expect([
+        declarationsOf(baseRules(sheet), [selector]).get("display"),
+        declarationsOf(rules, [selector]).get("display"),
+      ]).toEqual([desktop, phone]);
+    },
+  );
+
+  // データストア: 接続とテーブルの一覧と、表 (Redis などの画面も) を別のページに
+  // する (縦に積むと表の行の高さが 0 になった)。Redis・Elasticsearch・DynamoDB の
+  // 中身の側の「一覧 | 詳細」は縦に積む (固定幅の一覧で詳細に幅が残らなかった)。
+  // Markdown の表は表の中で横に送る (本文ごと横に動いた)。
+  test.each([
+    {
+      selector: ".db-container:not(.db-phone-list) .db-sidebar",
+      property: "display",
+      value: "none",
+    },
+    {
+      selector: ".db-container.db-phone-list .db-main-content",
+      property: "display",
+      value: "none",
+    },
+    {
+      selector: ".redis-explorer",
+      property: "flex-direction",
+      value: "column",
+    },
+    { selector: ".es-explorer", property: "flex-direction", value: "column" },
+    {
+      selector: ".dynamodb-explorer",
+      property: "flex-direction",
+      value: "column",
+    },
+    {
+      selector: ".gdp-markdown-preview table",
+      property: "overflow-x",
+      value: "auto",
+    },
+    // 表の「変更」の列は固定しない (行番号と合わせてデータの列の幅を食った)。
+    {
+      selector: ".db-root .db-grid-recency",
+      property: "position",
+      value: "static",
+    },
+  ])(
+    "電話の段の $selector の $property は $value",
+    ({ selector, property, value }) => {
+      expect(declarationsOf(rules, [selector]).get(property)).toBe(value);
+    },
+  );
+
+  // 点検で見つけた、電話の段で読めなかった・使えなかった画面:
+  // - ファイルの「履歴」のタブは一覧とコミットを別のページにする (2 列のままでは
+  //   コミットの箱が 58px になり、件名が 1 文字ずつ縦に並んだ)
+  // - Blame は左の欄を狭くする (コードが 20px しか見えなかった)
+  // - 設定の保存の帯は文言とボタンを縦に積む (文言が幅 18px に潰れ帯が伸びた)
+  // - データストアの表は上の段ごと縦に送り、表は箱の見える高さを下限にする。
+  //   クエリ履歴・ログとセルの詳細は表の上に重ね、中の 2 列は縦に積む
+  test.each([
+    {
+      selector: ".gdp-file-history-embed",
+      property: "grid-template-columns",
+      desktop: "minmax(260px, 320px) minmax(0, 1fr)",
+      phone: "minmax(0, 1fr)",
+    },
+    {
+      selector:
+        ".gdp-file-history-embed:has(.history-item.active) .gdp-file-history-panel",
+      property: "display",
+      desktop: undefined,
+      phone: "none",
+    },
+    {
+      selector:
+        ".gdp-file-history-embed:not(:has(.history-item.active)) .gdp-file-history-diff-pane",
+      property: "display",
+      desktop: undefined,
+      phone: "none",
+    },
+    {
+      selector: ".gdp-blame-info",
+      property: "width",
+      desktop: "240px",
+      phone: "calc(var(--space-unit) * 28)",
+    },
+    {
+      selector: ".scope-settings-footer",
+      property: "grid-template-columns",
+      desktop: "minmax(0, 1fr) auto",
+      phone: "minmax(0, 1fr)",
+    },
+    {
+      selector: ".db-main-content",
+      property: "overflow-y",
+      desktop: undefined,
+      phone: "auto",
+    },
+    {
+      selector: ".db-grid",
+      property: "min-height",
+      desktop: undefined,
+      phone: "100%",
+    },
+    {
+      selector:
+        ".db-container:has(> .db-history-pane:not([hidden])) > .db-upper-area",
+      property: "visibility",
+      desktop: undefined,
+      phone: "hidden",
+    },
+    {
+      selector: ".db-grid-detail-panel",
+      property: "position",
+      desktop: "relative",
+      phone: "absolute",
+    },
+    {
+      selector: ".db-query-history-body-split",
+      property: "flex-direction",
+      desktop: undefined,
+      phone: "column",
+    },
+    {
+      selector: '.db-grid-edit-controls:not(:has(> [aria-hidden="false"]))',
+      property: "display",
+      desktop: undefined,
+      phone: "none",
+    },
+  ])(
+    "$selector の $property はデスクトップ $desktop・電話 $phone",
+    ({ selector, property, desktop, phone }) => {
+      expect([
+        declarationsOf(baseRules(sheet), [selector]).get(property),
+        declarationsOf(rules, [selector]).get(property),
+      ]).toEqual([desktop, phone]);
+    },
+  );
+
+  // 狭い幅ではみ出す・切れていたもの (点検の中程度)。
+  test.each([
+    { selector: ".gdp-open-path", property: "display", phone: "none" },
+    { selector: "#topbar .controls .seg", property: "display", phone: "none" },
+    {
+      selector: ".agents-accounts-cards",
+      property: "grid-template-columns",
+      phone: "minmax(0, 1fr)",
+    },
+    { selector: ".agents-accounts-head", property: "flex-wrap", phone: "wrap" },
+    {
+      selector: ".agents-notify-help",
+      property: "white-space",
+      phone: "normal",
+    },
+    {
+      selector: ".db-schema-view th",
+      property: "white-space",
+      phone: "nowrap",
+    },
+    {
+      selector: ".shortcut-row-head > .shortcut-keys",
+      property: "grid-column",
+      phone: "1 / -1",
+    },
+    { selector: ".gdp-help-table", property: "overflow-x", phone: "auto" },
+    { selector: ".db-phone-list-back", property: "display", phone: "flex" },
+    {
+      selector: ".gdp-file-detail-wrapper",
+      property: "--pad-doc",
+      phone: "var(--space-3)",
+    },
+  ])(
+    "電話の段の $selector の $property は $phone",
+    ({ selector, property, phone }) => {
+      expect(declarationsOf(rules, [selector]).get(property)).toBe(phone);
+    },
+  );
+
+  // 点検の軽微: Files の絞り込みの段・Tools の Markdown の余白・作業ツリーの札。
+  test.each([
+    {
+      selector: ".gdp-repo-filter-clear:disabled",
+      property: "display",
+      phone: "none",
+    },
+    { selector: ".gdp-repo-search-bar", property: "flex-wrap", phone: "wrap" },
+    {
+      selector: ".tools-pane-markdown .gdp-markdown-preview",
+      property: "padding-inline",
+      phone: "0",
+    },
+    {
+      selector:
+        "body[data-worktree-overview] #worktree-panel .worktree-row-head",
+      property: "flex-wrap",
+      phone: "wrap",
+    },
+  ])(
+    "電話の段の $selector の $property は $phone",
+    ({ selector, property, phone }) => {
+      expect(declarationsOf(rules, [selector]).get(property)).toBe(phone);
+    },
+  );
+
+  test("キーボードの案内は指の画面で出さず、横向きでは差分の 2 列を選べる", () => {
+    expect({
+      keyHint: declarationsOf(withTiers(TOUCH), [".gdp-key-hint"]).get(
+        "display",
+      ),
+      portraitSeg: declarationsOf(rules, ["#topbar .controls .seg"]).get(
+        "display",
+      ),
+      landscapeSeg: declarationsOf(withTiers(PHONE, PHONE_LANDSCAPE), [
+        "#topbar .controls .seg",
+      ]).get("display"),
+      darkControls: declarationsOf(baseRules(sheet), [
+        ':root[data-theme="dark"]',
+      ]).get("color-scheme"),
+    }).toEqual({
+      keyHint: "none",
+      portraitSeg: "none",
+      landscapeSeg: "inline-flex",
+      darkControls: "dark",
+    });
+  });
+
+  test("端末の操作札の Enter (端末は ⌨ も) は帯の右端に留める", () => {
+    const tier = withTiers(SOFT_KEYS);
+    expect({
+      enter: declarationsOf(tier, ['.mobile-key[data-key="enter"]']).get(
+        "position",
+      ),
+      keyboard: declarationsOf(tier, [".mobile-keys .mobile-key-keyboard"]).get(
+        "right",
+      ),
+      shellEnter: declarationsOf(tier, [
+        '.mobile-keys .mobile-key[data-key="enter"]',
+      ]).get("right"),
+      paneEnter: declarationsOf(tier, [
+        '.pane-view-keys .mobile-key[data-key="enter"]',
+      ]).get("right"),
+    }).toEqual({
+      enter: "sticky",
+      keyboard: "0",
+      shellEnter: "calc(var(--sp-touch) + var(--space-1))",
+      paneEnter: "0",
+    });
+  });
+
+  // デスクトップでも同じ: ダイアログの欄と作業ツリーの欄は中身の幅を超えない。
+  test.each([
+    {
+      selector: ".gdp-dialog-input",
+      property: "box-sizing",
+      value: "border-box",
+    },
+    {
+      selector: ".worktree-form",
+      property: "min-width",
+      value: "min(340px, 100%)",
+    },
+  ])("$selector の $property は $value", ({ selector, property, value }) => {
+    expect(declarationsOf(baseRules(sheet), [selector]).get(property)).toBe(
+      value,
     );
   });
 

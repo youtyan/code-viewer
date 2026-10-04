@@ -109,6 +109,8 @@ export type TerminalViewHandle = {
   localize(): void;
   /** 画像の棚の置き場所と大きさを設定から当て直す (設定の欄・別の窓で変えたとき)。 */
   applyImageShelfLayout(): void;
+  /** 画像のタブが出している画像 (無ければ null)。全部の棚の印を合わせる。 */
+  markOpenedImage(path: string | null): void;
   dispose(): void;
   /** メインの面 (左 / 右) のターミナルの置き場所。app がその面の箱に置く。 */
   tabPaneFor(side: TabSide): HTMLElement;
@@ -693,6 +695,9 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     menuItems,
     applyImageShelfLayout() {
       for (const slot of slots()) slot.screen.applyImageShelfLayout();
+    },
+    markOpenedImage(path) {
+      for (const slot of slots()) slot.screen.markOpenedImage(path);
     },
     localize() {
       for (const slot of slots()) slot.screen.localize();

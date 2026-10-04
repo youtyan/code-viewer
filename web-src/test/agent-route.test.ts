@@ -10,10 +10,12 @@ import {
   constants,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -566,6 +568,14 @@ describe("出力から拾った画像の解決", () => {
       join(repo, "huge.png"),
       Buffer.alloc(MAX_PASTE_IMAGE_BYTES + 1),
     );
+    writeFileSync(join(repo, "clip.mp4"), "mp4");
+    writeFileSync(join(repo, "clip.webm"), "web");
+    writeFileSync(join(repo, "clip.MOV"), "mov");
+    // 動画の大きさは中身を書かずに伸ばす (疎なファイル)。
+    writeFileSync(join(repo, "long.mp4"), "");
+    truncateSync(join(repo, "long.mp4"), MAX_PASTE_IMAGE_BYTES + 1);
+    writeFileSync(join(repo, "endless.mp4"), "");
+    truncateSync(join(repo, "endless.mp4"), 2 * 1024 ** 3 + 1);
     writeFileSync(join(repo, "locked.png"), "png");
     chmodSync(join(repo, "locked.png"), 0o000);
     try {
@@ -643,6 +653,36 @@ describe("出力から拾った画像の解決", () => {
       name: ".git の中も置き場としては区別しない",
       candidate: () => ".git/internal.png",
       expected: () => ok(real(repo, ".git", "internal.png")),
+    },
+    {
+      name: "動画 (MP4)",
+      candidate: () => "clip.mp4",
+      expected: () => ok(real(repo, "clip.mp4")),
+    },
+    {
+      name: "動画 (WebM)",
+      candidate: () => "clip.webm",
+      expected: () => ok(real(repo, "clip.webm")),
+    },
+    {
+      name: "動画 (大文字の MOV)",
+      candidate: () => "clip.MOV",
+      expected: () => ok(real(repo, "clip.MOV")),
+    },
+    {
+      name: "動画は画像の上限を超えても配る",
+      candidate: () => "long.mp4",
+      expected: () => ok(real(repo, "long.mp4"), MAX_PASTE_IMAGE_BYTES + 1),
+    },
+    {
+      name: "動画の上限を超えた大きさ",
+      candidate: () => "endless.mp4",
+      expected: () => ({
+        status: "rejected",
+        reason: "too-large",
+        path: real(repo, "endless.mp4"),
+        bytes: 2 * 1024 ** 3 + 1,
+      }),
     },
     {
       name: "実在しない",
@@ -961,6 +1001,65 @@ describe("/_agent/image", () => {
     expect(res?.headers.get("Content-Security-Policy")).toBe("sandbox");
     const body = await res?.arrayBuffer();
     expect(body?.byteLength).toBe(statSync(path).size);
+  });
+
+  // Safari の video は Range で取りにくる。全体の 200 しか返さないと再生しない。
+  test.each([
+    {
+      name: "先頭の 2 バイト",
+      range: () => "bytes=0-1",
+      status: 206,
+      part: () => [0, 1],
+    },
+    {
+      name: "末尾から 4 バイト",
+      range: () => "bytes=-4",
+      status: 206,
+      part: (size: number) => [size - 4, size - 1],
+    },
+    {
+      name: "終わりを省いた範囲",
+      range: () => "bytes=10-",
+      status: 206,
+      part: (size: number) => [10, size - 1],
+    },
+    {
+      name: "読めない形は全体",
+      range: () => "items=0-1",
+      status: 200,
+      part: (size: number) => [0, size - 1],
+    },
+  ])("Range: $name", async ({ range, status, part }) => {
+    const path = realpathSync(join(process.cwd(), "web/favicon.png"));
+    const whole = readFileSync(path);
+    const [start = 0, end = 0] = part(whole.length);
+    const res = await call(`/_agent/image?path=${encodeURIComponent(path)}`, {
+      headers: { Range: range() },
+    });
+    expect({
+      status: res?.status,
+      contentRange: res?.headers.get("Content-Range"),
+      contentLength: res?.headers.get("Content-Length"),
+      body: Buffer.from((await res?.arrayBuffer()) ?? new ArrayBuffer(0)),
+    }).toEqual({
+      status,
+      contentRange:
+        status === 206 ? `bytes ${start}-${end}/${whole.length}` : null,
+      contentLength: String(end - start + 1),
+      body: whole.subarray(start, end + 1),
+    });
+  });
+
+  test("Range が大きさの外なら 416", async () => {
+    const path = realpathSync(join(process.cwd(), "web/favicon.png"));
+    const { size } = statSync(path);
+    const res = await call(`/_agent/image?path=${encodeURIComponent(path)}`, {
+      headers: { Range: `bytes=${size}-` },
+    });
+    expect({
+      status: res?.status,
+      contentRange: res?.headers.get("Content-Range"),
+    }).toEqual({ status: 416, contentRange: `bytes */${size}` });
   });
 
   test.each([

@@ -138,7 +138,7 @@ beforeEach(() => {
       </div>
       <aside id="file-list">
         <ul id="file-list-rows">
-          <li class="tree-dir"><span class="dir-label">lib</span></li>
+          <li class="tree-dir"><span class="chev"></span><span class="dir-label">lib</span></li>
           <li class="tree-file"><span class="file-label">b.ts</span></li>
         </ul>
       </aside>
@@ -388,9 +388,16 @@ describe("面 (一覧の列) と下端の帯", () => {
       selector: "#filelist .tree-dir .dir-label",
       closes: false,
     },
+    // ファイル一覧のフォルダの行は、そのフォルダを本文に開く (閉じないと、押した
+    // 結果が面の下に隠れた)。三角は開閉だけ。
     {
-      name: "ファイル一覧のフォルダの行 (開くだけ)",
+      name: "ファイル一覧のフォルダの行",
       selector: "#file-list-rows .tree-dir .dir-label",
+      closes: true,
+    },
+    {
+      name: "ファイル一覧のフォルダの三角 (開閉だけ)",
+      selector: "#file-list-rows .tree-dir .chev",
       closes: false,
     },
   ])("$name を押すと面を閉じる: $closes", ({ selector, closes }) => {

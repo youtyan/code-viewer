@@ -101,8 +101,10 @@ const DRAWER_CLOSING_TARGETS =
   ".nav-agent, .nav-project-toggle, a[href], #nav-launch, #search-btn";
 
 /**
- * 押したら面を閉じるもの (ファイル・コミット・画面の入口・タブ列)。フォルダの行
- * では閉じない。コミットは閉じて、本文にそのコミットの差分を出す (閉じないと、
+ * 押したら面を閉じるもの (ファイル・コミット・画面の入口・タブ列)。変更ファイルの
+ * 一覧のフォルダの行では閉じない (開閉するだけ)。ファイル一覧のフォルダの行は
+ * そのフォルダを本文に開くので閉じる (開閉は三角とフォルダの絵。そこでは閉じない)。
+ * コミットは閉じて、本文にそのコミットの差分を出す (閉じないと、
  * 押した結果が面の下に隠れ、何が起きたか分からない)。ファイルを絞りたいときは
  * 「一覧」を開き直すと、そのコミットの変更ファイルが面の下の段に出る。面は
  * タブ列の下を全部使い、タブ列は覆わない (＋のメニューなどが面の下に出る)。
@@ -110,6 +112,8 @@ const DRAWER_CLOSING_TARGETS =
 function closesSheet(target: Element): boolean {
   if (target.closest(".view-strip-item, .history-item, #main-tabs"))
     return true;
+  if (target.closest("#file-list-rows .tree-dir"))
+    return !target.closest(".chev, .dir-icon");
   // ファイル一覧 (#file-list-rows) と変更ファイルの一覧 (#filelist) の行。
   const row = target.closest("#filelist li, #file-list-rows li");
   return row !== null && !row.classList.contains("tree-dir");

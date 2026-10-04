@@ -246,6 +246,17 @@ describe("image tab navigation", () => {
       key: "ArrowLeft",
       expected: "/tmp/third-image.png",
     },
+    // 縦に並ぶ棚から開いたとき、棚と同じ向きで送れる。
+    {
+      name: "down moves to the next image",
+      key: "ArrowDown",
+      expected: "/tmp/second-image.png",
+    },
+    {
+      name: "up wraps to the last image",
+      key: "ArrowUp",
+      expected: "/tmp/third-image.png",
+    },
   ])("$name", ({ key, expected }) => {
     const view = createView({ images: [FIRST, SECOND, THIRD] });
     loadImage(view);
@@ -401,6 +412,75 @@ describe("image tab layout and failures", () => {
     view.dispose();
 
     expect(resize.disconnected).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("image tab video", () => {
+  const CLIP: TerminalImageRef = {
+    path: "/tmp/sample-clip.mp4",
+    candidate: "/tmp/sample-clip.mp4",
+    name: "sample-clip.mp4",
+    url: "/image/clip",
+    bytes: 400,
+    mtimeMs: 4,
+  };
+
+  test("a video plays with controls and fits like an image", () => {
+    const view = createView({ image: CLIP });
+    const clip = view.el.querySelector<HTMLVideoElement>("video");
+    if (!clip) throw new Error("image tab did not mount its video");
+    const canvas = view.el.querySelector<HTMLElement>(".image-tab-canvas");
+    if (!canvas) throw new Error("image tab has no canvas");
+    vi.spyOn(canvas, "getBoundingClientRect").mockImplementation(() =>
+      rect(640, 600),
+    );
+    Object.defineProperties(clip, {
+      videoWidth: { configurable: true, value: 1280 },
+      videoHeight: { configurable: true, value: 720 },
+    });
+    clip.dispatchEvent(new Event("loadedmetadata"));
+    expect({
+      controls: clip.controls,
+      muted: clip.muted,
+      src: clip.getAttribute("src"),
+      dimensions: view.el.querySelector(".image-tab-dimensions")?.textContent,
+      width: clip.style.width,
+      status: view.el.querySelector<HTMLElement>(".image-tab-status")?.hidden,
+    }).toEqual({
+      controls: true,
+      muted: false,
+      src: "/image/clip",
+      dimensions: "1280×720",
+      width: "640px",
+      status: true,
+    });
+  });
+
+  test("moving on from a focused video keeps the focus in the tab", () => {
+    const view = createView({ image: CLIP, images: [CLIP, FIRST] });
+    const clip = view.el.querySelector<HTMLVideoElement>("video");
+    if (!clip) throw new Error("image tab did not mount its video");
+    clip.tabIndex = 0;
+    clip.focus();
+    press(view, "ArrowDown");
+    expect({
+      path: view.el.querySelector(".image-tab-path")?.textContent,
+      focused: document.activeElement === view.el,
+    }).toEqual({ path: "/tmp/sample-image.png", focused: true });
+  });
+
+  test("an unplayable video keeps the media error code and message", () => {
+    const view = createView({ image: CLIP });
+    const clip = view.el.querySelector<HTMLVideoElement>("video");
+    if (!clip) throw new Error("image tab did not mount its video");
+    Object.defineProperty(clip, "error", {
+      configurable: true,
+      value: { code: 4, message: "sample decoder message" },
+    });
+    clip.dispatchEvent(new Event("error"));
+    expect(
+      view.el.querySelector<HTMLElement>(".image-tab-status")?.textContent,
+    ).toContain("Event: error · MediaError 4: sample decoder message");
   });
 });
 

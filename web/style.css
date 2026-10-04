@@ -239,6 +239,11 @@
    画面がライトでも面の中はそのテーマのダークになる。塊の後ろの並びと詳細度は
    html のダークと同じ順 (:root → ダーク → テーマ → テーマのダーク) になるよう、
    テーマの塊にはテーマの属性を足した形で書く (terminal-tone-css.test.ts)。 */
+/* 色を決めていない部品 (日付の欄・チェックボックス・スクロールバーの角) もダーク
+   で描く。無いとダークの画面に白い四角が出た。 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
 [data-theme="dark"],
 [data-terminal-tone="dark"] [data-terminal-surface] {
   --color-ground:       #101014;
@@ -9858,7 +9863,9 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-width: 340px;
+  /* ダイアログの中身の幅を超えない (390px の電話では中身が 326px で、欄が右に
+     はみ出し説明が切れた)。 */
+  min-width: min(340px, 100%);
   margin-top: 6px;
 }
 
@@ -11398,7 +11405,7 @@ body.journal-task-editor-resizing * {
 }
 .db-history-pane[hidden] { display: none; }
 
-/* ---------- Icon toolbar (案 B 改: TablePlus / Beekeeper 風) ---------- */
+/* ---------- Icon toolbar (案 B 改: 一覧の上端のアイコンの帯) ---------- */
 .db-icon-toolbar {
   display: flex;
   flex-direction: row;
@@ -11507,6 +11514,12 @@ body.journal-task-editor-resizing * {
 }
 
 /* ---------- Sidebar ---------- */
+/* 電話の段で接続とテーブルの一覧を開くボタンと、一覧から表へ戻るボタン
+   (database-view.ts)。デスクトップは出さない。 */
+.db-phone-list-open,
+.db-phone-list-back {
+  display: none;
+}
 .db-sidebar {
   width: 260px;
   min-width: 120px;
@@ -12013,17 +12026,19 @@ body.journal-task-editor-resizing * {
   font-size: var(--db-font-base);
 }
 
+/* 列の見出しと絞り込みの行の頭。本文と同じスクロールの箱 (.db-grid-viewport)
+   の中で上に貼り付け、横にはブラウザが本文と一緒に動かす (table-grid.ts)。
+   箱を分けて JS で scrollLeft を合わせていた頃は、iPhone の Safari で横に
+   送ると見出しが遅れて引っかかった。頭の中の箱は overflow を持たない (持つと
+   行番号の列の sticky がその箱の中で止まる)。 */
+.db-grid-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  width: max-content;
+  min-width: 100%;
+}
 .db-grid-header-wrap {
-  flex-shrink: 0;
-  overflow: hidden;
-  /* 本文 (.db-grid-viewport) の縦スクロールバーが食う幅を、右端に透明な
-     border として空ける。空けないと「見える幅」が本文だけ狭くなり、本文が
-     右へ余分にスクロールできてしまう。ヘッダは scrollLeft を同期しても
-     そこまで追随できず、右端で列がスクロールバー幅ぶんずれる。
-     scrollbar-gutter は overflow:hidden だと見た目の幅しか縮まず、
-     スクロール範囲は縮まないので使えない (実測済み)。
-     幅は table-grid.ts が実測して --db-grid-scrollbar-w に入れる。 */
-  border-right: var(--db-grid-scrollbar-w, 0px) solid transparent;
   border-bottom: 2px solid var(--border);
   background: var(--bg-soft);
 }
@@ -12068,9 +12083,8 @@ body.journal-task-editor-resizing * {
   flex: 1;
   overflow: auto;
   position: relative;
-  /* 行が少なくて縦スクロールバーが出ないときも幅を変えない。ここを可変に
-     すると、ヘッダ / フィルタ行に渡す --db-grid-scrollbar-w が行数やフィルタで
-     変わり、列の位置が動く。 */
+  /* 行が少なくて縦スクロールバーが出ないときも幅を変えない (行数やフィルタで
+     列の位置が動かない)。 */
   scrollbar-gutter: stable;
 }
 /* 矢印キーでセルを移動するため viewport 自体がフォーカスを受け取る
@@ -12084,6 +12098,10 @@ body.journal-task-editor-resizing * {
   box-shadow: inset var(--db-focus-ring);
 }
 
+/* 行の箱 (頭の下)。.db-grid-body はこの箱の上端から translateY で置く。 */
+.db-grid-rows {
+  position: relative;
+}
 .db-grid-spacer {
   width: 1px;
   pointer-events: none;
@@ -12741,10 +12759,6 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 
 /* ---------- Data Grid: Column Filter Row ---------- */
 .db-grid-filter-row-wrap {
-  flex-shrink: 0;
-  overflow: hidden;
-  /* ヘッダと同じ理由でスクロールバー幅を空ける (.db-grid-header-wrap 参照)。 */
-  border-right: var(--db-grid-scrollbar-w, 0px) solid transparent;
   border-bottom: 1px solid var(--border);
   background: var(--bg-soft);
 }
@@ -20322,7 +20336,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   gap: var(--space-1);
   padding: var(--space-1) var(--space-1) 0;
 }
-.terminal-link-preview img {
+.terminal-link-preview :is(img, video) {
   display: block;
   max-width: calc(var(--space-unit) * 60);
   max-height: calc(var(--space-unit) * 60);
@@ -20749,11 +20763,25 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   .terminal-image-shelf-frame {
   height: var(--shelf-thumb-h);
 }
-.terminal-image-shelf-frame img {
+.terminal-image-shelf-frame :is(img, video) {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+/* 動画の見本の上の再生の印 (見本と同じマスに重ねる)。 */
+.terminal-image-shelf-frame > * {
+  grid-area: 1 / 1;
+}
+.terminal-image-shelf-play {
+  box-sizing: content-box;
+  width: var(--space-4);
+  height: var(--space-4);
+  padding: var(--space-2);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-term) 75%, transparent);
+  color: var(--color-term-text);
+  pointer-events: none;
 }
 /* 文字の中のパスにカーソルが載った画像。棚の同じ列で強い選択は 1 つだけ。 */
 .terminal-image-shelf-item[data-linked] .terminal-image-shelf-frame,
@@ -20969,7 +20997,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   min-height: 100%;
   padding: var(--space-4);
 }
-.image-tab-stage img {
+.image-tab-stage :is(img, video) {
   display: block;
   max-width: none;
   max-height: none;
@@ -20978,7 +21006,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   user-select: none;
 }
 
-.image-tab-stage img[hidden] {
+.image-tab-stage :is(img, video)[hidden] {
   display: none;
 }
 .image-tab-status {
@@ -22285,6 +22313,7 @@ button.agents-account-name:hover {
 }
 .gdp-dialog-input {
   display: block;
+  box-sizing: border-box;
   width: 100%;
   height: calc(var(--space-unit) * 9);
   margin-top: var(--space-3);
@@ -26672,6 +26701,22 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     outline: 2px solid var(--color-accent);
     outline-offset: -2px;
   }
+  /* 確定の Enter (端末の札は ⌨ も) は帯の右端に留める。320〜390px では札が帯に
+     入りきらず、横に送らないと Enter が見えなかった。ほかの札は Enter の下を
+     横に送る (札の左の帯の色の縁で、下を通る札と区切る)。 */
+  .mobile-key[data-key="enter"],
+  .mobile-key-keyboard {
+    position: sticky;
+    z-index: 1;
+    box-shadow: calc(var(--space-1) * -1) 0 0 var(--color-ground);
+  }
+  .mobile-keys .mobile-key-keyboard,
+  .pane-view-keys .mobile-key[data-key="enter"] {
+    right: 0;
+  }
+  .mobile-keys .mobile-key[data-key="enter"] {
+    right: calc(var(--sp-touch) + var(--space-1));
+  }
 }
 
 /* ---- 1. 電話の段: 骨格 ---- */
@@ -26773,6 +26818,17 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .scope-settings-footer {
     padding-block: var(--space-2);
   }
+  /* 文言とボタンは縦に積む。横 2 列ではボタン 2 つ (44px の高さ) が幅を取り、
+     「保存の要る変更はありません。」が幅 18px で 1 文字ずつ縦に並び、帯が 360px に
+     伸びて節の欄を隠した。 */
+  .scope-settings-footer {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-2);
+  }
+  .scope-settings-footer > .scope-settings-actions {
+    grid-row: auto;
+    grid-column: 1;
+  }
   /* ヘルプの見出し: キーボードショートカットの小窓のボタンは出さない (電話にキー
      ボードは無い)。ボタンが幅を取り、見出しが「ヘ/ル/プ」と縦に折れて、版とボタンが
      画面の外へはみ出した。 */
@@ -26860,6 +26916,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     box-sizing: border-box;
     height: var(--global-header-h);
     padding-top: var(--sp-safe-top);
+    container: main-tabs / inline-size;
   }
   /* 2 面は無し: 右の面・境界・分割のボタン・ドロップ先を出さない (狭い幅では
      main-tabs-view.ts が右の面を預けている。横向きで幅が足りても出さない)。 */
@@ -27102,35 +27159,41 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   /* コミットの行は 2 段: 1 段目の全幅に件名と枝の札、2 段目に時刻・作者・
      ハッシュ。1 段に並べると件名が「Add the sa…」まで切れた。グラフの線は
      行の高さの割合で引くので (history-graph.ts)、2 段の行でもつながる。 */
-  #history-panel .history-item {
+  #history-panel .history-item,
+  .gdp-file-history-panel .history-item {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     column-gap: var(--space-3);
     row-gap: calc(var(--space-1) / 2);
     height: auto;
   }
-  #history-panel .history-item .history-graph-cell {
+  #history-panel .history-item .history-graph-cell,
+  .gdp-file-history-panel .history-item .history-graph-cell {
     grid-row: 1 / 3;
   }
   /* 枝の線の列は線の本数の幅だけ (デスクトップの 72px の列では、線 1 本の左右が
      空き、件名が画面の 4 分の 1 から始まった)。線の無い行 (未コミット変更) は 2 本分。 */
-  #history-panel .history-graph-cell {
+  #history-panel .history-graph-cell,
+  .gdp-file-history-panel .history-graph-cell {
     width: max-content;
     min-width: calc(var(--space-unit) * 6);
   }
   /* グラフは行の高さを決めない (高さの指定の無い SVG は 150px として行を
      押し広げた)。行が決まってから、その高さいっぱいに描く。 */
-  #history-panel .history-item .history-graph {
+  #history-panel .history-item .history-graph,
+  .gdp-file-history-panel .history-item .history-graph {
     height: 0;
     min-height: 100%;
   }
   /* 上下の余白は段の中に取る (行に取るとグラフの線が行の間で途切れる)。 */
-  #history-panel .history-item .history-title {
+  #history-panel .history-item .history-title,
+  .gdp-file-history-panel .history-item .history-title {
     grid-row: 1;
     grid-column: 2;
     padding-top: var(--space-1);
   }
-  #history-panel .history-item .meta2 {
+  #history-panel .history-item .meta2,
+  .gdp-file-history-panel .history-item .meta2 {
     grid-row: 2;
     grid-column: 2;
     padding-bottom: var(--space-1);
@@ -27138,18 +27201,53 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     min-width: 0;
     column-gap: var(--space-2);
   }
-  #history-panel .history-item .when {
+  #history-panel .history-item .when,
+  .gdp-file-history-panel .history-item .when {
     order: 1;
   }
-  #history-panel .history-item .author {
+  #history-panel .history-item .author,
+  .gdp-file-history-panel .history-item .author {
     order: 2;
     flex: 0 1 auto;
     display: block;
     min-width: 0;
   }
-  #history-panel .history-item .sha {
+  #history-panel .history-item .sha,
+  .gdp-file-history-panel .history-item .sha {
     order: 3;
     display: inline;
+  }
+  /* Blame: 左の欄 (いつ・誰・ハッシュ・件名。240〜320px) を狭くする。390px の
+     画面ではコードが 20px しか見えなかった。欄はいつと件名だけ (誰とハッシュは
+     コミットの履歴にある)。古い・新しいの凡例は 1 文字ずつ折り返さない。 */
+  .gdp-blame-info {
+    width: calc(var(--space-unit) * 28);
+    min-width: calc(var(--space-unit) * 28);
+    max-width: calc(var(--space-unit) * 28);
+  }
+  .gdp-source-virtual-row.gdp-blame-virtual-row {
+    --blame-cell-w: calc(var(--space-unit) * 28);
+  }
+  .gdp-blame-author,
+  .gdp-blame-sha {
+    display: none;
+  }
+  .gdp-blame-legend {
+    flex: none;
+    white-space: nowrap;
+  }
+  /* ファイルの「履歴」のタブ: 一覧とコミットを別のページにする (History と同じ)。
+     横 2 列のままだと、コミットの箱が 58px になり件名とハッシュが 1 文字ずつ
+     縦に並んだ。選ぶまでは一覧、選んだらコミット (頭の「‹ 履歴の一覧」で戻る)。 */
+  .gdp-file-history-embed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gdp-file-history-panel {
+    border-right: 0;
+  }
+  .gdp-file-history-embed:has(.history-item.active) .gdp-file-history-panel,
+  .gdp-file-history-embed:not(:has(.history-item.active)) .gdp-file-history-diff-pane {
+    display: none;
   }
   body.gdp-history-page main#content,
   body.gdp-history-page.gdp-sidebar-hidden main#content,
@@ -27201,16 +27299,143 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     padding-left: var(--space-3);
     padding-right: var(--space-3);
   }
-  /* Data: 接続の一覧を上、表を下に積む (横に並べると表が 1/2 幅に潰れる)。 */
+  /* Data: 接続とテーブルの一覧と、表 (Redis などの画面も) を別のページにする
+     (database-view.ts の db-phone-list)。縦に積むと表の行の高さが 0 になり、
+     データが 1 行も見えなかった。ふだんは表、上の「‹ 接続とテーブル」で一覧。 */
   .db-upper-area {
     flex-direction: column;
   }
   .db-sidebar {
+    flex: 1 1 auto;
     width: auto;
     max-width: none;
-    max-height: 40%;
+    border-right: 0;
+  }
+  .db-container:not(.db-phone-list) .db-sidebar,
+  .db-container.db-phone-list .db-main-content {
+    display: none;
+  }
+  .db-phone-list-open,
+  .db-phone-list-back {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--space-1);
+    min-height: var(--sp-touch);
+    padding: 0 var(--space-3);
+    border: 0;
+    border-bottom: 1px solid var(--color-line-soft);
+    background: none;
+    color: var(--color-accent-strong);
+    font: inherit;
+    text-align: left;
+  }
+  .db-phone-list-open-icon {
+    width: var(--icon-md);
+    height: var(--icon-md);
+    fill: currentColor;
+  }
+  /* 表の側は上の段 (一覧へのボタン・データ / スキーマ・SQL の段・検索・表の操作)
+     ごと縦に送る。段が積み重なって、短い画面 (320×568・横向き) では行の箱が 18px
+     になり、データが 1 行も見えなかった。表は箱の見える高さを下限にする (上の段を
+     送り出せば、表が画面いっぱいになる)。表の中の縦の送りは今までどおり行の箱が
+     持つ (表の高さは決まった値のまま。中身の高さまで伸ばすと仮想表示が効かない)。 */
+  .db-main-content {
+    overflow-y: auto;
+  }
+  .db-grid {
+    position: relative;
+    min-height: 100%;
+  }
+  /* クエリ履歴・ログと、セルの詳細・関連の行は表の上に重ねる (表のスクロールの
+     位置は保つ)。表の下に積むと、開くたびに行が 1〜2 行まで減った。閉じるのは
+     下端の × と、詳細の × (どちらも指で押せる大きさ)。 */
+  .db-container {
+    position: relative;
+  }
+  .db-container:has(> .db-history-pane:not([hidden])) > .db-upper-area {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+  }
+  .db-history-pane {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto !important;
+  }
+  .db-history-resizer {
+    display: none !important;
+  }
+  .db-history-dock-close,
+  .db-grid-detail-close {
+    min-width: var(--sp-touch);
+    min-height: var(--sp-touch);
+  }
+  .db-grid-detail-panel,
+  .db-related-panel {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    height: auto !important;
+  }
+  /* クエリ履歴・ログの中の「一覧 | 詳細」の 2 列は縦に積む。一覧が 360px の
+     固定幅で、詳細が画面の外 (右端の 32px) に押し出されていた。 */
+  .db-query-history-body-split,
+  .db-session-log-body-split {
+    flex-direction: column;
+  }
+  .db-query-history-list-col,
+  .db-session-log-list-col {
+    flex: none;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    max-height: 50%;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+  /* 編集モードでないときの編集の操作 (見えないまま場所だけ取る段) は出さない。
+     デスクトップは横 1 列の中で場所を取って位置のずれを防ぐが、電話では折り
+     返して空の段になり、表の高さを 28px 削っていた。 */
+  .db-grid-edit-controls:not(:has(> [aria-hidden="false"])) {
+    display: none;
+  }
+  /* Redis・Elasticsearch・DynamoDB の中身の側は、一覧 (キー・ドキュメント・
+     アイテム。幅 320〜380px の固定) と詳細の横 2 列だった。390px では一覧だけで
+     埋まり詳細に幅が残らないので、一覧を上、詳細を下に積む。 */
+  .redis-explorer,
+  .es-explorer,
+  .dynamodb-explorer {
+    flex-direction: column;
+  }
+  .redis-key-list-pane,
+  .es-doc-list-pane,
+  .dynamodb-item-list-pane {
+    flex: none;
+    width: auto;
+    max-height: 45%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .redis-main-pane,
+  .es-explorer .db-detail-pane,
+  .dynamodb-explorer .db-detail-pane {
+    min-height: 0;
+  }
+  /* 表の「変更」の列は左に固定しない (行番号と合わせて 145px を取り、データの
+     列に幅が残らなかった)。行番号だけ固定する (table-grid.ts の pinnedWidth)。 */
+  .db-root .db-grid-recency-header,
+  .db-root .db-grid-recency {
+    position: static;
+  }
+  /* Markdown の表は表の中で横に送る。表の幅で本文ごと横に送れて、縦に読む指が
+     少し横にずれるだけで画面が左右に揺れた (コードの枠は前から中で送る)。 */
+  .gdp-markdown-preview table,
+  .journal-markdown-preview table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
   }
   .db-sidebar-resize {
     display: none;
@@ -27227,6 +27452,98 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     position: static;
     padding-right: 0;
     border-right: 0;
+  }
+
+  /* ---- 狭い幅ではみ出す・切れていたもの (スマホの全画面の点検) ---- */
+  /* ファイルの表示の頭: 左右の余白を詰め (20px → 12px)、「OS で開く」は出さない
+     (サーバの PC のフォルダを開く操作で、電話の手元には何も出ない)。320px で頭の
+     2 行目 (コピー・OS で開く・情報・前後・削除) が箱の幅を 22px 超え、横に送れた。
+     一覧の列の「OS で開く」(22px の小さな絵札) も同じ理由で出さない。 */
+  .gdp-file-detail-wrapper {
+    --pad-doc: var(--space-3);
+  }
+  .gdp-open-path {
+    display: none;
+  }
+  /* Diff・History の上の帯: 分割 / 統合は出さない (電話の幅では 2 列がそれぞれ
+     177px になり読めない)。帯は前から横に送る作りだが、送れることが見えず、
+     空白・構文・テスト非表示に気づけなかったので、右端を薄くして続きを示す。 */
+  #topbar .controls .seg {
+    display: none;
+  }
+  /* Files のフォルダの絞り込み: 解除するものが無い間は「絞り込みを解除」を出さない
+     (出したままだと欄が狭まり、「このフォルダ内を絞り…」と案内が切れた)。 */
+  .gdp-repo-filter-clear:disabled {
+    display: none;
+  }
+  /* 絞り込みの欄と件数を 1 段目に、ファイルのアップロードを 2 段目に置く (同じ段に
+     並べると欄が 130px になり、案内が「このフォルダ」で切れた)。 */
+  .gdp-repo-search-bar {
+    flex-wrap: wrap;
+  }
+  .gdp-repo-search-bar .gdp-upload-panel {
+    flex-basis: 100%;
+  }
+  #topbar {
+    mask-image: linear-gradient(to right, #000 calc(100% - var(--space-6)), transparent);
+  }
+  /* エージェントの画面のアカウントのカードは 1 列 (1 枚の最小幅 320px で、320px の
+     画面ではプランの名前・件数・⋯ が切れ、画面ごと横に送れた)。 */
+  .agents-accounts-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* アカウントの見出しの行 (名前・件数・すべて更新・管理) は折り返す (320px で
+     「管理」が画面の外へ出て、画面ごと横に送れた)。 */
+  .agents-accounts-head {
+    flex-wrap: wrap;
+  }
+  /* 通知がブロックされているときの説明は折り返して全文を出す (「アドレ…」で
+     切れて、何をすればよいか読めなかった)。 */
+  .agents-notify {
+    flex-wrap: wrap;
+  }
+  .agents-notify-help {
+    max-width: none;
+    white-space: normal;
+  }
+  /* データストアのスキーマの表の見出しは 1 行 (「デフォルト」の列が 31px になり、
+     見出しが 1 文字ずつ縦に並んだ)。表は前から表の中で横に送る。 */
+  .db-schema-view th {
+    white-space: nowrap;
+  }
+  /* 設定のショートカット: 名前 (と変更の印) を 1 段目、キーを 2 段目に積む。3 列
+     では名前が 6 文字ほどで切れた。 */
+  .shortcut-row-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--space-1);
+    padding-block: var(--space-2);
+  }
+  .shortcut-row-head > .shortcut-keys {
+    grid-column: 1 / -1;
+  }
+  .shortcut-name {
+    white-space: normal;
+  }
+  /* 作業ツリーの一覧のカードの札 (このフォルダ・起動中) は名前の下へ折り返す
+     (375px で「起動…」と切れた。右の列は［開く］が取る)。 */
+  body[data-worktree-overview] #worktree-panel .worktree-row-head {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+  body[data-worktree-overview] #worktree-panel .worktree-row-badges {
+    overflow: visible;
+    white-space: normal;
+  }
+  /* Tools の Markdown のプレビューは内側の左右の余白を取らない (面の余白と重なり、
+     本文が画面の左から 48px で始まった)。 */
+  .tools-pane-markdown .gdp-markdown-preview {
+    padding-inline: 0;
+  }
+  /* ヘルプの表は表の中で横に送る (表の幅で記事ごと横に送れた)。 */
+  .gdp-help-table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
   }
 
   /* ---- 最下段は出さない ----
@@ -27282,6 +27599,10 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .mobile-bar-label {
     max-width: 100%;
     overflow: hidden;
+    /* 320px の画面では 1 つの入口が 64px で、「プロジェクト」「エージェント」が
+       「プロジェク…」と切れた。画面の幅に合わせて少しだけ小さくする (375px 以上
+       は今までの大きさ)。 */
+    font-size: min(1em, 3.2vw);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -27887,9 +28208,22 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
 }
 
+/* 電話の段のタブ列が 360px 以下 (320px の画面): プロジェクトの印 (前面のタブの
+   左の札) を出さない。前面のタブの名前が「c…」の 1 文字になった。プロジェクトは
+   引き出しで分かる。名前の付いた箱 (main-tabs) は電話の段でだけ作る。 */
+@container main-tabs (max-width: 360px) {
+  .main-tab-group-toggle {
+    display: none;
+  }
+}
+
 /* ---- 1'. 横向きの電話 (core/mobile-layout.ts の PHONE_LANDSCAPE_MEDIA_QUERY):
    残る高さが少ないので、下端の帯を細くする。 ---- */
 @media (pointer: coarse) and (max-height: 500px) {
+  /* 横向きは幅があるので、差分の 2 列 (分割 / 統合の切替) を出す (縦向きでは隠す)。 */
+  #topbar .controls .seg {
+    display: inline-flex;
+  }
   /* 端末と面の高さを取る: 下端の帯を細くする (絵と名前を横に並べる。帯の入口は
      横に長いので当たりの幅は十分)。 */
   body,
@@ -28072,6 +28406,60 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .gdp-context-menu button {
     height: auto;
     min-height: var(--sp-touch);
+  }
+  /* 点検で 44px に足りなかった押し場所 (Files の行と並べ替え・枝の選択の札と
+     タブ・履歴の絞り込みの解除・ダイアログ・データストアの操作・設定の保存と
+     ショートカットの行)。データストアの列ごとの絞り込みの欄は表の見出しの中
+     なので詰めたまま。 */
+  .gdp-repo-row,
+  .gdp-repo-sort-header button,
+  .rp-chip,
+  .rp-tab,
+  .history-filter-clear,
+  .gdp-dialog-button,
+  .gdp-dialog-input,
+  .db-tabs-chip-close,
+  .db-query-toolbar .db-btn,
+  .db-grid-filter-input,
+  .db-grid-filter-actions .db-btn,
+  .db-icon-btn,
+  .db-file-select,
+  .db-edit-mode-toggle,
+  .db-table-item,
+  .db-grid-pager-btn,
+  .db-grid-detail-copy,
+  .db-history-dock-tab,
+  .db-query-history-action,
+  .scope-settings-actions button,
+  .shortcut-row-head,
+  .tools-pane-action,
+  .journal-markdown-toolbar button,
+  .journal-label-filter,
+  .journal-section-head > button {
+    min-height: var(--sp-touch);
+    box-sizing: border-box;
+  }
+  .db-tabs-chip-close,
+  .db-icon-btn,
+  .db-grid-pager-btn,
+  .tools-pane-action,
+  .journal-markdown-toolbar button {
+    min-width: var(--sp-touch);
+  }
+  .gdp-dialog-input {
+    height: var(--sp-touch);
+  }
+  /* キーボードの案内 (⌘K・↑↓ 移動・T キー) は出さない。指の画面にキーボードは
+     無い (案内の部分にこの印を付ける。欄の中の文字は TS が分ける)。 */
+  .gdp-key-hint {
+    display: none;
+  }
+  /* 浮く帯の × (選んだ行の参照の帯) は帯の角に重ねる小さな丸。押せる大きさに。 */
+  #line-ref-pill-close {
+    top: calc(var(--space-3) * -1);
+    right: calc(var(--space-3) * -1);
+    width: calc(var(--space-unit) * 7);
+    height: calc(var(--space-unit) * 7);
   }
   /* 端末の上の 2 本指はページの拡大ではなく端末の文字の大きさ (mobile-shell.ts の
      ピンチ)。1 本指の縦横の送りはそのまま。 */

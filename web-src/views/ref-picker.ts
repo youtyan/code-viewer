@@ -7,6 +7,7 @@ import { apiUrl } from "../core/api-url";
 import { relativeTimeText } from "../core/blame";
 import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 import { isImeComposing } from "../core/keyboard";
+import { TOUCH_MEDIA_QUERY } from "../core/mobile-layout";
 import type { AppRoute, DiffRange } from "../core/routes";
 import type { RefCommitResponse, RefResponse } from "../core/types";
 import { pageLanguage } from "./page-language";
@@ -445,7 +446,10 @@ export function createRefPicker(deps: RefPickerDeps) {
     const popWidth = Math.min(560, Math.floor(window.innerWidth * 0.9));
     popover.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - popWidth - 8))}px`;
     popover.style.top = `${r.bottom + 4}px`;
-    setTimeout(() => popSearch.focus(), 0);
+    // 指の画面では絞り込みの欄に焦点を置かない (ソフトキーボードが出て、選ぶ
+    // 一覧を隠した)。打つときは欄を押せばよい。
+    if (!window.matchMedia?.(TOUCH_MEDIA_QUERY).matches)
+      setTimeout(() => popSearch.focus(), 0);
   }
   function closePopover() {
     popover.hidden = true;

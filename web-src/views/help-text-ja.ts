@@ -1265,7 +1265,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   ui(l.terminal.readOnly),
                   " にします。",
                 ],
-                "ターミナルにパスが出た画像は右の棚に並び、押すと画像のタブで開きます。",
+                "ターミナルにパスが出た画像と動画 (MP4・WebM・MOV) は右の棚に並び、押すと画像のタブで開きます。開いた後は矢印キーで棚の前後の項目へ移れます。",
                 [
                   "棚の画像は出たペインごとにまとまり、カーソルを載せるとそのペインが枠で囲まれ、棚の見出しにパスが出ます。右クリックの ",
                   ui(l.terminal.imageShowInTerminal),
@@ -1486,6 +1486,13 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   " は、ファイル・差分・履歴・作業ツリーの画面だけに出て、その画面の一覧を開きます。",
                 ],
                 "タブの列には前面のタブだけが出ます。右端の数字の四角で、開いているタブを全部見られます。",
+                [
+                  "データストアは表を画面いっぱいに出します。上の ",
+                  ui(l.database.nav.phoneList),
+                  " で一覧を開き、テーブルやキーを押すか一覧の上の ",
+                  ui(l.database.nav.phoneListBack),
+                  " で表に戻ります。",
+                ],
                 [
                   "履歴を開くと、コミットの一覧が出ます。コミットを押すと差分が出て、上の ",
                   ui(l.history.backToList),

@@ -16,6 +16,7 @@ import {
 } from "../core/terminal-images";
 import {
   addShelfOrigins,
+  groupShelfEntries,
   MAX_SHELF_ORIGINS,
   mergeShelf,
   type ShelfEntry,
@@ -386,5 +387,57 @@ describe("addShelfOrigins (出どころ)", () => {
     ]);
     list = addShelfOrigins(list, [paneOrigin(A.candidate, "%1", "new")]);
     expect(list[0]?.origins.map((origin) => origin.line)).toEqual(["new"]);
+  });
+});
+
+describe("groupShelfEntries (棚に描く順)", () => {
+  // 棚は出た所ごとにまとめて描く。画像のタブの前後 (shelfGallery) が新しい順の
+  // ままだと、棚の矢印とタブの ←→ で行き先が食い違う。
+  test("出た所ごとにまとめ、タブで回る順もそれと同じ", () => {
+    // 新しい順に x (読めない)・a・b・c・d・e。d と x は出た所が分からない。
+    let list = mergeShelf(
+      [],
+      {
+        images: ["e.png", "d.png", "c.png", "b.png", "a.png"].map((name) =>
+          image(name),
+        ),
+        rejected: [],
+      },
+      liveSeq(),
+    );
+    list = mergeShelf(
+      list,
+      { images: [], rejected: [rejection("x.png", "too-large")] },
+      liveSeq(10),
+    );
+    const origins = [
+      ["a.png", "%1"],
+      ["b.png", "%2"],
+      ["c.png", "%1"],
+      ["e.png", "%2"],
+    ] as const;
+    list = addShelfOrigins(
+      list,
+      origins.map(([name, pane]) =>
+        paneOrigin(`/tmp/sample-images/${name}`, pane),
+      ),
+    );
+    expect(
+      groupShelfEntries(list).map((group) => [
+        group.place,
+        names(group.entries),
+      ]),
+    ).toEqual([
+      ["none", ["x.png", "d.png"]],
+      ["pane:%1", ["a.png", "c.png"]],
+      ["pane:%2", ["b.png", "e.png"]],
+    ]);
+    expect(shelfGallery(list).map((item) => item.name)).toEqual([
+      "d.png",
+      "a.png",
+      "c.png",
+      "b.png",
+      "e.png",
+    ]);
   });
 });

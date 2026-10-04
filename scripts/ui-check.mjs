@@ -8,7 +8,8 @@
 // 手順 (配列の 1 要素ずつ。ms は後の待ち):
 //   {"do":"goto","path":"file?path=src%2Fmain.ts","ms":3000}  URL からの相対パス
 //   {"do":"settings","patch":{"theme":"dark","colorTheme":"ink"}}  設定を PATCH (全部の窓に効く)
-//   {"do":"viewport","w":1440,"h":900}  "touch":true で指の画面 (iPhone と同じく pointer: coarse)
+//   {"do":"viewport","w":1440,"h":900}  "touch":true で指の画面 (iPhone と同じく pointer: coarse)、
+//     "cpu":6 で CPU を 6 倍遅くする (スマホの重さを測る。省くと 1 = 遅くしない)
 //   {"do":"click","sel":".main-tab"} / {"do":"click","x":600,"y":120}
 //   {"do":"hover","sel":"..."} / {"do":"drag","from":[x,y],"to":[x,y]}
 //   {"do":"key","key":"Escape"}  (code・vk・mods を足せる)
@@ -142,6 +143,7 @@ try {
     },
     async viewport(step) {
       await viewport(step.w, step.h, step.touch === true);
+      await cdp.send("Emulation.setCPUThrottlingRate", { rate: step.cpu ?? 1 });
       await sleep(step.ms ?? 800);
     },
     async click(step) {

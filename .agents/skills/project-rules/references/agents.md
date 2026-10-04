@@ -1028,7 +1028,7 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 
 ## 12. ターミナルの画像の棚
 
-ターミナルの出力に出た画像パスを、画面の横（既定は右。左・下・上も選べる）の棚に新しい順の
+ターミナルの出力に出た画像と動画のパスを、画面の横（既定は右。左・下・上も選べる）の棚に新しい順の
 サムネイルで並べる。
 置き場所: `views/terminal/image-shelf.ts`（描く・置き場所と大きさ・見出しの行の詳しい表示）・
 `image-shelf-list.ts`（並びと出どころの決まり）・`terminal-screen.ts`（拾う・問い合わせる・画面の
@@ -1036,7 +1036,8 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 強調・帯・押下）・`core/terminal-images.ts`（画像のパスの拾い方と型）・`core/terminal-links.ts`
 （URL とファイルのパスの拾い方）・`server/terminal/images.ts`（配ってよいかの判定）・
 `image-base.ts`（相対パスの起点）・`image-origins.ts`（どのペインのどの行に出たか）・`paths.ts`
-（画面のファイルのパスがプロジェクトの中で実在するか）。
+（画面のファイルのパスがプロジェクトの中で実在するか）・`views/terminal/media-element.ts`
+（画像か動画かで img と video を作り分ける。棚・リンクの帯・画像のタブが使う）。
 
 ### 決めたこと
 
@@ -1100,8 +1101,12 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
   上の帯に出し、棚からは貼ったパスと同じ綴りだけを外していたので、エージェントが相対パスなど
   別の綴りで出し直すと、帯と棚の両方に同じ画像が並んだ。いまは貼ったパスを棚に問い合わせ
   （`pasteImage`）、同じ実体は棚の決まりで 1 枚にまとまる
-- 開く口は `terminal-screen.ts` の `openShelfEntry` 1 つ（今は拡大表示 `image-lightbox.ts`。
-  棚の並びを ←→ で回れ、パスをコピーできる）。画像のタブができたらここを差し替える
+- 開く口は `terminal-screen.ts` の `openShelfEntry` 1 つ。既定は画像のタブ、Alt / Shift と右クリック
+  で拡大表示 `image-lightbox.ts`（画像だけを回る。動画は覆いでも画像のタブで再生する）。棚の項目の
+  上の矢印キーは隣の項目へ移り、押したのと同じにタブで開く（右・左の棚でも下・上の棚でも 4 方向
+  とも前後）。タブで前後に回る順（`shelfGallery`）と棚に描く順は `groupShelfEntries` 1 つで決める
+- 動画（`TERMINAL_VIDEO_EXTENSIONS`: MP4・WebM・MOV）の見本は音を消した video を最初の辺りで
+  止めたまま見せ（`preload="metadata"` と `#t=0.1`。Safari は送らないと絵を出さない）、上に再生の印
 - 棚が無い（画像が 0 件）ときは列ごと出さない。畳んだかどうか・置き場所・右と左の幅・下と上の
   高さはユーザー単位の設定（`terminalImageShelfCollapsed`・`terminalImageShelfPlacement`・
   `terminalImageShelfWidth`・`terminalImageShelfHeight`。範囲は `core/panel-sizes.ts`、全部の窓で
@@ -1134,10 +1139,12 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 `/_agent/image` はリポジトリの外のファイルも配る（エージェントは一時ディレクトリに書くことが
 多い）。その代わり、配るのは `resolveTerminalImage` を通ったものだけ:
 
-- 拡張子の許可リスト（PNG・JPEG・GIF・WebP。SVG は中にスクリプトを書けるので外す。
-  貼り付けと同じ表 `TERMINAL_IMAGE_EXTENSIONS`）
+- 拡張子の許可リスト（画像は PNG・JPEG・GIF・WebP。SVG は中にスクリプトを書けるので外す。
+  貼り付けと同じ表 `TERMINAL_IMAGE_EXTENSIONS`。動画は `TERMINAL_VIDEO_EXTENSIONS`）
 - symlink を解いた実体が通常のファイル（ディレクトリや名前付きパイプを配ろうとすると詰まる）
-- 0 バイトでない・上限（`MAX_PASTE_IMAGE_BYTES`）まで・読める
+- 0 バイトでない・上限（画像は `MAX_PASTE_IMAGE_BYTES`、動画は 2 GiB。`MAX_MEDIA_BYTES`）まで・読める
+- Range を受ける（`rangedFileResponse`。Safari の video は Range で取りにきて、全体の 200 では
+  再生しない）。範囲は判定を通した実体の大きさの中だけ
 - 配るたびに判定し直す（クライアントが持って回った URL を信用しない）。ヘッダは `/_file` と同じ
   `rawFileHeaders`（`nosniff`・`CSP: sandbox`）
 
