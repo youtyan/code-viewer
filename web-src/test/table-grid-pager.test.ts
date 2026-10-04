@@ -124,4 +124,51 @@ describe("table-grid pager", () => {
     await scrollTo(0);
     expect(q<HTMLElement>(grid.el, ".db-grid-pager").hidden).toBe(true);
   });
+
+  // 描いた行 (見える範囲の上下 20 行ずつ) が見える範囲を覆っている間は、スクロール
+  // で行を作り直さない。毎フレーム作り直して、スマホでカクついた。
+  test.each([
+    { name: "within the drawn rows", to: 5, rebuilt: false, range: "6–15" },
+    { name: "past the drawn rows", to: 40, rebuilt: true, range: "41–50" },
+  ])("scrolling $name", async ({ to, rebuilt, range }) => {
+    const { grid, pager, scrollTo } = setup(500, 10);
+    await scrollTo(0);
+    const first = grid.el.querySelector(".db-grid-row");
+    await scrollTo(to * ROW);
+    expect({
+      rebuilt: grid.el.querySelector(".db-grid-row") !== first,
+      range: pager().range,
+    }).toEqual({ rebuilt, range: `${range} of 500 rows` });
+    grid.destroy();
+    grid.el.remove();
+  });
+
+  test("a reload in the same frame as a scroll still redraws the rows", async () => {
+    const { grid, viewport, scrollTo } = setup(500, 10);
+    await scrollTo(0);
+    const first = grid.el.querySelector(".db-grid-row");
+    grid.load(
+      "sample_table",
+      tableData({
+        dbId: "sample.db",
+        table: "sample_table",
+        columns: [
+          {
+            name: "id",
+            type: "INTEGER",
+            nullable: false,
+            primaryKey: true,
+            defaultValue: null,
+          },
+        ],
+        rows: [[1000]],
+      }),
+    );
+    viewport.scrollTop = 0;
+    viewport.dispatchEvent(new Event("scroll"));
+    await tick();
+    expect(grid.el.querySelector(".db-grid-row") !== first).toBe(true);
+    grid.destroy();
+    grid.el.remove();
+  });
 });

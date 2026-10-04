@@ -929,6 +929,9 @@ export function createTableGrid(
   // 相対位置を計算するために参照する (CSS transform を regex で読むのは
   // translate3d 等のフォーマット変更で簡単に壊れるので state を持つ)。
   let renderStartRow = 0;
+  // 描いてある行の終わり (含まない) と、次の描画で作り直すか (renderViewport)。
+  let renderedEndRow = 0;
+  let rebuildPending = true;
   // 現在のテーブルで外部キーを持つカラム名（ヘッダーのリンクアイコン表示用）。
   const fkColumns = new Set<string>();
 
@@ -2922,7 +2925,16 @@ export function createTableGrid(
     return row;
   }
 
-  function renderViewport() {
+  /**
+   * 行を描く。スクロールで呼ぶときは "scroll": 描いてある行 (見える範囲の上下に
+   * OVERSCAN 行ずつ) が見える範囲を覆っている間は作り直さない。指で送る間、毎
+   * フレーム 50 行ほどを組み直し、スマホ (CPU 6 倍遅く) で 1 フレーム 45ms・
+   * 22fps になってカクついた。ほかの呼び出し (読み込み・並べ替え・編集など) は
+   * 中身が変わるので必ず作り直す。同じフレームに両方が来ても作り直しを落とさない
+   * よう、作り直しの要求は rebuildPending に残す。
+   */
+  function renderViewport(reason: "scroll" | "rebuild" = "rebuild") {
+    if (reason === "rebuild") rebuildPending = true;
     cancelAnimationFrame(rafId);
     rafId = requestAnimationFrame(() => {
       // IME 変換中は body を作り直すと入力中の composition が中断されるので、
@@ -2930,16 +2942,15 @@ export function createTableGrid(
       if (isComposing) return;
       const scrollTop = viewport.scrollTop;
       const viewHeight = viewport.clientHeight;
+      const rowHeight = currentRowHeight();
       const startRow = Math.max(
         0,
-        Math.floor(scrollTop / currentRowHeight()) - OVERSCAN,
+        Math.floor(scrollTop / rowHeight) - OVERSCAN,
       );
-      // setActiveCell が body 内インデックスを計算するために参照する。
-      renderStartRow = startRow;
       // 編集モードでは末尾に新規行ドラフトを足すので表示行数が増える。
       const endRow = Math.min(
         displayRowCount(),
-        Math.ceil((scrollTop + viewHeight) / currentRowHeight()) + OVERSCAN,
+        Math.ceil((scrollTop + viewHeight) / rowHeight) + OVERSCAN,
       );
 
       // ページ取得はデータ行 (< totalRows) の範囲だけ行う。
@@ -2951,6 +2962,23 @@ export function createTableGrid(
           ensurePage(p);
         }
       }
+
+      const covered =
+        !rebuildPending &&
+        Math.floor(scrollTop / rowHeight) >= renderStartRow &&
+        Math.min(
+          displayRowCount(),
+          Math.ceil((scrollTop + viewHeight) / rowHeight),
+        ) <= renderedEndRow;
+      if (covered) {
+        syncPager(scrollTop, viewHeight);
+        syncHorizontalScroll();
+        return;
+      }
+      rebuildPending = false;
+      // setActiveCell が body 内インデックスを計算するために参照する。
+      renderStartRow = startRow;
+      renderedEndRow = endRow;
 
       // 編集モードでは body 全体を作り直すとフォーカス中のセル入力が破棄され、
       // スクロールのたびにキャレットが飛ぶ。再描画前に「どのセルを編集中か」と
@@ -2984,7 +3012,7 @@ export function createTableGrid(
       body.innerHTML = "";
       selectedRowElement = null;
       activeCellElement = null;
-      body.style.transform = `translateY(${startRow * currentRowHeight()}px)`;
+      body.style.transform = `translateY(${startRow * rowHeight}px)`;
 
       for (let i = startRow; i < endRow; i++) {
         body.appendChild(
@@ -3270,7 +3298,7 @@ export function createTableGrid(
 
   const onViewportScroll = () => {
     syncHorizontalScroll();
-    renderViewport();
+    renderViewport("scroll");
   };
   // ヘッダ / フィルタ行のラップは overflow:hidden だが、中の列フィルタ入力に
   // フォーカスが入ると、ブラウザがそれを見せようとしてラップ自身を横スクロール
