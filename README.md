@@ -276,6 +276,7 @@ In a window 640px wide or less (or a touch screen 500px tall or less), the layou
 
 - A bar at the bottom: **Projects**, **Files**, **Diff**, **Agents** (with the number waiting for input) and **List** (on Files, Diff, History and Worktrees).
 - **List** opens the screen's list as a full page. In History, tap a commit for its diff; **‹ History list** or the browser's back returns to the list.
+- **Data** shows the table full screen; **‹ Datastores and tables** opens the list of connections and tables.
 - Opening an agent shows only its pane, full screen. The PC's tmux layout does not change.
 - Numbered choices become buttons; the field at the bottom sends text and Enter; the image button attaches a photo.
 - URLs in the output open in a new tab. To sign in again from the phone, open the sign-in URL, approve, and send the code shown.

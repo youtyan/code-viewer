@@ -430,4 +430,32 @@ describe("query editor value display", () => {
     );
     editor.dispose();
   });
+
+  // 電話の段では SQL の欄を畳んで始める (開いたままでは表の行に高さが残らず、
+  // データが 1 行も見えなかった)。デスクトップは開いて始める。
+  test.each([
+    { name: "a phone", phone: true, collapsed: true },
+    { name: "the desktop", phone: false, collapsed: false },
+  ])(
+    "the input starts collapsed on $name: $collapsed",
+    ({ phone, collapsed }) => {
+      vi.spyOn(window, "matchMedia").mockImplementation(
+        (query: string) =>
+          ({ matches: phone, media: query }) as unknown as MediaQueryList,
+      );
+      const editor = createQueryEditor({
+        getKind: () => "sqlite",
+        executeQuery: async () => {
+          throw new Error("not run in this test");
+        },
+      });
+      expect({
+        collapsed: editor.el.classList.contains("is-collapsed"),
+        expanded: editor.el
+          .querySelector(".db-query-collapse")
+          ?.getAttribute("aria-expanded"),
+      }).toEqual({ collapsed, expanded: String(!collapsed) });
+      editor.dispose();
+    },
+  );
 });

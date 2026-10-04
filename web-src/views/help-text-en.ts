@@ -1506,6 +1506,11 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 ],
                 "The tab strip shows only the tab in front. The square with a number at its right end lists every open tab.",
                 [
+                  "Data shows the table full screen. ",
+                  ui(l.database.nav.phoneList),
+                  " at the top opens the list; tap a table or key to go back to it.",
+                ],
+                [
                   "History opens with its commit list. Tap a commit for its diff; ",
                   ui(l.history.backToList),
                   " at the top or the browser's back returns to the list.",

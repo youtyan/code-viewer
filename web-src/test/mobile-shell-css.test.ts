@@ -260,16 +260,58 @@ describe("電話の段の骨格", () => {
     expect(declarationsOf(rules, [selector]).get("display")).toMatch(/^none/);
   });
 
-  // 選んだコミットの差分の頭の「‹ 履歴の一覧」は、一覧と差分が別のページになる
-  // 電話の段だけ。
+  // 一覧と中身が別のページになる電話の段だけに出す戻るボタン: 選んだコミットの
+  // 差分の頭の「‹ 履歴の一覧」と、データストアの「‹ 接続とテーブル」。
   test.each([
-    { name: "デスクトップ", css: () => baseRules(sheet), display: "none" },
-    { name: "電話", css: () => rules, display: "block" },
-  ])("$name の履歴の一覧へ戻るボタン", ({ css, display }) => {
-    expect(declarationsOf(css(), [".hci-back-slot"]).get("display")).toBe(
-      display,
-    );
-  });
+    { selector: ".hci-back-slot", desktop: "none", phone: "block" },
+    { selector: ".db-phone-list-open", desktop: "none", phone: "flex" },
+  ])(
+    "$selector はデスクトップ $desktop・電話 $phone",
+    ({ selector, desktop, phone }) => {
+      expect([
+        declarationsOf(baseRules(sheet), [selector]).get("display"),
+        declarationsOf(rules, [selector]).get("display"),
+      ]).toEqual([desktop, phone]);
+    },
+  );
+
+  // データストア: 接続とテーブルの一覧と、表 (Redis などの画面も) を別のページに
+  // する (縦に積むと表の行の高さが 0 になった)。Redis・Elasticsearch・DynamoDB の
+  // 中身の側の「一覧 | 詳細」は縦に積む (固定幅の一覧で詳細に幅が残らなかった)。
+  // Markdown の表は表の中で横に送る (本文ごと横に動いた)。
+  test.each([
+    {
+      selector: ".db-container:not(.db-phone-list) .db-sidebar",
+      property: "display",
+      value: "none",
+    },
+    {
+      selector: ".db-container.db-phone-list .db-main-content",
+      property: "display",
+      value: "none",
+    },
+    {
+      selector: ".redis-explorer",
+      property: "flex-direction",
+      value: "column",
+    },
+    { selector: ".es-explorer", property: "flex-direction", value: "column" },
+    {
+      selector: ".dynamodb-explorer",
+      property: "flex-direction",
+      value: "column",
+    },
+    {
+      selector: ".gdp-markdown-preview table",
+      property: "overflow-x",
+      value: "auto",
+    },
+  ])(
+    "電話の段の $selector の $property は $value",
+    ({ selector, property, value }) => {
+      expect(declarationsOf(rules, [selector]).get(property)).toBe(value);
+    },
+  );
 
   test("切替の帯は下端に貼り、ホームバーの分だけ内側を空ける", () => {
     const bar = declarationsOf(rules, [".mobile-bar:not([hidden])"]);

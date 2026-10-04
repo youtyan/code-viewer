@@ -11507,6 +11507,10 @@ body.journal-task-editor-resizing * {
 }
 
 /* ---------- Sidebar ---------- */
+/* 電話の段で接続とテーブルの一覧を開くボタン (database-view.ts)。デスクトップは出さない。 */
+.db-phone-list-open {
+  display: none;
+}
 .db-sidebar {
   width: 260px;
   min-width: 120px;
@@ -27201,16 +27205,71 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     padding-left: var(--space-3);
     padding-right: var(--space-3);
   }
-  /* Data: 接続の一覧を上、表を下に積む (横に並べると表が 1/2 幅に潰れる)。 */
+  /* Data: 接続とテーブルの一覧と、表 (Redis などの画面も) を別のページにする
+     (database-view.ts の db-phone-list)。縦に積むと表の行の高さが 0 になり、
+     データが 1 行も見えなかった。ふだんは表、上の「‹ 接続とテーブル」で一覧。 */
   .db-upper-area {
     flex-direction: column;
   }
   .db-sidebar {
+    flex: 1 1 auto;
     width: auto;
     max-width: none;
-    max-height: 40%;
+    border-right: 0;
+  }
+  .db-container:not(.db-phone-list) .db-sidebar,
+  .db-container.db-phone-list .db-main-content {
+    display: none;
+  }
+  .db-phone-list-open {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--space-1);
+    min-height: var(--sp-touch);
+    padding: 0 var(--space-3);
+    border: 0;
+    border-bottom: 1px solid var(--color-line-soft);
+    background: none;
+    color: var(--color-accent-strong);
+    font: inherit;
+    text-align: left;
+  }
+  .db-phone-list-open-icon {
+    width: var(--icon-md);
+    height: var(--icon-md);
+    fill: currentColor;
+  }
+  /* Redis・Elasticsearch・DynamoDB の中身の側は、一覧 (キー・ドキュメント・
+     アイテム。幅 320〜380px の固定) と詳細の横 2 列だった。390px では一覧だけで
+     埋まり詳細に幅が残らないので、一覧を上、詳細を下に積む。 */
+  .redis-explorer,
+  .es-explorer,
+  .dynamodb-explorer {
+    flex-direction: column;
+  }
+  .redis-key-list-pane,
+  .es-doc-list-pane,
+  .dynamodb-item-list-pane {
+    flex: none;
+    width: auto;
+    max-height: 45%;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+  .redis-main-pane,
+  .es-explorer .db-detail-pane,
+  .dynamodb-explorer .db-detail-pane {
+    min-height: 0;
+  }
+  /* Markdown の表は表の中で横に送る。表の幅で本文ごと横に送れて、縦に読む指が
+     少し横にずれるだけで画面が左右に揺れた (コードの枠は前から中で送る)。 */
+  .gdp-markdown-preview table,
+  .journal-markdown-preview table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
   }
   .db-sidebar-resize {
     display: none;
