@@ -1489,7 +1489,9 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 [
                   "データストアは表を画面いっぱいに出します。上の ",
                   ui(l.database.nav.phoneList),
-                  " で一覧を開き、テーブルやキーを押すと表に戻ります。",
+                  " で一覧を開き、テーブルやキーを押すか一覧の上の ",
+                  ui(l.database.nav.phoneListBack),
+                  " で表に戻ります。",
                 ],
                 [
                   "履歴を開くと、コミットの一覧が出ます。コミットを押すと差分が出て、上の ",

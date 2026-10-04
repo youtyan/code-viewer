@@ -1508,7 +1508,9 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 [
                   "Data shows the table full screen. ",
                   ui(l.database.nav.phoneList),
-                  " at the top opens the list; tap a table or key to go back to it.",
+                  " at the top opens the list; tap a table or key, or ",
+                  ui(l.database.nav.phoneListBack),
+                  " above the list, to go back.",
                 ],
                 [
                   "History opens with its commit list. Tap a commit for its diff; ",

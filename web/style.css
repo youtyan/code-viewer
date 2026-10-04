@@ -9858,7 +9858,9 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-width: 340px;
+  /* ダイアログの中身の幅を超えない (390px の電話では中身が 326px で、欄が右に
+     はみ出し説明が切れた)。 */
+  min-width: min(340px, 100%);
   margin-top: 6px;
 }
 
@@ -11507,8 +11509,10 @@ body.journal-task-editor-resizing * {
 }
 
 /* ---------- Sidebar ---------- */
-/* 電話の段で接続とテーブルの一覧を開くボタン (database-view.ts)。デスクトップは出さない。 */
-.db-phone-list-open {
+/* 電話の段で接続とテーブルの一覧を開くボタンと、一覧から表へ戻るボタン
+   (database-view.ts)。デスクトップは出さない。 */
+.db-phone-list-open,
+.db-phone-list-back {
   display: none;
 }
 .db-sidebar {
@@ -22304,6 +22308,7 @@ button.agents-account-name:hover {
 }
 .gdp-dialog-input {
   display: block;
+  box-sizing: border-box;
   width: 100%;
   height: calc(var(--space-unit) * 9);
   margin-top: var(--space-3);
@@ -26691,6 +26696,22 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     outline: 2px solid var(--color-accent);
     outline-offset: -2px;
   }
+  /* 確定の Enter (端末の札は ⌨ も) は帯の右端に留める。320〜390px では札が帯に
+     入りきらず、横に送らないと Enter が見えなかった。ほかの札は Enter の下を
+     横に送る (札の左の帯の色の縁で、下を通る札と区切る)。 */
+  .mobile-key[data-key="enter"],
+  .mobile-key-keyboard {
+    position: sticky;
+    z-index: 1;
+    box-shadow: calc(var(--space-1) * -1) 0 0 var(--color-ground);
+  }
+  .mobile-keys .mobile-key-keyboard,
+  .pane-view-keys .mobile-key[data-key="enter"] {
+    right: 0;
+  }
+  .mobile-keys .mobile-key[data-key="enter"] {
+    right: calc(var(--sp-touch) + var(--space-1));
+  }
 }
 
 /* ---- 1. 電話の段: 骨格 ---- */
@@ -26890,6 +26911,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     box-sizing: border-box;
     height: var(--global-header-h);
     padding-top: var(--sp-safe-top);
+    container: main-tabs / inline-size;
   }
   /* 2 面は無し: 右の面・境界・分割のボタン・ドロップ先を出さない (狭い幅では
      main-tabs-view.ts が右の面を預けている。横向きで幅が足りても出さない)。 */
@@ -27288,7 +27310,8 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .db-container.db-phone-list .db-main-content {
     display: none;
   }
-  .db-phone-list-open {
+  .db-phone-list-open,
+  .db-phone-list-back {
     display: flex;
     flex: none;
     align-items: center;
@@ -27426,6 +27449,70 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     border-right: 0;
   }
 
+  /* ---- 狭い幅ではみ出す・切れていたもの (スマホの全画面の点検) ---- */
+  /* ファイルの表示の頭: 左右の余白を詰め (20px → 12px)、「OS で開く」は出さない
+     (サーバの PC のフォルダを開く操作で、電話の手元には何も出ない)。320px で頭の
+     2 行目 (コピー・OS で開く・情報・前後・削除) が箱の幅を 22px 超え、横に送れた。
+     一覧の列の「OS で開く」(22px の小さな絵札) も同じ理由で出さない。 */
+  .gdp-file-detail-wrapper {
+    --pad-doc: var(--space-3);
+  }
+  .gdp-open-path {
+    display: none;
+  }
+  /* Diff・History の上の帯: 分割 / 統合は出さない (電話の幅では 2 列がそれぞれ
+     177px になり読めない)。帯は前から横に送る作りだが、送れることが見えず、
+     空白・構文・テスト非表示に気づけなかったので、右端を薄くして続きを示す。 */
+  #topbar .controls .seg {
+    display: none;
+  }
+  #topbar {
+    mask-image: linear-gradient(to right, #000 calc(100% - var(--space-6)), transparent);
+  }
+  /* エージェントの画面のアカウントのカードは 1 列 (1 枚の最小幅 320px で、320px の
+     画面ではプランの名前・件数・⋯ が切れ、画面ごと横に送れた)。 */
+  .agents-accounts-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* アカウントの見出しの行 (名前・件数・すべて更新・管理) は折り返す (320px で
+     「管理」が画面の外へ出て、画面ごと横に送れた)。 */
+  .agents-accounts-head {
+    flex-wrap: wrap;
+  }
+  /* 通知がブロックされているときの説明は折り返して全文を出す (「アドレ…」で
+     切れて、何をすればよいか読めなかった)。 */
+  .agents-notify {
+    flex-wrap: wrap;
+  }
+  .agents-notify-help {
+    max-width: none;
+    white-space: normal;
+  }
+  /* データストアのスキーマの表の見出しは 1 行 (「デフォルト」の列が 31px になり、
+     見出しが 1 文字ずつ縦に並んだ)。表は前から表の中で横に送る。 */
+  .db-schema-view th {
+    white-space: nowrap;
+  }
+  /* 設定のショートカット: 名前 (と変更の印) を 1 段目、キーを 2 段目に積む。3 列
+     では名前が 6 文字ほどで切れた。 */
+  .shortcut-row-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--space-1);
+    padding-block: var(--space-2);
+  }
+  .shortcut-row-head > .shortcut-keys {
+    grid-column: 1 / -1;
+  }
+  .shortcut-name {
+    white-space: normal;
+  }
+  /* ヘルプの表は表の中で横に送る (表の幅で記事ごと横に送れた)。 */
+  .gdp-help-table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
   /* ---- 最下段は出さない ----
      残っていたのはエージェントの件数 (入力待ちは帯の「エージェント」の札に出る) と
      サーバの状態の点だけで、どの画面でも本文から 1 行 (44px) を取っていた。 */
@@ -27479,6 +27566,10 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .mobile-bar-label {
     max-width: 100%;
     overflow: hidden;
+    /* 320px の画面では 1 つの入口が 64px で、「プロジェクト」「エージェント」が
+       「プロジェク…」と切れた。画面の幅に合わせて少しだけ小さくする (375px 以上
+       は今までの大きさ)。 */
+    font-size: min(1em, 3.2vw);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -28084,6 +28175,15 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
 }
 
+/* 電話の段のタブ列が 360px 以下 (320px の画面): プロジェクトの印 (前面のタブの
+   左の札) を出さない。前面のタブの名前が「c…」の 1 文字になった。プロジェクトは
+   引き出しで分かる。名前の付いた箱 (main-tabs) は電話の段でだけ作る。 */
+@container main-tabs (max-width: 360px) {
+  .main-tab-group-toggle {
+    display: none;
+  }
+}
+
 /* ---- 1'. 横向きの電話 (core/mobile-layout.ts の PHONE_LANDSCAPE_MEDIA_QUERY):
    残る高さが少ないので、下端の帯を細くする。 ---- */
 @media (pointer: coarse) and (max-height: 500px) {
@@ -28269,6 +28369,51 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .gdp-context-menu button {
     height: auto;
     min-height: var(--sp-touch);
+  }
+  /* 点検で 44px に足りなかった押し場所 (Files の行と並べ替え・枝の選択の札と
+     タブ・履歴の絞り込みの解除・ダイアログ・データストアの操作・設定の保存と
+     ショートカットの行)。データストアの列ごとの絞り込みの欄は表の見出しの中
+     なので詰めたまま。 */
+  .gdp-repo-row,
+  .gdp-repo-sort-header button,
+  .rp-chip,
+  .rp-tab,
+  .history-filter-clear,
+  .gdp-dialog-button,
+  .gdp-dialog-input,
+  .db-tabs-chip-close,
+  .db-query-toolbar .db-btn,
+  .db-grid-filter-input,
+  .db-grid-filter-actions .db-btn,
+  .db-icon-btn,
+  .db-file-select,
+  .db-edit-mode-toggle,
+  .db-table-item,
+  .db-grid-pager-btn,
+  .db-grid-detail-copy,
+  .db-history-dock-tab,
+  .db-query-history-action,
+  .scope-settings-actions button,
+  .shortcut-row-head,
+  .tools-pane-action {
+    min-height: var(--sp-touch);
+    box-sizing: border-box;
+  }
+  .db-tabs-chip-close,
+  .db-icon-btn,
+  .db-grid-pager-btn,
+  .tools-pane-action {
+    min-width: var(--sp-touch);
+  }
+  .gdp-dialog-input {
+    height: var(--sp-touch);
+  }
+  /* 浮く帯の × (選んだ行の参照の帯) は帯の角に重ねる小さな丸。押せる大きさに。 */
+  #line-ref-pill-close {
+    top: calc(var(--space-3) * -1);
+    right: calc(var(--space-3) * -1);
+    width: calc(var(--space-unit) * 7);
+    height: calc(var(--space-unit) * 7);
   }
   /* 端末の上の 2 本指はページの拡大ではなく端末の文字の大きさ (mobile-shell.ts の
      ピンチ)。1 本指の縦横の送りはそのまま。 */

@@ -1272,6 +1272,20 @@ function createTabPane(
     container.classList.add("db-phone-list");
   });
   mainContent.prepend(phoneListButton);
+  // 一覧のページから表へ戻る (テーブルを選び直すほかに戻り方が無かった)。
+  const phoneListBack = document.createElement("button");
+  phoneListBack.type = "button";
+  phoneListBack.className = "db-phone-list-back";
+  phoneListBack.innerHTML = iconSvg("db-phone-list-open-icon", [
+    CHEVRON_LEFT_16_PATH,
+  ]);
+  const phoneListBackLabel = document.createElement("span");
+  phoneListBack.append(phoneListBackLabel);
+  reloc(() => {
+    phoneListBackLabel.textContent = paneText().nav.phoneListBack;
+  });
+  phoneListBack.addEventListener("click", () => closePhoneList());
+  sidebar.prepend(phoneListBack);
   function closePhoneList(): void {
     container.classList.remove("db-phone-list");
   }
