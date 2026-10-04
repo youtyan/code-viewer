@@ -2763,9 +2763,13 @@ function makeIconButton(opts: {
 }
 
 /** アイコンボタンの title / aria-label を言語切替時に再適用する。 */
-/** 押したら電話の段で一覧の側を閉じる、各 explorer の一覧の項目。 */
+/**
+ * 押したら電話の段で一覧の側を閉じる、各 explorer の一覧の項目と、ER 図・横断
+ * 検索・スナップショットのボタン (結果は表の側に出る。閉じないと押しても一覧の
+ * ままで何も起きないように見えた)。
+ */
 const PHONE_LIST_EXPLORER_ITEMS =
-  ".redis-db-item, .es-index-item, .dynamodb-table-item, .s3-object-item, .tree-file";
+  ".redis-db-item, .es-index-item, .dynamodb-table-item, .s3-object-item, .tree-file, .db-icon-toolbar .db-icon-btn";
 
 function localizeIconButton(
   btn: HTMLButtonElement,

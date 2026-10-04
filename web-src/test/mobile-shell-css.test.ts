@@ -319,6 +319,93 @@ describe("電話の段の骨格", () => {
     },
   );
 
+  // 点検で見つけた、電話の段で読めなかった・使えなかった画面:
+  // - ファイルの「履歴」のタブは一覧とコミットを別のページにする (2 列のままでは
+  //   コミットの箱が 58px になり、件名が 1 文字ずつ縦に並んだ)
+  // - Blame は左の欄を狭くする (コードが 20px しか見えなかった)
+  // - 設定の保存の帯は文言とボタンを縦に積む (文言が幅 18px に潰れ帯が伸びた)
+  // - データストアの表は上の段ごと縦に送り、表は箱の見える高さを下限にする。
+  //   クエリ履歴・ログとセルの詳細は表の上に重ね、中の 2 列は縦に積む
+  test.each([
+    {
+      selector: ".gdp-file-history-embed",
+      property: "grid-template-columns",
+      desktop: "minmax(260px, 320px) minmax(0, 1fr)",
+      phone: "minmax(0, 1fr)",
+    },
+    {
+      selector:
+        ".gdp-file-history-embed:has(.history-item.active) .gdp-file-history-panel",
+      property: "display",
+      desktop: undefined,
+      phone: "none",
+    },
+    {
+      selector:
+        ".gdp-file-history-embed:not(:has(.history-item.active)) .gdp-file-history-diff-pane",
+      property: "display",
+      desktop: undefined,
+      phone: "none",
+    },
+    {
+      selector: ".gdp-blame-info",
+      property: "width",
+      desktop: "240px",
+      phone: "calc(var(--space-unit) * 28)",
+    },
+    {
+      selector: ".scope-settings-footer",
+      property: "grid-template-columns",
+      desktop: "minmax(0, 1fr) auto",
+      phone: "minmax(0, 1fr)",
+    },
+    {
+      selector: ".db-main-content",
+      property: "overflow-y",
+      desktop: undefined,
+      phone: "auto",
+    },
+    {
+      selector: ".db-grid",
+      property: "min-height",
+      desktop: undefined,
+      phone: "100%",
+    },
+    {
+      selector:
+        ".db-container:has(> .db-history-pane:not([hidden])) > .db-upper-area",
+      property: "visibility",
+      desktop: undefined,
+      phone: "hidden",
+    },
+    {
+      selector: ".db-grid-detail-panel",
+      property: "position",
+      desktop: "relative",
+      phone: "absolute",
+    },
+    {
+      selector: ".db-query-history-body-split",
+      property: "flex-direction",
+      desktop: undefined,
+      phone: "column",
+    },
+    {
+      selector: '.db-grid-edit-controls:not(:has(> [aria-hidden="false"]))',
+      property: "display",
+      desktop: undefined,
+      phone: "none",
+    },
+  ])(
+    "$selector の $property はデスクトップ $desktop・電話 $phone",
+    ({ selector, property, desktop, phone }) => {
+      expect([
+        declarationsOf(baseRules(sheet), [selector]).get(property),
+        declarationsOf(rules, [selector]).get(property),
+      ]).toEqual([desktop, phone]);
+    },
+  );
+
   test("切替の帯は下端に貼り、ホームバーの分だけ内側を空ける", () => {
     const bar = declarationsOf(rules, [".mobile-bar:not([hidden])"]);
     expect(bar.get("position")).toBe("fixed");

@@ -26792,6 +26792,17 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .scope-settings-footer {
     padding-block: var(--space-2);
   }
+  /* 文言とボタンは縦に積む。横 2 列ではボタン 2 つ (44px の高さ) が幅を取り、
+     「保存の要る変更はありません。」が幅 18px で 1 文字ずつ縦に並び、帯が 360px に
+     伸びて節の欄を隠した。 */
+  .scope-settings-footer {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-2);
+  }
+  .scope-settings-footer > .scope-settings-actions {
+    grid-row: auto;
+    grid-column: 1;
+  }
   /* ヘルプの見出し: キーボードショートカットの小窓のボタンは出さない (電話にキー
      ボードは無い)。ボタンが幅を取り、見出しが「ヘ/ル/プ」と縦に折れて、版とボタンが
      画面の外へはみ出した。 */
@@ -27121,35 +27132,41 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   /* コミットの行は 2 段: 1 段目の全幅に件名と枝の札、2 段目に時刻・作者・
      ハッシュ。1 段に並べると件名が「Add the sa…」まで切れた。グラフの線は
      行の高さの割合で引くので (history-graph.ts)、2 段の行でもつながる。 */
-  #history-panel .history-item {
+  #history-panel .history-item,
+  .gdp-file-history-panel .history-item {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     column-gap: var(--space-3);
     row-gap: calc(var(--space-1) / 2);
     height: auto;
   }
-  #history-panel .history-item .history-graph-cell {
+  #history-panel .history-item .history-graph-cell,
+  .gdp-file-history-panel .history-item .history-graph-cell {
     grid-row: 1 / 3;
   }
   /* 枝の線の列は線の本数の幅だけ (デスクトップの 72px の列では、線 1 本の左右が
      空き、件名が画面の 4 分の 1 から始まった)。線の無い行 (未コミット変更) は 2 本分。 */
-  #history-panel .history-graph-cell {
+  #history-panel .history-graph-cell,
+  .gdp-file-history-panel .history-graph-cell {
     width: max-content;
     min-width: calc(var(--space-unit) * 6);
   }
   /* グラフは行の高さを決めない (高さの指定の無い SVG は 150px として行を
      押し広げた)。行が決まってから、その高さいっぱいに描く。 */
-  #history-panel .history-item .history-graph {
+  #history-panel .history-item .history-graph,
+  .gdp-file-history-panel .history-item .history-graph {
     height: 0;
     min-height: 100%;
   }
   /* 上下の余白は段の中に取る (行に取るとグラフの線が行の間で途切れる)。 */
-  #history-panel .history-item .history-title {
+  #history-panel .history-item .history-title,
+  .gdp-file-history-panel .history-item .history-title {
     grid-row: 1;
     grid-column: 2;
     padding-top: var(--space-1);
   }
-  #history-panel .history-item .meta2 {
+  #history-panel .history-item .meta2,
+  .gdp-file-history-panel .history-item .meta2 {
     grid-row: 2;
     grid-column: 2;
     padding-bottom: var(--space-1);
@@ -27157,18 +27174,53 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     min-width: 0;
     column-gap: var(--space-2);
   }
-  #history-panel .history-item .when {
+  #history-panel .history-item .when,
+  .gdp-file-history-panel .history-item .when {
     order: 1;
   }
-  #history-panel .history-item .author {
+  #history-panel .history-item .author,
+  .gdp-file-history-panel .history-item .author {
     order: 2;
     flex: 0 1 auto;
     display: block;
     min-width: 0;
   }
-  #history-panel .history-item .sha {
+  #history-panel .history-item .sha,
+  .gdp-file-history-panel .history-item .sha {
     order: 3;
     display: inline;
+  }
+  /* Blame: 左の欄 (いつ・誰・ハッシュ・件名。240〜320px) を狭くする。390px の
+     画面ではコードが 20px しか見えなかった。欄はいつと件名だけ (誰とハッシュは
+     コミットの履歴にある)。古い・新しいの凡例は 1 文字ずつ折り返さない。 */
+  .gdp-blame-info {
+    width: calc(var(--space-unit) * 28);
+    min-width: calc(var(--space-unit) * 28);
+    max-width: calc(var(--space-unit) * 28);
+  }
+  .gdp-source-virtual-row.gdp-blame-virtual-row {
+    --blame-cell-w: calc(var(--space-unit) * 28);
+  }
+  .gdp-blame-author,
+  .gdp-blame-sha {
+    display: none;
+  }
+  .gdp-blame-legend {
+    flex: none;
+    white-space: nowrap;
+  }
+  /* ファイルの「履歴」のタブ: 一覧とコミットを別のページにする (History と同じ)。
+     横 2 列のままだと、コミットの箱が 58px になり件名とハッシュが 1 文字ずつ
+     縦に並んだ。選ぶまでは一覧、選んだらコミット (頭の「‹ 履歴の一覧」で戻る)。 */
+  .gdp-file-history-embed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gdp-file-history-panel {
+    border-right: 0;
+  }
+  .gdp-file-history-embed:has(.history-item.active) .gdp-file-history-panel,
+  .gdp-file-history-embed:not(:has(.history-item.active)) .gdp-file-history-diff-pane {
+    display: none;
   }
   body.gdp-history-page main#content,
   body.gdp-history-page.gdp-sidebar-hidden main#content,
@@ -27254,6 +27306,71 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     width: var(--icon-md);
     height: var(--icon-md);
     fill: currentColor;
+  }
+  /* 表の側は上の段 (一覧へのボタン・データ / スキーマ・SQL の段・検索・表の操作)
+     ごと縦に送る。段が積み重なって、短い画面 (320×568・横向き) では行の箱が 18px
+     になり、データが 1 行も見えなかった。表は箱の見える高さを下限にする (上の段を
+     送り出せば、表が画面いっぱいになる)。表の中の縦の送りは今までどおり行の箱が
+     持つ (表の高さは決まった値のまま。中身の高さまで伸ばすと仮想表示が効かない)。 */
+  .db-main-content {
+    overflow-y: auto;
+  }
+  .db-grid {
+    position: relative;
+    min-height: 100%;
+  }
+  /* クエリ履歴・ログと、セルの詳細・関連の行は表の上に重ねる (表のスクロールの
+     位置は保つ)。表の下に積むと、開くたびに行が 1〜2 行まで減った。閉じるのは
+     下端の × と、詳細の × (どちらも指で押せる大きさ)。 */
+  .db-container {
+    position: relative;
+  }
+  .db-container:has(> .db-history-pane:not([hidden])) > .db-upper-area {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+  }
+  .db-history-pane {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto !important;
+  }
+  .db-history-resizer {
+    display: none !important;
+  }
+  .db-history-dock-close,
+  .db-grid-detail-close {
+    min-width: var(--sp-touch);
+    min-height: var(--sp-touch);
+  }
+  .db-grid-detail-panel,
+  .db-related-panel {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    height: auto !important;
+  }
+  /* クエリ履歴・ログの中の「一覧 | 詳細」の 2 列は縦に積む。一覧が 360px の
+     固定幅で、詳細が画面の外 (右端の 32px) に押し出されていた。 */
+  .db-query-history-body-split,
+  .db-session-log-body-split {
+    flex-direction: column;
+  }
+  .db-query-history-list-col,
+  .db-session-log-list-col {
+    flex: none;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    max-height: 50%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  /* 編集モードでないときの編集の操作 (見えないまま場所だけ取る段) は出さない。
+     デスクトップは横 1 列の中で場所を取って位置のずれを防ぐが、電話では折り
+     返して空の段になり、表の高さを 28px 削っていた。 */
+  .db-grid-edit-controls:not(:has(> [aria-hidden="false"])) {
+    display: none;
   }
   /* Redis・Elasticsearch・DynamoDB の中身の側は、一覧 (キー・ドキュメント・
      アイテム。幅 320〜380px の固定) と詳細の横 2 列だった。390px では一覧だけで
