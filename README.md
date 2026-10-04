@@ -199,6 +199,7 @@ Marks in the file list:
 
 - **New agent**: starts claude or codex in a new tmux window, with the account and project you choose. The dialog shows the exact command and each account's 5-hour and weekly usage.
 - The launch commands can be edited in **Settings → Accounts → Launch commands**.
+- claude started from code-viewer uses the classic renderer even if fullscreen (`"tui": "fullscreen"`) is set, so its earlier output stays in tmux for the phone to read.
 - Agents are listed under their project in the sidebar, on every screen. Select one to open its pane in a terminal tab. Rest the pointer on it to see the last lines of its screen.
 - **All agents** (`g a`): every agent in tmux on this machine, grouped by project, agents that need input first. **All panes** also lists plain shells.
 - The bottom bar counts agents that need input and agents that are working. The browser tab title shows the unread count.
@@ -273,9 +274,11 @@ How the state is decided, strongest first:
 
 In a window 640px wide or less (or a touch screen 500px tall or less), the layout keeps three tasks: answer agents, read diffs and files, and switch projects.
 
-- A bar at the bottom: **Projects**, **Files**, **Diff**, **Agents** (with the number waiting for input) and **List**.
+- A bar at the bottom: **Projects**, **Files**, **Diff**, **Agents** (with the number waiting for input) and **List** (on Files, Diff, History and Worktrees).
+- **List** opens the screen's list as a full page. In History, tap a commit for its diff; **‹ History list** or the browser's back returns to the list.
 - Opening an agent shows only its pane, full screen. The PC's tmux layout does not change.
 - Numbered choices become buttons; the field at the bottom sends text and Enter; the image button attaches a photo.
+- URLs in the output open in a new tab. To sign in again from the phone, open the sign-in URL, approve, and send the code shown.
 - **As on PC** shows the pane at the PC's width.
 - Touch and hold opens the right-click menu. Pinch changes the terminal's text size.
 - To use it away from home, see [Connect from outside](#connect-from-outside).

@@ -625,6 +625,10 @@ describe("diff view fast path", () => {
       } as IdleDeadline);
 
       expect(card.querySelector(".d2h-file-name")?.textContent).toBe(shownName);
+      // 電話の幅で名前を折り返すとき、/ の後ろで折る (語の途中で折れた)。
+      expect(card.querySelectorAll(".d2h-file-name wbr")).toHaveLength(
+        shownName.split("/").length - 1,
+      );
       const span = card.querySelector<HTMLElement>(".d2h-code-line-ctn");
       expect(span?.textContent).toBe("const value = 1;");
       expect(span?.classList.contains("gdp-highlight-failed")).toBe(

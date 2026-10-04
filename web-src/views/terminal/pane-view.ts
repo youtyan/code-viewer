@@ -28,6 +28,7 @@ import {
 } from "../../core/mobile-layout";
 import { UNINTERRUPTIBLE_REQUEST_HEADER } from "../../core/network-activity";
 import {
+  collapseBlankLines,
   DEFAULT_COLOR,
   findChoices,
   lineText,
@@ -41,6 +42,7 @@ import {
   terminalPalette,
   withoutTransient,
 } from "../../core/pane-reflow";
+import { matchTextLinks } from "../../core/terminal-links";
 import {
   PASTE_IMAGE_TYPES,
   pasteImageExtension,
@@ -142,13 +144,40 @@ function plain(run: ReflowLine["runs"][number]): boolean {
   );
 }
 
+type LineUrl = { index: number; length: number; path: string };
+
+/**
+ * 区切り (色の塊) 1 つの文字。行の中の URL に当たる所はリンクにする (offset は
+ * この塊の行の中の位置)。ログインのペインの承認の URL をスマホのブラウザで開くのに
+ * 要った (文字のままでは押せず、長くて選べなかった)。
+ */
+function runHtml(text: string, offset: number, urls: LineUrl[]): string {
+  let html = "";
+  let at = 0;
+  for (const url of urls) {
+    const start = Math.max(url.index - offset, at);
+    const end = Math.min(url.index + url.length - offset, text.length);
+    if (end <= start) continue;
+    const href = escapeHtml(url.path).replace(/"/g, "&quot;");
+    html += `${escapeHtml(text.slice(at, start))}<a class="pane-link" href="${href}" target="_blank" rel="noopener noreferrer">${escapeHtml(text.slice(start, end))}</a>`;
+    at = end;
+  }
+  return html + escapeHtml(text.slice(at));
+}
+
 function lineHtml(line: ReflowLine, colors: ReflowColors): string {
+  const urls = matchTextLinks(lineText(line)).filter(
+    (link) => link.kind === "url",
+  );
+  let offset = 0;
   const body = line.runs
-    .map((run) =>
-      plain(run)
-        ? escapeHtml(run.text)
-        : `<span style="${runCss(run.style, colors)}">${escapeHtml(run.text)}</span>`,
-    )
+    .map((run) => {
+      const html = runHtml(run.text, offset, urls);
+      offset += run.text.length;
+      return plain(run)
+        ? html
+        : `<span style="${runCss(run.style, colors)}">${html}</span>`;
+    })
     .join("");
   // 折り返した 2 行目以降を文の始まり (箇条書きなら頭の後ろ) に揃える。
   const hang = line.hang ? ` style="--pane-hang: ${line.hang}ch"` : "";
@@ -545,7 +574,10 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     const live = linesIn(buffer, liveStart, buffer.length);
     while (live.length > 0 && live[live.length - 1].runs.length === 0)
       live.pop();
-    readLive.innerHTML = linesHtml(live, palette);
+    readLive.innerHTML = linesHtml(
+      currentView === "read" ? collapseBlankLines(live) : live,
+      palette,
+    );
     scrollToBottom();
   }
 

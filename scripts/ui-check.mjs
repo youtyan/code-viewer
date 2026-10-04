@@ -8,7 +8,7 @@
 // 手順 (配列の 1 要素ずつ。ms は後の待ち):
 //   {"do":"goto","path":"file?path=src%2Fmain.ts","ms":3000}  URL からの相対パス
 //   {"do":"settings","patch":{"theme":"dark","colorTheme":"ink"}}  設定を PATCH (全部の窓に効く)
-//   {"do":"viewport","w":1440,"h":900}
+//   {"do":"viewport","w":1440,"h":900}  "touch":true で指の画面 (iPhone と同じく pointer: coarse)
 //   {"do":"click","sel":".main-tab"} / {"do":"click","x":600,"y":120}
 //   {"do":"hover","sel":"..."} / {"do":"drag","from":[x,y],"to":[x,y]}
 //   {"do":"key","key":"Escape"}  (code・vk・mods を足せる)
@@ -53,13 +53,20 @@ try {
       );
   });
   await cdp.send("Runtime.enable");
-  const viewport = (width, height) =>
-    cdp.send("Emulation.setDeviceMetricsOverride", {
+  // touch: 指の画面。SP の節の「指の画面」の規則 (押せる高さ 44px など) は
+  // pointer: coarse でだけ効くので、無いと実機の iPhone と違う画面を撮る。
+  const viewport = async (width, height, touch = false) => {
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
       width,
       height,
       deviceScaleFactor: 1,
-      mobile: false,
+      mobile: touch,
     });
+    await cdp.send("Emulation.setTouchEmulationEnabled", {
+      enabled: touch,
+      maxTouchPoints: touch ? 5 : 1,
+    });
+  };
   await viewport(1440, 900);
 
   const evaluate = async (expression) => {
@@ -134,7 +141,7 @@ try {
       })()`).finally(() => sleep(step.ms ?? 1200));
     },
     async viewport(step) {
-      await viewport(step.w, step.h);
+      await viewport(step.w, step.h, step.touch === true);
       await sleep(step.ms ?? 800);
     },
     async click(step) {

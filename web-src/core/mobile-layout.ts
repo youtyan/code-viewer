@@ -168,6 +168,28 @@ export function mobileBarCurrent(
   return null;
 }
 
+/** 一覧の列に、その画面の一覧 (ファイル・変更ファイル・コミット) がある画面。 */
+const LIST_PAGES = [
+  "gdp-repo-page",
+  "gdp-file-detail-page",
+  "gdp-diff-page",
+  "gdp-history-page",
+  "gdp-worktree-page",
+];
+
+/**
+ * 下端の帯に「一覧」を出すか。一覧の無い画面 (エージェント・ツール・検索など) で
+ * 押すと、その画面と関係の無いファイルの木が出た。作業ツリーの一覧だけの表示は
+ * 一覧が本文なので出さない。
+ */
+export function mobileListAvailable(
+  hasPageClass: (name: string) => boolean,
+  coveredByTab: boolean,
+  worktreeOverview: boolean,
+): boolean {
+  return !coveredByTab && !worktreeOverview && LIST_PAGES.some(hasPageClass);
+}
+
 /**
  * ソフトキーボードと見なす最小の高さ (px)。これより小さい差は、ブラウザの
  * 上下の帯が出入りしただけとして扱う。

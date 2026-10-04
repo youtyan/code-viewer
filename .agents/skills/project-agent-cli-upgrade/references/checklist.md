@@ -172,6 +172,7 @@
 | L4 | 両方 | ペインの前面のコマンド名（tmux の `pane_current_command`）で種類を決める: `claude`、または `x.y.z`（ネイティブの claude は版の名前で動く）→ claude、`codex` → codex。`node` で動く claude はフックの名乗りだけ | `web-src/core/agent-overview.ts#agentKindOf` | 黙って種類が出ない。アカウントが分からない・会話の場所を戻せない | `web-src/test/agent-overview-core.test.ts`・`web-src/test/agent-conversations.test.ts` |
 | L5 | 両方 | エージェントのプロセスがペインのシェルの子孫で、名前が `pane_current_command` と同じ。`CLAUDE_CONFIG_DIR` / `CODEX_HOME` を受け継ぐ。**要 C**（2026-10-02 時点で未確認）: codex 0.157.0 からの共有の裏のサーバ（H5）で、作業するプロセスがペインのシェルの子孫でなくなっていないか | `web-src/server/accounts/process-env.ts#findAgentProcess` | 行のアカウントが「不明」と理由 | `web-src/test/agent-accounts-server.test.ts` |
 | L6 | 両方 | `transcript_path` が実在するファイルを指す（中身は読まない） | `web-src/server/terminal/agent-conversations.ts#decideConversationRestore` | 再起動の後に会話の場所を戻さず、理由をログに出す | `web-src/test/agent-conversations.test.ts` |
+| L7 | claude | 起動に `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` を足すと、設定の `tui`（全画面表示）より優先して通常の表示で動き、会話が tmux の過去の行に残る | `web-src/core/agent-accounts.ts#LAUNCH_ENV` | 全画面表示のまま起動し、スマホの読む画面で過去の出力が読めない（ペインの `alternate_on` が 1） | `web-src/test/agent-accounts-core.test.ts` |
 
 **確かめ方**
 
@@ -184,6 +185,9 @@
   （メタ情報だけ。画面の中身は読まない）。版の名前に `-beta` などが付くと L4 の `x.y.z` に当たらない
 - C（L2・L3・L6）: 砂場（`agents.md` の 6 の最後の段落の偽の実行ファイル）で引き継ぎの引数を確かめる。
   本物での確認は利用者に頼む
+- A（L7）: https://code.claude.com/docs/en/env-vars の `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN` の行に
+  「`tui` の設定より優先」とあること。C: code-viewer から起動した claude のペインの
+  `#{alternate_on}` が 0（`list-panes -a -F '#{pane_id} #{alternate_on}'`。画面の中身は読まない）
 
 ---
 

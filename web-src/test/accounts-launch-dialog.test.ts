@@ -146,13 +146,14 @@ test("開いている間に届いた起動コマンドで、表示するコマ�
   });
   const closed = dialogs.launch();
   // 開いた時点でも 1 回取り直す
+  // claude には全画面表示を外す変数を足す (LAUNCH_ENV)。
   expect([preview(), fake.loads(), fake.listeners.size]).toEqual([
-    "claude --old",
+    "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 claude --old",
     1,
     1,
   ]);
   fake.arrive("claude --new");
-  expect(preview()).toBe("claude --new");
+  expect(preview()).toBe("CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 claude --new");
   // 閉じたら合わせ直しをやめる
   document
     .querySelector<HTMLButtonElement>(".gdp-dialog .gdp-dialog-cancel")
@@ -233,7 +234,9 @@ test.each([
     title,
     failed: rejection !== null,
     color: rejection ? failedColor : colorOf("agents-icon-action"),
-    written: rejection ? [] : ["claude --old"],
+    written: rejection
+      ? []
+      : ["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 claude --old"],
   });
   if (rejection) {
     const logged = consoleError.mock.calls[0]?.[0] as Error;
@@ -446,7 +449,7 @@ describe("起動の画面のアカウントの一覧", () => {
     ];
     rows()[1]?.click();
     expect(preview()).toBe(
-      "CLAUDE_CONFIG_DIR=~/.local/state/code-viewer/accounts/Work claude",
+      "CLAUDE_CONFIG_DIR=~/.local/state/code-viewer/accounts/Work CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 claude",
     );
     rows()[1]?.dispatchEvent(
       new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
@@ -458,7 +461,7 @@ describe("起動の画面のアカウントの一覧", () => {
     ]).toEqual([
       ["false", "false", "true"],
       "claude:spare",
-      "CLAUDE_CONFIG_DIR=~/.local/state/code-viewer/accounts/Spare claude",
+      "CLAUDE_CONFIG_DIR=~/.local/state/code-viewer/accounts/Spare CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 claude",
     ]);
     cancel();
     await closed;
@@ -511,7 +514,7 @@ describe("別のアカウントで続ける (起動の画面を引き継ぎの�
       ],
       project: "/home/sample/work/sample-lib",
       session: "sample-agents",
-      preview: `claude '${prompt}' --add-dir /home/sample/.claude/projects/-work-sample-lib`,
+      preview: `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 claude '${prompt}' --add-dir /home/sample/.claude/projects/-work-sample-lib`,
       submit: "Start and hand over",
     });
     dialog?.querySelector<HTMLButtonElement>(".gdp-dialog-confirm")?.click();

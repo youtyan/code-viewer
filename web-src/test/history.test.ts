@@ -1932,6 +1932,8 @@ describe("history view commit rows, filter URL and compare", () => {
     route: AppRoute;
     copyText?: (text: string) => Promise<void>;
     commitWebLink?: (sha: string) => HTMLAnchorElement | null;
+    listIsPage?: () => boolean;
+    showList?: () => void;
   }) {
     const dom = installHistoryViewDom();
     const filterInput = new FakeElement();
@@ -1977,6 +1979,8 @@ describe("history view commit rows, filter URL and compare", () => {
       trackLoad: (promise) => promise,
       copyText: options.copyText,
       commitWebLink: options.commitWebLink,
+      listIsPage: options.listIsPage,
+      showList: options.showList,
     });
     const mount = {
       panel: dom.panel as unknown as HTMLElement,
@@ -2254,4 +2258,87 @@ describe("history view commit rows, filter URL and compare", () => {
     const link = dom.actions.querySelector(".hci-link");
     expect(link?.attributes.href).toBe("https://example.test/commit/aaa111");
   });
+
+  // 電話の段では一覧と差分が別のページ。一覧から選ぶとブラウザの履歴に積み (戻る
+  // で一覧へ)、差分の上に一覧を開き直して選び直したときは置き換える (1 つ前は一覧
+  // のまま)。デスクトップは選び直しで履歴を増やさない。
+  test.each([
+    { name: "the phone", listIsPage: true, replaces: [false, true] },
+    { name: "the desktop", listIsPage: false, replaces: [true, true] },
+  ])(
+    "picking commits from the list on $name",
+    async ({ listIsPage, replaces }) => {
+      const { view, dom, routes, applied } = makeView({
+        commits: [second, first],
+        route: historyRoute,
+        listIsPage: () => listIsPage,
+      });
+      await view.enterHistory();
+      for (const sha of ["aaa111", "bbb111"]) {
+        const row = dom.list
+          .querySelectorAll(".history-item")
+          .find((item) => item.dataset.sha === sha);
+        dom.list.dispatch("click", { target: row });
+        await waitFor(() => applied[applied.length - 1]?.to === sha);
+      }
+      expect(routes.map((entry) => entry.replace)).toEqual(replaces);
+    },
+  );
+
+  // 差分の頭の「履歴の一覧」。一覧から積んだならブラウザの戻る (積んだ項を戻す)、
+  // URL から開いたコミット (1 つ前が一覧か分からない) なら一覧のページを開く。
+  test.each([
+    {
+      name: "a commit picked from the list goes back",
+      route: historyRoute,
+      pick: true,
+      expected: { backs: 1, shown: 0, label: "History list" },
+    },
+    {
+      name: "a commit opened from the URL opens the list",
+      route: { ...historyRoute, commit: "aaa111" } as AppRoute,
+      pick: false,
+      expected: { backs: 0, shown: 1, label: "History list" },
+    },
+  ])(
+    "back to the list on the phone: $name",
+    async ({ route, pick, expected }) => {
+      const originalHistory = globalThis.history;
+      let backs = 0;
+      let shown = 0;
+      globalThis.history = {
+        back: () => {
+          backs++;
+        },
+      } as unknown as History;
+      try {
+        const { view, dom, applied } = makeView({
+          commits: [second, first],
+          route,
+          listIsPage: () => true,
+          showList: () => {
+            shown++;
+          },
+        });
+        const slot = new FakeElement();
+        slot.className = "hci-back-slot";
+        dom.info.append(slot);
+        await view.enterHistory();
+        if (pick) {
+          const row = dom.list
+            .querySelectorAll(".history-item")
+            .find((item) => item.dataset.sha === "aaa111");
+          dom.list.dispatch("click", { target: row });
+        }
+        await waitFor(() => applied.length === 1);
+        const back = slot.querySelector(".hci-back");
+        back?.click();
+        expect({ backs, shown, label: back?.children[0]?.textContent }).toEqual(
+          expected,
+        );
+      } finally {
+        globalThis.history = originalHistory;
+      }
+    },
+  );
 });

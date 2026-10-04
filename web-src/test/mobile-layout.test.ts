@@ -12,6 +12,7 @@ import {
   LONG_PRESS_MOVE_TOLERANCE,
   longPressMoved,
   mobileBarCurrent,
+  mobileListAvailable,
   PHONE_LANDSCAPE_MEDIA_QUERY,
   PHONE_MEDIA_QUERY,
   pinchFontSize,
@@ -402,6 +403,37 @@ describe("mobileBarCurrent", () => {
       ),
     ).toBe(expected);
   });
+});
+
+// 下端の帯の「一覧」は一覧のある画面だけ (一覧の無い画面で押すと、関係の無い
+// ファイルの木が出た)。作業ツリーの一覧だけの表示は一覧が本文なので出さない。
+describe("mobileListAvailable", () => {
+  test.each([
+    [["gdp-repo-page"], false, false, true],
+    [["gdp-repo-blob-page", "gdp-file-detail-page"], false, false, true],
+    [["gdp-diff-page"], false, false, true],
+    [["gdp-history-page"], false, false, true],
+    [["gdp-worktree-page"], false, false, true],
+    [["gdp-worktree-page"], false, true, false],
+    [["gdp-diff-page"], true, false, false],
+    [["gdp-agents-page"], false, false, false],
+    [["gdp-tools-page"], false, false, false],
+    [["gdp-search-page"], false, false, false],
+    [["gdp-journal-page"], false, false, false],
+    [["gdp-database-page"], false, false, false],
+    [["gdp-help-page"], false, false, false],
+  ] as const)(
+    "%j, covered by a tab %s, worktree overview %s → %s",
+    (classes, covered, overview, expected) => {
+      expect(
+        mobileListAvailable(
+          (name) => (classes as readonly string[]).includes(name),
+          covered,
+          overview,
+        ),
+      ).toBe(expected);
+    },
+  );
 });
 
 describe("longPressMoved", () => {
