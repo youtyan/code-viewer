@@ -422,15 +422,18 @@ describe("mobileListAvailable", () => {
     [["gdp-journal-page"], false, false, false],
     [["gdp-database-page"], false, false, false],
     [["gdp-help-page"], false, false, false],
-  ] as const)("%j, covered by a tab %s, worktree overview %s → %s", (classes, covered, overview, expected) => {
-    expect(
-      mobileListAvailable(
-        (name) => (classes as readonly string[]).includes(name),
-        covered,
-        overview,
-      ),
-    ).toBe(expected);
-  });
+  ] as const)(
+    "%j, covered by a tab %s, worktree overview %s → %s",
+    (classes, covered, overview, expected) => {
+      expect(
+        mobileListAvailable(
+          (name) => (classes as readonly string[]).includes(name),
+          covered,
+          overview,
+        ),
+      ).toBe(expected);
+    },
+  );
 });
 
 describe("longPressMoved", () => {

@@ -2265,25 +2265,25 @@ describe("history view commit rows, filter URL and compare", () => {
   test.each([
     { name: "the phone", listIsPage: true, replaces: [false, true] },
     { name: "the desktop", listIsPage: false, replaces: [true, true] },
-  ])("picking commits from the list on $name", async ({
-    listIsPage,
-    replaces,
-  }) => {
-    const { view, dom, routes, applied } = makeView({
-      commits: [second, first],
-      route: historyRoute,
-      listIsPage: () => listIsPage,
-    });
-    await view.enterHistory();
-    for (const sha of ["aaa111", "bbb111"]) {
-      const row = dom.list
-        .querySelectorAll(".history-item")
-        .find((item) => item.dataset.sha === sha);
-      dom.list.dispatch("click", { target: row });
-      await waitFor(() => applied[applied.length - 1]?.to === sha);
-    }
-    expect(routes.map((entry) => entry.replace)).toEqual(replaces);
-  });
+  ])(
+    "picking commits from the list on $name",
+    async ({ listIsPage, replaces }) => {
+      const { view, dom, routes, applied } = makeView({
+        commits: [second, first],
+        route: historyRoute,
+        listIsPage: () => listIsPage,
+      });
+      await view.enterHistory();
+      for (const sha of ["aaa111", "bbb111"]) {
+        const row = dom.list
+          .querySelectorAll(".history-item")
+          .find((item) => item.dataset.sha === sha);
+        dom.list.dispatch("click", { target: row });
+        await waitFor(() => applied[applied.length - 1]?.to === sha);
+      }
+      expect(routes.map((entry) => entry.replace)).toEqual(replaces);
+    },
+  );
 
   // 差分の頭の「履歴の一覧」。一覧から積んだならブラウザの戻る (積んだ項を戻す)、
   // URL から開いたコミット (1 つ前が一覧か分からない) なら一覧のページを開く。
@@ -2300,46 +2300,45 @@ describe("history view commit rows, filter URL and compare", () => {
       pick: false,
       expected: { backs: 0, shown: 1, label: "History list" },
     },
-  ])("back to the list on the phone: $name", async ({
-    route,
-    pick,
-    expected,
-  }) => {
-    const originalHistory = globalThis.history;
-    let backs = 0;
-    let shown = 0;
-    globalThis.history = {
-      back: () => {
-        backs++;
-      },
-    } as unknown as History;
-    try {
-      const { view, dom, applied } = makeView({
-        commits: [second, first],
-        route,
-        listIsPage: () => true,
-        showList: () => {
-          shown++;
+  ])(
+    "back to the list on the phone: $name",
+    async ({ route, pick, expected }) => {
+      const originalHistory = globalThis.history;
+      let backs = 0;
+      let shown = 0;
+      globalThis.history = {
+        back: () => {
+          backs++;
         },
-      });
-      const slot = new FakeElement();
-      slot.className = "hci-back-slot";
-      dom.info.append(slot);
-      await view.enterHistory();
-      if (pick) {
-        const row = dom.list
-          .querySelectorAll(".history-item")
-          .find((item) => item.dataset.sha === "aaa111");
-        dom.list.dispatch("click", { target: row });
+      } as unknown as History;
+      try {
+        const { view, dom, applied } = makeView({
+          commits: [second, first],
+          route,
+          listIsPage: () => true,
+          showList: () => {
+            shown++;
+          },
+        });
+        const slot = new FakeElement();
+        slot.className = "hci-back-slot";
+        dom.info.append(slot);
+        await view.enterHistory();
+        if (pick) {
+          const row = dom.list
+            .querySelectorAll(".history-item")
+            .find((item) => item.dataset.sha === "aaa111");
+          dom.list.dispatch("click", { target: row });
+        }
+        await waitFor(() => applied.length === 1);
+        const back = slot.querySelector(".hci-back");
+        back?.click();
+        expect({ backs, shown, label: back?.children[0]?.textContent }).toEqual(
+          expected,
+        );
+      } finally {
+        globalThis.history = originalHistory;
       }
-      await waitFor(() => applied.length === 1);
-      const back = slot.querySelector(".hci-back");
-      back?.click();
-      expect({ backs, shown, label: back?.children[0]?.textContent }).toEqual(
-        expected,
-      );
-    } finally {
-      globalThis.history = originalHistory;
-    }
-  });
+    },
+  );
 });
