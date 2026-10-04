@@ -120,60 +120,58 @@ describe("list column layout", () => {
       list: "--list-w",
       tree: "--sidebar-w",
     },
-  ] as const)("$page: 本文の左端はファイル一覧・一覧・変更ファイルの一覧の右", ({
-    page,
-    files,
-    list,
-    tree,
-  }) => {
-    const value = (name: string) =>
-      name.startsWith("--") ? resolved(name, page) : name;
-    expect(resolved("--page-left", page)).toBe(
-      `calc(${resolved("--chrome-left", page)} + calc(${value(files)} + ${value(list)} + ${value(tree)}))`,
-    );
-  });
+  ] as const)(
+    "$page: 本文の左端はファイル一覧・一覧・変更ファイルの一覧の右",
+    ({ page, files, list, tree }) => {
+      const value = (name: string) =>
+        name.startsWith("--") ? resolved(name, page) : name;
+      expect(resolved("--page-left", page)).toBe(
+        `calc(${resolved("--chrome-left", page)} + calc(${value(files)} + ${value(list)} + ${value(tree)}))`,
+      );
+    },
+  );
 
   test.each([
     { page: "none", display: "block" },
     { page: "history", display: "block" },
     { page: "none-files-folded", display: "none" },
     { page: "history-files-folded", display: "none" },
-  ] as const)("$page: ファイル一覧は左のサイドバーのすぐ右 (畳めば出さない: $display)", ({
-    page,
-    display,
-  }) => {
-    const box = declarationsOn("#file-list", page);
-    const vars = bodyVariables(page);
-    expect({
-      left: resolveVar(box.get("left") ?? "", vars),
-      width: resolveVar(box.get("width") ?? "", vars),
-      display: displayOf(box) ?? "block",
-    }).toEqual({
-      left: resolved("--chrome-left", page),
-      width: resolved("--sidebar-w", page),
-      display,
-    });
-  });
+  ] as const)(
+    "$page: ファイル一覧は左のサイドバーのすぐ右 (畳めば出さない: $display)",
+    ({ page, display }) => {
+      const box = declarationsOn("#file-list", page);
+      const vars = bodyVariables(page);
+      expect({
+        left: resolveVar(box.get("left") ?? "", vars),
+        width: resolveVar(box.get("width") ?? "", vars),
+        display: displayOf(box) ?? "block",
+      }).toEqual({
+        left: resolved("--chrome-left", page),
+        width: resolved("--sidebar-w", page),
+        display,
+      });
+    },
+  );
 
   test.each([
     { page: "history", element: "#history-panel" },
     { page: "history", element: "#worktree-panel" },
     { page: "history-files-folded", element: "#history-panel" },
     { page: "sidebar", element: "#sidebar" },
-  ] as const)("$page: 一覧 $element はファイル一覧の右に一覧の幅で置く", ({
-    page,
-    element,
-  }) => {
-    const box = declarationsOn(element, page);
-    const vars = bodyVariables(page);
-    expect({
-      left: resolveVar(box.get("left") ?? "", vars),
-      width: resolveVar(box.get("width") ?? "", vars),
-    }).toEqual({
-      left: `calc(${resolved("--chrome-left", page)} + ${resolved("--files-shown", page)})`,
-      width: resolved("--list-w", page),
-    });
-  });
+  ] as const)(
+    "$page: 一覧 $element はファイル一覧の右に一覧の幅で置く",
+    ({ page, element }) => {
+      const box = declarationsOn(element, page);
+      const vars = bodyVariables(page);
+      expect({
+        left: resolveVar(box.get("left") ?? "", vars),
+        width: resolveVar(box.get("width") ?? "", vars),
+      }).toEqual({
+        left: `calc(${resolved("--chrome-left", page)} + ${resolved("--files-shown", page)})`,
+        width: resolved("--list-w", page),
+      });
+    },
+  );
 
   test("History: 変更ファイルの一覧は一覧の右、本文の左端の手前、一覧の列の頭の下に置く", () => {
     const vars = bodyVariables("history");

@@ -579,7 +579,7 @@ export async function createDbSchemasResponse(
       };
     }
   }
-  if (!r.docker || r.docker.kind !== "postgresql") {
+  if (r.docker?.kind !== "postgresql") {
     const body: DbSchemasResponse = { dbId: r.dbId, schemas: [] };
     return { ok: true, value: body };
   }

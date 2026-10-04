@@ -62,35 +62,38 @@ describe("file lock", () => {
     ["empty", ""],
     ["broken JSON", "{"],
     ["missing fields", '{"token":"x"}'],
-  ])("an unreadable lock (%s) older than staleMs is taken over with the reason logged, a fresh one still fails", (_label, body) => {
-    const file = join(dir, "sample.json.lock");
-    writeFileSync(file, body);
-    const now = Date.now();
-    // 新しい (staleMs 以内) うちは書きかけかもしれないので投げる。
-    expect(() => tryAcquireFileLock(file, { staleMs: 60_000, now })).toThrow(
-      /lock/,
-    );
-    // 古くなったら奪う。理由は console.error に出す。
-    const errors: unknown[][] = [];
-    const original = console.error;
-    console.error = (...args: unknown[]) => {
-      errors.push(args);
-    };
-    try {
-      const lock = tryAcquireFileLock(file, {
-        staleMs: 60_000,
-        now: now + 61_000,
-      });
-      expect(lock).not.toBeNull();
-      lock?.release();
-    } finally {
-      console.error = original;
-    }
-    expect(errors).toHaveLength(1);
-    expect(String(errors[0][0])).toContain("removing unreadable lock");
-    expect(errors[0][1]).toBeInstanceOf(Error);
-    expect(existsSync(file)).toBe(false);
-  });
+  ])(
+    "an unreadable lock (%s) older than staleMs is taken over with the reason logged, a fresh one still fails",
+    (_label, body) => {
+      const file = join(dir, "sample.json.lock");
+      writeFileSync(file, body);
+      const now = Date.now();
+      // 新しい (staleMs 以内) うちは書きかけかもしれないので投げる。
+      expect(() => tryAcquireFileLock(file, { staleMs: 60_000, now })).toThrow(
+        /lock/,
+      );
+      // 古くなったら奪う。理由は console.error に出す。
+      const errors: unknown[][] = [];
+      const original = console.error;
+      console.error = (...args: unknown[]) => {
+        errors.push(args);
+      };
+      try {
+        const lock = tryAcquireFileLock(file, {
+          staleMs: 60_000,
+          now: now + 61_000,
+        });
+        expect(lock).not.toBeNull();
+        lock?.release();
+      } finally {
+        console.error = original;
+      }
+      expect(errors).toHaveLength(1);
+      expect(String(errors[0][0])).toContain("removing unreadable lock");
+      expect(errors[0][1]).toBeInstanceOf(Error);
+      expect(existsSync(file)).toBe(false);
+    },
+  );
 
   // 権限で読めないロックは、中身が壊れているとは限らない。古くても奪わない。
   test("a lock that cannot be read (not broken) is never taken over", () => {

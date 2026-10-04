@@ -44,15 +44,14 @@ describe("history resizer visibility", () => {
     expect(computed("history-resizer", "display")).toBe("none");
   });
 
-  test.each([
-    "sidebar",
-    "history",
-    "worktree",
-  ])("shown while the list column shows the %s list", (list) => {
-    installDom();
-    document.body.dataset.listColumn = list;
-    expect(computed("history-resizer", "display")).toBe("block");
-  });
+  test.each(["sidebar", "history", "worktree"])(
+    "shown while the list column shows the %s list",
+    (list) => {
+      installDom();
+      document.body.dataset.listColumn = list;
+      expect(computed("history-resizer", "display")).toBe("block");
+    },
+  );
 
   test("hidden while the list column is hidden", () => {
     installDom();

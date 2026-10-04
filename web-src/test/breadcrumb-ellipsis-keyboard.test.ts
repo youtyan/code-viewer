@@ -104,25 +104,24 @@ describe("the breadcrumb ellipsis and the keyboard", () => {
     { open: "Enter", keys: ["Enter"], chosen: ["src"] },
     { open: " ", keys: ["ArrowDown", "Enter"], chosen: ["deep"] },
     { open: "Enter", keys: ["ArrowUp", "Enter"], chosen: ["deep"] },
-  ])("$open opens the hidden levels; $keys chooses $chosen", ({
-    open,
-    keys,
-    chosen,
-  }) => {
-    const pressed: string[] = [];
-    const ellipsis = collapsedBreadcrumb(pressed);
-    ellipsis.focus();
-    press(open);
-    const labels = [
-      ...document.querySelectorAll(".gdp-context-menu button"),
-    ].map((button) => button.textContent);
-    for (const key of keys) press(key);
-    expect([labels, pressed, isContextMenuOpen()]).toEqual([
-      ["src", "deep"],
-      chosen,
-      false,
-    ]);
-  });
+  ])(
+    "$open opens the hidden levels; $keys chooses $chosen",
+    ({ open, keys, chosen }) => {
+      const pressed: string[] = [];
+      const ellipsis = collapsedBreadcrumb(pressed);
+      ellipsis.focus();
+      press(open);
+      const labels = [
+        ...document.querySelectorAll(".gdp-context-menu button"),
+      ].map((button) => button.textContent);
+      for (const key of keys) press(key);
+      expect([labels, pressed, isContextMenuOpen()]).toEqual([
+        ["src", "deep"],
+        chosen,
+        false,
+      ]);
+    },
+  );
 
   test("Escape closes the menu and returns focus to the ellipsis", () => {
     const pressed: string[] = [];

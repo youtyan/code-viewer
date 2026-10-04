@@ -69,40 +69,38 @@ describe("table-grid pager", () => {
     GlobalRegistrator.unregister();
   });
 
-  test.each([
-    "compact",
-    "regular",
-    "large",
-    "xlarge",
-  ] as const)("shows the visible rows and moves one screen per button at the $0 density", async (density) => {
-    document.body.dataset.sidebarFontSize = density;
-    ROW = rowHeightFor(density);
-    const { grid, viewport, pager, scrollTo } = setup(50, 10);
-    await scrollTo(0);
-    expect(pager()).toEqual({
-      range: "1–10 of 50 rows",
-      prev: true,
-      next: false,
-    });
-    q<HTMLButtonElement>(grid.el, ".db-grid-pager-next").click();
-    // 1 画面から 1 行引いた分 (最後に見えていた行が次の画面の先頭に残る)。
-    expect(viewport.scrollTop).toBe(9 * ROW);
-    await scrollTo(viewport.scrollTop);
-    expect(pager()).toEqual({
-      range: "10–19 of 50 rows",
-      prev: false,
-      next: false,
-    });
-    await scrollTo(40 * ROW);
-    expect(pager()).toEqual({
-      range: "41–50 of 50 rows",
-      prev: false,
-      next: true,
-    });
-    grid.destroy();
-    grid.el.remove();
-    delete document.body.dataset.sidebarFontSize;
-  });
+  test.each(["compact", "regular", "large", "xlarge"] as const)(
+    "shows the visible rows and moves one screen per button at the $0 density",
+    async (density) => {
+      document.body.dataset.sidebarFontSize = density;
+      ROW = rowHeightFor(density);
+      const { grid, viewport, pager, scrollTo } = setup(50, 10);
+      await scrollTo(0);
+      expect(pager()).toEqual({
+        range: "1–10 of 50 rows",
+        prev: true,
+        next: false,
+      });
+      q<HTMLButtonElement>(grid.el, ".db-grid-pager-next").click();
+      // 1 画面から 1 行引いた分 (最後に見えていた行が次の画面の先頭に残る)。
+      expect(viewport.scrollTop).toBe(9 * ROW);
+      await scrollTo(viewport.scrollTop);
+      expect(pager()).toEqual({
+        range: "10–19 of 50 rows",
+        prev: false,
+        next: false,
+      });
+      await scrollTo(40 * ROW);
+      expect(pager()).toEqual({
+        range: "41–50 of 50 rows",
+        prev: false,
+        next: true,
+      });
+      grid.destroy();
+      grid.el.remove();
+      delete document.body.dataset.sidebarFontSize;
+    },
+  );
 
   test("follows a density change after the table is drawn", async () => {
     document.body.dataset.sidebarFontSize = "regular";

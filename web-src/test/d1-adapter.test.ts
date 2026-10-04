@@ -292,36 +292,35 @@ describe("d1 adapter cancellation", () => {
       run: (adapter: ReturnType<typeof createD1Adapter>, signal: AbortSignal) =>
         adapter.getForeignKeysAsync(signal),
     },
-  ])("propagates an abort during $name", async ({
-    listSql,
-    listResult,
-    run,
-  }) => {
-    const controller = new AbortController();
-    __setD1FetchForTest((async (
-      _input: RequestInfo | URL,
-      init?: RequestInit,
-    ) => {
-      const { sql } = JSON.parse(String(init?.body)) as { sql: string };
-      // 一覧の取得までは成功し、その後の PRAGMA 実行中に中断される。
-      if (sql !== listSql) {
-        controller.abort();
-        throw new Error("D1 request aborted");
-      }
-      return new Response(
-        JSON.stringify({
-          success: true,
-          result: [{ success: true, results: listResult }],
-        }),
-        { status: 200 },
-      );
-    }) as typeof fetch);
-    const adapter = createD1Adapter(CONFIG);
+  ])(
+    "propagates an abort during $name",
+    async ({ listSql, listResult, run }) => {
+      const controller = new AbortController();
+      __setD1FetchForTest((async (
+        _input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const { sql } = JSON.parse(String(init?.body)) as { sql: string };
+        // 一覧の取得までは成功し、その後の PRAGMA 実行中に中断される。
+        if (sql !== listSql) {
+          controller.abort();
+          throw new Error("D1 request aborted");
+        }
+        return new Response(
+          JSON.stringify({
+            success: true,
+            result: [{ success: true, results: listResult }],
+          }),
+          { status: 200 },
+        );
+      }) as typeof fetch);
+      const adapter = createD1Adapter(CONFIG);
 
-    expect(await captureErrorAsync(() => run(adapter, controller.signal))).toBe(
-      "D1 request aborted",
-    );
-  });
+      expect(
+        await captureErrorAsync(() => run(adapter, controller.signal)),
+      ).toBe("D1 request aborted");
+    },
+  );
 });
 
 // 直す前は EXPLAIN もサブクエリに包み、包めなければ末尾に LIMIT を足していた。
@@ -408,17 +407,17 @@ describe("d1 adapter error handling", () => {
       status: 401,
       message: "Authentication error",
     },
-  ])("surfaces $name with the failing statement", async ({
-    status,
-    message,
-  }) => {
-    stubD1Failure(status, message);
-    const adapter = createD1Adapter(CONFIG);
+  ])(
+    "surfaces $name with the failing statement",
+    async ({ status, message }) => {
+      stubD1Failure(status, message);
+      const adapter = createD1Adapter(CONFIG);
 
-    // authorizer 拒否はメッセージだけでは原因が分からないので、どの SQL で
-    // 落ちたかまで見えることを保証する。
-    expect(await captureErrorAsync(() => adapter.getTablesAsync())).toBe(
-      `${message} (sql: ${SQLITE_INTROSPECTION_SQL.listTables})`,
-    );
-  });
+      // authorizer 拒否はメッセージだけでは原因が分からないので、どの SQL で
+      // 落ちたかまで見えることを保証する。
+      expect(await captureErrorAsync(() => adapter.getTablesAsync())).toBe(
+        `${message} (sql: ${SQLITE_INTROSPECTION_SQL.listTables})`,
+      );
+    },
+  );
 });

@@ -474,7 +474,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     // in the code. Only an explicit toggle changes inline visibility.
     sync(inlineExpanded.get(entry.id) ?? true);
     toggle.addEventListener("click", () => {
-      const expanded = body.hidden;
+      const expanded = body.hidden !== false;
       inlineExpanded.set(entry.id, expanded);
       sync(expanded);
       syncInlineAnnotationSpacerHeights();
@@ -1773,7 +1773,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   updateAnnotationContext();
 
   $("#annotations-toggle").addEventListener("click", () => {
-    setAnnotationPanelOpen(annotationPanel.hidden);
+    setAnnotationPanelOpen(annotationPanel.hidden !== false);
     updateAnnotationContext();
     if (!annotationPanel.hidden) void refreshAnnotations();
   });

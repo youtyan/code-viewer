@@ -242,26 +242,25 @@ describe("checkDatastoreConnectivity connects to each kind of source", () => {
         globalThis.fetch = failingFetch;
       },
     },
-  ])("reads $name and keeps the failure reason", async ({
-    saved,
-    compose,
-    setup,
-  }) => {
-    const dir = mkdtempSync(join(tmpdir(), "code-viewer-doctor-probe-"));
-    try {
-      setup();
-      if (saved) {
-        await saveDatastoreConnection(dir, { name: "Example", ...saved });
+  ])(
+    "reads $name and keeps the failure reason",
+    async ({ saved, compose, setup }) => {
+      const dir = mkdtempSync(join(tmpdir(), "code-viewer-doctor-probe-"));
+      try {
+        setup();
+        if (saved) {
+          await saveDatastoreConnection(dir, { name: "Example", ...saved });
+        }
+        if (compose) writeFileSync(join(dir, "docker-compose.yml"), compose);
+        const group = await checkDatastoreConnectivity(dir, [], undefined);
+        expect(group.rows).toHaveLength(1);
+        expect(group.rows[0].status).toBe("warn");
+        expect(group.rows[0].detail).toContain("sample probe failure");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
       }
-      if (compose) writeFileSync(join(dir, "docker-compose.yml"), compose);
-      const group = await checkDatastoreConnectivity(dir, [], undefined);
-      expect(group.rows).toHaveLength(1);
-      expect(group.rows[0].status).toBe("warn");
-      expect(group.rows[0].detail).toContain("sample probe failure");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 
   // ドライバのエラーは秘密の値を含みうる (接続文字列なら URL の形で)。doctor の行
   // (画面・CLI・JSON) には素の形も URL の形も残さず、秘密でない部分は残す。

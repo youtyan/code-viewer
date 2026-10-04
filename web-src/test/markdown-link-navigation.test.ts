@@ -101,16 +101,17 @@ describe("markdown link navigation", () => {
       name: "リポジトリルート",
       target: { path: "", directory: true },
     },
-  ])("opens the repository listing without asking the server: $name", async ({
-    target,
-  }) => {
-    const { deps, recorded } = harness();
-    await openMarkdownLink(link(target), deps);
-    expect(recorded.routes.map((route) => route.screen)).toEqual(["repo"]);
-    expect(recorded.repoLoads).toBe(1);
-    expect(recorded.opened).toEqual([]);
-    expect(recorded.headRequests).toEqual([]);
-  });
+  ])(
+    "opens the repository listing without asking the server: $name",
+    async ({ target }) => {
+      const { deps, recorded } = harness();
+      await openMarkdownLink(link(target), deps);
+      expect(recorded.routes.map((route) => route.screen)).toEqual(["repo"]);
+      expect(recorded.repoLoads).toBe(1);
+      expect(recorded.opened).toEqual([]);
+      expect(recorded.headRequests).toEqual([]);
+    },
+  );
 
   test.each([
     { name: "markdown", path: "docs/guide.md" },

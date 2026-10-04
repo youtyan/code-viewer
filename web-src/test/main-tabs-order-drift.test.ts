@@ -398,21 +398,20 @@ describe("シェルのタブのグループが一瞬分からなくなる", () =
       close: "s1",
       expected: ["AL(app.ts shell-two README.md)", "BE(beta.ts)"],
     },
-  ])("$name と、グループの中の元の位置に戻る", async ({
-    away,
-    close,
-    expected,
-  }) => {
-    const { handle, strip, step } = mountShells();
-    await handle.restore();
-    expect(strip()).toEqual([
-      "AL(app.ts shell-one shell-two README.md)",
-      "BE(beta.ts)",
-    ]);
-    for (const groups of away) step(groups);
-    if (close) handle.closeTab(close);
-    expect(step({})).toEqual(expected);
-  });
+  ])(
+    "$name と、グループの中の元の位置に戻る",
+    async ({ away, close, expected }) => {
+      const { handle, strip, step } = mountShells();
+      await handle.restore();
+      expect(strip()).toEqual([
+        "AL(app.ts shell-one shell-two README.md)",
+        "BE(beta.ts)",
+      ]);
+      for (const groups of away) step(groups);
+      if (close) handle.closeTab(close);
+      expect(step({})).toEqual(expected);
+    },
+  );
 
   test("グループが一時的に分からない (undefined) 間は、控えのまま動かない", async () => {
     const { handle, strip, step } = mountShells({
@@ -542,24 +541,21 @@ describe("shellGroupOf (シェルのタブのグループ)", () => {
       showed: false,
       expected: undefined,
     },
-  ] as const)("$name", async ({
-    overview,
-    pane,
-    shell: listed,
-    showed,
-    expected,
-  }) => {
-    const response = overview === null ? null : await overviews[overview]();
-    expect(
-      shellGroupOf({
-        overview: response,
-        pane: pane ? response?.panes[0] : undefined,
-        shell: listed,
-        showedPane: showed,
-        roots: [ALPHA, BETA, GAMMA],
-      }),
-    ).toBe(expected);
-  });
+  ] as const)(
+    "$name",
+    async ({ overview, pane, shell: listed, showed, expected }) => {
+      const response = overview === null ? null : await overviews[overview]();
+      expect(
+        shellGroupOf({
+          overview: response,
+          pane: pane ? response?.panes[0] : undefined,
+          shell: listed,
+          showedPane: showed,
+          roots: [ALPHA, BETA, GAMMA],
+        }),
+      ).toBe(expected);
+    },
+  );
 });
 
 describe("2 つの窓が同時に並べ替える (mergeLayouts)", () => {

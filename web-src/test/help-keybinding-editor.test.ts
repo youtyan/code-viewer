@@ -680,21 +680,21 @@ describe("JSON", () => {
         "Line 3, column 43 (toggle-theme[0].shift): must be true or false",
       ],
     },
-  ])("$name is shown by line and column and nothing is saved", ({
-    text,
-    expected,
-  }) => {
-    const h = setup({ "toggle-theme": [{ key: "x" }] });
-    toolbarButton(h.root, "json").click();
+  ])(
+    "$name is shown by line and column and nothing is saved",
+    ({ text, expected }) => {
+      const h = setup({ "toggle-theme": [{ key: "x" }] });
+      toolbarButton(h.root, "json").click();
 
-    typeJson(h.root, text);
+      typeJson(h.root, text);
 
-    expect([
-      issues(h.root),
-      keysOf(h.root, "toggle-theme"),
-      h.settings.draft.problem?.(),
-    ]).toEqual([expected, ["x"], "Fix the shortcut JSON before saving."]);
-  });
+      expect([
+        issues(h.root),
+        keysOf(h.root, "toggle-theme"),
+        h.settings.draft.problem?.(),
+      ]).toEqual([expected, ["x"], "Fix the shortcut JSON before saving."]);
+    },
+  );
 
   test("imports a file into the editor, and a bad file changes nothing", async () => {
     const h = setup();

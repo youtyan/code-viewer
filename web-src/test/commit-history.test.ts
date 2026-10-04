@@ -329,21 +329,20 @@ describe("commitHistory", () => {
       previousIndex: 3,
       nextIndex: null,
     },
-  ])("fileRevisionNeighborsAsync: $name", async ({
-    refIndex,
-    previousIndex,
-    nextIndex,
-  }) => {
-    const res = await fileRevisionNeighborsAsync(repo, {
-      path: "file.txt",
-      ref: shas[refIndex],
-    });
-    expect(res.error).toBeUndefined();
-    expect(res.previous).toBe(
-      previousIndex === null ? null : shas[previousIndex],
-    );
-    expect(res.next).toBe(nextIndex === null ? null : shas[nextIndex]);
-  });
+  ])(
+    "fileRevisionNeighborsAsync: $name",
+    async ({ refIndex, previousIndex, nextIndex }) => {
+      const res = await fileRevisionNeighborsAsync(repo, {
+        path: "file.txt",
+        ref: shas[refIndex],
+      });
+      expect(res.error).toBeUndefined();
+      expect(res.previous).toBe(
+        previousIndex === null ? null : shas[previousIndex],
+      );
+      expect(res.next).toBe(nextIndex === null ? null : shas[nextIndex]);
+    },
+  );
 
   test("fileRevisionNeighborsAsync treats worktree as HEAD and rejects unknown refs", async () => {
     const res = await fileRevisionNeighborsAsync(repo, {

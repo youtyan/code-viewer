@@ -91,14 +91,15 @@ test.each([
   expect(() => parseRemoteAccessFile(value)).toThrow(message);
 });
 
-test.each([
-  1, 64161, 65535,
-])("accepts port %s and the fixed Access issuer", (port) => {
-  expect(parseRemoteAccessValues({ ...config, port })).toEqual({
-    ...config,
-    port,
-  });
-});
+test.each([1, 64161, 65535])(
+  "accepts port %s and the fixed Access issuer",
+  (port) => {
+    expect(parseRemoteAccessValues({ ...config, port })).toEqual({
+      ...config,
+      port,
+    });
+  },
+);
 
 test.each([
   ["different audience", { ...claims, aud: "b".repeat(64) }],
@@ -222,21 +223,22 @@ test.each([
     method: "POST",
     status: 403,
   },
-])("refuses $name on the remote listener", async ({
-  path,
-  headers,
-  method,
-  status,
-}) => {
-  const next = vi.fn();
-  const response = await createRemoteAccess(config, async () => keys.publicKey)(
-    request(await token(), path, { method, headers: headers as HeadersInit }),
-    next,
-  );
-  expect(response.status).toBe(status);
-  expect(response.headers.get("cache-control")).toBe("no-store");
-  expect(next).not.toHaveBeenCalled();
-});
+])(
+  "refuses $name on the remote listener",
+  async ({ path, headers, method, status }) => {
+    const next = vi.fn();
+    const response = await createRemoteAccess(
+      config,
+      async () => keys.publicKey,
+    )(
+      request(await token(), path, { method, headers: headers as HeadersInit }),
+      next,
+    );
+    expect(response.status).toBe(status);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(next).not.toHaveBeenCalled();
+  },
+);
 
 test.each([
   "cf-access-jwt-assertion",
@@ -258,52 +260,52 @@ test.each([
   expect(sideEffectRequestAllowed(req)).toBe(false);
 });
 
-test.each([
-  "GET",
-  "POST",
-])("authenticates and streams %s to a local project without Access credentials", async (method) => {
-  const handler = createRemoteAccess(config, async () => keys.publicKey);
-  const req = request(await token(), "/p/0123456789abcdef/refresh", {
-    method,
-    headers: {
-      origin: config.origin,
-      "x-code-viewer-action": "1",
-      cookie: "CF_Authorization=sample",
-      "cf-connecting-ip": "192.0.2.1",
-      "x-forwarded-proto": "https",
-    },
-    ...(method === "POST" ? { body: "sample body" } : {}),
-  });
-  const response = await handler(req, async (authenticated) => {
-    expect(authenticated.url).toBe(
-      "https://viewer.example.com/p/0123456789abcdef/refresh",
-    );
-    const result = await proxyToBackend(
-      authenticated,
-      "http://127.0.0.1:4173/",
-      "/refresh",
-      "",
-      {
-        publicOrigin: config.origin,
-        fetch: async (input, init) => {
-          const backend = new Request(input, init);
-          backend.headers.set("host", "127.0.0.1:4173");
-          expect(requestAllowed(backend)).toBe(true);
-          expect(sideEffectRequestAllowed(backend)).toBe(true);
-          expect(backend.headers.get("cookie")).toBeNull();
-          expect(backend.headers.get("cf-access-jwt-assertion")).toBeNull();
-          expect(backend.headers.get("x-forwarded-proto")).toBeNull();
-          return new Response(await backend.text());
-        },
+test.each(["GET", "POST"])(
+  "authenticates and streams %s to a local project without Access credentials",
+  async (method) => {
+    const handler = createRemoteAccess(config, async () => keys.publicKey);
+    const req = request(await token(), "/p/0123456789abcdef/refresh", {
+      method,
+      headers: {
+        origin: config.origin,
+        "x-code-viewer-action": "1",
+        cookie: "CF_Authorization=sample",
+        "cf-connecting-ip": "192.0.2.1",
+        "x-forwarded-proto": "https",
       },
-    );
-    if (result.status !== "ok") throw result.error;
-    return result.response;
-  });
-  expect(response.status).toBe(200);
-  expect(response.headers.get("cache-control")).toBe("no-store");
-  expect(await response.text()).toBe(method === "POST" ? "sample body" : "");
-});
+      ...(method === "POST" ? { body: "sample body" } : {}),
+    });
+    const response = await handler(req, async (authenticated) => {
+      expect(authenticated.url).toBe(
+        "https://viewer.example.com/p/0123456789abcdef/refresh",
+      );
+      const result = await proxyToBackend(
+        authenticated,
+        "http://127.0.0.1:4173/",
+        "/refresh",
+        "",
+        {
+          publicOrigin: config.origin,
+          fetch: async (input, init) => {
+            const backend = new Request(input, init);
+            backend.headers.set("host", "127.0.0.1:4173");
+            expect(requestAllowed(backend)).toBe(true);
+            expect(sideEffectRequestAllowed(backend)).toBe(true);
+            expect(backend.headers.get("cookie")).toBeNull();
+            expect(backend.headers.get("cf-access-jwt-assertion")).toBeNull();
+            expect(backend.headers.get("x-forwarded-proto")).toBeNull();
+            return new Response(await backend.text());
+          },
+        },
+      );
+      if (result.status !== "ok") throw result.error;
+      return result.response;
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe(method === "POST" ? "sample body" : "");
+  },
+);
 
 test("expires SSE subscriptions without keeping their source alive", async () => {
   vi.useFakeTimers();

@@ -76,15 +76,18 @@ describe("keymap action resolution", () => {
     ["editable-allowed palette key", "k", { ctrl: true }],
     ["panel menu key", "`", { ctrl: true }],
     ["terminal interrupt", "c", { ctrl: true }],
-  ] as const)("blocks %s on a protected surface", (_name, keyValue, options) => {
-    expect(
-      resolveKeymapAction(key(keyValue, options), {
-        scope: "panel",
-        editable: true,
-        pageKeymapBlocked: true,
-      }),
-    ).toBeNull();
-  });
+  ] as const)(
+    "blocks %s on a protected surface",
+    (_name, keyValue, options) => {
+      expect(
+        resolveKeymapAction(key(keyValue, options), {
+          scope: "panel",
+          editable: true,
+          pageKeymapBlocked: true,
+        }),
+      ).toBeNull();
+    },
+  );
 
   test("moves focus between sidebar and main with Shift+H and Shift+L", () => {
     expect(action("H", "main", { shift: true })).toBe("focus-sidebar");
@@ -853,11 +856,12 @@ describe("where a key works (inputs, terminals, the installed window)", () => {
   test.each([
     { name: "on a Mac", bindings: MAC },
     { name: "off a Mac", bindings: OTHER },
-  ])("the defaults with the window keys have no clashes $name", ({
-    bindings,
-  }) => {
-    expect(findKeymapConflicts(bindings)).toEqual([]);
-  });
+  ])(
+    "the defaults with the window keys have no clashes $name",
+    ({ bindings }) => {
+      expect(findKeymapConflicts(bindings)).toEqual([]);
+    },
+  );
 
   // [名前, キー, 修飾, 場所, 窓, 期待]。場所: page (入力欄の外) / input / terminal。
   test.each<

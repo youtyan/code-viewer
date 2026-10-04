@@ -336,31 +336,34 @@ describe("internal source paths", () => {
       expectedCode: null,
       expectedUnavailable: true,
     },
-  ])("$name", async ({
-    path,
-    expectedRawFileCalls,
-    expectedCode,
-    expectedUnavailable,
-  }) => {
-    document.body.innerHTML = '<div id="diff"></div>';
-    const fetchMock = installRawFileFetchMock();
-    const view = createSourceViewForCursorTest(blobRoute(path));
+  ])(
+    "$name",
+    async ({
+      path,
+      expectedRawFileCalls,
+      expectedCode,
+      expectedUnavailable,
+    }) => {
+      document.body.innerHTML = '<div id="diff"></div>';
+      const fetchMock = installRawFileFetchMock();
+      const view = createSourceViewForCursorTest(blobRoute(path));
 
-    await view.renderStandaloneSource({ path, ref: "worktree" });
+      await view.renderStandaloneSource({ path, ref: "worktree" });
 
-    expect(fetchMock.calls()).toBe(expectedRawFileCalls);
-    expect(
-      document.querySelector<HTMLElement>(".gdp-source-line-code")
-        ?.textContent ?? null,
-    ).toBe(expectedCode);
-    expect(
-      document.querySelector(".gdp-source-viewer.unsupported") !== null,
-    ).toBe(expectedUnavailable);
-    expect(
-      document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
-        .sourceState,
-    ).toBe("done");
-  });
+      expect(fetchMock.calls()).toBe(expectedRawFileCalls);
+      expect(
+        document.querySelector<HTMLElement>(".gdp-source-line-code")
+          ?.textContent ?? null,
+      ).toBe(expectedCode);
+      expect(
+        document.querySelector(".gdp-source-viewer.unsupported") !== null,
+      ).toBe(expectedUnavailable);
+      expect(
+        document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+          .sourceState,
+      ).toBe("done");
+    },
+  );
 });
 
 describe("renderStandaloneSource idempotency", () => {
@@ -482,70 +485,69 @@ describe("renderStandaloneSource idempotency", () => {
       body: 'name\tnote\nalpha\t"one\ttwo"\n',
       expectedCells: ["alpha", "one\ttwo"],
     },
-  ])("a $name target renders a table in the active Preview tab", async ({
-    path,
-    body,
-    expectedCells,
-  }) => {
-    document.body.innerHTML = '<div id="diff"></div>';
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: (async () =>
-        new Response(body, {
-          status: 200,
-        })) as typeof fetch,
-    });
-    const route = {
-      ...blobRoute(path),
-      preview: true as const,
-    };
-    let markdownRenderCalls = 0;
-    const view = createSourceViewForCursorTest(route, {
-      STATE: {
-        route,
-        from: "HEAD",
-        to: "worktree",
-        files: [],
-        syntaxHighlight: true,
-      },
-      loadRawFileInfo: async () => ({ size: body.length }),
-      renderMarkdownPreview: async () => {
-        markdownRenderCalls++;
-        return document.createElement("div");
-      },
-    });
+  ])(
+    "a $name target renders a table in the active Preview tab",
+    async ({ path, body, expectedCells }) => {
+      document.body.innerHTML = '<div id="diff"></div>';
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        writable: true,
+        value: (async () =>
+          new Response(body, {
+            status: 200,
+          })) as typeof fetch,
+      });
+      const route = {
+        ...blobRoute(path),
+        preview: true as const,
+      };
+      let markdownRenderCalls = 0;
+      const view = createSourceViewForCursorTest(route, {
+        STATE: {
+          route,
+          from: "HEAD",
+          to: "worktree",
+          files: [],
+          syntaxHighlight: true,
+        },
+        loadRawFileInfo: async () => ({ size: body.length }),
+        renderMarkdownPreview: async () => {
+          markdownRenderCalls++;
+          return document.createElement("div");
+        },
+      });
 
-    await view.renderStandaloneSource({
-      path,
-      ref: "worktree",
-    });
+      await view.renderStandaloneSource({
+        path,
+        ref: "worktree",
+      });
 
-    expect(
-      Array.from(
-        document.querySelectorAll<HTMLButtonElement>(
-          ".gdp-source-tabs button[data-source-tab]",
+      expect(
+        Array.from(
+          document.querySelectorAll<HTMLButtonElement>(
+            ".gdp-source-tabs button[data-source-tab]",
+          ),
+        ).map((button) => button.textContent),
+      ).toEqual(["Preview", "Code", "Blame", "History"]);
+      expect(
+        document.querySelector<HTMLButtonElement>(
+          ".gdp-source-tabs button.active",
+        )?.textContent,
+      ).toBe("Preview");
+      expect(
+        Array.from(
+          document.querySelectorAll(".gdp-csv-table tbody td"),
+          (cell) => cell.textContent,
         ),
-      ).map((button) => button.textContent),
-    ).toEqual(["Preview", "Code", "Blame", "History"]);
-    expect(
-      document.querySelector<HTMLButtonElement>(
-        ".gdp-source-tabs button.active",
-      )?.textContent,
-    ).toBe("Preview");
-    expect(
-      Array.from(
-        document.querySelectorAll(".gdp-csv-table tbody td"),
-        (cell) => cell.textContent,
-      ),
-    ).toEqual(expectedCells);
-    expect(
-      document.querySelector<HTMLElement>(
-        '.gdp-source-table[data-source-pane="code"]',
-      )?.hidden,
-    ).toBe(true);
-    expect(markdownRenderCalls).toBe(0);
-  });
+      ).toEqual(expectedCells);
+      expect(
+        document.querySelector<HTMLElement>(
+          '.gdp-source-table[data-source-pane="code"]',
+        )?.hidden,
+      ).toBe(true);
+      expect(markdownRenderCalls).toBe(0);
+    },
+  );
 });
 
 describe("renderStandaloneSource same-file hit navigation", () => {
@@ -695,31 +697,31 @@ describe("renderStandaloneSource loading-state guard and paged retry", () => {
   test.each([
     { refresh: false, expected: 1 },
     { refresh: true, expected: 2 },
-  ])("notifies inline readers after source rows mount, refresh=$refresh", async ({
-    refresh,
-    expected,
-  }) => {
-    document.body.innerHTML = '<div id="diff"></div>';
-    installRawFileFetchMock();
-    const rendered: string[][] = [];
-    const view = createSourceViewForCursorTest(blobRoute("sample.ts"), {
-      onSourceRendered: () => {
-        rendered.push(
-          [...document.querySelectorAll(".gdp-source-line-code")].map(
-            (cell) => cell.textContent || "",
-          ),
-        );
-      },
-    });
-    await view.renderStandaloneSource({ path: "sample.ts", ref: "worktree" });
-    await view.renderStandaloneSource(
-      { path: "sample.ts", ref: "worktree" },
-      { refresh },
-    );
-    expect(rendered).toHaveLength(expected);
-    for (const rows of rendered)
-      expect(rows).toEqual(["line one", "line two", " "]);
-  });
+  ])(
+    "notifies inline readers after source rows mount, refresh=$refresh",
+    async ({ refresh, expected }) => {
+      document.body.innerHTML = '<div id="diff"></div>';
+      installRawFileFetchMock();
+      const rendered: string[][] = [];
+      const view = createSourceViewForCursorTest(blobRoute("sample.ts"), {
+        onSourceRendered: () => {
+          rendered.push(
+            [...document.querySelectorAll(".gdp-source-line-code")].map(
+              (cell) => cell.textContent || "",
+            ),
+          );
+        },
+      });
+      await view.renderStandaloneSource({ path: "sample.ts", ref: "worktree" });
+      await view.renderStandaloneSource(
+        { path: "sample.ts", ref: "worktree" },
+        { refresh },
+      );
+      expect(rendered).toHaveLength(expected);
+      for (const rows of rendered)
+        expect(rows).toEqual(["line one", "line two", " "]);
+    },
+  );
 
   test("finishes plain source first and applies syntax highlighting later", async () => {
     document.body.innerHTML = '<div id="diff"></div>';

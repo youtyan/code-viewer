@@ -146,15 +146,15 @@ describe("keychain credential store", () => {
       id: 'connection:x"\nadd-generic-password',
     },
     { name: "working directory", cwd: "/workspace\nrm", id: ID },
-  ])("refuses to build a command from a $name with control characters", async ({
-    cwd,
-    id,
-  }) => {
-    const calls = stubKeychain(() => ({ code: 0 }));
+  ])(
+    "refuses to build a command from a $name with control characters",
+    async ({ cwd, id }) => {
+      const calls = stubKeychain(() => ({ code: 0 }));
 
-    expect(await saveConnectionSecretsAsync(cwd, id, SECRETS)).toBe(false);
-    expect(calls).toHaveLength(0);
-  });
+      expect(await saveConnectionSecretsAsync(cwd, id, SECRETS)).toBe(false);
+      expect(calls).toHaveLength(0);
+    },
+  );
 
   test("does nothing when the keychain is unavailable", async () => {
     const calls = stubKeychain(() => ({ code: 0 }));

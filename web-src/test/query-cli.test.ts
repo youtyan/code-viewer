@@ -4414,50 +4414,50 @@ describe("runQueryCli search integration", () => {
       message:
         "search timed out after 1s and cancelling job job-timeout failed: POST /_db/search/cancel (HTTP 500): cancel failed",
     },
-  ])("timeout cancels the search job and says whether $name", async ({
-    cancel,
-    message,
-  }) => {
-    withZeroPollInterval();
-    const nowValues = [0, 0, 1001];
-    let nowIndex = 0;
-    Date.now = () => nowValues[Math.min(nowIndex++, nowValues.length - 1)];
-    const harness = installRunHarness([
-      { body: JSON.stringify({ files: [] }) },
-      { body: JSON.stringify({ jobId: "job-timeout" }) },
-      {
-        body: JSON.stringify({
-          jobId: "job-timeout",
-          dbId: "app.db",
-          scannedTables: 1,
-          totalTables: 2,
-          hits: [],
-          done: false,
-        }),
-      },
-      cancel,
-    ]);
+  ])(
+    "timeout cancels the search job and says whether $name",
+    async ({ cancel, message }) => {
+      withZeroPollInterval();
+      const nowValues = [0, 0, 1001];
+      let nowIndex = 0;
+      Date.now = () => nowValues[Math.min(nowIndex++, nowValues.length - 1)];
+      const harness = installRunHarness([
+        { body: JSON.stringify({ files: [] }) },
+        { body: JSON.stringify({ jobId: "job-timeout" }) },
+        {
+          body: JSON.stringify({
+            jobId: "job-timeout",
+            dbId: "app.db",
+            scannedTables: 1,
+            totalTables: 2,
+            hits: [],
+            done: false,
+          }),
+        },
+        cancel,
+      ]);
 
-    await runAndCatchExit([
-      "--server",
-      SERVER,
-      "search",
-      "--db",
-      "app.db",
-      "--term",
-      "x",
-      "--timeout",
-      "1",
-    ]);
+      await runAndCatchExit([
+        "--server",
+        SERVER,
+        "search",
+        "--db",
+        "app.db",
+        "--term",
+        "x",
+        "--timeout",
+        "1",
+      ]);
 
-    expect(harness.requests[3]).toEqual({
-      url: `${SERVER}/_db/search/cancel`,
-      method: "POST",
-      body: { id: "job-timeout" },
-    });
-    expect(harness.exits).toEqual([1]);
-    expect(harness.errs).toContain(message);
-  });
+      expect(harness.requests[3]).toEqual({
+        url: `${SERVER}/_db/search/cancel`,
+        method: "POST",
+        body: { id: "job-timeout" },
+      });
+      expect(harness.exits).toEqual([1]);
+      expect(harness.errs).toContain(message);
+    },
+  );
 
   test("a poll interval that is not a number stops instead of falling back", async () => {
     process.env.CODE_VIEWER_SEARCH_POLL_MS = "soon";

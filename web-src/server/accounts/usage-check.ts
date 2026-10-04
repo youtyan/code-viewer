@@ -81,8 +81,7 @@ function claudeWindows(stdout: string): UsageWindow[] {
     .reverse()
     .find((message) => message.type === "result");
   if (
-    !result ||
-    result.is_error !== false ||
+    result?.is_error !== false ||
     result.local_command !== "usage" ||
     result.num_turns !== 0 ||
     result.total_cost_usd !== 0 ||

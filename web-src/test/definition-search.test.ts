@@ -145,38 +145,40 @@ function ordinaryBracketBodies(pattern: string): string[] {
 }
 
 describe("definition patterns", () => {
-  test.each(
-    CLASSIFICATION_CASES,
-  )("classifies %s line %s", (lang, line, expectedPatternIndex) => {
-    const query = buildDefinitionQuery(lang, "sampleThing");
-    const candidates = rankDefinitionMatches(
-      [match(PATHS[lang ?? "generic"], 1, line)],
-      {
-        symbol: "sampleThing",
-        currentPath: "src/current.txt",
-        currentLine: null,
-        lang,
-      },
-      query.classifiers,
-    );
-    expect(candidates[0]?.patternIndex ?? null).toBe(expectedPatternIndex);
-  });
+  test.each(CLASSIFICATION_CASES)(
+    "classifies %s line %s",
+    (lang, line, expectedPatternIndex) => {
+      const query = buildDefinitionQuery(lang, "sampleThing");
+      const candidates = rankDefinitionMatches(
+        [match(PATHS[lang ?? "generic"], 1, line)],
+        {
+          symbol: "sampleThing",
+          currentPath: "src/current.txt",
+          currentLine: null,
+          lang,
+        },
+        query.classifiers,
+      );
+      expect(candidates[0]?.patternIndex ?? null).toBe(expectedPatternIndex);
+    },
+  );
 
-  test.each(
-    ALL_LANGS,
-  )("keeps the %s engine pattern in the shared dialect", (lang) => {
-    const query = buildDefinitionQuery(lang, "sampleThing");
-    for (const forbidden of ["\\b", "(?:", "\\s", "\\w"]) {
-      expect(query.pattern).not.toContain(forbidden);
-    }
-    for (const body of ordinaryBracketBodies(query.pattern)) {
-      expect(body).not.toContain("\\");
-      expect(body).not.toContain("[");
-    }
-    expect(query.classifiers.every((item) => item instanceof RegExp)).toBe(
-      true,
-    );
-  });
+  test.each(ALL_LANGS)(
+    "keeps the %s engine pattern in the shared dialect",
+    (lang) => {
+      const query = buildDefinitionQuery(lang, "sampleThing");
+      for (const forbidden of ["\\b", "(?:", "\\s", "\\w"]) {
+        expect(query.pattern).not.toContain(forbidden);
+      }
+      for (const body of ordinaryBracketBodies(query.pattern)) {
+        expect(body).not.toContain("\\");
+        expect(body).not.toContain("[");
+      }
+      expect(query.classifiers.every((item) => item instanceof RegExp)).toBe(
+        true,
+      );
+    },
+  );
 });
 
 describe("definition search inputs", () => {
@@ -189,10 +191,10 @@ describe("definition search inputs", () => {
     ["python", "python"],
     ["sql", null],
     [null, null],
-  ] as Array<
-    [string | null, DefinitionLang | null]
-  >)("maps %s to %s", (inferred, expected) =>
-    expect(definitionLangOf(inferred)).toBe(expected));
+  ] as Array<[string | null, DefinitionLang | null]>)(
+    "maps %s to %s",
+    (inferred, expected) => expect(definitionLangOf(inferred)).toBe(expected),
+  );
 
   test.each([
     ["sampleThing", "sampleThing"],
@@ -217,11 +219,12 @@ describe("definition search inputs", () => {
     ["function", "js", false],
     ["def", "python", false],
     ["class", "java", false],
-  ] as Array<
-    [string, DefinitionLang | null, boolean]
-  >)("returns %s jumpability for %s", (word, lang, expected) => {
-    expect(isJumpableSymbol(word, lang)).toBe(expected);
-  });
+  ] as Array<[string, DefinitionLang | null, boolean]>)(
+    "returns %s jumpability for %s",
+    (word, lang, expected) => {
+      expect(isJumpableSymbol(word, lang)).toBe(expected);
+    },
+  );
 });
 
 type RankingCase = {
@@ -325,23 +328,22 @@ describe("rankDefinitionMatches", () => {
     },
   ];
 
-  test.each(cases)("orders by $name", ({
-    lang,
-    currentPath,
-    currentLine,
-    matches,
-    expected,
-  }) => {
-    const ranked = rankDefinitionMatches(
-      matches,
-      {
-        symbol: "sampleThing",
-        currentPath,
-        currentLine: currentLine ?? null,
-        lang,
-      },
-      buildDefinitionQuery("js", "sampleThing").classifiers,
-    );
-    expect(ranked.map((item) => `${item.path}:${item.line}`)).toEqual(expected);
-  });
+  test.each(cases)(
+    "orders by $name",
+    ({ lang, currentPath, currentLine, matches, expected }) => {
+      const ranked = rankDefinitionMatches(
+        matches,
+        {
+          symbol: "sampleThing",
+          currentPath,
+          currentLine: currentLine ?? null,
+          lang,
+        },
+        buildDefinitionQuery("js", "sampleThing").classifiers,
+      );
+      expect(ranked.map((item) => `${item.path}:${item.line}`)).toEqual(
+        expected,
+      );
+    },
+  );
 });

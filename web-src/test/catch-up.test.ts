@@ -115,17 +115,20 @@ describe("diff catch-up policy", () => {
       route: { screen: "database", range },
       expected: null,
     },
-  ] as const)("catches up $name with $expected", ({
-    route,
-    options,
-    expected,
-  }: {
-    route: AppRoute;
-    options?: { historyWorktreeSelected?: boolean };
-    expected: "diff" | "files" | null;
-  }) => {
-    expect(catchUpKind(route, options)).toBe(expected);
-  });
+  ] as const)(
+    "catches up $name with $expected",
+    ({
+      route,
+      options,
+      expected,
+    }: {
+      route: AppRoute;
+      options?: { historyWorktreeSelected?: boolean };
+      expected: "diff" | "files" | null;
+    }) => {
+      expect(catchUpKind(route, options)).toBe(expected);
+    },
+  );
 
   test("deduplicates catch-up fetches within the interval", () => {
     let now = 1000;

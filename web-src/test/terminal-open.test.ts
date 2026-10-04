@@ -132,25 +132,25 @@ describe("openTmuxPaneInShell", () => {
   test.each([
     { session: LOGIN_SESSION, expected: SIGN_IN },
     { session: "sample-session", expected: null },
-  ])("a pane in $session gets the purpose $expected", async ({
-    session,
-    expected,
-  }) => {
-    rememberSignInPane("%7", SIGN_IN);
-    mocks.resolvePaneSession.mockResolvedValue({
-      status: "ok",
-      session,
-      window: 0,
-    });
-    mocks.writeToShellWhenReady.mockResolvedValue({ status: "ok" });
-    await openTmuxPaneInShell("%7", "/sample");
-    expect(mocks.rememberShellTmuxAttachment).toHaveBeenCalledWith(
-      SESSION.id,
-      session,
-      "%7",
-      expected,
-    );
-  });
+  ])(
+    "a pane in $session gets the purpose $expected",
+    async ({ session, expected }) => {
+      rememberSignInPane("%7", SIGN_IN);
+      mocks.resolvePaneSession.mockResolvedValue({
+        status: "ok",
+        session,
+        window: 0,
+      });
+      mocks.writeToShellWhenReady.mockResolvedValue({ status: "ok" });
+      await openTmuxPaneInShell("%7", "/sample");
+      expect(mocks.rememberShellTmuxAttachment).toHaveBeenCalledWith(
+        SESSION.id,
+        session,
+        "%7",
+        expected,
+      );
+    },
+  );
 
   test("returns a delayed shell write failure instead of reporting success", async () => {
     const writeError = new Error("delayed write failed");

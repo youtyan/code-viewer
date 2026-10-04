@@ -50,25 +50,25 @@ describe("filePathClipboardText", () => {
       path: "dir/right\u202ename.txt",
       visible: "dir/right\\u{202E}name.txt",
     },
-  ])("uses the same visible escaped text for $name paths", ({
-    path,
-    visible,
-  }) => {
-    expect(filePathDisplayText(path)).toBe(visible);
-    const copied = filePathClipboardText(path);
-    expect(copied).toBe(visible);
-    expect(
-      [...copied].every((character) => {
-        const codePoint = character.codePointAt(0) ?? 0;
-        return (
-          codePoint > 0x1f &&
-          (codePoint < 0x7f || codePoint > 0x9f) &&
-          codePoint !== 0x200b &&
-          codePoint !== 0x202e
-        );
-      }),
-    ).toBe(true);
-  });
+  ])(
+    "uses the same visible escaped text for $name paths",
+    ({ path, visible }) => {
+      expect(filePathDisplayText(path)).toBe(visible);
+      const copied = filePathClipboardText(path);
+      expect(copied).toBe(visible);
+      expect(
+        [...copied].every((character) => {
+          const codePoint = character.codePointAt(0) ?? 0;
+          return (
+            codePoint > 0x1f &&
+            (codePoint < 0x7f || codePoint > 0x9f) &&
+            codePoint !== 0x200b &&
+            codePoint !== 0x202e
+          );
+        }),
+      ).toBe(true);
+    },
+  );
 
   test("uses visible path text inside file references", () => {
     expect(fileReferenceClipboardText("dir/line\nname.txt", 2, 2)).toBe(

@@ -48,15 +48,15 @@ describe("request body limits without content-length", () => {
       limit: 1_048_576,
       parse: (req: Request) => parsePostJsonBody(req),
     },
-  ])("$name: 上限を少し越えた所で読むのをやめて 413", async ({
-    limit,
-    parse,
-  }) => {
-    const { req, pulled } = countedBody();
-    const result = await parse(req);
-    expect(result).toBeInstanceOf(Response);
-    expect((result as Response).status).toBe(413);
-    // 上限 + ストリームの先読み 2 塊までなら「上限つき」と言える。
-    expect(pulled()).toBeLessThanOrEqual(limit + 2 * CHUNK_BYTES);
-  });
+  ])(
+    "$name: 上限を少し越えた所で読むのをやめて 413",
+    async ({ limit, parse }) => {
+      const { req, pulled } = countedBody();
+      const result = await parse(req);
+      expect(result).toBeInstanceOf(Response);
+      expect((result as Response).status).toBe(413);
+      // 上限 + ストリームの先読み 2 塊までなら「上限つき」と言える。
+      expect(pulled()).toBeLessThanOrEqual(limit + 2 * CHUNK_BYTES);
+    },
+  );
 });

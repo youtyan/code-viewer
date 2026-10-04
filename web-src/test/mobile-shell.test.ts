@@ -204,20 +204,17 @@ describe("幅の段で部品を出し分ける", () => {
       bar: false,
       keys: false,
     },
-  ])("$name: 段 $tier・メニューの hidden $menu・帯の hidden $bar・札の hidden $keys", ({
-    viewport,
-    tier,
-    menu,
-    bar,
-    keys,
-  }) => {
-    const created = install(viewport);
-    expect(created.tier()).toBe(tier);
-    expect(q<HTMLElement>(document, "#mobile-nav-open").hidden).toBe(menu);
-    expect(q<HTMLElement>(document, "#mobile-bar").hidden).toBe(bar);
-    expect(q<HTMLElement>(document, "#mobile-scrim").hidden).toBe(bar);
-    expect(q<HTMLElement>(document, "#mobile-keys").hidden).toBe(keys);
-  });
+  ])(
+    "$name: 段 $tier・メニューの hidden $menu・帯の hidden $bar・札の hidden $keys",
+    ({ viewport, tier, menu, bar, keys }) => {
+      const created = install(viewport);
+      expect(created.tier()).toBe(tier);
+      expect(q<HTMLElement>(document, "#mobile-nav-open").hidden).toBe(menu);
+      expect(q<HTMLElement>(document, "#mobile-bar").hidden).toBe(bar);
+      expect(q<HTMLElement>(document, "#mobile-scrim").hidden).toBe(bar);
+      expect(q<HTMLElement>(document, "#mobile-keys").hidden).toBe(keys);
+    },
+  );
 
   test("デスクトップでは body の class も引き出しの inert も付けない", () => {
     const before = document.body.className;
@@ -893,21 +890,24 @@ describe("長押しで右クリックのメニュー", () => {
     "#file-list-rows li.tree-file",
     "#filelist li.tree-file",
     ".gdp-repo-row",
-  ])("%s: 置いたままで右クリックのメニューを送り、離したときの click を止める", (selector) => {
-    install(PHONE);
-    const row = q(document, selector);
-    const got = listen(row);
-    fingers(row, "touchstart", [[40, 60]]);
-    vi.advanceTimersByTime(LONG_PRESS_MS - 1);
-    const before = [...got];
-    vi.advanceTimersByTime(1);
-    const release = fingers(row, "touchend", [[40, 60]]);
-    expect({ before, got, prevented: release.defaultPrevented }).toEqual({
-      before: [],
-      got: ["40,60"],
-      prevented: true,
-    });
-  });
+  ])(
+    "%s: 置いたままで右クリックのメニューを送り、離したときの click を止める",
+    (selector) => {
+      install(PHONE);
+      const row = q(document, selector);
+      const got = listen(row);
+      fingers(row, "touchstart", [[40, 60]]);
+      vi.advanceTimersByTime(LONG_PRESS_MS - 1);
+      const before = [...got];
+      vi.advanceTimersByTime(1);
+      const release = fingers(row, "touchend", [[40, 60]]);
+      expect({ before, got, prevented: release.defaultPrevented }).toEqual({
+        before: [],
+        got: ["40,60"],
+        prevented: true,
+      });
+    },
+  );
 
   test.each([
     {

@@ -697,50 +697,48 @@ describe("database view SQL error rendering", () => {
       failing: "/_db/schemas",
       operation: "スキーマの一覧を取得できませんでした",
     },
-  ])("names the failed operation in the display language: $language $failing", async ({
-    language,
-    kind,
-    failing,
-    operation,
-  }) => {
-    installDatabaseDom();
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    mockFetch((url, init) => {
-      if (url === "/_db/tabs" && init?.method === "PUT")
-        return jsonResponse({ ok: true });
-      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
-      if (url === "/_db/files")
-        return jsonResponse({
-          files: [{ ...baseFilesResponse().files[0], kind }],
-        });
-      if (url.startsWith(failing))
-        return new Response("sample failure", { status: 500 });
-      return new Response("unexpected request", { status: 500 });
-    });
+  ])(
+    "names the failed operation in the display language: $language $failing",
+    async ({ language, kind, failing, operation }) => {
+      installDatabaseDom();
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      mockFetch((url, init) => {
+        if (url === "/_db/tabs" && init?.method === "PUT")
+          return jsonResponse({ ok: true });
+        if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+        if (url === "/_db/files")
+          return jsonResponse({
+            files: [{ ...baseFilesResponse().files[0], kind }],
+          });
+        if (url.startsWith(failing))
+          return new Response("sample failure", { status: 500 });
+        return new Response("unexpected request", { status: 500 });
+      });
 
-    const view = createViewForTest({ getLanguage: () => language });
-    await view.enter("docker:db");
+      const view = createViewForTest({ getLanguage: () => language });
+      await view.enter("docker:db");
 
-    const shown = (
-      Array.from(
-        document.querySelectorAll(".db-pane-error"),
-      ) as unknown as FakeElement[]
-    ).map((error) => String(error.textContent));
-    // 頭の "Error:" は文言ではなく、formatErrorDetail が出す error の型名。
-    expect(shown).toEqual([
-      `Error: ${operation} (HTTP 500): sample failure`,
-      `Error: ${operation} (HTTP 500): sample failure`,
-    ]);
-    expect(consoleError).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({
-        message: `${operation} (HTTP 500): sample failure`,
-      }),
-    );
-    await leaveView(view);
-  });
+      const shown = (
+        Array.from(
+          document.querySelectorAll(".db-pane-error"),
+        ) as unknown as FakeElement[]
+      ).map((error) => String(error.textContent));
+      // 頭の "Error:" は文言ではなく、formatErrorDetail が出す error の型名。
+      expect(shown).toEqual([
+        `Error: ${operation} (HTTP 500): sample failure`,
+        `Error: ${operation} (HTTP 500): sample failure`,
+      ]);
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          message: `${operation} (HTTP 500): sample failure`,
+        }),
+      );
+      await leaveView(view);
+    },
+  );
 
   // 直す前は日本語の設定でも、データストアの一覧・タブ・表示設定の読み込みの
   // 失敗の詳細に英語の操作名が残っていた。英語の出力は今までどおり。
@@ -775,56 +773,55 @@ describe("database view SQL error rendering", () => {
       failing: "ui",
       operation: "Data の表示設定を読み込めませんでした",
     },
-  ])("names the failed $failing load in the display language: $language", async ({
-    language,
-    failing,
-    operation,
-  }) => {
-    installDatabaseDom();
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const failure = () => new Response("sample failure", { status: 500 });
-    mockFetch(
-      (url, init) => {
-        if (url === "/_db/tabs" && init?.method === "PUT")
-          return jsonResponse({ ok: true });
-        if (url === "/_db/tabs")
-          return failing === "tabs" ? failure() : jsonResponse({ tabs: [] });
-        if (url === "/_db/files")
-          return failing === "files"
-            ? failure()
-            : jsonResponse(baseFilesResponse());
-        if (url === "/_db/ui")
-          return failing === "ui"
-            ? failure()
-            : jsonResponse({ version: 1, columnWidths: {}, prefs: {} });
-        if (url.startsWith("/_db/schema"))
-          return jsonResponse(baseSchemaResponse());
-        if (url.startsWith("/_db/table"))
-          return jsonResponse(baseTableResponse());
-        return new Response("unexpected request", { status: 500 });
-      },
-      { handleDbUi: true },
-    );
+  ])(
+    "names the failed $failing load in the display language: $language",
+    async ({ language, failing, operation }) => {
+      installDatabaseDom();
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      const failure = () => new Response("sample failure", { status: 500 });
+      mockFetch(
+        (url, init) => {
+          if (url === "/_db/tabs" && init?.method === "PUT")
+            return jsonResponse({ ok: true });
+          if (url === "/_db/tabs")
+            return failing === "tabs" ? failure() : jsonResponse({ tabs: [] });
+          if (url === "/_db/files")
+            return failing === "files"
+              ? failure()
+              : jsonResponse(baseFilesResponse());
+          if (url === "/_db/ui")
+            return failing === "ui"
+              ? failure()
+              : jsonResponse({ version: 1, columnWidths: {}, prefs: {} });
+          if (url.startsWith("/_db/schema"))
+            return jsonResponse(baseSchemaResponse());
+          if (url.startsWith("/_db/table"))
+            return jsonResponse(baseTableResponse());
+          return new Response("unexpected request", { status: 500 });
+        },
+        { handleDbUi: true },
+      );
 
-    const view = createViewForTest({ getLanguage: () => language });
-    await view.enter("docker:db");
-    await flushMicrotasks();
+      const view = createViewForTest({ getLanguage: () => language });
+      await view.enter("docker:db");
+      await flushMicrotasks();
 
-    const detail = `${operation} (HTTP 500): sample failure`;
-    const shown = (
-      Array.from(
-        document.querySelectorAll(".db-pane-error"),
-      ) as unknown as FakeElement[]
-    ).map((error) => String(error.textContent));
-    expect(shown.some((text) => text.includes(detail))).toBe(true);
-    expect(consoleError).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ message: detail }),
-    );
-    await leaveView(view);
-  });
+      const detail = `${operation} (HTTP 500): sample failure`;
+      const shown = (
+        Array.from(
+          document.querySelectorAll(".db-pane-error"),
+        ) as unknown as FakeElement[]
+      ).map((error) => String(error.textContent));
+      expect(shown.some((text) => text.includes(detail))).toBe(true);
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ message: detail }),
+      );
+      await leaveView(view);
+    },
+  );
 
   // 直す前は通信の失敗を err.message だけでセッションログに載せ、cause が消えていた。
   test("keeps the whole failure with its cause in the session log", async () => {
@@ -877,64 +874,65 @@ describe("database view SQL error rendering", () => {
       select: "データストアを選択",
       chip: "新しいタブ",
     },
-  ])("guides a new tab to choose a datastore: $language", async ({
-    language,
-    title,
-    hint,
-    select,
-    chip,
-  }) => {
-    installDatabaseDom();
-    mockFetch((url, init) => {
-      if (url === "/_db/tabs" && init?.method === "PUT")
-        return jsonResponse({ ok: true });
-      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
-      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
-      if (url.startsWith("/_db/schema"))
-        return jsonResponse(baseSchemaResponse());
-      if (url.startsWith("/_db/table"))
-        return jsonResponse(baseTableResponse());
-      return new Response("unexpected request", { status: 500 });
-    });
+  ])(
+    "guides a new tab to choose a datastore: $language",
+    async ({ language, title, hint, select, chip }) => {
+      installDatabaseDom();
+      mockFetch((url, init) => {
+        if (url === "/_db/tabs" && init?.method === "PUT")
+          return jsonResponse({ ok: true });
+        if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+        if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+        if (url.startsWith("/_db/schema"))
+          return jsonResponse(baseSchemaResponse());
+        if (url.startsWith("/_db/table"))
+          return jsonResponse(baseTableResponse());
+        return new Response("unexpected request", { status: 500 });
+      });
 
-    const view = createViewForTest({ getLanguage: () => language });
-    await view.enter("docker:db");
-    const newTab = document.querySelector(
-      ".db-tabs-new-btn",
-    ) as unknown as FakeElement | null;
-    if (!newTab) throw new Error("new tab button is missing");
-    await newTab.click();
-    await flushMicrotasks();
+      const view = createViewForTest({ getLanguage: () => language });
+      await view.enter("docker:db");
+      const newTab = document.querySelector(
+        ".db-tabs-new-btn",
+      ) as unknown as FakeElement | null;
+      if (!newTab) throw new Error("new tab button is missing");
+      await newTab.click();
+      await flushMicrotasks();
 
-    const guides = (
-      Array.from(
-        document.querySelectorAll(".db-no-datastores"),
-      ) as unknown as FakeElement[]
-    ).filter((pane) => !pane.hidden);
-    expect(guides).toHaveLength(1);
-    const guide = guides[0] as unknown as HTMLElement;
-    expect(guide.querySelector(".db-pane-empty-title")?.textContent).toBe(
-      title,
-    );
-    expect(guide.querySelector(".db-pane-empty-hint")?.textContent).toBe(hint);
-    const placeholders = (
-      Array.from(
-        document.querySelectorAll(".db-file-select"),
-      ) as unknown as FakeElement[]
-    )
-      .flatMap((selectEl) => selectEl.children)
-      .filter(
-        (option): option is FakeElement =>
-          option instanceof FakeElement &&
-          (option as unknown as { disabled?: boolean }).disabled === true,
+      const guides = (
+        Array.from(
+          document.querySelectorAll(".db-no-datastores"),
+        ) as unknown as FakeElement[]
+      ).filter((pane) => !pane.hidden);
+      expect(guides).toHaveLength(1);
+      const guide = guides[0] as unknown as HTMLElement;
+      expect(guide.querySelector(".db-pane-empty-title")?.textContent).toBe(
+        title,
       );
-    expect(placeholders.map((option) => option.textContent)).toEqual([select]);
-    const chips = Array.from(
-      document.querySelectorAll(".db-tabs-chip-label"),
-    ).map((label) => label.textContent);
-    expect(chips[chips.length - 1]).toBe(chip);
-    await leaveView(view);
-  });
+      expect(guide.querySelector(".db-pane-empty-hint")?.textContent).toBe(
+        hint,
+      );
+      const placeholders = (
+        Array.from(
+          document.querySelectorAll(".db-file-select"),
+        ) as unknown as FakeElement[]
+      )
+        .flatMap((selectEl) => selectEl.children)
+        .filter(
+          (option): option is FakeElement =>
+            option instanceof FakeElement &&
+            (option as unknown as { disabled?: boolean }).disabled === true,
+        );
+      expect(placeholders.map((option) => option.textContent)).toEqual([
+        select,
+      ]);
+      const chips = Array.from(
+        document.querySelectorAll(".db-tabs-chip-label"),
+      ).map((label) => label.textContent);
+      expect(chips[chips.length - 1]).toBe(chip);
+      await leaveView(view);
+    },
+  );
 
   test("keeps the normal schema and first table path rendering", async () => {
     installDatabaseDom();

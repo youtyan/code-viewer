@@ -116,37 +116,40 @@ describe("the palette in web/style.css", () => {
     return value;
   };
 
-  test.each(
-    Object.entries(themes),
-  )("%s: the initials read on every square (4.5:1 or more)", (_theme, vars) => {
-    const ink = read(vars, "--project-ink");
-    const low = swatches
-      .map((id) => ({
-        id,
-        ratio: contrastRatio(read(vars, `--project-${id}`), ink),
-      }))
-      .filter((item) => item.ratio < 4.5);
-    expect(low).toEqual([]);
-  });
+  test.each(Object.entries(themes))(
+    "%s: the initials read on every square (4.5:1 or more)",
+    (_theme, vars) => {
+      const ink = read(vars, "--project-ink");
+      const low = swatches
+        .map((id) => ({
+          id,
+          ratio: contrastRatio(read(vars, `--project-${id}`), ink),
+        }))
+        .filter((item) => item.ratio < 4.5);
+      expect(low).toEqual([]);
+    },
+  );
 
-  test.each(
-    Object.entries(themes),
-  )("%s: every color differs from the others", (_theme, vars) => {
-    const values = swatches.map((id) => read(vars, `--project-${id}`));
-    expect(new Set(values).size).toBe(values.length);
-  });
+  test.each(Object.entries(themes))(
+    "%s: every color differs from the others",
+    (_theme, vars) => {
+      const values = swatches.map((id) => read(vars, `--project-${id}`));
+      expect(new Set(values).size).toBe(values.length);
+    },
+  );
 
-  test.each(
-    swatches,
-  )("an element painted %s reads that color as --project-color", (id) => {
-    for (const vars of Object.values(themes)) {
-      const painted = new Map([
-        ...vars,
-        ...block(`[data-project-color="${id}"]`),
-      ]);
-      expect(resolveVar("var(--project-color)", painted)).toBe(
-        read(vars, `--project-${id}`),
-      );
-    }
-  });
+  test.each(swatches)(
+    "an element painted %s reads that color as --project-color",
+    (id) => {
+      for (const vars of Object.values(themes)) {
+        const painted = new Map([
+          ...vars,
+          ...block(`[data-project-color="${id}"]`),
+        ]);
+        expect(resolveVar("var(--project-color)", painted)).toBe(
+          read(vars, `--project-${id}`),
+        );
+      }
+    },
+  );
 });

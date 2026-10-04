@@ -43,16 +43,14 @@ test.each([
   },
   // 使える幅が無い
   { available: 0, name: 48, branch: 54, expected: { name: 0, branch: 0 } },
-])("使える幅 $available・名前 $name・枝 $branch → $expected", ({
-  available,
-  name,
-  branch,
-  expected,
-}) => {
-  // 丸めずに返す (端数は画面に当てる側で扱う)。比べるのは小数 1 桁まで。
-  const widths = fitBrandWidths({ available, name, branch, gap: 5 });
-  expect({
-    name: Math.round(widths.name * 10) / 10,
-    branch: Math.round(widths.branch * 10) / 10,
-  }).toEqual(expected);
-});
+])(
+  "使える幅 $available・名前 $name・枝 $branch → $expected",
+  ({ available, name, branch, expected }) => {
+    // 丸めずに返す (端数は画面に当てる側で扱う)。比べるのは小数 1 桁まで。
+    const widths = fitBrandWidths({ available, name, branch, gap: 5 });
+    expect({
+      name: Math.round(widths.name * 10) / 10,
+      branch: Math.round(widths.branch * 10) / 10,
+    }).toEqual(expected);
+  },
+);

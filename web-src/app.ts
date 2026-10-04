@@ -4067,7 +4067,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           title: mount.dataset.title,
           wrapperId: mount.dataset.wrapperId,
           extraClass: mount.dataset.extraClass,
-          hidden: mount.hidden,
+          hidden: mount.hidden !== false,
         });
         mount.replaceWith(wrap);
       });

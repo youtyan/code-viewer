@@ -139,30 +139,27 @@ describe("focus scope helpers", () => {
       meta: false,
       action: "open-file-palette",
     },
-  ])("$name reaches the page keymap as $action", ({
-    on,
-    key,
-    ctrl,
-    meta,
-    action,
-  }) => {
-    // xterm は textarea でキーを受ける (編集できる対象)。
-    const el = target("TEXTAREA", on ? { [on]: true } : {});
-    const event = {
-      key,
-      ctrlKey: ctrl,
-      metaKey: meta,
-      altKey: false,
-      shiftKey: false,
-    } as KeyboardEvent;
-    expect(
-      resolveKeymapAction(event, {
-        scope: "global",
-        editable: true,
-        pageKeymapBlocked: isPageKeymapBlockedKey(el, meta),
-      }),
-    ).toBe(action);
-  });
+  ])(
+    "$name reaches the page keymap as $action",
+    ({ on, key, ctrl, meta, action }) => {
+      // xterm は textarea でキーを受ける (編集できる対象)。
+      const el = target("TEXTAREA", on ? { [on]: true } : {});
+      const event = {
+        key,
+        ctrlKey: ctrl,
+        metaKey: meta,
+        altKey: false,
+        shiftKey: false,
+      } as KeyboardEvent;
+      expect(
+        resolveKeymapAction(event, {
+          scope: "global",
+          editable: true,
+          pageKeymapBlocked: isPageKeymapBlockedKey(el, meta),
+        }),
+      ).toBe(action);
+    },
+  );
 
   test("stores the active panel focus scope on the document body", () => {
     const doc = { body: { dataset: {} } } as Document;
@@ -203,21 +200,21 @@ describe("focus scope helpers", () => {
   test.each([
     { listColumn: true, list: "#sidebar" },
     { listColumn: false, list: "#file-list" },
-  ])("panel focus helpers update the visual focus scope (list column $listColumn → $list)", ({
-    listColumn,
-    list,
-  }) => {
-    const calls: string[] = [];
-    const doc = panelDoc(listColumn, calls);
+  ])(
+    "panel focus helpers update the visual focus scope (list column $listColumn → $list)",
+    ({ listColumn, list }) => {
+      const calls: string[] = [];
+      const doc = panelDoc(listColumn, calls);
 
-    focusSidebarPanel(doc);
-    expect(calls).toEqual([list]);
-    expect(getPanelFocusScope(doc)).toBe("sidebar");
+      focusSidebarPanel(doc);
+      expect(calls).toEqual([list]);
+      expect(getPanelFocusScope(doc)).toBe("sidebar");
 
-    focusMainPanel(doc);
-    expect(calls).toEqual([list, "content"]);
-    expect(getPanelFocusScope(doc)).toBe("main");
-  });
+      focusMainPanel(doc);
+      expect(calls).toEqual([list, "content"]);
+      expect(getPanelFocusScope(doc)).toBe("main");
+    },
+  );
 
   test("restores saved panel focus through the focus helpers", () => {
     const calls: string[] = [];

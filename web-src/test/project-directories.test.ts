@@ -98,16 +98,18 @@ describe("listing the child directories", () => {
   test.each([
     { hidden: undefined, names: ["sample-app"] },
     { hidden: "1", names: [".sample-hidden", "sample-app"] },
-  ])("hidden directories only with hidden=$hidden", async ({
-    hidden,
-    names,
-  }) => {
-    mkdirs(".sample-hidden", "sample-app");
-    const { body } = await get(hidden ? { path: dir, hidden } : { path: dir });
-    expect(
-      (body as ProjectDirectoryListing).entries.map((entry) => entry.name),
-    ).toEqual(names);
-  });
+  ])(
+    "hidden directories only with hidden=$hidden",
+    async ({ hidden, names }) => {
+      mkdirs(".sample-hidden", "sample-app");
+      const { body } = await get(
+        hidden ? { path: dir, hidden } : { path: dir },
+      );
+      expect(
+        (body as ProjectDirectoryListing).entries.map((entry) => entry.name),
+      ).toEqual(names);
+    },
+  );
 
   test("marks the root of a repository and of a worktree (.git file), not a plain folder", async () => {
     mkdirs("sample-repo/.git", "sample-worktree", "sample-plain");

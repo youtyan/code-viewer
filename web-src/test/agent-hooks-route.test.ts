@@ -129,19 +129,18 @@ describe("state reports carry the agent kind", () => {
     expect(getAgentState("%3")?.ended).toBeUndefined();
   });
 
-  test.each([
-    { agent: "gemini" },
-    { agent: 1 },
-    { agent: "" },
-  ])("rejects an unknown agent ($agent)", async ({ agent }) => {
-    const res = await post("/_agent/state", {
-      target: "%3",
-      event: "stop",
-      agent,
-    });
-    expect(res?.status).toBe(400);
-    expect(getAgentState("%3")).toBeNull();
-  });
+  test.each([{ agent: "gemini" }, { agent: 1 }, { agent: "" }])(
+    "rejects an unknown agent ($agent)",
+    async ({ agent }) => {
+      const res = await post("/_agent/state", {
+        target: "%3",
+        event: "stop",
+        agent,
+      });
+      expect(res?.status).toBe(400);
+      expect(getAgentState("%3")).toBeNull();
+    },
+  );
 
   test.each([
     { name: "missing", at: undefined, expected: 200 },
@@ -152,23 +151,23 @@ describe("state reports carry the agent kind", () => {
     { name: "fractional", at: 999.5, expected: 400 },
     { name: "a string", at: "1000", expected: 400 },
     { name: "null", at: null, expected: 400 },
-  ])("accepts only a valid event timestamp ($name)", async ({
-    at,
-    expected,
-  }) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(1000);
-    try {
-      const res = await post("/_agent/state", {
-        target: "%3",
-        event: "stop",
-        at,
-      });
-      expect(res?.status).toBe(expected);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+  ])(
+    "accepts only a valid event timestamp ($name)",
+    async ({ at, expected }) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(1000);
+      try {
+        const res = await post("/_agent/state", {
+          target: "%3",
+          event: "stop",
+          at,
+        });
+        expect(res?.status).toBe(expected);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 });
 
 describe("state-changing request bodies", () => {
@@ -272,7 +271,7 @@ describe("/_agent/hooks", () => {
     expect(status.agents[0]).toMatchObject({ state: "unreadable" });
     const res = await call("/_agent/hooks/plan?agent=claude&action=install");
     expect(res?.status).toBe(422);
-    expect(((await res?.json()) as { error: string }).error).toContain(
+    expect(((await res.json()) as { error: string }).error).toContain(
       "$.hooks: hooks must be an object",
     );
   });
@@ -328,21 +327,21 @@ describe("/_agent/hooks", () => {
   test.each([
     { path: "/_agent/hooks/apply", method: "POST" },
     { path: "/_agent/hooks/failures", method: "DELETE" },
-  ])("$method $path needs a same-origin action request", async ({
-    path,
-    method,
-  }) => {
-    const res = await call(
-      path,
-      {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: method === "POST" ? "{}" : undefined,
-      },
-      () => false,
-    );
-    expect(res?.status).toBe(403);
-  });
+  ])(
+    "$method $path needs a same-origin action request",
+    async ({ path, method }) => {
+      const res = await call(
+        path,
+        {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: method === "POST" ? "{}" : undefined,
+        },
+        () => false,
+      );
+      expect(res?.status).toBe(403);
+    },
+  );
 
   test("launcherOnly writes the launcher and leaves the settings file alone", async () => {
     writeFileSync(join(claudeDir, "settings.json"), "{}\n");

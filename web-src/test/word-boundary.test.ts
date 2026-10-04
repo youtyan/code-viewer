@@ -68,12 +68,10 @@ describe("isWordBoundary", () => {
     { line: "sample_value", start: 0, end: 6, expected: false },
     { line: "example sample", start: 8, end: 14, expected: true },
     { line: "例sample値", start: 1, end: 7, expected: false },
-  ])("checks both sides of [$start,$end) in $line", ({
-    line,
-    start,
-    end,
-    expected,
-  }) => {
-    expect(isWordBoundary(line, start, end)).toBe(expected);
-  });
+  ])(
+    "checks both sides of [$start,$end) in $line",
+    ({ line, start, end, expected }) => {
+      expect(isWordBoundary(line, start, end)).toBe(expected);
+    },
+  );
 });

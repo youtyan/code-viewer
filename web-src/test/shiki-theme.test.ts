@@ -84,19 +84,17 @@ describe("highlighted code reads the syntax names", () => {
     { lang: "markdown", code: "# Sample app\n\n- one item\n\n`code`" },
   ];
 
-  test.each(
-    SAMPLES,
-  )("$lang: every span uses a name, the same in light and dark", ({
-    lang,
-    code,
-  }) => {
-    const found = spans(highlight(code, lang));
-    expect({
-      some: found.length > 0,
-      outside: found.filter(([, light]) => !ALLOWED.has(light)),
-      differ: found.filter(([, light, dark]) => light !== dark),
-    }).toEqual({ some: true, outside: [], differ: [] });
-  });
+  test.each(SAMPLES)(
+    "$lang: every span uses a name, the same in light and dark",
+    ({ lang, code }) => {
+      const found = spans(highlight(code, lang));
+      expect({
+        some: found.length > 0,
+        outside: found.filter(([, light]) => !ALLOWED.has(light)),
+        differ: found.filter(([, light, dark]) => light !== dark),
+      }).toEqual({ some: true, outside: [], differ: [] });
+    },
+  );
 
   // 種類ごとの割り当て (highlight.js の面と同じ。diff-code-contrast.test.ts の表)。
   test.each([

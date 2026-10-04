@@ -205,30 +205,30 @@ describe("DynamoDB explorer UI", () => {
       writeText: () => Promise.reject(new Error("copy failed")),
       expectedStatus: "Copy failed",
     },
-  ])("$name: キーコピー後もボタンラベルを変えない", async ({
-    writeText,
-    expectedStatus,
-  }) => {
-    installFetchMock();
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    });
-    const view = await mountExplorer();
-    click(view.el.querySelector(".dynamodb-item-row"));
-    const copy = view.el.querySelector<HTMLButtonElement>(
-      ".dynamodb-copy-key-btn",
-    );
+  ])(
+    "$name: キーコピー後もボタンラベルを変えない",
+    async ({ writeText, expectedStatus }) => {
+      installFetchMock();
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+      const view = await mountExplorer();
+      click(view.el.querySelector(".dynamodb-item-row"));
+      const copy = view.el.querySelector<HTMLButtonElement>(
+        ".dynamodb-copy-key-btn",
+      );
 
-    click(copy);
-    await waitFor(
-      () =>
-        view.el.querySelector(".dynamodb-copy-status")?.textContent ===
-        expectedStatus,
-    );
+      click(copy);
+      await waitFor(
+        () =>
+          view.el.querySelector(".dynamodb-copy-status")?.textContent ===
+          expectedStatus,
+      );
 
-    expect(copy?.textContent).toBe("Copy key");
-  });
+      expect(copy?.textContent).toBe("Copy key");
+    },
+  );
 
   // 直す前は err.message だけを出し、console にも cause にも何も残らなかった。
   // HTTP の失敗は画面に本文を出すだけで、操作も状態も console も無かった。
@@ -288,49 +288,45 @@ describe("DynamoDB explorer UI", () => {
       { ...failureCase, via: "network" as const },
       { ...failureCase, via: "http" as const },
     ]),
-  )("$operation の $via の失敗は理由を画面と console に出す", async ({
-    operation,
-    httpOperation,
-    via,
-    fails,
-    open,
-    shown,
-  }) => {
-    const failure = failureWithCause(`${operation} request failed`);
-    installFetchMock((url) =>
-      fails(url)
-        ? via === "network"
-          ? failure
-          : new Response("sample failure", { status: 500 })
-        : null,
-    );
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    try {
-      const view = await mountExplorer();
-      await open(view);
-      await waitFor(() => !!shown(view));
+  )(
+    "$operation の $via の失敗は理由を画面と console に出す",
+    async ({ operation, httpOperation, via, fails, open, shown }) => {
+      const failure = failureWithCause(`${operation} request failed`);
+      installFetchMock((url) =>
+        fails(url)
+          ? via === "network"
+            ? failure
+            : new Response("sample failure", { status: 500 })
+          : null,
+      );
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      try {
+        const view = await mountExplorer();
+        await open(view);
+        await waitFor(() => !!shown(view));
 
-      const text = shown(view) ?? "";
-      expect(text).not.toContain("Error: Error:");
-      const logs = dynamoLogs(consoleError.mock.calls, operation);
-      expect(logs.length).toBe(1);
-      const logged = logs[0]?.[logs[0].length - 1];
-      if (via === "network") {
-        expect(text).toContain(`${operation} request failed`);
-        expect(text).toContain("Caused by");
-        expect(text).toContain("network is unreachable");
-        expect(logged).toBe(failure);
-      } else {
-        const detail = `${httpOperation} (HTTP 500): sample failure`;
-        expect(text).toContain(`Error: ${detail}`);
-        expect((logged as Error).message).toBe(detail);
+        const text = shown(view) ?? "";
+        expect(text).not.toContain("Error: Error:");
+        const logs = dynamoLogs(consoleError.mock.calls, operation);
+        expect(logs.length).toBe(1);
+        const logged = logs[0]?.[logs[0].length - 1];
+        if (via === "network") {
+          expect(text).toContain(`${operation} request failed`);
+          expect(text).toContain("Caused by");
+          expect(text).toContain("network is unreachable");
+          expect(logged).toBe(failure);
+        } else {
+          const detail = `${httpOperation} (HTTP 500): sample failure`;
+          expect(text).toContain(`Error: ${detail}`);
+          expect((logged as Error).message).toBe(detail);
+        }
+      } finally {
+        consoleError.mockRestore();
       }
-    } finally {
-      consoleError.mockRestore();
-    }
-  });
+    },
+  );
 
   // 直す前は「属性値の JSON が不正です」だけで、どこが読めないかが出なかった。
   test.each([

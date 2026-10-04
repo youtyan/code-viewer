@@ -281,29 +281,30 @@ describe("grep output parsers", () => {
   test.each([
     { name: "a current-directory prefix", inputPath: "./src/sample.ts" },
     { name: "no current-directory prefix", inputPath: "src/sample.ts" },
-  ])("parses ripgrep JSON with $name and converts its byte offset", ({
-    inputPath,
-  }) => {
-    const output = `${JSON.stringify({
-      type: "match",
-      data: {
-        path: { text: inputPath },
-        lines: { text: "const 日本語 = 1;\n" },
-        line_number: 7,
-        submatches: [{ match: { text: "日本語" }, start: 6, end: 15 }],
-      },
-    })}\n`;
+  ])(
+    "parses ripgrep JSON with $name and converts its byte offset",
+    ({ inputPath }) => {
+      const output = `${JSON.stringify({
+        type: "match",
+        data: {
+          path: { text: inputPath },
+          lines: { text: "const 日本語 = 1;\n" },
+          line_number: 7,
+          submatches: [{ match: { text: "日本語" }, start: 6, end: 15 }],
+        },
+      })}\n`;
 
-    expect(parseRgOutput(output, 10)).toEqual([
-      {
-        path: "src/sample.ts",
-        line: 7,
-        column: 7,
-        preview: "const 日本語 = 1;",
-        matchText: "日本語",
-      },
-    ]);
-  });
+      expect(parseRgOutput(output, 10)).toEqual([
+        {
+          path: "src/sample.ts",
+          line: 7,
+          column: 7,
+          preview: "const 日本語 = 1;",
+          matchText: "日本語",
+        },
+      ]);
+    },
+  );
 
   test.each([
     { name: "a current-directory prefix", inputPath: "./src/app.ts" },
@@ -512,79 +513,81 @@ describe("search-service shared behavior", () => {
   // "match case" and "whole word" mean, so the same table runs against the
   // worktree (rg or fallback, whichever this machine has) and a committed
   // ref (git grep) and expects identical line sets.
-  describe.each([
-    { ref: "worktree" },
-    { ref: "main" },
-  ])("grep case / word options on $ref", ({ ref }) => {
-    test.each([
-      {
-        name: "default: case-insensitive substring",
-        caseSensitive: false,
-        wholeWord: false,
-        expected: [1, 2, 3],
-      },
-      {
-        name: "match case keeps only the capitalised line",
-        caseSensitive: true,
-        wholeWord: false,
-        expected: [1],
-      },
-      {
-        name: "whole word drops the tokenizer line",
-        caseSensitive: false,
-        wholeWord: true,
-        expected: [1, 3],
-      },
-      {
-        name: "match case + whole word",
-        caseSensitive: true,
-        wholeWord: true,
-        expected: [1],
-      },
-    ])("$name", async ({ caseSensitive, wholeWord, expected }) => {
-      const result = await grepRepoAsync(env(), {
-        query: "Token",
-        ref,
-        paths: ["nested/sample_case.ts"],
-        regex: false,
-        max: 10,
-        caseSensitive,
-        wholeWord,
+  describe.each([{ ref: "worktree" }, { ref: "main" }])(
+    "grep case / word options on $ref",
+    ({ ref }) => {
+      test.each([
+        {
+          name: "default: case-insensitive substring",
+          caseSensitive: false,
+          wholeWord: false,
+          expected: [1, 2, 3],
+        },
+        {
+          name: "match case keeps only the capitalised line",
+          caseSensitive: true,
+          wholeWord: false,
+          expected: [1],
+        },
+        {
+          name: "whole word drops the tokenizer line",
+          caseSensitive: false,
+          wholeWord: true,
+          expected: [1, 3],
+        },
+        {
+          name: "match case + whole word",
+          caseSensitive: true,
+          wholeWord: true,
+          expected: [1],
+        },
+      ])("$name", async ({ caseSensitive, wholeWord, expected }) => {
+        const result = await grepRepoAsync(env(), {
+          query: "Token",
+          ref,
+          paths: ["nested/sample_case.ts"],
+          regex: false,
+          max: 10,
+          caseSensitive,
+          wholeWord,
+        });
+        if (result.ok !== true) throw new Error(result.error);
+        expect(result.value.matches.map((match) => match.line)).toEqual(
+          expected,
+        );
       });
-      if (result.ok !== true) throw new Error(result.error);
-      expect(result.value.matches.map((match) => match.line)).toEqual(expected);
-    });
 
-    test.each([
-      {
-        name: "a directory scope walks into it",
-        paths: ["nested"],
-        expected: ["nested/deep/readme.md", "nested/sample_case.ts"],
-      },
-      {
-        name: "a glob scope selects by pattern",
-        paths: ["*.md"],
-        expected: ["nested/deep/readme.md"],
-      },
-      {
-        name: "a deep glob scope",
-        paths: ["nested/**/*.ts"],
-        expected: ["nested/sample_case.ts"],
-      },
-    ])("$name", async ({ paths, expected }) => {
-      const result = await grepRepoAsync(env(), {
-        query: "token",
-        ref,
-        paths,
-        regex: false,
-        max: 10,
+      test.each([
+        {
+          name: "a directory scope walks into it",
+          paths: ["nested"],
+          expected: ["nested/deep/readme.md", "nested/sample_case.ts"],
+        },
+        {
+          name: "a glob scope selects by pattern",
+          paths: ["*.md"],
+          expected: ["nested/deep/readme.md"],
+        },
+        {
+          name: "a deep glob scope",
+          paths: ["nested/**/*.ts"],
+          expected: ["nested/sample_case.ts"],
+        },
+      ])("$name", async ({ paths, expected }) => {
+        const result = await grepRepoAsync(env(), {
+          query: "token",
+          ref,
+          paths,
+          regex: false,
+          max: 10,
+        });
+        if (result.ok !== true) throw new Error(result.error);
+        expect(
+          [...new Set(result.value.matches.map((match) => match.path))].sort(),
+        ).toEqual(expected);
       });
-      if (result.ok !== true) throw new Error(result.error);
-      expect(
-        [...new Set(result.value.matches.map((match) => match.path))].sort(),
-      ).toEqual(expected);
-    });
-  });
+    },
+  );
 });
 
 describe("fixedStringColumn", () => {

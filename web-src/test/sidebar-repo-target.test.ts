@@ -231,25 +231,25 @@ describe("diff sidebar repository target", () => {
   test.each([
     { list: "changes", hidden: false },
     { list: "files", hidden: true },
-  ] as const)("rendering the $list list without a tree: the repository target is hidden $hidden", ({
-    list,
-    hidden,
-  }) => {
-    installFixtureDom(FILE_LIST_DOM);
-    const fileList = document.body.innerHTML;
-    installFixtureDom(CHANGES_LIST_DOM);
-    document.body.insertAdjacentHTML("beforeend", fileList);
-    const wrap = document.querySelector<HTMLElement>("#repo-target-wrap");
-    if (!wrap) throw new Error("missing repo target wrap");
-    wrap.hidden = false;
-    const dom = list === "files" ? FILE_LIST_DOM : CHANGES_LIST_DOM;
-    createFixtureSidebar({ dom }).renderSidebar(
-      list === "files"
-        ? []
-        : [{ path: "sample.ts", display_path: "sample.ts", status: "M" }],
-    );
-    expect(wrap.hidden).toBe(hidden);
-  });
+  ] as const)(
+    "rendering the $list list without a tree: the repository target is hidden $hidden",
+    ({ list, hidden }) => {
+      installFixtureDom(FILE_LIST_DOM);
+      const fileList = document.body.innerHTML;
+      installFixtureDom(CHANGES_LIST_DOM);
+      document.body.insertAdjacentHTML("beforeend", fileList);
+      const wrap = document.querySelector<HTMLElement>("#repo-target-wrap");
+      if (!wrap) throw new Error("missing repo target wrap");
+      wrap.hidden = false;
+      const dom = list === "files" ? FILE_LIST_DOM : CHANGES_LIST_DOM;
+      createFixtureSidebar({ dom }).renderSidebar(
+        list === "files"
+          ? []
+          : [{ path: "sample.ts", display_path: "sample.ts", status: "M" }],
+      );
+      expect(wrap.hidden).toBe(hidden);
+    },
+  );
 
   test("keeps file counts out of repository sidebars", () => {
     installSidebarDom();
@@ -305,13 +305,20 @@ describe("diff sidebar repository target", () => {
     ["gdp-file-detail-page gdp-sidebar-hidden", "sidebar", "block", "none"],
     ["gdp-help-page", "", "none", "block"],
     ["gdp-help-page gdp-sidebar-hidden", "", "none", "none"],
-  ])("body class %j, list column %j: changed files %s, file list %s", (className, listColumn, changes, files) => {
-    expect([
-      computedDisplayForBodyClass("#sidebar", className, listColumn),
-      computedDisplayForBodyClass("#file-list", className, listColumn),
-      computedDisplayForBodyClass("#file-list-resizer", className, listColumn),
-    ]).toEqual([changes, files, files]);
-  });
+  ])(
+    "body class %j, list column %j: changed files %s, file list %s",
+    (className, listColumn, changes, files) => {
+      expect([
+        computedDisplayForBodyClass("#sidebar", className, listColumn),
+        computedDisplayForBodyClass("#file-list", className, listColumn),
+        computedDisplayForBodyClass(
+          "#file-list-resizer",
+          className,
+          listColumn,
+        ),
+      ]).toEqual([changes, files, files]);
+    },
+  );
 
   // Rows carry their route as a real link so the browser can open it in a
   // new tab (Cmd/Ctrl/middle click); the app keeps only the plain click.
@@ -380,30 +387,33 @@ describe("diff sidebar repository target", () => {
     ["Shift+click", "click", { shiftKey: true }, [], false],
     ["right button", "auxclick", { button: 2 }, [], false],
     ["Cmd+Alt+click", "click", { metaKey: true, altKey: true }, [], false],
-  ])("%s on a diff row: opens %j, default prevented %s", (_label, type, init, opens, prevented) => {
-    installSidebarDom();
-    const opened: string[][] = [];
-    const sidebar = createSidebarForTest({
-      openDiffFile: (path) => {
-        opened.push(["diff", path]);
-      },
-      openFileAs: (_file, intent, list) => {
-        opened.push([intent, list]);
-      },
-    });
-    sidebar.renderSidebar([{ path: "src/alpha.ts", status: "M" }]);
-    const link = document.querySelector(
-      '#filelist li[data-path="src/alpha.ts"] a.name',
-    );
-    if (!link) throw new Error("missing row link");
-    const event = new MouseEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      ...init,
-    });
-    link.dispatchEvent(event);
-    expect([opened, event.defaultPrevented]).toEqual([opens, prevented]);
-  });
+  ])(
+    "%s on a diff row: opens %j, default prevented %s",
+    (_label, type, init, opens, prevented) => {
+      installSidebarDom();
+      const opened: string[][] = [];
+      const sidebar = createSidebarForTest({
+        openDiffFile: (path) => {
+          opened.push(["diff", path]);
+        },
+        openFileAs: (_file, intent, list) => {
+          opened.push([intent, list]);
+        },
+      });
+      sidebar.renderSidebar([{ path: "src/alpha.ts", status: "M" }]);
+      const link = document.querySelector(
+        '#filelist li[data-path="src/alpha.ts"] a.name',
+      );
+      if (!link) throw new Error("missing row link");
+      const event = new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      });
+      link.dispatchEvent(event);
+      expect([opened, event.defaultPrevented]).toEqual([opens, prevented]);
+    },
+  );
 
   // The commit list stays while the history screen shows a source view. It
   // follows the list column (app.ts listColumnKind), not the page class: with
@@ -414,11 +424,14 @@ describe("diff sidebar repository target", () => {
     ["gdp-history-page gdp-file-detail-page", "history", "flex"],
     ["gdp-file-detail-page", "sidebar", "none"],
     ["gdp-history-page", "", "none"],
-  ])("history panel display for body class %j, list column %j: %s", (className, listColumn, display) => {
-    expect(
-      computedDisplayForBodyClass("#history-panel", className, listColumn),
-    ).toBe(display);
-  });
+  ])(
+    "history panel display for body class %j, list column %j: %s",
+    (className, listColumn, display) => {
+      expect(
+        computedDisplayForBodyClass("#history-panel", className, listColumn),
+      ).toBe(display);
+    },
+  );
 
   test("clears the file filter and restores hidden sidebar rows", () => {
     installSidebarDom();

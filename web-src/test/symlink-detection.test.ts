@@ -318,17 +318,15 @@ describe("gitSymlinkTargetMetadataAsync resolves committed-ref symlink targets",
       expectedType: "missing",
       expectedResolvedPath: undefined,
     },
-  ])("$path resolves to symlink_target_type $expectedType", async ({
-    path,
-    expectedTarget,
-    expectedType,
-    expectedResolvedPath,
-  }) => {
-    const meta = await gitSymlinkTargetMetadataAsync("HEAD", path, dir);
-    expect(meta.symlink_target).toBe(expectedTarget);
-    expect(meta.symlink_target_type).toBe(expectedType);
-    expect(meta.resolved_path).toBe(expectedResolvedPath);
-  });
+  ])(
+    "$path resolves to symlink_target_type $expectedType",
+    async ({ path, expectedTarget, expectedType, expectedResolvedPath }) => {
+      const meta = await gitSymlinkTargetMetadataAsync("HEAD", path, dir);
+      expect(meta.symlink_target).toBe(expectedTarget);
+      expect(meta.symlink_target_type).toBe(expectedType);
+      expect(meta.resolved_path).toBe(expectedResolvedPath);
+    },
+  );
 
   test("navigating a committed-ref directory symlink via resolved_path lists the real target contents", async () => {
     const meta = await gitSymlinkTargetMetadataAsync(
@@ -511,19 +509,20 @@ test.each([
     name: "git check-ignore",
     ask: (dir: string) => ignoredPathsAsync(["sample.txt"], dir),
   },
-])("a $name that fails is returned with git's reason, not as empty", async ({
-  ask,
-}) => {
-  const dir = mkdtempSync(join(tmpdir(), "code-viewer-not-a-repo-"));
-  try {
-    expect(await ask(dir)).toEqual({
-      ok: false,
-      error: expect.stringMatching(/^fatal: not a git repository/),
-    });
-  } finally {
-    rmSync(dir, { force: true, recursive: true });
-  }
-});
+])(
+  "a $name that fails is returned with git's reason, not as empty",
+  async ({ ask }) => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-not-a-repo-"));
+    try {
+      expect(await ask(dir)).toEqual({
+        ok: false,
+        error: expect.stringMatching(/^fatal: not a git repository/),
+      });
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  },
+);
 
 describe("ignoredPathsAsync", () => {
   let dir: string;

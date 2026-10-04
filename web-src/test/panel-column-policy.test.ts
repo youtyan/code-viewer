@@ -113,15 +113,13 @@ describe("bootFileListFold", () => {
       user: false,
       auto: true,
     },
-  ])("$name → 利用者 $user・自動 $auto", ({
-    bodyHidden,
-    early,
-    user,
-    auto,
-  }) => {
-    expect(bootFileListFold({ bodyHidden, earlyUserHidden: early })).toEqual({
-      userHidden: user,
-      autoHidden: auto,
-    });
-  });
+  ])(
+    "$name → 利用者 $user・自動 $auto",
+    ({ bodyHidden, early, user, auto }) => {
+      expect(bootFileListFold({ bodyHidden, earlyUserHidden: early })).toEqual({
+        userHidden: user,
+        autoHidden: auto,
+      });
+    },
+  );
 });

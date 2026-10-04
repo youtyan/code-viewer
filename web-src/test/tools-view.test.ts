@@ -224,18 +224,19 @@ describe("tools overlay shell", () => {
     expect(getCalls).toBe(2);
   });
 
-  test.each([
-    400, 503,
-  ])("failed draft save (%i) prevents project reset", async (status) => {
-    storedState = { version: 1, activeTool: "markdown" };
-    const view = createView();
-    await view.open();
-    textareaFor("markdown").value = "unsaved draft";
-    textareaFor("markdown").dispatchEvent(new Event("input"));
-    patchStatus = status;
-    await expect(view.resetProject()).rejects.toThrow("saving tools drafts");
-    expect(textareaFor("markdown").value).toBe("unsaved draft");
-  });
+  test.each([400, 503])(
+    "failed draft save (%i) prevents project reset",
+    async (status) => {
+      storedState = { version: 1, activeTool: "markdown" };
+      const view = createView();
+      await view.open();
+      textareaFor("markdown").value = "unsaved draft";
+      textareaFor("markdown").dispatchEvent(new Event("input"));
+      patchStatus = status;
+      await expect(view.resetProject()).rejects.toThrow("saving tools drafts");
+      expect(textareaFor("markdown").value).toBe("unsaved draft");
+    },
+  );
 
   test("opening reveals the drawer and its overlay", async () => {
     const view = createView();

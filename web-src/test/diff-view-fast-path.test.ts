@@ -371,11 +371,14 @@ describe("diff view fast path", () => {
     [false, true, true, true],
     // 別のタブで右の列が Files の木に書き換わった
     [true, true, false, true],
-  ])("renders the sidebar (listSame=%s, domIntact=%s, listShown=%s) -> %s", (listSame, domIntact, listShown, expected) => {
-    expect(shouldRenderDiffSidebar(listSame, domIntact, listShown)).toBe(
-      expected,
-    );
-  });
+  ])(
+    "renders the sidebar (listSame=%s, domIntact=%s, listShown=%s) -> %s",
+    (listSame, domIntact, listShown, expected) => {
+      expect(shouldRenderDiffSidebar(listSame, domIntact, listShown)).toBe(
+        expected,
+      );
+    },
+  );
 
   test("renders viewed progress from the displayed diff files", () => {
     setupDiffDom();
@@ -1046,45 +1049,46 @@ describe("diff view fast path", () => {
   test.each([
     { rendered: true, requests: 1 },
     { rendered: false, requests: 0 },
-  ])("loads a card on first render only when it is rendered: $rendered", async ({
-    rendered,
-    requests: expected,
-  }) => {
-    setupDiffDom();
-    const originalObserver = globalThis.IntersectionObserver;
-    const originalRects = HTMLElement.prototype.getClientRects;
-    const originalFetch = globalThis.fetch;
-    const requests: string[] = [];
-    globalThis.IntersectionObserver = class {
-      observe() {
-        /* noop */
+  ])(
+    "loads a card on first render only when it is rendered: $rendered",
+    async ({ rendered, requests: expected }) => {
+      setupDiffDom();
+      const originalObserver = globalThis.IntersectionObserver;
+      const originalRects = HTMLElement.prototype.getClientRects;
+      const originalFetch = globalThis.fetch;
+      const requests: string[] = [];
+      globalThis.IntersectionObserver = class {
+        observe() {
+          /* noop */
+        }
+        disconnect() {
+          /* noop */
+        }
+        unobserve() {
+          /* noop */
+        }
+      } as unknown as typeof IntersectionObserver;
+      if (!rendered)
+        HTMLElement.prototype.getClientRects = () =>
+          [] as unknown as DOMRectList;
+      globalThis.fetch = ((input: RequestInfo | URL) => {
+        requests.push(String(input));
+        return deferred<Response>().promise;
+      }) as typeof fetch;
+      try {
+        const { view } = createDiffViewForShellTest();
+        view.renderShell(
+          makeMeta([makeFile("README.md", 1, 0, "/file_diff?path=README.md")]),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(requests.length).toBe(expected);
+      } finally {
+        globalThis.IntersectionObserver = originalObserver;
+        HTMLElement.prototype.getClientRects = originalRects;
+        globalThis.fetch = originalFetch;
       }
-      disconnect() {
-        /* noop */
-      }
-      unobserve() {
-        /* noop */
-      }
-    } as unknown as typeof IntersectionObserver;
-    if (!rendered)
-      HTMLElement.prototype.getClientRects = () => [] as unknown as DOMRectList;
-    globalThis.fetch = ((input: RequestInfo | URL) => {
-      requests.push(String(input));
-      return deferred<Response>().promise;
-    }) as typeof fetch;
-    try {
-      const { view } = createDiffViewForShellTest();
-      view.renderShell(
-        makeMeta([makeFile("README.md", 1, 0, "/file_diff?path=README.md")]),
-      );
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(requests.length).toBe(expected);
-    } finally {
-      globalThis.IntersectionObserver = originalObserver;
-      HTMLElement.prototype.getClientRects = originalRects;
-      globalThis.fetch = originalFetch;
-    }
-  });
+    },
+  );
 
   test("focuses every diff row in a line range", () => {
     setupDiffDom();
@@ -1180,41 +1184,40 @@ describe("diff view scroll spy", () => {
       sidebarTouched: true,
       expectedOptions: undefined,
     },
-  ])("follows the visible file during $name", async ({
-    target,
-    sidebarTouched,
-    expectedOptions,
-  }) => {
-    setupDiffDom();
-    const first = document.createElement("article");
-    first.className = "gdp-file-shell";
-    first.dataset.path = "src/first.ts";
-    const second = document.createElement("article");
-    second.className = "gdp-file-shell";
-    second.dataset.path = "src/second.ts";
-    document.getElementById("diff")?.append(first, second);
+  ])(
+    "follows the visible file during $name",
+    async ({ target, sidebarTouched, expectedOptions }) => {
+      setupDiffDom();
+      const first = document.createElement("article");
+      first.className = "gdp-file-shell";
+      first.dataset.path = "src/first.ts";
+      const second = document.createElement("article");
+      second.className = "gdp-file-shell";
+      second.dataset.path = "src/second.ts";
+      document.getElementById("diff")?.append(first, second);
 
-    let afterScroll = false;
-    first.getBoundingClientRect = () =>
-      new DOMRect(0, afterScroll ? -200 : 0, 100, 200);
-    second.getBoundingClientRect = () =>
-      new DOMRect(0, afterScroll ? 0 : 200, 100, 200);
-    const { view, markActiveCalls } = createDiffViewForShellTest();
-    view.setupScrollSpy();
-    await waitFor(() => markActiveCalls().length === 1);
-    markActiveCalls().length = 0;
+      let afterScroll = false;
+      first.getBoundingClientRect = () =>
+        new DOMRect(0, afterScroll ? -200 : 0, 100, 200);
+      second.getBoundingClientRect = () =>
+        new DOMRect(0, afterScroll ? 0 : 200, 100, 200);
+      const { view, markActiveCalls } = createDiffViewForShellTest();
+      view.setupScrollSpy();
+      await waitFor(() => markActiveCalls().length === 1);
+      markActiveCalls().length = 0;
 
-    afterScroll = true;
-    if (sidebarTouched) window.__gdpSidebarTouchedAt = performance.now();
-    const scrollTarget =
-      target === "window" ? window : document.getElementById("content");
-    scrollTarget?.dispatchEvent(new Event("scroll"));
+      afterScroll = true;
+      if (sidebarTouched) window.__gdpSidebarTouchedAt = performance.now();
+      const scrollTarget =
+        target === "window" ? window : document.getElementById("content");
+      scrollTarget?.dispatchEvent(new Event("scroll"));
 
-    await waitFor(() => markActiveCalls().length > 0);
-    expect(markActiveCalls()).toEqual([
-      { path: "src/second.ts", options: expectedOptions },
-    ]);
-  });
+      await waitFor(() => markActiveCalls().length > 0);
+      expect(markActiveCalls()).toEqual([
+        { path: "src/second.ts", options: expectedOptions },
+      ]);
+    },
+  );
 
   test("uses the visible area below the fixed bars as its scan position", async () => {
     setupDiffDom();
@@ -1302,32 +1305,32 @@ describe("diff view preview shortcut", () => {
     { name: "HTML", path: "web/index.html", expected: true },
     { name: "TypeScript", path: "web-src/app.ts", expected: false },
     { name: "image", path: "web/icon.png", expected: false },
-  ])("shows the preview shortcut for $name files: $expected", ({
-    path,
-    expected,
-  }) => {
-    setupDiffDom();
-    const { view } = createDiffViewForShellTest();
-    const file = makeFile(
-      path,
-      1,
-      0,
-      `/file_diff?path=${encodeURIComponent(path)}`,
-    );
-    const card = document.createElement("article") as DiffCardElement;
-    card.className = "gdp-file-shell";
-    card.innerHTML =
-      '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
-    document.querySelector("#diff")?.appendChild(card);
+  ])(
+    "shows the preview shortcut for $name files: $expected",
+    ({ path, expected }) => {
+      setupDiffDom();
+      const { view } = createDiffViewForShellTest();
+      const file = makeFile(
+        path,
+        1,
+        0,
+        `/file_diff?path=${encodeURIComponent(path)}`,
+      );
+      const card = document.createElement("article") as DiffCardElement;
+      card.className = "gdp-file-shell";
+      card.innerHTML =
+        '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+      document.querySelector("#diff")?.appendChild(card);
 
-    view.renderFile(
-      file,
-      { path, status: "M", diff: `diff --git a/${path} b/${path}\n` },
-      card,
-    );
+      view.renderFile(
+        file,
+        { path, status: "M", diff: `diff --git a/${path} b/${path}\n` },
+        card,
+      );
 
-    expect(card.querySelector(".gdp-preview-file") !== null).toBe(expected);
-  });
+      expect(card.querySelector(".gdp-preview-file") !== null).toBe(expected);
+    },
+  );
 
   test("opens a Markdown file directly in the rendered preview", () => {
     setupDiffDom();
@@ -1398,30 +1401,33 @@ describe("diff view preview shortcut", () => {
       historyRoute,
       { ...historyRoute, source: "src/b.ts" },
     ],
-  ])("openDiffFile switches the open source view to the picked file on the %s", (_label, initial, expected) => {
-    setupDiffDom();
-    const routes: AppRoute[] = [];
-    let sourceRouteApplications = 0;
-    const { view, state, markActiveCalls } = createDiffViewForShellTest(
-      defaultDiffText,
-      {
-        setRoute: (route) => routes.push(route),
-        applySourceRouteToShell: () => {
-          sourceRouteApplications++;
+  ])(
+    "openDiffFile switches the open source view to the picked file on the %s",
+    (_label, initial, expected) => {
+      setupDiffDom();
+      const routes: AppRoute[] = [];
+      let sourceRouteApplications = 0;
+      const { view, state, markActiveCalls } = createDiffViewForShellTest(
+        defaultDiffText,
+        {
+          setRoute: (route) => routes.push(route),
+          applySourceRouteToShell: () => {
+            sourceRouteApplications++;
+          },
         },
-      },
-    );
-    state.files = [makeFile("src/b.ts", 1, 0, "/file_diff?path=src/b.ts")];
-    state.route = initial;
+      );
+      state.files = [makeFile("src/b.ts", 1, 0, "/file_diff?path=src/b.ts")];
+      state.route = initial;
 
-    view.openDiffFile("src/b.ts");
+      view.openDiffFile("src/b.ts");
 
-    expect(routes).toEqual([expected]);
-    expect(sourceRouteApplications).toBe(1);
-    expect(markActiveCalls()).toEqual([
-      { path: "src/b.ts", options: undefined },
-    ]);
-  });
+      expect(routes).toEqual([expected]);
+      expect(sourceRouteApplications).toBe(1);
+      expect(markActiveCalls()).toEqual([
+        { path: "src/b.ts", options: undefined },
+      ]);
+    },
+  );
 
   test("View File on the history screen keeps the history route and names the file", () => {
     setupDiffDom();

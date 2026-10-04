@@ -132,41 +132,40 @@ describe("the help and settings pages", () => {
     expect(sizes[0] > sizes[1] && sizes[1] > sizes[2]).toBe(true);
   });
 
-  test.each([
-    "light",
-    "dark",
-  ] as const)("in %s the body is the text colour and only summaries are one step lighter", (theme) => {
-    document.documentElement.dataset.theme = theme;
-    renderPages("ja");
-    const root = getComputedStyle(document.documentElement);
-    const text = root.getPropertyValue("--color-text").trim();
-    const text2 = root.getPropertyValue("--color-text-2").trim();
-    expect({
-      body: style("body").color,
-      stepText: style("step-text").color,
-      label: style("settings-label").color,
-      summary: style("summary").color,
-      settingsHelp: style("settings-help").color,
-      different: text !== text2,
-    }).toEqual({
-      body: text,
-      stepText: text,
-      label: text,
-      summary: text2,
-      settingsHelp: text2,
-      different: true,
-    });
-  });
+  test.each(["light", "dark"] as const)(
+    "in %s the body is the text colour and only summaries are one step lighter",
+    (theme) => {
+      document.documentElement.dataset.theme = theme;
+      renderPages("ja");
+      const root = getComputedStyle(document.documentElement);
+      const text = root.getPropertyValue("--color-text").trim();
+      const text2 = root.getPropertyValue("--color-text-2").trim();
+      expect({
+        body: style("body").color,
+        stepText: style("step-text").color,
+        label: style("settings-label").color,
+        summary: style("summary").color,
+        settingsHelp: style("settings-help").color,
+        different: text !== text2,
+      }).toEqual({
+        body: text,
+        stepText: text,
+        label: text,
+        summary: text2,
+        settingsHelp: text2,
+        different: true,
+      });
+    },
+  );
 
-  test.each([
-    "body",
-    "summary",
-    "step-text",
-  ])("%s has a line height between 1.7 and 1.8", (id) => {
-    renderPages("ja");
-    const lineHeight = Number(style(id).lineHeight);
-    expect(lineHeight >= 1.7 && lineHeight <= 1.8).toBe(true);
-  });
+  test.each(["body", "summary", "step-text"])(
+    "%s has a line height between 1.7 and 1.8",
+    (id) => {
+      renderPages("ja");
+      const lineHeight = Number(style(id).lineHeight);
+      expect(lineHeight >= 1.7 && lineHeight <= 1.8).toBe(true);
+    },
+  );
 
   test.each([
     { name: "compact is smaller", density: "compact", compare: -1 },
@@ -185,27 +184,24 @@ describe("the help and settings pages", () => {
     { page: "help", lang: "en", unit: "%", min: 100, max: 100 },
     { page: "settings", lang: "ja", unit: "em", min: 36, max: 44 },
     { page: "settings", lang: "en", unit: "ch", min: 60, max: 78 },
-  ] as const)("$page uses $min-$max $unit of reading width in $lang", ({
-    page,
-    lang,
-    unit,
-    min,
-    max,
-  }) => {
-    renderPages(lang);
-    const shell = document.querySelector(
-      `.gdp-help-shell[data-page="${page}"]`,
-    );
-    if (!shell) throw new Error("missing shell");
-    const measure = getComputedStyle(shell)
-      .getPropertyValue("--doc-measure")
-      .trim();
-    const match = /^([\d.]+)(em|ch|%)$/.exec(measure);
-    expect({
-      unit: match?.[2],
-      inRange: Number(match?.[1]) >= min && Number(match?.[1]) <= max,
-    }).toEqual({ unit, inRange: true });
-  });
+  ] as const)(
+    "$page uses $min-$max $unit of reading width in $lang",
+    ({ page, lang, unit, min, max }) => {
+      renderPages(lang);
+      const shell = document.querySelector(
+        `.gdp-help-shell[data-page="${page}"]`,
+      );
+      if (!shell) throw new Error("missing shell");
+      const measure = getComputedStyle(shell)
+        .getPropertyValue("--doc-measure")
+        .trim();
+      const match = /^([\d.]+)(em|ch|%)$/.exec(measure);
+      expect({
+        unit: match?.[2],
+        inRange: Number(match?.[1]) >= min && Number(match?.[1]) <= max,
+      }).toEqual({ unit, inRange: true });
+    },
+  );
 
   // 幅の宣言そのもの (happy-dom は em の max-width を解けない)。
   const rules = baseRules(loadStyleSheet());

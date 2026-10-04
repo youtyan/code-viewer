@@ -74,13 +74,13 @@ describe("shell side-effect guards", () => {
       body: { id: "shell-abc123", cols: 80, rows: 24 },
     },
     { name: "close", path: "/_shell/close", body: { id: "shell-abc123" } },
-  ])("refuses $name when not marked as a user action", async ({
-    path,
-    body,
-  }) => {
-    const res = await post(path, body, DENY_SIDE_EFFECTS);
-    expect(res?.status).toBe(403);
-  });
+  ])(
+    "refuses $name when not marked as a user action",
+    async ({ path, body }) => {
+      const res = await post(path, body, DENY_SIDE_EFFECTS);
+      expect(res?.status).toBe(403);
+    },
+  );
 
   test("refuses a body that is not JSON", async () => {
     const res = await post("/_shell/keys", "not json");

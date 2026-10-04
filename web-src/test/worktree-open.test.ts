@@ -291,86 +291,90 @@ describe("openWorktreeServer", () => {
         new Response("entry owner pid 4241 is still alive", { status: 409 }),
       replaced: false,
     },
-  ])("a project process that refuses a new entry ($name)", async ({
-    refusal,
-    replaced,
-  }) => {
-    const old = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e9)"], {
-      stdio: "ignore",
-    });
-    const oldPid = old.pid as number;
-    const calls: string[] = [];
-    let clock = 0;
-    writeServerRegistry({
-      url: "http://127.0.0.1:4321/",
-      pid: oldPid,
-      root: worktree,
-      started_at: "2026-08-11T00:00:00.000Z",
-      backend: true,
-    });
-    const controller = createWorktreeServerController({
-      now: () => clock,
-      pollIntervalMs: 1,
-      startTimeoutMs: 50,
-      delay: async (ms) => {
-        clock += ms;
-      },
-      spawnServer: () => {
-        calls.push("spawn");
-        writeServerRegistry({
-          url: "http://127.0.0.1:4322/",
-          pid: process.pid,
-          root: worktree,
-          started_at: "2026-08-11T00:00:01.000Z",
-          backend: true,
-        });
-        return fakeSpawn(() => undefined);
-      },
-      fetch: async (input) => {
-        const url = new URL(input);
-        calls.push(`${url.port} ${url.pathname}`);
-        if (url.pathname === "/_entry/adopt") return refusal();
-        const pid = url.port === "4321" ? oldPid : process.pid;
-        return new Response(
-          JSON.stringify({ server: { pid, root: worktree } }),
-        );
-      },
-    });
-    try {
-      const result = await controller.openWorktreeServer(worktree, {
-        backendOf: 4242,
-        backendToken: "0123456789abcdef",
-      });
-      expect({
-        result: result.status === "ok" ? result : result.status,
-        calls,
-        oldAlive: processAlive(oldPid),
-      }).toEqual(
-        replaced
-          ? {
-              result: {
-                status: "ok",
-                url: "http://127.0.0.1:4322/",
-                started: true,
-              },
-              calls: [
-                "4321 /_settings",
-                "4321 /_entry/adopt",
-                "spawn",
-                "4322 /_settings",
-              ],
-              oldAlive: false,
-            }
-          : {
-              result: "error",
-              calls: ["4321 /_settings", "4321 /_entry/adopt"],
-              oldAlive: true,
-            },
+  ])(
+    "a project process that refuses a new entry ($name)",
+    async ({ refusal, replaced }) => {
+      const old = spawn(
+        process.execPath,
+        ["-e", "setInterval(() => {}, 1e9)"],
+        {
+          stdio: "ignore",
+        },
       );
-    } finally {
-      old.kill("SIGKILL");
-    }
-  });
+      const oldPid = old.pid as number;
+      const calls: string[] = [];
+      let clock = 0;
+      writeServerRegistry({
+        url: "http://127.0.0.1:4321/",
+        pid: oldPid,
+        root: worktree,
+        started_at: "2026-08-11T00:00:00.000Z",
+        backend: true,
+      });
+      const controller = createWorktreeServerController({
+        now: () => clock,
+        pollIntervalMs: 1,
+        startTimeoutMs: 50,
+        delay: async (ms) => {
+          clock += ms;
+        },
+        spawnServer: () => {
+          calls.push("spawn");
+          writeServerRegistry({
+            url: "http://127.0.0.1:4322/",
+            pid: process.pid,
+            root: worktree,
+            started_at: "2026-08-11T00:00:01.000Z",
+            backend: true,
+          });
+          return fakeSpawn(() => undefined);
+        },
+        fetch: async (input) => {
+          const url = new URL(input);
+          calls.push(`${url.port} ${url.pathname}`);
+          if (url.pathname === "/_entry/adopt") return refusal();
+          const pid = url.port === "4321" ? oldPid : process.pid;
+          return new Response(
+            JSON.stringify({ server: { pid, root: worktree } }),
+          );
+        },
+      });
+      try {
+        const result = await controller.openWorktreeServer(worktree, {
+          backendOf: 4242,
+          backendToken: "0123456789abcdef",
+        });
+        expect({
+          result: result.status === "ok" ? result : result.status,
+          calls,
+          oldAlive: processAlive(oldPid),
+        }).toEqual(
+          replaced
+            ? {
+                result: {
+                  status: "ok",
+                  url: "http://127.0.0.1:4322/",
+                  started: true,
+                },
+                calls: [
+                  "4321 /_settings",
+                  "4321 /_entry/adopt",
+                  "spawn",
+                  "4322 /_settings",
+                ],
+                oldAlive: false,
+              }
+            : {
+                result: "error",
+                calls: ["4321 /_settings", "4321 /_entry/adopt"],
+                oldAlive: true,
+              },
+        );
+      } finally {
+        old.kill("SIGKILL");
+      }
+    },
+  );
 
   test("reports a worktree whose directory is gone", async () => {
     expect(await openWorktreeServer(join(worktree, "missing"))).toEqual({

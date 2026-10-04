@@ -1088,7 +1088,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     item: WorktreeItem,
   ): { base: string; branch: string; command: string } | null {
     const divergence = item.divergence;
-    if (!divergence || divergence.mergeState !== "clean") return null;
+    if (divergence?.mergeState !== "clean") return null;
     if (!item.branch || !divergence.base) return null;
     return {
       base: divergence.base,

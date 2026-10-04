@@ -404,78 +404,81 @@ describe("query history view", () => {
       remove: "クエリ履歴の項目を削除できませんでした",
       clear: "クエリ履歴を消去できませんでした",
     },
-  ])("names the failed operation in the display language: $language", async ({
-    language,
-    refresh,
-    remove,
-    clear,
-  }) => {
-    const entry = {
-      id: "sample-entry",
-      dbId: "sample.db",
-      schema: "public",
-      sql: "SELECT id FROM sample_table",
-      columns: ["id"],
-      rowsPreview: [[1]],
-      rowCount: 1,
-      savedRows: 1,
-      truncated: false,
-      elapsedMs: 3,
-      executedAt: "2026-01-02T03:04:05",
-      executedBy: "user",
-      source: "browser",
-    };
-    let initialLoad = true;
-    globalThis.fetch = ((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.startsWith("/_db/history?") && initialLoad) {
-        initialLoad = false;
-        return Promise.resolve(
-          new Response(JSON.stringify({ entries: [entry] }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
-        );
-      }
-      return Promise.resolve(new Response("sample failure", { status: 500 }));
-    }) as typeof fetch;
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  ])(
+    "names the failed operation in the display language: $language",
+    async ({ language, refresh, remove, clear }) => {
+      const entry = {
+        id: "sample-entry",
+        dbId: "sample.db",
+        schema: "public",
+        sql: "SELECT id FROM sample_table",
+        columns: ["id"],
+        rowsPreview: [[1]],
+        rowCount: 1,
+        savedRows: 1,
+        truncated: false,
+        elapsedMs: 3,
+        executedAt: "2026-01-02T03:04:05",
+        executedBy: "user",
+        source: "browser",
+      };
+      let initialLoad = true;
+      globalThis.fetch = ((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith("/_db/history?") && initialLoad) {
+          initialLoad = false;
+          return Promise.resolve(
+            new Response(JSON.stringify({ entries: [entry] }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }
+        return Promise.resolve(new Response("sample failure", { status: 500 }));
+      }) as typeof fetch;
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    const view = createQueryHistoryView({
-      getDbId: () => "sample.db",
-      getSchema: () => "public",
-      copySqlToQuery: () => undefined,
-      getText: () => dbText(language),
-    });
-    document.body.appendChild(view.el);
-    await view.refresh({ force: true });
-    const result = q<HTMLElement>(view.el, ".db-query-history-refresh-result");
+      const view = createQueryHistoryView({
+        getDbId: () => "sample.db",
+        getSchema: () => "public",
+        copySqlToQuery: () => undefined,
+        getText: () => dbText(language),
+      });
+      document.body.appendChild(view.el);
+      await view.refresh({ force: true });
+      const result = q<HTMLElement>(
+        view.el,
+        ".db-query-history-refresh-result",
+      );
 
-    q<HTMLButtonElement>(view.el, ".db-query-history-refresh").click();
-    await flush();
-    expect(result.textContent).toContain(
-      `${refresh} (HTTP 500): sample failure`,
-    );
+      q<HTMLButtonElement>(view.el, ".db-query-history-refresh").click();
+      await flush();
+      expect(result.textContent).toContain(
+        `${refresh} (HTTP 500): sample failure`,
+      );
 
-    q<HTMLElement>(view.el, ".db-query-history-entry").click();
-    const deleteButton = q<HTMLButtonElement>(
-      view.el,
-      ".db-query-history-detail-actions .db-query-history-danger",
-    );
-    deleteButton.click();
-    deleteButton.click();
-    await flush();
-    expect(result.textContent).toContain(
-      `${remove} (HTTP 500): sample failure`,
-    );
+      q<HTMLElement>(view.el, ".db-query-history-entry").click();
+      const deleteButton = q<HTMLButtonElement>(
+        view.el,
+        ".db-query-history-detail-actions .db-query-history-danger",
+      );
+      deleteButton.click();
+      deleteButton.click();
+      await flush();
+      expect(result.textContent).toContain(
+        `${remove} (HTTP 500): sample failure`,
+      );
 
-    const clearButton = q<HTMLButtonElement>(
-      view.el,
-      ".db-query-history-toolbar .db-query-history-danger",
-    );
-    clearButton.click();
-    clearButton.click();
-    await flush();
-    expect(result.textContent).toContain(`${clear} (HTTP 500): sample failure`);
-  });
+      const clearButton = q<HTMLButtonElement>(
+        view.el,
+        ".db-query-history-toolbar .db-query-history-danger",
+      );
+      clearButton.click();
+      clearButton.click();
+      await flush();
+      expect(result.textContent).toContain(
+        `${clear} (HTTP 500): sample failure`,
+      );
+    },
+  );
 });

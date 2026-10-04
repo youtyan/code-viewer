@@ -117,20 +117,19 @@ describe("shell name: Shell and the order it was opened, never the id", () => {
       agent: "codex" as const,
       expected: "Sign in · codex · Default",
     },
-  ])("sign-in $agent '$account' → $expected", ({
-    account,
-    agent,
-    expected,
-  }) => {
-    const signIn = {
-      id: "shell-dddd01",
-      createdAt: "2026-01-01T00:00:03.000Z",
-      purpose: { kind: "sign-in" as const, agent, account },
-    };
-    expect(
-      shellName(signIn.id, [...sessions, signIn], words, () => false),
-    ).toBe(expected);
-  });
+  ])(
+    "sign-in $agent '$account' → $expected",
+    ({ account, agent, expected }) => {
+      const signIn = {
+        id: "shell-dddd01",
+        createdAt: "2026-01-01T00:00:03.000Z",
+        purpose: { kind: "sign-in" as const, agent, account },
+      };
+      expect(
+        shellName(signIn.id, [...sessions, signIn], words, () => false),
+      ).toBe(expected);
+    },
+  );
 
   test("closing an earlier shell renumbers the later ones", () => {
     const rest = sessions.filter((item) => item.id !== "shell-aaaa01");

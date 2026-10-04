@@ -197,28 +197,27 @@ describe("端末の操作札", () => {
       app: true,
       expected: ["\x1bOA", "\x1bOB"],
     },
-  ])("$name: 押した順に打鍵と同じ経路で送る", async ({
-    keys,
-    app,
-    expected,
-  }) => {
-    fakeModes().applicationCursorKeysMode = app;
-    for (const key of keys) {
-      screen.sendSoftKey(key);
-      await settle();
-    }
-    expect(sentKeys()).toEqual(expected);
-    const viewportRequests = vi
-      .mocked(fetch)
-      .mock.calls.filter(([url]) => String(url).includes("/_shell/keys"));
-    for (const [, init] of viewportRequests) {
-      expect(JSON.parse(String(init?.body)).viewport).toMatchObject({
-        claim: true,
-        cols: 80,
-        rows: 24,
-      });
-    }
-  });
+  ])(
+    "$name: 押した順に打鍵と同じ経路で送る",
+    async ({ keys, app, expected }) => {
+      fakeModes().applicationCursorKeysMode = app;
+      for (const key of keys) {
+        screen.sendSoftKey(key);
+        await settle();
+      }
+      expect(sentKeys()).toEqual(expected);
+      const viewportRequests = vi
+        .mocked(fetch)
+        .mock.calls.filter(([url]) => String(url).includes("/_shell/keys"));
+      for (const [, init] of viewportRequests) {
+        expect(JSON.parse(String(init?.body)).viewport).toMatchObject({
+          claim: true,
+          cols: 80,
+          rows: 24,
+        });
+      }
+    },
+  );
 
   test("入力を止めている間は送らない", async () => {
     screen.setInputEnabled(false);

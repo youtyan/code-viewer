@@ -89,18 +89,17 @@ const INSTALL_GUIDE =
   "better-sqlite3 is an optional dependency required for SQLite features (data viewer / snapshot). " +
   "Install it with `npm i better-sqlite3`.";
 
-const MISSING_BUILD_GUIDE =
-  "better-sqlite3 is installed, but its native build is missing: its install script did not run " +
-  "(for example `--ignore-scripts`, or `pnpm dlx` without `--allow-build=better-sqlite3`). " +
-  "Run `npm rebuild better-sqlite3` where code-viewer is installed, or install again with the script allowed: " +
-  "`npm install -g --allow-scripts=better-sqlite3 @youtyan/code-viewer`, " +
-  "`npm config set allow-scripts=better-sqlite3 --location=user` (also covers npx), " +
-  "or `pnpm dlx --allow-build=better-sqlite3 @youtyan/code-viewer`.";
+const NO_PREBUILT_GUIDE =
+  "better-sqlite3 is installed, but it ships no prebuilt binary for this platform " +
+  `(${process.platform}-${process.arch}) and does not build one when installed. ` +
+  "Build it in the better-sqlite3 folder named in the message: `npm run build-release` " +
+  "(needs Python and a C++ compiler).";
 
 /**
  * better-sqlite3 を読めなかった・開けなかった理由から、状態と直し方を決める。
- * ネイティブの部品が無いのは import では分からず、DB を開いたときに
- * 「Could not locate the bindings file」で分かる。
+ * 13 は OS ごとのビルド済みバイナリを同梱し、無い OS では build/Release を探す。
+ * どちらも無いのは import では分からず、DB を開いたときに
+ * 「Cannot find module '…/better_sqlite3.node'」で分かる。
  */
 export function _classifySqliteLoadError(
   message: string,
@@ -121,8 +120,8 @@ export function _classifySqliteLoadError(
     kind: "unavailable",
     driver: "better-sqlite3",
     message,
-    hint: /Could not locate the bindings file/.test(message)
-      ? MISSING_BUILD_GUIDE
+    hint: /better_sqlite3\.node/.test(message)
+      ? NO_PREBUILT_GUIDE
       : INSTALL_GUIDE,
   };
 }

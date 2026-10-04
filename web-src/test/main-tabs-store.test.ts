@@ -164,17 +164,21 @@ describe("main tabs store", () => {
       text: JSON.stringify({ rev: 1, savedAt: 1, layout: null }),
       message: "- version is undefined, expected 1 or 2",
     },
-  ])("壊れたファイル ($name) は読まず、上書きもしない", async ({
-    text,
-    message,
-  }) => {
-    writeFileSync(path, text);
-    await expect(loadMainTabs(path)).rejects.toThrow(message);
-    await expect(
-      saveMainTabs(path, { baseRev: null, base: null, layout: layoutOf("a") }),
-    ).rejects.toThrow(message);
-    expect(readFileSync(path, "utf8")).toBe(text);
-  });
+  ])(
+    "壊れたファイル ($name) は読まず、上書きもしない",
+    async ({ text, message }) => {
+      writeFileSync(path, text);
+      await expect(loadMainTabs(path)).rejects.toThrow(message);
+      await expect(
+        saveMainTabs(path, {
+          baseRev: null,
+          base: null,
+          layout: layoutOf("a"),
+        }),
+      ).rejects.toThrow(message);
+      expect(readFileSync(path, "utf8")).toBe(text);
+    },
+  );
 
   test("別の窓の保存が壊れていて重ねられなければ、何も書かない", async () => {
     const text = JSON.stringify({
