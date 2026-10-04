@@ -7231,7 +7231,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     // 走っているものを待つ)。
     onTmuxWindowStale: () => void AGENT_MONITOR.refresh(),
     onOpenImage: (image, gallery, kept) => {
-      IMAGE_REFS.set(image.path, { image, images: gallery });
+      IMAGE_REFS.set(imageRefKey(image.path), { image, images: gallery });
       const open = () => MAIN_TABS.openImage(image.path, "other-if-split");
       IMAGE_TAB_RETURN.open(() => {
         if (kept) MAIN_TABS.openingNewTab(open);
@@ -7752,6 +7752,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     else history.replaceState(state, "", next);
   }
 
+  /** IMAGE_REFS の鍵 (プロジェクトとパス)。棚から入れる側と引く側で揃える。 */
+  function imageRefKey(path: string, project: string | null = null): string {
+    return `${project ?? projectKey() ?? ""}\u0000${path}`;
+  }
+
   /**
    * パスから画像を引く (既存の /_agent/images。URL はサーバが組み立てる)。
    * リポジトリのファイルなら、木の同じフォルダの画像を前後の並びにする。
@@ -7760,7 +7765,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     path: string,
     project: string | null = null,
   ): Promise<{ image: TerminalImageRef; images: TerminalImageRef[] }> {
-    const cacheKey = `${project ?? projectKey() ?? ""}\u0000${path}`;
+    const cacheKey = imageRefKey(path, project);
     const known = IMAGE_REFS.get(cacheKey);
     if (known) return known;
     // 別のプロジェクトの画像は、そのプロジェクトの鍵で引く (パスはその根から)。
@@ -7842,6 +7847,7 @@ window.GdpExpandLogic = GdpExpandLogic;
             openPath: (target) => openPathInOs(target, "file-parent"),
             close: () => IMAGE_TAB_RETURN.close(side),
             language: STATE.language,
+            onShow: (shown) => TERMINAL_VIEW.markOpenedImage(shown.path),
           });
           IMAGE_VIEWS[side] = view;
         }
@@ -8608,6 +8614,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         );
       }
     }
+    // 画像のタブが前面から消えたら、棚の印を外す (出したときは onShow が付ける)。
+    if (
+      !(["left", "right"] as const).some(
+        (side) =>
+          (side === "left" || view.split) &&
+          view.fronts[side]?.target.kind === "image",
+      )
+    )
+      TERMINAL_VIEW.markOpenedImage(null);
     syncHeaderMenu();
     AGENTS_SIDEBAR?.refresh();
     syncLineRefPill();

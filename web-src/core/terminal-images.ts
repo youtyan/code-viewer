@@ -26,6 +26,17 @@ export const TERMINAL_IMAGE_EXTENSIONS: readonly string[] = [
 ];
 
 /**
+ * 棚に出す動画の拡張子。ブラウザの video で再生できる種類 (ファイルの
+ * プレビューの views/media-embed.ts の isVideo と同じ)。どれも中に script を
+ * 書ける形式ではない。
+ */
+export const TERMINAL_VIDEO_EXTENSIONS: readonly string[] = [
+  "mp4",
+  "webm",
+  "mov",
+];
+
+/**
  * 1 回の走査で拾う上限。画像パスだらけの出力でも走査が暴れないための歯止め
  * で、普段は届かない。棚に並べる枚数の上限は MAX_SHELF_IMAGES。
  */
@@ -318,7 +329,10 @@ const PATH_CHAR = "[\\p{L}\\p{N}._~+@%/-]";
 /** 拡張子の直前に来てよい文字。`.png` や `/.png` を単独で拾わないための縛り。 */
 const NAME_CHAR = "[\\p{L}\\p{N}_~+@%-]";
 
-const EXTENSIONS = TERMINAL_IMAGE_EXTENSIONS.join("|");
+const EXTENSIONS = [
+  ...TERMINAL_IMAGE_EXTENSIONS,
+  ...TERMINAL_VIDEO_EXTENSIONS,
+].join("|");
 
 /**
  * シェルの流儀で空白を `\ ` と書いたパスも 1 本として拾う (`ls` や補完が
@@ -348,10 +362,24 @@ const QUOTED_IMAGE_PATH_RE = new RegExp(
  * 弾いておけばファイルを触らずに済む。
  */
 export function terminalImageExtension(path: string): string | null {
-  const dot = path.lastIndexOf(".");
-  if (dot < 0) return null;
-  const extension = path.slice(dot + 1).toLowerCase();
+  const extension = extensionOf(path);
   return TERMINAL_IMAGE_EXTENSIONS.includes(extension) ? extension : null;
+}
+
+/**
+ * 棚に出せる種類か (画像か動画か)。どちらでもなければ null。拡張子だけで
+ * 決めるのは terminalImageExtension と同じ。
+ */
+export function terminalMediaKind(path: string): "image" | "video" | null {
+  const extension = extensionOf(path);
+  if (TERMINAL_IMAGE_EXTENSIONS.includes(extension)) return "image";
+  if (TERMINAL_VIDEO_EXTENSIONS.includes(extension)) return "video";
+  return null;
+}
+
+function extensionOf(path: string): string {
+  const dot = path.lastIndexOf(".");
+  return dot < 0 ? "" : path.slice(dot + 1).toLowerCase();
 }
 
 /** URL の一部を切り出したものは、ファイルのパスではない。 */

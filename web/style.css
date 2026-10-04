@@ -20327,7 +20327,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   gap: var(--space-1);
   padding: var(--space-1) var(--space-1) 0;
 }
-.terminal-link-preview img {
+.terminal-link-preview :is(img, video) {
   display: block;
   max-width: calc(var(--space-unit) * 60);
   max-height: calc(var(--space-unit) * 60);
@@ -20754,11 +20754,25 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   .terminal-image-shelf-frame {
   height: var(--shelf-thumb-h);
 }
-.terminal-image-shelf-frame img {
+.terminal-image-shelf-frame :is(img, video) {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+/* 動画の見本の上の再生の印 (見本と同じマスに重ねる)。 */
+.terminal-image-shelf-frame > * {
+  grid-area: 1 / 1;
+}
+.terminal-image-shelf-play {
+  box-sizing: content-box;
+  width: var(--space-4);
+  height: var(--space-4);
+  padding: var(--space-2);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-term) 75%, transparent);
+  color: var(--color-term-text);
+  pointer-events: none;
 }
 /* 文字の中のパスにカーソルが載った画像。棚の同じ列で強い選択は 1 つだけ。 */
 .terminal-image-shelf-item[data-linked] .terminal-image-shelf-frame,
@@ -20974,7 +20988,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   min-height: 100%;
   padding: var(--space-4);
 }
-.image-tab-stage img {
+.image-tab-stage :is(img, video) {
   display: block;
   max-width: none;
   max-height: none;
@@ -20983,7 +20997,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   user-select: none;
 }
 
-.image-tab-stage img[hidden] {
+.image-tab-stage :is(img, video)[hidden] {
   display: none;
 }
 .image-tab-status {

@@ -89,7 +89,7 @@ import {
   handleProjectsPost,
 } from "../projects/handle";
 import { rawFileHeaders } from "../raw-file-headers";
-import { fileReadableStream } from "../runtime";
+import { rangedFileResponse } from "../runtime";
 import { captureTmuxPane, MAX_TMUX_HISTORY_LINES } from "../tmux/capture";
 import { runTmux } from "../tmux/command";
 import { getAgentActivityErrors, noteAgentListWatched } from "./activity";
@@ -614,24 +614,19 @@ const TERMINAL_IMAGE_CACHE_CONTROL = "private, max-age=31536000, immutable";
  * /_file と同じ raw-file-headers に任せるので、Content-Type の表は 1 つのまま。
  * 配れないときは 404 で、本文に理由 (TerminalImageRejectReason) を返す。
  */
-function handleImageGet(url: URL, cwd: string): Response {
+function handleImageGet(req: Request, url: URL, cwd: string): Response {
   const result = resolveTerminalImage(cwd, url.searchParams.get("path"));
   if (result.status === "rejected") {
     return textError(`not found: ${result.reason}`, 404);
   }
   const { image } = result;
-  const headers: Record<string, string> = {
-    ...(rawFileHeaders(image.path, { size: image.bytes }) as Record<
-      string,
-      string
-    >),
-  };
   // 棚のサムネイルは描き直すたびに同じ URL を読む。no-store のままだと、
   // そのたびに原寸を取り直す。
-  if (url.searchParams.get("v") === terminalImageVersion(image)) {
-    headers["Cache-Control"] = TERMINAL_IMAGE_CACHE_CONTROL;
-  }
-  return new Response(fileReadableStream(image.path), { headers });
+  const cacheable = url.searchParams.get("v") === terminalImageVersion(image);
+  return rangedFileResponse(req, image.path, image.bytes, (range) => ({
+    ...rawFileHeaders(image.path, { size: image.bytes, range }),
+    ...(cacheable ? { "Cache-Control": TERMINAL_IMAGE_CACHE_CONTROL } : {}),
+  }));
 }
 
 async function handlePastePost(req: Request, cwd: string): Promise<Response> {
@@ -906,7 +901,7 @@ export function handleAgentRoute(
       "/_agent/image": {
         methods: ["GET"],
         sideEffect: false,
-        handler: () => Promise.resolve(handleImageGet(url, cwd)),
+        handler: () => Promise.resolve(handleImageGet(req, url, cwd)),
       },
       "/_agent/hooks": {
         methods: ["GET"],

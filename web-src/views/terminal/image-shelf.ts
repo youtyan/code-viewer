@@ -1,5 +1,5 @@
 // ターミナルの画面の横 (既定は右。左・下・上も選べる) に置く画像の棚。そのペインの
-// 出力に出てきた画像パスを、新しい順にサムネイルで並べる。
+// 出力に出てきた画像と動画のパスを、新しい順にサムネイルで並べる。
 //
 // 画像を端末の文字の上に重ねると、パスの下の行・作業中の行・入力欄が隠れる。
 // 棚は文字とは別の列として場所を取るので、何も隠さない。
@@ -18,6 +18,7 @@
 // - サムネイルはブラウザに縮小させる (依存を足さない)。loading="lazy" で、
 //   URL に更新時刻と大きさが入っているので、描き直しても取り直さない
 // - 読めなかった項目は理由を出す。押すと確かめ直す
+// - 項目の上の矢印キーで隣の項目へ移り、押したのと同じに開く
 // - 項目にカーソルかフォーカスが載ったら、端末の中のそのパスを示してもらう
 //   (onLocate)
 // - 棚の中は出た所ごとにまとめる (tmux のペイン、tmux でなければシェル)。
@@ -34,6 +35,7 @@ import {
   IMAGE_16_PATH,
   iconSvg,
   KEBAB_16_PATH,
+  PLAY_16_PATH,
 } from "../../core/icons";
 import {
   clampPanelSize,
@@ -44,10 +46,17 @@ import { elapsedBucket } from "../../core/terminal-board";
 import {
   TERMINAL_IMAGE_SHELF_PLACEMENTS,
   type TerminalImageShelfPlacement,
+  terminalMediaKind,
 } from "../../core/terminal-images";
 import { showContextMenu } from "../context-menu";
+import { adjacentRow, onListRowKeys } from "../list-tab-stop";
 import type { TerminalText } from "./i18n";
-import type { ShelfEntry, ShelfOrigin } from "./image-shelf-list";
+import {
+  groupShelfEntries,
+  type ShelfEntry,
+  type ShelfOrigin,
+} from "./image-shelf-list";
+import { createMediaElement, onMediaReady } from "./media-element";
 
 /** 「何分前」を書き直す間隔。分単位でしか出さないので 30 秒で足りる。 */
 const AGE_REFRESH_MS = 30_000;
@@ -228,6 +237,33 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
   resizer.tabIndex = 0;
 
   el.append(head, list, expand, resizer);
+
+  // 矢印で隣の項目へ移り、押したのと同じに画像のタブで開く (タブの中身を棚の
+  // 並びで送る)。読めなかった項目は移るだけ (押すと確かめ直しになる)。右・左の
+  // 棚は縦、下・上は横に並ぶが、どちらの向きの矢印でも前後に動く。
+  const openButtons = () => [
+    ...list.querySelectorAll<HTMLElement>(".terminal-image-shelf-open"),
+  ];
+  const moveTo = (from: HTMLElement, to: HTMLElement | undefined | null) => {
+    if (!to || to === from) return;
+    to.focus({ preventScroll: true });
+    const key = to.closest<HTMLElement>(".terminal-image-shelf-item")?.dataset
+      .key;
+    const entry = entries.find((item) => item.key === key);
+    if (!entry) return;
+    scrollToKey(entry.key);
+    if (entry.image) deps.onOpen(entry, "tab");
+  };
+  const step = (delta: 1 | -1) => (button: HTMLElement) =>
+    moveTo(button, adjacentRow(openButtons(), button, delta));
+  onListRowKeys(list, ".terminal-image-shelf-open", {
+    ArrowUp: step(-1),
+    ArrowLeft: step(-1),
+    ArrowDown: step(1),
+    ArrowRight: step(1),
+    Home: (button) => moveTo(button, openButtons()[0]),
+    End: (button) => moveTo(button, openButtons().pop()),
+  });
 
   let entries: readonly ShelfEntry[] = [];
   const items = new Map<string, ItemParts>();
@@ -419,6 +455,9 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
       const current = entries.find((item) => item.key === li.dataset.key);
       if (!current) return;
       event.preventDefault();
+      // 押した後の矢印キーをこの項目で受ける。Safari は押してもボタンに
+      // フォーカスを移さない。
+      open.focus({ preventScroll: true });
       deps.onOpen(
         current,
         event.altKey || event.shiftKey
@@ -459,10 +498,15 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
             // 右クリックで選んだ「タブで開く」は、あえて開くので固定。
             onSelect: () => deps.onOpen(current, "kept-tab"),
           },
-          {
-            label: text.imageOpenInViewer,
-            onSelect: () => deps.onOpen(current, "overlay"),
-          },
+          // 覆いの拡大表示は画像だけ (動画はタブで再生する)。
+          ...(terminalMediaKind(current.path) === "video"
+            ? []
+            : [
+                {
+                  label: text.imageOpenInViewer,
+                  onSelect: () => deps.onOpen(current, "overlay"),
+                },
+              ]),
           {
             label: text.imageShowInTerminal,
             onSelect: () => deps.onReveal(current),
@@ -488,16 +532,10 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
     const url = entry.image?.url ?? null;
     if (url !== parts.url) {
       parts.url = url;
-      if (url) {
-        const picture = document.createElement("img");
-        picture.loading = "lazy";
-        picture.decoding = "async";
-        picture.alt = entry.name;
-        picture.addEventListener("load", () => {
-          sizes.set(url, {
-            width: picture.naturalWidth,
-            height: picture.naturalHeight,
-          });
+      if (entry.image && url) {
+        const picture = createMediaElement(entry.image, "thumbnail");
+        onMediaReady(picture, (size) => {
+          sizes.set(url, size);
           const current = entries.find((item) => item.image?.url === url);
           if (current && locatedKey === current.key) showDetail(current);
         });
@@ -505,8 +543,14 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
           const current = entries.find((item) => item.image?.url === url);
           if (current) deps.onImageError(current);
         });
-        picture.src = url;
         parts.frame.replaceChildren(picture);
+        // 動画は見本の上に再生の印。
+        if (picture instanceof HTMLVideoElement) {
+          parts.frame.insertAdjacentHTML(
+            "beforeend",
+            iconSvg("terminal-image-shelf-play", PLAY_16_PATH),
+          );
+        }
       } else {
         parts.frame.innerHTML = iconSvg(
           "terminal-image-shelf-failed-icon",
@@ -618,48 +662,39 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
     applyCollapsed();
     localizeHead();
     const keep = new Set<string>();
-    // 出た所ごとに、新しい画像の順でまとめる (entries は新しい順)。
-    const grouped = new Map<string, { label: string; lis: HTMLLIElement[] }>();
-    for (const entry of entries) {
-      keep.add(entry.key);
-      let parts = items.get(entry.key);
-      if (!parts) {
-        parts = buildItem();
-        items.set(entry.key, parts);
+    const grouped = groupShelfEntries(entries);
+    const orderedGroups: HTMLLIElement[] = [];
+    for (const group of grouped) {
+      const lis: HTMLLIElement[] = [];
+      for (const entry of group.entries) {
+        keep.add(entry.key);
+        let parts = items.get(entry.key);
+        if (!parts) {
+          parts = buildItem();
+          items.set(entry.key, parts);
+        }
+        fillItem(parts, entry);
+        lis.push(parts.li);
       }
-      fillItem(parts, entry);
-      const origin = entry.origins[0];
-      const place = origin
-        ? origin.pane
-          ? `pane:${origin.pane.id}`
-          : `shell:${origin.shell}`
-        : "none";
-      const group = grouped.get(place) ?? {
-        label: originLabel(origin),
-        lis: [],
-      };
-      group.lis.push(parts.li);
-      grouped.set(place, group);
+      let parts = groups.get(group.place);
+      if (!parts) {
+        parts = buildGroup();
+        groups.set(group.place, parts);
+      }
+      const label = originLabel(group.origin);
+      parts.head.textContent = label;
+      parts.head.title = label;
+      placeChildren(parts.items, lis);
+      orderedGroups.push(parts.li);
     }
     for (const [key, parts] of items) {
       if (keep.has(key)) continue;
       parts.li.remove();
       items.delete(key);
     }
-    const orderedGroups: HTMLLIElement[] = [];
-    for (const [place, group] of grouped) {
-      let parts = groups.get(place);
-      if (!parts) {
-        parts = buildGroup();
-        groups.set(place, parts);
-      }
-      parts.head.textContent = group.label;
-      parts.head.title = group.label;
-      placeChildren(parts.items, group.lis);
-      orderedGroups.push(parts.li);
-    }
+    const places = new Set(grouped.map((group) => group.place));
     for (const [place, parts] of groups) {
-      if (grouped.has(place)) continue;
+      if (places.has(place)) continue;
       parts.li.remove();
       groups.delete(place);
     }

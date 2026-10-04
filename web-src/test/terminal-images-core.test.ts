@@ -20,6 +20,7 @@ import {
   stripAnsi,
   TERMINAL_IMAGE_EXTENSIONS,
   terminalImageExtension,
+  terminalMediaKind,
 } from "../core/terminal-images";
 import { PASTE_IMAGE_TYPES } from "../core/terminal-paste";
 
@@ -54,6 +55,28 @@ describe("受け付ける画像の種類", () => {
     { name: "画像の後ろに別の拡張子", path: "shot.png.txt", expected: null },
   ])("$name", ({ path, expected }) => {
     expect(terminalImageExtension(path)).toBe(expected);
+  });
+});
+
+describe("terminalMediaKind", () => {
+  test.each([
+    { path: "shot.png", expected: "image" },
+    { path: "shot.jpeg", expected: "image" },
+    { path: "run.mp4", expected: "video" },
+    { path: "run.webm", expected: "video" },
+    { path: "RUN.MOV", expected: "video" },
+    { path: "voice.mp3", expected: null },
+    { path: "shot.svg", expected: null },
+    { path: "run.mp4.txt", expected: null },
+    { path: "Makefile", expected: null },
+  ])("$path は $expected", ({ path, expected }) => {
+    expect(terminalMediaKind(path)).toBe(expected);
+  });
+
+  test("動画は画像の拡張子 (terminalImageExtension) に入れない", () => {
+    // 画像だけを数える所 (リポジトリの画像の前後の並び・画像のタブで開くファイル)
+    // に動画が混ざらない。
+    expect(terminalImageExtension("run.mp4")).toBe(null);
   });
 });
 
@@ -100,6 +123,11 @@ describe("findImagePaths", () => {
       expected: ["docs/img/a.jpg"],
     },
     { name: "./ 付き", text: "see ./a.gif", expected: ["./a.gif"] },
+    {
+      name: "動画も拾う",
+      text: "recorded /tmp/run.mp4 and './out/a b.webm' and demo.MOV",
+      expected: ["/tmp/run.mp4", "./out/a b.webm", "demo.MOV"],
+    },
     { name: "~ 付き", text: "~/pics/b.webp", expected: ["~/pics/b.webp"] },
     {
       name: "引用符に囲まれていても中身だけ",

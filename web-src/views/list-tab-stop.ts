@@ -138,7 +138,13 @@ function focusedFrom(
 /** 行の上のキー (修飾キー無し)。一覧ごとに動きを渡す。 */
 export type ListRowKeys = Partial<
   Record<
-    "ArrowDown" | "ArrowUp" | "Home" | "End" | "Enter",
+    | "ArrowDown"
+    | "ArrowUp"
+    | "ArrowLeft"
+    | "ArrowRight"
+    | "Home"
+    | "End"
+    | "Enter",
     (row: HTMLElement) => void
   >
 >;

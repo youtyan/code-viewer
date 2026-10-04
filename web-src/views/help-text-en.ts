@@ -1286,7 +1286,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(l.terminal.readOnly),
                   " from the tab's right-click menu.",
                 ],
-                "Images whose paths appear in the terminal are listed on the shelf at the right; select one to open it in an image tab.",
+                "Images and videos (MP4, WebM, MOV) whose paths appear in the terminal are listed on the shelf at the right; select one to open it in an image tab, then use the arrow keys to move to the next or previous one.",
                 [
                   "The shelf groups images by the pane they came from; hover one to outline that pane and show its path in the shelf header. Choose ",
                   ui(l.terminal.imageShowInTerminal),

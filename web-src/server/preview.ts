@@ -135,8 +135,8 @@ import { requestAllowed, sideEffectRequestAllowed } from "./request-origin";
 import { ROOT } from "./root";
 import { diffRowBasisFor, readFileHead } from "./row-basis";
 import {
-  fileByteRangeResponseBody,
   fileReadableStream,
+  rangedFileResponse,
   readFileTextRange,
   type SpawnStreamExit,
   SSE_HEARTBEAT_INTERVAL_MS,
@@ -2248,42 +2248,9 @@ async function handleRawFile(req: Request, url: URL) {
     const size = await rawFileSize(path, ref);
     if (size == null) return text("not found", 404);
     const metadata = worktreeFileMetadata(path, size);
-    const rangeResult = req.headers.get("range")
-      ? parseHttpByteRange(req.headers.get("range"), size)
-      : null;
-    if (rangeResult?.kind === "unsatisfiable") {
-      return new Response(null, {
-        status: 416,
-        headers: {
-          ...rawFileHeaders(path, { size, metadata }),
-          "Content-Range": `bytes */${size}`,
-          "Content-Length": "0",
-        },
-      });
-    }
-    if (rangeResult?.kind === "range") {
-      const range = rangeResult.range;
-      if (req.method === "HEAD") {
-        return new Response(null, {
-          status: 206,
-          headers: rawFileHeaders(path, { size, range, metadata }),
-        });
-      }
-      return new Response(
-        fileByteRangeResponseBody(full, range.start, range.end),
-        {
-          status: 206,
-          headers: rawFileHeaders(path, { size, range, metadata }),
-        },
-      );
-    }
-    if (req.method === "HEAD")
-      return new Response(null, {
-        headers: rawFileHeaders(path, { size, metadata }),
-      });
-    return new Response(fileReadableStream(full), {
-      headers: rawFileHeaders(path, { size, metadata }),
-    });
+    return rangedFileResponse(req, full, size, (range) =>
+      rawFileHeaders(path, { size, range, metadata }),
+    );
   }
 }
 

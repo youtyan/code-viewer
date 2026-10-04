@@ -3,7 +3,8 @@
 // 拾ってくるのは端末に流れた文字列なので、そのまま読みにいってよいかを必ず
 // ここで決める。通すのは 3 つを満たすものだけ。
 //
-// - 許可した拡張子 (PNG/JPEG/GIF/WebP)。SVG は貼り付けと同じ理由で外す
+// - 許可した拡張子 (画像は PNG/JPEG/GIF/WebP、動画は MP4/WebM/MOV)。SVG は
+//   貼り付けと同じ理由で外す
 // - 実体が通常のファイル (ディレクトリや名前付きパイプを配ろうとすると、
 //   読み出しで詰まる)
 // - 上限バイト数まで・0 バイトでない・読める
@@ -27,15 +28,19 @@ import {
   type TerminalImageRef,
   type TerminalImageRejection,
   type TerminalImageRejectReason,
-  terminalImageExtension,
+  terminalMediaKind,
 } from "../../core/terminal-images";
 import { MAX_PASTE_IMAGE_BYTES } from "../../core/terminal-paste";
 
 /**
- * 棚に出す 1 枚の上限。貼り付けと同じ値にしてある。棚に並ぶ縮小画像に、
- * それ以上の大きさを配る意味がない。
+ * 棚に出す 1 つの上限。画像は貼り付けと同じ値 (棚に並ぶ縮小画像に、それ以上
+ * の大きさを配る意味がない)。動画は画面の録画が数百 MB になるので別に取る。
+ * 動画は Range で要る所だけ読まれる (handle.ts の handleImageGet)。
  */
-const MAX_IMAGE_BYTES = MAX_PASTE_IMAGE_BYTES;
+const MAX_MEDIA_BYTES = {
+  image: MAX_PASTE_IMAGE_BYTES,
+  video: 2 * 1024 * 1024 * 1024,
+} as const;
 
 /** 解決できた画像の実体。配信ルートはこれを見てファイルを開く。 */
 export type ResolvedTerminalImage = {
@@ -97,7 +102,8 @@ export function resolveTerminalImage(
     : candidate;
   const full = isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
   // 先に拡張子で落とす。ファイルを触る前に大半の候補がここで消える。
-  if (!terminalImageExtension(candidate)) {
+  const kind = terminalMediaKind(candidate);
+  if (!kind) {
     return { status: "rejected", reason: "unsupported", path: full };
   }
   let real: string;
@@ -139,7 +145,7 @@ export function resolveTerminalImage(
   if (stat.size === 0) {
     return { status: "rejected", reason: "empty", path: real, bytes: 0 };
   }
-  if (stat.size > MAX_IMAGE_BYTES) {
+  if (stat.size > MAX_MEDIA_BYTES[kind]) {
     return {
       status: "rejected",
       reason: "too-large",

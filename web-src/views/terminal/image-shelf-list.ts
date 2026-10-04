@@ -211,9 +211,34 @@ export function mergeShelf(
 
 /** 拡大表示で前へ／次へ回す並び。読めたものだけ、棚と同じ順。 */
 export function shelfGallery(list: readonly ShelfEntry[]): TerminalImageRef[] {
-  const images: TerminalImageRef[] = [];
-  for (const entry of list) if (entry.image) images.push(entry.image);
-  return images;
+  return groupShelfEntries(list).flatMap((group) =>
+    group.entries.flatMap((entry) => (entry.image ? [entry.image] : [])),
+  );
+}
+
+/** 棚のまとまり 1 つ (出た所ごと)。 */
+export type ShelfGroup = {
+  /** まとまりの鍵 (出た所が分からない項目は "none")。 */
+  place: string;
+  origin: ShelfOrigin | undefined;
+  entries: ShelfEntry[];
+};
+
+/**
+ * 出た所ごとにまとめる (list は新しい順)。まとまりの並びはその所の新しい項目の
+ * 順、中も新しい順。棚に描く順と、画像のタブで前後に回る順 (shelfGallery) は
+ * これ 1 つで決める。
+ */
+export function groupShelfEntries(list: readonly ShelfEntry[]): ShelfGroup[] {
+  const groups = new Map<string, ShelfGroup>();
+  for (const entry of list) {
+    const origin = entry.origins[0];
+    const place = origin ? originPlace(origin) : "none";
+    const group = groups.get(place) ?? { place, origin, entries: [] };
+    group.entries.push(entry);
+    groups.set(place, group);
+  }
+  return [...groups.values()];
 }
 
 /** 画面に出ている綴りから棚の項目を引く。 */

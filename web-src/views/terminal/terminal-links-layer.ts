@@ -30,6 +30,11 @@ import {
 import type { XtermTerminal } from "../../core/xterm-loader";
 import type { TerminalText } from "./i18n";
 import type { ShelfOpenMode } from "./image-shelf";
+import {
+  createMediaElement,
+  type MediaElement,
+  onMediaReady,
+} from "./media-element";
 
 /** 帯を消すまでの間。文字列から帯へカーソルを移す間に消えないように。 */
 export const LINK_BAR_HIDE_MS = 300;
@@ -54,8 +59,8 @@ export type ScreenLink = {
   /** 画面に出た綴り。 */
   text: string;
   segments: LinkSegment[];
-  /** 画像なら、その見本の URL・名前 (棚の項目から)。 */
-  image?: { url: string; name: string };
+  /** 画像か動画なら、その見本の URL・名前・実体のパス (棚の項目から)。 */
+  image?: { url: string; name: string; path: string };
   /** URL なら開く先。 */
   url?: string;
   /** ファイルなら、プロジェクトの中の相対パス・絶対パス・行と桁。 */
@@ -153,11 +158,11 @@ export function createTerminalLinkLayer(
   bar.hidden = true;
   const preview = document.createElement("div");
   preview.className = "terminal-link-preview";
-  const previewImg = document.createElement("img");
-  previewImg.alt = "";
+  // 見本 (画像か動画)。画像が変わったときだけ作り直す。
+  let previewMedia: MediaElement | null = null;
   const previewCaption = document.createElement("div");
   previewCaption.className = "terminal-link-preview-caption";
-  preview.append(previewImg, previewCaption);
+  preview.append(previewCaption);
   const actions = document.createElement("div");
   actions.className = "terminal-link-actions";
   const openButton = document.createElement("button");
@@ -309,8 +314,21 @@ export function createTerminalLinkLayer(
     bar.setAttribute("aria-label", link.text);
     preview.hidden = !link.image;
     if (link.image) {
-      if (previewImg.getAttribute("src") !== link.image.url) {
-        previewImg.src = link.image.url;
+      if (previewMedia?.dataset.url !== link.image.url) {
+        const url = link.image.url;
+        const media = createMediaElement(link.image, "thumbnail");
+        media.dataset.url = url;
+        media.setAttribute("aria-hidden", "true");
+        onMediaReady(media, (size) => {
+          sizes.set(url, size);
+          if (hovered?.image?.url === url) {
+            fillBar(hovered);
+            showBar(hovered);
+          }
+        });
+        previewMedia?.remove();
+        previewMedia = media;
+        preview.prepend(media);
       }
       const size = sizes.get(link.image.url);
       previewCaption.textContent = size
@@ -333,19 +351,6 @@ export function createTerminalLinkLayer(
     bar.style.left = `${place.left}px`;
     bar.style.top = `${place.top}px`;
   }
-
-  previewImg.addEventListener("load", () => {
-    const url = previewImg.getAttribute("src");
-    if (!url) return;
-    sizes.set(url, {
-      width: previewImg.naturalWidth,
-      height: previewImg.naturalHeight,
-    });
-    if (hovered?.image?.url === url) {
-      fillBar(hovered);
-      showBar(hovered);
-    }
-  });
 
   function modeOf(event: MouseEvent): ShelfOpenMode {
     return event.altKey

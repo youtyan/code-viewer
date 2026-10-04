@@ -236,7 +236,7 @@ How the state is decided, strongest first:
 - Each tmux session gets one tab; opening another pane of that session selects it in the same tab (and in tmux, so your own terminal attached to that session switches too). The tab closes when the tmux window ends or you detach.
 - Closing a tab never stops the shell or the agent. **Stop session** in the tab's right-click menu does.
 - **Read only** in the right-click menu turns input off; the same menu changes the text size.
-- Images whose paths appear in the terminal are listed on a shelf next to it. Select one to open it in an image tab.
+- Images and videos whose paths appear in the terminal are listed on a shelf next to it. Select one to open it in an image tab; the arrow keys move to the next or previous one.
 - Paste an image (⌘V / Ctrl+V) to hand it to the agent: it is saved under `.code-viewer/pasted/` and its path is typed without sending.
 - URLs and file paths on the screen are links (hold ⌘/Ctrl when tmux handles the mouse).
 - The terminal size follows the screen you are operating (PC or phone).

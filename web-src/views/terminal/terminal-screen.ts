@@ -41,6 +41,7 @@ import {
   type TerminalPaneLayout,
   type TerminalPaneLayoutResponse,
   type TerminalRevealRequest,
+  terminalMediaKind,
   validateTerminalImageResponseUrls,
 } from "../../core/terminal-images";
 import {
@@ -216,6 +217,11 @@ export type TerminalScreenHandle = {
   updateTmuxCover(): void;
   /** 画像の棚の置き場所と大きさを設定から当て直す。 */
   applyImageShelfLayout(): void;
+  /**
+   * 画像のタブが出している画像 (無ければ null)。棚にあればその項目に印を
+   * 付ける (棚から開いた後、タブの ←→ で送っても印が付いてくる)。
+   */
+  markOpenedImage(path: string | null): void;
 };
 
 /**
@@ -801,16 +807,18 @@ export function createTerminalScreen(
     }
     const gallery = shelfGallery(shelfEntries);
     // 既定は画像のタブ (分割していれば隣の面)。覆いは Alt / Shift か右クリック。
-    if (mode !== "overlay" && deps.onOpenImage) {
-      shelf.setOpened(entry.key);
+    // 覆いは画像だけを回る (動画はタブで再生する)。
+    const video = terminalMediaKind(entry.image.path) === "video";
+    if ((mode !== "overlay" || video) && deps.onOpenImage) {
+      // 棚の印は画像のタブが出したときに付く (markOpenedImage)。
       deps.onOpenImage(entry.image, gallery, mode === "kept-tab");
       return;
     }
-    const index = gallery.findIndex((image) => image.path === entry.key);
-    openImageLightbox(
-      { images: gallery, index: Math.max(index, 0) },
-      deps.getText(),
+    const images = gallery.filter(
+      (image) => terminalMediaKind(image.path) === "image",
     );
+    const index = images.findIndex((image) => image.path === entry.key);
+    openImageLightbox({ images, index: Math.max(index, 0) }, deps.getText());
   }
 
   /** その項目をもう一度問い合わせる (消えた・読めるようになった、を知る)。 */
@@ -977,7 +985,11 @@ export function createTerminalScreen(
           {
             kind: "image",
             text: found.candidate,
-            image: { url: entry.image.url, name: entry.name },
+            image: {
+              url: entry.image.url,
+              name: entry.name,
+              path: entry.image.path,
+            },
           },
           found,
         );
@@ -1900,6 +1912,11 @@ export function createTerminalScreen(
     },
     updateTmuxCover: renderTmuxCover,
     applyImageShelfLayout: () => shelf.applyLayout(),
+    markOpenedImage(path) {
+      shelf.setOpened(
+        shelfEntries.some((entry) => entry.key === path) ? path : null,
+      );
+    },
     dispose() {
       disposed = true;
       for (const event of operationEvents)

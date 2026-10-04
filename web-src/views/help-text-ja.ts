@@ -1265,7 +1265,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   ui(l.terminal.readOnly),
                   " にします。",
                 ],
-                "ターミナルにパスが出た画像は右の棚に並び、押すと画像のタブで開きます。",
+                "ターミナルにパスが出た画像と動画 (MP4・WebM・MOV) は右の棚に並び、押すと画像のタブで開きます。開いた後は矢印キーで棚の前後の項目へ移れます。",
                 [
                   "棚の画像は出たペインごとにまとまり、カーソルを載せるとそのペインが枠で囲まれ、棚の見出しにパスが出ます。右クリックの ",
                   ui(l.terminal.imageShowInTerminal),
