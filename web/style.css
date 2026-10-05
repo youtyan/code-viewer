@@ -6067,6 +6067,13 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   background: var(--bg);
   color: var(--fg);
 }
+/* 帯が狭いときに「前へ」「次へ」「閉じる」が 1 文字ずつ折れないよう、ボタンと件数は
+   縮めない (縮むのは左の説明の文)。 */
+.gdp-source-virtual-search button,
+.gdp-source-virtual-search-count {
+  flex: none;
+  white-space: nowrap;
+}
 .gdp-source-virtual-search button {
   height: 28px;
   padding: 0 8px;
@@ -6155,9 +6162,12 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-source-virtual-line-code.hljs {
   background: var(--bg);
 }
+/* ファイルの中の検索の当たり。地と文字を同じテーマの組で決める (地を明るい黄色に
+   決め打ちして文字の色を受け継ぐと、ダークでは明るい文字が明るい地に消えた)。
+   ⌘K のパレットの当たり (.gdp-palette-row-detail mark) と同じ組。 */
 .gdp-source-virtual-search-hit {
-  background: #fff8c5;
-  color: inherit;
+  background: var(--attn);
+  color: var(--fg-onemphasis);
   border-radius: 2px;
 }
 .gdp-source-virtual-search-hit.active {

@@ -1155,3 +1155,44 @@ describe("file header tabs keep their place while the file loads", () => {
     });
   });
 });
+
+describe("find in a large file", () => {
+  // 検索の印は行の範囲が同じでも変わる。描いた行を作り直さずにいたので、
+  // スクロールするまで当たりに印が付かなかった (閉じたときも印が残った)。
+  test("marks the hits on the rows already drawn, and clears them on close", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    const view = createSourceViewForCursorTest(blobRoute("big.ts"));
+    const text = Array.from(
+      { length: 3001 },
+      (_, index) => `const value${index} = sampleWidget;`,
+    ).join("\n");
+    const virtual = await view.renderVirtualSourceWithGutter(
+      { path: "big.ts", ref: "worktree" },
+      text,
+      {
+        rowClass: "",
+        cell: () => document.createElement("span"),
+        fullView: () => undefined,
+      },
+    );
+    if (!virtual) throw new Error("the file was not drawn as a large file");
+    document.body.append(virtual);
+    const hits = () =>
+      virtual.querySelectorAll(".gdp-source-virtual-search-hit").length;
+    expect(hits()).toBe(0);
+
+    view.openVirtualSourceSearchFromKeyboard(virtual);
+    const input = virtual.querySelector<HTMLInputElement>(
+      ".gdp-source-virtual-search input",
+    );
+    if (!input) throw new Error("no find box");
+    input.value = "sampleWidget";
+    input.dispatchEvent(new Event("input"));
+    await waitFor(() => hits() > 0);
+
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    expect(hits()).toBe(0);
+  });
+});

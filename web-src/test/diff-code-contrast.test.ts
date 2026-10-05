@@ -292,3 +292,24 @@ describe("shiki and highlight.js give the same kind the same color", () => {
     },
   );
 });
+
+// ファイルの中の検索の当たり (ほかの当たりと今の当たり)。地を明るい黄色に決め打ち
+// して文字の色を受け継いでいたので、ダークでは明るい文字が明るい地に消えた。
+describe("search hits in a file stay readable", () => {
+  test.each(
+    Object.entries(THEMES).flatMap(([theme, vars]) =>
+      [
+        ".gdp-source-virtual-search-hit",
+        ".gdp-source-virtual-search-hit.active",
+      ].map((selector) => ({ theme, vars, selector })),
+    ),
+  )("$selector on $theme", ({ vars, selector }) => {
+    const hit = cascadedDeclarations(rules, (s) => s === selector);
+    expect(
+      contrastRatio(
+        resolveVar(hit.get("color") ?? "", vars),
+        resolveVar(hit.get("background") ?? "", vars),
+      ),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+});
