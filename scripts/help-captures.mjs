@@ -1214,6 +1214,10 @@ async function captureScreens(ctx) {
   await wait("the review", `return ${create};`);
   await shot(ctx, "accounts-review", `return dialog();`, { mark: create });
   await inPage(`${create}.click();`);
+  // 作った後に「サインインしますか」の確認が出る (サインインは下の行のボタンで撮る)。
+  const later = `byText(dialog(), "button", ${JSON.stringify(a.createdLater)})`;
+  await wait("the created dialog", `return ${later};`);
+  await inPage(`${later}.click();`);
   await wait("the new row", `return !dialog() && accountRow("Personal");`);
   const signIn = `must(byText(accountRow("Personal"), "button", ${JSON.stringify(a.loginButton)}), "sign in")`;
   // 一覧の表と、その下の［アカウントを追加］まで (途中で切らない)。
