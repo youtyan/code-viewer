@@ -346,6 +346,7 @@ import { installMobileShell } from "./views/mobile-shell";
 import { createProjectActions } from "./views/projects/project-actions";
 import {
   PROJECT_LOOKS,
+  type ProjectLook,
   paintProjectColor,
   projectMark,
 } from "./views/projects/project-looks";
@@ -495,6 +496,11 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   let PROJECT_NAME = "";
   let PROJECT_BRANCH = "";
+  /**
+   * 電話の段の左上のボタンに、いま見ているプロジェクトを出す (renderProjectHead が
+   * 呼ぶ)。電話の部品 (MOBILE_SHELL) を作るまでは null: 名前はそれより前に届く。
+   */
+  let showProjectOnPhone: ((look: ProjectLook) => void) | null = null;
   let REPO_WEB_URL: string | null = null;
   /** 開いているプロジェクトの server の code-viewer の版 (ヘルプのページの見出し)。 */
   let SERVER_VERSION = "";
@@ -795,6 +801,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       // 一覧に載るまでは、最初の描画 (#first-project) が控えから塗った色のまま。
       if (look) paintProjectColor(mark, look.color);
     }
+    showProjectOnPhone?.(
+      look ?? { root: root ?? "", name, initials, color: null },
+    );
     rememberProjectHead(name, initials, mark?.dataset.projectColor);
   }
 
@@ -7918,7 +7927,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     focusTerminal: () => TERMINAL_VIEW.focusTab("left"),
     tabs: {
       list: () => MAIN_TABS.tabList(),
-      bringToFront: (id) => MAIN_TABS.bringToFront(id),
+      bringToFront: (id) => bringTabToFrontOnPhone(id),
       close: (id) => MAIN_TABS.closeTab(id),
       onRender: (listener) => MAIN_TABS.onRender(listener),
     },
@@ -7936,6 +7945,38 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   // 電話の段に出入りすると、端末の文字の大きさの出所 (電話の値と設定) が替わる。
   PHONE_QUERY.addEventListener("change", () => TERMINAL_VIEW.applyFontSize());
+  showProjectOnPhone = (look) => MOBILE_SHELL.setProject(look);
+  renderProjectHead();
+
+  /**
+   * 電話の段でタブを前面に出す (タブ列のタブと「タブ」の一覧)。1 ペイン表示は
+   * タブ列の下から始まるので、開いたままタブを押せる。そのときは表示を閉じて
+   * から出す。押したのが表示で映しているターミナルのタブなら、そのまま。
+   */
+  function bringTabToFrontOnPhone(id: string): void {
+    const bring = () => {
+      MAIN_TABS.bringToFront(id);
+      // ターミナルのタブは、前に開いて閉じたものでも 1 ペイン表示で開く
+      // (showPhonePane が自分で開くのは、前面になった最初の 1 回だけ)。
+      const front = MAIN_TABS.panes().fronts.left;
+      if (front?.id !== id || front.target.kind !== "terminal") return;
+      const pane = tmuxPaneOfShell(front.target.session);
+      if (pane && PANE_VIEW.currentPane() !== pane) PANE_VIEW.open(pane);
+    };
+    const shown = PANE_VIEW.currentPane();
+    if (shown === null) {
+      bring();
+      return;
+    }
+    const front = MAIN_TABS.panes().fronts.left;
+    if (
+      front?.id === id &&
+      front.target.kind === "terminal" &&
+      tmuxPaneOfShell(front.target.session) === shown
+    )
+      return;
+    PANE_VIEW.closeThen(bring);
+  }
 
   /** 1 ペイン表示の見出しとタブの札に出す、ペインの名前と状態。 */
   function describeAgentPane(id: string): PaneDescription | null {
@@ -7951,6 +7992,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     };
   }
 
+  /**
+   * 電話の段で最後に 1 ペイン表示で見たペイン (サイドバーの選択の印)。閉じても
+   * 残す: 戻ると引き出しが開き、いま見ていた行を示す。
+   */
+  let PHONE_LAST_PANE: string | null = null;
+
   // SP の 1 ペイン表示。電話の段でエージェントを開くと、attach せずにそのペイン
   // だけを全画面で映す (分割したウインドウ全体では狭すぎる)。
   const PANE_VIEW = createPaneView({
@@ -7958,9 +8005,45 @@ window.GdpExpandLogic = GdpExpandLogic;
     describePane: describeAgentPane,
     actionHeaders,
     trackLoad,
-    onClose: (pane) => AGENT_MONITOR.markRead(pane),
+    onClose: (pane) => {
+      PHONE_LAST_PANE = pane;
+      AGENT_MONITOR.markRead(pane);
+      AGENTS_SIDEBAR?.refresh();
+    },
   });
   document.body.append(PANE_VIEW.el);
+  // 1 ペイン表示を開いている間に下端の帯を押したら、表示を閉じてから押し直す
+  // (表示は帯を覆わない。閉じるときの戻るが、帯で移った画面を取り消さないように)。
+  // 「プロジェクト」の引き出しは表示の上に開くので、そのまま。
+  document.getElementById("mobile-bar")?.addEventListener(
+    "click",
+    (event) => {
+      if (PANE_VIEW.currentPane() === null) return;
+      const button = (event.target as Element).closest<HTMLButtonElement>(
+        "button",
+      );
+      if (!button || button.getAttribute("aria-controls") === "app-nav") return;
+      event.stopPropagation();
+      PANE_VIEW.closeThen(() => button.click());
+    },
+    true,
+  );
+  // 電話の段のタブ列のタブは bringTabToFrontOnPhone で出す (1 ペイン表示を開いて
+  // いれば閉じてから。タブの click が先に移ると、閉じるときの戻るがその移動を
+  // 取り消す)。× はタブの処理のまま。
+  document.getElementById("main-tabs")?.addEventListener(
+    "click",
+    (event) => {
+      if (!PHONE_QUERY.matches) return;
+      const target = event.target as Element;
+      if (target.closest(".main-tab-close")) return;
+      const id = target.closest<HTMLElement>(".main-tab")?.dataset.tabId;
+      if (!id) return;
+      event.stopPropagation();
+      bringTabToFrontOnPhone(id);
+    },
+    true,
+  );
   // デスクトップの幅へ戻ったら閉じる (1 ペイン表示は電話の段だけの形)。
   PHONE_QUERY.addEventListener("change", () => {
     if (!PHONE_QUERY.matches) PANE_VIEW.close();
@@ -9681,6 +9764,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       for (const [shell, pane] of TAB_SHELL_PANES) {
         if (!live.has(pane)) TAB_SHELL_PANES.delete(shell);
       }
+      if (PHONE_LAST_PANE !== null && !live.has(PHONE_LAST_PANE))
+        PHONE_LAST_PANE = null;
     }
     for (const session of MAIN_TABS.terminalSessions()) {
       if (paneForShell(session)?.kind || !TAB_LAST_LABELS.has(session))
@@ -9691,8 +9776,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     MAIN_TABS.localize();
   });
 
-  /** いまターミナルで見ているエージェントのペイン (サイドバーの選択の印)。 */
+  /**
+   * いまターミナルで見ているエージェントのペイン (サイドバーの選択の印)。電話の
+   * 段ではタブでなく 1 ペイン表示で開くので、そこで見たペイン。前面のタブは
+   * 見ない: タブの配置は全部の窓で共有するので、PC で開いたタブの印が残り、
+   * 電話で選んでも印が動かなかった。
+   */
   function viewingAgentPane(): string | null {
+    if (PHONE_QUERY.matches) return PANE_VIEW.currentPane() ?? PHONE_LAST_PANE;
     const target = viewedShells()[0];
     if (!target) return null;
     return (

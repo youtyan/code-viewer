@@ -2067,7 +2067,12 @@ export function createSourceView(deps: SourceViewDeps) {
       scroller,
       (query) =>
         Promise.resolve(collectVirtualSourceSearchMatches(lines, query)),
-      render,
+      () => {
+        // 検索の印は行の範囲が同じでも変わる。描いた範囲を忘れて作り直す
+        // (忘れないと、スクロールするまで当たりに印が付かなかった)。
+        renderedStart = -1;
+        render();
+      },
     );
     wrap.__gdpVirtualSourceSearch = search;
     // A grep hit opened into a virtual file: the find bar carries the term,
@@ -2397,9 +2402,6 @@ export function createSourceView(deps: SourceViewDeps) {
         if (data.complete || !data.lines.length) done = true;
         else startLine = data.start + data.lines.length;
       }
-      renderedStart = -1;
-      renderedEnd = -1;
-      schedule();
       return matches;
     };
     search = createVirtualSourceSearch(
@@ -2410,7 +2412,11 @@ export function createSourceView(deps: SourceViewDeps) {
         searchController = new AbortController();
         return findPagedMatches(query, searchController.signal);
       },
-      render,
+      () => {
+        // 検索の印は行の範囲が同じでも変わる (今の当たりを次へ送ったときなど)。
+        renderedStart = -1;
+        render();
+      },
     );
     wrap.__gdpVirtualSourceSearch = search;
     // A grep hit opened into a virtual file: the find bar carries the term,

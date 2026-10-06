@@ -1504,7 +1504,8 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(l.mobile.list),
                   " shows only on Files, Diff, History and Worktrees, and opens that screen's list.",
                 ],
-                "The tab strip shows only the tab in front. The square with a number at its right end lists every open tab.",
+                "The top row lists the tabs open in the project at its top left; swipe it sideways for the rest. Tap the top left to switch projects.",
+                "Tabs at its right end lists them to switch or close. The tabs are the computer's: closing one on the phone closes it there too.",
                 [
                   "Data shows the table full screen. ",
                   ui(l.database.nav.phoneList),
@@ -1513,9 +1514,9 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   " above the list, to go back.",
                 ],
                 [
-                  "History opens with its commit list. Tap a commit for its diff; ",
+                  "History opens with its commit list. Tap a commit for its diff; ‹ at the left end of the top bar, ",
                   ui(l.history.backToList),
-                  " at the top or the browser's back returns to the list.",
+                  " or the browser's back returns to the list.",
                 ],
                 "A terminal tab shows keys the on-screen keyboard lacks, such as Esc, Tab and Ctrl+C.",
                 "Touch and hold for the right-click menu.",
@@ -1546,7 +1547,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
             {
               kind: "list",
               items: [
-                "Opening an agent, or a tab that shows a tmux pane, shows only that pane, full screen. Other panes in a split tmux window are not shown, and the PC's window size and layout stay as they are.",
+                "Opening an agent, or a tab that shows a tmux pane, shows only that pane, between the tabs at the top and the bar at the bottom. Other panes in a split tmux window are not shown, and the PC's window size and layout stay as they are.",
                 [
                   "Long lines, and text the agent folded at the PC pane's width, wrap to the phone's width. ",
                   ui(l.terminal.paneView.screen),
@@ -1561,7 +1562,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 "Scroll to the top to read earlier output, up to 3,000 lines. The agent's working status lines and input box borders are left out of it.",
                 "Tap a URL in the output to open it in a new tab. To sign in again from the phone, open the sign-in URL, approve, and send the code shown.",
                 "The image button left of the field attaches a photo or screenshot. It is saved like an image pasted into a terminal, and its path is added to the field.",
-                "Go back (‹ at the top left, or the browser's back) to return to where you opened it, such as the sidebar or the + menu.",
+                "Tap a tab or the bottom bar to close it and go there. The browser's back also closes it.",
               ],
             },
           ],

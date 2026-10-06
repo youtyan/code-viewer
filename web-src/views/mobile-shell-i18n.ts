@@ -33,6 +33,8 @@ export type MobileShellText = {
   /** 差分の長い行を折り返す切替 (札の文字と名前)。 */
   wrap: string;
   wrapTitle: string;
+  /** History の選んだコミットの差分から一覧へ戻る (上の帯の左端の ‹)。 */
+  historyBack: string;
   /** 開いているタブの一覧の面の見出し。 */
   tabsTitle: (count: number) => string;
   /** タブが 1 枚も無いとき。 */
@@ -70,6 +72,7 @@ const EN: MobileShellText = {
   keyboardHide: "Hide keyboard",
   wrap: "Wrap",
   wrapTitle: "Wrap long lines in the diff",
+  historyBack: "Back to the history list",
   tabsTitle: (count) => `Open tabs (${count})`,
   tabsEmpty: "No open tabs",
   tabsParked: "Right",
@@ -102,6 +105,7 @@ const JA: MobileShellText = {
   keyboardHide: "キーボードをしまう",
   wrap: "折り返し",
   wrapTitle: "差分の長い行を折り返す",
+  historyBack: "履歴の一覧へ戻る",
   tabsTitle: (count) => `開いているタブ (${count} 枚)`,
   tabsEmpty: "開いているタブはありません",
   tabsParked: "右",

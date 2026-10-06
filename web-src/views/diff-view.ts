@@ -145,20 +145,18 @@ export type RenderResult = {
 type ScrollSpyHandler = EventListener & { _raf?: number | null };
 
 /**
- * 名前の / の後ろを折り返してよい位置にする (電話の幅では見出しの名前を折り返して
- * 全部出す。区切りが無いと「src/greeting.t」「s」と語の途中で折れた)。文字は
- * 変えない (textContent はそのまま)。
+ * 名前をフォルダ (最後の / まで) とファイル名に分ける。電話の幅では、フォルダは
+ * 1 行に収めて省き、ファイル名は折り返して全部出す (style.css の SP の節)。
+ * 文字は変えない (textContent はそのまま)。
  */
-function breakAfterSlashes(name: HTMLElement): void {
-  const parts = (name.textContent ?? "").split("/");
-  if (parts.length < 2) return;
-  name.replaceChildren(
-    ...parts.flatMap((part, index) =>
-      index === parts.length - 1
-        ? [part]
-        : [`${part}/`, document.createElement("wbr")],
-    ),
-  );
+function splitFileName(name: HTMLElement): void {
+  const text = name.textContent ?? "";
+  const cut = text.lastIndexOf("/") + 1;
+  if (cut === 0) return;
+  const dir = document.createElement("span");
+  dir.className = "gdp-file-name-dir";
+  dir.textContent = text.slice(0, cut);
+  name.replaceChildren(dir, text.slice(cut));
 }
 
 export function isDiffShellDomIntact(
@@ -1892,7 +1890,7 @@ export function createDiffView(deps: DiffViewDeps) {
     if (fileName && filePathNeedsEscaping(file.path)) {
       fileName.textContent = filePathDisplayText(file.path);
     }
-    if (fileName) breakAfterSlashes(fileName);
+    if (fileName) splitFileName(fileName);
     if (STATE.ignoreWs) suppressWhitespaceOnlyInlineHighlights(body);
 
     enhanceMediaCard(file, card);

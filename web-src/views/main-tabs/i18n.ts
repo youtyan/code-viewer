@@ -35,6 +35,8 @@ type MainTabsText = {
   dropToSplit: string;
   /** 電話の段のタブ列の右端: 開いているタブの一覧を出すボタン (枚数は右の面の預けた分も)。 */
   openTabs: (count: number) => string;
+  /** そのボタンの枚数の前の文字 (何の数か分かるように)。 */
+  tabsButton: string;
   /** 画像のタブのメニュー: そのファイルの履歴。 */
   fileHistory: string;
   previewHint: string;
@@ -97,6 +99,7 @@ const EN: MainTabsText = {
     `The right side (${count} tab${count === 1 ? "" : "s"}) is set aside to make room for this screen's list in the left column. It comes back when you move to another screen or widen the window.`,
   resizeSplit: "Resize the two sides",
   openTabs: (count) => `Open tabs (${count})`,
+  tabsButton: "Tabs",
   dropToSplit: "Drop to split right",
   fileHistory: "File history",
   previewHint:
@@ -157,6 +160,7 @@ const JA: MainTabsText = {
     `左の列の一覧 (差分・履歴・作業ツリー) のために、右の面 (タブ ${count} 枚) を預けています。別の画面に移るか窓を広げると戻ります。`,
   resizeSplit: "左右の幅を変える",
   openTabs: (count) => `開いているタブ (${count} 枚)`,
+  tabsButton: "タブ",
   dropToSplit: "ここに落とすと右に分割",
   fileHistory: "ファイルの履歴",
   previewHint:

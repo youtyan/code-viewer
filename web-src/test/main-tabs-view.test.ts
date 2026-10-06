@@ -2756,9 +2756,12 @@ describe("main tabs view: 左右 2 面", () => {
             (entry) =>
               `${entry.front ? ">" : ""}${entry.name}${entry.preview ? " (preview)" : ""}${entry.parked ? " [right]" : ""}`,
           );
+      const count = () =>
+        button.querySelector(".main-tabs-list-count")?.textContent;
       const onPhone = {
         shown: !button.hidden,
-        count: button.textContent,
+        count: count(),
+        tabsLabel: button.querySelector(".main-tabs-list-label")?.textContent,
         label: button.getAttribute("aria-label"),
         list: list(),
       };
@@ -2772,7 +2775,7 @@ describe("main tabs view: 左右 2 面", () => {
       handle.closeTab("t");
       const afterCloseParked = {
         list: list(),
-        count: button.textContent,
+        count: count(),
         closedShell: terminals[terminals.length - 1]?.closed,
       };
       handle.closeTab("a");
@@ -2791,6 +2794,7 @@ describe("main tabs view: 左右 2 面", () => {
         onPhone: {
           shown: true,
           count: "4",
+          tabsLabel: "Tabs",
           label: "Open tabs (4)",
           list: [
             ">app.ts",

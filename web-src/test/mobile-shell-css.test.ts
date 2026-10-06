@@ -248,10 +248,8 @@ describe("電話の段の骨格", () => {
     ".gdp-help-header-end [data-quick-help-trigger]",
     "#scope-settings-save-note",
     ".agent-accounts-row.agent-accounts-head",
-    // 名前に幅を回す: タブ (ターミナル以外) と差分の見出しの種類の絵、札の ▾。
-    '.main-tab:not([data-kind="terminal"]) .main-tab-icon',
+    // 名前に幅を回す: 差分の見出しの種類の絵。
     ".d2h-file-header .d2h-file-name-wrapper > .d2h-icon",
-    ".main-tab-group-menu",
     // 帯の「一覧」は一覧の無い画面では hidden (display を決める規則に負けない)。
     ".mobile-bar-item[hidden]",
     // ファイルの表示の「行へ移る」欄 (幅を取り、コピーのボタンが次の行へ落ちた)。
@@ -311,6 +309,18 @@ describe("電話の段の骨格", () => {
       selector: ".db-root .db-grid-recency",
       property: "position",
       value: "static",
+    },
+    // 差分の見出しのフォルダは 1 行に省く (/ ごとに折り返し、深いパスで見出しが
+    // 9 行になって差分を覆った)。ファイル名は折り返して全部出す。
+    {
+      selector: ".d2h-file-header .gdp-file-name-dir",
+      property: "white-space",
+      value: "nowrap",
+    },
+    {
+      selector: ".d2h-file-header .d2h-file-name",
+      property: "white-space",
+      value: "normal",
     },
   ])(
     "電話の段の $selector の $property は $value",
@@ -723,10 +733,22 @@ describe("1 ペイン表示", () => {
     expect(declarationsOf(rules, [selector]).get("flex")).toBe(expected);
   });
 
-  test("下端はソフトキーボードの上に置く", () => {
+  // タブ列と下端の帯は覆わない (覆うとシェルを開くたびにタブが消え、戻るの
+  // ボタンでしか出られなかった)。キーボードが出ている間の --chrome-bottom は
+  // キーボードの高さ (上の「ソフトキーボードが出ている間は…」)。
+  test("上端はタブ列の下、下端は帯 (キーボードが出ていればその上) に置く", () => {
     expect(
       declarationsOf(rules, [".pane-view:not([hidden])"]).get("inset"),
-    ).toBe("0 0 var(--sp-keyboard-h, 0px) 0");
+    ).toBe("var(--global-header-h) 0 var(--chrome-bottom) 0");
+  });
+
+  // 開いたまま左上・「タブ」から出した引き出しと一覧は、表示 (80) の上に出す。
+  test.each([
+    ["body.pane-view-open .mobile-scrim:not([hidden])", "81"],
+    ["body.pane-view-open #app-nav", "82"],
+    ["body.pane-view-open .mobile-tabs:not([hidden])", "82"],
+  ])("開いている間の %s は z-index %s", (selector, expected) => {
+    expect(declarationsOf(rules, [selector]).get("z-index")).toBe(expected);
   });
 
   // 幅の広いペインの色付きの帯 (数百桁の空白) を iPhone の Safari がはみ出しと
@@ -771,6 +793,8 @@ describe("指の画面の押せる大きさ", () => {
     ".nav-row-action",
     ".view-strip-item",
     "#statusbar .agent-status",
+    // History の選んだコミットの差分から一覧へ戻る ‹ (上の帯の左端)。
+    ".mobile-history-back",
   ])("%s は幅も高さも 44px 以上", (selector) => {
     const box = declarationsOf(rules, [selector]);
     expect(resolveVar(box.get("min-height") ?? "", vars)).toBe("44px");
@@ -1046,10 +1070,11 @@ describe("on a phone the History list sits in the sheet", () => {
   });
 });
 
-// 電話の段のタブ列は前面のタブ 1 つだけ (並べると 1 枚半しか入らず、端で切れて
-// 名前が読めなかった)。グループの札は前面のタブのグループのものだけ、＋ は
-// 前面のタブの右。デスクトップは並べたまま。
-describe("the phone tab strip shows only the front tab", () => {
+// 電話の段のタブ列: 開いているタブを横に並べ、縮めずに横に送る (前面のタブ
+// 1 枚だけを並べた間は、差分と履歴を開いても 1 枚しか見えなかった)。札と ＋ は
+// 出さず、× は前面だけに見せる (ほかのタブも場所は取る: 消すと前面が替わるたびに
+// タブの幅が変わって隣がずれた)。デスクトップは札・＋ を並べ、入らなければ縮める。
+describe("the phone tab strip lists the open tabs without the group and the plus", () => {
   beforeAll(() => {
     GlobalRegistrator.register();
   });
@@ -1060,19 +1085,19 @@ describe("the phone tab strip shows only the front tab", () => {
   function strip(): Record<string, HTMLElement> {
     document.body.innerHTML = `
       <div class="main-tabs-strip">
-        <div class="main-tab-group main-tab-group-front" id="front-group"></div>
+        <div class="main-tab-group" id="group"></div>
         <div class="main-tabs-list main-tabs-group-list">
-          <div class="main-tab main-tab-active" id="front"></div>
-          <div class="main-tab" id="behind"></div>
-        </div>
-        <div class="main-tab-group" id="other-group"></div>
-        <div class="main-tabs-list main-tabs-group-list">
-          <div class="main-tab" id="other"></div>
+          <div class="main-tab main-tab-active" id="front">
+            <button class="main-tab-close" id="front-close"></button>
+          </div>
+          <div class="main-tab" id="behind">
+            <button class="main-tab-close" id="behind-close"></button>
+          </div>
         </div>
         <button class="main-tabs-action main-tabs-new" id="new"></button>
       </div>`;
     return Object.fromEntries(
-      ["front-group", "front", "behind", "other-group", "other", "new"].map(
+      ["group", "front", "front-close", "behind", "behind-close", "new"].map(
         (id) => [id, document.getElementById(id) as HTMLElement],
       ),
     );
@@ -1090,38 +1115,31 @@ describe("the phone tab strip shows only the front tab", () => {
       name: "phone",
       rules: withTiers(SOFT_KEYS, PHONE),
       expected: {
-        shown: ["front-group", "front", "new"],
-        front: ["1 1 auto", "none"],
-        newOrder: "1",
+        hidden: ["group", "new"],
+        invisible: ["behind-close"],
+        width: "auto",
       },
     },
     {
       name: "desktop",
       rules: baseRules(sheet),
+      // 前面でないタブの × はデスクトップも場所を取ったまま見えない (ホバーで出る)。
       expected: {
-        shown: [
-          "front-group",
-          "front",
-          "behind",
-          "other-group",
-          "other",
-          "new",
-        ],
-        front: ["0 0 auto", "calc(var(--space-unit) * 50)"],
-        newOrder: undefined,
+        hidden: [],
+        invisible: ["behind-close"],
+        width: "var(--main-tab-w, auto)",
       },
     },
   ])("$name", ({ rules, expected }) => {
     const els = strip();
     expect({
-      shown: Object.keys(els).filter(
-        (id) => won(rules, els[id]).get("display") !== "none",
+      hidden: Object.keys(els).filter(
+        (id) => won(rules, els[id]).get("display") === "none",
       ),
-      front: [
-        won(rules, els.front).get("flex"),
-        won(rules, els.front).get("max-width"),
-      ],
-      newOrder: won(rules, els.new).get("order"),
+      invisible: Object.keys(els).filter(
+        (id) => won(rules, els[id]).get("visibility") === "hidden",
+      ),
+      width: won(rules, els.behind).get("width"),
     }).toEqual(expected);
   });
 });

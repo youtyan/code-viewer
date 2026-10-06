@@ -11,6 +11,8 @@
 // (PHONE_MEDIA_QUERY) と同じ。
 
 import {
+  CHEVRON_DOWN_12_PATH,
+  CHEVRON_LEFT_16_PATH,
   iconSvg,
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
@@ -44,7 +46,7 @@ import {
   mobileShellText,
   SOFT_KEY_CAPS,
 } from "./mobile-shell-i18n";
-import { projectMark } from "./projects/project-looks";
+import { type ProjectLook, projectMark } from "./projects/project-looks";
 
 export type MobileShellDeps = {
   getLanguage(): MobileShellLang;
@@ -81,6 +83,11 @@ export type MobileShell = {
   close(): void;
   /** 下端の帯の「エージェント」に出す入力待ちの件数 (0 で札を隠す)。 */
   setWaitingAgents(count: number): void;
+  /**
+   * 左上のボタンに出す、いま見ているプロジェクト (色の四角と頭文字・名前)。
+   * null なら引き出しの絵だけ。押すと引き出し (プロジェクトの一覧) が開く。
+   */
+  setProject(look: ProjectLook | null): void;
   /** 足した部品と見張りを外す (テスト用。アプリは一度だけ作る)。 */
   dispose(): void;
 };
@@ -139,6 +146,10 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   let current: ViewportTier = "desktop";
   let open: Panel | null = null;
   let waitingAgents = 0;
+  /** 左上のボタンに出しているプロジェクト (setProject)。 */
+  let project: ProjectLook | null = null;
+  /** 左上のボタンを最後に描いた中身 (同じなら描き直さない)。 */
+  let menuButtonSignature = "";
   /** 開く前にフォーカスがあった場所 (閉じたら戻す)。 */
   let returnFocus: HTMLElement | null = null;
 
@@ -149,7 +160,6 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   // hidden にしても場所を取る (タブ列の左が 28px 広がった)。見た目は SP の節だけ。
   menuButton.className = "mobile-nav-button";
   menuButton.setAttribute("aria-controls", "app-nav");
-  menuButton.innerHTML = iconSvg("mobile-nav-icon", SIDEBAR_SHOW_16_PATHS);
   menuButton.addEventListener("click", () => toggle("drawer"));
   lead.prepend(menuButton);
 
@@ -207,6 +217,21 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     syncDiffWrap();
   });
   topbar.append(wrapButton);
+
+  // History の選んだコミットの差分から一覧へ戻る ‹ (上の帯の左端)。差分の頭の
+  // 「‹ 履歴の一覧」は差分と一緒に流れ、下まで読むと戻る所が無かった。戻り方は
+  // その頭のボタン (history-view.ts の backToList) に任せる。出すのはそのボタンが
+  // ある間だけ (style.css の SP の節)。
+  const historyBackButton = document.createElement("button");
+  historyBackButton.type = "button";
+  historyBackButton.className = "mobile-history-back";
+  historyBackButton.innerHTML = iconSvg("mobile-history-back-icon", [
+    CHEVRON_LEFT_16_PATH,
+  ]);
+  historyBackButton.addEventListener("click", () =>
+    requireElement("#history-commit-info .hci-back").click(),
+  );
+  topbar.prepend(historyBackButton);
 
   // 端末の操作札。ソフトキーボードに無いキー (Esc・Ctrl+C・矢印) と、確定の
   // Enter。押してもフォーカスを端末から奪わない (キーボードが閉じない)。
@@ -459,10 +484,44 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     return mobileShellText(deps.getLanguage());
   }
 
+  /**
+   * 左上のボタン: いまのプロジェクトの色の四角と頭文字・▾ (タブ列はこのプロジェクトの
+   * タブだけなので、どのプロジェクトのタブかがここで分かる)。名前は出さない (名前
+   * まで並べるとタブが 1 枚半しか見えなかった)。名前は引き出しと読み上げに出す。
+   * 分からない間は引き出しの絵。
+   */
+  function renderMenuButton(): void {
+    const t = text();
+    // 中身が同じなら作り直さない: 押した瞬間 (フォーカスが移る) にも呼ばれ、
+    // 押した要素を入れ替えると離したときの click が出ず、引き出しが開かなかった。
+    const signature = JSON.stringify([
+      t.projects,
+      project && [project.name, project.initials, project.color],
+    ]);
+    if (signature === menuButtonSignature) return;
+    menuButtonSignature = signature;
+    menuButton.classList.toggle("mobile-nav-project", project !== null);
+    if (!project) {
+      menuButton.innerHTML = iconSvg("mobile-nav-icon", SIDEBAR_SHOW_16_PATHS);
+      menuButton.title = t.projects;
+      menuButton.setAttribute("aria-label", t.projects);
+      return;
+    }
+    const chevron = document.createElement("span");
+    chevron.className = "mobile-nav-project-chevron";
+    chevron.innerHTML = iconSvg("mobile-nav-icon", CHEVRON_DOWN_12_PATH);
+    menuButton.replaceChildren(
+      projectMark(project, "mobile-nav-project-mark"),
+      chevron,
+    );
+    const label = `${t.projects}: ${project.name}`;
+    menuButton.title = label;
+    menuButton.setAttribute("aria-label", label);
+  }
+
   function localize(): void {
     const t = text();
-    menuButton.title = t.projects;
-    menuButton.setAttribute("aria-label", t.projects);
+    renderMenuButton();
     bar.setAttribute("aria-label", t.bar);
     for (const [name, button] of Object.entries(barItems)) {
       const label = t[name as keyof typeof barItems];
@@ -482,6 +541,8 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     keyboardButton.setAttribute("aria-label", keyboardLabel);
     wrapButton.textContent = t.wrap;
     wrapButton.title = t.wrapTitle;
+    historyBackButton.title = t.historyBack;
+    historyBackButton.setAttribute("aria-label", t.historyBack);
     syncBar();
   }
 
@@ -569,6 +630,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     menuButton.hidden = !phone;
     bar.hidden = !phone;
     wrapButton.hidden = !phone;
+    historyBackButton.hidden = !phone;
     syncDiffWrap();
     scrim.hidden = !phone;
     if (tabsSheet) tabsSheet.hidden = !phone;
@@ -956,6 +1018,10 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
       waitingAgents = count;
       syncBar();
     },
+    setProject(look) {
+      project = look;
+      renderMenuButton();
+    },
     dispose() {
       close();
       endDrag();
@@ -964,6 +1030,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
       langObserver.disconnect();
       pageObserver.disconnect();
       wrapButton.remove();
+      historyBackButton.remove();
       document.body.classList.remove("mobile-diff-wrap");
       nav.inert = false;
       menuButton.remove();

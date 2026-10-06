@@ -20,7 +20,7 @@ import {
   responseErrorMessage,
 } from "../../core/error-detail";
 import { escapeHtml } from "../../core/html-escape";
-import { CHEVRON_LEFT_16_PATH, IMAGE_16_PATH, iconSvg } from "../../core/icons";
+import { IMAGE_16_PATH, iconSvg } from "../../core/icons";
 import {
   pinchFontSize,
   softKeySequence,
@@ -124,6 +124,12 @@ export type PaneViewHandle = {
    */
   open(pane: TmuxPaneId, returnTo?: () => void): void;
   close(): void;
+  /**
+   * 閉じてから next を呼ぶ (積んだ履歴を戻るで降ろした後)。タブ列のタブを押した
+   * ときに使う: 降ろす前にタブを移ると、その移動が積んだ履歴を戻るが取り消す。
+   * 開いていなければすぐ呼ぶ。
+   */
+  closeThen(next: () => void): void;
   currentPane(): TmuxPaneId | null;
   /** エージェントの一覧が変わった。見出しの名前と状態を描き直す。 */
   refreshHeader(): void;
@@ -193,12 +199,10 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
   el.dataset.terminalSurface = "";
   el.hidden = true;
 
+  // 戻るのボタンは置かない: 表示はタブ列と下端の帯の間にあり、ほかの画面へは
+  // タブと帯で移る (押すと表示を閉じてから移る。app.ts)。ブラウザの戻るでも閉じる。
   const head = document.createElement("header");
   head.className = "pane-view-head";
-  const back = document.createElement("button");
-  back.type = "button";
-  back.className = "pane-view-back";
-  back.innerHTML = iconSvg("pane-view-back-icon", [CHEVRON_LEFT_16_PATH]);
   const mark = document.createElement("i");
   mark.setAttribute("aria-hidden", "true");
   const titles = document.createElement("div");
@@ -220,7 +224,7 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     modeButtons.set(mode, button);
     modes.append(button);
   }
-  head.append(back, mark, titles, modes);
+  head.append(mark, titles, modes);
 
   const body = document.createElement("div");
   body.className = "pane-view-body";
@@ -839,8 +843,6 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
 
   function localize(): void {
     const t = text();
-    back.setAttribute("aria-label", t.back);
-    back.title = t.back;
     modes.setAttribute("aria-label", t.modeLabel);
     modeButtons.get("read")?.replaceChildren(t.read);
     modeButtons.get("screen")?.replaceChildren(t.screen);
@@ -935,7 +937,6 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     );
   }
 
-  back.addEventListener("click", () => close());
   /** 前の出力を READ_LINES_STEP だけ足す (「前の出力」・上端で止まったとき)。 */
   function showOlder(): void {
     readLines += READ_LINES_STEP;
@@ -1088,6 +1089,14 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     close,
     currentPane: () => pane,
     refreshHeader,
+    closeThen(next) {
+      if (!pane) {
+        next();
+        return;
+      }
+      returnTo = next;
+      close();
+    },
     handlePopState() {
       if (!pane) return false;
       pushedHistory = false;
