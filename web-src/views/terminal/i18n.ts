@@ -14,7 +14,6 @@ export type TerminalText = {
   connecting: string;
   /** SP の 1 ペイン表示 (pane-view.ts)。 */
   paneView: {
-    back: string;
     read: string;
     screen: string;
     modeLabel: string;
@@ -221,7 +220,6 @@ function elapsedFormatter(
 const EN: TerminalText = {
   connecting: "Connecting…",
   paneView: {
-    back: "Back",
     read: "Read",
     screen: "As on PC",
     modeLabel: "How to show the pane",
@@ -370,7 +368,6 @@ const EN: TerminalText = {
 const JA: TerminalText = {
   connecting: "接続しています…",
   paneView: {
-    back: "戻る",
     read: "読む",
     screen: "PC と同じ",
     modeLabel: "表示のしかた",

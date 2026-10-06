@@ -394,6 +394,9 @@ describe("mobileBarCurrent", () => {
     [["gdp-agents-page"], false, "agents"],
     [["gdp-history-page"], false, null],
     [["gdp-diff-page"], true, null],
+    // 1 ペイン表示 (エージェントのペイン) は下の画面やタブでなくエージェント。
+    [["gdp-repo-page", "pane-view-open"], false, "agents"],
+    [["gdp-diff-page", "pane-view-open"], true, "agents"],
     [[], false, null],
   ] as const)("%j, covered by a tab %s → %s", (classes, covered, expected) => {
     expect(

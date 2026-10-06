@@ -275,9 +275,10 @@ How the state is decided, strongest first:
 In a window 640px wide or less (or a touch screen 500px tall or less), the layout keeps three tasks: answer agents, read diffs and files, and switch projects.
 
 - A bar at the bottom: **Projects**, **Files**, **Diff**, **Agents** (with the number waiting for input) and **List** (on Files, Diff, History and Worktrees).
-- **List** opens the screen's list as a full page. In History, tap a commit for its diff; **‹ History list** or the browser's back returns to the list.
+- The top row lists the tabs of the project marked at its top left; tap the mark to switch projects. **Tabs** at the right end lists them to switch or close. Tabs are shared with the PC.
+- **List** opens the screen's list as a full page. In History, tap a commit for its diff; **‹** at the left of the top bar, **‹ History list** or the browser's back returns to the list.
 - **Data** shows the table full screen; **‹ Datastores and tables** opens the list of connections and tables.
-- Opening an agent shows only its pane, full screen. The PC's tmux layout does not change.
+- Opening an agent shows only its pane, between the tabs and the bottom bar; tap a tab or the bar to leave it. The PC's tmux layout does not change.
 - Numbered choices become buttons; the field at the bottom sends text and Enter; the image button attaches a photo.
 - URLs in the output open in a new tab. To sign in again from the phone, open the sign-in URL, approve, and send the code shown.
 - **As on PC** shows the pane at the PC's width.

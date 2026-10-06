@@ -582,10 +582,10 @@ describe("終わり", () => {
     expect(input?.disabled).toBe(true);
   });
 
-  test("戻るボタンは履歴を 1 つ戻し、戻るの知らせで閉じる", async () => {
+  test("閉じると履歴を 1 つ戻し、戻るの知らせで閉じる", async () => {
     const back = vi.spyOn(history, "back").mockImplementation(() => undefined);
     await openWith("ready");
-    view.el.querySelector<HTMLButtonElement>(".pane-view-back")?.click();
+    view.close();
     const beforePop = view.el.hidden;
     const handled = view.handlePopState();
     expect([
@@ -597,17 +597,28 @@ describe("終わり", () => {
     ]).toEqual([1, false, true, true, [["%3"]]]);
   });
 
+  // タブ列・帯から移るときは、戻るで履歴を降ろしてから移る (先に移ると、降ろす
+  // 戻るがその移動を取り消した)。開いていなければすぐ移る。
+  test("closeThen は戻るの知らせで閉じてから呼ぶ", async () => {
+    vi.spyOn(history, "back").mockImplementation(() => undefined);
+    const calls: string[] = [];
+    await openWith("ready");
+    view.closeThen(() =>
+      calls.push(view.el.hidden ? "next-after-close" : "next-while-open"),
+    );
+    calls.push("before-pop");
+    view.handlePopState();
+    view.closeThen(() => calls.push("next-when-closed"));
+    expect(calls).toEqual([
+      "before-pop",
+      "next-after-close",
+      "next-when-closed",
+    ]);
+  });
+
   // 引き出し・＋のメニューから開いたペインは、戻るでその場所へ戻す (戻った先が
   // 開く前と違う画面だった)。
   test.each([
-    {
-      name: "戻るのボタン",
-      act: () => {
-        view.el.querySelector<HTMLButtonElement>(".pane-view-back")?.click();
-        view.handlePopState();
-      },
-      expected: 1,
-    },
     { name: "ブラウザの戻る", act: () => view.handlePopState(), expected: 1 },
     { name: "別のペインへ開き直した", act: () => view.open("%4"), expected: 0 },
   ])("開いた場所へ戻す: $name", ({ act, expected }) => {

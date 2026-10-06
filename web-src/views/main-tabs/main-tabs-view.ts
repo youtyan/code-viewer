@@ -461,7 +461,10 @@ export type MainTabsHandle = {
    * 可否を合わせ直す。
    */
   refit(): void;
-  /** 電話の段のタブの一覧: 左の面のタブ、続けて預けた右の面のタブ。 */
+  /**
+   * 電話の段のタブの一覧: 左の面のタブ、続けて預けた右の面のタブ。このページの
+   * プロジェクトのものと、どのプロジェクトのものでもないものだけ。
+   */
   tabList(): TabListEntry[];
   /**
    * 一覧から前面に出す。預けた右の面のタブは左の面へ移して出す (電話では右の
@@ -897,7 +900,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     newButton: HTMLButtonElement;
     splitButton: HTMLButtonElement;
     /** 電話の段だけ出す「開いているタブ」と枚数の枠 (左の面だけ)。 */
-    listButton: { button: HTMLButtonElement; count: HTMLElement } | null;
+    listButton: {
+      button: HTMLButtonElement;
+      label: HTMLElement;
+      count: HTMLElement;
+    } | null;
   };
   const sections = {} as Record<PaneSide, Section>;
   const phoneQuery = window.matchMedia(PHONE_MEDIA_QUERY);
@@ -968,7 +975,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         changeAndGo((l) => splitRight(l, front.id));
     });
     // 電話の段では分割のボタンの代わりに、開いているタブの一覧の入口を置く
-    // (88px のタブが 2 枚しか見えず、預けた右の面のタブには届かない)。
+    // (預けた右の面のタブには、並んだタブからは届かない)。
     let listButton: Section["listButton"] = null;
     if (side === "left" && deps.onTabList) {
       const onTabList = deps.onTabList;
@@ -977,13 +984,18 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       button.className = "main-tabs-action main-tabs-list-open";
       button.setAttribute("aria-haspopup", "dialog");
       button.hidden = true;
-      // 枚数を四角の枠に入れて出す (ブラウザのタブの数の印と同じ形)。
+      // 「タブ」と、枚数を四角の枠に入れて出す (枠の数字だけでは何の数か
+      // 分からなかった)。
+      const label = document.createElement("span");
+      label.className = "main-tabs-list-label";
+      label.setAttribute("aria-hidden", "true");
       const count = document.createElement("span");
       count.className = "main-tabs-list-count";
-      button.append(count);
+      count.setAttribute("aria-hidden", "true");
+      button.append(label, count);
       button.addEventListener("click", () => onTabList());
       actions.append(button);
-      listButton = { button, count };
+      listButton = { button, label, count };
     }
     actions.append(splitButton);
     strip.append(list, newButton);
@@ -1154,10 +1166,12 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const tab = strip.querySelector<HTMLElement>(".main-tab-active");
     if (!tab) return;
     // 前面が最後のタブなら、すぐ右の ＋ まで見せる (タブだけだと ＋ が数 px
-    // だけ列の外に残った)。
-    const plus = tab.nextElementSibling
+    // だけ列の外に残った)。出していない ＋ (電話の段) は数えない: 位置が 0 と
+    // 測られ、列が左へ送られてタブがずれた。
+    const next = tab.nextElementSibling
       ? null
       : strip.querySelector<HTMLElement>(".main-tabs-new");
+    const plus = next && next.getClientRects().length > 0 ? next : null;
     revealIn(strip, plus ?? tab);
     if (plus) revealIn(strip, tab);
   }
@@ -2271,6 +2285,47 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     return el;
   }
 
+  /**
+   * 電話の段のタブの一覧 (右端の「タブ」の面と枚数)。並べるのはこのページの
+   * プロジェクトのタブと、どのプロジェクトのものでもないタブ (エージェント・設定)
+   * だけ。タブは PC と共有なので、全部を出すと別のプロジェクトのタブが混ざった。
+   */
+  function phoneTabList(): TabListEntry[] {
+    const entry = (
+      tab: Tab,
+      front: boolean,
+      isParked: boolean,
+    ): TabListEntry => {
+      const name = nameOf(tab.target).full;
+      const key = keyOf(tab);
+      return {
+        id: tab.id,
+        name,
+        title: titleOf(tab.target, name),
+        iconHtml: iconMarkup(tab.target),
+        front,
+        preview: tab.preview,
+        parked: isParked,
+        project: key === null ? null : lookOf(key),
+      };
+    };
+    const right = parked?.pane ?? layout.panes.right;
+    return [
+      ...layout.panes.left.tabs
+        .filter(ofThisPage)
+        .map((tab) => entry(tab, tab.id === layout.panes.left.activeId, false)),
+      ...(right?.tabs ?? [])
+        .filter(ofThisPage)
+        .map((tab) => entry(tab, false, true)),
+    ];
+  }
+
+  /** このページのプロジェクトのタブか、どのプロジェクトのものでもないタブ。 */
+  function ofThisPage(tab: Tab): boolean {
+    const key = keyOf(tab);
+    return key === null || key === currentRoot;
+  }
+
   function renderActions(): void {
     const current = text();
     // 押せない理由は 1 つだけ出す (条件を全部並べると、どれに当たったか読めない)。
@@ -2307,9 +2362,10 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     dropLabel.textContent = current.dropToSplit;
     const listButton = sections.left.listButton;
     if (listButton) {
-      const count = allTabs(fullLayout()).length;
+      const count = phoneTabList().length;
       const label = current.openTabs(count);
       listButton.button.hidden = !phoneQuery.matches;
+      listButton.label.textContent = current.tabsButton;
       listButton.count.textContent = String(count);
       listButton.button.title = label;
       listButton.button.setAttribute("aria-label", label);
@@ -2351,7 +2407,10 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       const key = group.key;
       // 空のグループは畳めない (畳んだ控えが残っていても開いて描く)。
       const isCollapsed = group.tabs.length > 0 && collapsed.has(key);
-      const visible = group.tabs.filter((tab) => shown.has(tab));
+      // 電話の段は札を出さない (畳む・開くができない) ので、畳んでいても並べる。
+      const visible = phoneQuery.matches
+        ? group.tabs
+        : group.tabs.filter((tab) => shown.has(tab));
       const look = lookOf(key);
       const tabs = document.createElement("div");
       tabs.className = "main-tabs-list main-tabs-group-list";
@@ -2620,6 +2679,12 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     ];
   }
 
+  /** 面ごとに、最後に見える所まで送った前面のタブ (render)。 */
+  const revealedFronts: Record<PaneSide, string | null | undefined> = {
+    left: undefined,
+    right: undefined,
+  };
+
   function render(): void {
     const present = SIDES.filter((side) =>
       side === "left" ? true : !!layout.panes.right,
@@ -2657,7 +2722,12 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         "main-tabs-pane-focused",
         layout.focused === side,
       );
-      revealFront(strip);
+      // 前面のタブが替わったときだけ、そこまで送る。描き直し (エージェントの状態で
+      // 数秒おき) のたびに送ると、横に送って見ていた列が前面のタブへ戻った。
+      if (revealedFronts[side] !== pane.activeId) {
+        revealedFronts[side] = pane.activeId;
+        revealFront(strip);
+      }
     }
     renderActions();
     for (const listener of renderListeners) listener();
@@ -3152,33 +3222,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     // 名前・シェルのプロジェクト・グループの並びが変わったときも呼ばれる (並べ直す)。
     localize: relayout,
     refit: () => followGeometry(),
-    tabList() {
-      const entry = (
-        tab: Tab,
-        front: boolean,
-        isParked: boolean,
-      ): TabListEntry => {
-        const name = nameOf(tab.target).full;
-        const key = keyOf(tab);
-        return {
-          id: tab.id,
-          name,
-          title: titleOf(tab.target, name),
-          iconHtml: iconMarkup(tab.target),
-          front,
-          preview: tab.preview,
-          parked: isParked,
-          project: key === null ? null : lookOf(key),
-        };
-      };
-      const right = parked?.pane ?? layout.panes.right;
-      return [
-        ...layout.panes.left.tabs.map((tab) =>
-          entry(tab, tab.id === layout.panes.left.activeId, false),
-        ),
-        ...(right?.tabs ?? []).map((tab) => entry(tab, false, true)),
-      ];
-    },
+    tabList: phoneTabList,
     bringToFront(id) {
       if (parked?.pane.tabs.some((tab) => tab.id === id)) {
         const taken = takeParked(layout, parked, id);

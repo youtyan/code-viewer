@@ -26887,8 +26887,10 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .empty-keys {
     display: none;
   }
-  /* 差分のファイルの見出し: 名前は折り返して全部出す (切ると、大事な末尾のファイル名
-     が「src/config…」で消えた)。種類の絵は外して名前に幅を回す。 */
+  /* 差分のファイルの見出し: ファイル名は折り返して全部出す (切ると、大事な末尾の
+     ファイル名が「src/config…」で消えた)。フォルダ (diff-view.ts の splitFileName) は
+     1 行に収めて省く (フォルダも / ごとに折り返していた間は、深いパスで見出しが
+     9 行になり、上に貼り付いた見出しが差分を覆った)。種類の絵は外して名前に幅を回す。 */
   .d2h-file-header .d2h-file-name-wrapper > .d2h-icon {
     display: none;
   }
@@ -26896,15 +26898,13 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     white-space: normal;
     overflow-wrap: anywhere;
   }
-  /* 前面のタブの名前に幅を回す: 画面・ファイルのタブは種類の絵を出さない (「作業
-     ツリー」が「作…」まで切れた)。ターミナルのタブの絵は状態の印なので残す。 */
-  .main-tab:not([data-kind="terminal"]) .main-tab-icon {
-    display: none;
-  }
-  /* プロジェクトの札の ▾ も出さない (同じメニューは札の長押しで開き、行き先は一覧の
-     頭の画面の入口と同じ)。 */
-  .main-tab-group-menu {
-    display: none;
+  .d2h-file-header .gdp-file-name-dir {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
   }
   /* ファイルの表示の「行へ移る」欄は出さない (スマホはスクロールで読む)。欄が
      幅を取り、ソースのコピーのボタンが次の行へ 1 つだけ折り返していた。 */
@@ -26926,7 +26926,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     box-sizing: border-box;
     height: var(--global-header-h);
     padding-top: var(--sp-safe-top);
-    container: main-tabs / inline-size;
   }
   /* 2 面は無し: 右の面・境界・分割のボタン・ドロップ先を出さない (狭い幅では
      main-tabs-view.ts が右の面を預けている。横向きで幅が足りても出さない)。 */
@@ -26964,6 +26963,24 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
   .mobile-nav-button[aria-expanded="true"] {
     color: var(--color-accent-strong);
+  }
+  /* いまのプロジェクト (色の四角と頭文字・▾。mobile-shell.ts の renderMenuButton)。
+     タブ列はこのプロジェクトのタブだけなので、ここで分かる。 */
+  .mobile-nav-button.mobile-nav-project:not([hidden]) {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    width: auto;
+    padding: 0 var(--space-2);
+  }
+  .mobile-nav-project-chevron {
+    display: inline-grid;
+    flex: none;
+    color: var(--color-text-3);
+  }
+  .mobile-nav-project-chevron .mobile-nav-icon {
+    width: var(--icon-sm);
+    height: var(--icon-sm);
   }
   .mobile-nav-icon {
     width: var(--icon-md);
@@ -27648,6 +27665,37 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     text-align: center;
   }
 
+  /* ---- History の一覧へ戻る ‹ (上の帯の左端。mobile-shell.ts) ----
+     選んだコミットの差分 (頭に「‹ 履歴の一覧」がある間) だけ出す。頭のボタンは
+     差分と一緒に流れるので、下まで読むと戻る所が無かった。 */
+  .mobile-history-back:not([hidden]) {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: var(--ui-control-sm);
+    height: var(--ui-control-sm);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-accent-strong);
+    cursor: pointer;
+  }
+  body.gdp-history-page:has(#history-commit-info:not([hidden]) .hci-back)
+    .mobile-history-back:not([hidden]) {
+    display: inline-flex;
+  }
+  .mobile-history-back-icon {
+    width: var(--icon-md);
+    height: var(--icon-md);
+    fill: currentColor;
+  }
+  /* 帯は横に送る箱 (overflow) なので、輪は内側。 */
+  .mobile-history-back:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring-inset);
+  }
+
   /* ---- 差分の長い行の折り返し (Diff の上の帯の端の切替。mobile-shell.ts) ----
      行の番号の列はそのまま、字の欄だけを欄の幅で折り返す。 */
   .mobile-wrap-toggle:not([hidden]) {
@@ -27719,33 +27767,51 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     font-size: var(--sp-input-font) !important;
   }
 
-  /* ---- タブ列は前面のタブ 1 つだけ ----
-     並べると幅 390 に 1 枚半しか入らず、端で切れて名前が読めなかった。前面の
-     タブに残りの幅を渡し、ほかのタブは右端の「開いているタブ」の一覧から替える。
-     グループの札は前面のタブのグループのものだけ。 */
-  .main-tab:not(.main-tab-active),
-  .main-tab-group:not(.main-tab-group-front) {
+  /* ---- タブ列: このプロジェクトのタブを横に並べ、入らない分は横に送る ----
+     前面のタブ 1 枚だけを並べた間は、差分と履歴を開いても 1 枚しか見えず、
+     プロジェクトの札は押すと見えないタブを畳んだ。別のプロジェクトのタブは
+     出さない (札の後ろの並び。どのプロジェクトのものでもないタブは出す)。
+     プロジェクトは左上のボタン (mobile-shell.ts) で分かり、そこから替える。
+     札と ＋ は出さない (＋ のメニューはファイル・シェル・画面・セッションが混ざって
+     いて分からなかった)。縮めると名前が読めないので縮めずに送る (fitTabs の幅は
+     使わない)。名前に幅を回すため、種類の絵はターミナル (状態の印) だけ。× は
+     前面のタブだけに見せ、ほかのタブも場所は取る (消すと前面が替わるたびに
+     タブの幅が変わって隣がずれ、押し間違えた)。 */
+  .main-tab-group,
+  .main-tab-group:not(.main-tab-group-current) + .main-tabs-group-list,
+  .main-tabs-strip > .main-tabs-new {
     display: none;
   }
-  .main-tab.main-tab-active {
-    flex: 1 1 auto;
+  .main-tab {
     width: auto;
-    min-width: 0;
-    max-width: none;
+    max-width: calc(var(--space-unit) * 36);
+    padding: 0 var(--space-2);
   }
-  /* ＋ は前面のタブの右 (グループがあるとデスクトップではグループの後ろ・
-     グループに属さないタブの前に置くので、前面のタブ次第で左右に動いた)。 */
-  .main-tabs-strip > .main-tabs-new {
-    order: 1;
+  .main-tab:not([data-kind="terminal"]) .main-tab-icon {
+    display: none;
+  }
+  /* 指で押した後に残るホバー (.main-tab:hover) で × を見せない。 */
+  .main-tab:not(.main-tab-active) .main-tab-close {
+    visibility: hidden;
   }
 
   /* ---- 開いているタブの一覧 ----
-     入口はタブ列の右端 (分割のボタンの代わり。枚数を枠に入れる)。一覧は下から
+     入口はタブ列の右端 (分割のボタンの代わり。「タブ」と枚数の枠)。一覧は下から
      出す面 (#mobile-tabs。mobile-shell.ts)。場所は一覧の面 (#file-list・#sidebar) と同じ。 */
   .main-tabs-list-open:not([hidden]) {
-    display: grid;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    /* .main-tabs-action の幅 (絵のボタンの正方形) では「タブ」が縦に折れた。 */
+    width: auto;
+    padding: 0 var(--space-2);
+    white-space: nowrap;
     color: var(--color-text-2);
     font: inherit;
+  }
+  .main-tabs-list-label {
+    font-size: var(--ui-font-sm);
+    font-weight: 500;
   }
   .main-tabs-list-count {
     display: inline-grid;
@@ -27954,22 +28020,43 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
 
   /* ---- 1 ペイン表示 (views/terminal/pane-view.ts) ----
-     エージェントのペインを 1 つだけ全画面で映す。上から 見出し・本文・選択肢・
-     操作札・返事の欄。下端はソフトキーボードの上 (--sp-keyboard-h は
-     mobile-shell.ts)。面ごと端末の色 ([data-terminal-surface]) で塗る。 */
+     エージェントのペインを 1 つだけ、タブ列と下端の帯の間に映す。上から 見出し・
+     本文・選択肢・操作札・返事の欄。ソフトキーボードが出ている間は、帯の代わりに
+     キーボードの上まで (--chrome-bottom)。面ごと端末の色 ([data-terminal-surface])
+     で塗る。タブ列と帯は覆わない (覆うとシェルを開くたびにタブが消え、戻るの
+     ボタンでしか出られなかった)。 */
   .pane-view:not([hidden]) {
     position: fixed;
-    inset: 0 0 var(--sp-keyboard-h, 0px) 0;
+    inset: var(--global-header-h) 0 var(--chrome-bottom) 0;
     z-index: 80;
     display: flex;
     flex-direction: column;
-    padding: var(--sp-safe-top) var(--sp-safe-right) var(--sp-safe-bottom) var(--sp-safe-left);
+    padding: 0 var(--sp-safe-right) 0 var(--sp-safe-left);
     background: var(--color-term);
     color: var(--color-term-text);
   }
-  /* キーボードが出ている間は、下の安全領域もキーボードの下にある。 */
-  body.mobile-keyboard-open .pane-view:not([hidden]) {
-    padding-bottom: 0;
+  /* 開いたまま、タブ列の左上・「タブ」から出した引き出しと一覧は表示の上に出す。 */
+  body.pane-view-open .mobile-scrim:not([hidden]) {
+    z-index: 81;
+  }
+  body.pane-view-open #app-nav,
+  body.pane-view-open .mobile-tabs:not([hidden]) {
+    z-index: 82;
+  }
+  /* 開いている間、下の画面 (ターミナルでない前面のタブ) は選んだ見た目にしない
+     (表示が映しているのはそのタブではない)。×も見せない (押すと見えていない
+     タブを閉じる。場所は取ったまま: 幅が変わるとタブがずれる)。タブを押すと
+     表示を閉じてそのタブを出す (app.ts)。 */
+  body.pane-view-open .main-tab.main-tab-active:not([data-kind="terminal"]) {
+    background: var(--color-nav);
+    color: var(--color-text-3);
+    box-shadow: none;
+  }
+  body.pane-view-open .main-tab.main-tab-active:not([data-kind="terminal"])::before {
+    content: none;
+  }
+  body.pane-view-open .main-tab-close {
+    visibility: hidden;
   }
   /* 縮むのは本文だけ。本文の元の高さ (履歴の全文) で縮み方を割り振ると、
      本文が長いほど札や返事の欄まで潰れる。 */
@@ -27987,21 +28074,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     background: var(--color-ground);
     color: var(--color-text);
     border-bottom: 1px solid var(--color-line-soft);
-  }
-  .pane-view-back {
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: var(--sp-touch);
-    height: var(--sp-touch);
-    margin-left: calc(var(--pad-face) * -1);
-    border: 0;
-    background: none;
-    color: inherit;
-  }
-  .pane-view-back-icon {
-    width: var(--space-4);
-    height: var(--space-4);
   }
   .pane-view-titles {
     flex: 1 1 auto;
@@ -28218,14 +28290,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
 }
 
-/* 電話の段のタブ列が 360px 以下 (320px の画面): プロジェクトの印 (前面のタブの
-   左の札) を出さない。前面のタブの名前が「c…」の 1 文字になった。プロジェクトは
-   引き出しで分かる。名前の付いた箱 (main-tabs) は電話の段でだけ作る。 */
-@container main-tabs (max-width: 360px) {
-  .main-tab-group-toggle {
-    display: none;
-  }
-}
 
 /* ---- 1'. 横向きの電話 (core/mobile-layout.ts の PHONE_LANDSCAPE_MEDIA_QUERY):
    残る高さが少ないので、下端の帯を細くする。 ---- */
@@ -28348,6 +28412,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .global-icon-action,
   .agents-icon-action,
   .mobile-nav-button,
+  .mobile-history-back,
   .nav-icon-action,
   .nav-row-action,
   .view-strip-item,

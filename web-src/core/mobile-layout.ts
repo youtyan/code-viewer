@@ -153,13 +153,15 @@ export type MobileBarView = "files" | "diff" | "agents";
 
 /**
  * 下端の帯で「いま見ている画面」の印を付ける入口。body の画面の印 (app.ts の
- * setPageMode) から決める。左の面の前面がタブ (端末・画像など) で画面が
- * 隠れているときは印を付けない。
+ * setPageMode) から決める。1 ペイン表示 (エージェントのペイン。body の
+ * pane-view-open) を開いている間はエージェント。左の面の前面がタブ (端末・
+ * 画像など) で画面が隠れているときは印を付けない。
  */
 export function mobileBarCurrent(
   hasPageClass: (name: string) => boolean,
   coveredByTab: boolean,
 ): MobileBarView | null {
+  if (hasPageClass("pane-view-open")) return "agents";
   if (coveredByTab) return null;
   if (hasPageClass("gdp-agents-page")) return "agents";
   if (hasPageClass("gdp-diff-page")) return "diff";
