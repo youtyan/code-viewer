@@ -2,13 +2,15 @@
 // (server/entry/remote-control.ts)。
 //
 //   状態
-//   待ち受け     ● 開いています       127.0.0.1:64161（https://viewer.example.com 用）
-//   cloudflared  ● 接続中（4 本）     cloudflared 2026.9.0（pid 123）
-//   トークン     ● 保存済み           Tunnel ID 0000…
+//   スマホ → Cloudflare → cloudflared（この Mac）→ サービス URL（code-viewer）…
+//   サービス URL ● 開いています       http://127.0.0.1:64161（https://viewer.example.com からの転送先）
+//                Tunnel の公開ルートの「サービス URL」に入れるアドレス
+//   cloudflared  ● 接続中（4 本）     [ターミナルで見る]  (code-viewer の端末で動く)
+//   トークン     ● 保存済み           Tunnel ID 0000…  (未設定なら [トークンの欄へ])
 //   [停止]  ☑ code-viewer の起動時に開始する
 //   Cloudflare の値  (未保存)
-//   公開 URL / Team domain / AUD / 待ち受けのポート / Tunnel のトークン
-//   ▸ cloudflared の出力（最後の 200 行）
+//   公開 URL / Team domain / AUD / サービス URL のポート / Tunnel のトークン
+//   ▸ Homebrew と code-viewer の出力（あるときだけ。cloudflared の出力は端末のタブ）
 //
 // 開始・停止・「起動時に開始する」は押した時点で当てる。値とトークンの保存は
 // ページの「変更を保存」1 つ (draft を viewer-settings に渡す)。トークンは
@@ -35,6 +37,8 @@ export type RemoteAccessSettingsDeps = {
   getText(): RemoteAccessSettingsText;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
   actionHeaders(): HeadersInit;
+  /** cloudflared を動かしている端末をタブで開く。 */
+  openShell(id: string): void;
 };
 
 export type RemoteAccessSettings = {
@@ -65,12 +69,18 @@ type Unavailable = "local-only" | "standalone" | null;
 const FIELDS = ["origin", "teamDomain", "audience", "port"] as const;
 type Field = (typeof FIELDS)[number];
 
+/** Tunnel の公開ルートの「サービス URL」に入れる、入口が開くアドレス。 */
+function serviceUrl(port: number): string {
+  return `http://127.0.0.1:${port}`;
+}
+
 export function createRemoteAccessSettings(
   deps: RemoteAccessSettingsDeps,
 ): RemoteAccessSettings {
   const element = el("div", "scope-settings-section remote-access-section");
   const statusTitle = el("strong", "agent-accounts-subtitle");
   statusTitle.id = REMOTE_ACCESS_SECTION_ID;
+  const statusIntro = el("p", "scope-settings-help");
   const notice = el("p", "scope-settings-help");
   const loadError = el("p", "scope-settings-help scope-settings-refresh-error");
   const rows = el("div", "agent-hooks-rows");
@@ -142,6 +152,7 @@ export function createRemoteAccessSettings(
   /** 外から開いた画面・入口でないサーバでは、案内の 1 文だけを出して隠す部分。 */
   const body = el("div");
   body.append(
+    statusIntro,
     rows,
     actions,
     result,
@@ -299,12 +310,15 @@ export function createRemoteAccessSettings(
     }
   }
 
-  /** note は補足 (無彩色)、problem は理由 (赤)。どちらも全文を折り返して出す。 */
+  /**
+   * note は補足 (無彩色)、problem は理由 (赤)。どちらも全文を折り返して出す。
+   * detail が要素 (ボタン) なら 3 列目にそのまま置く。
+   */
   function stateRow(
     name: string,
     tone: Tone,
     label: string,
-    detail: string,
+    detail: string | HTMLElement,
     extra: { problem?: string; note?: string } = {},
   ): HTMLElement {
     const row = el("div", "agent-hooks-row remote-access-row ui-table-row");
@@ -312,8 +326,11 @@ export function createRemoteAccessSettings(
     const mark = el("i", "agent-hooks-mark");
     mark.setAttribute("aria-hidden", "true");
     state.append(mark, label);
-    const detailCell = el("span", "agent-hooks-path", detail);
-    detailCell.title = detail;
+    let detailCell = detail;
+    if (typeof detail === "string") {
+      detailCell = el("span", "agent-hooks-path", detail);
+      detailCell.title = detail;
+    }
     row.append(el("span", "agent-hooks-name", name), state, detailCell);
     if (extra.problem)
       row.append(
@@ -323,21 +340,43 @@ export function createRemoteAccessSettings(
     return row;
   }
 
+  /** 3 列目に置く小さなボタン (列の幅に伸ばさない)。 */
+  function rowButton(label: string, onClick: () => void): HTMLButtonElement {
+    const button = el(
+      "button",
+      "gdp-btn gdp-btn-sm remote-access-row-button",
+      label,
+    );
+    button.type = "button";
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
   function listenerRow(current: RemoteAccessStatus): HTMLElement {
     const t = text();
     const { listener } = current;
+    const note = t.listenerNote;
     if (listener.state === "running")
       return stateRow(
         t.rowListener,
         "ok",
         t.listenerRunning,
-        t.listenerTarget(listener.port, listener.origin),
+        t.listenerTarget(serviceUrl(listener.port), listener.origin),
+        { note },
       );
     if (listener.state === "failed")
       return stateRow(t.rowListener, "error", t.listenerFailed, "", {
         problem: listener.error,
+        note,
       });
-    return stateRow(t.rowListener, "idle", t.listenerStopped, "");
+    const saved = savedValues();
+    return stateRow(
+      t.rowListener,
+      "idle",
+      t.listenerStopped,
+      saved ? serviceUrl(saved.port) : "",
+      { note },
+    );
   }
 
   function tunnelRow(current: RemoteAccessStatus): HTMLElement {
@@ -350,15 +389,19 @@ export function createRemoteAccessSettings(
       cloudflared.state === "unavailable" && cloudflared.installable
         ? t.installHint
         : "";
-    if (tunnel.state === "running")
+    if (tunnel.state === "running") {
+      const { shell } = tunnel;
+      const open = rowButton(t.openTerminal, () => deps.openShell(shell));
+      open.title = t.tunnelProcess(version, tunnel.pid);
       return stateRow(
         t.rowTunnel,
         tunnel.connections > 0 ? "ok" : "warn",
         tunnel.connections > 0
           ? t.tunnelConnected(tunnel.connections)
           : t.tunnelWaiting,
-        t.tunnelProcess(version, tunnel.pid),
+        open,
       );
+    }
     if (tunnel.state === "exited")
       return stateRow(
         t.rowTunnel,
@@ -398,12 +441,20 @@ export function createRemoteAccessSettings(
       return stateRow(t.rowToken, "error", t.tokenInvalid, "", {
         problem: token.error,
       });
-    return stateRow(t.rowToken, "idle", t.tokenAbsent, "");
+    // 状態の行から、貼る欄 (Cloudflare の値の最後) へ送る。
+    const jump = rowButton(t.tokenJump, () => {
+      tokenInput.scrollIntoView({ block: "center" });
+      tokenInput.focus();
+    });
+    return stateRow(t.rowToken, "idle", t.tokenAbsent, jump, {
+      note: t.tokenAbsentNote,
+    });
   }
 
   function render(): void {
     const t = text();
     statusTitle.textContent = t.statusTitle;
+    statusIntro.textContent = t.statusIntro;
     startButton.textContent = t.start;
     stopButton.textContent = t.stop;
     autoStartText.textContent = t.autoStart;
@@ -472,6 +523,7 @@ export function createRemoteAccessSettings(
         : t.needValues;
     const key = JSON.stringify([
       t.statusTitle,
+      savedValues()?.port,
       current.listener,
       current.tunnel,
       current.token,
@@ -501,9 +553,10 @@ export function createRemoteAccessSettings(
     savedTo.textContent = current.configFromFlag
       ? t.fromFlag(current.configPath, current.tokenPath)
       : t.savedTo(current.configPath, current.tokenPath);
-    log.hidden = false;
+    // cloudflared の出力は端末のタブで見る。ここは Homebrew と code-viewer の記録だけ。
+    log.hidden = current.log.length === 0;
     logSummary.textContent = t.logTitle(current.log.length);
-    const logText = current.log.length ? current.log.join("\n") : t.logEmpty;
+    const logText = current.log.join("\n");
     if (logBody.textContent !== logText) {
       // 末尾を見ていたら、新しい行に付いていく。
       const atEnd =

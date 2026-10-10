@@ -30,6 +30,11 @@ import {
 import { processAlive } from "../server/file-lock";
 import type { RunResult } from "../server/runtime";
 import { spawnProcess, stopProcess } from "../server/runtime";
+import {
+  closeShellSession,
+  getShellSession,
+  readShellBuffer,
+} from "../server/shell/session";
 import { captureErrorAsync, waitFor } from "./_test-helpers";
 
 /** a: アカウント、t: 00000000-0000-4000-8000-000000000001、s: 秘密 (どれも架空)。 */
@@ -471,11 +476,15 @@ describe("createRemoteControl", () => {
       pid: started.tunnel.state === "running" ? started.tunnel.pid : 0,
       tokenPath: join(dir, "tunnel-token"),
     });
-    const log = target.status().log.join("\n");
-    expect(log).toContain(
+    // cloudflared は code-viewer の端末で動く (設定の「ターミナルで見る」で開く)。
+    const shell =
+      started.tunnel.state === "running" ? started.tunnel.shell : "";
+    const screen = readShellBuffer(shell)?.replay ?? "";
+    expect(getShellSession(shell)?.purpose).toEqual({ kind: "remote-tunnel" });
+    expect(screen).toContain(
       `ARGS tunnel --no-autoupdate --grace-period 2s run --token-file ${join(dir, "tunnel-token")}`,
     );
-    expect(log).not.toContain(TOKEN);
+    expect(screen).not.toContain(TOKEN);
     // 待ち受けは関所の後ろ: Host が公開 URL でない要求は入口へ渡さない。
     const outside = await fetch(`http://127.0.0.1:${port}/`);
     expect(outside.status).toBe(403);
@@ -514,16 +523,37 @@ describe("createRemoteControl", () => {
     await route(target, "/_entry/remote/start");
     await waitFor(() => target.status().tunnel.state === "exited");
 
+    // 端末は終わると消えるので、最後の出力を理由に添える。
     expect(target.status().tunnel).toEqual({
       state: "exited",
-      error:
-        "cloudflared exited (code 3). The last lines of its output are below.",
+      error: `cloudflared exited (code 3).\nLast output:\nARGS tunnel --no-autoupdate --grace-period 2s run --token-file ${join(dir, "tunnel-token")}\nERR Provided Tunnel token is not valid`,
     });
-    expect(target.status().log).toContain(
-      "ERR Provided Tunnel token is not valid",
-    );
     expect(error).toHaveBeenCalled();
     error.mockRestore();
+  });
+
+  test("stopping its terminal from the tab stops cloudflared without reporting a failure", async () => {
+    const target = create(fakeCloudflared(STAYS_UP));
+    await route(target, "/_entry/remote/config", {
+      values: { ...VALUES, port: await freePort() },
+      token: TOKEN,
+    });
+    const started = statusOf(await route(target, "/_entry/remote/start"));
+    const shell =
+      started.tunnel.state === "running" ? started.tunnel.shell : "";
+
+    await closeShellSession(shell);
+    await waitFor(() => target.status().tunnel.state !== "running");
+
+    expect({
+      tunnel: target.status().tunnel,
+      listener: target.status().listener.state,
+      pidRecord: existsSync(join(dir, "cloudflared.pid")),
+    }).toEqual({
+      tunnel: { state: "stopped" },
+      listener: "running",
+      pidRecord: false,
+    });
   });
 
   test("a missing cloudflared is reported on the cloudflared row", async () => {

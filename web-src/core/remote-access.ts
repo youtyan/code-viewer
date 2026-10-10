@@ -49,9 +49,13 @@ export type RemoteAccessStatus = {
     | { state: "stopped" }
     /** トークンが無いので cloudflared は起こさず、待ち受けだけ開いた。 */
     | { state: "skipped" }
-    | { state: "running"; pid: number; connections: number }
+    /** shell は cloudflared を動かしている code-viewer の端末 (タブで開ける)。 */
+    | { state: "running"; pid: number; connections: number; shell: string }
     | { state: "exited"; error: string };
-  /** cloudflared の出力の最後の行 (古い順)。 */
+  /**
+   * Homebrew (cloudflared を入れる) と code-viewer の記録の最後の行 (古い順)。
+   * cloudflared の出力は端末 (tunnel.shell) にあり、ここには入れない。
+   */
   log: string[];
 };
 
@@ -64,6 +68,23 @@ export type RemoteAccessSaveRequest = {
   autoStart?: boolean;
   token?: string;
 };
+
+/**
+ * 開始で入口が起こす cloudflared の引数 (server/entry/remote-control.ts)。設定の
+ * 画面は同じものを「実行するコマンド」として見せる。--grace-period は止めるときに
+ * 通信の終わりを待つ時間。
+ */
+export function cloudflaredRunArgs(tokenPath: string): string[] {
+  return [
+    "tunnel",
+    "--no-autoupdate",
+    "--grace-period",
+    "2s",
+    "run",
+    "--token-file",
+    tokenPath,
+  ];
+}
 
 /** 外から開いた画面が外部接続の経路 (entryRemote*) を叩いたときの 403 の code。 */
 export const REMOTE_LOCAL_ONLY_CODE = "remote-local-only";

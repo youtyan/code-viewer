@@ -387,8 +387,15 @@ export type MainTabsHandle = {
   openImage(path: string, pane?: OpenOptions["pane"]): void;
   /** フォーカスのある面の＋のメニューを開く (キー操作・パレットから)。 */
   openNewTabMenu(): void;
-  /** サイドバーの＋から、フォーカスのある面のプロジェクトのメニューを開く。 */
-  openProjectMenu(root: string, anchor: HTMLElement): void;
+  /**
+   * サイドバーの＋から、フォーカスのある面のプロジェクトのメニューを開く。
+   * picked は項目を選んだとき (取り消しでは呼ばない)、その項目より先に呼ぶ。
+   */
+  openProjectMenu(
+    root: string,
+    anchor: HTMLElement,
+    options?: { picked?: () => void },
+  ): void;
   /** 左の面の選択を外して本文の既定 (フォルダ表示) を出す (Files の入口)。 */
   showHome(): void;
   /** フォーカスのある面の前面のタブ。 */
@@ -2553,12 +2560,10 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     menu.innerHTML = iconSvg("main-tab-group-menu-icon", CHEVRON_DOWN_12_PATH);
     const openMenu = (at?: { x: number; y: number }) => {
       const rect = menu.getBoundingClientRect();
-      openProjectMenu(
-        key,
-        menu,
+      openProjectMenu(key, menu, {
         side,
-        at ?? { x: rect.left, y: rect.bottom + 4 },
-      );
+        at: at ?? { x: rect.left, y: rect.bottom + 4 },
+      });
     };
     menu.addEventListener("click", () => openMenu());
     head.addEventListener("contextmenu", (event) => {
@@ -2572,13 +2577,35 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   function openProjectMenu(
     root: string,
     anchor: HTMLElement,
-    side: PaneSide = layout.panes.right ? layout.focused : "left",
-    at?: { x: number; y: number },
+    options: {
+      side?: PaneSide;
+      at?: { x: number; y: number };
+      picked?: () => void;
+    } = {},
   ): void {
+    const side = options.side ?? (layout.panes.right ? layout.focused : "left");
     const count =
       layout.panes[side]?.tabs.filter((tab) => keyOf(tab) === root).length ?? 0;
     const collapsed = count > 0 && (layout.collapsed ?? []).includes(root);
-    showContextMenu(anchor, groupMenuFor(side, root, collapsed, count), { at });
+    const { picked } = options;
+    const items = groupMenuFor(side, root, collapsed, count);
+    showContextMenu(
+      anchor,
+      picked
+        ? items.map((item) =>
+            item.kind === "separator"
+              ? item
+              : {
+                  ...item,
+                  onSelect: () => {
+                    picked();
+                    item.onSelect();
+                  },
+                },
+          )
+        : items,
+      { at: options.at },
+    );
   }
 
   /**

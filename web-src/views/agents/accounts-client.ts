@@ -11,6 +11,7 @@ import { apiUrl } from "../../core/api-url";
 
 import type {
   AccountsResponse,
+  AccountTag,
   CreateAccountPlan,
   LaunchResponse,
   RegisterAccountPlan,
@@ -78,6 +79,8 @@ export type AccountsClient = {
   register(plan: RegisterAccountPlan): Promise<StoredAccount>;
   remove(id: string): Promise<StoredAccount>;
   rename(id: string, name: string): Promise<StoredAccount>;
+  /** タグを置き換える (色はタグの名前ごと)。 */
+  setTags(id: string, tags: AccountTag[]): Promise<AccountTag[]>;
   savePreferences(commands: Record<string, string>): Promise<void>;
   login(id: string): Promise<{ paneId: string; session: string }>;
   launch(request: {
@@ -359,6 +362,15 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
       );
       await load();
       return result.renamed;
+    },
+    async setTags(id, tags) {
+      const result = await post<{ tags: AccountTag[] }>(
+        apiUrl("agentAccounts"),
+        { op: "tags", id, tags },
+        "change the account tags",
+      );
+      await load();
+      return result.tags;
     },
     async savePreferences(commands) {
       await post(

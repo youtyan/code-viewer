@@ -3,8 +3,10 @@
 //
 // - 待ち受け: 127.0.0.1:<port>。Access の JWT を確かめてから入口の処理へ渡す
 //   (関所は remote-access.ts)。外から来た要求には publicOrigin が付く
-// - cloudflared: `cloudflared tunnel run --token-file <file>` を子として起こし、
-//   出力の最後の行と、張れている接続の数を持つ
+// - cloudflared: `cloudflared tunnel run --token-file <file>` を code-viewer の
+//   端末 (server/shell/session.ts の PTY。「＋」のシェルと同じ) で起こし、張れて
+//   いる接続の数を出力から数える。出力は端末のタブで見る (設定の「ターミナルで
+//   見る」)。タブを閉じても動き続け、タブの「セッションを止める」で止まる
 // - 設定ファイル (remote-access.json) と Tunnel のトークン (tunnel-token): 設定
 //   画面から 0600 で書く。トークンはどの応答にもログにも出さない
 //
@@ -18,8 +20,8 @@
 // 別の設定ファイルを渡したときも状態フォルダに置く (渡したファイルの隣は
 // リポジトリの中でありうる)。
 //
-// cloudflared は入口の終了処理 (shutdown) と runtime.ts の exit の後始末で
-// 止まる。SIGKILL で入口が終わると残るので、起こした pid を状態フォルダに控え、
+// cloudflared は入口の終了処理 (shutdown) と、端末の後始末 (入口が終われば
+// PTY が閉じる) で止まる。SIGKILL で入口が終わると残りうるので、起こした pid を状態フォルダに控え、
 // 次の入口が起動時と開始の前に、控えた pid がまだ同じトークンの cloudflared
 // なら止める (stopLeftoverTunnel)。
 
@@ -37,11 +39,14 @@ import { createInterface } from "node:readline";
 import type { JWTVerifyGetKey } from "jose";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import {
+  cloudflaredRunArgs,
   REMOTE_LOCAL_ONLY_CODE,
   type RemoteAccessSaveRequest,
   type RemoteAccessStatus,
   type RemoteAccessValues,
 } from "../../core/remote-access";
+import type { ShellSessionId } from "../../core/shell";
+import { stripAnsi } from "../../core/terminal-images";
 import {
   json,
   parseBoundedJsonBody,
@@ -58,6 +63,7 @@ import {
   startServer,
   stopProcess,
 } from "../runtime";
+import { createShellSession, watchShellOutput } from "../shell/session";
 import { writeFileAtomic } from "../terminal/settings-file";
 import { codeViewerStateDir } from "../user-state-dir";
 import {
@@ -73,8 +79,8 @@ const PID_FILE_NAME = "remote-access-cloudflared.pid";
 /** 画面に返す cloudflared の出力の行数と、1 行の長さの上限。 */
 const LOG_LINES = 200;
 const LOG_LINE_CHARS = 2000;
-/** cloudflared に渡す、止めるときに通信の終わりを待つ時間。 */
-const GRACE_PERIOD = "2s";
+/** cloudflared が自分で終わったとき、理由に添える出力の行数。 */
+const EXIT_TAIL_LINES = 20;
 /** SIGTERM の後、SIGKILL に切り替えるまで待つ時間。SIGKILL の後も同じだけ待つ。 */
 const STOP_WAIT_MS = 5000;
 const VERSION_TIMEOUT_MS = 5000;
@@ -251,13 +257,16 @@ type Tunnel =
   | { state: "skipped" }
   | {
       state: "running";
-      child: SpawnedProcess;
+      /** cloudflared を動かしている code-viewer の端末 (タブで開ける)。 */
+      shell: ShellSessionId;
       pid: number;
       connections: Set<string>;
-      /** 'close' で解決する (止めるときに待つ)。 */
+      /** 終わったら解決する (止めるときに待つ)。 */
       closed: Promise<void>;
       /** こちらが止めている (終了を失敗として出さない)。 */
       stopping: boolean;
+      /** 出力の最後の行 (自分で終わったときの理由に添える。端末は終わると消える)。 */
+      tail: string[];
     }
   | { state: "exited"; error: string };
 
@@ -419,6 +428,7 @@ export function createRemoteControl(deps: RemoteControlDeps) {
               state: "running",
               pid: tunnel.pid,
               connections: tunnel.connections.size,
+              shell: tunnel.shell,
             }
           : tunnel,
       log: [...log],
@@ -596,12 +606,12 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     }
     const running = tunnel;
     running.stopping = true;
-    stopProcess(running.child, "SIGTERM");
+    signalProcessGroup(running.pid, "SIGTERM");
     if (await waitClosed(running.closed, STOP_WAIT_MS)) return;
     appendLog(
       `[code-viewer] cloudflared did not stop within ${STOP_WAIT_MS / 1000} seconds; sending SIGKILL`,
     );
-    stopProcess(running.child, "SIGKILL");
+    signalProcessGroup(running.pid, "SIGKILL");
     if (await waitClosed(running.closed, STOP_WAIT_MS)) return;
     // SIGKILL の後も出力が閉じない (送れなかった・孫が管を持っている)。待ち続けると
     // 開始・停止・保存・入口の終了が全部詰まるので、理由を残して先へ進む。
@@ -732,96 +742,122 @@ export function createRemoteControl(deps: RemoteControlDeps) {
       changed();
       return;
     }
-    const child = spawnProcess(
-      cloudflared,
-      [
-        "tunnel",
-        "--no-autoupdate",
-        "--grace-period",
-        GRACE_PERIOD,
-        "run",
-        "--token-file",
-        tokenPath,
-      ],
-      { cwd: dirname(tokenPath), stdio: ["ignore", "pipe", "pipe"] },
+    // code-viewer の端末で動かす: 設定の「ターミナルで見る」でタブに開いて出力を
+    // 見られ、タブを閉じても動き続ける。端末の子なので入口が終われば一緒に終わる。
+    const created = await createShellSession(
+      dirname(tokenPath),
+      {},
+      undefined,
+      {
+        file: cloudflared,
+        args: cloudflaredRunArgs(tokenPath),
+        purpose: { kind: "remote-tunnel" },
+      },
     );
-    let spawnError: Error | null = null;
+    if (created.status !== "ok") {
+      const error =
+        created.status === "unavailable"
+          ? `cloudflared runs in a code-viewer terminal, which needs @lydell/node-pty: ${created.reason || "it could not be loaded"}`
+          : created.status === "error"
+            ? `cloudflared could not be started: ${formatErrorDetail(created.error)}`
+            : `cloudflared could not be started: a terminal ${created.session.id} is already open`;
+      console.error(`[code-viewer] remote access: ${error}`);
+      tunnel = { state: "exited", error };
+      changed();
+      return;
+    }
     let closeTunnel: () => void = () => undefined;
     const closed = new Promise<void>((resolve) => {
       closeTunnel = resolve;
     });
     const current: Tunnel & { state: "running" } = {
       state: "running",
-      child,
-      pid: child.pid ?? 0,
+      shell: created.session.id,
+      pid: created.pid,
       connections: new Set(),
       closed,
       stopping: false,
+      tail: [],
     };
     tunnel = current;
     changed();
-    for (const stream of [child.stdout, child.stderr]) {
-      if (!stream) continue;
-      createInterface({ input: stream }).on("line", (line) => {
-        appendLog(line);
-        if (tunnel !== current) return;
-        const event = tunnelConnectionEvent(line);
-        if (event?.kind === "up") current.connections.add(event.index);
-        if (event?.kind === "down") current.connections.delete(event.index);
-      });
-    }
-    child.on("error", (error: Error) => {
-      spawnError ??= error;
-      console.error("[code-viewer] remote access: cloudflared failed", error);
-      appendLog(`[code-viewer] ${formatErrorDetail(error)}`);
-    });
-    child.once("close", (code: number | null, signal: string | null) => {
-      const how = signal ? `signal ${signal}` : `code ${code}`;
-      appendLog(`[code-viewer] cloudflared exited (${how})`);
-      try {
-        removePidRecord(current.pid);
-      } catch (error) {
-        // 終了の知らせの中なので投げ返す先が無い。画面の出力とログに全文を残す
-        // (残った記録は次の開始で確かめ直される)。
-        console.error(
-          "[code-viewer] remote access: removing the pid record failed",
-          error,
-        );
-        appendLog(`[code-viewer] ${formatErrorDetail(error)}`);
-      }
-      if (tunnel === current) {
-        if (current.stopping) {
-          tunnel = { state: "stopped" };
-          console.log("[code-viewer] remote access: cloudflared stopped");
-        } else {
-          const error = spawnError
-            ? `cloudflared could not be started: ${formatErrorDetail(spawnError)}`
-            : `cloudflared exited (${how}). The last lines of its output are below.`;
-          console.error(`[code-viewer] remote access: ${error}`);
-          tunnel = { state: "exited", error };
+    let partial = "";
+    const unwatch = watchShellOutput(
+      current.shell,
+      (chunk) => {
+        const lines = `${partial}${chunk}`.split(/\r\n|\n|\r/);
+        partial = lines.pop() ?? "";
+        for (const raw of lines) {
+          // 端末の中の cloudflared は色を付けて書く。色を落としてから読む。
+          const line = stripAnsi(raw);
+          if (!line) continue;
+          current.tail.push(
+            line.length > LOG_LINE_CHARS
+              ? `${line.slice(0, LOG_LINE_CHARS)}…`
+              : line,
+          );
+          if (current.tail.length > EXIT_TAIL_LINES) current.tail.shift();
+          if (tunnel !== current) continue;
+          const event = tunnelConnectionEvent(line);
+          if (event?.kind === "up") current.connections.add(event.index);
+          if (event?.kind === "down") current.connections.delete(event.index);
+          changed();
         }
-        changed();
-      }
-      closeTunnel();
-    });
-    if (child.pid !== undefined) {
-      try {
-        mkdirSync(dirname(pidPath), { recursive: true, mode: 0o700 });
-        writeFileAtomic(
-          pidPath,
-          `${JSON.stringify({ pid: child.pid, tokenPath })}\n`,
-          0o600,
-        );
-      } catch (error) {
-        // 記録できないまま動かすと、入口が SIGKILL で終わったときに誰も止めない。
-        current.stopping = true;
-        stopProcess(child, "SIGTERM");
-        await waitClosed(closed, STOP_WAIT_MS);
-        throw errorWithCause(
-          `cloudflared was stopped because its pid could not be recorded in ${pidPath}`,
-          error,
-        );
-      }
+      },
+      (exitCode, closedByRequest) => {
+        try {
+          removePidRecord(current.pid);
+        } catch (error) {
+          // 終了の知らせの中なので投げ返す先が無い。画面の出力とログに全文を残す
+          // (残った記録は次の開始で確かめ直される)。
+          console.error(
+            "[code-viewer] remote access: removing the pid record failed",
+            error,
+          );
+          appendLog(`[code-viewer] ${formatErrorDetail(error)}`);
+        }
+        if (tunnel === current) {
+          if (current.stopping || closedByRequest) {
+            // こちらの停止か、端末のタブの「セッションを止める」。
+            tunnel = { state: "stopped" };
+            console.log("[code-viewer] remote access: cloudflared stopped");
+          } else {
+            const last = [...current.tail, stripAnsi(partial)].filter(Boolean);
+            const error = `cloudflared exited (code ${exitCode}).${last.length ? `\nLast output:\n${last.join("\n")}` : ""}`;
+            console.error(`[code-viewer] remote access: ${error}`);
+            tunnel = { state: "exited", error };
+          }
+          changed();
+        }
+        closeTunnel();
+      },
+    );
+    if (!unwatch) {
+      // 受け手を付ける前に終わった (端末はもう無い)。
+      removePidRecord(current.pid);
+      tunnel = {
+        state: "exited",
+        error: `cloudflared exited right after it started (pid ${current.pid})`,
+      };
+      changed();
+      return;
+    }
+    try {
+      mkdirSync(dirname(pidPath), { recursive: true, mode: 0o700 });
+      writeFileAtomic(
+        pidPath,
+        `${JSON.stringify({ pid: current.pid, tokenPath })}\n`,
+        0o600,
+      );
+    } catch (error) {
+      // 記録できないまま動かすと、入口が SIGKILL で終わったときに誰も止めない。
+      current.stopping = true;
+      signalProcessGroup(current.pid, "SIGTERM");
+      await waitClosed(closed, STOP_WAIT_MS);
+      throw errorWithCause(
+        `cloudflared was stopped because its pid could not be recorded in ${pidPath}`,
+        error,
+      );
     }
     console.log(
       `[code-viewer] remote access: cloudflared started (pid ${current.pid})`,

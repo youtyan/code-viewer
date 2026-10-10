@@ -82,7 +82,7 @@ code-viewer
 | `--open` | Open the URL in the default browser |
 | `--port <port>` | Port to listen on (default: a free port) |
 | `--idle-stop <seconds>` | Stop a project's process after this long unused (default `600`, `0` = never). Terminals and agents keep running |
-| `--remote-access <file>` | Use this remote access file and open its listener on start (Settings → **Remote access** does the same without it; [Connect from outside](#connect-from-outside)) |
+| `--remote-access <file>` | Use this remote access file and open its service URL (where the Tunnel forwards to) on start (Settings → **Remote access** does the same without it; [Connect from outside](#connect-from-outside)) |
 | `--standalone` | Run a separate server for this repository only |
 | `--bin <name>=<absolute-path>` | Path of `git`, `rg`, `docker`, `gh` or `tmux`, for the repository you start in |
 | `--scope-omit-dir <name>` | Directories not to read in the repository you start in (repeatable; replaces the default list and the one in Settings) |
@@ -226,6 +226,7 @@ How the state is decided, strongest first:
 - **Sign in** runs the official login command in a new tmux window.
 - Sign-in state and email come from `claude auth status`, `codex login status` and `codex app-server`. code-viewer does not read tokens.
 - Usage: the 5-hour and weekly windows with reset times, checked every 5 minutes while any code-viewer page is open (**Refresh all** checks now). Checking does not start a model turn.
+- **Tags** in **Settings → Accounts** gives an account tags of your own (the default account too). Each tag has one color, and the tags appear on the account cards of the board and next to the account name on its agent rows.
 - The same steps from a terminal: `code-viewer accounts` (`list`, `plan`, `create`, `register`, `login`, `wait`, `rename`, `remove`).
 
 ### Terminal
@@ -594,10 +595,10 @@ You need a domain whose DNS is managed by Cloudflare (shown as Active).
 
 1. In Zero Trust, create a self-hosted Access application for the public hostname (for example `viewer.example.com`) with a policy that allows only your email.
 2. Copy the Team domain and the application's AUD.
-3. In code-viewer (not started with `--standalone`), open Settings → **Remote access**, enter **Public URL**, **Team domain**, **AUD** and **Listener port** (`64161`), and press **Save changes**.
+3. In code-viewer (not started with `--standalone`), open Settings → **Remote access**, enter **Public URL**, **Team domain**, **AUD** and **Service URL port** (`64161`), and press **Save changes**.
 4. Create a named Tunnel (Networking → Tunnels). If `cloudflared` is missing and Homebrew is installed, **Install cloudflared** in the same section installs it.
-5. Paste the Tunnel's install command (`cloudflared service install …`) into **Tunnel token** and save. Only the token is kept; do not run the command itself.
-6. Press **Start**. The section shows the listener and the number of Tunnel connections.
+5. Paste the Tunnel's install command (`cloudflared service install …`) into **Tunnel token** at the bottom of the same section and save. Only the token is kept; do not run the command itself.
+6. Press **Start**. code-viewer opens `http://127.0.0.1:64161` (**Service URL**) and runs `cloudflared tunnel run --token-file <token file>` in its own terminal. The section shows the state of each and the number of Tunnel connections; **Open in terminal** opens the cloudflared output in a tab (closing the tab does not stop it).
 7. In the Tunnel, add a published application route for the public hostname to `http://127.0.0.1:64161`.
 8. In the route's additional settings, set HTTP Host Header to the public hostname and turn on Protect with Access with your Team name (without `.cloudflareaccess.com`) and AUD.
 9. Add a Cache Rule for the domain that bypasses the cache for that hostname.
@@ -605,9 +606,9 @@ You need a domain whose DNS is managed by Cloudflare (shown as Active).
 
 - **Start when code-viewer starts** starts remote access every time code-viewer starts. Stopping code-viewer stops `cloudflared`; one left behind by a killed code-viewer is stopped when code-viewer starts again.
 - Remote access can be started, stopped and changed only on the Mac, not from a page opened through the Tunnel.
-- The values are saved in `remote-access.json` and the token in `tunnel-token`, both in the state folder and readable only by you. `--remote-access <file>` reads the values from that file instead and opens the listener when code-viewer starts; the token still goes to the state folder, so paste it once in Settings.
-- If you run `cloudflared` yourself (for example as a service), do not save a token: **Start** then opens only the listener.
-- Point the Tunnel only at the listener port, never at the normal local port.
+- The values are saved in `remote-access.json` and the token in `tunnel-token`, both in the state folder and readable only by you. `--remote-access <file>` reads the values from that file instead and opens the service URL when code-viewer starts; the token still goes to the state folder, so paste it once in Settings.
+- If you run `cloudflared` yourself (for example as a service), do not save a token: **Start** then opens only the service URL.
+- Point the Tunnel only at the service URL port, never at the normal local port.
 - Quick Tunnel does not work (no event streams for terminal output).
 - Keep the Mac awake. Input that failed to send is not retried.
 

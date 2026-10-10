@@ -16,7 +16,9 @@ import {
   createShellSession,
   listShellSessionsForMatching,
   operateShellView,
+  readShellBuffer,
   subscribeShell,
+  watchShellOutput,
   writeToShellWhenReady,
 } from "../server/shell/session";
 
@@ -117,6 +119,93 @@ describe("createShellSession with a requested id", () => {
       ["shell-same02"],
     ]);
   });
+});
+
+// シェルの代わりに決まったコマンドを起こす (外部接続の cloudflared)。
+describe("createShellSession with a command", () => {
+  const LAUNCH = {
+    file: "/opt/sample/cloudflared",
+    args: ["tunnel", "run", "--token-file", "/state dir/tunnel-token"],
+    purpose: { kind: "remote-tunnel" } as const,
+  };
+
+  test("runs the command itself, shows it on the first line and does not wait for the tty", async () => {
+    const result = await createShellSession(
+      process.cwd(),
+      {},
+      undefined,
+      LAUNCH,
+    );
+    if (result.status !== "ok") throw new Error("expected a shell session");
+
+    expect({
+      spawned: mocks.spawn.mock.calls[0]?.slice(0, 2),
+      ttyLookups: mocks.runAsync.mock.calls.length,
+      session: {
+        command: result.session.command,
+        purpose: result.session.purpose,
+      },
+      pid: result.pid,
+      screen: readShellBuffer(result.session.id)?.replay,
+    }).toEqual({
+      spawned: [
+        "/opt/sample/cloudflared",
+        ["tunnel", "run", "--token-file", "/state dir/tunnel-token"],
+      ],
+      ttyLookups: 0,
+      session: {
+        command:
+          "/opt/sample/cloudflared tunnel run --token-file '/state dir/tunnel-token'",
+        purpose: { kind: "remote-tunnel" },
+      },
+      pid: 1234,
+      screen:
+        "$ /opt/sample/cloudflared tunnel run --token-file '/state dir/tunnel-token'\r\n",
+    });
+  });
+
+  test.each([
+    {
+      name: "a command that ends by itself is not closed",
+      end: (id: string) => {
+        pty.emitExit(3);
+        return Promise.resolve(id);
+      },
+      expected: { chunks: ["INF ready\r\n"], exits: [[3, false]] },
+    },
+    {
+      name: "a command stopped with closeShellSession is closed",
+      end: async (id: string) => {
+        pty.kill.mockImplementation(() => pty.emitExit(0));
+        await closeShellSession(id);
+        return id;
+      },
+      expected: { chunks: ["INF ready\r\n"], exits: [[0, true]] },
+    },
+  ])(
+    "watchShellOutput passes the output and how it ended: $name",
+    async ({ end, expected }) => {
+      const result = await createShellSession(
+        process.cwd(),
+        {},
+        undefined,
+        LAUNCH,
+      );
+      if (result.status !== "ok") throw new Error("expected a shell session");
+      const chunks: string[] = [];
+      const exits: Array<[number, boolean]> = [];
+      watchShellOutput(
+        result.session.id,
+        (chunk) => chunks.push(chunk),
+        (exitCode, closed) => exits.push([exitCode, closed]),
+      );
+
+      pty.emitData("INF ready\r\n");
+      await end(result.session.id);
+
+      expect({ chunks, exits }).toEqual(expected);
+    },
+  );
 });
 
 describe("createShellSession PTY terminal resolution", () => {

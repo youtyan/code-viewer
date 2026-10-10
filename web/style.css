@@ -17657,6 +17657,10 @@ body.gdp-search-page {
 .remote-access-stop {
   inline-size: 8em;
 }
+/* 状態の行の 3 列目のボタン (ターミナルで見る・トークンの欄へ)。列の幅に伸ばさない。 */
+.remote-access-row-button {
+  justify-self: start;
+}
 /* 「cloudflared を入れる」は入れられるときだけ (.gdp-btn の display より強く隠す)。 */
 .remote-access-actions > [hidden] {
   display: none;
@@ -18054,6 +18058,169 @@ html[data-nav-collapsed] #app-nav {
 [data-project-color="red"]    { --project-color: var(--project-red); }
 [data-project-color="olive"]  { --project-color: var(--project-olive); }
 [data-project-color="none"]   { --project-color: var(--project-none); }
+/* アカウントのタグの札 (views/agents/account-tags.ts。全体ボードの行・設定の
+   アカウントの表・タグの小窓)。地と文字はプロジェクトの頭文字の四角と同じ名前
+   (濃さの下限は project-colors.test.ts)。色の無いタグは --project-none の地。 */
+.account-tags {
+  display: inline-flex;
+  gap: var(--space-1);
+  margin-left: var(--space-1);
+  vertical-align: baseline;
+}
+.account-tag {
+  display: inline-block;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--project-color);
+  color: var(--project-ink);
+  font-size: var(--ui-font-xs);
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+/* タグの小窓の入力欄 (account-tags.ts の createAccountTagEditor)。欄は
+   .gdp-dialog-input と同じ沈んだ面・内側の線・焦点の見せ方で、札が中に並ぶ。 */
+.account-tags-editor {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+.account-tags-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: calc(var(--space-unit) * 11);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  cursor: text;
+}
+.account-tags-field:focus-within {
+  box-shadow: inset 0 0 0 1px var(--color-accent), var(--focus-ring);
+}
+.account-tags-input {
+  flex: 1 1 calc(var(--space-unit) * 30);
+  min-width: 0;
+  height: calc(var(--space-unit) * 6);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  outline: none;
+}
+.account-tags-input::placeholder {
+  color: var(--color-text-3);
+}
+/* 入力欄の札: 名前を押すと色を選ぶ札になり (焦点と同じ輪)、× で外す。 */
+.account-tag-editable {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  font-size: var(--ui-font-sm);
+  line-height: 1;
+}
+.account-tag-editable.is-selected {
+  box-shadow: var(--focus-ring);
+}
+.account-tag-pick,
+.account-tag-remove {
+  display: inline-flex;
+  align-items: center;
+  height: calc(var(--space-unit) * 6);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.account-tag-pick {
+  padding: 0 var(--space-1) 0 var(--space-2);
+  font-weight: 600;
+}
+.account-tag-remove {
+  padding: 0 var(--space-1);
+  opacity: 0.7;
+}
+.account-tag-remove:hover {
+  opacity: 1;
+}
+.account-tag-remove-icon {
+  width: calc(var(--space-unit) * 3);
+  height: calc(var(--space-unit) * 3);
+}
+.account-tag-pick:focus-visible,
+.account-tag-remove:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+/* 色の丸と、ほかのアカウントのタグ。見出しは補足の色で小さく。 */
+.account-tags-colors,
+.account-tags-others {
+  display: grid;
+  gap: var(--space-2);
+}
+.account-tags-colors[hidden],
+.account-tags-others[hidden] {
+  display: none;
+}
+.account-tags-label {
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+}
+.account-tags-swatches,
+.account-tags-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.account-tag-swatch {
+  width: calc(var(--space-unit) * 6);
+  height: calc(var(--space-unit) * 6);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--project-color);
+  cursor: pointer;
+}
+/* 色なしは中の空いた丸 (札は --project-none の灰色で出る)。 */
+.account-tag-swatch[data-project-color="none"] {
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-text-3);
+}
+.account-tag-swatch[aria-pressed="true"],
+.account-tag-swatch:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.account-tag-swatch[data-project-color="none"][aria-pressed="true"],
+.account-tag-swatch[data-project-color="none"]:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--color-text-3), var(--focus-ring);
+}
+.account-tags-suggest {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+.account-tags-suggest > .account-tag {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--ui-font-sm);
+  line-height: 1;
+}
+.account-tags-suggest:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.account-tags-suggest:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
 .project-mark {
   flex: none;
   display: inline-grid;
@@ -24607,8 +24774,11 @@ body.gdp-help-page #content {
   padding-left: var(--space-4);
   border-left: 2px solid var(--color-line);
 }
-/* ヘルプの本文の表は本文の幅まで。表の見た目は下の .ui-table。 */
+/* ヘルプの本文の表は中身の幅 (本文の幅まで)。ヘルプの本文の幅は欄いっぱいなので、
+   .ui-table の 100% のままだと 2 列の短い表の列が画面の両端に離れた。
+   表の見た目は下の .ui-table。 */
 .gdp-help-content table {
+  width: auto;
   max-width: var(--doc-measure);
   margin: 0 0 var(--space-4);
   font-size: var(--ui-font-lg);

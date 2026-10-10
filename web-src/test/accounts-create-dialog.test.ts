@@ -114,6 +114,7 @@ function client(
     register: unused("register"),
     remove: unused("remove"),
     rename: unused("rename"),
+    setTags: unused("setTags"),
     savePreferences: unused("savePreferences"),
     login: unused("login"),
     launch: unused("launch"),

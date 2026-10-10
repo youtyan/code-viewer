@@ -59,7 +59,8 @@ export type ShellWords = {
  * エージェントを映しているシェル (`showsAgent`) はエージェントの名前で出るので
  * 数えない (素のシェルの 1 本目は「Shell 1」)。
  * ログインのウィンドウを映すシェル (purpose が sign-in) は
- * 「Sign in · 種類 · アカウント」。
+ * 「Sign in · 種類 · アカウント」。外部接続の cloudflared (remote-tunnel) は
+ * 「cloudflared」(番号を付けない。1 つしか動かない)。
  */
 export function shellName(
   session: string,
@@ -75,8 +76,13 @@ export function shellName(
   if (purpose?.kind === "sign-in") {
     return `${words.signIn} · ${purpose.agent} · ${purpose.account || words.defaultAccount}`;
   }
+  if (purpose?.kind === "remote-tunnel") return "cloudflared";
   const order = sessions
-    .filter((item) => item.id === session || !showsAgent(item.id))
+    .filter(
+      (item) =>
+        item.id === session ||
+        (!showsAgent(item.id) && item.purpose?.kind !== "remote-tunnel"),
+    )
     .sort(
       (a, b) =>
         a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),

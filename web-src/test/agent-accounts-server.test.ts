@@ -55,6 +55,7 @@ import {
   applyRegisterAccount,
   applyRemoveAccount,
   applyRenameAccount,
+  applySetAccountTags,
   planCreateAccount,
   readAccountRegistry,
   updateAccountRegistry,
@@ -505,6 +506,58 @@ describe("registering, removing and a broken registry", () => {
         "Personal",
         "Other",
       ]);
+    },
+  );
+
+  test("tags are written for a registered and the default account and keep the registry readable", async () => {
+    const dir = join(root, "existing");
+    mkdirSync(dir);
+    const added = await applyRegisterAccount(paths, "codex", "Personal", dir);
+    await applySetAccountTags(paths, added.id, [
+      { name: "work", color: "blue" },
+    ]);
+    const saved = await applySetAccountTags(paths, "claude:default", [
+      { name: "work", color: null },
+      { name: "home", color: "green" },
+    ]);
+    const read = readAccountRegistry(paths.registry);
+    expect([
+      saved,
+      read.ok && [read.registry.tags, read.registry.tagColors],
+    ]).toEqual([
+      [
+        { name: "work", color: null },
+        { name: "home", color: "green" },
+      ],
+      [
+        { [added.id]: ["work"], "claude:default": ["work", "home"] },
+        { home: "green" },
+      ],
+    ]);
+  });
+
+  test.each([
+    {
+      name: "an unknown account",
+      id: "missing",
+      tags: [{ name: "work", color: null }],
+      code: "not-found",
+    },
+    {
+      name: "the same tag twice",
+      id: "claude:default",
+      tags: [
+        { name: "work", color: null },
+        { name: "Work", color: null },
+      ],
+      code: "invalid",
+    },
+  ] as const)(
+    "setting tags on $name is refused",
+    async ({ id, tags, code }) => {
+      await expect(
+        applySetAccountTags(paths, id, [...tags]),
+      ).rejects.toMatchObject({ code });
     },
   );
 

@@ -26,6 +26,7 @@ import {
   type ShellPurpose,
   type ShellSession,
   type ShellSessionId,
+  shellQuoteForDisplay,
 } from "../../core/shell";
 import { runAsync } from "../runtime";
 
@@ -78,11 +79,12 @@ type SessionEntry = {
   listeners: Set<(chunk: string) => void>;
   exitListeners: Set<(exitCode: number) => void>;
   /**
-   * 出力が出たことだけを知りたい者 (terminal/attach-watch.ts の見張り)。購読者
-   * (listeners) とは別に持つ: 購読者に数えると、まだ誰にも渡っていない出力
-   * (unseenChars) を渡したことになり、端末への問い合わせに誰も答えなくなる。
+   * 出力を見張る者 (terminal/attach-watch.ts の見張り・外部接続の cloudflared の
+   * 接続の数え上げ)。購読者 (listeners) とは別に持つ: 購読者に数えると、まだ誰にも
+   * 渡っていない出力 (unseenChars) を渡したことになり、端末への問い合わせに誰も
+   * 答えなくなる。
    */
-  outputWatchers: Set<() => void>;
+  outputWatchers: Set<(chunk: string) => void>;
   /**
    * 最初の出力を受けたか。プロンプトが出た = シェルが入力を読む状態になった
    * 合図として使う (writeToShellWhenReady)。
@@ -281,13 +283,24 @@ export function shellTmuxAttachment(
  */
 export function watchShellOutput(
   id: ShellSessionId,
-  onOutput: () => void,
+  onOutput: (chunk: string) => void,
+  /**
+   * 終わったときに呼ぶ。closed は closeShellSession で止めた (タブの「セッションを
+   * 止める」・入口の終了) か。false ならプロセスが自分で終わった。
+   */
+  onExit?: (exitCode: number, closed: boolean) => void,
 ): (() => void) | null {
   const entry = sessions.get(id);
   if (!entry || entry.meta.exited) return null;
+  // closeShellSession は止める前に一覧から外す。自分で終わったときは知らせた後に外す。
+  const exitWatcher = onExit
+    ? (exitCode: number) => onExit(exitCode, sessions.get(id) !== entry)
+    : null;
   entry.outputWatchers.add(onOutput);
+  if (exitWatcher) entry.exitListeners.add(exitWatcher);
   return () => {
     entry.outputWatchers.delete(onOutput);
+    if (exitWatcher) entry.exitListeners.delete(exitWatcher);
   };
 }
 
@@ -296,7 +309,7 @@ export function getShellSession(id: ShellSessionId): ShellSession | null {
 }
 
 export type CreateShellResult =
-  | { status: "ok"; session: ShellSession }
+  | { status: "ok"; session: ShellSession; pid: number }
   /** 頼まれた ID のシェルがもうある (別の窓が先に開き直した)。開かずにそれを返す。 */
   | { status: "in-use"; session: ShellSession }
   | { status: "unavailable"; reason: string }
@@ -311,6 +324,12 @@ export async function createShellSession(
    * ことになる)。使われている ID なら開かずに in-use を返す。
    */
   requestedId?: ShellSessionId,
+  /**
+   * シェルの代わりに起こすコマンド (外部接続の cloudflared)。PTY の子がこの
+   * プロセスそのものになる (pid で止められる)。端末の頭に `$ <コマンド>` の 1 行を
+   * 出し、何が動いているかを見せる。
+   */
+  launch?: { file: string; args: string[]; purpose: ShellPurpose },
 ): Promise<CreateShellResult> {
   const existing = requestedId ? sessions.get(requestedId) : undefined;
   if (existing) return { status: "in-use", session: existing.meta };
@@ -326,14 +345,16 @@ export async function createShellSession(
     size.cols ?? DEFAULT_SHELL_COLS,
     size.rows ?? DEFAULT_SHELL_ROWS,
   );
-  const command = resolveShellCommand();
+  const command = launch
+    ? [launch.file, ...launch.args].map(shellQuoteForDisplay).join(" ")
+    : resolveShellCommand();
   // makeTimedId は `<prefix>-<base36>` を返す。SHELL_ID_PREFIX の末尾の
   // ハイフンがそこに当たるので、prefix はハイフンを外して渡す。
   const id = requestedId ?? makeTimedId(SHELL_ID_PREFIX.replace(/-$/, ""));
 
   let child: PtyProcess;
   try {
-    child = pty.spawn(command, [], {
+    child = pty.spawn(launch?.file ?? command, launch?.args ?? [], {
       name: "xterm-256color",
       cols,
       rows,
@@ -356,7 +377,9 @@ export async function createShellSession(
 
   let tty: string;
   try {
-    tty = await resolvePtyTty(child.pid, cwd);
+    // コマンドを起こすときは端末の名前を待たない (tmux を映さないので要らない)。
+    // 待つと、すぐ終わるコマンドの出力と終わりが、下で受け手を付ける前に過ぎる。
+    tty = launch ? "" : await resolvePtyTty(child.pid, cwd);
   } catch (error) {
     try {
       child.kill();
@@ -378,6 +401,7 @@ export async function createShellSession(
     };
   }
 
+  const header = launch ? `$ ${command}\r\n` : "";
   const entry: SessionEntry = {
     meta: {
       id,
@@ -391,11 +415,12 @@ export async function createShellSession(
       // このシェルの中で tmux を起動したとき、これが宛先になる。まだ空なら
       // shownInShell の照合時に取り直し、値を得た時点で meta に覚える。
       tty,
+      ...(launch ? { purpose: launch.purpose } : {}),
     },
     pty: child,
-    replay: "",
-    totalChars: 0,
-    unseenChars: 0,
+    replay: header,
+    totalChars: header.length,
+    unseenChars: header.length,
     listeners: new Set(),
     exitListeners: new Set(),
     outputWatchers: new Set(),
@@ -419,7 +444,7 @@ export async function createShellSession(
     // 待たせていた入力があればここで流す。
     markShellReady(entry);
     for (const listener of [...entry.listeners]) listener(chunk);
-    for (const watcher of [...entry.outputWatchers]) watcher();
+    for (const watcher of [...entry.outputWatchers]) watcher(chunk);
   });
   child.onExit(({ exitCode }) => {
     entry.meta.exited = true;
@@ -467,7 +492,7 @@ export async function createShellSession(
     return { status: "in-use", session: raced.meta };
   }
   sessions.set(id, entry);
-  return { status: "ok", session: entry.meta };
+  return { status: "ok", session: entry.meta, pid: child.pid };
 }
 
 export type ShellSubscription = {

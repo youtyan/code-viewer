@@ -22,12 +22,16 @@ export const SHELL_ID_PREFIX = "shell-";
  * sign-in はアカウントのログインのウィンドウを映すシェルで、タブの名前が
  * 「Sign in · <アカウント>」になる (views/agents/pane-text.ts の shellName)。
  * account は登録した表示名、既定のアカウントは空。
+ * remote-tunnel は外部接続の開始で入口が起こした cloudflared の端末
+ * (server/entry/remote-control.ts)。タブの名前は「cloudflared」。
  */
-export type ShellPurpose = {
-  kind: "sign-in";
-  agent: "claude" | "codex";
-  account: string;
-};
+export type ShellPurpose =
+  | {
+      kind: "sign-in";
+      agent: "claude" | "codex";
+      account: string;
+    }
+  | { kind: "remote-tunnel" };
 
 export type ShellSession = {
   id: ShellSessionId;
@@ -66,6 +70,16 @@ export type ShellListResponse = {
 export type ShellCreateResponse = {
   session: ShellSession;
 };
+
+/** 引用符なしで書けるシェルの単語。 */
+export const SHELL_SAFE_WORD = /^[A-Za-z0-9_./@%+=:,-]+$/;
+
+/** 画面に見せるコマンドの 1 語。そのまま貼って動く形に引用する。 */
+export function shellQuoteForDisplay(value: string): string {
+  return SHELL_SAFE_WORD.test(value)
+    ? value
+    : `'${value.replace(/'/g, "'\\''")}'`;
+}
 
 /** 新しいシェルを開くときの既定サイズ。ブラウザ側が測る前の暫定値。 */
 export const DEFAULT_SHELL_COLS = 120;

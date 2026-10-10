@@ -6,7 +6,8 @@
 //   本文は一覧の文字 (body) より一段大きい。設定の節の見出しはヘルプの群の見出しと同じ段
 // - 色: 本文は本来の文字色、要約・設定の説明だけ一段薄い色 (--color-text-2)
 // - 行間は日本語で読みやすい 1.7〜1.8
-// - 本文の幅: ヘルプは本文欄いっぱい、設定の説明は日本語 40 字・英語 70 字前後まで
+// - 本文の幅: ヘルプは本文欄いっぱい、設定の説明は日本語 40 字・英語 70 字前後まで。
+//   ヘルプの本文の表は中身の幅 (本文欄いっぱいに伸ばさない)
 // - 表示密度で文字が比例して変わる
 // - 設定の「変更を保存」は本文の箱の下端に貼り付く
 //
@@ -57,6 +58,7 @@ function renderPages(lang: "en" | "ja"): void {
               <p class="gdp-help-step-title" id="step-title">Start it</p>
               <p class="gdp-help-step-text" id="step-text">It opens.</p>
             </li></ol>
+            <table class="ui-table gdp-help-table" id="help-table"><tbody><tr><th>Domain</th><td>example.com</td></tr></tbody></table>
           </section>
         </article>
       </div>
@@ -221,6 +223,26 @@ describe("the help and settings pages", () => {
       (candidate) => candidate === selector,
     ).get("max-width");
     expect(width).toBe("var(--doc-measure)");
+  });
+
+  test.each([
+    {
+      name: "a table in the help body fits its content",
+      id: "help-table",
+      width: "auto",
+    },
+    {
+      name: "a table outside the help body keeps the full width",
+      id: "plain-table",
+      width: "100%",
+    },
+  ])("$name", ({ id, width }) => {
+    renderPages("ja");
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<table class="ui-table" id="plain-table"><tbody><tr><td>a</td></tr></tbody></table>',
+    );
+    expect(style(id).width).toBe(width);
   });
 
   test("the settings save bar sticks to the bottom of the content box", () => {
