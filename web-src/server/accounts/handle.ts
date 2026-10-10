@@ -17,17 +17,21 @@ import { mkdirSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import {
   type AccountAgent,
   type AccountEntry,
+  type AccountTag,
   handoffArgs,
   handoffPrompt,
   isAccountAgent,
   isHandoffLanguage,
   LOGIN_SESSION,
+  MAX_ACCOUNT_TAG,
+  MAX_ACCOUNT_TAGS,
   MAX_HANDOFF_ACCOUNT_LABEL,
   MAX_LAUNCH_COMMAND,
   transcriptDir,
 } from "../../core/agent-accounts";
 import { hasControlCharacter } from "../../core/control-chars";
 import { formatErrorDetail } from "../../core/error-detail";
+import { isProjectColor } from "../../core/project-colors";
 import {
   json,
   parseBoundedJsonBody,
@@ -57,6 +61,7 @@ import {
   applyRegisterAccount,
   applyRemoveAccount,
   applyRenameAccount,
+  applySetAccountTags,
   planCreateAccount,
   planRegisterAccount,
   updateAccountRegistry,
@@ -159,6 +164,21 @@ function shareOf(value: unknown): string[] | null {
   return out;
 }
 
+/** タグの一覧 ({ name, color }[])。色は無い (null) か、プロジェクトの色。 */
+function tagsOf(value: unknown): AccountTag[] | null {
+  if (!Array.isArray(value) || value.length > MAX_ACCOUNT_TAGS) return null;
+  const out: AccountTag[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) return null;
+    const { name, color } = item as Record<string, unknown>;
+    const tag = text(name, MAX_ACCOUNT_TAG);
+    const shade = color === null ? null : isProjectColor(color) ? color : false;
+    if (tag === null || shade === false) return null;
+    out.push({ name: tag, color: shade });
+  }
+  return out;
+}
+
 export async function handleAccountsPost(req: Request): Promise<Response> {
   const body = await parseBoundedJsonBody(
     req,
@@ -183,6 +203,12 @@ export async function handleAccountsPost(req: Request): Promise<Response> {
       return json({
         renamed: await applyRenameAccount(paths, fields.id, name),
       });
+    }
+    if (fields.op === "tags") {
+      if (typeof fields.id !== "string") return textError("invalid id", 400);
+      const tags = tagsOf(fields.tags);
+      if (tags === null) return textError("invalid tags", 400);
+      return json({ tags: await applySetAccountTags(paths, fields.id, tags) });
     }
     if (fields.op === "preferences") {
       const commands = fields.launchCommands;

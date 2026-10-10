@@ -1297,28 +1297,31 @@ describe("main tabs view: プロジェクトのグループ", () => {
       {
         name: "shell",
         label: "New shell",
-        expected: ["shell:/work/sample-docs:left"],
+        expected: ["picked", "shell:/work/sample-docs:left"],
       },
       {
         name: "agent",
         label: "New agent…",
-        expected: ["agent:/work/sample-docs"],
+        expected: ["picked", "agent:/work/sample-docs"],
       },
       {
         name: "files",
         label: "repo",
-        expected: ["switch:/work/sample-docs:-:-"],
+        expected: ["picked", "switch:/work/sample-docs:-:-"],
       },
       {
         name: "history",
         label: "history",
-        expected: ["switch:/work/sample-docs:history:-"],
+        expected: ["picked", "switch:/work/sample-docs:history:-"],
       },
     ])(
-      "サイドバーからタブの無いプロジェクトの $name を開く",
+      // picked は電話の引き出しを閉じる (app.ts)。項目より先に呼ぶ。
+      "サイドバーからタブの無いプロジェクトの $name を開く (選んだら先に picked)",
       async ({ label, expected }) => {
         const { handle, mount, calls } = await setupWithActions();
-        handle.openProjectMenu("/work/sample-docs", mount);
+        handle.openProjectMenu("/work/sample-docs", mount, {
+          picked: () => calls.push("picked"),
+        });
         const item = [
           ...document.querySelectorAll<HTMLButtonElement>(
             ".gdp-context-menu button",

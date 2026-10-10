@@ -4,13 +4,15 @@
 
 export type RemoteAccessSettingsText = {
   statusTitle: string;
+  statusIntro: string;
   rowListener: string;
   rowTunnel: string;
   rowToken: string;
   listenerRunning: string;
   listenerStopped: string;
   listenerFailed: string;
-  listenerTarget: (port: number, origin: string) => string;
+  listenerTarget: (url: string, origin: string) => string;
+  listenerNote: string;
   tunnelConnected: (connections: number) => string;
   tunnelWaiting: string;
   tunnelStopped: string;
@@ -18,6 +20,7 @@ export type RemoteAccessSettingsText = {
   tunnelExited: string;
   tunnelUnavailable: string;
   tunnelSkippedDetail: string;
+  openTerminal: string;
   tunnelProcess: (version: string, pid: number) => string;
   cloudflaredVersion: (version: string) => string;
   install: string;
@@ -28,6 +31,8 @@ export type RemoteAccessSettingsText = {
   tokenSaved: string;
   tokenAbsent: string;
   tokenInvalid: string;
+  tokenAbsentNote: string;
+  tokenJump: string;
   tokenTunnelId: (id: string) => string;
   start: string;
   stop: string;
@@ -57,7 +62,6 @@ export type RemoteAccessSettingsText = {
   savedTo: (configPath: string, tokenPath: string) => string;
   fromFlag: (configPath: string, tokenPath: string) => string;
   logTitle: (lines: number) => string;
-  logEmpty: string;
 };
 
 export const REMOTE_ACCESS_SETTINGS_TEXT: Record<
@@ -66,13 +70,17 @@ export const REMOTE_ACCESS_SETTINGS_TEXT: Record<
 > = {
   en: {
     statusTitle: "Status",
-    rowListener: "Listener",
+    statusIntro:
+      "Phone → Cloudflare → cloudflared (on this Mac) → service URL (code-viewer).",
+    rowListener: "Service URL",
     rowTunnel: "cloudflared",
     rowToken: "Token",
     listenerRunning: "Open",
     listenerStopped: "Stopped",
     listenerFailed: "Could not open",
-    listenerTarget: (port, origin) => `127.0.0.1:${port} for ${origin}`,
+    listenerTarget: (url, origin) => `${url} (forwarded from ${origin})`,
+    listenerNote:
+      "Enter this address as the Service URL of the Tunnel's public route in Cloudflare.",
     tunnelConnected: (connections) => `Connected (${connections})`,
     tunnelWaiting: "Connecting",
     tunnelStopped: "Stopped",
@@ -80,7 +88,8 @@ export const REMOTE_ACCESS_SETTINGS_TEXT: Record<
     tunnelExited: "Stopped by itself",
     tunnelUnavailable: "Unavailable",
     tunnelSkippedDetail:
-      "No token is saved, so cloudflared was not started. If you run cloudflared yourself, this is fine.",
+      "No token is set, so cloudflared was not started. If you run cloudflared yourself, this is fine.",
+    openTerminal: "Open in terminal",
     tunnelProcess: (version, pid) => `cloudflared ${version} (pid ${pid})`,
     cloudflaredVersion: (version) => `cloudflared ${version}`,
     install: "Install cloudflared",
@@ -88,11 +97,14 @@ export const REMOTE_ACCESS_SETTINGS_TEXT: Record<
     installHint:
       "Install cloudflared installs it with Homebrew; you do not need to open a terminal.",
     installingNote:
-      "Installing with Homebrew. Its output appears under cloudflared output below.",
+      "Installing with Homebrew. Its output appears under Homebrew and code-viewer output below.",
     installFailed: "Could not install cloudflared",
     tokenSaved: "Saved",
-    tokenAbsent: "Not saved",
+    tokenAbsent: "Not set",
     tokenInvalid: "Unreadable",
+    tokenAbsentNote:
+      "Copy the install command on the Tunnel page in Cloudflare (cloudflared service install <token>), paste it as it is into Tunnel token below, and press Save changes.",
+    tokenJump: "Go to Tunnel token",
     tokenTunnelId: (id) => `Tunnel ID ${id}`,
     start: "Start",
     stop: "Stop",
@@ -116,30 +128,34 @@ export const REMOTE_ACCESS_SETTINGS_TEXT: Record<
     originLabel: "Public URL",
     teamDomainLabel: "Team domain",
     audienceLabel: "AUD",
-    portLabel: "Listener port",
+    portLabel: "Service URL port",
     tokenLabel: "Tunnel token",
     tokenPlaceholderSaved: "Saved. Paste only to replace it",
     tokenPlaceholderAbsent: "Paste the Tunnel's install command",
     tokenHelp:
       "You can paste the whole install command (cloudflared service install …); only the token is saved, in a file only you can read. It is never shown again.",
-    portProblem: "The listener port must be a whole number from 1 to 65535.",
+    portProblem: "The service URL port must be a whole number from 1 to 65535.",
     saveFailed: "Could not save the remote access values",
     savedTo: (configPath, tokenPath) =>
       `Saved in ${configPath} (token: ${tokenPath}).`,
     fromFlag: (configPath, tokenPath) =>
       `Using the file given with --remote-access: ${configPath} (token: ${tokenPath}).`,
-    logTitle: (lines) => `cloudflared output (last ${lines} lines)`,
-    logEmpty: "No output yet.",
+    logTitle: (lines) =>
+      `Homebrew and code-viewer output (last ${lines} lines)`,
   },
   ja: {
     statusTitle: "状態",
-    rowListener: "待ち受け",
+    statusIntro:
+      "スマホ → Cloudflare → cloudflared（この Mac）→ サービス URL（code-viewer）の順につながります。",
+    rowListener: "サービス URL",
     rowTunnel: "cloudflared",
     rowToken: "トークン",
     listenerRunning: "開いています",
     listenerStopped: "止まっています",
     listenerFailed: "開けませんでした",
-    listenerTarget: (port, origin) => `127.0.0.1:${port}（${origin} 用）`,
+    listenerTarget: (url, origin) => `${url}（${origin} からの転送先）`,
+    listenerNote:
+      "Cloudflare の Tunnel の公開ルートで「サービス URL」に入れるアドレスです。",
     tunnelConnected: (connections) => `接続中（${connections} 本）`,
     tunnelWaiting: "接続しています",
     tunnelStopped: "止まっています",
@@ -147,7 +163,8 @@ export const REMOTE_ACCESS_SETTINGS_TEXT: Record<
     tunnelExited: "止まりました",
     tunnelUnavailable: "使えません",
     tunnelSkippedDetail:
-      "トークンが保存されていないので、cloudflared は起動していません。cloudflared を別に動かしているなら、このままで使えます。",
+      "トークンが未設定なので起動していません。cloudflared を自分で動かしているなら、このままで使えます。",
+    openTerminal: "ターミナルで見る",
     tunnelProcess: (version, pid) => `cloudflared ${version}（pid ${pid}）`,
     cloudflaredVersion: (version) => `cloudflared ${version}`,
     install: "cloudflared を入れる",
@@ -155,11 +172,14 @@ export const REMOTE_ACCESS_SETTINGS_TEXT: Record<
     installHint:
       "「cloudflared を入れる」で Homebrew から入れます。ターミナルを開く必要はありません。",
     installingNote:
-      "Homebrew で入れています。経過は下の「cloudflared の出力」に出ます。",
+      "Homebrew で入れています。経過は下の「Homebrew と code-viewer の出力」に出ます。",
     installFailed: "cloudflared を入れられませんでした",
     tokenSaved: "保存済み",
-    tokenAbsent: "未保存",
+    tokenAbsent: "未設定",
     tokenInvalid: "読めません",
+    tokenAbsentNote:
+      "Cloudflare の Tunnel の画面にあるインストールコマンド（cloudflared service install <トークン>）を、下の「Tunnel のトークン」にそのまま貼り、「変更を保存」を押します。",
+    tokenJump: "トークンの欄へ",
     tokenTunnelId: (id) => `Tunnel ID ${id}`,
     start: "開始",
     stop: "停止",
@@ -183,19 +203,18 @@ export const REMOTE_ACCESS_SETTINGS_TEXT: Record<
     originLabel: "公開 URL",
     teamDomainLabel: "Team domain",
     audienceLabel: "AUD",
-    portLabel: "待ち受けのポート",
+    portLabel: "サービス URL のポート",
     tokenLabel: "Tunnel のトークン",
     tokenPlaceholderSaved: "保存済み。置き換えるときだけ貼り付けます",
     tokenPlaceholderAbsent: "Tunnel のインストールコマンドを貼り付け",
     tokenHelp:
       "インストールコマンド（cloudflared service install …）をそのまま貼れます。トークンだけを自分しか読めないファイルに保存し、画面には二度と出しません。",
-    portProblem: "待ち受けのポートは 1〜65535 の整数にしてください。",
+    portProblem: "サービス URL のポートは 1〜65535 の整数にしてください。",
     saveFailed: "外部接続の値を保存できませんでした",
     savedTo: (configPath, tokenPath) =>
       `保存先: ${configPath}（トークン: ${tokenPath}）`,
     fromFlag: (configPath, tokenPath) =>
       `--remote-access で指定したファイルを使っています: ${configPath}（トークン: ${tokenPath}）`,
-    logTitle: (lines) => `cloudflared の出力（最後の ${lines} 行）`,
-    logEmpty: "まだ出力はありません。",
+    logTitle: (lines) => `Homebrew と code-viewer の出力（最後の ${lines} 行）`,
   },
 };

@@ -1180,6 +1180,27 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
           ],
         },
         {
+          title: "Tag accounts",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                [
+                  "Select ",
+                  ui(accounts.tags),
+                  " on a row in ",
+                  settings,
+                  " → ",
+                  ui(cat.accounts.label),
+                  " to give the account tags of your own. The default account can have tags too.",
+                ],
+                "Tags appear on the account cards of the board and next to the account name on its agent rows.",
+                "Each tag has one color, so other accounts with the same tag show the same color.",
+              ],
+            },
+          ],
+        },
+        {
           title: "Continue with another account",
           blocks: [
             {
@@ -1803,7 +1824,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                     ],
                     [
                       ui(remote.portLabel),
-                      "Keep 64161 (separate from the normal viewing port)",
+                      "Keep 64161 (the port of the Service URL in step 7-1, separate from the normal viewing port)",
                     ],
                   ],
                 },
@@ -1831,21 +1852,33 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                       ],
                       text: "Remote access shows this button when cloudflared is missing and Homebrew is installed. Without Homebrew, follow the macOS instructions on the Tunnel page.",
                     },
+                    {
+                      title: [
+                        "Paste the connection command into ",
+                        ui(remote.tokenLabel),
+                        " (Mac)",
+                      ],
+                      text: [
+                        "Copy the connection command on the Tunnel page (cloudflared service install <token>), paste it into the last field of ",
+                        settings,
+                        " → ",
+                        ui(cat.remote.label),
+                        " and press ",
+                        ui(l.settings.save),
+                        ".",
+                      ],
+                    },
                   ],
                 },
                 {
                   kind: "paragraph",
                   text: [
-                    "Copy the connection command on the Tunnel page (cloudflared service install …), paste it as it is into ",
-                    ui(remote.tokenLabel),
-                    " and press ",
-                    ui(l.settings.save),
-                    ".",
+                    "Only the token is kept, in a file only you can read, and ",
+                    ui(remote.rowToken),
+                    " in the status turns ",
+                    ui(remote.tokenSaved),
+                    ". Do not run the connection command itself on your Mac.",
                   ],
-                },
-                {
-                  kind: "paragraph",
-                  text: "Only the token is kept, in a file only you can read, and it is never shown again. Do not run the connection command itself on your Mac.",
                 },
                 {
                   kind: "paragraph",
@@ -1864,7 +1897,40 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                     ui(remote.start),
                     " in ",
                     ui(cat.remote.label),
-                    ". code-viewer opens its listener and starts cloudflared.",
+                    ". code-viewer runs the two parts below, so you do not type any command in a terminal.",
+                  ],
+                },
+                {
+                  kind: "table",
+                  head: ["Status row", "What it is"],
+                  rows: [
+                    [
+                      ui(remote.rowListener),
+                      [
+                        "The address code-viewer opens, ",
+                        code("http://127.0.0.1:64161"),
+                        ". Enter it as the Tunnel's Service URL in step 7-1",
+                      ],
+                    ],
+                    [
+                      ui(remote.rowTunnel),
+                      [
+                        "code-viewer runs ",
+                        code(
+                          "cloudflared tunnel run --token-file <token file>",
+                        ),
+                        " in its own terminal. ",
+                        ui(remote.openTerminal),
+                        " shows the output; closing that tab does not stop it",
+                      ],
+                    ],
+                    [
+                      ui(remote.rowToken),
+                      [
+                        "The <token> part of the connection command ",
+                        code("cloudflared service install <token>"),
+                      ],
+                    ],
                   ],
                 },
                 {
@@ -2037,7 +2103,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   " stops phone access only; you can keep using code-viewer on the Mac. Stopping code-viewer also stops cloudflared.",
                 ],
                 "Remote access can be started, stopped and changed only on the Mac. Settings opened from the phone cannot change it.",
-                "If you run cloudflared as a service yourself, start without saving a token (only the listener opens).",
+                "If you run cloudflared as a service yourself, start without saving a token (code-viewer opens only the service URL).",
                 "The Mac must stay online and awake. Closing the phone browser does not stop the agents working on your Mac.",
               ],
             },
@@ -2100,9 +2166,11 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                     [
                       "If the Tunnel is inactive, read the ",
                       ui(remote.rowTunnel),
-                      " row and the cloudflared output in ",
+                      " row in ",
                       ui(cat.remote.label),
-                      ". Check that the saved token belongs to the new Tunnel.",
+                      " and the cloudflared output that ",
+                      ui(remote.openTerminal),
+                      " opens. Check that the saved token belongs to the new Tunnel.",
                     ],
                     [
                       "If the Tunnel is Healthy but returns 502, check that ",

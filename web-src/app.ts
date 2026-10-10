@@ -4587,6 +4587,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function setRoute(route: AppRoute, replace = false) {
+    // 置き換え (行の選択・裏の読み直し) では 1 ペイン表示を閉じない。
+    if (!replace && leavePaneViewFirst(() => setRoute(route))) return;
     // 右の面にフォーカスがあるときの木・パレット・リンクで開くファイルは、
     // 右の面で開く (本文は描き直さない)。履歴を置き換えるだけの呼び出し
     // (本文の行の選択など) は本文のもの。
@@ -5181,6 +5183,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     getText: () => REMOTE_ACCESS_SETTINGS_TEXT[STATE.language],
     trackLoad,
     actionHeaders,
+    openShell: (id) => MAIN_TABS.openTerminal(id),
   });
 
   // ---------- Shortcuts (settings): help-keybinding-editor.ts ----------
@@ -8012,6 +8015,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
   });
   document.body.append(PANE_VIEW.el);
+
+  /**
+   * 画面を移る操作 (積んで移るもの) の入口で呼ぶ。1 ペイン表示を開いていれば、
+   * 閉じてから go で同じ移動をやり直して true。表示は開くときに履歴を 1 つ積み、
+   * 閉じるときに戻るで降ろすので、先に移ると、その戻るが移動を取り消す。閉じずに
+   * 移ると表示が画面を覆ったまま残る (引き出しのリンク・メニューから移っても
+   * 画面が変わらなかった)。開いていなければ false。
+   */
+  function leavePaneViewFirst(go: () => void): boolean {
+    if (PANE_VIEW.currentPane() === null) return false;
+    PANE_VIEW.closeThen(go);
+    return true;
+  }
   // 1 ペイン表示を開いている間に下端の帯を押したら、表示を閉じてから押し直す
   // (表示は帯を覆わない。閉じるときの戻るが、帯で移った画面を取り消さないように)。
   // 「プロジェクト」の引き出しは表示の上に開くので、そのまま。
@@ -9551,6 +9567,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** Load the next project's state before replacing the current project. */
   function navigateProject(url: string, replace = false): Promise<void> {
+    if (leavePaneViewFirst(() => void navigateProject(url, replace)))
+      return Promise.resolve();
     const destination = new URL(url, window.location.href);
     const key = projectKey(destination.pathname);
     if (destination.origin !== location.origin || !key || !loadedProjectKey) {
@@ -9808,8 +9826,13 @@ window.GdpExpandLogic = GdpExpandLogic;
             returnOnPhone(() => MOBILE_SHELL.openDrawer()),
           ),
         viewingPane: viewingAgentPane,
+        // 電話の引き出しの＋のメニュー: 選んだら引き出しを閉じる (メニューは
+        // 引き出しの外に開くので、引き出しの中の押下では閉じない。開いたまま
+        // 選んだ画面・シェルを覆っていた)。
         openProjectMenu: (root, anchor) =>
-          MAIN_TABS.openProjectMenu(root, anchor),
+          MAIN_TABS.openProjectMenu(root, anchor, {
+            picked: () => MOBILE_SHELL.close(),
+          }),
         handoff: HANDOFF_ACTIONS,
         openBoard: () =>
           navigateToRoute({ screen: "agents", range: currentRange() }),
@@ -10070,6 +10093,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function navigateToRoute(route: AppRoute): void {
+    if (leavePaneViewFirst(() => navigateToRoute(route))) return;
     history.pushState(historyStateForRoute(route), "", urlForRoute(route));
     scrollMainToTop();
     applyRouteFromLocation();
@@ -10310,6 +10334,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       link.addEventListener("click", (e) => {
         if (isNativeLinkClick(e)) return;
         e.preventDefault();
+        if (leavePaneViewFirst(() => link.click())) return;
         // 画面の入口 (木の見出しの絵柄の列) と全体ボードは、その画面のタブが
         // 開いていれば、そのタブが最後に見ていた状態を前面に出す。Files は
         // タブではなく本文の既定なので、左の面の選択を外して出す。

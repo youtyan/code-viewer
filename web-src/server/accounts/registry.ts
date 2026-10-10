@@ -40,6 +40,7 @@ import {
   codexAuthKeys,
   defaultConfigDir,
   emptyAccountRegistry,
+  MAX_ACCOUNT_TAGS,
   normalizeConfigDir,
   parseAccountRegistry,
   type RegisterAccountPlan,
@@ -47,6 +48,8 @@ import {
   removeAccount,
   renameAccount,
   SHARED_CONFIG_ENTRIES,
+  type AccountTag,
+  setAccountTags,
   type ShareEntry,
   type ShareSelectionIssue,
   type StoredAccount,
@@ -487,6 +490,34 @@ export async function applyRenameAccount(
     const result = renameAccount(registry, id, name);
     if (result.ok === false) throw renameError(registry, id, name, result);
     return { registry: result.registry, result: result.renamed };
+  });
+}
+
+/**
+ * タグを置き換える (ロックの中で読む → 変える → 書く)。既定のアカウントにも
+ * 付けられる。色はタグの名前ごとなので、同じタグのほかのアカウントにも出る。
+ */
+export async function applySetAccountTags(
+  paths: AccountPaths,
+  id: string,
+  tags: readonly AccountTag[],
+): Promise<AccountTag[]> {
+  return updateAccountRegistry(paths.registry, (registry) => {
+    const result = setAccountTags(registry, id, tags);
+    if (result.ok === false) {
+      if (result.code === "not-found")
+        throw new AccountError(`no account ${id}`, "not-found");
+      const { issue } = result;
+      throw new AccountError(
+        issue.code === "too-many"
+          ? `an account can have at most ${MAX_ACCOUNT_TAGS} tags`
+          : issue.code === "empty"
+            ? "a tag name cannot be empty"
+            : `invalid tag "${issue.tag}" (${issue.code})`,
+        "invalid",
+      );
+    }
+    return { registry: result.registry, result: result.tags };
   });
 }
 

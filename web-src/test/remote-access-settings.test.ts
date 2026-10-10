@@ -58,8 +58,13 @@ const STOPPED: RemoteAccessStatus = {
 const RUNNING: RemoteAccessStatus = {
   ...STOPPED,
   listener: { state: "running", port: 64161, origin: VALUES.origin },
-  tunnel: { state: "running", pid: 4321, connections: 4 },
-  log: ["INF Registered tunnel connection connIndex=0"],
+  tunnel: {
+    state: "running",
+    pid: 4321,
+    connections: 4,
+    shell: "shell-tunnel",
+  },
+  log: [],
 };
 
 type Call = {
@@ -89,11 +94,15 @@ function serve(reply: (call: Call) => Response) {
   return calls;
 }
 
-async function mount(lang: "en" | "ja" = "ja") {
+async function mount(
+  lang: "en" | "ja" = "ja",
+  openShell: (id: string) => void = () => undefined,
+) {
   const section = createRemoteAccessSettings({
     getText: () => REMOTE_ACCESS_SETTINGS_TEXT[lang],
     trackLoad: (promise) => promise,
     actionHeaders: () => ({ "X-Code-Viewer-Action": "1" }),
+    openShell,
   });
   document.body.append(section.element);
   await section.refresh();
@@ -106,18 +115,31 @@ function rowTexts(root: HTMLElement): string[][] {
   );
 }
 
+/** その行の 3 列目のボタン (ターミナルで見る・トークンの欄へ)。 */
+function rowButton(root: HTMLElement, row: number): HTMLButtonElement {
+  const button = root
+    .querySelectorAll(".remote-access-row")
+    [row]?.querySelector<HTMLButtonElement>(".remote-access-row-button");
+  if (!button) throw new Error(`no button on status row ${row}`);
+  return button;
+}
+
+const SERVICE_URL_NOTE =
+  "Cloudflare の Tunnel の公開ルートで「サービス URL」に入れるアドレスです。";
+
 describe("the remote access section", () => {
-  test("shows the listener, cloudflared and the token as rows", async () => {
+  test("shows the service URL, cloudflared and the token as rows", async () => {
     serve(() => Response.json(RUNNING));
     const section = await mount();
 
     expect(rowTexts(section.element)).toEqual([
       [
-        "待ち受け",
+        "サービス URL",
         "開いています",
-        "127.0.0.1:64161（https://viewer.example.com 用）",
+        "http://127.0.0.1:64161（https://viewer.example.com からの転送先）",
+        SERVICE_URL_NOTE,
       ],
-      ["cloudflared", "接続中（4 本）", "cloudflared 2026.9.0（pid 4321）"],
+      ["cloudflared", "接続中（4 本）", "ターミナルで見る"],
       [
         "トークン",
         "保存済み",
@@ -128,17 +150,74 @@ describe("the remote access section", () => {
 
   test.each<{
     name: string;
+    status: RemoteAccessStatus;
+    expected: string[];
+  }>([
+    {
+      name: "stopped with saved values shows the address it will open",
+      status: STOPPED,
+      expected: [
+        "サービス URL",
+        "止まっています",
+        "http://127.0.0.1:64161",
+        SERVICE_URL_NOTE,
+      ],
+    },
+    {
+      name: "stopped without values has no address yet",
+      status: { ...STOPPED, config: { state: "absent" } },
+      expected: ["サービス URL", "止まっています", "", SERVICE_URL_NOTE],
+    },
+  ])("the service URL row: $name", async ({ status, expected }) => {
+    serve(() => Response.json(status));
+    const section = await mount();
+
+    expect(rowTexts(section.element)[0]).toEqual(expected);
+  });
+
+  test("open in terminal opens the terminal cloudflared runs in", async () => {
+    serve(() => Response.json(RUNNING));
+    const opened: string[] = [];
+    const section = await mount("ja", (id) => opened.push(id));
+
+    rowButton(section.element, 1).click();
+
+    expect(opened).toEqual(["shell-tunnel"]);
+  });
+
+  test("without a token, the token row says where to paste it and its button goes to the field", async () => {
+    serve(() => Response.json({ ...STOPPED, token: { state: "absent" } }));
+    const section = await mount();
+    rowButton(section.element, 2).click();
+
+    expect({
+      row: rowTexts(section.element)[2],
+      focused: document.activeElement?.id,
+    }).toEqual({
+      row: [
+        "トークン",
+        "未設定",
+        "トークンの欄へ",
+        "Cloudflare の Tunnel の画面にあるインストールコマンド（cloudflared service install <トークン>）を、下の「Tunnel のトークン」にそのまま貼り、「変更を保存」を押します。",
+      ],
+      focused: "remote-access-token",
+    });
+  });
+
+  test.each<{
+    name: string;
     tunnel: RemoteAccessStatus["tunnel"];
     expected: string[];
   }>([
     {
       name: "waiting for its first connection",
-      tunnel: { state: "running", pid: 4321, connections: 0 },
-      expected: [
-        "cloudflared",
-        "接続しています",
-        "cloudflared 2026.9.0（pid 4321）",
-      ],
+      tunnel: {
+        state: "running",
+        pid: 4321,
+        connections: 0,
+        shell: "shell-tunnel",
+      },
+      expected: ["cloudflared", "接続しています", "ターミナルで見る"],
     },
     {
       name: "not started without a token",
@@ -147,7 +226,7 @@ describe("the remote access section", () => {
         "cloudflared",
         "起動していません",
         "",
-        "トークンが保存されていないので、cloudflared は起動していません。cloudflared を別に動かしているなら、このままで使えます。",
+        "トークンが未設定なので起動していません。cloudflared を自分で動かしているなら、このままで使えます。",
       ],
     },
     {
@@ -396,7 +475,7 @@ describe("the remote access section", () => {
 
     expect(section.draft.problem?.()).toBe(
       problem
-        ? "The listener port must be a whole number from 1 to 65535."
+        ? "The service URL port must be a whole number from 1 to 65535."
         : null,
     );
   });

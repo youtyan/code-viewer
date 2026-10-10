@@ -11,7 +11,9 @@ import {
   type AccountEntry,
   type AccountStatus,
   type AccountsResponse,
+  type AccountTagIssue,
   type CreateAccountPlan,
+  checkAccountTags,
   defaultLaunchSession,
   emptyAccountRegistry,
   handoffArgs,
@@ -19,6 +21,8 @@ import {
   isAccountAgent,
   type LaunchResponse,
   launchCommandLine,
+  MAX_ACCOUNT_TAG,
+  MAX_ACCOUNT_TAGS,
   type RegisterAccountPlan,
   renameAccount,
   type ShareEntry,
@@ -34,7 +38,9 @@ import { abbreviateHome } from "../../core/agent-overview";
 import { showCopyFailure } from "../../core/copy-failure";
 import { formatErrorDetail } from "../../core/error-detail";
 import { CHEVRON_DOWN_16_PATH, COPY_16_PATHS, iconSvg } from "../../core/icons";
+import type { ProjectColor } from "../../core/project-colors";
 import { showFormDialog } from "../ui-dialog";
+import { createAccountTagEditor } from "./account-tags";
 import type { AccountsClient } from "./accounts-client";
 import type { AccountsText } from "./accounts-i18n";
 import { settingsDiffBlock } from "./settings-diff";
@@ -285,6 +291,8 @@ export type AccountDialogs = {
   add(prefill?: { agent: AccountAgent; path: string }): Promise<string | null>;
   remove(account: AccountStatus): Promise<string | null>;
   rename(account: AccountStatus): Promise<string | null>;
+  /** タグの付け外し (既定のアカウントにも)。戻り値は結果の文 (やめたら null)。 */
+  tags(account: AccountStatus): Promise<string | null>;
   login(account: AccountEntry): Promise<string>;
   launch(options?: LaunchOptions): Promise<string | null>;
   /**
@@ -684,6 +692,44 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       submit: async () => {
         const renamed = await deps.client.rename(account.id, name.value);
         return t.renamed(account.name, renamed.name);
+      },
+    });
+  }
+
+  /**
+   * タグを付け外しする。入力欄に札が並び、打って Enter で足す
+   * (views/agents/account-tags.ts の createAccountTagEditor)。押す前の検査は
+   * サーバと同じ規則 (checkAccountTags)。
+   */
+  async function tags(account: AccountStatus): Promise<string | null> {
+    const t = text();
+    // 既定のアカウントはどちらも「既定」なので、種類を前に付ける。
+    const display = `${account.agent} ${accountDisplayName(account, t)}`;
+    const others = new Map<string, ProjectColor | null>();
+    for (const entry of deps.client.snapshot().data?.accounts ?? []) {
+      if (entry.id === account.id) continue;
+      for (const tag of entry.tags ?? []) others.set(tag.name, tag.color);
+    }
+    const editor = createAccountTagEditor({
+      tags: account.tags ?? [],
+      others,
+      text: t,
+    });
+    return showFormDialog({
+      title: t.tagsDialogTitle(display),
+      description: t.tagsDescription,
+      body: editor.element,
+      focusTarget: editor.input,
+      submitLabel: t.tagsSave,
+      cancelLabel: t.cancel,
+      validate: () =>
+        tagIssueText(
+          checkAccountTags(editor.value().map((tag) => tag.name)),
+          t,
+        ),
+      submit: async () => {
+        await deps.client.setTags(account.id, editor.value());
+        return t.tagsSaved(display);
       },
     });
   }
@@ -1230,5 +1276,25 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     }).finally(unsubscribe);
   }
 
-  return { add, remove, rename, login, launch, openHere, statusLine };
+  return { add, remove, rename, tags, login, launch, openHere, statusLine };
+}
+
+/** タグの検査の結果を文にする (問題が無ければ null)。 */
+function tagIssueText(
+  issue: AccountTagIssue | null,
+  t: AccountsText,
+): string | null {
+  if (!issue) return null;
+  switch (issue.code) {
+    case "empty":
+      return t.tagEmpty;
+    case "too-many":
+      return t.tagTooMany(MAX_ACCOUNT_TAGS);
+    case "too-long":
+      return t.tagTooLong(issue.tag, MAX_ACCOUNT_TAG);
+    case "control":
+      return t.tagControl(issue.tag);
+    case "duplicate":
+      return t.tagDuplicate(issue.tag);
+  }
 }

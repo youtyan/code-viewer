@@ -10,6 +10,8 @@ import type {
   UsageUnavailableReason,
   UsageWindow,
 } from "../../core/agent-accounts";
+import type { ProjectColor } from "../../core/project-colors";
+import { PROJECTS_EN, PROJECTS_JA } from "../projects/projects-i18n";
 
 export type AccountsText = {
   /** この文言の言語。引き継ぎの指示文 (core/agent-accounts.ts の handoffPrompt) を合わせる。 */
@@ -151,6 +153,26 @@ export type AccountsText = {
   renameEmpty: string;
   renameReserved: (name: string) => string;
   renameDuplicate: (name: string, agent: string) => string;
+  /** タグ (設定の行のボタンと小窓。views/agents/account-tags.ts)。 */
+  tags: string;
+  tagsTitle: (name: string) => string;
+  tagsDialogTitle: (name: string) => string;
+  tagsDescription: string;
+  tagName: string;
+  tagPlaceholder: string;
+  tagFull: (max: number) => string;
+  tagColorFor: (tag: string) => string;
+  tagNoColor: string;
+  colorNames: Record<ProjectColor, string>;
+  tagRemove: (tag: string) => string;
+  tagUsed: string;
+  tagsSave: string;
+  tagsSaved: (name: string) => string;
+  tagEmpty: string;
+  tagTooLong: (tag: string, max: number) => string;
+  tagControl: (tag: string) => string;
+  tagDuplicate: (tag: string) => string;
+  tagTooMany: (max: number) => string;
   /** 帯のカードの ⋯ のボタン。 */
   bandMenu: (name: string) => string;
   remove: string;
@@ -493,6 +515,27 @@ export const ACCOUNTS_EN: AccountsText = {
     `"${name}" is the name of the default account. Choose another name.`,
   renameDuplicate: (name, agent) =>
     `Another ${agent} account is already named "${name}".`,
+  tags: "Tags",
+  tagsTitle: (name) => `Add or remove the tags of ${name}`,
+  tagsDialogTitle: (name) => `Tags of ${name}`,
+  tagsDescription:
+    "Shown on the board's account cards and agent rows. A color belongs to the tag, so accounts with the same tag share it.",
+  tagName: "Tag",
+  tagPlaceholder: "Type a tag and press Enter",
+  tagFull: (max) => `Up to ${max} tags`,
+  tagColorFor: (tag) => `Color of "${tag}"`,
+  tagNoColor: "No color",
+  colorNames: PROJECTS_EN.colorNames,
+  tagRemove: (tag) => `Remove "${tag}"`,
+  tagUsed: "Tags on other accounts",
+  tagsSave: "Save",
+  tagsSaved: (name) => `Saved the tags of ${name}.`,
+  tagEmpty: "A tag is empty. Enter a name or remove it.",
+  tagTooLong: (tag, max) =>
+    `"${tag}" is too long. Use up to ${max} characters.`,
+  tagControl: (tag) => `"${tag}" contains a control character.`,
+  tagDuplicate: (tag) => `"${tag}" is there twice.`,
+  tagTooMany: (max) => `An account can have up to ${max} tags.`,
   bandMenu: (name) => `Actions for ${name}`,
   remove: "Remove",
   removeTitle: (name) => `Remove ${name} from the list`,
@@ -854,6 +897,27 @@ export const ACCOUNTS_JA: AccountsText = {
     `「${name}」は既定のアカウントの名前です。別の名前にしてください。`,
   renameDuplicate: (name, agent) =>
     `${agent} のほかのアカウントに「${name}」という名前が既にあります。`,
+  tags: "タグ",
+  tagsTitle: (name) => `${name} のタグを付け外しする`,
+  tagsDialogTitle: (name) => `${name} のタグ`,
+  tagsDescription:
+    "全体ボードのアカウントのカードと、エージェントの行に出ます。色はタグごとで、同じタグのアカウントは同じ色になります。",
+  tagName: "タグ",
+  tagPlaceholder: "タグを入力して Enter",
+  tagFull: (max) => `タグは ${max} 個までです`,
+  tagColorFor: (tag) => `「${tag}」の色`,
+  tagNoColor: "色なし",
+  colorNames: PROJECTS_JA.colorNames,
+  tagRemove: (tag) => `「${tag}」を外す`,
+  tagUsed: "ほかのアカウントのタグ",
+  tagsSave: "保存",
+  tagsSaved: (name) => `${name} のタグを保存しました。`,
+  tagEmpty: "空のタグがあります。名前を入れるか、外してください。",
+  tagTooLong: (tag, max) =>
+    `「${tag}」は長すぎます。${max} 文字までにしてください。`,
+  tagControl: (tag) => `「${tag}」に制御文字が入っています。`,
+  tagDuplicate: (tag) => `「${tag}」が 2 つあります。`,
+  tagTooMany: (max) => `タグは 1 つのアカウントに ${max} 個までです。`,
   bandMenu: (name) => `${name} の操作`,
   remove: "外す",
   removeTitle: (name) => `${name} を一覧から外す`,

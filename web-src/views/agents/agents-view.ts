@@ -55,6 +55,7 @@ import { projectLook, projectMark } from "../projects/project-looks";
 import { showProjectMenu } from "../projects/project-menu";
 import type { AccountsBand } from "./accounts-band";
 import { paneAccountName } from "./accounts-dialogs";
+import { accountTagList } from "./account-tags";
 import { fillAgentCard } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
 import { type HandoffMenuActions, handoffMenuItems } from "./handoff";
@@ -316,7 +317,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     return row;
   }
 
-  /** 行に出すアカウント名。 */
+  /** 行に出すアカウント名と、そのアカウントのタグの札。 */
   function accountLabel(pane: AgentPane): HTMLElement {
     const t = text().accounts;
     const label = document.createElement("span");
@@ -331,6 +332,8 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
         label.textContent,
         entry?.configDir ?? "",
       );
+      const tags = accountTagList(entry?.tags);
+      if (tags) label.appendChild(tags);
     } else if (account.kind === "unregistered") {
       label.classList.add("agents-account-unregistered");
       label.title = t.unregisteredTitle(account.configDir);

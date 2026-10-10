@@ -11,6 +11,8 @@
 
 import type { AgentHookState, HookAgent } from "./agent-hooks";
 import { type AgentPane, abbreviateHome } from "./agent-overview";
+import { isProjectColor, type ProjectColor } from "./project-colors";
+import { SHELL_SAFE_WORD, shellQuoteForDisplay } from "./shell";
 import { flattenTmuxPanes, type TmuxPane, type TmuxSession } from "./tmux";
 
 export type AccountAgent = HookAgent;
@@ -63,6 +65,10 @@ export type AccountRegistry = {
   /** 起動コマンド。空なら種類の名前 (claude / codex)。 */
   launchCommands: Partial<Record<AccountAgent, string>>;
   lastLaunch: LaunchChoice | null;
+  /** アカウントの id (既定のアカウントも) ごとのタグの名前。無い id はタグなし。 */
+  tags?: Record<string, string[]>;
+  /** タグの名前ごとの色 (どのアカウントでも同じ)。無い名前は無彩色。 */
+  tagColors?: Record<string, ProjectColor>;
 };
 
 export function emptyAccountRegistry(): AccountRegistry {
@@ -210,11 +216,141 @@ export function parseAccountRegistry(
       issues.push("$.lastLaunch: unexpected shape");
     }
   }
+  const tags: Record<string, string[]> = {};
+  if (raw.tags !== undefined) {
+    if (!isPlainObject(raw.tags)) {
+      issues.push("$.tags: must be an object");
+    } else {
+      for (const [id, names] of Object.entries(raw.tags)) {
+        if (
+          !Array.isArray(names) ||
+          names.some((name) => typeof name !== "string") ||
+          checkAccountTags(names as string[]) !== null
+        ) {
+          issues.push(`$.tags.${id}: must be a list of short tag names`);
+        } else if (names.length > 0) {
+          tags[id] = (names as string[]).map((name) => name.trim());
+        }
+      }
+    }
+  }
+  const tagColors: Record<string, ProjectColor> = {};
+  if (raw.tagColors !== undefined) {
+    if (!isPlainObject(raw.tagColors)) {
+      issues.push("$.tagColors: must be an object");
+    } else {
+      for (const [name, color] of Object.entries(raw.tagColors)) {
+        if (isProjectColor(color)) tagColors[name] = color;
+        else issues.push(`$.tagColors.${name}: unknown color`);
+      }
+    }
+  }
   if (issues.length > 0) return { ok: false, issues };
   return {
     ok: true,
-    registry: { version: 1, accounts, launchCommands, lastLaunch },
+    registry: {
+      version: 1,
+      accounts,
+      launchCommands,
+      lastLaunch,
+      ...(Object.keys(tags).length > 0 ? { tags } : {}),
+      ...(Object.keys(tagColors).length > 0 ? { tagColors } : {}),
+    },
   };
+}
+
+/** タグの名前の上限と、1 つのアカウントに付けられる数。 */
+export const MAX_ACCOUNT_TAG = 24;
+export const MAX_ACCOUNT_TAGS = 8;
+
+/** アカウントに付けたタグ。色はタグの名前ごとに 1 つ。null は無彩色。 */
+export type AccountTag = { name: string; color: ProjectColor | null };
+
+/** tag は問題のタグ (empty・too-many は空)。 */
+export type AccountTagIssue = {
+  code: "empty" | "too-many" | "too-long" | "control" | "duplicate";
+  tag: string;
+};
+
+/** 1 つのアカウントのタグの名前を確かめる (同じ名前は大文字小文字を区別しない)。 */
+export function checkAccountTags(
+  names: readonly string[],
+): AccountTagIssue | null {
+  if (names.length > MAX_ACCOUNT_TAGS) return { code: "too-many", tag: "" };
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const tag = raw.trim();
+    if (!tag) return { code: "empty", tag: "" };
+    if (tag.length > MAX_ACCOUNT_TAG) return { code: "too-long", tag };
+    if (hasControl(tag)) return { code: "control", tag };
+    const key = tag.toLocaleLowerCase();
+    if (seen.has(key)) return { code: "duplicate", tag };
+    seen.add(key);
+  }
+  return null;
+}
+
+/** その id のタグ (色つき)。 */
+export function accountTags(
+  registry: AccountRegistry,
+  id: string,
+): AccountTag[] {
+  return (registry.tags?.[id] ?? []).map((name) => ({
+    name,
+    color: registry.tagColors?.[name] ?? null,
+  }));
+}
+
+/** どのアカウントにも付いていないタグの色と、空のタグの一覧を落とす。 */
+function pruneTags(
+  registry: AccountRegistry,
+  tags: Record<string, string[]>,
+  colors: Record<string, ProjectColor>,
+): AccountRegistry {
+  const { tags: _tags, tagColors: _colors, ...rest } = registry;
+  const used = new Set(Object.values(tags).flat());
+  const keptColors = Object.fromEntries(
+    Object.entries(colors).filter(([name]) => used.has(name)),
+  );
+  return {
+    ...rest,
+    ...(Object.keys(tags).length > 0 ? { tags } : {}),
+    ...(Object.keys(keptColors).length > 0 ? { tagColors: keptColors } : {}),
+  };
+}
+
+export type SetAccountTagsResult =
+  | { ok: true; registry: AccountRegistry; tags: AccountTag[] }
+  | { ok: false; code: "not-found" }
+  | { ok: false; code: "tag"; issue: AccountTagIssue };
+
+/**
+ * そのアカウントのタグを置き換える (既定のアカウントにも付けられる)。色はタグの
+ * 名前ごとなので、ここで選んだ色はそのタグを付けたほかのアカウントにも出る。
+ */
+export function setAccountTags(
+  registry: AccountRegistry,
+  id: string,
+  next: readonly AccountTag[],
+): SetAccountTagsResult {
+  const known =
+    id === defaultAccountId("claude") ||
+    id === defaultAccountId("codex") ||
+    registry.accounts.some((account) => account.id === id);
+  if (!known) return { ok: false, code: "not-found" };
+  const issue = checkAccountTags(next.map((tag) => tag.name));
+  if (issue) return { ok: false, code: "tag", issue };
+  const tags = { ...registry.tags };
+  const names = next.map((tag) => tag.name.trim());
+  if (names.length > 0) tags[id] = names;
+  else delete tags[id];
+  const colors = { ...registry.tagColors };
+  for (const tag of next) {
+    if (tag.color) colors[tag.name.trim()] = tag.color;
+    else delete colors[tag.name.trim()];
+  }
+  const updated = pruneTags(registry, tags, colors);
+  return { ok: true, registry: updated, tags: accountTags(updated, id) };
 }
 
 /** パスの比較用。末尾の / と、途中の // と /./ を畳む。 */
@@ -311,14 +447,19 @@ export function removeAccount(
   if (!removed) return { ok: false, code: "not-found" };
   const lastLaunch =
     registry.lastLaunch?.accountId === id ? null : registry.lastLaunch;
+  const { [id]: _removedTags, ...tags } = registry.tags ?? {};
   return {
     ok: true,
     removed,
-    registry: {
-      ...registry,
-      accounts: registry.accounts.filter((account) => account.id !== id),
-      lastLaunch,
-    },
+    registry: pruneTags(
+      {
+        ...registry,
+        accounts: registry.accounts.filter((account) => account.id !== id),
+        lastLaunch,
+      },
+      tags,
+      registry.tagColors ?? {},
+    ),
   };
 }
 
@@ -382,6 +523,8 @@ export type AccountEntry = {
   configDir: string;
   builtin: boolean;
   managed: boolean;
+  /** 付けたタグ (全体ボードの行に出す)。 */
+  tags?: AccountTag[];
 };
 
 /** 既定のアカウントを先頭に置いた全件。種類ごとに claude → codex の順。 */
@@ -399,6 +542,7 @@ export function accountEntries(
       configDir: defaultConfigDir(agent, home),
       builtin: true,
       managed: false,
+      tags: accountTags(registry, defaultAccountId(agent)),
     });
     for (const account of registry.accounts) {
       if (account.agent !== agent) continue;
@@ -409,6 +553,7 @@ export function accountEntries(
         configDir: account.configDir,
         builtin: false,
         managed: account.managed,
+        tags: accountTags(registry, account.id),
       });
     }
   }
@@ -1082,15 +1227,6 @@ export function defaultLaunchSession(
   }
   if (best) return { session: best, exists: true };
   return { session: fallbackName, exists: false };
-}
-
-/** 引用符なしで書けるシェルの単語。 */
-const SHELL_SAFE_WORD = /^[A-Za-z0-9_./@%+=:,-]+$/;
-
-function shellQuoteForDisplay(value: string): string {
-  return SHELL_SAFE_WORD.test(value)
-    ? value
-    : `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 /**

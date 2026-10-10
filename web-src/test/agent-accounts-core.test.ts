@@ -8,7 +8,9 @@ import {
   accountDirSlug,
   accountEntries,
   accountForEnv,
+  accountTags,
   addAccount,
+  checkAccountTags,
   checkAddAccount,
   checkShareSelection,
   classifyShareEntry,
@@ -25,6 +27,7 @@ import {
   removeAccount,
   renameAccount,
   type ShareEntry,
+  setAccountTags,
   showPaneAccounts,
   tmuxLaunchArgs,
   tmuxSessionName,
@@ -422,6 +425,138 @@ describe("adding and removing", () => {
       ["codex:default", "Default", true, "/home/sample/.codex"],
       ["id-0", "Personal", false, "/home/sample/accounts/a0"],
     ]);
+  });
+});
+
+// アカウントのタグ。1 つのアカウントに 8 個まで・1 つ 24 文字まで、同じ名前は
+// 大文字小文字を区別しない。色はタグの名前ごと。
+describe("account tags", () => {
+  test.each([
+    { name: "no tags", tags: [], expected: null },
+    {
+      name: "8 tags (the limit)",
+      tags: ["a", "b", "c", "d", "e", "f", "g", "h"],
+      expected: null,
+    },
+    {
+      name: "9 tags",
+      tags: ["a", "b", "c", "d", "e", "f", "g", "h", "i"],
+      expected: { code: "too-many", tag: "" },
+    },
+    {
+      name: "24 characters (the limit)",
+      tags: ["x".repeat(24)],
+      expected: null,
+    },
+    {
+      name: "25 characters",
+      tags: ["x".repeat(25)],
+      expected: { code: "too-long", tag: "x".repeat(25) },
+    },
+    {
+      name: "an empty tag",
+      tags: ["api", "  "],
+      expected: { code: "empty", tag: "" },
+    },
+    {
+      name: "a control character",
+      tags: ["a\tb"],
+      expected: { code: "control", tag: "a\tb" },
+    },
+    {
+      name: "the same tag in another case",
+      tags: ["API", "api"],
+      expected: { code: "duplicate", tag: "api" },
+    },
+  ])("checkAccountTags: $name", ({ tags, expected }) => {
+    expect(checkAccountTags(tags)).toEqual(expected);
+  });
+
+  test.each([
+    { name: "a registered account", id: "id-0", ok: true },
+    { name: "the default claude account", id: "claude:default", ok: true },
+    { name: "the default codex account", id: "codex:default", ok: true },
+    { name: "an unknown account", id: "missing", ok: false },
+  ])("tags can be set on $name", ({ id, ok }) => {
+    const result = setAccountTags(registry([{}]), id, [
+      { name: " api ", color: "blue" },
+    ]);
+    expect(result.ok ? accountTags(result.registry, id) : result).toEqual(
+      ok ? [{ name: "api", color: "blue" }] : { ok: false, code: "not-found" },
+    );
+  });
+
+  test("a color belongs to the tag, and colors and empty lists no account uses are dropped", () => {
+    const first = setAccountTags(registry([{}, {}]), "id-0", [
+      { name: "api", color: "blue" },
+      { name: "old", color: "red" },
+    ]);
+    if (!first.ok) throw new Error("expected the first tags to be set");
+    const second = setAccountTags(first.registry, "id-1", [
+      { name: "api", color: "green" },
+    ]);
+    if (!second.ok) throw new Error("expected the second tags to be set");
+    const cleared = setAccountTags(second.registry, "id-0", []);
+    if (!cleared.ok) throw new Error("expected the tags to be cleared");
+
+    expect({
+      shared: accountTags(second.registry, "id-0"),
+      cleared: {
+        tags: cleared.registry.tags,
+        tagColors: cleared.registry.tagColors,
+      },
+    }).toEqual({
+      shared: [
+        { name: "api", color: "green" },
+        { name: "old", color: "red" },
+      ],
+      cleared: { tags: { "id-1": ["api"] }, tagColors: { api: "green" } },
+    });
+  });
+
+  test("removing an account drops its tags and the colors only it used", () => {
+    const tagged = setAccountTags(registry([{}, {}]), "id-1", [
+      { name: "solo", color: "pink" },
+    ]);
+    if (!tagged.ok) throw new Error("expected the tags to be set");
+    const removed = removeAccount(tagged.registry, "id-1");
+    if (!removed.ok) throw new Error("expected the account to be removed");
+
+    expect([removed.registry.tags, removed.registry.tagColors]).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
+  test.each([
+    {
+      name: "tags and colors are read",
+      raw: {
+        tags: { "claude:default": [" api "] },
+        tagColors: { api: "cyan" },
+      },
+      expected: { ok: true, tags: [{ name: "api", color: "cyan" }] },
+    },
+    {
+      name: "an unknown color is refused",
+      raw: { tags: { "claude:default": ["api"] }, tagColors: { api: "gold" } },
+      expected: { ok: false, issues: ["$.tagColors.api: unknown color"] },
+    },
+    {
+      name: "a tag that is not a short name is refused",
+      raw: { tags: { "claude:default": ["x".repeat(25)] } },
+      expected: {
+        ok: false,
+        issues: ["$.tags.claude:default: must be a list of short tag names"],
+      },
+    },
+  ])("parseAccountRegistry: $name", ({ raw, expected }) => {
+    const parsed = parseAccountRegistry({ ...emptyAccountRegistry(), ...raw });
+    expect(
+      parsed.ok
+        ? { ok: true, tags: accountTags(parsed.registry, "claude:default") }
+        : parsed,
+    ).toEqual(expected);
   });
 });
 

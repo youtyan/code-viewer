@@ -8,7 +8,8 @@
 //   codex  仕事用  —                          ○ 未ログイン    2分前
 //   …/codex-work   [確かめ直す] [ログイン] [名前を変更] [外す]
 //   claude 検証用  —                          ? 不明          たった今
-//   …/dir          [確かめ直す] [名前を変更] [外す]
+//   …/dir          [確かめ直す] [タグ] [名前を変更] [外す]
+//   (名前の後ろに付けたタグの札。タグはどのアカウントにも付けられる)
 //   確かめられませんでした: claude auth status --json exited with 1: …
 //   [アカウントを追加…]
 //   使用量
@@ -49,6 +50,7 @@ import {
   resultLine,
 } from "./accounts-dialogs";
 import type { AccountsText } from "./accounts-i18n";
+import { accountTagList } from "./account-tags";
 import type { AgentHooksSettings } from "./agent-hooks-settings";
 import { usageCheckBlock } from "./usage-check";
 
@@ -384,6 +386,8 @@ export function createAccountsSettings(
       el("span", "agent-accounts-kind", account.agent),
       el("span", "agent-accounts-name", accountDisplayName(account, t)),
     );
+    const tags = accountTagList(account.tags);
+    if (tags) name.appendChild(tags);
     const actions = el("span", "agent-accounts-actions");
     actions.setAttribute("role", "cell");
     const display = accountDisplayName(account, t);
@@ -400,6 +404,18 @@ export function createAccountsSettings(
         ),
       );
     }
+    actions.appendChild(
+      actionButton(
+        t.tags,
+        t.tagsTitle(display),
+        () =>
+          void run(account.id, async () => {
+            const out = await deps.dialogs.tags(account);
+            if (out) sectionMessage = { ok: true, text: out };
+            return null;
+          }),
+      ),
+    );
     if (!account.builtin) {
       actions.appendChild(
         actionButton(

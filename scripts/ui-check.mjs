@@ -10,7 +10,11 @@
 //   {"do":"settings","patch":{"theme":"dark","colorTheme":"ink"}}  設定を PATCH (全部の窓に効く)
 //   {"do":"viewport","w":1440,"h":900}  "touch":true で指の画面 (iPhone と同じく pointer: coarse)、
 //     "cpu":6 で CPU を 6 倍遅くする (スマホの重さを測る。省くと 1 = 遅くしない)
+//   {"do":"network","latency":300}  通信の往復を 300ms 遅らせる (外部接続の Cloudflare 越しの
+//     遅さを真似る。0 で戻す)
 //   {"do":"click","sel":".main-tab"} / {"do":"click","x":600,"y":120}
+//   {"do":"tap","sel":".main-tab"}  指のタップ (touchstart → touchend。実機のスマホと同じく
+//     pointer の種類が touch で、click はブラウザが作る)。viewport に "touch":true が要る
 //   {"do":"hover","sel":"..."} / {"do":"drag","from":[x,y],"to":[x,y]}
 //   {"do":"key","key":"Escape"}  (code・vk・mods を足せる)
 //   {"do":"type","text":"ls -la"}  焦点のある所へ文字を入れて Enter ("enter":false で押さない)
@@ -141,6 +145,16 @@ try {
         return res.status;
       })()`).finally(() => sleep(step.ms ?? 1200));
     },
+    async network(step) {
+      await cdp.send("Network.enable");
+      await cdp.send("Network.emulateNetworkConditions", {
+        offline: false,
+        latency: step.latency ?? 0,
+        downloadThroughput: -1,
+        uploadThroughput: -1,
+      });
+      await sleep(step.ms ?? 200);
+    },
     async viewport(step) {
       await viewport(step.w, step.h, step.touch === true);
       await cdp.send("Emulation.setCPUThrottlingRate", { rate: step.cpu ?? 1 });
@@ -152,6 +166,20 @@ try {
       await mouse("mouseMoved", x, y, { button: "none" });
       await mouse("mousePressed", x, y, extra);
       await mouse("mouseReleased", x, y, extra);
+      await sleep(step.ms ?? 600);
+    },
+    async tap(step) {
+      const [x, y] = await pointOf(step);
+      const point = [{ x, y, id: 1, radiusX: 4, radiusY: 4, force: 1 }];
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: point,
+      });
+      await sleep(step.hold ?? 80);
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchEnd",
+        touchPoints: [],
+      });
       await sleep(step.ms ?? 600);
     },
     async hover(step) {

@@ -1159,6 +1159,26 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
           ],
         },
         {
+          title: "タグを付ける",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                [
+                  settings,
+                  " → ",
+                  ui(cat.accounts.label),
+                  " の行の ",
+                  ui(accounts.tags),
+                  " で、アカウントに好きな名前のタグを付けます。既定のアカウントにも付けられます。",
+                ],
+                "タグは全体ボードのアカウントのカードと、エージェントの行のアカウント名の横に出ます。",
+                "色はタグごとに選びます。同じタグを付けたほかのアカウントにも、同じ色が付きます。",
+              ],
+            },
+          ],
+        },
+        {
           title: "別のアカウントで続ける",
           blocks: [
             {
@@ -1782,7 +1802,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                     [ui(remote.audienceLabel), "手順3でコピーした64文字のAUD"],
                     [
                       ui(remote.portLabel),
-                      "64161 のまま（通常の表示用ポートとは別）",
+                      "64161 のまま（手順7-1のサービスURLのポート。通常の表示用ポートとは別）",
                     ],
                   ],
                 },
@@ -1810,21 +1830,33 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                       ],
                       text: "cloudflaredが無くHomebrewがあるとき、外部接続の節にこのボタンが出ます。Homebrewが無いときは、Tunnelの画面のmacOSの手順で入れます。",
                     },
+                    {
+                      title: [
+                        "接続コマンドを ",
+                        ui(remote.tokenLabel),
+                        " に貼る（Mac）",
+                      ],
+                      text: [
+                        "Tunnel画面の接続コマンド（cloudflared service install <トークン>）をコピーし、",
+                        settings,
+                        " → ",
+                        ui(cat.remote.label),
+                        " の一番下の欄に貼って ",
+                        ui(l.settings.save),
+                        " を押します。",
+                      ],
+                    },
                   ],
                 },
                 {
                   kind: "paragraph",
                   text: [
-                    "Tunnel画面の接続コマンド（cloudflared service install …）をコピーし、",
-                    ui(remote.tokenLabel),
-                    " にそのまま貼って ",
-                    ui(l.settings.save),
-                    " を押します。",
+                    "トークンだけが自分しか読めないファイルに保存され、状態の ",
+                    ui(remote.rowToken),
+                    " が ",
+                    ui(remote.tokenSaved),
+                    " になります。接続コマンドそのものはMacで実行しません。",
                   ],
-                },
-                {
-                  kind: "paragraph",
-                  text: "トークンだけが自分しか読めないファイルに保存され、画面には二度と出ません。接続コマンドそのものはMacで実行しません。",
                 },
                 {
                   kind: "paragraph",
@@ -1842,7 +1874,41 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                     ui(cat.remote.label),
                     " の ",
                     ui(remote.start),
-                    " を押します。code-viewerが待ち受けを開き、cloudflaredを起動します。",
+                    " を押します。code-viewerが次の2つを動かすので、ターミナルでコマンドを打つ必要はありません。",
+                  ],
+                },
+                {
+                  kind: "table",
+                  head: ["状態の行", "中身"],
+                  rows: [
+                    [
+                      ui(remote.rowListener),
+                      [
+                        "code-viewerが開く ",
+                        code("http://127.0.0.1:64161"),
+                        "。手順7-1でTunnelのサービスURLに入れるアドレスです",
+                      ],
+                    ],
+                    [
+                      ui(remote.rowTunnel),
+                      [
+                        "code-viewerの端末で ",
+                        code(
+                          "cloudflared tunnel run --token-file <トークンのファイル>",
+                        ),
+                        " を動かします。",
+                        ui(remote.openTerminal),
+                        " で出力を見られ、タブを閉じても止まりません",
+                      ],
+                    ],
+                    [
+                      ui(remote.rowToken),
+                      [
+                        "接続コマンド ",
+                        code("cloudflared service install <トークン>"),
+                        " の <トークン> の部分です",
+                      ],
+                    ],
                   ],
                 },
                 {
@@ -2013,7 +2079,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   " はスマホからの接続だけを止め、Macのcode-viewerはそのまま使えます。code-viewerを止めるとcloudflaredも止まります。",
                 ],
                 "開始・停止と値の変更は、Macの画面でだけ行えます。スマホから開いた設定では操作できません。",
-                "cloudflaredをサービスとして別に動かしているなら、トークンを保存せずに開始します（待ち受けだけを開きます）。",
+                "cloudflaredをサービスとして別に動かしているなら、トークンを保存せずに開始します（code-viewerはサービスURLだけを開きます）。",
                 "Macがスリープ中・電源オフ・オフラインの間は接続できません。スマホの画面を閉じるだけなら、Mac側のエージェントの作業は続きます。",
               ],
             },
@@ -2078,7 +2144,9 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                       ui(cat.remote.label),
                       " の ",
                       ui(remote.rowTunnel),
-                      " の行と、その下のcloudflaredの出力を確認します。別のTunnelのトークンを保存していないかも確認してください。",
+                      " の行と、",
+                      ui(remote.openTerminal),
+                      " で開くcloudflaredの出力を確認します。別のTunnelのトークンを保存していないかも確認してください。",
                     ],
                     [
                       "Tunnelが正常でも502なら、",

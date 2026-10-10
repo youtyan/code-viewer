@@ -40,6 +40,7 @@ import {
   resultLine,
   runningCount,
 } from "./accounts-dialogs";
+import { accountTagList } from "./account-tags";
 import type { AccountsText } from "./accounts-i18n";
 import { usageCheckBlock, usageCheckMenuItem } from "./usage-check";
 import {
@@ -246,6 +247,8 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
     ].join("\n");
     name.addEventListener("click", () => deps.openSettings());
     head.append(el("span", "agents-account-kind", account.agent), name);
+    const tags = accountTagList(account.tags);
+    if (tags) head.appendChild(tags);
     head.appendChild(el("span", "agents-spacer"));
     const plan = planLabel(account.login.plan);
     if (account.login.state === "logged-in" && plan) {

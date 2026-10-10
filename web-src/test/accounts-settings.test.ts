@@ -124,6 +124,7 @@ const ROWS: AccountStatus[] = [
     id: "codex-key",
     name: "key",
     configDir: "/home/sample/codex-key",
+    tags: [{ name: "work", color: "blue" }],
     login: login({
       method: "API key",
       whoDetail: "signed in with API key, which has no email",
@@ -160,7 +161,10 @@ function unused(name: string): () => never {
   };
 }
 
-function harness(language: "en" | "ja" = "en") {
+function harness(
+  language: "en" | "ja" = "en",
+  dialogOverrides: Partial<AccountDialogs> = {},
+) {
   const data = response();
   const listeners: Array<() => void> = [];
   const loads: Array<Parameters<AccountsClient["load"]>[0]> = [];
@@ -184,6 +188,7 @@ function harness(language: "en" | "ja" = "en") {
     register: unused("register"),
     remove: unused("remove"),
     rename: unused("rename"),
+    setTags: unused("setTags"),
     async savePreferences(commands) {
       saves.push(commands);
       data.launchCommands = {
@@ -206,10 +211,12 @@ function harness(language: "en" | "ja" = "en") {
     add: unused("add"),
     login: unused("login"),
     rename: unused("rename"),
+    tags: unused("tags"),
     remove: unused("remove"),
     launch: unused("launch"),
     openHere: unused("openHere"),
     statusLine: unused("statusLine"),
+    ...dialogOverrides,
   };
   const settings = createAccountsSettings({
     client,
@@ -267,7 +274,7 @@ describe("the sign-in table", () => {
       state: "Signed in",
       checked: "just now",
       reason: "",
-      actions: ["Check again"],
+      actions: ["Check again", "Tags"],
       path: "~/.claude",
     },
     {
@@ -279,7 +286,7 @@ describe("the sign-in table", () => {
       state: "Signed in",
       checked: "3m ago",
       reason: "",
-      actions: ["Check again"],
+      actions: ["Check again", "Tags"],
       path: "~/.codex",
     },
     {
@@ -291,7 +298,7 @@ describe("the sign-in table", () => {
       state: "Not signed in",
       checked: "just now",
       reason: "",
-      actions: ["Check again", "Sign in", "Rename", "Remove"],
+      actions: ["Check again", "Sign in", "Tags", "Rename", "Remove"],
       path: "~/.local/state/code-viewer/accounts/codex-work",
     },
     {
@@ -304,19 +311,19 @@ describe("the sign-in table", () => {
       checked: "just now",
       reason:
         "Could not check: claude auth status --json exited with 1 (stdout 0 bytes, not shown); no JSON object in the output",
-      actions: ["Check again", "Rename", "Remove"],
+      actions: ["Check again", "Tags", "Rename", "Remove"],
       path: "~/lab-claude",
     },
     {
       id: "codex-key",
       login: "in",
-      name: "codexkey",
+      name: "codexkeywork",
       email: "—",
       plan: "",
       state: "Signed in",
       checked: "just now",
       reason: "No email: signed in with API key, which has no email",
-      actions: ["Check again", "Rename", "Remove"],
+      actions: ["Check again", "Tags", "Rename", "Remove"],
       path: "~/codex-key",
     },
     {
@@ -328,7 +335,7 @@ describe("the sign-in table", () => {
       state: "Not signed in",
       checked: "just now",
       reason: "The settings directory does not exist: /home/sample/codex-gone",
-      actions: ["Check again", "Rename", "Remove"],
+      actions: ["Check again", "Tags", "Rename", "Remove"],
       path: "~/codex-gone",
     },
   ])("$id: $state", (expected) => {
@@ -348,6 +355,30 @@ describe("the sign-in table", () => {
       ),
     ).toEqual(expected.actions);
     expect(cellText(box, ".agent-accounts-path")).toBe(expected.path);
+  });
+
+  test("Tags opens the tag dialog for that account, the default account too, and a tag shows in its color", async () => {
+    const opened: string[] = [];
+    harness("en", {
+      tags: async (account) => {
+        opened.push(account.id);
+        return null;
+      },
+    });
+    const tagsButton = Array.from(
+      row("claude:default").querySelectorAll<HTMLButtonElement>(
+        ".agent-accounts-actions button",
+      ),
+    ).find((button) => button.textContent === "Tags");
+
+    tagsButton?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect({
+      opened,
+      chip: row("codex-key").querySelector<HTMLElement>(".account-tag")?.dataset
+        .projectColor,
+    }).toEqual({ opened: ["claude:default"], chip: "blue" });
   });
 
   test("every row has the same cells in the same order, under one header", () => {
