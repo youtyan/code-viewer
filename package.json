@@ -65,7 +65,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
+    "@biomejs/biome": "2.5.15",
     "@happy-dom/global-registrator": "^20.14.5",
     "@types/better-sqlite3": "^7.6.13",
     "@types/d3-dsv": "3.0.7",
@@ -82,7 +82,7 @@
     "markdown-it-anchor": "9.2.0",
     "markdown-it-footnote": "4.0.0",
     "mermaid": "11.16.1",
-    "shiki": "4.4.3",
+    "shiki": "4.5.0",
     "tsx": "^4.23.15",
     "typescript": "7.0.2",
     "vitest": "^5.0.2",
@@ -90,15 +90,15 @@
   },
   "optionalDependencies": {
     "@lydell/node-pty": "^1.2.0-beta.14",
-    "better-sqlite3": "13.0.2"
+    "better-sqlite3": "13.0.3"
   },
   "packageManager": "pnpm@10.34.0",
   "engines": {
     "node": ">=22.14.0"
   },
   "dependencies": {
-    "@redis/client": "6.2.1",
-    "mysql2": "3.24.4",
-    "pg": "8.23.0"
+    "@redis/client": "6.3.0",
+    "mysql2": "3.24.5",
+    "pg": "8.23.1"
   }
 }
