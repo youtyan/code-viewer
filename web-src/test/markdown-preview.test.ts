@@ -231,27 +231,41 @@ describe("markdown preview", () => {
   });
 
   test.each([
-    { tag: "<br>", label: "no-space br" },
-    { tag: "<br/>", label: "solidus br" },
-    { tag: "<br />", label: "spaced br" },
-    { tag: "<BR>", label: "uppercase br" },
-  ])("renders HTML $label tags as real line breaks", ({ tag }) => {
+    ["line1<br>line2", "line1<br>line2"],
+    ["line1<br/>line2", "line1<br>line2"],
+    ["line1<br />line2", "line1<br>line2"],
+    ["line1<BR>line2", "line1<br>line2"],
+    [
+      '1. <a id="spec-ac-01"></a>**SPEC-AC-01** when saved',
+      '<li><a id="spec-ac-01"></a><strong>SPEC-AC-01</strong>',
+    ],
+    ['<a name="legacy"></a>text', '<a id="legacy"></a>text'],
+    ["<a id='quoted'></a>text", '<a id="quoted"></a>text'],
+    ['<A ID="upper"></A>text', '<a id="upper"></a>text'],
+  ])("renders inline HTML %j as a real element", (source, expected) => {
     const html = renderMarkdownHtml(
-      `line1${tag}line2`,
+      source,
       { path: "README.md", ref: "worktree" },
       null,
     );
-    expect(html.includes("line1<br>line2")).toBe(true);
-    expect(html.includes("&lt;br")).toBe(false);
+    expect(html.includes(expected)).toBe(true);
+    expect(html.includes("&lt;")).toBe(false);
   });
 
-  test("leaves HTML line break tags untouched inside code blocks", () => {
+  test.each([
+    ["```\nline1<br />line2\n```", "&lt;br /&gt;"],
+    ['<a id="x" onclick="run()"></a>', "&lt;a id="],
+    ['<a id="x">text</a>', "&lt;a id="],
+    ['<a href="https://example.com"></a>', "&lt;a href="],
+    ['`<a id="x"></a>`', "<code>&lt;a id=&quot;x&quot;&gt;&lt;/a&gt;</code>"],
+  ])("keeps HTML %j as escaped text", (source, escaped) => {
     const html = renderMarkdownHtml(
-      "```\nline1<br />line2\n```",
+      source,
       { path: "README.md", ref: "worktree" },
       null,
     );
-    expect(html.includes("&lt;br /&gt;")).toBe(true);
+    expect(html.includes(escaped)).toBe(true);
+    expect(html.includes("<a id=")).toBe(false);
   });
 
   test.each([
