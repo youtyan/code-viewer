@@ -290,8 +290,11 @@ function createMarkdownIt(
       }
     }
   });
-  md.core.ruler.after("inline", "gdp_line_breaks", (state) => {
-    const brRe = /<br\s*\/?>/gi;
+  // raw HTML は無効のまま、文書でよく使われる 2 つだけを本物の要素にする:
+  // 改行の <br> と、リンクの飛び先に置く空の <a id="…"></a> (name も同じ)。
+  md.core.ruler.after("inline", "gdp_inline_html", (state) => {
+    const inlineHtmlRe =
+      /<br\s*\/?>|<a\s+(?:id|name)\s*=\s*(["'])([^\s"'<>]+)\1\s*>\s*<\/a\s*>/gi;
     for (const token of state.tokens) {
       if (token.type !== "inline" || !token.children) continue;
       const children: Token[] = [];
@@ -302,20 +305,22 @@ function createMarkdownIt(
         }
         const content = child.content;
         let lastIndex = 0;
-        brRe.lastIndex = 0;
+        inlineHtmlRe.lastIndex = 0;
         for (
-          let match = brRe.exec(content);
+          let match = inlineHtmlRe.exec(content);
           match !== null;
-          match = brRe.exec(content)
+          match = inlineHtmlRe.exec(content)
         ) {
           if (match.index > lastIndex) {
             const text = new state.Token("text", "", 0);
             text.content = content.slice(lastIndex, match.index);
             children.push(text);
           }
-          const br = new state.Token("html_inline", "", 0);
-          br.content = "<br>";
-          children.push(br);
+          const html = new state.Token("html_inline", "", 0);
+          html.content = match[2]
+            ? `<a id="${md.utils.escapeHtml(match[2])}"></a>`
+            : "<br>";
+          children.push(html);
           lastIndex = match.index + match[0].length;
         }
         if (lastIndex < content.length) {
