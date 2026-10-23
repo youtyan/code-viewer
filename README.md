@@ -350,7 +350,7 @@ Open **Data** (`g b`).
 - Select a cell to see its value; the **Row** tab lists every column with its type (JSON pretty-printed, dates in the chosen zone).
 - Foreign-key cells open the related rows: what the row refers to and what refers to it, with row counts (relations without rows can be hidden).
 - SQL editor above the grid: read-only queries. SQLite and D1 allow `SELECT`, `PRAGMA`, `EXPLAIN`, `WITH`; PostgreSQL and MySQL allow `SELECT`, `EXPLAIN`, `WITH`, `SHOW`, `DESCRIBE` and run in a read-only transaction.
-- **Schema** (columns, comments, indexes, foreign keys, triggers, DDL), **ER** diagram, **Search** across all tables.
+- **Schema** (columns, comments, indexes, foreign keys, triggers, DDL), **ER** diagram (column types, comments, PK / FK / unique keys, crow's-foot lines; Mermaid export), **Search** across all tables.
 - **Snapshot**: save selected tables now and compare two snapshots (added, changed and removed rows).
 - **Query history** and **Log** at the bottom (closed until you open one of them).
 - **Rails FK inference**: adds foreign keys from Rails naming (`user_id → users.id`).

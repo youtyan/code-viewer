@@ -12808,7 +12808,10 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
   font-size: var(--db-font-sm);
 }
 
-/* ---------- ER Diagram ---------- */
+/* ---------- ER Diagram (views/database/er-diagram.ts) ----------
+   テーブルごとのカードを絶対位置で置き、その下の SVG に FK の線を描く。カードの
+   位置は TS が並べて left / top に書く (core/database/er-layout.ts)。図の面の色と
+   カード・線の色は下の「ER 図」の節 (.db-root) で名前から読む。 */
 .db-er-diagram[hidden] {
   display: none !important;
 }
@@ -12817,42 +12820,216 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   overflow: hidden;
 }
 
 .db-er-toolbar {
   display: flex;
-  gap: 4px;
-  padding: 6px 8px;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
   background: var(--bg-soft);
   flex-shrink: 0;
 }
 
+.db-er-tool-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.db-er-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--ui-control-sm);
+}
+
 .db-er-zoom-btn {
-  /* uses .db-btn base */
+  min-width: var(--ui-control-sm);
+}
+
+/* 倍率の数字は幅を決めておき、桁が変わってもボタンを動かさない。 */
+.db-er-zoom-level {
+  width: 5ch;
+  font-size: var(--db-font-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.db-er-find {
+  width: calc(var(--space-unit) * 48);
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--db-font-sm);
+}
+
+.db-er-copy {
+  margin-left: auto;
 }
 
 .db-er-container {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   cursor: grab;
   background:
     radial-gradient(circle, var(--border) 1px, transparent 1px);
-  background-size: 20px 20px;
-  padding: 24px;
+  background-size: var(--space-5) var(--space-5);
+  padding: var(--space-5);
 }
 .db-er-container:active {
   cursor: grabbing;
 }
 
-.db-er-svg-wrap {
-  display: inline-block;
-  min-width: 100%;
+/* 幅と高さは図の大きさ。拡大縮小で外側の余白を TS が足し引きする (er-diagram.ts の
+   syncCanvasExtent)。 */
+.db-er-canvas {
+  width: max-content;
 }
 
-.db-er-svg-wrap .mermaid svg {
-  max-width: none !important;
+.db-er-stage {
+  position: relative;
+}
+
+.db-er-edges {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* 幅は中身 (max-content)。絶対位置の箱は置き場の幅で縮むので、並べる前の
+   (幅 0 の) 置き場で文字が折り返さないよう決めておく。 */
+.db-er-table {
+  position: absolute;
+  width: max-content;
+  min-width: calc(var(--space-unit) * 44);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--db-font-base);
+  cursor: default;
+  transition:
+    opacity 0.12s,
+    box-shadow 0.12s,
+    border-color 0.12s;
+}
+
+.db-er-table-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  cursor: move;
+  user-select: none;
+}
+
+.db-er-table-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+
+.db-er-table-name {
+  font-family: var(--font-mono);
+  font-size: var(--db-font-md);
+  font-weight: 700;
+}
+
+.db-er-table-rows {
+  margin-left: auto;
+  font-size: var(--db-font-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.db-er-table-comment {
+  max-width: 32em;
+  overflow: hidden;
+  font-size: var(--db-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* .ui-table の行の区切りと hover はそのまま使い、カードの中なので詰める。 */
+.db-er-table .db-er-columns td {
+  padding: var(--space-1) var(--space-2);
+  line-height: 1.4;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.db-er-table .db-er-columns td:first-child {
+  padding-left: var(--space-3);
+}
+.db-er-table .db-er-columns td:last-child {
+  padding-right: var(--space-3);
+}
+.db-er-table .db-er-columns tr:last-child > td {
+  border-bottom: 0;
+}
+
+.db-er-key {
+  display: inline-block;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-xs);
+  font-weight: 700;
+  line-height: 1.5;
+}
+.db-er-key + .db-er-key {
+  margin-left: var(--space-1);
+}
+
+.db-er-col-name,
+.db-er-col-type,
+.db-er-col-null {
+  font-family: var(--font-mono);
+}
+.db-er-table tr.is-pk .db-er-col-name {
+  font-weight: 700;
+}
+.db-er-col-null {
+  font-size: var(--ui-font-xs);
+}
+
+.db-er-clip {
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+.db-er-col-type .db-er-clip {
+  max-width: 18em;
+}
+.db-er-col-comment .db-er-clip {
+  max-width: 24em;
+}
+
+.db-er-more {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--db-font-sm);
+}
+
+.db-er-edge path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.db-er-edge.is-inferred .db-er-edge-line {
+  stroke-dasharray: 5 4;
+}
+.db-er-edge:is(.is-active, .is-hot) path {
+  stroke-width: 2.25;
 }
 
 /* 現在フッタ/関連パネルに表示している値の元セル。スクロール後も維持するため
@@ -26214,12 +26391,12 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   width: var(--icon-sm);
   height: var(--icon-sm);
 }
-.db-root .db-grid-newest[aria-pressed="true"] {
+.db-root :is(.db-grid-newest, .db-er-toggle)[aria-pressed="true"] {
   background: color-mix(in srgb, var(--color-accent) 14%, var(--color-doc));
   border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-line));
   color: var(--color-accent-strong);
 }
-.db-root .db-grid-newest[data-save-failed] {
+.db-root :is(.db-grid-newest, .db-er-toggle)[data-save-failed] {
   color: var(--color-failed);
 }
 /* タイムゾーンの選択窓 (views/database/time-zone-picker.ts)。ボタンの幅は
@@ -26601,42 +26778,108 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 .db-root .db-snapshot-right-pane {
   background: var(--color-doc);
 }
-/* ER 図: 図の面はコードの面、実体の箱は沈んだ面と線、文字は本文の色。
-   mermaid が描いた SVG の塗り (path の fill 属性) を名前で上書きする。図の形・
-   配置は変えない。線と辺の札は mermaid が SVG の中に書く「#<id> .x」の規則
-   (id の詳細度) で色を持つので、この図の中に限って !important で上書きする。 */
+/* ER 図: 図の面はコードの面、カードは本文の面に線と影で浮かせ、見出しは沈んだ面。
+   型は構文の型の色、コメントと補足は 1 段・2 段薄い文字。関係を強調するのは
+   押せる強調の色 (いま選んでいる表とその線)。 */
 .db-root .db-er-diagram {
   background: var(--color-code);
 }
-.db-root .db-er-diagram svg :is(g.outer-path, g.row-rect-even) > path:first-child {
-  fill: var(--color-inset);
+.db-root .db-er-container {
+  background-image: radial-gradient(
+    circle,
+    var(--color-line-soft) 1px,
+    transparent 1px
+  );
 }
-.db-root .db-er-diagram svg g.row-rect-odd > path:first-child {
-  fill: var(--color-code);
-}
-.db-root .db-er-diagram svg :is(g.outer-path, g.row-rect-odd, g.row-rect-even) > path:not(:first-child),
-.db-root .db-er-diagram svg g.node path[stroke]:not([stroke="none"]) {
-  stroke: var(--color-line) !important;
-}
-.db-root .db-er-diagram svg .nodeLabel {
-  color: var(--color-text);
-}
-.db-root .db-er-diagram svg .label.attribute-type .nodeLabel,
-.db-root .db-er-diagram svg .label.attribute-keys .nodeLabel {
+.db-root :is(.db-er-zoom-level, .db-er-table-rows, .db-er-col-null, .db-er-more) {
   color: var(--color-text-3);
 }
-.db-root .db-er-diagram svg path.relationshipLine {
-  stroke: var(--color-text-3) !important;
+.db-root .db-er-find {
+  border-color: var(--color-line);
+  background: var(--color-inset);
+  color: var(--color-text);
 }
-.db-root .db-er-diagram svg :is(.labelBkg, span.edgeLabel) {
-  background-color: var(--color-code) !important;
+.db-root .db-er-table {
+  border-color: var(--color-line-strong);
+  background: var(--color-doc);
+  box-shadow: var(--shadow-sm);
+}
+.db-root .db-er-table-head {
+  border-bottom: 1px solid var(--color-line-row);
+  background: var(--color-inset);
+}
+.db-root .db-er-table-head:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.db-root .db-er-table-name,
+.db-root .db-er-col-name {
+  color: var(--color-text);
+}
+.db-root .db-er-col-type {
+  color: var(--syntax-type);
+}
+.db-root :is(.db-er-table-comment, .db-er-col-comment) {
   color: var(--color-text-2);
 }
-.db-root .db-er-diagram svg :is(marker path, marker circle) {
-  stroke: var(--color-text-3) !important;
+.db-root .db-er-more {
+  border-top: 1px solid var(--color-line-row);
 }
-.db-root .db-er-diagram svg marker circle {
-  fill: var(--color-code) !important;
+.db-root .db-er-key {
+  border-color: var(--color-line-row);
+}
+.db-root .db-er-key-pk {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.db-root .db-er-key-fk {
+  color: var(--color-text-2);
+}
+.db-root .db-er-key-uq {
+  color: var(--color-text-3);
+}
+.db-root .db-er-table .db-er-columns tr:is(.is-hot, .is-linked) > td {
+  background: color-mix(in srgb, var(--color-accent) 16%, var(--color-doc));
+}
+.db-root .db-er-table.is-related {
+  border-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-line-strong));
+}
+.db-root .db-er-table.is-active {
+  border-color: var(--color-accent);
+  box-shadow:
+    0 0 0 1px var(--color-accent),
+    var(--shadow-md);
+}
+.db-root .db-er-table.is-match {
+  outline: 2px dashed var(--color-accent);
+  outline-offset: 2px;
+}
+.db-root .db-er-table.is-dimmed {
+  opacity: 0.35;
+}
+.db-root .db-er-table.is-dragging {
+  z-index: 1;
+  box-shadow: var(--shadow-pop);
+}
+.db-root .db-er-edge {
+  color: var(--color-text-3);
+}
+.db-root .db-er-edge .db-er-edge-dots {
+  fill: var(--color-code);
+}
+.db-root .db-er-edge:is(.is-active, .is-hot) {
+  color: var(--color-accent);
+}
+.db-root .db-er-edge.is-dimmed {
+  opacity: 0.2;
+}
+.db-root .db-er-copy.failed {
+  color: var(--color-failed);
+}
+@media (prefers-reduced-motion: reduce) {
+  .db-er-table {
+    transition: none;
+  }
 }
 
 /* ---- B-2: Work log (views/journal-view.ts) ----

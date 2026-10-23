@@ -763,6 +763,8 @@ describe("state store", () => {
           prefs: {
             s3TooltipEnabled: true,
             inferFkRails: false,
+            erShowComments: false,
+            erKeysOnly: true,
             unknownPref: true,
             invalidType: 1,
           } as unknown as { [k: string]: unknown },
@@ -770,11 +772,15 @@ describe("state store", () => {
         expect(written.prefs).toEqual({
           s3TooltipEnabled: true,
           inferFkRails: false,
+          erShowComments: false,
+          erKeysOnly: true,
         });
         const reloaded = await loadDbUiState(dir);
         expect(reloaded.prefs).toEqual({
           s3TooltipEnabled: true,
           inferFkRails: false,
+          erShowComments: false,
+          erKeysOnly: true,
         });
       });
     });

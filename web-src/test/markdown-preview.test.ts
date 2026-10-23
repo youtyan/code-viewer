@@ -19,7 +19,7 @@ const markdown = sourceFixture(
   readFileSync(new URL("../core/markdown-preview.ts", import.meta.url), "utf8"),
 );
 // shiki / mermaid の lazy load は専用 loader モジュールに切り出されている
-// (markdown-preview と er-diagram / query-editor 等から共有)。lazy 性は
+// (markdown-preview と tools の mermaid / query-editor 等から共有)。lazy 性は
 // loader 側のソースで検証する。
 const mermaidLoader = sourceFixture(
   readFileSync(new URL("../core/mermaid-loader.ts", import.meta.url), "utf8"),

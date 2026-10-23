@@ -2301,7 +2301,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               "Cloudflare D1 と DynamoDB は読むだけです。",
               [
                 ui(l.database.nav.er),
-                " で ER 図、",
+                " で ER 図（カラムの型・コメント・関係の線。カードのダブルクリックでテーブルを開く）、",
                 ui(l.database.nav.search),
                 " で全部のテーブルを横断して探せます。",
               ],

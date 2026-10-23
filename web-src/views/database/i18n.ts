@@ -296,13 +296,32 @@ export type DbText = {
     zoomIn: string;
     zoomOut: string;
     zoomReset: string;
+    zoomLevel: string;
+    fit: string;
+    fitTitle: string;
+    find: string;
+    showComments: string;
+    showCommentsTitle: string;
+    keysOnly: string;
+    keysOnlyTitle: string;
+    optionSaveFailed: (detail: string) => string;
     copyMermaid: string;
     copyMermaidTitle: string;
     copied: string;
     copyFailed: (detail: string) => string;
     noTables: string;
-    loadError: string;
     renderError: string;
+    // カードの見出しの title。
+    tableTitle: (table: string) => string;
+    // 「キー列だけ」で隠した列の数。
+    moreColumns: (n: number) => string;
+    primaryKey: string;
+    foreignKey: string;
+    unique: string;
+    nullable: string;
+    defaultValue: (value: string) => string;
+    references: (target: string) => string;
+    inferred: string;
   };
   // 全テーブル横断検索。
   search: {
@@ -889,14 +908,32 @@ const EN: DbText = {
   er: {
     zoomIn: "Zoom in",
     zoomOut: "Zoom out",
-    zoomReset: "Reset zoom",
+    zoomReset: "Actual size",
+    zoomLevel: "Zoom level",
+    fit: "Fit",
+    fitTitle: "Fit the whole diagram in view",
+    find: "Find a table",
+    showComments: "Comments",
+    showCommentsTitle: "Show table and column comments",
+    keysOnly: "Keys only",
+    keysOnlyTitle: "Show only primary, foreign and unique key columns",
+    optionSaveFailed: (detail) => `Could not remember this choice: ${detail}`,
     copyMermaid: "Copy Mermaid",
     copyMermaidTitle: "Copy mermaid source to clipboard",
     copied: "Copied!",
     copyFailed: (detail) => `Copy Mermaid failed: ${detail}`,
     noTables: "No tables to display.",
-    loadError: "Failed to load mermaid.js",
     renderError: "Failed to render ER diagram.",
+    tableTitle: (table) =>
+      `${table}\nDrag to move. Double-click to open the table.`,
+    moreColumns: (n) => `${n} more column${n === 1 ? "" : "s"}`,
+    primaryKey: "Primary key",
+    foreignKey: "Foreign key",
+    unique: "Unique",
+    nullable: "NULL allowed",
+    defaultValue: (value) => `Default: ${value}`,
+    references: (target) => `References ${target}`,
+    inferred: "Guessed from the column name",
   },
   search: {
     placeholder: "Search across all tables…",
@@ -1492,14 +1529,32 @@ const JA: DbText = {
   er: {
     zoomIn: "拡大",
     zoomOut: "縮小",
-    zoomReset: "ズームをリセット",
+    zoomReset: "等倍",
+    zoomLevel: "倍率",
+    fit: "全体",
+    fitTitle: "図の全体が収まる倍率にする",
+    find: "テーブルを探す",
+    showComments: "コメント",
+    showCommentsTitle: "テーブルとカラムのコメントを表示する",
+    keysOnly: "キー列だけ",
+    keysOnlyTitle: "主キー・外部キー・一意キーの列だけを表示する",
+    optionSaveFailed: (detail) => `この選択を覚えられませんでした: ${detail}`,
     copyMermaid: "Mermaid をコピー",
     copyMermaidTitle: "Mermaid ソースをクリップボードにコピー",
     copied: "コピーしました",
     copyFailed: (detail) => `Mermaid のコピーに失敗しました: ${detail}`,
     noTables: "表示できるテーブルがありません。",
-    loadError: "mermaid.js の読み込みに失敗しました",
     renderError: "ER 図の描画に失敗しました。",
+    tableTitle: (table) =>
+      `${table}\nドラッグで動かす。ダブルクリックでテーブルを開く。`,
+    moreColumns: (n) => `ほか ${n} 列`,
+    primaryKey: "主キー",
+    foreignKey: "外部キー",
+    unique: "一意",
+    nullable: "NULL 可",
+    defaultValue: (value) => `既定値: ${value}`,
+    references: (target) => `参照先: ${target}`,
+    inferred: "列名から推測した関連",
   },
   search: {
     placeholder: "全テーブルを横断検索...",

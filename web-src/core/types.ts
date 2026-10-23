@@ -324,6 +324,10 @@ export type DbUiPrefs = {
   // Data の表の日時の列を表示し直すタイムゾーン。"local" は画面の PC の
   // タイムゾーン、ほかは IANA の名前 ("UTC"・"Asia/Tokyo")。無ければ元の値のまま。
   timeZone?: string;
+  // ER 図でテーブルとカラムのコメントを出す。default true。
+  erShowComments?: boolean;
+  // ER 図で主キー・外部キー・一意キーの列だけを出す。default false。
+  erKeysOnly?: boolean;
 };
 
 export type DbUiState = {
