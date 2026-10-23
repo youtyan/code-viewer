@@ -30,7 +30,11 @@ export type MarkdownPreviewOptions = {
   resolveAssetUrl?: (path: string, rawSrc: string) => string | null;
 };
 
-import { loadMermaid, type MermaidApi } from "./mermaid-loader";
+import {
+  loadMermaid,
+  type MermaidApi,
+  onMermaidLookChange,
+} from "./mermaid-loader";
 import { loadShikiHighlighter, type ShikiHighlighter } from "./shiki-loader";
 import { SHIKI_THEMES } from "./shiki-theme";
 
@@ -671,7 +675,30 @@ function wireMarkdownInteractions(
   });
   setupMarkdownScrollSpy(root);
   setupMermaidLightbox(root);
-  void renderMermaidDiagrams(root);
+  watchMermaidLook();
+  void renderMermaidDiagrams(
+    Array.from(root.querySelectorAll<HTMLElement>(".markdown-body .mermaid")),
+  );
+}
+
+// 描いた図の SVG には描いた時の明暗・テーマの色が焼き込まれる。明暗・テーマを
+// 変えたら、ページにある図をもとの記法から描き直す (見張りはページに 1 つ)。
+let stopMermaidLookWatch: (() => void) | null = null;
+function watchMermaidLook(): void {
+  if (stopMermaidLookWatch) return;
+  stopMermaidLookWatch = onMermaidLookChange(() => {
+    const nodes = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        ".markdown-body .mermaid[data-gdp-mermaid-source]",
+      ),
+    );
+    for (const node of nodes) {
+      // mermaid は data-processed の付いた要素を描かない。
+      node.removeAttribute("data-processed");
+      node.textContent = node.dataset.gdpMermaidSource ?? "";
+    }
+    void renderMermaidDiagrams(nodes);
+  });
 }
 
 function setupMarkdownScrollSpy(root: HTMLElement) {
@@ -889,10 +916,7 @@ function setupMermaidLightbox(root: HTMLElement) {
   });
 }
 
-async function renderMermaidDiagrams(root: HTMLElement) {
-  const nodes = Array.from(
-    root.querySelectorAll<HTMLElement>(".markdown-body .mermaid"),
-  );
+async function renderMermaidDiagrams(nodes: HTMLElement[]) {
   if (!nodes.length) return;
   let mermaid: MermaidApi;
   try {

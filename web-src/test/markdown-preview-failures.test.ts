@@ -14,12 +14,18 @@ import type { ShikiHighlighter } from "../core/shiki-loader";
 
 const mermaidLoad = vi.hoisted(() => ({
   next: null as null | (() => Promise<MermaidApi>),
+  // 明暗・テーマが変わったときにプレビューが描き直す口 (ページに 1 つ)。
+  lookChanged: null as null | (() => void),
 }));
 
 vi.mock("../core/mermaid-loader", () => ({
   loadMermaid: () => {
     if (!mermaidLoad.next) throw new Error("mermaid load was not arranged");
     return mermaidLoad.next();
+  },
+  onMermaidLookChange: (listener: () => void) => {
+    mermaidLoad.lookChanged = listener;
+    return () => undefined;
   },
 }));
 
@@ -176,6 +182,37 @@ describe("markdown preview failure paths", () => {
       expect(errorSpy).toHaveBeenCalledOnce();
     },
   );
+
+  test("changing the theme draws the diagrams again from their source", async () => {
+    const drawn: string[][] = [];
+    mermaidLoad.next = () =>
+      Promise.resolve({
+        initialize: () => undefined,
+        run: async ({ nodes }: { nodes: Element[] }) => {
+          drawn.push(nodes.map((node) => node.textContent ?? ""));
+          for (const node of nodes) {
+            node.setAttribute("data-processed", "true");
+            node.replaceChildren(
+              document.createElementNS("http://www.w3.org/2000/svg", "svg"),
+            );
+          }
+        },
+      });
+    const root = await renderMarkdownPreview(
+      "```mermaid\ngraph TD; A-->B\n```",
+      TARGET,
+      { syntaxHighlight: false },
+    );
+    document.body.appendChild(root);
+    onTestFinished(() => root.remove());
+    await settle();
+
+    mermaidLoad.lookChanged?.();
+    await settle();
+
+    expect(drawn).toEqual([["graph TD; A-->B\n"], ["graph TD; A-->B\n"]]);
+    expect(root.querySelectorAll(".mermaid svg")).toHaveLength(1);
+  });
 
   test("a diagram that cannot be measured opens with the layout size and says so", async () => {
     captureConsoleErrors();
