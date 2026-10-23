@@ -4,7 +4,7 @@
 
 import { createDiagramViewport } from "../../core/diagram-viewport";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
-import { loadMermaid } from "../../core/mermaid-loader";
+import { loadMermaid, onMermaidLookChange } from "../../core/mermaid-loader";
 import { PHONE_MEDIA_QUERY } from "../../core/mobile-layout";
 import type { ToolsText } from "./i18n";
 import {
@@ -103,6 +103,8 @@ export function createMermaidTool(
     },
   );
 
+  // 描いた図には描いた時の明暗・テーマの色が焼き込まれるので、変えたら描き直す。
+  const stopLookWatch = onMermaidLookChange(() => pane.refresh());
   const disposePane = pane.dispose;
   return {
     ...pane,
@@ -113,6 +115,7 @@ export function createMermaidTool(
       zoomReset.title = nextText.mermaid.zoomReset;
     },
     dispose() {
+      stopLookWatch();
       disposePane();
       viewport.dispose();
     },

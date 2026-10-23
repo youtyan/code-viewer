@@ -505,6 +505,8 @@ const DB_UI_BOOL_PREF_KEYS = [
   "s3TooltipEnabled",
   "inferFkRails",
   "newestFirst",
+  "erShowComments",
+  "erKeysOnly",
 ] as const;
 
 // 日時の列を表示し直すタイムゾーン。"local" (画面の PC) か、このランタイムの

@@ -27,6 +27,7 @@ export const KNOWN_SNAKE_CASE_IDENTIFIERS: readonly string[] = [
   "bottom_non_empty",
   "built_in",
   "capture_screen",
+  "character_varying",
   "child_process",
   "client_control_mode",
   "client_height",

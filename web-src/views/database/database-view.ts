@@ -679,8 +679,17 @@ function createTabPane(
   // `#datastore-infer-fk`)。pref 値が外部から変わったら grid の FK 解釈を
   // 再計算する必要があるので、subscriber だけ残す。disposer はタブ dispose
   // で必ず unsubscribe する (listener leak 回避)。
+  // ER 図は推測の FK が変わったときだけ描き直す (ER 図自身の表示の切替も
+  // pref なので、毎回描き直すと切り替えた直後に倍率と動かしたカードが戻る)。
+  let erForeignKeys: DbForeignKey[] | null = null;
   const disposeInferFkPrefSub = outerDeps.onDbUiPrefChange(() => {
     grid.refreshForeignKeys();
+    if (
+      currentTab === "er" &&
+      schemaCache &&
+      getForeignKeysCached() !== erForeignKeys
+    )
+      void renderErDiagram();
   });
   reloc(() => {
     const t = paneText().nav;
@@ -841,7 +850,14 @@ function createTabPane(
     getText: () => paneText(),
     onRefresh: () => refreshCurrentSchemaView(),
   });
-  const erDiagram = createErDiagram({ getText: () => paneText() });
+  const erDiagram = createErDiagram({
+    getText: () => paneText(),
+    getOption: (key, fallback) => outerDeps.getDbUiPref(key, fallback),
+    saveOption: (key, on) => outerDeps.saveDbUiPrefs({ [key]: on }),
+    onOpenTable: (table) => {
+      void selectTable(table);
+    },
+  });
   const globalSearchView = createGlobalSearchView({
     getDbId: () => currentDbInfo?.id || null,
     getSchema: () => currentSchema,
@@ -2165,7 +2181,7 @@ function createTabPane(
       } catch (error) {
         console.error("Failed to load columns for ER diagram", error);
         const statusHost =
-          erDiagram.el.querySelector<HTMLElement>(".db-er-svg-wrap");
+          erDiagram.el.querySelector<HTMLElement>(".db-er-canvas");
         if (statusHost) {
           setPaneStatus(
             statusHost,
@@ -2179,7 +2195,12 @@ function createTabPane(
         if (cols.length > 0) columnsMap.set(name, cols);
       }
     }
-    erDiagram.render(schemaCache, columnsMap);
+    // 命名から推測した FK (設定で入れたとき) も線にする。破線で描き分ける。
+    erForeignKeys = getForeignKeysCached();
+    erDiagram.render(
+      { ...schemaCache, foreignKeys: erForeignKeys },
+      columnsMap,
+    );
   }
 
   dbSelect.addEventListener("change", () => {

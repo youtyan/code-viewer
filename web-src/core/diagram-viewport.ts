@@ -11,6 +11,10 @@ export type DiagramViewport = {
   zoomIn(): void;
   zoomOut(): void;
   reset(): void;
+  /** 倍率を直接決める (「全体を表示」など)。範囲の外は端に寄せる。 */
+  zoomTo(scale: number): void;
+  /** いまの倍率。描画結果の上で測った長さを、拡大前の長さに戻すのに使う。 */
+  scale(): number;
   dispose(): void;
 };
 
@@ -91,6 +95,8 @@ export function createDiagramViewport(options: {
     zoomIn: () => applyZoom(stepDiagramScale(scale, 1)),
     zoomOut: () => applyZoom(stepDiagramScale(scale, -1)),
     reset: () => applyZoom(1),
+    zoomTo: (next) => applyZoom(next),
+    scale: () => scale,
     dispose() {
       dragState = null;
       container.style.cursor = "";

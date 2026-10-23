@@ -2326,7 +2326,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               "Cloudflare D1 and DynamoDB are read-only.",
               [
                 ui(l.database.nav.er),
-                " draws an ER diagram, and ",
+                " draws an ER diagram with column types, comments and relationship lines (double-click a card to open its table), and ",
                 ui(l.database.nav.search),
                 " looks through every table.",
               ],
