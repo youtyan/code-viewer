@@ -97,6 +97,8 @@ export function fakeMonitor(
       return () => listeners.delete(listener);
     },
     markRead: () => undefined,
+    latest: () => ({ overview: snapshot.overview, error: snapshot.error }),
+    receive: () => undefined,
     permission: () => notify.permission ?? "default",
     requestPermission: async () => {
       snapshot = { ...snapshot, permissionAsked: true };

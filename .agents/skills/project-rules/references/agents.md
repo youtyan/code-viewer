@@ -41,7 +41,7 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 | 左のサイドバーの「プロジェクト → エージェント」（どの画面にも出る） | `views/agents/agents-sidebar.ts`（枠の畳む・幅は `views/shell/app-nav.ts`） |
 | エージェントの全体ボード（サイドバーの「PROJECTS」の横のボタン、`/agents`、`g a`） | `views/agents/agents-view.ts` |
 | 最下段の件数（入力待ち n・作業中 n）と使用量 | `views/agents/agent-status.ts`・`views/agents/usage-status.ts` |
-| 全画面共通の取り直し・未読・通知・タブのタイトル | `views/agents/agent-monitor.ts` |
+| 全画面共通の取り直し・未読・通知・タブのタイトル | `views/agents/agent-monitor.ts`。取り直すのは外側のページ (と 1 枚の画面) だけで、面 (iframe) は外側のページが配る一覧を受け取る (`relay`。面ごとに tmux を問い合わせない)。通知も外側のページだけが出す |
 | アカウントの帯（一覧の上）と、作る・ログイン・起動の画面 | `views/agents/accounts-band.ts`・`accounts-dialogs.ts` |
 | 設定の「エージェントの通知」「エージェント連携」「アカウント」の節 | `views/viewer-settings.ts`・`views/agents/agent-hooks-settings.ts`・`accounts-settings.ts` |
 | 一覧の列の頭の 1 段目（`#project-head`。どの画面・状態でも動かさない）のプロジェクト名 = プロジェクトの切替（`p`） | `views/projects/project-switcher.ts`（置き場所は `web/index.html` の `#project-head` に固定、サイドバー・全体ボードと共有する操作は `project-actions.ts`、⋯ のメニューは `project-menu.ts`） |

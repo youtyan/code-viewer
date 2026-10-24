@@ -57,6 +57,11 @@ export type WorkspaceHost = {
   commandWhereTerminal(session: string | null, command: HostCommand): void;
   /** 全部の面に知らせる。フォーカスは動かさない。 */
   notifyAll(command: HostCommand): void;
+  /**
+   * 全部の面に配り、後から口を渡した面にも最後の値を送る (エージェントの一覧)。
+   * 前と同じ値なら送らない。
+   */
+  share(command: HostCommand): void;
   /** どれかの面で見ているシェル (前面のターミナルのタブ)。 */
   viewedShells(): string[];
   /** フォーカスのある面のプロジェクト。面が知らせるまでは null。 */
@@ -90,12 +95,17 @@ export function startWorkspaceHost(deps: {
   onNavCollapsed(collapsed: boolean): void;
   /** 窓が狭くて隠している面の数 (0 なら全部出ている)。 */
   onHidden(count: number): void;
+  /** 面がエージェントの一覧の取り直しを頼んだ。 */
+  onAgentsRefresh(): void;
 }): WorkspaceHost {
   const root = document.getElementById("workspace");
   if (!root) throw new Error("#workspace is missing from index.html");
   const panes = new Map<PaneId, PaneRuntime>();
   /** フォーカスした順 (古い → 新しい)。別の面で開く先を選ぶ。 */
   const focusOrder: PaneId[] = [];
+  /** 面に配った最後の値 (種類ごと) と、その JSON (同じ値を送り直さない)。 */
+  const shared = new Map<HostCommand["type"], HostCommand>();
+  const sharedText = new Map<HostCommand["type"], string>();
   let workspace: Workspace = singlePane("p1", currentUrl());
   let ready = false;
   /** 読み込みに失敗した・新しい版の保存: 書かない。 */
@@ -174,6 +184,7 @@ export function startWorkspaceHost(deps: {
     );
     for (const command of runtime.queued.splice(0))
       runtime.port.postMessage(command);
+    for (const command of shared.values()) runtime.port.postMessage(command);
     send(runtime, focusState(runtime.id));
   }
 
@@ -267,6 +278,9 @@ export function startWorkspaceHost(deps: {
       }
       case "drag-end":
         endDrag();
+        return;
+      case "agents-refresh":
+        deps.onAgentsRefresh();
         return;
     }
   }
@@ -797,6 +811,14 @@ export function startWorkspaceHost(deps: {
     },
     notifyAll(next) {
       for (const runtime of panes.values()) send(runtime, next);
+    },
+    share(next) {
+      const text = JSON.stringify(next);
+      if (sharedText.get(next.type) === text) return;
+      sharedText.set(next.type, text);
+      shared.set(next.type, next);
+      // 口を渡す前の面には送らない (口を渡したときに最後の値を送る)。
+      for (const runtime of panes.values()) runtime.port?.postMessage(next);
     },
     viewedShells: () => [
       ...new Set([...panes.values()].flatMap((runtime) => runtime.shells)),

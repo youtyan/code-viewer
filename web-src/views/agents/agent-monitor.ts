@@ -74,6 +74,18 @@ export type AgentMonitorDeps = {
   /** 通知を押されたとき。そのペインを開く。 */
   onNotificationClick(pane: AgentPane): void;
   actionHeaders(): HeadersInit;
+  /**
+   * 外側のページが取った一覧を受け取る (面の中。core/workspace-role.ts)。あれば自分
+   * では取り直さず、取り直しは requestRefresh で外側のページに頼む (receive で届く)。
+   * 面ごとに 1.5 秒おきに tmux を問い合わせない。
+   */
+  relay?: { requestRefresh(): void };
+};
+
+/** 取り直した応答 (外側のページが面へ配る)。 */
+export type AgentMonitorFeed = {
+  overview: AgentOverviewResponse | null;
+  error: string;
 };
 
 export type AgentMonitor = {
@@ -85,6 +97,10 @@ export type AgentMonitor = {
   markRead(pane: TmuxPaneId): void;
   permission(): NotificationPermissionState;
   requestPermission(): Promise<NotificationPermissionState>;
+  /** サーバの応答そのもの (外側のページが面へ配る)。 */
+  latest(): AgentMonitorFeed;
+  /** 外側のページが配った応答を受け取る (relay のとき)。 */
+  receive(feed: AgentMonitorFeed): void;
 };
 
 function notificationApi(): typeof Notification | null {
@@ -290,7 +306,15 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     emit();
   }
 
+  /** relay のとき、頼んだ取り直しの答え (次に receive で届く応答) を待っているもの。 */
+  const waiting: Array<() => void> = [];
+
   function refresh(): Promise<void> {
+    const relay = deps.relay;
+    if (relay) {
+      relay.requestRefresh();
+      return new Promise((resolve) => waiting.push(resolve));
+    }
     // 取り直しが重なったら、走っているものの結果を待つ。前の応答が後から
     // 届いて新しい結果を巻き戻すことがない。
     inFlight ??= load().finally(() => {
@@ -336,7 +360,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
 
   return {
     start() {
-      if (timer !== null) return;
+      if (timer !== null || deps.relay) return;
       void refresh();
       schedule();
     },
@@ -371,6 +395,15 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
         );
       }
       if (hadUnread) emit();
+    },
+    latest: () => ({ overview: received, error }),
+    receive(feed) {
+      if (feed.overview) {
+        error = feed.error;
+        apply(feed.overview);
+      } else forget(feed.error);
+      emit();
+      for (const resolve of waiting.splice(0)) resolve();
     },
     permission,
     async requestPermission() {

@@ -153,3 +153,43 @@ test.each([
   await monitor.refresh();
   expect(titles).toEqual(expected);
 });
+
+// 面の中 (relay) は自分では取り直さず、外側のページが取った一覧を受け取る。取り直しは
+// 外側のページに頼み、次に届いた一覧で終わる。
+test("relay: 自分では取り直さず、頼んだ取り直しは届いた一覧で終わる", async () => {
+  const fetched = vi.fn();
+  vi.stubGlobal("fetch", fetched);
+  const requested: string[] = [];
+  const monitor = createAgentMonitor({
+    getText: () => agentsText("en"),
+    getNotifySettings: () => ({ waiting: false, finished: false }),
+    isViewing: () => false,
+    onUnreadCountChange: () => undefined,
+    onNotificationClick: () => undefined,
+    actionHeaders: () => ({}),
+    relay: { requestRefresh: () => requested.push("refresh") },
+  });
+  monitor.start();
+  let done = false;
+  const refreshing = monitor.refresh().then(() => {
+    done = true;
+  });
+  await Promise.resolve();
+  const before = { requested: [...requested], done };
+  const next = overview([pane("%1", "waiting")], []);
+  monitor.receive({ overview: next, error: "" });
+  await refreshing;
+  expect({
+    before,
+    done,
+    fetched: fetched.mock.calls.length,
+    panes: monitor.snapshot().overview?.panes.map((item) => item.id),
+    latest: monitor.latest(),
+  }).toEqual({
+    before: { requested: ["refresh"], done: false },
+    done: true,
+    fetched: 0,
+    panes: ["%1"],
+    latest: { overview: next, error: "" },
+  });
+});

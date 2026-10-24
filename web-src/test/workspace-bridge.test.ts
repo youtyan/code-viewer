@@ -183,6 +183,7 @@ async function startHost(loaded: Workspace = twoPanes()) {
     onLookChanged: vi.fn(),
     onNavCollapsed: vi.fn(),
     onHidden: vi.fn(),
+    onAgentsRefresh: vi.fn(),
   };
   const host = startWorkspaceHost(deps);
   await vi.waitFor(() =>
@@ -477,6 +478,41 @@ describe("host: 面の並び", () => {
   });
 });
 
+describe("host: エージェントの一覧を面へ配る", () => {
+  const feed = (label: string) =>
+    ({
+      type: "agents",
+      overview: { label } as never,
+      error: "",
+    }) satisfies HostCommand;
+
+  test("口のある面へ配り、同じ値は送り直さず、後から口を渡した面にも最後の値を送る", async () => {
+    const { host, panes, deps } = await startHost();
+    const p1 = paneEnd(panes.p1);
+    host.share(feed("first"));
+    host.share(feed("first"));
+    host.share(feed("second"));
+    await vi.waitFor(() =>
+      expect(p1.received.filter((c) => c.type === "agents")).toHaveLength(2),
+    );
+    // p2 が読み直した: 口を渡し直すと、最後の値が届く。
+    panes.p2.frame.dispatchEvent(new Event("load"));
+    await vi.waitFor(() => expect(panes.p2.hellos.length).toBe(2));
+    const p2 = paneEnd(panes.p2);
+    await vi.waitFor(() =>
+      expect(p2.received.filter((c) => c.type === "agents")).toEqual([
+        feed("second"),
+      ]),
+    );
+    paneEnd(panes.p2).send({ type: "agents-refresh" });
+    await vi.waitFor(() => expect(deps.onAgentsRefresh).toHaveBeenCalled());
+    expect(p1.received.filter((c) => c.type === "agents")).toEqual([
+      feed("first"),
+      feed("second"),
+    ]);
+  });
+});
+
 describe("host: 掴んだタブをほかの面へ落とす", () => {
   const route: AppRoute = {
     screen: "history",
@@ -618,6 +654,7 @@ describe("host: 読み込みの最初に作った面", () => {
       onLookChanged: vi.fn(),
       onNavCollapsed: vi.fn(),
       onHidden: vi.fn(),
+      onAgentsRefresh: vi.fn(),
     });
     await vi.waitFor(() => expect(first.hellos.length).toBe(1));
     const frames = [
