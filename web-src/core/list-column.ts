@@ -7,8 +7,10 @@
 // 全体の左)。本文 (1 面なら 1 面、2 面なら 2 面と仕切り) が足りないときは、
 // (1) 一覧を詰めた幅 (HISTORY_WIDTH.min の 240。題と札だけが読める幅) にし、
 // (2) 変更ファイルの一覧を帯に畳み、(3) ファイル一覧を畳む (最後まで残す)。
-// それでも足りなければ、2 面なら右の面を預け (main-tabs-view の fitToWidth)、
-// 1 面ならそのまま出す。利用者が手で開いた列は、そのセッションは自動で畳まない。
+// (4) それでも足りなければ (狭い面)、Diff の一覧 (変更ファイルの一覧) も帯に畳む
+// (History と作業ツリーの一覧は本文に出すものを選ぶ入口なので畳まない)。それでも
+// 足りなければ、2 面なら右の面を預け (main-tabs-view の fitToWidth)、1 面なら
+// そのまま出す。利用者が手で開いた列は、そのセッションは自動で畳まない。
 // 左のサイドバー (プロジェクトとエージェント) は畳まない。
 
 import type { PanelSize } from "./panel-sizes";
@@ -28,8 +30,10 @@ export type ListColumnInput = {
   filesRail: number;
   /** 利用者が手でファイル一覧を開いた (このセッションは自動で畳まない)。 */
   filesKeptOpen: boolean;
-  /** 一覧の利用者の幅。一覧の無い画面・利用者が一覧を畳んだなら 0。 */
+  /** 一覧の利用者の幅。一覧の無い画面なら 0、利用者が一覧を畳んだなら帯の幅。 */
   preferred: number;
+  /** 利用者が一覧を畳んだか、幅で畳んだ一覧を開いた (このセッションは畳まない)。 */
+  listKeptOpen: boolean;
   /** 一覧の詰めた幅。 */
   compact: number;
   /**
@@ -37,7 +41,7 @@ export type ListColumnInput = {
    * が変更ファイルの一覧) と、利用者が畳んだなら 0。
    */
   tree: number;
-  /** 畳んだ列の帯の幅。 */
+  /** 畳んだ列 (一覧・変更ファイルの一覧) の帯の幅。 */
   treeRail: number;
   /** 利用者が畳んだ変更ファイルの一覧を開いた (このセッションは畳まない)。 */
   treeKeptOpen: boolean;
@@ -46,7 +50,7 @@ export type ListColumnInput = {
 };
 
 export type ListColumnLayout = {
-  /** 一覧の幅。 */
+  /** 一覧の幅 (畳んだら帯の幅)。 */
   width: number;
   /** 一覧を詰めた。 */
   compact: boolean;
@@ -56,6 +60,8 @@ export type ListColumnLayout = {
   treeFolded: boolean;
   /** ファイル一覧を自動で畳んだ (幅は帯の幅 filesRail。帯の開くボタンで開く)。 */
   filesFolded: boolean;
+  /** Diff の一覧を自動で帯に畳んだ (帯の開くボタンで開く)。 */
+  listFolded: boolean;
 };
 
 export function listColumnLayout(input: ListColumnInput): ListColumnLayout {
@@ -73,6 +79,7 @@ export function listColumnLayout(input: ListColumnInput): ListColumnLayout {
       tree,
       treeFolded: false,
       filesFolded: false,
+      listFolded: false,
     };
   // (1) 一覧を詰める。
   if (fits(files, narrow, tree))
@@ -82,6 +89,7 @@ export function listColumnLayout(input: ListColumnInput): ListColumnLayout {
       tree,
       treeFolded: false,
       filesFolded: false,
+      listFolded: false,
     };
   // (2) 変更ファイルの一覧を帯に畳む。
   const treeFolded = tree !== 0 && !input.treeKeptOpen;
@@ -93,14 +101,24 @@ export function listColumnLayout(input: ListColumnInput): ListColumnLayout {
       tree: treeWidth,
       treeFolded,
       filesFolded: false,
+      listFolded: false,
     };
   // (3) ファイル一覧を畳む。
+  const filesFolded = input.files !== 0 && !input.filesKeptOpen;
+  // (4) Diff の一覧 (右に変更ファイルの一覧の列が無い = tree 0) を帯に畳む (狭い面。
+  // ファイル一覧を畳んでも本文が足りない)。
+  const listFolded =
+    preferred !== 0 &&
+    tree === 0 &&
+    !input.listKeptOpen &&
+    !fits(filesFolded ? input.filesRail : files, narrow, treeWidth);
   return {
-    width: narrow,
+    width: listFolded ? treeRail : narrow,
     compact,
     tree: treeWidth,
     treeFolded,
-    filesFolded: input.files !== 0 && !input.filesKeptOpen,
+    filesFolded,
+    listFolded,
   };
 }
 

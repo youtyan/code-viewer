@@ -33,7 +33,8 @@ beforeEach(() => {
     <div id="outside">outside</div>
     <button id="anchor" title="History (g h)"><span id="inner">icon</span></button>
     <div id="tab" title="src/sample.ts"><span id="tab-name">sample.ts</span><button id="close" title="Close tab">x</button></div>
-    <div id="blank" title=" "><span id="blank-inner">x</span></div>`;
+    <div id="blank" title=" "><span id="blank-inner">x</span></div>
+    <iframe id="frame" title="code viewer"></iframe>`;
   uninstall = installTitleTooltips(document);
 });
 afterEach(() => {
@@ -99,8 +100,14 @@ describe("showing", () => {
     ]);
   });
 
-  test("a blank title shows nothing (and hides the parents' title)", () => {
-    pointer("pointerover", el("blank-inner"));
+  test.each([
+    { name: "a blank title (it hides the parents' title)", id: "blank-inner" },
+    {
+      name: "a frame's title (it names the frame for screen readers)",
+      id: "frame",
+    },
+  ])("$name shows nothing", ({ id }) => {
+    pointer("pointerover", el(id));
     vi.advanceTimersByTime(1000);
     expect(shownText()).toBe(null);
   });

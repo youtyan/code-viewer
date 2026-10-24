@@ -94,6 +94,7 @@ import {
   GIT_BRANCH_16_PATH,
   HISTORY_16_PATH,
   iconSvg,
+  KEBAB_16_PATH,
   MARK_GITHUB_16_PATH,
   MOON_16_PATH,
   NEXT_16_PATHS,
@@ -422,6 +423,7 @@ import { createTerminalView } from "./views/terminal/terminal-view";
 import { installTitleTooltips } from "./views/title-tooltip";
 import { toolsText } from "./views/tools/i18n";
 import { createToolsView } from "./views/tools/tools-view";
+import { mountTopbarMore } from "./views/topbar-more";
 import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
   createViewerSettings,
@@ -1791,6 +1793,11 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 設定とは別)。配線は syncListColumn。
    */
   let LIST_COLUMN_HIDDEN = false;
+  /**
+   * 利用者が一覧の帯を押して開いた (手で畳んだ帯でも、幅で畳んだ帯でも)。この
+   * セッションは幅で畳まない。配線は syncListColumn。
+   */
+  let LIST_COLUMN_KEPT_OPEN = false;
   /** 利用者が History・作業ツリーの変更ファイルの一覧を手で畳んだ (このセッションだけ)。 */
   let LIST_TREE_HIDDEN = false;
   /**
@@ -2711,6 +2718,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxOffTitle: string;
         hideTests: string;
         hideTestsLabel: string;
+        more: string;
         autoUpdateOnTitle: string;
         autoUpdateOffTitle: string;
       };
@@ -2883,6 +2891,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxOffTitle: "syntax highlighting off",
         hideTests: "hide test files (test|spec)",
         hideTestsLabel: "no test",
+        more: "more options",
         autoUpdateOnTitle: "auto update on file change",
         autoUpdateOffTitle: "auto update off — manual reload",
       },
@@ -3151,6 +3160,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxOffTitle: "シンタックスハイライト無効",
         hideTests: "test/spec ファイルを隠す",
         hideTestsLabel: "テスト非表示",
+        more: "ほかの操作",
         autoUpdateOnTitle: "ファイル変更時に自動更新",
         autoUpdateOffTitle: "自動更新オフ — 手動で再読み込み",
       },
@@ -3525,6 +3535,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (hideTests) {
       hideTests.title = text.topbar.hideTests;
       hideTests.textContent = text.topbar.hideTestsLabel;
+    }
+    const topbarMore =
+      document.querySelector<HTMLButtonElement>("#topbar-more");
+    if (topbarMore) {
+      topbarMore.innerHTML = iconSvg("octicon-kebab-horizontal", KEBAB_16_PATH);
+      topbarMore.title = text.topbar.more;
+      topbarMore.setAttribute("aria-label", text.topbar.more);
     }
     applyAutoUpdateButton();
     setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
@@ -8647,6 +8664,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       filesKeptOpen: FILE_LIST_KEPT_OPEN,
       // 手で畳んだ一覧・変更ファイルの一覧は帯 (開くボタン) の幅。
       preferred: !kind ? 0 : LIST_COLUMN_HIDDEN ? rail : STATE.historyWidth,
+      listKeptOpen: LIST_COLUMN_KEPT_OPEN || LIST_COLUMN_HIDDEN,
       compact: HISTORY_WIDTH.min,
       tree: !hasTree ? 0 : LIST_TREE_HIDDEN ? rail : STATE.sbWidth,
       treeRail: rail,
@@ -8677,10 +8695,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       listColumnLayoutFor(need);
     if (kind) body.dataset.listColumn = kind;
     else delete body.dataset.listColumn;
-    body.toggleAttribute(
-      "data-list-column-hidden",
-      !!kind && LIST_COLUMN_HIDDEN,
-    );
+    // 一覧を帯に畳む: 利用者が畳んだか、狭い面で幅が足りない。
+    const listFolded = LIST_COLUMN_HIDDEN || layout.listFolded;
+    body.toggleAttribute("data-list-column-hidden", !!kind && listFolded);
     // 電話では一覧の列は重ねて出す面なので、幅では畳まない。
     const overlaid = phoneMediaQuery().matches;
     const action = fileListAction({
@@ -8699,7 +8716,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     // 掴んで広げられる一覧の上限 = 今のファイル一覧と変更ファイルの一覧のままで
     // 本文が need を保てる幅。
     LIST_FITS_WIDTH = room - files - layout.tree - need;
-    if (kind && !LIST_COLUMN_HIDDEN)
+    if (kind && !listFolded)
       document.documentElement.style.setProperty(
         "--list-w",
         `${layout.width}px`,
@@ -8710,7 +8727,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       "data-list-tree-folded",
       hasTree && (layout.treeFolded || LIST_TREE_HIDDEN),
     );
-    LIST_SHOWN_WIDTH = kind && !LIST_COLUMN_HIDDEN ? layout.width : 0;
+    LIST_SHOWN_WIDTH = kind && !listFolded ? layout.width : 0;
     localizeListColumnFolds();
     const total = files + (kind ? layout.width + layout.tree : 0);
     if (total === LIST_COLUMN_WIDTH) return;
@@ -8801,8 +8818,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       LIST_TREE_HIDDEN = true;
       syncListColumn();
     };
+    // 開いた一覧は、このセッションは幅で畳まない (幅で畳んだ帯から開いたときも)。
     const openList = () => {
       LIST_COLUMN_HIDDEN = false;
+      LIST_COLUMN_KEPT_OPEN = true;
       syncListColumn();
     };
     const listStop = () =>
@@ -8858,13 +8877,21 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!LIST_COLUMN_FOLDS) return;
     const text = uiText().sidebar;
     const diff = listColumnKind() === "sidebar";
+    // 幅のために畳んだ帯は、その理由も出す (手で畳んだときと区別が付かないと、
+    // なぜ消えたのか分からない)。
+    const listAuto =
+      document.body.hasAttribute("data-list-column-hidden") &&
+      !LIST_COLUMN_HIDDEN;
+    const showList = listAuto
+      ? `${text.showList} (${text.autoHidden})`
+      : text.showList;
     setListTreeOpenLabel(LIST_COLUMN_FOLDS.listFold, text.hideList);
-    setListTreeOpenLabel(LIST_COLUMN_FOLDS.listOpen, text.showList);
+    setListTreeOpenLabel(LIST_COLUMN_FOLDS.listOpen, showList);
     setListTreeOpenLabel(
       LIST_COLUMN_FOLDS.sidebarFold,
       diff ? text.hideList : text.hideTree,
     );
-    setListTreeOpenLabel(LIST_COLUMN_FOLDS.sidebarOpen, text.showList);
+    setListTreeOpenLabel(LIST_COLUMN_FOLDS.sidebarOpen, showList);
     const treeAuto =
       document.body.hasAttribute("data-list-tree-folded") && !LIST_TREE_HIDDEN;
     setListTreeOpenLabel(
@@ -10759,6 +10786,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     patchSettings({ hideTests: STATE.hideTests });
     applyHideTests();
   });
+  mountTopbarMore($<HTMLButtonElement>("#topbar-more"));
 
   // ---- Code annotations (AI walkthrough) ----
   // Panel + inline rows live in annotations-ui.ts; this wires it to the app.

@@ -2792,8 +2792,8 @@ describe("main tabs view: 左右 2 面", () => {
   // ファイル一覧 (240)・一覧 (Diff の変更ファイルの一覧・History のコミット 320)・
   // 変更ファイルの一覧 (History だけ 240) が並ぶ (どれも面の外)。本文が 2 面の
   // ゆとり (961) に足りなければ、一覧を詰めた幅 (240) にし、次に変更ファイルの一覧を
-  // 帯 (28) に畳み、次にファイル一覧を畳む (畳んでも画面の入口の縦の帯 40 は残る。
-  // core/list-column.ts。app.ts が決めて
+  // 帯 (28) に畳み、次にファイル一覧を畳み (畳んでも画面の入口の縦の帯 40 は残る)、
+  // 次に Diff の一覧も帯 (28) に畳む (core/list-column.ts。app.ts が決めて
   // listColumnWidth で渡す)。それでも 2 面の下限 (641) に足りなければ右の面を
   // 預ける。本文の幅 = 窓 − 左のサイドバー 280 − 一覧の列。
   test.each([
@@ -2855,14 +2855,28 @@ describe("main tabs view: 左右 2 面", () => {
     },
     {
       screen: "Diff",
-      window: 1200,
-      column: 280,
+      window: 988,
+      column: 68,
       parked: true,
       filesFolded: true,
     },
     {
       screen: "Diff",
-      window: 1201,
+      window: 989,
+      column: 68,
+      parked: false,
+      filesFolded: true,
+    },
+    {
+      screen: "Diff",
+      window: 1520,
+      column: 68,
+      parked: false,
+      filesFolded: true,
+    },
+    {
+      screen: "Diff",
+      window: 1521,
       column: 280,
       parked: false,
       filesFolded: true,
@@ -2931,6 +2945,7 @@ describe("main tabs view: 左右 2 面", () => {
         filesRail: 40,
         filesKeptOpen: false,
         preferred: holdsList ? HISTORY_WIDTH.default : 0,
+        listKeptOpen: false,
         compact: HISTORY_WIDTH.min,
         tree: screen === "History" ? 240 : 0,
         treeRail: 28,
