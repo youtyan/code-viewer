@@ -8480,6 +8480,11 @@ window.GdpExpandLogic = GdpExpandLogic;
             ? void openShellIn(null, side)
             : showShellUnavailable(list.reason ?? ""),
       },
+      // 面の中にはグループの札 (その ▾) が無いので、エージェントもここから起こす。
+      {
+        label: mainTabsText(STATE.language).newAgentHere,
+        onSelect: () => launchAgent(MAIN_TABS.currentProject() ?? undefined),
+      },
       // Tools と Search は page のタブ (左の面にだけ開く)。
       { label: uiText().nav.tools, onSelect: () => openToolsPage() },
       { label: uiText().nav.search, onSelect: () => openSearchPage() },

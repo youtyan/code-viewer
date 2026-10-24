@@ -2355,7 +2355,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const loose: HTMLElement[] = [];
     const grouped: HTMLElement[] = [];
     for (const group of groupsOf(side, pane)) {
-      if (group.key === null) {
+      // 面の中は 1 つのプロジェクトのタブだけなので札を出さない (一覧の列の頭と
+      // 同じプロジェクトを、タブ列の左端にもう一度出していた)。
+      if (group.key === null || deps.paneMode) {
         for (const tab of group.tabs)
           loose.push(renderTab(tab, tab.id === pane.activeId, side, false));
         continue;
