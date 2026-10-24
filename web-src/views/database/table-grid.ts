@@ -25,7 +25,6 @@ import {
   SYNC_16_PATH,
 } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
-import { PHONE_MEDIA_QUERY } from "../../core/mobile-layout";
 import {
   highlightToInnerHtml,
   loadShikiHighlighter,
@@ -39,6 +38,7 @@ import {
 import type { AnnotationDatabaseDataState } from "../../core/types";
 import { pageLanguage } from "../page-language";
 import { currentRowHeight } from "../shell/row-height";
+import { phoneMediaQuery } from "../shell/workspace";
 import { showConfirmDialog } from "../ui-dialog";
 import { createDetailTabs } from "./detail-tabs";
 import { createGridRangeSelect } from "./grid-range-select";
@@ -587,8 +587,7 @@ export function createTableGrid(
    * 145px を取り、データの列に幅が残らなかった。style.css の SP の節)。
    */
   function pinnedWidth(): number {
-    const recencyPinned =
-      recency.shown() && !window.matchMedia?.(PHONE_MEDIA_QUERY).matches;
+    const recencyPinned = recency.shown() && !phoneMediaQuery().matches;
     return ROWNUM_WIDTH + (recencyPinned ? RECENCY_COLUMN_WIDTH : 0);
   }
 

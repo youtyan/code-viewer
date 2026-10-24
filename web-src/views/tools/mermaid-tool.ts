@@ -5,7 +5,7 @@
 import { createDiagramViewport } from "../../core/diagram-viewport";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { loadMermaid, onMermaidLookChange } from "../../core/mermaid-loader";
-import { PHONE_MEDIA_QUERY } from "../../core/mobile-layout";
+import { phoneMediaQuery } from "../shell/workspace";
 import type { ToolsText } from "./i18n";
 import {
   createPaneAction,
@@ -74,10 +74,7 @@ export function createMermaidTool(
         if (svg) {
           // 電話の段では図をもとの大きさで描き、指で動かして読む (面の幅に縮める
           // とノードの文字が 5px になった)。mermaid はもとの幅を max-width に書く。
-          if (
-            window.matchMedia?.(PHONE_MEDIA_QUERY).matches &&
-            svg.style.maxWidth
-          ) {
+          if (phoneMediaQuery().matches && svg.style.maxWidth) {
             svg.style.width = svg.style.maxWidth;
             svg.style.maxWidth = "none";
           }

@@ -1,7 +1,7 @@
 // 設定とヘルプのページの枠: 見出し・左の目次・本文。中身は各ページ
 // (views/settings-page.ts・views/help-page.ts) が組む。
 
-import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
+import { phoneMediaQuery } from "./shell/workspace";
 
 export type PageShellNavItem =
   | { kind: "heading"; label: string }
@@ -38,7 +38,7 @@ export function createPageShell() {
   // 本文だけ (2 段目。頭の「‹ 目次」で 1 段目へ戻る)。ほかの画面から入ったら
   // 1 段目から (節を指して開いたときは 2 段目)。
   let navOpen = false;
-  const phoneQuery = window.matchMedia(PHONE_MEDIA_QUERY);
+  const phoneQuery = phoneMediaQuery();
 
   /** 枠を描いて target の中身と差し替える。返す closeNav は目次の 1 段目を閉じる。 */
   function render(

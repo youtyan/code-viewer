@@ -24,6 +24,7 @@ import {
 } from "vitest";
 import { withoutProjectPrefix } from "../core/api-url";
 import { listColumnKindFor, listColumnLayout } from "../core/list-column";
+import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import {
   PAGE_MODE_CLASSES,
   pageModeClasses,
@@ -31,6 +32,7 @@ import {
 } from "../core/page-mode";
 import { HISTORY_WIDTH, SIDEBAR_WIDTH } from "../core/panel-sizes";
 import { parseRoute, parseTerminalOverlay } from "../core/routes";
+import { embeddedMediaText } from "../core/workspace-role";
 import {
   COMFORTABLE_PANE_WIDTH,
   SPLIT_DIVIDER_WIDTH,
@@ -99,6 +101,7 @@ beforeEach(() => {
   for (const name of [...document.body.getAttributeNames()])
     document.body.removeAttribute(name);
   document.documentElement.removeAttribute("style");
+  delete document.documentElement.dataset.workspace;
   localStorage.clear();
 });
 
@@ -314,6 +317,135 @@ describe("#first-screen は app.ts と同じ印を付ける", () => {
     } finally {
       window.getComputedStyle = real;
     }
+  });
+});
+
+// 窓の役割は CSS より先に決める (外側のページと面で骨格が違う)。決まりは
+// core/workspace-role.ts の decideWorkspaceRole と同じ表。
+describe("#first-look は窓の役割を html[data-workspace] に付ける", () => {
+  function runRole(facts: {
+    frame: "pane" | "other" | null;
+    topLevel: boolean;
+    phone: boolean;
+  }) {
+    const frame =
+      facts.frame === null ? null : document.createElement("iframe");
+    if (facts.frame === "pane") frame?.setAttribute("data-cv-pane", "p1");
+    const queries: string[] = [];
+    const realMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "frameElement", {
+      configurable: true,
+      value: frame,
+    });
+    Object.defineProperty(window, "top", {
+      configurable: true,
+      value: facts.topLevel ? window : {},
+    });
+    window.matchMedia = ((query: string) => {
+      queries.push(query);
+      return { matches: facts.phone } as MediaQueryList;
+    }) as typeof window.matchMedia;
+    try {
+      new Function(inlineScript("first-look"))();
+    } finally {
+      window.matchMedia = realMatchMedia;
+      Object.defineProperty(window, "top", {
+        configurable: true,
+        value: window,
+      });
+      Object.defineProperty(window, "frameElement", {
+        configurable: true,
+        value: null,
+      });
+    }
+    return { role: document.documentElement.dataset.workspace, queries };
+  }
+
+  test.each([
+    {
+      name: "host が置いた面の中は pane",
+      facts: { frame: "pane", topLevel: false, phone: false },
+      role: "pane",
+    },
+    {
+      name: "一番上のページで SP の幅でなければ host",
+      facts: { frame: null, topLevel: true, phone: false },
+      role: "host",
+    },
+    {
+      name: "一番上のページでも SP の幅なら 1 枚",
+      facts: { frame: null, topLevel: true, phone: true },
+      role: "single",
+    },
+    {
+      name: "ほかのページの中は 1 枚",
+      facts: { frame: "other", topLevel: false, phone: false },
+      role: "single",
+    },
+  ] as const)("$name", ({ facts, role }) => {
+    expect(runRole(facts)).toEqual({ role, queries: [PHONE_MEDIA_QUERY] });
+  });
+
+  test("外側のページの #first-screen は本文の印を付けない", () => {
+    document.documentElement.dataset.workspace = "host";
+    runFirstScreen("/p/0123456789abcdef/todif", 1600, {});
+    expect([...document.body.attributes].map((a) => a.name)).toEqual([]);
+    expect(document.body.className).toBe("");
+  });
+});
+
+// 面と外側のページでは SP の @media を外す。書き換えは embeddedMediaText と同じ。
+describe("#pane-media は SP の @media を外す", () => {
+  class FakeMediaRule {
+    media: { mediaText: string };
+    cssRules: unknown[];
+    constructor(mediaText: string, cssRules: unknown[] = []) {
+      this.media = { mediaText };
+      this.cssRules = cssRules;
+    }
+  }
+  const MEDIA = [
+    PHONE_MEDIA_QUERY,
+    "(max-width: 640px), (pointer: coarse)",
+    "(max-width: 1100px)",
+    "(prefers-color-scheme: dark)",
+  ];
+
+  function runPaneMedia(role: string) {
+    const nested = new FakeMediaRule("(max-width: 360px)");
+    const rules = [
+      ...MEDIA.map((media) => new FakeMediaRule(media)),
+      { cssRules: [nested] },
+    ];
+    const fakeDocument = {
+      documentElement: { dataset: { workspace: role } },
+      styleSheets: [{ cssRules: rules }],
+    };
+    new Function("document", "CSSMediaRule", inlineScript("pane-media"))(
+      fakeDocument,
+      FakeMediaRule,
+    );
+    return [
+      ...rules
+        .slice(0, MEDIA.length)
+        .map((rule) =>
+          rule instanceof FakeMediaRule ? rule.media.mediaText : null,
+        ),
+      nested.media.mediaText,
+    ];
+  }
+
+  test.each(["pane", "host"])(
+    "%s: embeddedMediaText と同じに書き換える",
+    (role) => {
+      expect(runPaneMedia(role)).toEqual(
+        [...MEDIA, "(max-width: 360px)"].map(embeddedMediaText),
+      );
+    },
+  );
+
+  test("1 枚の画面では書き換えない", () => {
+    expect(runPaneMedia("single")).toEqual([...MEDIA, "(max-width: 360px)"]);
   });
 });
 

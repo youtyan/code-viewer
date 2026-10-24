@@ -3,11 +3,11 @@ import { attachDragResizer } from "../../core/drag-resizer";
 import { formatErrorDetail } from "../../core/error-detail";
 import { CHEVRON_DOWN_16_PATH, iconSvg } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
-import { PHONE_MEDIA_QUERY } from "../../core/mobile-layout";
 import {
   loadShikiHighlighter,
   type ShikiHighlighter,
 } from "../../core/shiki-loader";
+import { phoneMediaQuery } from "../shell/workspace";
 import { type DbText, dbText } from "./i18n";
 import { fillNullOrEmpty, formatQueryValue } from "./query-value";
 import { serverErrorSummary } from "./report-failure";
@@ -210,7 +210,7 @@ export function createQueryEditor(
     setInputExpanded(collapseBtn.getAttribute("aria-expanded") !== "true");
   });
   // 電話の段では畳んで始める (開いたままでは表の行に高さが残らなかった)。
-  if (window.matchMedia?.(PHONE_MEDIA_QUERY).matches) setInputExpanded(false);
+  if (phoneMediaQuery().matches) setInputExpanded(false);
 
   function showQueryResult(): void {
     resultArea.hidden = false;

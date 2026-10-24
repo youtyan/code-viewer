@@ -397,6 +397,8 @@ function installDatabaseDom() {
 
   const fakeDocument = {
     body,
+    // 電話の段かは html[data-workspace] と matchMedia で読む (views/shell/workspace.ts)。
+    documentElement: { dataset: {} },
     createElement: (tagName: string) => new FakeElement(tagName),
     createElementNS: (_ns: string, tagName: string) => new FakeElement(tagName),
     createDocumentFragment: () => new FakeElement("fragment"),
@@ -428,6 +430,7 @@ function installDatabaseDom() {
           (current) => current !== listener,
         );
       },
+      matchMedia: () => ({ matches: false }),
     },
   });
   Object.defineProperty(globalThis, "navigator", {

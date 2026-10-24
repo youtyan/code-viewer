@@ -3296,7 +3296,7 @@ const server = await startServer({
       });
     }
     if (url.pathname === "/_entry/adopt") return handleEntryAdopt(req);
-    const staticResponse = staticFile(url.pathname);
+    const staticResponse = staticFile(url.pathname, req);
     if (staticResponse) return staticResponse;
     if (url.pathname === "/diff.json") return await handleDiffJson(url);
     if (url.pathname === "/_settings") return await handleSettings();

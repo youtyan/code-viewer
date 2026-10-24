@@ -28,7 +28,6 @@ import {
   type MobileBarView,
   mobileBarCurrent,
   mobileListAvailable,
-  PHONE_MEDIA_QUERY,
   pinchFontSize,
   softKeyboardInset,
   TERMINAL_SOFT_KEYS,
@@ -47,6 +46,7 @@ import {
   SOFT_KEY_CAPS,
 } from "./mobile-shell-i18n";
 import { type ProjectLook, projectMark } from "./projects/project-looks";
+import { phoneMediaQuery } from "./shell/workspace";
 
 export type MobileShellDeps = {
   getLanguage(): MobileShellLang;
@@ -137,7 +137,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   const app = requireElement("#app");
   const nav = requireElement("#app-nav");
   const lead = requireElement("#tabs-lead");
-  const phoneQuery = window.matchMedia(PHONE_MEDIA_QUERY);
+  const phoneQuery = phoneMediaQuery();
   const touchQuery = window.matchMedia(TOUCH_MEDIA_QUERY);
 
   const topbar = requireElement("#topbar");

@@ -805,7 +805,7 @@ async function handleProjectPath(
         error,
       );
     });
-    return staticFile(rest) ?? textError("not found", 404);
+    return staticFile(rest, req) ?? textError("not found", 404);
   }
   const events = rest === "/events";
   // 取り次ぐ間 (SSE なら購読の間、ダウンロードなら流し終わるまで) は数に
@@ -920,7 +920,7 @@ async function handleEntryRequest(
   if (isAppEntryPath(path)) {
     return redirectToLastProject(ctx, url, path === "/index.html" ? "/" : path);
   }
-  const asset = staticFile(path);
+  const asset = staticFile(path, req);
   if (asset) return asset;
 
   if (path === "/_live" || path === "/_live/channels") {

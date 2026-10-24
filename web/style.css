@@ -17923,6 +17923,38 @@ html[data-nav-collapsed] #app-nav {
   display: none;
 }
 
+/* 外側のページ (host) と面 (pane)。役割は index.html の head の早いスクリプトが
+   html[data-workspace] に付ける (core/workspace-role.ts)。host は左のサイドバーと
+   最下段と面の場所 (#workspace) だけを出し、本文は面 (iframe) の中の同じ app が描く。
+   面の中には左のサイドバーと最下段が無い (場所も取らない)。 */
+#workspace {
+  display: none;
+}
+html[data-workspace="host"] #app > :not(#app-nav, #statusbar, #workspace) {
+  display: none;
+}
+html[data-workspace="host"] #workspace {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: var(--chrome-left);
+  right: var(--chrome-right);
+  bottom: var(--chrome-bottom);
+}
+html[data-workspace="host"] #workspace > iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+html[data-workspace="pane"] body {
+  --nav-w: 0px;
+  --statusbar-h: 0px;
+}
+html[data-workspace="pane"] :is(#app-nav, #statusbar) {
+  display: none;
+}
+
 /* ---- 左のサイドバー ---- */
 #app-nav {
   position: fixed;
