@@ -110,7 +110,6 @@ import {
   updateJournalTask,
   updateJournalTaskState,
 } from "./journal";
-import { mainTabsPath } from "./main-tabs-store";
 import {
   buildMcpInstructions,
   defaultMcpTools,
@@ -3544,10 +3543,6 @@ const shutdown = createProcessShutdown([
     },
   },
   {
-    label: "code-viewer main tabs watch stop",
-    run: () => unwatchFile(mainTabsWatched),
-  },
-  {
     label: "code-viewer user settings watch stop",
     run: () => unwatchFile(userSettingsWatched),
   },
@@ -3654,26 +3649,15 @@ if (backendMode && entryPid !== null && entryToken !== null) {
   }, ENTRY_WATCH_INTERVAL_MS).unref();
 }
 
-// タブの配置 (全プロジェクト共通、main-tabs.json) は、別のプロジェクトの裏や
-// 別の窓が書く。書き換わったら画面へ知らせ、画面が取り直して自分の配置に重ねる
-// (views/main-tabs の refreshFromServer)。書き込みは原子的な置き換え (rename) なので、
-// fs.watch ではなく時刻を見る (置き換えた後も同じパスを見続ける)。
-const MAIN_TABS_WATCH_INTERVAL_MS = 1000;
-const mainTabsWatched = mainTabsPath();
-watchFile(
-  mainTabsWatched,
-  { interval: MAIN_TABS_WATCH_INTERVAL_MS, persistent: false },
-  (now, before) => {
-    if (now.mtimeMs !== before.mtimeMs) sendSse("tabs", String(now.mtimeMs));
-  },
-);
-
-// 全プロジェクト共通の設定 (明暗・テーマなど) も別の窓が書く。書き換わったら
+// 全プロジェクト共通の設定 (明暗・テーマなど) は別の窓が書く。書き換わったら
 // 画面へ知らせ、画面が取り直して明暗とテーマを当てる (app.ts の refreshLook)。
+// 書き込みは原子的な置き換え (rename) なので、fs.watch ではなく時刻を見る
+// (置き換えた後も同じパスを見続ける)。
+const USER_SETTINGS_WATCH_INTERVAL_MS = 1000;
 const userSettingsWatched = userSettingsPath();
 watchFile(
   userSettingsWatched,
-  { interval: MAIN_TABS_WATCH_INTERVAL_MS, persistent: false },
+  { interval: USER_SETTINGS_WATCH_INTERVAL_MS, persistent: false },
   (now, before) => {
     if (now.mtimeMs !== before.mtimeMs)
       sendSse("user-settings", String(now.mtimeMs));

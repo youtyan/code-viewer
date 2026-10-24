@@ -131,6 +131,8 @@ import {
 } from "./core/list-column";
 import {
   type PaneSide,
+  type SerializedLayout,
+  serializeLayout,
   type Tab,
   type TabTarget,
   withTerminalTmux,
@@ -233,7 +235,8 @@ import type {
   UndoActionResponse,
   ViewState,
 } from "./core/types";
-import type { HostCommand } from "./core/workspace-bridge";
+import type { SplitDir, Workspace } from "./core/workspace";
+import { type HostCommand, isWorkspaceAction } from "./core/workspace-bridge";
 import { createAccountsBand } from "./views/agents/accounts-band";
 import { createAccountsClient } from "./views/agents/accounts-client";
 import { createAccountDialogs } from "./views/agents/accounts-dialogs";
@@ -425,12 +428,13 @@ import {
   type ViewerSettingsText,
 } from "./views/viewer-settings";
 import { VIEWER_SETTINGS_TEXT } from "./views/viewer-settings-i18n";
+import { type PaneBridge, startPaneBridge } from "./views/workspace/bridge";
+import { startWorkspaceHost, type WorkspaceHost } from "./views/workspace/host";
 import {
-  type PaneBridge,
-  startPaneBridge,
-  startWorkspaceHost,
-  type WorkspaceHost,
-} from "./views/workspace/bridge";
+  backupSavedTabs,
+  createWorkspaceStore,
+  type WorkspaceStore,
+} from "./views/workspace/store";
 import { worktreeText } from "./views/worktree-i18n";
 import { createWorktreeView, type WorktreeView } from "./views/worktree-view";
 
@@ -489,6 +493,20 @@ window.GdpExpandLogic = GdpExpandLogic;
   const WORKSPACE_ROLE = workspaceRole();
   let WORKSPACE_HOST: WorkspaceHost | null = null;
   let PANE_BRIDGE: PaneBridge | null = null;
+  // 窓ごとの面の並びとタブの保存。書くのは host と 1 枚の画面 (面は host へ送る)。
+  const WORKSPACE_STORE: WorkspaceStore | null =
+    WORKSPACE_ROLE === "pane"
+      ? null
+      : createWorkspaceStore({
+          url: apiUrl("stateWorkspace"),
+          backupUrl: apiUrl("stateWorkspaceBackup"),
+          headers: () => actionHeaders(),
+          trackLoad: (promise) => trackLoad(promise),
+        });
+  /** 1 枚の画面: 読み込んだ窓の面の並び (フォーカスのある面のタブを読み書きする)。 */
+  let SINGLE_WORKSPACE: Workspace | null = null;
+  /** 面: host へ送ったタブの配置の版 (面の中だけで数える)。 */
+  let PANE_TABS_REV = 0;
   /** host: 面が最後に知らせたプロジェクト。 */
   let WORKSPACE_PROJECT_ROOT: string | null = null;
   const $$ = <T extends Element = HTMLElement>(sel: string): T[] =>
@@ -608,9 +626,10 @@ window.GdpExpandLogic = GdpExpandLogic;
             const pathname = new URL(url, location.href).pathname;
             // Tab layouts are shared by every project; let their synchronization finish.
             if (
-              [apiUrl("stateTabs"), apiUrl("stateTabsBackup")].includes(
-                pathname,
-              )
+              [
+                apiUrl("stateWorkspace"),
+                apiUrl("stateWorkspaceBackup"),
+              ].includes(pathname)
             )
               return false;
             return projectKey(pathname) === projectKey();
@@ -1377,7 +1396,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     return settings;
   }
 
+  /** この裏の根 (設定の server.root。面のタブの持ち物のプロジェクト)。 */
+  let SERVER_ROOT: string | null = null;
+
   function applyServerSettings(settings: SettingsResponse): void {
+    SERVER_ROOT = settings.server.root;
     const key = projectKey();
     if (key) PROJECT_KEYS.set(settings.server.root, key);
     setProjectName(settings.project || "");
@@ -1902,38 +1925,11 @@ window.GdpExpandLogic = GdpExpandLogic;
           : []),
       ];
     },
-    // 全プロジェクト共通の配置 (server/main-tabs-store.ts)。root はこの裏の根で、
-    // タブの持ち物のプロジェクトになる。
-    loadSaved: () =>
-      loadStateResponse<SavedTabs>(
-        apiUrl("stateTabs"),
-        "main tabs request failed",
-      ),
-    save: async (layout, keepalive, base) => {
-      const response = await fetch(apiUrl("stateTabs"), {
-        method: "PUT",
-        keepalive,
-        headers: { ...actionHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          baseRev: base.rev,
-          base: base.layout,
-          layout: withTerminalTmux(layout, (session) =>
-            TAB_TMUX_PLACES.get(session),
-          ),
-        }),
-      });
-      if (!response.ok)
-        throw new Error(await responseErrorMessage(response, "save main tabs"));
-      const written = (await response.json()) as SavedWrite & {
-        migration?: unknown;
-      };
-      if (written.migration !== undefined)
-        console.info(
-          "[code-viewer] main tabs: the per-project tabs were moved into one set of tabs while saving:",
-          JSON.stringify(written.migration),
-        );
-      return written;
-    },
+    // 窓ごとの面の並びのうち、この画面の面のタブ (server/main-tabs-store.ts)。
+    // 面は host の hello で受け取り、host へ送る。1 枚の画面はフォーカスのある面を
+    // 読み書きする。root はこの裏の根で、タブの持ち物のプロジェクトになる。
+    loadSaved: loadSavedTabs,
+    save: async (layout, keepalive) => saveTabs(layout, keepalive),
     newTabId: () => `t-${crypto.randomUUID().slice(0, 8)}`,
     projectLook: (root) => PROJECT_LOOKS.get(root),
     projectOrder: () => PROJECT_LOOKS.order(),
@@ -1956,29 +1952,124 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     // 別のプロジェクトのファイルを /p/<鍵> から読めるのは入口のサーバの下だけ。
     foreignInPlace: () => projectKey() !== null,
-    backupSaved: async () => {
-      const response = await fetch(apiUrl("stateTabsBackup"), {
-        method: "POST",
-        headers: actionHeaders(),
-      });
-      if (!response.ok)
-        throw new Error(
-          await responseErrorMessage(response, "back up the saved main tabs"),
-        );
-      const body = (await response.json()) as { backup?: unknown };
-      if (typeof body.backup !== "string")
-        throw new Error(
-          `back up the saved main tabs: the answer has no backup path: ${JSON.stringify(body)}`,
-        );
-      return body.backup;
-    },
+    backupSaved: () =>
+      backupSavedTabs(apiUrl("stateWorkspaceBackup"), actionHeaders()),
     terminalInfo: (session) => terminalTabInfo(session),
     onPanes: (view, how) => showPanes(view, how),
     listColumnHoldsList: () => listColumnKind() !== null,
-    onTerminals: (_open, closed) => {
+    onTerminals: (open, closed) => {
       for (const id of closed) TERMINAL_VIEW.releaseTab(id as ShellSessionId);
+      PANE_BRIDGE?.send({ type: "terminals", open: [...open] });
     },
+    ...(WORKSPACE_ROLE === "pane"
+      ? {
+          paneMode: {
+            splitOut: (tab: Tab, how: "split" | "move") =>
+              splitOutTab(tab, how, "row"),
+            onEmptied: () => PANE_BRIDGE?.send({ type: "emptied" }),
+          },
+        }
+      : {}),
   });
+
+  /** タブの保存を読む (面は host の hello、1 枚の画面は窓ごとの保存)。 */
+  async function loadSavedTabs(): Promise<SavedTabs> {
+    if (WORKSPACE_ROLE === "pane") {
+      if (!PANE_BRIDGE) throw new Error("the pane bridge is not started yet");
+      const hello = await PANE_BRIDGE.hello;
+      return { layout: hello.layout, rev: PANE_TABS_REV, root: SERVER_ROOT };
+    }
+    if (!WORKSPACE_STORE) throw new Error("this window has no workspace store");
+    const loaded = await WORKSPACE_STORE.load(
+      window.location.pathname + window.location.search + window.location.hash,
+      pageUrl("/"),
+    );
+    SINGLE_WORKSPACE = loaded.workspace;
+    const pane = loaded.workspace.panes[loaded.workspace.focused];
+    return {
+      layout: pane?.layout ?? null,
+      rev: 0,
+      root: loaded.root,
+      ...(loaded.newer !== null ? { newer: loaded.newer } : {}),
+    };
+  }
+
+  /** タブを書く (面は host へ送る。1 枚の画面はフォーカスのある面に書く)。 */
+  function saveTabs(layout: SerializedLayout, keepalive: boolean): SavedWrite {
+    const written = withTerminalTmux(layout, (session) =>
+      TAB_TMUX_PLACES.get(session),
+    );
+    PANE_TABS_REV += 1;
+    if (PANE_BRIDGE) PANE_BRIDGE.send({ type: "tabs", layout: written });
+    else if (WORKSPACE_STORE && SINGLE_WORKSPACE) {
+      const focused = SINGLE_WORKSPACE.focused;
+      SINGLE_WORKSPACE = {
+        ...SINGLE_WORKSPACE,
+        panes: {
+          ...SINGLE_WORKSPACE.panes,
+          [focused]: {
+            url:
+              window.location.pathname +
+              window.location.search +
+              window.location.hash,
+            layout: written,
+          },
+        },
+      };
+      WORKSPACE_STORE.save(SINGLE_WORKSPACE);
+      if (keepalive) WORKSPACE_STORE.flush(true);
+    }
+    return { rev: PANE_TABS_REV, layout: written, merged: false };
+  }
+
+  /**
+   * 面の中: そのタブで面を分ける・別の面へ移す (外側のページに頼む)。シェルと
+   * 画像は 1 か所だけに出すので、この面からは閉じる。移すなら全部閉じる。
+   */
+  function splitOutTab(tab: Tab, how: "split" | "move", dir: SplitDir): void {
+    const bridge = PANE_BRIDGE;
+    if (!bridge) return;
+    const front = MAIN_TABS.front()?.id === tab.id;
+    const route = MAIN_TABS.tabRoute(tab);
+    const here =
+      window.location.pathname + window.location.search + window.location.hash;
+    const url =
+      tab.target.kind === "terminal"
+        ? withTerminalOverlay(
+            pageUrl("/"),
+            tab.target.session as ShellSessionId,
+          )
+        : front
+          ? here
+          : route
+            ? urlForRoute(route)
+            : here;
+    // 画面の route (検索語など) は url が持つ。
+    const layout = serializeLayout({
+      panes: {
+        left: {
+          tabs: [{ ...tab, preview: false }],
+          activeId: tab.id,
+          recent: [tab.id],
+        },
+      },
+      focused: "left",
+    });
+    if (how === "move")
+      bridge.send({
+        type: "open-elsewhere",
+        route: tab.target.kind === "terminal" ? null : route,
+        terminal: tab.target.kind === "terminal" ? tab.target.session : null,
+        project: MAIN_TABS.groupOf(tab),
+        url,
+        layout,
+      });
+    else bridge.send({ type: "split", dir, url, layout });
+    if (how === "move" || tab.target.kind === "image")
+      MAIN_TABS.closeTab(tab.id);
+    else if (tab.target.kind === "terminal")
+      MAIN_TABS.closeTerminal(tab.target.session);
+  }
 
   // 言語の当て直し (起動の途中でも呼ばれる) が読むので、ここで宣言する。
   /** 面ごとの画像の部品 (使い回す。setImage で差し替える)。 */
@@ -2580,6 +2671,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         statusInFlightTitle: (count: number, cancellable: number) => string;
         cancelRequestsActiveTitle: (count: number) => string;
         cancelRequestsInactiveTitle: string;
+        /** 窓が狭くて面を隠している (最下段)。 */
+        panesHidden: (count: number) => string;
         menuViews: string;
         repoWebLink: string;
         copyLineReference: string;
@@ -2750,6 +2843,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         cancelRequestsActiveTitle: (count) =>
           `cancel ${count} in-flight request${count === 1 ? "" : "s"}`,
         cancelRequestsInactiveTitle: "no in-flight requests",
+        panesHidden: (count) =>
+          `${count} pane${count === 1 ? "" : "s"} hidden (window too small)`,
         menuViews: "Views",
         repoWebLink: "open repository web page",
         copyLineReference: "Copy AI reference",
@@ -3017,6 +3112,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         cancelRequestsActiveTitle: (count) =>
           `実行中のリクエストを${count}件キャンセル`,
         cancelRequestsInactiveTitle: "実行中のリクエストはありません",
+        panesHidden: (count) => `${count} 面を隠しています (窓が狭いため)`,
         menuViews: "ビュー切り替え",
         repoWebLink: "リポジトリのウェブページを開く",
         copyLineReference: "AI参照をコピー",
@@ -6056,6 +6152,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       PENDING_G_SCOPE = null;
       PENDING_G_UNTIL = 0;
     }
+    // 窓の面の並びの操作は外側のページが受ける (1 枚の画面では左右 2 面のもう一方へ
+    // だけが効く)。
+    if (isWorkspaceAction(action)) {
+      if (PANE_BRIDGE) {
+        PANE_BRIDGE.send({ type: "workspace-action", action });
+        return true;
+      }
+      if (action !== "main-pane-other") return false;
+    }
     if (action === "open-file-palette") {
       if (paletteMode() !== "file") openSearchPalette("file");
       return true;
@@ -6480,14 +6585,17 @@ window.GdpExpandLogic = GdpExpandLogic;
       e.preventDefault();
       return;
     }
-    // host (左のサイドバー・最下段) にフォーカスがあっても、操作の先は面の本文。
+    // host (左のサイドバー・最下段) にフォーカスがあっても、操作の先は面の本文
+    // (面の並びの操作は host が受ける)。
     if (WORKSPACE_HOST) {
       e.preventDefault();
-      WORKSPACE_HOST.command({
-        type: "keymap",
-        action: outcome.action,
-        repeated: e.repeat,
-      });
+      if (isWorkspaceAction(outcome.action)) WORKSPACE_HOST.run(outcome.action);
+      else
+        WORKSPACE_HOST.command({
+          type: "keymap",
+          action: outcome.action,
+          repeated: e.repeat,
+        });
       return;
     }
     const handled = dispatchKeymapAction(
@@ -7783,6 +7891,36 @@ window.GdpExpandLogic = GdpExpandLogic;
    * Alt+クリック、右の面の中の移動)。開けなければ (1 面で狭い) false。
    */
   function openInRightPane(route: FileRoute, replace = false): boolean {
+    // 面の中: 外側のページが別の面 (無ければ右に分けた面) で開く。
+    if (PANE_BRIDGE) {
+      const target = routeTarget(route, MAIN_TABS.currentProject());
+      PANE_BRIDGE.send({
+        type: "open-elsewhere",
+        route,
+        terminal: null,
+        project: MAIN_TABS.currentProject(),
+        url: urlForRoute(route),
+        layout: serializeLayout({
+          panes: {
+            left: target
+              ? {
+                  tabs: [
+                    {
+                      id: `t-${crypto.randomUUID().slice(0, 8)}`,
+                      target,
+                      preview: false,
+                    },
+                  ],
+                  activeId: null,
+                  recent: [],
+                }
+              : { tabs: [], activeId: null, recent: [] },
+          },
+          focused: "left",
+        }),
+      });
+      return true;
+    }
     if (!MAIN_TABS.openRouteRight(route)) return false;
     showSourceInRight();
     syncLineRefPill();
@@ -9534,11 +9672,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     destination?: "opposite",
     returnTo?: () => void,
   ): void {
+    // host: そのシェルを出している面があればその面で、無ければフォーカスのある面で。
     if (WORKSPACE_HOST) {
-      WORKSPACE_HOST.command({
+      const shell =
+        AGENT_MONITOR.snapshot().overview?.panes.find(
+          (item) => item.id === pane,
+        )?.shownInShell ?? "";
+      WORKSPACE_HOST.commandWhereTerminal(shell || null, {
         type: "open-agent-pane",
         pane,
-        opposite: destination === "opposite",
+        opposite: false,
       });
       return;
     }
@@ -9994,7 +10137,7 @@ window.GdpExpandLogic = GdpExpandLogic;
             // 畳んだ・開いたは、host と面の両方の骨格に効く。
             if (patch.navCollapsed === undefined) return;
             const collapsed = patch.navCollapsed;
-            WORKSPACE_HOST?.notify({ type: "nav-collapsed", collapsed });
+            WORKSPACE_HOST?.notifyAll({ type: "nav-collapsed", collapsed });
             PANE_BRIDGE?.send({ type: "nav-collapsed", collapsed });
           },
           // 面の幅が変わるので端末の桁数を取り直す。
@@ -11006,10 +11149,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     es.addEventListener("journal", () => {
       JOURNAL_VIEW?.handleSse();
     });
-    // タブの配置 (全プロジェクト共通) を別の窓・別のプロジェクトの画面が書いた。
-    es.addEventListener("tabs", () => {
-      void MAIN_TABS.refreshFromServer();
-    });
     // 全プロジェクト共通の設定 (明暗・テーマ) を別の窓が書いた。
     es.addEventListener("user-settings", () => {
       refreshLook();
@@ -11062,6 +11201,13 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   if (WORKSPACE_ROLE === "host")
     WORKSPACE_HOST = startWorkspaceHost({
+      store: (() => {
+        if (!WORKSPACE_STORE)
+          throw new Error("the host has no workspace store");
+        return WORKSPACE_STORE;
+      })(),
+      homeUrl: () => pageUrl("/"),
+      onHidden: showHiddenPanes,
       onLocation: (project) => {
         if (!project) return;
         const moved = project.root !== WORKSPACE_PROJECT_ROOT;
@@ -11123,7 +11269,48 @@ window.GdpExpandLogic = GdpExpandLogic;
       case "nav-collapsed":
         applyNavCollapsedFromOtherSide(command.collapsed);
         return;
+      case "close-terminal":
+        MAIN_TABS.closeTerminal(command.session);
+        return;
+      case "open-terminal":
+        MAIN_TABS.openTerminal(command.session);
+        return;
+      case "split-front": {
+        const front = MAIN_TABS.front();
+        if (front) splitOutTab(front, "split", command.dir);
+        // 本文の既定 (フォルダ表示) を出している: 同じ画面で面を分ける。
+        else
+          PANE_BRIDGE?.send({
+            type: "split",
+            dir: command.dir,
+            url:
+              window.location.pathname +
+              window.location.search +
+              window.location.hash,
+            layout: serializeLayout({
+              panes: { left: { tabs: [], activeId: null, recent: [] } },
+              focused: "left",
+            }),
+          });
+        return;
+      }
+      case "focus-state":
+        // 面が 2 つ以上あるときだけ、フォーカスの無い面の印を消す (style.css)。
+        document.documentElement.dataset.paneFocus = command.many
+          ? command.focused
+            ? "on"
+            : "off"
+          : "";
+        return;
     }
+  }
+
+  /** 窓が狭くて隠している面の数を最下段に出す (0 なら消す)。 */
+  function showHiddenPanes(count: number): void {
+    const note = document.getElementById("workspace-hidden");
+    if (!note) throw new Error("#workspace-hidden is missing from index.html");
+    note.hidden = count === 0;
+    note.textContent = count === 0 ? "" : uiText().global.panesHidden(count);
   }
 
   /** host と面の片方で左のサイドバーを畳んだ・開いた (書き込みは畳んだ側がした)。 */

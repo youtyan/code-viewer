@@ -197,20 +197,74 @@
     </div>
     <div id="app-nav-resizer" class="app-nav-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="resize sidebar"></div>
   </aside>
-  <!-- 外側のページ (html[data-workspace="host"]) の本文の場所。面 (iframe) を 1 つ
-       置き、同じ URL の app を面として開く (core/workspace-role.ts)。app.js を待たずに
-       作り、面の読み込みを外側のページと並べて始める。やりとりは
-       views/workspace/bridge.ts。 -->
+  <!-- 外側のページ (html[data-workspace="host"]) の本文の場所。面 (iframe) を並べ、
+       それぞれで同じ app を面として開く (core/workspace-role.ts)。app.js を待たずに、
+       この窓の前の並び (sessionStorage の控え。views/workspace/host.ts が書く) で面を
+       作って置き、面の読み込みを外側のページと並べて始める。控えが無ければ面 1 つ。
+       アドレス欄の URL を開く面と、面の場所の決め方は core/workspace.ts の routeUrl・
+       paneRects・panesFit と同じ (web-src/test/first-screen.test.ts)。 -->
   <div id="workspace">
     <script id="first-workspace">
     (function () {
       if (document.documentElement.dataset.workspace !== "host") return;
-      var frame = document.createElement("iframe");
-      frame.setAttribute("data-cv-pane", "p1");
-      frame.setAttribute("allow", "clipboard-read; clipboard-write; fullscreen");
-      frame.title = "code viewer";
-      frame.src = location.href;
-      document.getElementById("workspace").appendChild(frame);
+      var host = document.getElementById("workspace");
+      var here = location.pathname + location.search + location.hash;
+      var raw = window.sessionStorage.getItem("code-viewer:workspace-frames");
+      var saved = raw ? JSON.parse(raw) : { tree: { pane: "p1" }, focused: "p1", urls: {} };
+      var urls = saved.urls;
+      var focused = saved.focused;
+      function keyOf(url) {
+        var match = /^\/p\/([0-9a-f]{16})(?=[\/?#]|$)/.exec((url || "").split(/[?#]/)[0]);
+        return match ? match[1] : null;
+      }
+      function ids(node) {
+        return typeof node.pane === "string" ? [node.pane] : ids(node.a).concat(ids(node.b));
+      }
+      if (urls[focused] !== here) {
+        var key = keyOf(here);
+        if (keyOf(urls[focused]) !== key)
+          focused = ids(saved.tree).filter(function (id) { return keyOf(urls[id]) === key; })[0] || focused;
+        urls[focused] = here;
+      }
+      var divider = 4;
+      var rects = {};
+      function walk(node, x, y, w, h) {
+        if (typeof node.pane === "string") {
+          rects[node.pane] = [x, y, w, h];
+          return;
+        }
+        var along = node.dir === "row" ? w : h;
+        var first = Math.round((along - divider) * node.ratio);
+        var second = along - divider - first;
+        if (node.dir === "row") {
+          walk(node.a, x, y, first, h);
+          walk(node.b, x + first + divider, y, second, h);
+        } else {
+          walk(node.a, x, y, w, first);
+          walk(node.b, x, y + first + divider, w, second);
+        }
+      }
+      var width = host.clientWidth;
+      var height = host.clientHeight;
+      walk(saved.tree, 0, 0, width, height);
+      var fits = ids(saved.tree).every(function (id) {
+        return rects[id][2] >= 440 && rects[id][3] >= 240;
+      });
+      ids(saved.tree).forEach(function (id) {
+        var whole = !fits && id === focused;
+        var box = whole ? [0, 0, width, height] : rects[id];
+        var frame = document.createElement("iframe");
+        frame.setAttribute("data-cv-pane", id);
+        frame.setAttribute("allow", "clipboard-read; clipboard-write; fullscreen");
+        frame.title = "code viewer";
+        frame.style.left = box[0] + "px";
+        frame.style.top = box[1] + "px";
+        frame.style.width = box[2] + "px";
+        frame.style.height = box[3] + "px";
+        if (!fits && !whole) frame.style.visibility = "hidden";
+        frame.src = urls[id] || here;
+        host.appendChild(frame);
+      });
     })();
     </script>
   </div>
@@ -499,6 +553,8 @@
   <footer id="statusbar">
     <div id="usage-status" class="usage-status" role="group" aria-label="Usage"></div>
     <span class="statusbar-spacer"></span>
+    <!-- 窓が狭くて面を隠している間の知らせ (外側のページだけ。views/workspace/host.ts)。 -->
+    <span id="workspace-hidden" class="workspace-hidden" role="status" hidden></span>
     <!-- エージェントの件数 (入力待ち / 作業中)。中身は views/agents/agent-status.ts が入れる。 -->
     <button id="agent-status" class="agent-status" type="button" hidden></button>
     <span class="statusbar-sep" aria-hidden="true"></span>

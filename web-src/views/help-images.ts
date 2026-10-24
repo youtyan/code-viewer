@@ -49,7 +49,6 @@ export const HELP_CAPTURES: ReadonlyMap<
   ["search-palette", 750],
   ["sidebar-no-tmux", 293],
   ["skill-install", 698],
-  ["tabs-groups", 674],
   ["tabs-split", 750],
   ["terminal-tab", 666],
   ["tools-markdown", 750],

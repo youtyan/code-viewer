@@ -1574,8 +1574,8 @@ async function captureScreens(ctx) {
   await inPage(`document.querySelector("#annotation-panel-close").click();`);
 
   const greetingTab = `[...document.querySelectorAll(".main-tab")].find((tab) => tab.textContent.includes("greeting.ts"))`;
-  // --- タブのグループ: 画面のタブを閉じ (エージェントのタブと greeting.ts だけ
-  // 残す)、sample-lib でもファイルを開いて、2 つ目のグループを作る。
+  // --- 画面のタブを閉じ (エージェントのタブと greeting.ts だけ残す)、sample-lib
+  // でもファイルを開く。
   await setColumns(true);
   await inPage(`
     for (const tab of [...document.querySelectorAll(".main-tab")]) {
@@ -1584,16 +1584,6 @@ async function captureScreens(ctx) {
     }
   `);
   await openInOtherProject(ctx);
-  const libGroupMenu = `[...document.querySelectorAll(".main-tab-group-toggle")].find((toggle) => (toggle.getAttribute("aria-label") ?? toggle.title).startsWith("sample-lib"))?.closest(".main-tab-group")?.querySelector(".main-tab-group-menu")`;
-  await wait("the sample-lib group", `return !!${libGroupMenu};`);
-  await inPage(`${libGroupMenu}.click();`);
-  await wait("the group menu", "return !!menu();");
-  await shot(
-    ctx,
-    "tabs-groups",
-    `return union(document.querySelector("#main-tabs"), menu());`,
-  );
-  await closeMenus();
 
   // --- ターミナル: 新しいシェルのタブと、＋ のメニュー。sample-app のタブを
   // 選んでから開く (sample-app のシェルになる)。

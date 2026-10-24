@@ -11,10 +11,10 @@ import {
 } from "./database/handle-shared";
 import {
   backupMainTabs,
-  loadMainTabs,
+  loadWorkspace,
   MainTabsStoreError,
   mainTabsPath,
-  saveMainTabs,
+  saveWorkspace,
 } from "./main-tabs-store";
 import {
   loadAppSettingsState,
@@ -183,74 +183,67 @@ async function handleToolsPatch(cwd: string, req: Request): Promise<Response> {
 }
 
 /**
- * メインの面のタブの配置 (全プロジェクト共通) と版の番号、この裏の根 (画面が
- * タブの持ち物のプロジェクトに使う)。前の版の保存なら移してから返す (migration)。
+ * その窓 (?window=) の面の並びとタブ (core/workspace.ts) と、この裏の根 (画面が
+ * タブの持ち物のプロジェクトに使う)。この窓の保存が無ければ最後に書いた窓の写し
+ * (copiedFrom)、前の版のファイルなら配置 (legacy。画面が面の木へ移す)。
  */
-async function handleTabsGet(cwd: string): Promise<Response> {
+function handleWorkspaceGet(cwd: string, url: URL): Response {
+  const window = url.searchParams.get("window");
+  if (window === null) return textError("workspace request has no window", 400);
   try {
-    const loaded = await loadMainTabs(mainTabsPath());
+    const loaded = loadWorkspace(mainTabsPath(), window);
     switch (loaded.kind) {
       case "none":
-        return json({ root: cwd, layout: null, rev: null });
+        return json({ root: cwd, workspace: null });
       case "newer":
+        return json({ root: cwd, workspace: null, newer: loaded.version });
+      case "legacy":
         return json({
           root: cwd,
-          layout: null,
-          rev: null,
-          newer: loaded.version,
+          workspace: null,
+          legacy: loaded.layout,
+          ...(loaded.migration ? { migration: loaded.migration } : {}),
         });
       case "ok":
         return json({
           root: cwd,
-          layout: loaded.layout,
-          rev: loaded.rev,
-          ...(loaded.migration ? { migration: loaded.migration } : {}),
+          workspace: loaded.workspace,
+          ...(loaded.copiedFrom ? { copiedFrom: loaded.copiedFrom } : {}),
         });
     }
   } catch (error) {
-    console.error("[code-viewer] main tabs are not loaded:", error);
+    console.error("[code-viewer] the workspace is not loaded:", error);
     return textError(
-      `failed to load main tabs: ${formatErrorDetail(error)}`,
-      500,
+      `failed to load the workspace: ${formatErrorDetail(error)}`,
+      error instanceof MainTabsStoreError && error.code === "invalid-input"
+        ? 400
+        : 500,
     );
   }
 }
 
 /**
- * 配置を書く。本文は `{ baseRev, base, layout }` (MainTabsWrite)。別の窓が先に
- * 書いていれば重ねて書き、重ねた値を返す。新しい版のファイルは書かない (409)。
+ * その窓の面の並びとタブを書く。本文は `{ window, workspace }`。新しい版の
+ * ファイルは書かない (409)。
  */
-async function handleTabsPut(req: Request): Promise<Response> {
+async function handleWorkspacePut(req: Request): Promise<Response> {
   const body = await parseJsonBody(req, MAX_STATE_PATCH_BODY_BYTES);
   if (body instanceof Response) return body;
-  if (!body || typeof body !== "object" || !("layout" in body))
-    return textError("main tabs body has no layout", 400);
-  const rawRev = "baseRev" in body ? body.baseRev : undefined;
-  const baseRev =
-    rawRev === null
-      ? null
-      : typeof rawRev === "number" && Number.isInteger(rawRev) && rawRev >= 0
-        ? rawRev
-        : undefined;
-  if (baseRev === undefined)
+  if (!body || typeof body !== "object" || !("workspace" in body))
+    return textError("workspace body has no workspace", 400);
+  const window = "window" in body ? body.window : undefined;
+  if (typeof window !== "string")
     return textError(
-      `main tabs body has a bad baseRev: ${JSON.stringify(rawRev)}`,
+      `workspace body has a bad window: ${JSON.stringify(window)}`,
       400,
     );
-  const base = "base" in body ? body.base : undefined;
-  if (base === undefined)
-    return textError("main tabs body has no base (null when unknown)", 400);
-  let saved: Awaited<ReturnType<typeof saveMainTabs>>;
+  let saved: Awaited<ReturnType<typeof saveWorkspace>>;
   try {
-    saved = await saveMainTabs(mainTabsPath(), {
-      baseRev,
-      base,
-      layout: body.layout,
-    });
+    saved = await saveWorkspace(mainTabsPath(), window, body.workspace);
   } catch (error) {
-    console.error("[code-viewer] main tabs are not saved:", error);
+    console.error("[code-viewer] the workspace is not saved:", error);
     return textError(
-      `failed to save main tabs: ${formatErrorDetail(error)}`,
+      `failed to save the workspace: ${formatErrorDetail(error)}`,
       error instanceof MainTabsStoreError && error.code === "invalid-input"
         ? 400
         : 500,
@@ -261,12 +254,7 @@ async function handleTabsPut(req: Request): Promise<Response> {
       `the saved main tabs were written by a newer version (file version ${saved.version}); they are not overwritten`,
       409,
     );
-  return json({
-    rev: saved.rev,
-    layout: saved.layout,
-    merged: saved.merged,
-    ...(saved.migration ? { migration: saved.migration } : {}),
-  });
+  return json({ rev: saved.rev });
 }
 
 /** 画面が読めなかった保存値を上書きの前に退避する。写した先のパスを返す。 */
@@ -307,13 +295,15 @@ export async function handleStateRoute(
         handler: () =>
           req.method === "GET" ? handleViewGet(cwd) : handleViewPatch(cwd, req),
       },
-      "/_state/tabs": {
+      "/_state/workspace": {
         methods: ["GET", "PUT"],
         sideEffect: (method) => method !== "GET",
-        handler: () =>
-          req.method === "GET" ? handleTabsGet(cwd) : handleTabsPut(req),
+        handler: async () =>
+          req.method === "GET"
+            ? handleWorkspaceGet(cwd, url)
+            : handleWorkspacePut(req),
       },
-      "/_state/tabs/backup": {
+      "/_state/workspace/backup": {
         methods: ["POST"],
         sideEffect: () => true,
         handler: () => handleTabsBackup(),

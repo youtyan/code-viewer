@@ -1,12 +1,12 @@
-// /_state/tabs の入口 (server/state-route.ts)。本体を更新した直後は、前の版の
-// JS を読み込んだままのタブが残る。その画面は版の番号 (baseRev) も base も付けずに、
-// プロジェクトごとの配置と共通のタブを PUT してくる。それで全プロジェクト共通の
-// 保存を上書きで消さない (400 で断り、ファイルはそのまま)。
+// 窓ごとの面の並びとタブの入口 (server/state-route.ts の /_state/workspace)。本体を
+// 更新した直後は、前の版の JS を読み込んだままのタブが残る。その画面は前の入口
+// (/_state/tabs) へ配置を PUT してくる。それで窓ごとの保存を上書きで消さない
+// (入口が無いので受けず、ファイルはそのまま)。
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { LAYOUT_VERSION } from "../core/main-tabs";
+import { singlePane } from "../core/workspace";
 import { handleStateRoute } from "../server/state-route";
 
 let dir = "";
@@ -25,98 +25,91 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const saved = JSON.stringify({
-  version: 2,
-  rev: 3,
-  savedAt: 1,
-  layout: {
-    version: LAYOUT_VERSION,
-    focused: "left",
-    panes: [
-      {
-        side: "left",
-        activeId: "a",
-        tabs: [
-          {
-            id: "a",
-            preview: false,
-            target: { kind: "file", path: "a.ts", project: "/work/sample-app" },
-          },
-        ],
-      },
-    ],
-  },
-});
+const WORKSPACE = singlePane("p1", "/p/0123456789abcdef/");
 
-/** 前の版の画面が送る形 (プロジェクトの配置は版 4、共通のタブは別)。 */
-const oldLayout = {
-  version: 4,
-  focused: "left",
-  panes: [
-    {
-      side: "left",
-      activeId: "t1",
-      tabs: [
-        { id: "t1", preview: false, target: { kind: "file", path: "old.ts" } },
-      ],
-    },
-  ],
-};
+async function call(path: string, init?: RequestInit) {
+  const req = new Request(`http://localhost${path}`, init);
+  const res = await handleStateRoute(
+    req,
+    new URL(req.url),
+    "/work/sample-app",
+    () => true,
+  );
+  return res ? { status: res.status, text: await res.text() } : null;
+}
 
-async function put(body: unknown) {
-  const req = new Request("http://localhost/_state/tabs", {
+const put = (body: unknown) =>
+  call("/_state/workspace", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const res = await handleStateRoute(
-    req,
-    new URL(req.url),
-    "/work/sample-lib",
-    () => true,
-  );
-  if (!res) throw new Error("no response");
-  return { status: res.status, text: await res.text() };
-}
 
-describe("PUT /_state/tabs from a page of the previous version", () => {
+describe("/_state/workspace", () => {
+  test("書いた窓の並びを、その窓で読み戻す", async () => {
+    const written = await put({ window: "w-a", workspace: WORKSPACE });
+    const read = await call("/_state/workspace?window=w-a");
+    expect([written, JSON.parse(read?.text ?? "null")]).toEqual([
+      { status: 200, text: '{"rev":1}' },
+      { root: "/work/sample-app", workspace: WORKSPACE },
+    ]);
+  });
+
   test.each([
-    { name: "配置だけ", body: { layout: oldLayout } },
     {
-      name: "配置と共通のタブ",
-      body: {
-        layout: oldLayout,
-        common: {
-          version: 1,
-          targets: [{ kind: "terminal", session: "shell-ab12" }],
-        },
+      name: "窓の無い読み込み",
+      run: () => call("/_state/workspace"),
+      expected: { status: 400, text: "workspace request has no window" },
+    },
+    {
+      name: "窓の無い書き込み",
+      run: () => put({ workspace: WORKSPACE }),
+      expected: {
+        status: 400,
+        text: "workspace body has a bad window: undefined",
       },
     },
-  ])(
-    "版の番号の無い PUT ($name) は断り、今の保存を消さない",
-    async ({ body }) => {
-      const path = join(dir, "main-tabs.json");
-      writeFileSync(path, saved);
-      const res = await put(body);
-      expect([res.status, res.text, readFileSync(path, "utf8")]).toEqual([
-        400,
-        "main tabs body has a bad baseRev: undefined",
-        saved,
-      ]);
+    {
+      name: "並びの無い書き込み",
+      run: () => put({ window: "w-a" }),
+      expected: { status: 400, text: "workspace body has no workspace" },
     },
-  );
+  ])("$name は断る", async ({ run, expected }) => {
+    expect(await run()).toEqual(expected);
+  });
 
-  test("前の版の画面が読むと、新しい版の配置が返る (その画面は保存しない)", async () => {
-    writeFileSync(join(dir, "main-tabs.json"), saved);
-    const req = new Request("http://localhost/_state/tabs");
-    const res = await handleStateRoute(
-      req,
-      new URL(req.url),
-      "/work/sample-app",
-      () => true,
-    );
-    const body = (await res?.json()) as { layout: { version: number } };
-    // 前の版の画面は、自分より新しい版 (5 > 4) の配置を「使わず、書かない」。
-    expect([body.layout.version > 4, "common" in body]).toEqual([true, false]);
+  test("前の版の画面の PUT /_state/tabs は受けず、今の保存を消さない", async () => {
+    await put({ window: "w-a", workspace: WORKSPACE });
+    const path = join(dir, "main-tabs.json");
+    const before = readFileSync(path, "utf8");
+    const res = await call("/_state/tabs", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ layout: { version: 4, panes: [] } }),
+    });
+    expect([res, readFileSync(path, "utf8")]).toEqual([null, before]);
+  });
+
+  test("前の版のファイル (版 2) は配置を返し、まだ書き直さない", async () => {
+    const path = join(dir, "main-tabs.json");
+    const old = JSON.stringify({
+      version: 2,
+      rev: 3,
+      savedAt: 1,
+      layout: { version: 5, focused: "left", panes: [] },
+    });
+    writeFileSync(path, old);
+    const read = await call("/_state/workspace?window=w-a");
+    expect([
+      JSON.parse(read?.text ?? "null"),
+      readFileSync(path, "utf8"),
+    ]).toEqual([
+      {
+        root: "/work/sample-app",
+        workspace: null,
+        legacy: { version: 5, focused: "left", panes: [] },
+      },
+      old,
+    ]);
   });
 });

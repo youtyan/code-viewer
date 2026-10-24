@@ -91,6 +91,11 @@ const SHELL_SCROLLBACK = 5000;
 
 /** リサイズ通知の間引き。ドラッグ中に毎フレーム送らない。 */
 const RESIZE_DEBOUNCE_MS = 150;
+/**
+ * 付けた直後に箱の大きさが落ち着くまでの間 (外側のページが面を置く・一覧の列を
+ * 畳む)。この間の測り直しは、付けたときと同じく PTY へ大きさを伝える。
+ */
+const SETTLE_AFTER_ATTACH_MS = 1500;
 
 /**
  * 端末のフォント。powerline のセパレータやファイラのアイコンは私用領域
@@ -523,11 +528,20 @@ export function createTerminalScreen(
     shownBefore = shown;
   }
 
+  /** 付けた時刻 (SETTLE_AFTER_ATTACH_MS の間は測り直しの大きさを PTY へ伝える)。 */
+  let attachedAt = Number.NEGATIVE_INFINITY;
+
   function scheduleShellResize(): void {
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       resizeTimer = null;
-      fitShellToContainer(false, hasOperated && document.hasFocus());
+      // 付けた直後の測り直しは伝える: 伝えずに xterm だけ縮め・広げると代替画面の
+      // 中身が消え、tmux も描き直さないので空のまま残った (別の面へ移したシェル)。
+      const settling = Date.now() - attachedAt < SETTLE_AFTER_ATTACH_MS;
+      fitShellToContainer(
+        false,
+        settling || (hasOperated && document.hasFocus()),
+      );
     }, RESIZE_DEBOUNCE_MS);
   }
 
@@ -1822,8 +1836,11 @@ export function createTerminalScreen(
     }
     if (myGen !== generation || disposed) return;
 
-    // 表示領域がサイズを決める。購読前に PTY へ伝えておく。
-    fitShellToContainer();
+    // 表示領域がサイズを決める。購読前に PTY へ伝えておく。利用者がいまこの窓
+    // (面) で開いたなら、この画面が大きさを持つ: 別の画面 (シェルを移す前の面・
+    // 別の窓) が持ったままだと、この大きさは使われず、tmux が描き直さないので
+    // 空のまま残った。
+    fitShellToContainer(document.hasFocus());
     // 前のシェルの中身を残さない。購読が始まると、溜まっていた出力が最初に
     // まとめて流れてくる。
     //
@@ -1834,6 +1851,7 @@ export function createTerminalScreen(
     // 重複して並ぶ。reset は今の寸法で両方の画面を作り直すので、上限も揃う。
     created.reset();
     renderTmuxCover();
+    attachedAt = Date.now();
     openSource(session, myGen);
     void loadImageHistory(session, myGen);
   }

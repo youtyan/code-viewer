@@ -7,11 +7,14 @@
 // message は hello にしか使わない)。
 //
 // 左のサイドバーと最下段は host が持ち、本文は面が持つ。サイドバーで押したものは
-// command で面に頼み、面の状態 (URL・最下段の面ごとの項目・見ているシェル) は面が
-// host に知らせる。
+// command でフォーカスのある面に頼み、面の状態 (URL・最下段の面ごとの項目・見ている
+// シェル・タブの配置) は面が host に知らせる。面の並び (分ける・閉じる・フォーカス) と
+// 保存は host が持つ (core/workspace.ts)。
 
 import type { KeymapAction } from "./keymap";
+import type { SerializedLayout } from "./main-tabs";
 import type { AppRoute } from "./routes";
+import type { PaneId, SplitDir } from "./workspace";
 
 export const HOST_HELLO = "code-viewer:host-hello";
 
@@ -42,6 +45,28 @@ export function isMirroredId(id: string): id is MirroredId {
   return (MIRRORED_IDS as readonly string[]).includes(id);
 }
 
+/** host が面の並びとして受ける操作 (キーと、面の中のメニュー)。 */
+export const WORKSPACE_ACTIONS = [
+  "pane-split-right",
+  "pane-split-down",
+  "pane-close",
+  // 次の面へ (1 枚の画面では、左右 2 面のもう一方へ)。
+  "main-pane-other",
+  "pane-focus-previous",
+  "pane-focus-left",
+  "pane-focus-right",
+  "pane-focus-up",
+  "pane-focus-down",
+] as const satisfies readonly KeymapAction[];
+
+export type WorkspaceAction = (typeof WORKSPACE_ACTIONS)[number];
+
+export function isWorkspaceAction(
+  action: KeymapAction,
+): action is WorkspaceAction {
+  return (WORKSPACE_ACTIONS as readonly string[]).includes(action);
+}
+
 /** 写した部品 1 つ (属性と中身)。 */
 export type MirroredItem = {
   id: MirroredId;
@@ -59,7 +84,35 @@ export type PaneMessage =
   /** 全プロジェクト共通の見た目の設定 (明暗・テーマ・言語・密度) が変わった。 */
   | { type: "look-changed" }
   /** 面の頭の「サイドバーを出す」で開いた。 */
-  | { type: "nav-collapsed"; collapsed: boolean };
+  | { type: "nav-collapsed"; collapsed: boolean }
+  /** 面のタブの配置が変わった (保存は host が窓ごとにする)。 */
+  | { type: "tabs"; layout: SerializedLayout }
+  /** 利用者が面に触れた (押した・フォーカスが入った)。 */
+  | { type: "focus" }
+  /** 面に開いているシェルのタブ (1 つのシェルは窓の 1 か所だけに出す)。 */
+  | { type: "terminals"; open: string[] }
+  /**
+   * そのタブで面を分ける。url は新しい面が開く画面、layout は新しい面のタブ
+   * (そのタブ 1 枚)。シェル・画像は面の側で閉じる (移す)。
+   */
+  | { type: "split"; dir: SplitDir; url: string; layout: SerializedLayout }
+  /**
+   * 別の面で開く (Alt＋クリック・反対の面へ)。route か terminal のどちらか。
+   * project は route の持ち物 (同じプロジェクトの面にだけ開く)。開ける面が無ければ
+   * url と layout で右に分ける。
+   */
+  | {
+      type: "open-elsewhere";
+      route: AppRoute | null;
+      terminal: string | null;
+      project: string | null;
+      url: string;
+      layout: SerializedLayout;
+    }
+  /** 利用者が面の最後のタブを閉じた (面が 2 つ以上なら host が面を閉じる)。 */
+  | { type: "emptied" }
+  /** 面の並びの操作 (キー)。 */
+  | { type: "workspace-action"; action: WorkspaceAction };
 
 export type ClickModifiers = {
   shiftKey: boolean;
@@ -79,15 +132,33 @@ export type HostCommand =
   | { type: "keymap"; action: KeymapAction; repeated: boolean }
   | { type: "click"; id: MirroredId; modifiers: ClickModifiers }
   /** 左のサイドバーを畳んだ・開いた (面は頭の「サイドバーを出す」を出し入れする)。 */
-  | { type: "nav-collapsed"; collapsed: boolean };
+  | { type: "nav-collapsed"; collapsed: boolean }
+  /** そのシェルのタブを閉じる (別の面で開いた。閉じた履歴には積まない)。 */
+  | { type: "close-terminal"; session: string }
+  /** そのシェルのタブを開いて前面に出す。 */
+  | { type: "open-terminal"; session: string }
+  /** 面を分ける (キー)。面は前面のタブで split を送り返す。 */
+  | { type: "split-front"; dir: SplitDir }
+  /** 面が 2 つ以上あるか・この面にフォーカスがあるか (フォーカスの印)。 */
+  | { type: "focus-state"; focused: boolean; many: boolean };
+
+/** host の hello: その面の id と、保存してあったタブの配置 (無ければ null)。 */
+export type HostHello = {
+  type: typeof HOST_HELLO;
+  pane: PaneId;
+  layout: unknown | null;
+};
 
 /** 窓の message が host の hello か (別の用途の message は通す)。 */
-export function isHostHello(data: unknown): boolean {
+export function isHostHello(data: unknown): data is HostHello {
   return (
     typeof data === "object" &&
     data !== null &&
     "type" in data &&
-    data.type === HOST_HELLO
+    data.type === HOST_HELLO &&
+    "pane" in data &&
+    typeof data.pane === "string" &&
+    "layout" in data
   );
 }
 
@@ -97,6 +168,13 @@ const PANE_MESSAGE_TYPES: readonly PaneMessage["type"][] = [
   "viewing",
   "look-changed",
   "nav-collapsed",
+  "tabs",
+  "focus",
+  "terminals",
+  "split",
+  "open-elsewhere",
+  "emptied",
+  "workspace-action",
 ];
 
 const HOST_COMMAND_TYPES: readonly HostCommand["type"][] = [
@@ -109,6 +187,10 @@ const HOST_COMMAND_TYPES: readonly HostCommand["type"][] = [
   "keymap",
   "click",
   "nav-collapsed",
+  "close-terminal",
+  "open-terminal",
+  "split-front",
+  "focus-state",
 ];
 
 /**

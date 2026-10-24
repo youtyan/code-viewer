@@ -384,8 +384,8 @@ export const KEYMAP_ACTION_INFO: Record<KeymapAction, KeymapActionInfo> = {
   "main-pane-other": {
     group: "tabs",
     label: {
-      en: "Move focus to the other side of a split main area",
-      ja: "左右に分けたメインの面で、もう一方の面へ",
+      en: "Move focus to the next pane",
+      ja: "次の面へフォーカスを移す",
     },
   },
   // 左の一覧の並びで前・次のプロジェクトへ。前面はそのプロジェクトのタブの
@@ -402,6 +402,59 @@ export const KEYMAP_ACTION_INFO: Record<KeymapAction, KeymapActionInfo> = {
     label: {
       en: "Switch to the next project in the sidebar list",
       ja: "左の一覧の次のプロジェクトへ切り替える",
+    },
+  },
+  "pane-split-right": {
+    group: "tabs",
+    label: {
+      en: "Split the pane to the right (the front tab opens in the new pane)",
+      ja: "面を右に分ける (前面のタブを新しい面に出す)",
+    },
+  },
+  "pane-split-down": {
+    group: "tabs",
+    label: {
+      en: "Split the pane downward (the front tab opens in the new pane)",
+      ja: "面を下に分ける (前面のタブを新しい面に出す)",
+    },
+  },
+  "pane-close": {
+    group: "tabs",
+    label: { en: "Close the pane", ja: "面を閉じる" },
+  },
+  "pane-focus-previous": {
+    group: "tabs",
+    label: {
+      en: "Move focus to the previous pane",
+      ja: "前の面へフォーカスを移す",
+    },
+  },
+  "pane-focus-left": {
+    group: "tabs",
+    label: {
+      en: "Move focus to the pane on the left",
+      ja: "左の面へフォーカスを移す",
+    },
+  },
+  "pane-focus-right": {
+    group: "tabs",
+    label: {
+      en: "Move focus to the pane on the right",
+      ja: "右の面へフォーカスを移す",
+    },
+  },
+  "pane-focus-up": {
+    group: "tabs",
+    label: {
+      en: "Move focus to the pane above",
+      ja: "上の面へフォーカスを移す",
+    },
+  },
+  "pane-focus-down": {
+    group: "tabs",
+    label: {
+      en: "Move focus to the pane below",
+      ja: "下の面へフォーカスを移す",
     },
   },
   "sidebar-next": {

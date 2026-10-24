@@ -317,6 +317,18 @@ export type MainTabsDeps = {
   /** 開いているターミナルのタブ (一覧の印) と、閉じたもの (購読をやめる)。 */
   onTerminals(open: ReadonlySet<string>, closed: string[]): void;
   /**
+   * 面の中 (外側のページが窓の面を並べる。core/workspace-role.ts の pane)。
+   * - splitOut: 分割・反対の面へを外側のページに頼む。このタブ列の中には右の面を
+   *   作らない (分割のボタン・タブのメニュー・右半分へのドロップ)
+   * - タブ列に出すのは、いま見ているプロジェクトのグループとプロジェクトの無いタブ
+   *   だけ (ほかのプロジェクトのタブは残し、そのプロジェクトへ移ると出る)
+   * - onEmptied: 利用者が最後のタブを閉じた (外側のページが面を閉じる)
+   */
+  paneMode?: {
+    splitOut(tab: Tab, how: "split" | "move"): void;
+    onEmptied(): void;
+  };
+  /**
    * 一覧の列に今の画面の一覧 (Diff・History・作業ツリー) を出しているか。右の面を
    * 預けたときの説明をそれに合わせる (一覧を出すために預けた)。
    */
@@ -779,7 +791,10 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
    * プロジェクトを開くと札が出ず、どのプロジェクトを見ているか分からなかった。
    */
   function groupsOf(side: PaneSide, pane: Pane): TabGroup[] {
-    const groups = tabGroups(pane.tabs, keyOf);
+    const groups = tabGroups(pane.tabs, keyOf).filter(
+      (group) =>
+        !deps.paneMode || group.key === null || group.key === currentRoot,
+    );
     const root = currentRoot;
     if (side !== "left" || root === null) return groups;
     if (groups.some((group) => group.key === root)) return groups;
@@ -973,6 +988,12 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       pageIconPaths(side === "right" ? "unsplit" : "split"),
     );
     splitButton.addEventListener("click", () => {
+      const paneMode = deps.paneMode;
+      if (paneMode) {
+        const front = frontTab(layout, "left");
+        if (front) paneMode.splitOut(front, "split");
+        return;
+      }
       if (side === "right") {
         changeAndGo(unsplit);
         return;
@@ -1699,6 +1720,70 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const before = layout;
     changeAndGo(change);
     closedHistory = pushClosed(closedHistory, closedTabs(before, layout));
+    if (
+      deps.paneMode &&
+      allTabs(before).length > 0 &&
+      allTabs(layout).length === 0
+    )
+      deps.paneMode.onEmptied();
+  }
+
+  /**
+   * タブのメニューの「右に分割」「反対の面へ移す」。面の中では外側のページに頼む
+   * (面が 1 つでも分けられる。移す先が無ければ右に分ける)。
+   */
+  function splitItems(
+    tab: Tab,
+    state: ReturnType<typeof tabMenu>,
+  ): ContextMenuItem[] {
+    const current = text();
+    const paneMode = deps.paneMode;
+    if (paneMode)
+      return [
+        {
+          label: current.splitRight,
+          onSelect: () => paneMode.splitOut(tab, "split"),
+        },
+        {
+          label: current.moveToOtherSide,
+          onSelect: () => paneMode.splitOut(tab, "move"),
+        },
+      ];
+    return [
+      {
+        label: current.splitRight,
+        // 狭くて 2 面が置けない幅では無効 (モデルの可否に幅の条件を足す)。
+        disabled: !state.splitRight || !splitAllowed(),
+        onSelect: () => changeAndGo((l) => splitRight(l, tab.id)),
+      },
+      {
+        label: current.moveToOtherSide,
+        disabled: !state.moveToOtherSide,
+        onSelect: () => changeAndGo((l) => moveToOtherSide(l, tab.id)),
+      },
+    ];
+  }
+
+  /**
+   * 面の中: タブ列に出ていないグループ (ほかのプロジェクト) を畳んだことにして
+   * 動かす (次・前のタブと n 番目は、見えているタブの中だけを動く)。
+   */
+  function inShownGroups(
+    change: (current: Layout) => Layout,
+  ): (current: Layout) => Layout {
+    if (!deps.paneMode) return change;
+    return (current) => {
+      const hidden = [...new Set(allTabs(current).map(keyOf))].filter(
+        (key): key is string => key !== null && key !== currentRoot,
+      );
+      const { collapsed: _shown, ...next } = change({
+        ...current,
+        collapsed: hidden,
+      });
+      return current.collapsed
+        ? { ...next, collapsed: current.collapsed }
+        : next;
+    };
   }
 
   /** 本文に出ている route のタブ (か本文の既定) の、今の route を覚える。 */
@@ -1822,17 +1907,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         disabled: !state.keepOpen,
         onSelect: () => commit(keepOpen(layout, tab.id)),
       },
-      {
-        label: current.splitRight,
-        // 狭くて 2 面が置けない幅では無効 (モデルの可否に幅の条件を足す)。
-        disabled: !state.splitRight || !splitAllowed(),
-        onSelect: () => changeAndGo((l) => splitRight(l, tab.id)),
-      },
-      {
-        label: current.moveToOtherSide,
-        disabled: !state.moveToOtherSide,
-        onSelect: () => changeAndGo((l) => moveToOtherSide(l, tab.id)),
-      },
+      ...splitItems(tab, state),
       {
         label: current.moveLeft,
         disabled: !state.moveLeft,
@@ -2150,7 +2225,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     event.preventDefault();
     const id = dragId;
     endDrag();
-    changeAndGo((l) => splitRight(l, id));
+    const dropped = findTab(layout, id)?.tab;
+    if (deps.paneMode && dropped) deps.paneMode.splitOut(dropped, "split");
+    else changeAndGo((l) => splitRight(l, id));
   });
 
   /** タブの名前 (別のプロジェクトのペインならプロジェクト名つき)。 */
@@ -2483,7 +2560,13 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       known.length > 0
         ? known.reduce((sum, width) => sum + width, 0) / known.length
         : unit * TAB_FLOOR_UNITS;
-    const ids = pane.tabs.map((tab) => tab.id);
+    // 面の中で出していないグループ (ほかのプロジェクト) の分は数えない。
+    const ids = pane.tabs
+      .filter(
+        (tab) =>
+          !deps.paneMode || keyOf(tab) === null || keyOf(tab) === currentRoot,
+      )
+      .map((tab) => tab.id);
     const natural = ids.map((id) => naturalWidths.get(id) ?? average);
     // タブ以外に列が使う幅: 札 (畳んだときの枚数を除く)・＋・隙間 (描いていない
     // タブの分も数える)。
@@ -3225,8 +3308,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       });
       return true;
     },
-    next: () => activateBy((l) => nextTab(l, keyOf)),
-    previous: () => activateBy((l) => prevTab(l, keyOf)),
+    next: () => activateBy(inShownGroups((l) => nextTab(l, keyOf))),
+    previous: () => activateBy(inShownGroups((l) => prevTab(l, keyOf))),
     reopenClosed() {
       let reopened = false;
       changeAndGo((current) => {
@@ -3243,7 +3326,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       const tab = activeTab(layout);
       if (tab) closeByUser((l) => close(l, tab.id));
     },
-    activateNth: (n) => activateBy((l) => activateIndex(l, n, keyOf)),
+    activateNth: (n) =>
+      activateBy(inShownGroups((l) => activateIndex(l, n, keyOf))),
     restore,
     flush,
     // 名前・シェルのプロジェクト・グループの並びが変わったときも呼ばれる (並べ直す)。

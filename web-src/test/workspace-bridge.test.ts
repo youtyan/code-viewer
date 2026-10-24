@@ -1,19 +1,12 @@
 // 外側のページ (host) と面 (pane) のやりとり (core/workspace-bridge.ts の形と
-// views/workspace/bridge.ts)。host は index.html の部品をそのまま使い、面の iframe は
-// 窓と文書を差し替えた偽物にする (口の上の知らせは本物の MessageChannel)。
+// views/workspace/host.ts)。host は index.html の部品をそのまま使い、面の iframe は
+// 窓と文書を差し替えた偽物にする (口の上の知らせは本物の MessageChannel)。保存は
+// 偽物 (読み込みは決めた面の並び、書いた値を覚える)。
 
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { singlePane, splitPane, type Workspace } from "../core/workspace";
 import {
   HOST_HELLO,
   type HostCommand,
@@ -28,7 +21,8 @@ import {
   installTitleTooltips,
   TITLE_TOOLTIP_DELAY_MS,
 } from "../views/title-tooltip";
-import { startWorkspaceHost } from "../views/workspace/bridge";
+import { startWorkspaceHost } from "../views/workspace/host";
+import type { WorkspaceStore } from "../views/workspace/store";
 
 const BODY = (() => {
   const html = readFileSync("web/index.html", "utf8");
@@ -79,7 +73,16 @@ describe("知らせと頼みの形", () => {
   });
 
   test.each([
-    { name: "host の hello", data: { type: HOST_HELLO }, expected: true },
+    {
+      name: "host の hello",
+      data: { type: HOST_HELLO, pane: "p1", layout: null },
+      expected: true,
+    },
+    {
+      name: "面の id の無い hello",
+      data: { type: HOST_HELLO, layout: null },
+      expected: false,
+    },
     { name: "別の用途の message", data: { type: "other" }, expected: false },
     { name: "null", data: null, expected: false },
   ])("isHostHello: $name", ({ data, expected }) => {
@@ -87,75 +90,112 @@ describe("知らせと頼みの形", () => {
   });
 });
 
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://127.0.0.1/p/0123456789abcdef/" });
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
-
+// host は文書ごとに受け口 (押下の捕捉・message) を置くので、テストごとに窓を作り直す。
 beforeEach(() => {
+  GlobalRegistrator.register({
+    url: "http://127.0.0.1/p/aaaaaaaaaaaaaaaa/",
+    // 面の iframe は偽物の窓と文書にする (本当には読み込まない)。
+    settings: { disableIframePageLoading: true },
+  });
   document.body.innerHTML = BODY;
 });
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
+  await GlobalRegistrator.unregister();
 });
 
-/**
- * host の面の iframe。空のページを読み終えてから窓と文書を偽物にして、host が
- * 渡した口を受け取る (読み終わりの load は、host を始める前に済ませる)。
- */
-async function paneFrame(loaded: boolean) {
-  const frame = document.createElement("iframe");
-  frame.setAttribute("data-cv-pane", "p1");
-  frame.src = "about:blank";
-  const workspace = document.getElementById("workspace");
-  if (!workspace) throw new Error("index.html has no #workspace");
-  const blank = new Promise((resolve) =>
-    frame.addEventListener("load", resolve, { once: true }),
-  );
-  workspace.append(frame);
-  await blank;
-  const hellos: MessagePort[] = [];
-  const paneWindow = {
-    postMessage(data: unknown, origin: string, ports: MessagePort[]) {
-      expect({ data, origin }).toEqual({
-        data: { type: HOST_HELLO },
-        origin: location.origin,
-      });
-      hellos.push(...ports);
-    },
-  };
-  const paneDocument = {
-    readyState: loaded ? "complete" : "loading",
-    URL: loaded ? location.href : "about:blank",
-  };
-  // null は、面がこの origin を離れた (外部接続のサインインへ移された) とき。
-  let shown: typeof paneDocument | null = paneDocument;
-  Object.defineProperty(frame, "contentWindow", { value: paneWindow });
-  Object.defineProperty(frame, "contentDocument", { get: () => shown });
-  const leaveOrigin = () => {
-    shown = null;
-    frame.dispatchEvent(new Event("load"));
-  };
-  return { frame, hellos, paneDocument, leaveOrigin };
+const A = "/p/aaaaaaaaaaaaaaaa";
+const B = "/p/bbbbbbbbbbbbbbbb";
+
+/** p1 (A のフォルダ表示) | p2 (B の History)。フォーカスは p1。 */
+function twoPanes(): Workspace {
+  const ws = splitPane(singlePane("p1", `${A}/`), "p1", "row", "p2", {
+    url: `${B}/history`,
+    layout: { saved: "p2" },
+  });
+  return { ...ws, focused: "p1" };
 }
 
-async function startHost(loaded = true) {
-  const pane = await paneFrame(loaded);
+type FakePane = {
+  frame: HTMLIFrameElement;
+  /** host が渡した hello (口は受け取った順)。 */
+  hellos: Array<{ data: unknown; port: MessagePort }>;
+  leaveOrigin(): void;
+};
+
+/** #workspace の面の iframe (読み込みの最初に index.html が作るもの)。 */
+function paneFrame(id: string, url: string): FakePane {
+  const frame = document.createElement("iframe");
+  frame.setAttribute("data-cv-pane", id);
+  const hellos: FakePane["hellos"] = [];
+  let shown: { readyState: string; URL: string } | null = {
+    readyState: "complete",
+    URL: `${location.origin}${url}`,
+  };
+  Object.defineProperty(frame, "contentWindow", {
+    value: {
+      postMessage(data: unknown, origin: string, ports: MessagePort[]) {
+        expect(origin).toBe(location.origin);
+        hellos.push({ data, port: ports[0] });
+      },
+    },
+  });
+  Object.defineProperty(frame, "contentDocument", { get: () => shown });
+  document.getElementById("workspace")?.append(frame);
+  return {
+    frame,
+    hellos,
+    leaveOrigin: () => {
+      shown = null;
+      frame.dispatchEvent(new Event("load"));
+    },
+  };
+}
+
+function fakeStore(loaded: Workspace) {
+  const saved: Workspace[] = [];
+  const store: WorkspaceStore = {
+    windowId: () => "w-test",
+    load: async () => ({ root: "/work/a", workspace: loaded, newer: null }),
+    save: (workspace) => saved.push(workspace),
+    flush: () => undefined,
+    backup: async () => "unused",
+  };
+  return { store, saved };
+}
+
+/** 面の並びで host を始め、読み込みが済むまで待つ。 */
+async function startHost(loaded: Workspace = twoPanes()) {
+  const panes = Object.fromEntries(
+    Object.entries(loaded.panes).map(([id, entry]) => [
+      id,
+      paneFrame(id, entry.url),
+    ]),
+  );
+  const { store, saved } = fakeStore(loaded);
   const deps = {
+    store,
+    homeUrl: () => `${A}/`,
     onLocation: vi.fn(),
     onViewing: vi.fn(),
     onLookChanged: vi.fn(),
     onNavCollapsed: vi.fn(),
+    onHidden: vi.fn(),
   };
   const host = startWorkspaceHost(deps);
-  return { host, deps, ...pane };
+  await vi.waitFor(() =>
+    expect(Object.values(panes).every((pane) => pane.hellos.length === 1)).toBe(
+      true,
+    ),
+  );
+  return { host, deps, panes, saved };
 }
 
 /** 面の側の口: host へ送り、host の頼みを集める。 */
-function paneEnd(port: MessagePort) {
+function paneEnd(pane: FakePane) {
   const received: HostCommand[] = [];
+  const { port } = pane.hellos[pane.hellos.length - 1];
   port.onmessage = (event) => received.push(event.data);
   return {
     received,
@@ -169,41 +209,96 @@ function el(id: string): HTMLElement {
   return found;
 }
 
-const AUTO_UPDATE: MirroredItem = {
+const autoUpdate = (state: "on" | "off"): MirroredItem => ({
   id: "auto-update",
   attributes: [
     ["id", "auto-update"],
-    ["class", "global-icon-action"],
-    ["title", "auto update is off"],
+    [
+      "class",
+      state === "on" ? "global-icon-action active" : "global-icon-action",
+    ],
+    ["title", `auto update is ${state}`],
   ],
-  html: '<span class="goi-icon" aria-hidden="true">off</span>',
-};
+  html: `<span class="goi-icon" aria-hidden="true">${state}</span>`,
+});
 
-describe("host: 最下段の面ごとの項目は面の写し", () => {
-  test("写した値を出し、host の app.ts が書いても面の値に戻す", async () => {
-    const { hellos } = await startHost();
-    const pane = paneEnd(hellos[0]);
-    pane.send({ type: "mirror", items: [AUTO_UPDATE] });
+describe("host: 面の口と保存", () => {
+  test("面ごとに、その面の id と保存してあったタブの配置を渡す", async () => {
+    const { panes } = await startHost();
+    expect([panes.p1, panes.p2].map((pane) => pane.hellos[0].data)).toEqual([
+      { type: HOST_HELLO, pane: "p1", layout: null },
+      { type: HOST_HELLO, pane: "p2", layout: { saved: "p2" } },
+    ]);
+  });
+
+  test("面が送ったタブの配置と URL を、その面の保存に書く", async () => {
+    const { panes, saved } = await startHost();
+    const p2 = paneEnd(panes.p2);
+    p2.send({ type: "tabs", layout: { version: 5 } as never });
+    p2.send({
+      type: "location",
+      href: `${location.origin}${B}/file?path=a.ts`,
+      project: { root: "/work/b", name: "b" },
+    });
+    await vi.waitFor(() =>
+      expect(saved[saved.length - 1]?.panes.p2).toEqual({
+        url: `${B}/file?path=a.ts`,
+        layout: { version: 5 },
+      }),
+    );
+  });
+});
+
+describe("host: フォーカスのある面を写す", () => {
+  test("最下段とアドレス欄はフォーカスのある面のもの。押した面へフォーカスが移る", async () => {
+    const { panes, deps } = await startHost();
+    const p1 = paneEnd(panes.p1);
+    const p2 = paneEnd(panes.p2);
+    p1.send({ type: "mirror", items: [autoUpdate("off")] });
+    p2.send({ type: "mirror", items: [autoUpdate("on")] });
+    p2.send({
+      type: "location",
+      href: `${location.origin}${B}/history`,
+      project: { root: "/work/b", name: "b" },
+    });
+    await vi.waitFor(() =>
+      expect(el("auto-update").className).toBe("global-icon-action"),
+    );
+    const before = { path: location.pathname, title: el("auto-update").title };
+    p2.send({ type: "focus" });
+    await vi.waitFor(() =>
+      expect(el("auto-update").title).toBe("auto update is on"),
+    );
+    expect({
+      before,
+      after: { path: location.pathname, title: el("auto-update").title },
+      project: deps.onLocation.mock.lastCall?.[0],
+      p1: p1.received
+        .filter((command) => command.type === "focus-state")
+        .slice(-1)[0],
+    }).toEqual({
+      before: { path: `${A}/`, title: "auto update is off" },
+      after: { path: `${B}/history`, title: "auto update is on" },
+      project: { root: "/work/b", name: "b" },
+      p1: { type: "focus-state", focused: false, many: true },
+    });
+  });
+
+  test("host の app.ts が写した部品に書いても面の値に戻す", async () => {
+    const { panes } = await startHost();
+    paneEnd(panes.p1).send({ type: "mirror", items: [autoUpdate("off")] });
     await vi.waitFor(() =>
       expect(el("auto-update").className).toBe("global-icon-action"),
     );
     el("auto-update").classList.add("active");
     await Promise.resolve();
-    expect({
-      className: el("auto-update").className,
-      title: el("auto-update").title,
-      html: el("auto-update").innerHTML,
-    }).toEqual({
-      className: "global-icon-action",
-      title: "auto update is off",
-      html: AUTO_UPDATE.html,
-    });
+    expect(el("auto-update").className).toBe("global-icon-action");
   });
 
   test("吹き出しを出している間も、写しと吹き出しが title を書き合わない", async () => {
-    const { hellos } = await startHost();
-    const pane = paneEnd(hellos[0]);
-    pane.send({ type: "mirror", items: [AUTO_UPDATE] });
+    const { panes } = await startHost();
+    const p1 = paneEnd(panes.p1);
+    p1.send({ type: "mirror", items: [autoUpdate("off")] });
     await vi.waitFor(() =>
       expect(el("auto-update").title).toBe("auto update is off"),
     );
@@ -224,19 +319,7 @@ describe("host: 最下段の面ごとの項目は面の写し", () => {
     await new Promise((resolve) =>
       setTimeout(resolve, TITLE_TOOLTIP_DELAY_MS + 50),
     );
-    pane.send({
-      type: "mirror",
-      items: [
-        {
-          ...AUTO_UPDATE,
-          attributes: [
-            ["id", "auto-update"],
-            ["class", "global-icon-action active"],
-            ["title", "auto update is on"],
-          ],
-        },
-      ],
-    });
+    p1.send({ type: "mirror", items: [autoUpdate("on")] });
     await vi.waitFor(() =>
       expect(el("auto-update").className).toBe("global-icon-action active"),
     );
@@ -250,9 +333,9 @@ describe("host: 最下段の面ごとの項目は面の写し", () => {
 });
 
 describe("host: 写した部品を押すと面の同じ部品を押す", () => {
-  test("修飾キーごと面へ送り、host の同じ id の処理は動かさない", async () => {
-    const { hellos } = await startHost();
-    const pane = paneEnd(hellos[0]);
+  test("修飾キーごとフォーカスのある面へ送り、host の同じ id の処理は動かさない", async () => {
+    const { panes } = await startHost();
+    const p1 = paneEnd(panes.p1);
     const hostHandler = vi.fn();
     el("copy-ai-context").addEventListener("click", hostHandler);
     el("copy-ai-context").dispatchEvent(
@@ -262,23 +345,25 @@ describe("host: 写した部品を押すと面の同じ部品を押す", () => {
         shiftKey: true,
       }),
     );
-    await vi.waitFor(() => expect(pane.received.length).toBe(1));
+    await vi.waitFor(() =>
+      expect(p1.received.some((command) => command.type === "click")).toBe(
+        true,
+      ),
+    );
     expect({
-      received: pane.received,
+      click: p1.received.find((command) => command.type === "click"),
       host: hostHandler.mock.calls.length,
     }).toEqual({
-      received: [
-        {
-          type: "click",
-          id: "copy-ai-context",
-          modifiers: {
-            shiftKey: true,
-            altKey: false,
-            ctrlKey: false,
-            metaKey: false,
-          },
+      click: {
+        type: "click",
+        id: "copy-ai-context",
+        modifiers: {
+          shiftKey: true,
+          altKey: false,
+          ctrlKey: false,
+          metaKey: false,
         },
-      ],
+      },
       host: 0,
     });
   });
@@ -287,8 +372,8 @@ describe("host: 写した部品を押すと面の同じ部品を押す", () => {
     { name: "⌘＋クリック", init: { metaKey: true } },
     { name: "中ボタン", init: { button: 1 } },
   ])("リンクの $name は新しいタブで開く (面へ送らない)", async ({ init }) => {
-    const { hellos } = await startHost();
-    const pane = paneEnd(hellos[0]);
+    const { panes } = await startHost();
+    const p1 = paneEnd(panes.p1);
     const event = new MouseEvent("click", {
       bubbles: true,
       cancelable: true,
@@ -296,69 +381,155 @@ describe("host: 写した部品を押すと面の同じ部品を押す", () => {
     });
     el("nav-help").dispatchEvent(event);
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect({ sent: pane.received, prevented: event.defaultPrevented }).toEqual({
-      sent: [],
-      prevented: false,
-    });
+    expect({
+      clicks: p1.received.filter((command) => command.type === "click"),
+      prevented: event.defaultPrevented,
+    }).toEqual({ clicks: [], prevented: false });
   });
 });
 
-describe("host: アドレス欄と頼みの順番", () => {
-  test("面の URL とプロジェクトをアドレス欄と deps に写す", async () => {
-    const { hellos, deps } = await startHost();
-    const pane = paneEnd(hellos[0]);
-    const project = { root: "/work/sample-app", name: "sample-app" };
-    pane.send({
-      type: "location",
-      href: `${location.origin}/p/0123456789abcdef/history`,
-      project,
-    });
-    await vi.waitFor(() => expect(deps.onLocation).toHaveBeenCalled());
-    expect({
-      path: location.pathname,
-      project: deps.onLocation.mock.calls[0][0],
-    }).toEqual({ path: "/p/0123456789abcdef/history", project });
+describe("host: 面の並び", () => {
+  test("1 つのシェルは 1 か所: 別の面で開いたら、前に出していた面のタブを閉じる", async () => {
+    const { panes } = await startHost();
+    const p1 = paneEnd(panes.p1);
+    const p2 = paneEnd(panes.p2);
+    p1.send({ type: "terminals", open: ["shell-aaaaaa"] });
+    p2.send({ type: "terminals", open: ["shell-aaaaaa"] });
+    await vi.waitFor(() =>
+      expect(
+        p1.received.filter((command) => command.type === "close-terminal"),
+      ).toEqual([{ type: "close-terminal", session: "shell-aaaaaa" }]),
+    );
+    expect(
+      p2.received.filter((command) => command.type === "close-terminal"),
+    ).toEqual([]);
   });
 
-  test("面が読み終わる前の頼みは、読み終わったときに渡した口へ送る", async () => {
-    const { host, hellos, frame, paneDocument } = await startHost(false);
-    host.command({ type: "settings-at", heading: "accounts" });
-    expect(hellos.length).toBe(0);
-    paneDocument.readyState = "complete";
-    paneDocument.URL = location.href;
-    frame.dispatchEvent(new Event("load"));
-    const pane = paneEnd(hellos[0]);
+  test("分けると新しい面を作り、フォーカスを移して保存する", async () => {
+    const { panes, saved } = await startHost();
+    paneEnd(panes.p1).send({
+      type: "split",
+      dir: "column",
+      url: `${A}/todif`,
+      layout: { version: 5 } as never,
+    });
     await vi.waitFor(() =>
-      expect(pane.received).toEqual([
-        { type: "settings-at", heading: "accounts" },
-      ]),
+      expect(
+        document.querySelector('iframe[data-cv-pane="p3"]'),
+      ).not.toBeNull(),
     );
+    const last = saved[saved.length - 1];
+    expect({
+      tree: last?.tree,
+      focused: last?.focused,
+      p3: last?.panes.p3,
+      src: document
+        .querySelector<HTMLIFrameElement>('iframe[data-cv-pane="p3"]')
+        ?.getAttribute("src"),
+    }).toEqual({
+      tree: {
+        dir: "row",
+        ratio: 0.5,
+        a: { dir: "column", ratio: 0.5, a: { pane: "p1" }, b: { pane: "p3" } },
+        b: { pane: "p2" },
+      },
+      focused: "p3",
+      p3: { url: `${A}/todif`, layout: { version: 5 } },
+      src: `${A}/todif`,
+    });
+  });
+
+  test("最後のタブを閉じた面は閉じる (面が 1 つなら閉じない)", async () => {
+    const { panes, saved } = await startHost();
+    paneEnd(panes.p2).send({ type: "emptied" });
+    await vi.waitFor(() => expect(panes.p2.frame.isConnected).toBe(false));
+    const only = saved[saved.length - 1];
+    expect(only?.tree).toEqual({ pane: "p1" });
+  });
+
+  test("別の面で開く: 同じプロジェクトの面が無ければ右に分ける", async () => {
+    const { panes, saved } = await startHost();
+    paneEnd(panes.p2).send({
+      type: "location",
+      href: `${location.origin}${B}/history`,
+      project: { root: "/work/b", name: "b" },
+    });
+    paneEnd(panes.p1).send({
+      type: "location",
+      href: `${location.origin}${A}/`,
+      project: { root: "/work/a", name: "a" },
+    });
+    paneEnd(panes.p1).send({
+      type: "open-elsewhere",
+      route: {
+        screen: "history",
+        range: { from: "HEAD", to: "worktree" },
+      } as never,
+      terminal: null,
+      project: "/work/a",
+      url: `${A}/history`,
+      layout: { version: 5 } as never,
+    });
+    await vi.waitFor(() =>
+      expect(saved[saved.length - 1]?.panes.p3?.url).toBe(`${A}/history`),
+    );
+  });
+});
+
+describe("host: 読み込みの最初に作った面", () => {
+  test("開いている画面を移し直さず、その画面を保存した面として扱う", async () => {
+    // 前の並びの控えが無い窓: index.html は面 p1 を作って B の History を開いた。
+    const first = paneFrame("p1", `${B}/history`);
+    first.frame.setAttribute("src", `${B}/history`);
+    const { store } = fakeStore(twoPanes());
+    startWorkspaceHost({
+      store,
+      homeUrl: () => `${A}/`,
+      onLocation: vi.fn(),
+      onViewing: vi.fn(),
+      onLookChanged: vi.fn(),
+      onNavCollapsed: vi.fn(),
+      onHidden: vi.fn(),
+    });
+    await vi.waitFor(() => expect(first.hellos.length).toBe(1));
+    const frames = [
+      ...document.querySelectorAll<HTMLIFrameElement>("#workspace > iframe"),
+    ].map((frame) => [
+      frame.getAttribute("data-cv-pane"),
+      frame.getAttribute("src"),
+    ]);
+    expect({ frames, hello: first.hellos[0].data }).toEqual({
+      frames: [
+        ["p2", `${B}/history`],
+        ["p1", `${A}/`],
+      ],
+      hello: { type: HOST_HELLO, pane: "p2", layout: { saved: "p2" } },
+    });
   });
 });
 
 describe("host: 面がこの origin を離れたら (サインイン)", () => {
   test("窓ごと読み直し、読み直した直後にまた離れたら繰り返さない", async () => {
-    sessionStorage.clear();
     const reload = vi
       .spyOn(location, "reload")
       .mockImplementation(() => undefined);
     const errors = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
-    const { leaveOrigin } = await startHost();
-    leaveOrigin();
-    leaveOrigin();
+    const { panes } = await startHost();
+    panes.p1.leaveOrigin();
+    panes.p1.leaveOrigin();
     expect({
       reloads: reload.mock.calls.length,
-      errors: errors.mock.calls.map(([error]) => String(error)),
+      errors: errors.mock.calls
+        .map(([error]) => String(error))
+        .filter((message) => message.includes("left this origin")),
     }).toEqual({
       reloads: 1,
       errors: [
         "Error: the pane left this origin again right after reloading for sign-in; not reloading again",
       ],
     });
-    reload.mockRestore();
-    errors.mockRestore();
   });
 });
 

@@ -7,8 +7,8 @@
 // 部品を hidden にすることだけ。デスクトップ (幅の段が desktop で、指の画面でも
 // ない) では足した部品は全部 hidden で、骨格の class も付けない。
 //
-// 幅の段の判定は core/mobile-layout.ts の viewportTier。CSS の条件
-// (PHONE_MEDIA_QUERY) と同じ。
+// 電話の段かは views/shell/workspace.ts の phoneMediaQuery (CSS の条件 PHONE_MEDIA_QUERY。
+// 外側のページと面の中では電話の段に入らない)。
 
 import {
   CHEVRON_DOWN_12_PATH,
@@ -34,7 +34,6 @@ import {
   type TerminalSoftKey,
   TOUCH_MEDIA_QUERY,
   type ViewportTier,
-  viewportTier,
 } from "../core/mobile-layout";
 import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from "../core/tmux";
 import type { TabListEntry } from "./main-tabs/main-tabs-view";
@@ -621,11 +620,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   }
 
   function apply(): void {
-    current = viewportTier({
-      width: document.documentElement.clientWidth,
-      height: document.documentElement.clientHeight,
-      coarsePointer: touchQuery.matches,
-    });
+    current = phoneQuery.matches ? "phone" : "desktop";
     const phone = current === "phone";
     menuButton.hidden = !phone;
     bar.hidden = !phone;

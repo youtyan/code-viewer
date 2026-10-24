@@ -47,7 +47,7 @@ describe("pane: host の hello を受けてから知らせる", () => {
       channel.port2.onmessage = (event) => received.push(event.data);
       window.dispatchEvent(
         new MessageEvent("message", {
-          data: { type: HOST_HELLO },
+          data: { type: HOST_HELLO, pane: "p2", layout: { saved: true } },
           origin: location.origin,
           source: source as Window,
           ports: [channel.port1],
@@ -65,6 +65,7 @@ describe("pane: host の hello を受けてから知らせる", () => {
         "mirror",
       ]),
     );
+    expect(await bridge.hello).toEqual({ pane: "p2", layout: { saved: true } });
     parent.port.postMessage({ type: "nav-collapsed", collapsed: true });
     await vi.waitFor(() =>
       expect(commands).toEqual([{ type: "nav-collapsed", collapsed: true }]),

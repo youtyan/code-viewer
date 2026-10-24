@@ -45,7 +45,7 @@ import { mergeLayouts } from "../core/main-tabs-merge";
 import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import { lastTabNumber } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
-import { loadMainTabs, saveMainTabs } from "../server/main-tabs-store";
+
 import {
   createMainTabsView,
   type MainTabsDeps,
@@ -118,6 +118,25 @@ afterAll(() => {
 
 let dir = "";
 let store = "";
+
+// タブの保存の代わり。保存は窓ごと (server/main-tabs-store.ts。書くのは外側のページ) に
+// なり、窓どうしで重ねない。ここではこの部品が読み書きする 1 つの配置だけを持つ
+// (読み直すと、最後に書いた配置が戻る)。
+const saves = new Map<string, { rev: number; layout: unknown }>();
+async function loadMainTabs(
+  file: string,
+): Promise<{ kind: "none" } | { kind: "ok"; rev: number; layout: unknown }> {
+  const saved = saves.get(file);
+  return saved ? { kind: "ok", ...saved } : { kind: "none" };
+}
+async function saveMainTabs(
+  file: string,
+  write: { baseRev: number | null; base: unknown; layout: unknown },
+): Promise<{ kind: "ok"; rev: number; layout: unknown; merged: false }> {
+  const rev = (saves.get(file)?.rev ?? 0) + 1;
+  saves.set(file, { rev, layout: write.layout });
+  return { kind: "ok", rev, layout: write.layout, merged: false };
+}
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "cv-tab-audit-"));
@@ -244,7 +263,6 @@ function openWindow(
     terminalMenuItems: () => [],
     loadSaved: async () => {
       const loaded = await loadMainTabs(file);
-      if (loaded.kind === "newer") throw new Error("newer");
       return loaded.kind === "ok"
         ? { layout: loaded.layout, rev: loaded.rev, root }
         : { layout: null, rev: null, root };
@@ -563,42 +581,6 @@ describe("読み直し (保存して読み戻すと同じ配置)", () => {
     await again.save();
     const third = await reload(w, again, A);
     expect(third.strip()).toBe(before);
-  });
-});
-
-describe("窓 2 つ", () => {
-  test("この窓で閉じたタブを、古い配置を持つ裏の窓 (SSE を切っている) の保存が戻さない", async () => {
-    const w = world();
-    const front = await seed(w);
-    const back = openWindow(w, A, fileRoute("a1.ts"));
-    await back.handle.restore({ keepSavedFront: true });
-    front.handle.closeTab(front.id("a2.ts"));
-    tabKey(front, "database", { key: "PageUp", ctrlKey: true, shiftKey: true });
-    await front.save();
-    // 裏の窓は取り直さずに、自分の変更 (新しいファイル) を書く。
-    back.keep(fileRoute("back.ts"));
-    await back.save();
-    await front.handle.refreshFromServer();
-    await settle();
-    expect([shared(front), shared(back)]).toEqual([
-      "L database@A,a1.ts@A,back.ts@A,shell-a,beta.ts@B,beta2.ts@B,shell-b,shell-free | R  | collapsed []",
-      "L database@A,a1.ts@A,back.ts@A,shell-a,beta.ts@B,beta2.ts@B,shell-b,shell-free | R  | collapsed []",
-    ]);
-  });
-
-  test("別のプロジェクトのページの窓と、グループの並びが同じに落ち着く", async () => {
-    const w = world();
-    const alpha = await seed(w);
-    const beta = openWindow(w, B, fileRoute("beta.ts"));
-    await beta.handle.restore();
-    w.order = [B, A, C];
-    alpha.handle.localize();
-    beta.handle.localize();
-    alpha.keep(fileRoute("a3.ts"));
-    await settle();
-    await beta.handle.refreshFromServer();
-    await settle();
-    expect(shared(beta)).toBe(shared(alpha));
   });
 });
 

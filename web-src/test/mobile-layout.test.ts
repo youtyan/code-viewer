@@ -21,94 +21,9 @@ import {
   softKeySequence,
   type TerminalSoftKey,
   TOUCH_MEDIA_QUERY,
-  viewportTier,
 } from "../core/mobile-layout";
 
-describe("viewportTier", () => {
-  test.each([
-    {
-      name: "縦の電話 (390)",
-      width: 390,
-      height: 844,
-      coarse: true,
-      expected: "phone",
-    },
-    {
-      name: "境界: 639 はマウスでも電話",
-      width: 639,
-      height: 900,
-      coarse: false,
-      expected: "phone",
-    },
-    {
-      name: "境界: 640 はマウスでも電話",
-      width: 640,
-      height: 900,
-      coarse: false,
-      expected: "phone",
-    },
-    {
-      name: "境界: 641 のマウスはデスクトップ",
-      width: 641,
-      height: 900,
-      coarse: false,
-      expected: "desktop",
-    },
-    {
-      name: "横の電話 (844×390) は指なので電話",
-      width: 844,
-      height: 390,
-      coarse: true,
-      expected: "phone",
-    },
-    {
-      name: "境界: 指で高さ 499 は電話",
-      width: 900,
-      height: 499,
-      coarse: true,
-      expected: "phone",
-    },
-    {
-      name: "境界: 指で高さ 500 は電話",
-      width: 900,
-      height: 500,
-      coarse: true,
-      expected: "phone",
-    },
-    {
-      name: "境界: 指で高さ 501 はデスクトップ (タブレット)",
-      width: 900,
-      height: 501,
-      coarse: true,
-      expected: "desktop",
-    },
-    {
-      name: "低いマウスの窓 (1280×400) はデスクトップ",
-      width: 1280,
-      height: 400,
-      coarse: false,
-      expected: "desktop",
-    },
-    {
-      name: "デスクトップ 1280×800",
-      width: 1280,
-      height: 800,
-      coarse: false,
-      expected: "desktop",
-    },
-    {
-      name: "デスクトップ 1600×900",
-      width: 1600,
-      height: 900,
-      coarse: false,
-      expected: "desktop",
-    },
-  ])("$name → $expected", ({ width, height, coarse, expected }) => {
-    expect(viewportTier({ width, height, coarsePointer: coarse })).toBe(
-      expected,
-    );
-  });
-
+describe("電話の段の media query", () => {
   test("media query の文字列は同じ境界から作る", () => {
     expect(PHONE_MEDIA_QUERY).toBe(
       "(max-width: 640px), (pointer: coarse) and (max-height: 500px)",

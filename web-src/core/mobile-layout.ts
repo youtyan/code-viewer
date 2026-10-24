@@ -38,23 +38,6 @@ export const SOFT_KEYS_MEDIA_QUERY = `(max-width: ${PHONE_MAX_WIDTH}px), ${TOUCH
 
 export type ViewportTier = "phone" | "desktop";
 
-export type ViewportFacts = {
-  /** 表示領域の幅 (CSS px)。 */
-  width: number;
-  /** 表示領域の高さ (CSS px)。 */
-  height: number;
-  /** 主な入力が指か (pointer: coarse)。 */
-  coarsePointer: boolean;
-};
-
-/** 幅の段。PHONE_MEDIA_QUERY と同じ条件。 */
-export function viewportTier(facts: ViewportFacts): ViewportTier {
-  if (facts.width <= PHONE_MAX_WIDTH) return "phone";
-  if (facts.coarsePointer && facts.height <= PHONE_LANDSCAPE_MAX_HEIGHT)
-    return "phone";
-  return "desktop";
-}
-
 export type DiffLayout = "side-by-side" | "line-by-line";
 
 /**

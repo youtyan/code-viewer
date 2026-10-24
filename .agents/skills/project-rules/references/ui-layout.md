@@ -77,6 +77,12 @@ grep -n "100vh\|100dvh" web/style.css \
   (`core/workspace-bridge.ts` の `MIRRORED_IDS`)。押すと面の同じ部品が押される。面ごとの部品を
   最下段に足すなら `MIRRORED_IDS` に足す
 - SP の幅で開いた窓・ほかのページの中で開いた窓 (`single`) は今までどおりの 1 枚
+- **面の並び**: 外側のページが面の木 (左右・上下・入れ子) で iframe と境界 (`.workspace-divider`、
+  `attachDragResizer`) を `#workspace` の中に置く (`views/workspace/host.ts`。場所は `core/workspace.ts`
+  の `paneRects`、読み込みの最初は `#first-workspace` が同じ決まりで置く: `first-screen.test.ts`)。
+  どの面も最小の大きさ (`MIN_PANE_WIDTH` × `MIN_PANE_HEIGHT`) で並ばない窓は、フォーカスのある面だけを
+  窓いっぱいに出し、ほかの面は大きさを保ったまま隠す (最下段に隠している数)。面の中の `@media` の
+  デスクトップの区切りは面の幅で効く
 
 画面は次の固定物で囲まれている: 左のサイドバー (`#app-nav`、幅 `--nav-w`)、その右の一覧の列
 (下の「一覧の列」。頭 `#panel-head` は 2 段)、最上段のタブ列 (`#main-tabs`、高さ `--main-tabs-h`。

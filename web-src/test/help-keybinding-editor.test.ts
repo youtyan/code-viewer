@@ -138,7 +138,7 @@ describe("the list of actions", () => {
       keysOf(root, "open-help-page"),
     ]).toEqual([
       ["Global", "Panels", "Screens", "Tabs", "File list", "Main Panel"],
-      83,
+      91,
       ["t"],
       [
         "g+Shift+T",
@@ -300,10 +300,11 @@ describe("assigning keys", () => {
       .querySelector<HTMLInputElement>(".shortcut-gfirst input")
       ?.click();
 
-    press(h.root, "toggle-theme", { key: "q" });
+    // g の後のキーは、既定で使っていないもの (g q は面を閉じる)。
+    press(h.root, "toggle-theme", { key: "z" });
 
     expect(await draftAfterSave(h)).toEqual({
-      "toggle-theme": [{ key: "t" }, { key: "q", pendingG: true }],
+      "toggle-theme": [{ key: "t" }, { key: "z", pendingG: true }],
     });
   });
 

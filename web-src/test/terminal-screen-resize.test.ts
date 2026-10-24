@@ -319,6 +319,67 @@ describe("attach は寸法を合わせてから端末を作り直す", () => {
     expect(calls().indexOf("write")).toBeGreaterThan(reset);
   });
 
+  // 利用者がいまこの窓 (面) で開いたシェルは、この画面が大きさを持つ。別の画面
+  // (シェルを移す前の面・別の窓) が持ったままだと、この大きさは使われず tmux が
+  // 描き直さないので、移した先の端末が空のまま残った。
+  test.each([
+    {
+      name: "フォーカスのある窓で付けたら大きさを持つ",
+      focused: true,
+      claim: true,
+    },
+    {
+      name: "フォーカスの無い窓 (裏の窓) では持たない",
+      focused: false,
+      claim: false,
+    },
+  ])("$name", async ({ focused, claim }) => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(focused);
+    await screen.attach(SESSION);
+    const first = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url).includes("/_shell/resize"));
+    expect(
+      (JSON.parse(String(first?.[1]?.body)) as { viewport: { claim: boolean } })
+        .viewport.claim,
+    ).toBe(claim);
+  });
+
+  // 外側のページが面を置く・一覧の列を畳むと、付けた直後に箱の大きさが変わる。
+  // 触っていない窓の測り直しは PTY へ伝えない決まりだが、付けた直後にそれをすると
+  // xterm だけ縮んで代替画面の中身が消え、tmux も描き直さず空のまま残った (別の面へ
+  // 移したシェル)。付けた直後の間だけは、付けたときと同じく伝える。
+  test.each([
+    { name: "付けた直後に箱が変わったら PTY へ伝える", after: 0, sent: 1 },
+    // 測り直しは 150ms まとめてから走る。決めるのは走った時刻 (付けてから 1499ms)。
+    {
+      name: "境界: 付けてから 1499ms に走る測り直しは伝える",
+      after: 1349,
+      sent: 1,
+    },
+    {
+      name: "境界: 1500ms に走る測り直しは、触っていなければ伝えない",
+      after: 1350,
+      sent: 0,
+    },
+  ])("$name", async ({ after, sent }) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const box = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+    await screen.attach(SESSION);
+    const resizes = () =>
+      vi
+        .mocked(fetch)
+        .mock.calls.filter(([url]) => String(url).includes("/_shell/resize"))
+        .length;
+    const before = resizes();
+    vi.advanceTimersByTime(after);
+    box.mockReturnValue(new DOMRect(0, 0, 600, 300));
+    for (const observed of resizeCallbacks) observed();
+    vi.advanceTimersByTime(200);
+    expect(resizes() - before).toBe(sent);
+    vi.useRealTimers();
+  });
+
   // 隠れている間に開いた端末は、見えるようになったとき xterm が字の大きさを測り
   // 直して描いた行を作り直し、描き直さない (右の面に開いた直後のエージェントの
   // 画面が空のまま残った)。見えるようになった次の描画で全体を描き直す。
