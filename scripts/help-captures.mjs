@@ -727,18 +727,35 @@ async function seedServer(root, server, lang) {
 
 // ---------------------------------------------------------------- ブラウザ
 
-/** ページで動かす関数の共通部分。 */
+/**
+ * ページで動かす関数の共通部分。デスクトップの窓は外側のページ (左のサイドバーと
+ * 最下段) と面 (iframe の中の本文) に分かれる (core/workspace-role.ts)。関数は
+ * フォーカスのある面の中で動き、document は面の文書、host は外側のページの文書
+ * (1 枚の画面では同じ文書)。小窓とメニューは両方を探す。範囲 (rectOf) は窓の座標。
+ */
 const PRELUDE = `
+const host = top.document;
+const documents = () => (host === document ? [document] : [document, host]);
 const visible = (el) => !!el && el.getClientRects().length > 0;
 const must = (el, what) => { if (!el) throw new Error("not found: " + what); return el; };
 // root が無い (小窓がまだ開いていない) ときは見つからないものとして null。
 const byText = (root, selector, text) =>
   !root ? null : ([...root.querySelectorAll(selector)].filter(visible).find((el) => el.textContent.trim() === text) ?? null);
-const dialog = () => document.querySelector(".gdp-dialog");
-const menu = () => [...document.querySelectorAll(".gdp-context-menu")].find(visible) ?? null;
+const dialog = () => documents().map((doc) => doc.querySelector(".gdp-dialog")).find(Boolean) ?? null;
+const menu = () => documents().flatMap((doc) => [...doc.querySelectorAll(".gdp-context-menu")]).find(visible) ?? null;
+// 要素の範囲を窓の座標で返す (面の中の要素は、面の iframe の場所を足す)。
 const rectOf = (target) => {
-  const r = target instanceof Element ? target.getBoundingClientRect() : target;
-  return { x: r.x, y: r.y, width: r.width, height: r.height };
+  if (typeof target.getBoundingClientRect !== "function")
+    return { x: target.x, y: target.y, width: target.width, height: target.height };
+  const r = target.getBoundingClientRect();
+  let x = r.x;
+  let y = r.y;
+  for (let view = target.ownerDocument.defaultView; view.frameElement; view = view.parent) {
+    const frame = view.frameElement.getBoundingClientRect();
+    x += frame.x + view.frameElement.clientLeft;
+    y += frame.y + view.frameElement.clientTop;
+  }
+  return { x, y, width: r.width, height: r.height };
 };
 const union = (...targets) => {
   const rects = targets.map(rectOf);
@@ -749,39 +766,46 @@ const union = (...targets) => {
   return { x, y, width: right - x, height: bottom - y };
 };
 const mark = (el) => {
-  if (!document.getElementById("help-capture-style")) {
-    const style = document.createElement("style");
+  const doc = el.ownerDocument;
+  if (!doc.getElementById("help-capture-style")) {
+    const style = doc.createElement("style");
     style.id = "help-capture-style";
     style.textContent = ${JSON.stringify(MARK_CSS)};
-    document.head.append(style);
+    doc.head.append(style);
   }
   el.classList.add(${JSON.stringify(MARK_CLASS)});
   return el;
 };
+const clearMarks = () => {
+  for (const doc of documents()) {
+    doc.querySelectorAll(".${MARK_CLASS}").forEach((el) => el.classList.remove("${MARK_CLASS}"));
+    doc.querySelectorAll(".${MARK_LAYER}").forEach((el) => el.remove());
+  }
+};
 // 番号の印: 範囲ごとに赤い枠と、左上に番号の丸 (本文の ①〜⑤ と同じ番号)。
 // 細い範囲 (タブ列・最下段) は丸を枠の中の縦の真ん中に、side ("left" か "right") の端に置く。
 const markNumbers = (items) => {
-  const layer = document.createElement("div");
+  const layer = host.createElement("div");
   layer.className = ${JSON.stringify(MARK_LAYER)};
   layer.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
   for (const [target, label, side = "left"] of items) {
     const r = rectOf(target);
-    const box = document.createElement("div");
+    const box = host.createElement("div");
     box.style.cssText = "position:absolute;box-sizing:border-box;border:3px solid ${MARK_COLOR};border-radius:6px;" +
       "left:" + (r.x + 2) + "px;top:" + (r.y + 2) + "px;width:" + (r.width - 4) + "px;height:" + (r.height - 4) + "px";
-    const badge = document.createElement("div");
+    const badge = host.createElement("div");
     badge.textContent = label;
     const thin = r.height < 48;
     const size = thin ? Math.min(28, r.height - 8) : 28;
-    const top = thin ? (r.height - 4 - 6 - size) / 2 : 6;
+    const badgeTop = thin ? (r.height - 4 - 6 - size) / 2 : 6;
     const edge = (side === "right" ? "right:" : "left:") + (thin ? 40 : 6) + "px;";
     badge.style.cssText = "position:absolute;border-radius:50%;background:${MARK_COLOR};color:#fff;text-align:center;" +
       "box-shadow:0 1px 4px rgba(0,0,0,.45);font:700 " + Math.round(size * 0.62) + "px/" + size + "px system-ui,-apple-system,sans-serif;" +
-      "width:" + size + "px;height:" + size + "px;top:" + top + "px;" + edge;
+      "width:" + size + "px;height:" + size + "px;top:" + badgeTop + "px;" + edge;
     box.append(badge);
     layer.append(box);
   }
-  document.body.append(layer);
+  host.body.append(layer);
 };
 const accountRow = (name) =>
   [...document.querySelectorAll(".agent-accounts-row")].find((row) => row.textContent.includes(name)) ?? null;
@@ -793,9 +817,36 @@ const setField = (field, value) => {
 };
 `;
 
-/** body は関数の中身。戻り値を JSON で返す。ページで投げられたものはそのまま出す。 */
-async function page(cdp, body) {
-  const expression = `(async () => { ${PRELUDE}\nreturn JSON.stringify(await (async () => { ${body} })() ?? null); })()`;
+/**
+ * 外側のページなら、フォーカスのある面の window (面が 1 つならその面)。面がまだ
+ * 使えない (iframe が無い・読み込み中・フォーカスの印が届いていない) なら、その理由。
+ * 1 枚の画面と、アプリでないページでは自分の window。
+ */
+const FOCUSED_PANE = `(() => {
+  if (document.documentElement.dataset.workspace !== "host") return window;
+  const frames = [...document.querySelectorAll("#workspace > iframe[data-cv-pane]")]
+    .filter((frame) => frame.style.visibility !== "hidden");
+  if (frames.length === 0) return "no pane";
+  const docs = frames.map((frame) => frame.contentDocument);
+  if (docs.some((doc) => !doc || doc.readyState !== "complete" || doc.documentElement.dataset.workspace !== "pane"))
+    return "a pane is loading";
+  const at = frames.length === 1 ? 0 : docs.findIndex((doc) => doc.documentElement.dataset.paneFocus === "on");
+  return at < 0 ? "no pane has the focus" : frames[at].contentWindow;
+})()`;
+const PANE_NOT_READY = "helpCapturesPaneNotReady";
+
+/**
+ * body は関数の中身。戻り値を JSON で返す。ページで投げられたものはそのまま出す。
+ * フォーカスのある面の中で動かす (PRELUDE)。面がまだ使えなければ投げる (waiting
+ * なら null を返し、待つ側が読み直す)。
+ */
+async function page(cdp, body, { waiting = false } = {}) {
+  const inner = `(async () => { ${PRELUDE}\nreturn JSON.stringify(await (async () => { ${body} })() ?? null); })()`;
+  const expression = `(async () => {
+    const view = ${FOCUSED_PANE};
+    if (typeof view === "string") return JSON.stringify({ ${PANE_NOT_READY}: view });
+    return await view.eval(${JSON.stringify(inner)});
+  })()`;
   const answer = await cdp.send("Runtime.evaluate", {
     expression,
     returnByValue: true,
@@ -805,7 +856,14 @@ async function page(cdp, body) {
     throw new Error(
       `the page threw: ${answer.exceptionDetails.exception?.description ?? answer.exceptionDetails.text}\n--- evaluated ---\n${body}`,
     );
-  return JSON.parse(answer.result.value);
+  const value = JSON.parse(answer.result.value);
+  if (value !== null && typeof value === "object" && PANE_NOT_READY in value) {
+    if (waiting) return null;
+    throw new Error(
+      `the pane is not ready (${value[PANE_NOT_READY]})\n--- not evaluated ---\n${body}`,
+    );
+  }
+  return value;
 }
 
 async function screenshot(cdp, path, clip) {
@@ -819,13 +877,18 @@ async function screenshot(cdp, path, clip) {
 async function waitFor(cdp, what, body, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const value = await page(cdp, body);
+    const value = await page(cdp, body, { waiting: true });
     if (value) return value;
     if (Date.now() > deadline) {
       const picture = join(tmpdir(), `help-captures-timeout-${Date.now()}.png`);
       await screenshot(cdp, picture);
+      const where = await page(
+        cdp,
+        "return host === document ? location.href : top.location.href + ' (pane ' + location.href + ')';",
+        { waiting: true },
+      );
       throw new Error(
-        `timed out waiting for ${what} on ${await page(cdp, "return location.href;")} (last value ${JSON.stringify(value)}; the screen is in ${picture})`,
+        `timed out waiting for ${what} on ${where ?? "a window whose pane is not ready"} (last value ${JSON.stringify(value)}; the screen is in ${picture})`,
       );
     }
     await sleep(250);
@@ -843,7 +906,7 @@ async function setViewport(cdp, width, height = VIEWPORT.height) {
   await waitFor(
     cdp,
     `the viewport to be ${width}x${height}`,
-    `return innerWidth === ${width} && innerHeight === ${height};`,
+    `return top.innerWidth === ${width} && top.innerHeight === ${height};`,
   );
   await sleep(300);
 }
@@ -973,7 +1036,7 @@ async function shot(ctx, name, frame, options = {}) {
   // ポインタを右の端の真ん中 (最下段のボタンに掛からない所) へ退け、前の操作のホバーの枠やツールチップを写さない。
   const corner = await page(
     cdp,
-    "return { x: innerWidth - 2, y: Math.round(innerHeight / 2) };",
+    "return { x: top.innerWidth - 2, y: Math.round(top.innerHeight / 2) };",
   );
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...corner });
   await sleep(600);
@@ -981,7 +1044,10 @@ async function shot(ctx, name, frame, options = {}) {
   if (options.mark)
     await page(cdp, `mark(must(${options.mark}, "the mark of ${name}"));`);
   if (options.numbers) await page(cdp, `markNumbers(${options.numbers});`);
-  const view = await page(cdp, "return { w: innerWidth, h: innerHeight };");
+  const view = await page(
+    cdp,
+    "return { w: top.innerWidth, h: top.innerHeight };",
+  );
   let clip;
   if (frame === "window") {
     clip = {
@@ -1005,11 +1071,7 @@ async function shot(ctx, name, frame, options = {}) {
   }
   const png = join(ctx.tmp, `${name}.${ctx.lang}.png`);
   await screenshot(cdp, png, clip);
-  await page(
-    cdp,
-    `document.querySelectorAll(".${MARK_CLASS}").forEach((el) => el.classList.remove("${MARK_CLASS}"));
-     document.querySelectorAll(".${MARK_LAYER}").forEach((el) => el.remove());`,
-  );
+  await page(cdp, "clearMarks();");
   const { out, bytes, encoding } = writeCapture(ctx, name, png);
   console.log(
     `${out}: ${bytes} bytes (${encoding}), clip ${JSON.stringify(clip)}`,
@@ -1059,8 +1121,8 @@ async function setPageColumns(cdp, open) {
     cdp,
     `
     const want = ${open};
-    if (visible(document.querySelector("#app-nav .nav-search")) !== want)
-      must(document.querySelector(want ? "#nav-expand" : "#nav-collapse"), "the sidebar toggle").click();
+    if (visible(host.querySelector("#app-nav .nav-search")) !== want)
+      must(want ? document.querySelector("#nav-expand") : host.querySelector("#nav-collapse"), "the sidebar toggle").click();
     if (visible(document.querySelector("#file-list")) !== want)
       must(document.querySelector("#sidebar-toggle"), "the file list toggle").click();
   `,
@@ -1068,7 +1130,7 @@ async function setPageColumns(cdp, open) {
   await waitFor(
     cdp,
     "the columns",
-    `return visible(document.querySelector("#app-nav .nav-search")) === ${open} &&
+    `return visible(host.querySelector("#app-nav .nav-search")) === ${open} &&
       visible(document.querySelector("#file-list")) === ${open};`,
   );
 }
@@ -1171,10 +1233,7 @@ async function captureScreens(ctx) {
     await pressKey(cdp, "Escape");
     await wait("the menu to close", "return !menu();");
   };
-  await wait(
-    "the app",
-    `return visible(document.querySelector("#nav-launch"));`,
-  );
+  await wait("the app", `return visible(host.querySelector("#nav-launch"));`);
   // headless でも前面の見える画面として描かれていること (背面扱いだと xterm も
   // 差分の読み込みも進まない)。
   if (await inPage("return document.hidden;"))
@@ -1287,19 +1346,19 @@ async function captureScreens(ctx) {
     ctx,
     "agent-new",
     `
-    const button = document.querySelector("#nav-launch").getBoundingClientRect();
-    return { x: 0, y: button.y - 240, width: ${FRAME_WIDTH}, height: innerHeight - (button.y - 240) - ${FRAME_PAD} };
+    const button = rectOf(host.querySelector("#nav-launch"));
+    return { x: 0, y: button.y - 240, width: ${FRAME_WIDTH}, height: top.innerHeight - (button.y - 240) - ${FRAME_PAD} };
   `,
-    { mark: `document.querySelector("#nav-launch")` },
+    { mark: `host.querySelector("#nav-launch")` },
   );
-  await inPage(`document.querySelector("#nav-launch").click();`);
+  await inPage(`host.querySelector("#nav-launch").click();`);
   const launch = `byText(dialog() ?? document, "button", ${JSON.stringify(a.launchRun)})`;
   await wait("the launch dialog", `return ${launch};`);
   await shot(ctx, "agent-launch", `return dialog();`, { mark: launch });
   await inPage(`${launch}.click();`);
   await wait(
     "the opened agent marked in the sidebar and its screen",
-    `return document.querySelector('#app-nav .agent-card[aria-current="true"]') &&
+    `return host.querySelector('#app-nav .agent-card[aria-current="true"]') &&
       ${terminalRows}?.includes(${JSON.stringify(sample.agentScreen)});`,
     30_000,
   );
@@ -1308,13 +1367,13 @@ async function captureScreens(ctx) {
     "agent-running",
     `return { x: 0, y: 0, width: ${FRAME_WIDTH}, height: 280 };`,
     {
-      mark: `document.querySelector('#app-nav .agent-card[aria-current="true"]')`,
+      mark: `host.querySelector('#app-nav .agent-card[aria-current="true"]')`,
     },
   );
 
   // --- エージェントの様子: 3 つをフックの申告で別々の状態にする。
   await reportStates(ctx);
-  await inPage(`document.querySelector("#agent-status").click();`);
+  await inPage(`host.querySelector("#agent-status").click();`);
   await wait(
     "the agents board with three states",
     `const board = document.querySelector("#content");
@@ -1340,7 +1399,7 @@ async function captureScreens(ctx) {
 
   // --- プロジェクトの見出しの ⋯ のメニュー
   await inPage(
-    `must(document.querySelector("#app-nav .nav-project-menu"), "the project menu button").click();`,
+    `must(host.querySelector("#app-nav .nav-project-menu"), "the project menu button").click();`,
   );
   await wait("the project menu", "return !!menu();");
   await shot(
@@ -1351,8 +1410,8 @@ async function captureScreens(ctx) {
   await closeMenus();
 
   // --- プロジェクトを追加する
-  const docsRow = `[...document.querySelectorAll(".project-directory-row")].find((row) => row.textContent.startsWith("sample-docs"))`;
-  await inPage(`document.querySelector("#nav-add-project").click();`);
+  const docsRow = `[...(dialog()?.querySelectorAll(".project-directory-row") ?? [])].find((row) => row.textContent.startsWith("sample-docs"))`;
+  await inPage(`host.querySelector("#nav-add-project").click();`);
   await wait("the folder list", `return !!${docsRow};`);
   await shot(ctx, "project-add", `return dialog();`, { mark: docsRow });
   await inPage(`${docsRow}.click();`);
@@ -1379,14 +1438,15 @@ async function captureScreens(ctx) {
   await shot(ctx, "overview", "window");
   await shot(ctx, "overview-marked", "window", {
     numbers: `(() => {
-      const tabs = document.querySelector("#main-tabs").getBoundingClientRect();
-      const foot = document.querySelector("#statusbar").getBoundingClientRect();
+      const tabs = rectOf(document.querySelector("#main-tabs"));
+      const foot = rectOf(host.querySelector("#statusbar"));
+      const tabsBottom = tabs.y + tabs.height;
       return [
-        [document.querySelector("#app-nav"), "1"],
+        [host.querySelector("#app-nav"), "1"],
         [union(document.querySelector("#panel-head"), document.querySelector("#file-list")), "2"],
         [document.querySelector("#main-tabs"), "3", "right"],
-        [{ x: tabs.x, y: tabs.bottom, width: innerWidth - tabs.x, height: foot.top - tabs.bottom }, "4"],
-        [document.querySelector("#statusbar"), "5"],
+        [{ x: tabs.x, y: tabsBottom, width: top.innerWidth - tabs.x, height: foot.y - tabsBottom }, "4"],
+        [host.querySelector("#statusbar"), "5"],
       ];
     })()`,
   });
@@ -1433,7 +1493,7 @@ async function captureScreens(ctx) {
   await shot(ctx, "files-open", "window");
   const lines = await inPage(`
     const cells = [...document.querySelectorAll("td.gdp-source-line-number")];
-    const point = (cell) => { const r = cell.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; };
+    const point = (cell) => { const r = rectOf(cell); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; };
     return { from: point(cells[2]), to: point(cells[4]) };
   `);
   await drag(cdp, lines.from, lines.to);
@@ -1615,14 +1675,22 @@ async function captureScreens(ctx) {
   await shot(
     ctx,
     "terminal-tab",
-    `const tabs = document.querySelector("#main-tabs").getBoundingClientRect();
+    `const tabs = rectOf(document.querySelector("#main-tabs"));
      return union(menu(), { x: tabs.x, y: tabs.y, width: tabs.width, height: 420 });`,
   );
   await closeMenus();
 
-  // --- 左右 2 面: 左にファイル、右にターミナル。前面のタブが右へ移るので、
-  // シェルのタブを前にして分ける。
+  // --- 2 つの面: 左にファイル、右にターミナル。前面のシェルのタブが右の新しい
+  // 面へ移るので、シェルのタブを前にして分ける (フォーカスは右の面へ移る)。
   await inPage(`must(${greetingTab}, "the greeting.ts tab").click();`);
+  await closeLinePill();
+  // 面は窓の半分の幅になるので、面のファイル一覧を畳んでから分ける (本文に幅を
+  // 回す。左のサイドバーは残す)。1 つの面に戻したら開き直す。
+  const toggleFileList = (open) =>
+    inPage(
+      `if (visible(document.querySelector("#file-list")) !== ${open}) must(document.querySelector("#sidebar-toggle"), "the file list toggle").click();`,
+    );
+  await toggleFileList(false);
   await inPage(`
     // 最後に開いたターミナルのタブ (エージェントのタブより後)。
     const shell = [...document.querySelectorAll('.main-tab[data-kind="terminal"]')].at(-1);
@@ -1631,24 +1699,24 @@ async function captureScreens(ctx) {
   await inPage(
     `must([...document.querySelectorAll(".main-tabs-split")].find(visible), "the split button").click();`,
   );
+  const paneFrames = `[...host.querySelectorAll("#workspace > iframe[data-cv-pane]")].sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x)`;
   await wait(
     "the file on the left and the shell on the right",
-    `const panes = [...document.querySelectorAll(".main-tabs-pane")];
-     return panes.length === 2 &&
-       panes[0].querySelector(".main-tab-active")?.textContent.includes("greeting.ts") &&
-       panes[1].querySelector('.main-tab-active[data-kind="terminal"]') !== null;`,
+    `const frames = ${paneFrames};
+     const active = (frame) => frame.contentDocument?.querySelector(".main-tab-active");
+     return frames.length === 2 &&
+       active(frames[0])?.textContent.includes("greeting.ts") &&
+       active(frames[1])?.dataset.kind === "terminal" &&
+       frames[1].contentDocument.querySelector(".main-pane-host.is-shown .xterm-rows")?.textContent.includes("sample-app %");`,
+    30_000,
   );
-  await closeLinePill();
   await sleep(1000);
   await shot(ctx, "tabs-split", "window");
-  // 1 面に戻す (右の面の同じ場所のボタン)。
-  await inPage(
-    `must([...document.querySelectorAll(".main-tabs-split")].filter(visible).at(-1), "the unsplit button").click();`,
-  );
-  await wait(
-    "one pane",
-    `return document.querySelectorAll(".main-tabs-pane").length === 1;`,
-  );
+  // 右の面 (フォーカスのある面) を g q で閉じ、1 つの面に戻す。
+  await pageKey(cdp, { key: "g", code: "KeyG" });
+  await pageKey(cdp, { key: "q", code: "KeyQ" });
+  await wait("one pane", `return ${paneFrames}.length === 1;`);
+  await toggleFileList(true);
 
   // --- SP の画面: 幅の狭い窓で変更の画面。
   await setViewport(cdp, PHONE.width, PHONE.height);
@@ -1666,12 +1734,9 @@ async function captureScreens(ctx) {
   // --- 環境ドクター: 最下段のアイコンから開く。
   await setViewport(cdp, VIEWPORT.width);
   await cdp.send("Page.navigate", { url: server.projectUrl });
-  await wait(
-    "the app",
-    `return visible(document.querySelector("#doctor-btn"));`,
-  );
+  await wait("the app", `return visible(host.querySelector("#doctor-btn"));`);
   await setColumns(true);
-  await inPage(`document.querySelector("#doctor-btn").click();`);
+  await inPage(`host.querySelector("#doctor-btn").click();`);
   await wait(
     "the doctor results",
     `return /\\bWARN\\b/.test(document.querySelector("#doctor-sheet").innerText);`,
@@ -1683,7 +1748,7 @@ async function captureScreens(ctx) {
     must(group, "the git group").scrollIntoView({ block: "start" });
   `);
   await shot(ctx, "doctor-sheet", "window", {
-    mark: `document.querySelector("#doctor-btn")`,
+    mark: `host.querySelector("#doctor-btn")`,
   });
   await inPage(
     `document.querySelector("#doctor-sheet .doctor-close").click();`,
@@ -1716,9 +1781,9 @@ async function captureScreens(ctx) {
     "skill-install",
     `
     const rows = [...document.querySelectorAll(".main-pane-host.is-shown .xterm-rows > div")].filter((row) => row.textContent.trim());
-    const tabs = document.querySelector("#main-tabs").getBoundingClientRect();
-    const last = rows.at(-1).getBoundingClientRect();
-    return { x: 0, y: tabs.y, width: ${FRAME_WIDTH}, height: last.bottom - tabs.y };
+    const tabs = rectOf(document.querySelector("#main-tabs"));
+    const last = rectOf(rows.at(-1));
+    return { x: 0, y: tabs.y, width: ${FRAME_WIDTH}, height: last.y + last.height - tabs.y };
   `,
   );
   // 砂場の tmux に残らないように、シェルを閉じる。
@@ -1802,15 +1867,15 @@ async function reportStates(ctx) {
   await report(standIns.work, "ready", "claude");
 }
 
-/** sample-lib でファイルを開き、sample-app に戻る (タブのグループが 2 つになる)。 */
+/** sample-lib でファイルを開き、sample-app に戻る (面はプロジェクトごとにタブを覚える)。 */
 async function openInOtherProject(ctx) {
   const { cdp } = ctx;
   const project = (name) =>
-    `[...document.querySelectorAll("#app-nav .nav-project-name")].find((el) => visible(el) && el.textContent.trim() === "${name}")`;
+    `[...host.querySelectorAll("#app-nav .nav-project-name")].find((el) => visible(el) && el.textContent.trim() === "${name}")`;
   const appPath = new URL(ctx.server.projectUrl).pathname;
   await page(
     cdp,
-    `if (!${project("sample-lib")}) must(document.querySelector("#app-nav .nav-stopped-toggle"), "the not running section").click();`,
+    `if (!${project("sample-lib")}) must(host.querySelector("#app-nav .nav-stopped-toggle"), "the not running section").click();`,
   );
   await waitFor(
     cdp,
@@ -1851,9 +1916,9 @@ async function captureNoTmux(ctx) {
   await waitFor(
     cdp,
     "the app",
-    `return [...document.querySelectorAll("#nav-launch, #nav-expand")].some(visible);`,
+    `return [host.querySelector("#nav-launch"), document.querySelector("#nav-expand")].some(visible);`,
   );
-  const note = `[...document.querySelectorAll("#app-nav .nav-note-muted")].find((el) => el.textContent.includes(${JSON.stringify(text.notInstalled)}))`;
+  const note = `[...host.querySelectorAll("#app-nav .nav-note-muted")].find((el) => el.textContent.includes(${JSON.stringify(text.notInstalled)}))`;
   // 保存した列の状態が遅れて届いて畳み直すことがあるので、畳まれていれば開き直す。
   await waitFor(
     cdp,
