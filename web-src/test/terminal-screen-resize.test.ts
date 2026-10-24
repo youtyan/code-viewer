@@ -27,6 +27,10 @@ import {
   test,
   vi,
 } from "vitest";
+
+// 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
+vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
+
 import type { ShellSession } from "../core/shell";
 import { terminalText } from "../views/terminal/i18n";
 import {
@@ -165,6 +169,9 @@ vi.mock("../core/xterm-loader", async () => {
     reset = () => {
       log.push("reset");
     };
+    refresh = (start: number, end: number) => {
+      log.push(`refresh ${start}-${end}`);
+    };
     focus = noop;
     blur = noop;
     clear = noop;
@@ -220,6 +227,8 @@ describe("attach は寸法を合わせてから端末を作り直す", () => {
   let host: HTMLElement;
   /** 購読の output の受け口。テストから溜まっていた出力を流す。 */
   let outputHandlers: Array<(event: MessageEvent<string>) => void> = [];
+  /** 箱の大きさが変わったときの受け口。テストから呼ぶ。 */
+  let resizeCallbacks: Array<() => void> = [];
 
   beforeEach(() => {
     calls().length = 0;
@@ -250,9 +259,13 @@ describe("attach は寸法を合わせてから端末を作り直す", () => {
         }
       },
     );
+    resizeCallbacks = [];
     vi.stubGlobal(
       "ResizeObserver",
       class {
+        constructor(callback: () => void) {
+          resizeCallbacks.push(callback);
+        }
         observe = () => undefined;
         unobserve = () => undefined;
         disconnect = () => undefined;
@@ -304,5 +317,32 @@ describe("attach は寸法を合わせてから端末を作り直す", () => {
       "reset",
     ]);
     expect(calls().indexOf("write")).toBeGreaterThan(reset);
+  });
+
+  // 隠れている間に開いた端末は、見えるようになったとき xterm が字の大きさを測り
+  // 直して描いた行を作り直し、描き直さない (右の面に開いた直後のエージェントの
+  // 画面が空のまま残った)。見えるようになった次の描画で全体を描き直す。
+  test("隠れていた箱が見えるようになったら、次の描画で全体を描き直す", async () => {
+    vi.stubGlobal("requestAnimationFrame", (run: FrameRequestCallback) => {
+      run(0);
+      return 0;
+    });
+    const box = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+    await screen.attach(SESSION);
+    const refreshes = () => calls().filter((c) => c.startsWith("refresh"));
+
+    box.mockReturnValue(new DOMRect(0, 0, 0, 0));
+    for (const observed of resizeCallbacks) observed();
+    const whileHidden = refreshes();
+    box.mockReturnValue(new DOMRect(0, 0, 858, 170));
+    for (const observed of resizeCallbacks) observed();
+    const whenShown = refreshes();
+    for (const observed of resizeCallbacks) observed();
+
+    expect([whileHidden, whenShown, refreshes()]).toEqual([
+      [],
+      ["refresh 0-7"],
+      ["refresh 0-7"],
+    ]);
   });
 });

@@ -22,6 +22,10 @@ import {
   test,
   vi,
 } from "vitest";
+
+// 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
+vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
+
 import type { ShellSession } from "../core/shell";
 import type { XtermTerminal } from "../core/xterm-loader";
 import { terminalText } from "../views/terminal/i18n";

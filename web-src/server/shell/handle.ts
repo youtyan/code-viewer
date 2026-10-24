@@ -3,15 +3,15 @@ import { isShellViewport } from "../../core/shell";
 //
 // - GET  /_shell/list             開いているシェルの一覧
 // - POST /_shell/create           新しいシェルを開く
-// - GET  /_shell/stream?id=shell-…  そのシェルの出力を SSE で流し続ける
 // - POST /_shell/keys             そのシェルへ入力を送る
 // - POST /_shell/resize           そのシェルの桁数・行数を変える
 // - POST /_shell/close            そのシェルを終了する
 //
+// 出力は生きた知らせのチャンネル (live/handle.ts) で流す (startShellStream)。
 // ルーティングと副作用リクエストの認可は tmux 側と同じく dispatchRoutes に
 // 任せる。tmux との違いは購読の形で、あちらは画面を取り直して丸ごと置き換え
 // るのに対し、こちらは PTY が吐いた分だけを順に流す。だから poll を持たず、
-// onData をそのまま SSE へ橋渡しする。
+// onData をそのまま流しへ橋渡しする。
 
 import { formatErrorDetail } from "../../core/error-detail";
 import {
@@ -26,7 +26,7 @@ import {
   parsePostJsonBody,
   textError,
 } from "../database/handle-shared";
-import { createSseStreamGroup } from "../sse-stream";
+import type { SseStream } from "../sse-stream";
 import {
   closeShellSession,
   createShellSession,
@@ -38,42 +38,33 @@ import {
   writeToShell,
 } from "./session";
 
-/** 開いている購読。サーバ終了時にまとめて閉じる。 */
-const SHELL_STREAMS = createSseStreamGroup();
-
-/** preview.ts の shutdown から呼ぶ。購読が残ったままだと終了できない。 */
-export function closeShellStreams(): void {
-  SHELL_STREAMS.closeAll();
-}
-
-function createShellStreamResponse(id: ShellSessionId): Response {
-  return SHELL_STREAMS.open((stream) => {
-    const sub = subscribeShell(
-      id,
-      (chunk) => stream.send("output", JSON.stringify({ data: chunk })),
-      (exitCode) => {
-        stream.send("exited", JSON.stringify({ exitCode }));
-        stream.close();
-      },
-    );
-    if (!sub) {
-      stream.send("gone", "1");
+/** シェルの出力を流しへ送り続ける。シェルが無ければ gone、終われば exited を送って閉じる。 */
+export function startShellStream(id: ShellSessionId, stream: SseStream): void {
+  const sub = subscribeShell(
+    id,
+    (chunk) => stream.send("output", JSON.stringify({ data: chunk })),
+    (exitCode) => {
+      stream.send("exited", JSON.stringify({ exitCode }));
       stream.close();
-      return;
-    }
-    stream.onClose(() => sub.unsubscribe());
-    stream.send("open", "ok");
-    // 購読していない間に出ていた分を先に流す。開き直したときに画面が
-    // 真っ白にならない。前の購読者に渡った分には流し直しの印を付ける:
-    // 中にある端末への問い合わせ (tmux が attach したときの DA など) には
-    // そのときの端末が答えており、答え直すと、誰も待っていない PTY に
-    // `1;2c` のような文字として入る。まだ誰にも渡っていない分は印を付けず、
-    // 端末に答えさせる (tmux はその答えを待っている)。
-    if (sub.replay) {
-      stream.send("output", JSON.stringify({ data: sub.replay, replay: true }));
-    }
-    if (sub.unseen) stream.send("output", JSON.stringify({ data: sub.unseen }));
-  });
+    },
+  );
+  if (!sub) {
+    stream.send("gone", "1");
+    stream.close();
+    return;
+  }
+  stream.onClose(() => sub.unsubscribe());
+  stream.send("open", "ok");
+  // 購読していない間に出ていた分を先に流す。開き直したときに画面が
+  // 真っ白にならない。前の購読者に渡った分には流し直しの印を付ける:
+  // 中にある端末への問い合わせ (tmux が attach したときの DA など) には
+  // そのときの端末が答えており、答え直すと、誰も待っていない PTY に
+  // `1;2c` のような文字として入る。まだ誰にも渡っていない分は印を付けず、
+  // 端末に答えさせる (tmux はその答えを待っている)。
+  if (sub.replay) {
+    stream.send("output", JSON.stringify({ data: sub.replay, replay: true }));
+  }
+  if (sub.unseen) stream.send("output", JSON.stringify({ data: sub.unseen }));
 }
 
 async function handleList(): Promise<Response> {
@@ -120,15 +111,6 @@ async function handleCreate(req: Request, cwd: string): Promise<Response> {
     return textError(formatErrorDetail(result.error), 500);
   }
   return json({ session: result.session });
-}
-
-// ai-dup-check: allow -- ok:tmux 側の handleStreamGet と形は似ているが、クエリ
-// キー・検証関数・生成先がすべて別物。共通化すると引数 4 つの高階関数になり、
-// 3 行の重複より読みにくくなる。
-function handleStream(url: URL): Response {
-  const id = url.searchParams.get("id");
-  if (!isShellSessionId(id)) return textError("invalid shell id", 400);
-  return createShellStreamResponse(id);
 }
 
 /** POST 本文から共通して取り出すシェル ID。 */
@@ -226,11 +208,6 @@ export function handleShellRoute(
         methods: ["GET"],
         sideEffect: false,
         handler: () => handleList(),
-      },
-      "/_shell/stream": {
-        methods: ["GET"],
-        sideEffect: false,
-        handler: () => handleStream(url),
       },
       "/_shell/create": {
         methods: ["POST"],

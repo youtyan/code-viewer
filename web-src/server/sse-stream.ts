@@ -1,5 +1,5 @@
-// ブラウザへ知らせを流し続ける SSE の応答 1 本ずつの作り。ターミナルの出力
-// (/_shell/stream) と SP の 1 ペイン表示 (/_tmux/pane-stream) が同じものを使う。
+// ブラウザへ知らせを流し続ける SSE の応答 1 本ずつの作り。生きた知らせの流し
+// (/_live。live/handle.ts) と、その中のチャンネルが同じ形を使う。
 //
 // - 何も流れない間も 15 秒ごとに ping を送り、途中の経路に切られないようにする
 // - ブラウザが切ったら (cancel)・こちらが閉じたら、onClose で渡した片付けを呼ぶ
@@ -15,12 +15,14 @@ const SSE_HEADERS = {
 } as const;
 
 export type SseStream = {
-  /** 知らせを 1 つ送る。data は 1 行 (JSON など) にする。閉じた後は何もしない。 */
+  /** 知らせを 1 つ送る。data は改行を含んでよい (行ごとの data にする)。閉じた後は何もしない。 */
   send(event: string, data: string): void;
   close(): void;
   /** 閉じたとき (こちらからでも、ブラウザが切ってでも) に 1 回だけ呼ぶ片付け。 */
   onClose(cleanup: () => void): void;
   readonly closed: boolean;
+  /** まだブラウザへ送れずに溜まっている量 (バイト)。 */
+  backlog(): number;
 };
 
 export type SseStreamGroup = {
@@ -29,7 +31,10 @@ export type SseStreamGroup = {
   closeAll(): void;
 };
 
-export function createSseStreamGroup(): SseStreamGroup {
+/** retryMs: 開いた直後に `retry:` で送る、切れた後の繋ぎ直しまでの待ち。 */
+export function createSseStreamGroup(
+  options: { retryMs?: number } = {},
+): SseStreamGroup {
   const active = new Set<SseStream>();
   const enc = new TextEncoder();
 
@@ -54,7 +59,11 @@ export function createSseStreamGroup(): SseStreamGroup {
         return closed;
       },
       send(event, data) {
-        enqueue(`event: ${event}\ndata: ${data}\n\n`);
+        const lines = data.split(/\r\n|\r|\n/).map((line) => `data: ${line}`);
+        enqueue(`event: ${event}\n${lines.join("\n")}\n\n`);
+      },
+      backlog() {
+        return controller ? Math.max(0, -(controller.desiredSize ?? 0)) : 0;
       },
       close() {
         if (closed) return;
@@ -75,22 +84,29 @@ export function createSseStreamGroup(): SseStreamGroup {
       },
     };
 
-    const body = new ReadableStream<Uint8Array>({
-      start(ctrl) {
-        controller = ctrl;
-        active.add(stream);
-        start(stream);
-        if (closed) return;
-        keepalive = setInterval(
-          () => enqueue(": ping\n\n"),
-          KEEPALIVE_INTERVAL_MS,
-        );
-        keepalive.unref?.();
+    const body = new ReadableStream<Uint8Array>(
+      {
+        start(ctrl) {
+          controller = ctrl;
+          active.add(stream);
+          if (options.retryMs !== undefined)
+            enqueue(`retry: ${options.retryMs}\n\n`);
+          start(stream);
+          if (closed) return;
+          keepalive = setInterval(
+            () => enqueue(": ping\n\n"),
+            KEEPALIVE_INTERVAL_MS,
+          );
+          keepalive.unref?.();
+        },
+        cancel() {
+          stream.close();
+        },
       },
-      cancel() {
-        stream.close();
-      },
-    });
+      // 溜まりをバイトで数える (backlog)。押し込むだけで pull しないので、
+      // 上限 0 でも送る速さは変わらない。
+      { highWaterMark: 0, size: (chunk) => chunk.byteLength },
+    );
     return new Response(body, { headers: SSE_HEADERS });
   }
 

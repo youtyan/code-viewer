@@ -13,6 +13,10 @@ import {
   test,
   vi,
 } from "vitest";
+
+// 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
+vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
+
 import type { TmuxPaneSnapshot } from "../core/tmux";
 
 vi.mock("../core/xterm-loader", () => ({
@@ -152,7 +156,7 @@ describe("流しから届いた画面", () => {
   test("そのペインの流しを繋ぎ、届いた画面を出す", async () => {
     await openWith("hello world\nsecond line");
     expect([sources[0].url, shownText()]).toEqual([
-      "/_tmux/pane-stream?pane=%253",
+      '{"kind":"pane","pane":"%3"}',
       ["hello world", "second line"],
     ]);
   });

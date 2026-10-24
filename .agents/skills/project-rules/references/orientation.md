@@ -128,6 +128,7 @@ global の `my-reuse-first` に従う。ここに置くのは**このリポジ�
 | コピーの失敗をボタンに出す | `core/copy-failure.ts` `showCopyFailure`（failed の見た目・title に理由・console.error） |
 | エラーを画面の文字にする | `core/error-detail.ts` の `formatErrorDetail`（cause の連鎖ごと）・`errorWithCause`・`responseErrorMessage`（操作・HTTP status・本文） |
 | Data の画面で失敗を console と画面に出す | `views/database/report-failure.ts` `reportDatastoreFailure` / `requireOkResponse`（使い方は `server.md` の「ブラウザ側で失敗から回復するとき」） |
+| 画面がサーバの知らせを受け続ける (プロジェクトの通知・シェルやペインの出力) | `views/shell/live-hub.ts` `openLiveSource` (EventSource と同じ形。1 窓 1 本の `/_live` に相乗り) + `server/live/handle.ts` のチャンネル。決まりは `server.md` |
 | tmux コマンド実行 | `server/tmux/command.ts` `runTmux` / `tmuxArgs` / `TMUX_FIELD_SEP` |
 | JSON をファイルに永続化 | `server/json-store.ts` `createJsonFileStore` |
 | CLI からサーバを叩く | `server/cli-helpers.ts` `requestJson` |

@@ -3,12 +3,12 @@
 // - GET  /_tmux/panes        セッション → ウィンドウ → ペインの一覧 (ツリーの元)
 // - GET  /_tmux/clients      どの端末がどのペインを映しているか
 // - POST /_tmux/open         そのペインをブラウザのターミナルで見られるようにする
-// - GET  /_tmux/pane-stream  SP の 1 ペイン表示: 1 つのペインを attach せずに流す
 // - POST /_tmux/pane-input   SP の 1 ペイン表示: そのペインへ入力を送る
 //
 // デスクトップのターミナルは tmux ペインの画面を自分で描かない。PTY のシェル
 // 1 本の中で tmux が普通に動く (キー送信は /_shell/* が持つ)。SP だけは、分割した
-// ウインドウ全体では狭すぎるので、1 つのペインを control mode で流す (pane-stream.ts)。
+// ウインドウ全体では狭すぎるので、1 つのペインを attach せずに control mode で流す
+// (pane-stream.ts。流しは生きた知らせのチャンネル、live/handle.ts)。
 //
 // ルーティングと副作用リクエストの認可は database/handle-shared の
 // dispatchRoutes に任せる (state-route.ts と同じ使い方)。ペインを開くのは
@@ -28,7 +28,7 @@ import {
 } from "../database/handle-shared";
 import { openTmuxPaneInShell } from "../terminal/open";
 import { listTmuxClients } from "./clients";
-import { handlePaneInput, handlePaneStream } from "./pane-stream";
+import { handlePaneInput } from "./pane-stream";
 import { type ListTmuxPanesOptions, listTmuxPanes } from "./panes";
 
 function handlePanesGet(
@@ -136,11 +136,6 @@ export function handleTmuxRoute(
         methods: ["POST"],
         sideEffect: true,
         handler: () => handleOpenPost(req, cwd),
-      },
-      "/_tmux/pane-stream": {
-        methods: ["GET"],
-        sideEffect: false,
-        handler: async () => handlePaneStream(url, cwd),
       },
       "/_tmux/pane-input": {
         methods: ["POST"],

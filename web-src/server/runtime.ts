@@ -21,13 +21,6 @@ import { type ByteRange, parseHttpByteRange } from "./range";
 export const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
 
 /**
- * `/events` asks the browser to reconnect this soon after the stream drops.
- * The EventSource default (about 3 s in Chrome) was the whole of the wait
- * after the entry server restarted (scripts/perf.mjs, sse.caughtUpMs).
- */
-export const SSE_RETRY_MS = 500;
-
-/**
  * 子が終了コードを返すところまで動かなかった理由。動いて終わったなら (0 でも
  * 非 0 でも) 無い。「コマンドが無い」かどうかは command-resolver.ts の
  * commandRunFailure がこれから決める (stderr の文言からは決めない)。

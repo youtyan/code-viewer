@@ -11,7 +11,7 @@
 // - 上へスクロールして読んでいる間は描き直さない (読んでいる文が動かない)。
 //   続きが来たら「最新へ」を出す
 // - 送るのは 1 本ずつ順に (打った順が入れ替わらない)。失敗は理由を出す
-// - 流しが切れたら EventSource が繋ぎ直し、サーバが今の画面を送り直す
+// - 流しが切れたら繋ぎ直し (views/shell/live-hub.ts)、サーバが今の画面を送り直す
 
 import type { AgentState } from "../../core/agent-state";
 import { apiUrl } from "../../core/api-url";
@@ -61,6 +61,7 @@ import {
   type XtermTerminal,
 } from "../../core/xterm-loader";
 import { SOFT_KEY_CAPS } from "../mobile-shell-i18n";
+import { type LiveSource, openLiveSource } from "../shell/live-hub";
 import type { TerminalText } from "./i18n";
 import { uploadPastedImage } from "./paste-upload";
 import {
@@ -309,7 +310,7 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
 
   let pane: TmuxPaneId | null = null;
   let generation = 0;
-  let source: EventSource | null = null;
+  let source: LiveSource | null = null;
   let xterm: XtermApi | null = null;
   let term: XtermTerminal | null = null;
   let termSubscriptions: XtermDisposable[] = [];
@@ -787,9 +788,7 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
   }
 
   function openStream(target: TmuxPaneId, myGen: number): void {
-    const stream = new EventSource(
-      `${apiUrl("tmuxPaneStream")}?pane=${encodeURIComponent(target)}`,
-    );
+    const stream = openLiveSource({ kind: "pane", pane: target });
     source = stream;
     const stale = () => myGen !== generation;
     stream.addEventListener("open", () => {
@@ -821,7 +820,7 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
       setEnded(`${text().failed}\n${error}`);
     });
     stream.onerror = () => {
-      // EventSource は自動で繋ぎ直す (繋がったらサーバが今の画面を送り直す)。
+      // 流しは自動で繋ぎ直す (繋がったらサーバが今の画面を送り直す)。
       if (stale() || ended) return;
       showStatus(
         stream.readyState === EventSource.CLOSED
