@@ -503,6 +503,12 @@ export type ShellSubscription = {
   replay: string;
   /** 溜まっていた出力のうち、まだ誰にも渡っていない分 (replay の続き)。 */
   unseen: string;
+  /**
+   * 映し始めたので、同じ tmux セッションの映っていないシェルをこの大きさに
+   * そろえた結果 (alignUnseenTmuxShells)。大きさが同じなら画面は寸法を送り
+   * 直さないので、ここでそろえる。
+   */
+  aligned: ShellWriteResult;
   unsubscribe(): void;
 };
 
@@ -520,6 +526,7 @@ export function subscribeShell(
   return {
     replay: entry.replay.slice(0, seenChars),
     unseen: entry.replay.slice(seenChars),
+    aligned: alignUnseenTmuxShells(entry),
     unsubscribe() {
       entry.listeners.delete(onData);
       entry.exitListeners.delete(onExit);
@@ -638,7 +645,15 @@ export function resizeShell(
 ): ShellWriteResult {
   const entry = sessions.get(id);
   if (!entry || entry.meta.exited) return { status: "gone" };
-  const size = clampShellSize(cols, rows);
+  const resized = resizeEntry(entry, clampShellSize(cols, rows));
+  if (resized.status !== "ok") return resized;
+  return alignUnseenTmuxShells(entry);
+}
+
+function resizeEntry(
+  entry: SessionEntry,
+  size: { cols: number; rows: number },
+): ShellWriteResult {
   if (size.cols === entry.meta.cols && size.rows === entry.meta.rows) {
     return { status: "ok" };
   }
@@ -654,6 +669,39 @@ export function resizeShell(
       error: errorWithCause("failed to resize the shell", err),
     };
   }
+}
+
+/**
+ * 同じ tmux セッションに繋いだシェルのうち、どの画面も映していないもの (タブを
+ * 閉じた・背面のタブ・サーバが起き直した後の繋ぎ直しで増えた 2 本目) を、映して
+ * いるシェルの大きさにそろえる。tmux の窓は繋いだ端末で一番小さいものに縮む
+ * (window-size smallest) ので、見ていないシェルが前に映っていた狭い面の大きさの
+ * まま残ると、見ている端末の窓を縮め続けていた。
+ */
+function alignUnseenTmuxShells(shown: SessionEntry): ShellWriteResult {
+  const target = shown.tmuxAttachment?.session;
+  if (!target || shown.listeners.size === 0) return { status: "ok" };
+  const failures: Error[] = [];
+  for (const other of sessions.values()) {
+    if (
+      other === shown ||
+      other.meta.exited ||
+      other.listeners.size > 0 ||
+      other.tmuxAttachment?.session !== target
+    )
+      continue;
+    const result = resizeEntry(other, shown.meta);
+    if (result.status === "error")
+      failures.push(errorWithCause(`shell ${other.meta.id}`, result.error));
+  }
+  if (failures.length === 0) return { status: "ok" };
+  return {
+    status: "error",
+    error: errorWithCauses(
+      `failed to align the shells attached to tmux session ${target}`,
+      failures,
+    ),
+  };
 }
 
 /**
