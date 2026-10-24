@@ -712,7 +712,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
             {
               kind: "paragraph",
               text: [
-                "左のプロジェクトの ＋ か、タブのグループの ▾ から ",
+                "左のプロジェクトの ＋ か、タブ列の ＋ から ",
                 ui(l.mainTabs.newAgentHere),
                 " を選ぶと、そのプロジェクトを選んだ状態で同じ画面が開きます。",
               ],
@@ -1358,11 +1358,11 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 "面のタブ列には、その面のプロジェクトのタブだけが並びます。面を別のプロジェクトに替えて戻すと、そのタブが戻ります。",
                 "左のサイドバーで選んだプロジェクトやエージェントは、フォーカスのある面 (最後に押した面) で開きます。もうどこかの面に出ているエージェントは、その面で出します。",
                 [
-                  "タブ列のプロジェクト名の ▾ から、",
-                  ui(l.mainTabs.newShellHere),
+                  "タブ列の ＋ から ",
+                  ui(l.terminal.newShell),
                   "・",
                   ui(l.mainTabs.newAgentHere),
-                  "・そのプロジェクトの画面を選べます。",
+                  " を開けます。そのプロジェクトの画面は、一覧の列の頭のアイコンから開きます。",
                 ],
               ],
             },

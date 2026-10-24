@@ -17,6 +17,8 @@ import {
   listShellSessionsForMatching,
   operateShellView,
   readShellBuffer,
+  rememberShellTmuxAttachment,
+  resizeShell,
   subscribeShell,
   watchShellOutput,
   writeToShellWhenReady,
@@ -569,5 +571,106 @@ describe("terminal size follows the operating view", () => {
     );
     expect(created.session.cols).toBe(40);
     expect(pty.write).toHaveBeenCalledWith("old");
+  });
+});
+
+// tmux の窓は繋いだ端末で一番小さいものに縮む (window-size smallest)。同じ tmux
+// セッションに繋いだシェルのうち、どの画面も映していないもの (タブを閉じた・背面の
+// タブ・繋ぎ直しで増えた 2 本目) は、映しているシェルの大きさにそろえる。前に
+// 映っていた狭い面の大きさのまま残ると、見ている端末の窓を縮め続けていた。
+describe("unseen shells on the same tmux session follow the shown one", () => {
+  const noop = () => undefined;
+
+  /** 映す側 (140×40、tmux の 1) と、もう 1 本 (110×30) を開く。 */
+  async function twoShells(unseenPty: FakePty) {
+    mocks.spawn.mockReturnValueOnce(pty).mockReturnValueOnce(unseenPty);
+    const main = await createShellSession(process.cwd(), {
+      cols: 140,
+      rows: 40,
+    });
+    const rest = await createShellSession(process.cwd(), {
+      cols: 110,
+      rows: 30,
+    });
+    if (main.status !== "ok" || rest.status !== "ok")
+      throw new Error("test shells did not start");
+    rememberShellTmuxAttachment(main.session.id, "1", "%1");
+    return { main: main.session, rest: rest.session };
+  }
+
+  test.each([
+    {
+      name: "an unseen shell on the same session takes the shown size",
+      other: { tmux: "1", shown: false },
+      shown: true,
+      expected: [150, 50],
+    },
+    {
+      name: "a shell shown elsewhere keeps its own size",
+      other: { tmux: "1", shown: true },
+      shown: true,
+      expected: [110, 30],
+    },
+    {
+      name: "an unseen shell on another session keeps its size",
+      other: { tmux: "2", shown: false },
+      shown: true,
+      expected: [110, 30],
+    },
+    {
+      name: "an unseen shell not attached to tmux keeps its size",
+      other: { tmux: null, shown: false },
+      shown: true,
+      expected: [110, 30],
+    },
+    {
+      name: "a resized shell that nobody shows moves nothing",
+      other: { tmux: "1", shown: false },
+      shown: false,
+      expected: [110, 30],
+    },
+  ])("$name", async ({ other, shown, expected }) => {
+    const unseenPty = fakePty();
+    const { main, rest } = await twoShells(unseenPty);
+    if (other.tmux) rememberShellTmuxAttachment(rest.id, other.tmux, "%11");
+    if (other.shown) subscribeShell(rest.id, noop, noop);
+    if (shown) subscribeShell(main.id, noop, noop);
+
+    const result = resizeShell(main.id, 150, 50);
+    const size = [rest.cols, rest.rows];
+    unseenPty.emitExit(0);
+
+    expect([result, size]).toEqual([{ status: "ok" }, expected]);
+  });
+
+  test("showing a shell aligns the unseen ones without a resize request", async () => {
+    const unseenPty = fakePty();
+    const { main, rest } = await twoShells(unseenPty);
+    rememberShellTmuxAttachment(rest.id, "1", "%11");
+
+    const sub = subscribeShell(main.id, noop, noop);
+    const size = [rest.cols, rest.rows];
+    unseenPty.emitExit(0);
+
+    expect([sub?.aligned, size]).toEqual([{ status: "ok" }, [140, 40]]);
+  });
+
+  test("a failed alignment names the shell and keeps the cause", async () => {
+    const unseenPty = fakePty();
+    unseenPty.resize.mockImplementation(() => {
+      throw new Error("pty is gone");
+    });
+    const { main, rest } = await twoShells(unseenPty);
+    rememberShellTmuxAttachment(rest.id, "1", "%11");
+    subscribeShell(main.id, noop, noop);
+
+    const result = resizeShell(main.id, 150, 50);
+    unseenPty.emitExit(0);
+
+    expect(
+      result.status === "error" ? formatErrorDetail(result.error) : result,
+    ).toMatch(
+      new RegExp(`tmux session 1[\\s\\S]*shell ${rest.id}[\\s\\S]*pty is gone`),
+    );
   });
 });

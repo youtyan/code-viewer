@@ -531,6 +531,26 @@ describe("main tabs view: プロジェクトのグループ", () => {
     ]);
   });
 
+  test("面の中では札を出さず、その面のプロジェクトのタブをタブの順に並べる", async () => {
+    const { handle, mount } = setup(
+      async () => saved,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      APP,
+      groupDeps([], {
+        paneMode: {
+          splitOut: () => undefined,
+          onEmptied: () => undefined,
+          dragStart: () => undefined,
+          dragEnd: () => undefined,
+        },
+      }),
+    );
+    await handle.restore();
+    expect(strip(mount)).toEqual(["-(>app.ts README.md agents)", "+"]);
+  });
+
   test("シェルのグループが分かるまでは保存した控えで並べる (読み込み直後にタブが動かない)", async () => {
     let known = false;
     const { handle, mount } = setup(
