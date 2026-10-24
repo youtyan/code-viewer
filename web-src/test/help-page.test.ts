@@ -1020,7 +1020,7 @@ describe("help page captures", () => {
       ],
     ],
     ["terminal", ["terminal-tab"]],
-    ["tabs-layout", ["tabs-groups", "tabs-split"]],
+    ["tabs-layout", ["tabs-split"]],
     ["install-app", []],
     ["phone", ["phone-screen"]],
     [

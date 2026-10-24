@@ -32,6 +32,14 @@ import {
 } from "../core/page-mode";
 import { HISTORY_WIDTH, SIDEBAR_WIDTH } from "../core/panel-sizes";
 import { parseRoute, parseTerminalOverlay } from "../core/routes";
+import {
+  type PaneNode,
+  paneRects,
+  panesFit,
+  routeUrl,
+  singlePane,
+  type Workspace,
+} from "../core/workspace";
 import { embeddedMediaText } from "../core/workspace-role";
 import {
   COMFORTABLE_PANE_WIDTH,
@@ -391,6 +399,135 @@ describe("#first-look は窓の役割を html[data-workspace] に付ける", () 
     runFirstScreen("/p/0123456789abcdef/todif", 1600, {});
     expect([...document.body.attributes].map((a) => a.name)).toEqual([]);
     expect(document.body.className).toBe("");
+  });
+});
+
+// 外側のページは app.js を待たずに、前の並びの控えで面を作って置く。アドレス欄の
+// URL を開く面と場所は core/workspace.ts の routeUrl・paneRects・panesFit と同じ。
+describe("#first-workspace は面の並びを core/workspace.ts と同じに置く", () => {
+  const A = "/p/aaaaaaaaaaaaaaaa";
+  const B = "/p/bbbbbbbbbbbbbbbb";
+  const nested: PaneNode = {
+    dir: "row",
+    ratio: 0.4,
+    a: { pane: "p1" },
+    b: { dir: "column", ratio: 0.6, a: { pane: "p2" }, b: { pane: "p3" } },
+  };
+  const cache = {
+    tree: nested,
+    focused: "p1",
+    urls: { p1: `${A}/`, p2: `${B}/history`, p3: `${A}/todif` },
+  };
+
+  function runFirstWorkspace(
+    url: string,
+    width: number,
+    height: number,
+    saved: typeof cache | null,
+  ) {
+    (
+      window as unknown as { happyDOM: { setURL(url: string): void } }
+    ).happyDOM.setURL(`http://127.0.0.1${url}`);
+    document.documentElement.dataset.workspace = "host";
+    window.sessionStorage.clear();
+    if (saved)
+      window.sessionStorage.setItem(
+        "code-viewer:workspace-frames",
+        JSON.stringify(saved),
+      );
+    // 文書に付けない箱 (iframe を本当には読み込まない)。
+    const host = document.createElement("div");
+    Object.defineProperty(host, "clientWidth", { value: width });
+    Object.defineProperty(host, "clientHeight", { value: height });
+    const real = document.getElementById.bind(document);
+    document.getElementById = (id: string) =>
+      id === "workspace" ? host : real(id);
+    try {
+      new Function(inlineScript("first-workspace"))();
+    } finally {
+      document.getElementById = real;
+    }
+    return [...host.querySelectorAll("iframe")].map((frame) => ({
+      id: frame.getAttribute("data-cv-pane"),
+      src: frame.getAttribute("src"),
+      box: [
+        frame.style.left,
+        frame.style.top,
+        frame.style.width,
+        frame.style.height,
+      ],
+      hidden: frame.style.visibility === "hidden",
+    }));
+  }
+
+  /** core/workspace.ts で同じことをした結果。 */
+  function expected(
+    url: string,
+    width: number,
+    height: number,
+    saved: typeof cache | null,
+  ) {
+    const base: Workspace = saved
+      ? {
+          version: 6,
+          tree: saved.tree,
+          focused: saved.focused,
+          panes: Object.fromEntries(
+            Object.entries(saved.urls).map(([id, at]) => [
+              id,
+              { url: at, layout: null },
+            ]),
+          ),
+        }
+      : singlePane("p1", url);
+    const ws = routeUrl(base, url);
+    const area = { x: 0, y: 0, width, height };
+    const fits = panesFit(ws.tree, area);
+    return paneRects(ws.tree, area).panes.map(({ id, rect }) => {
+      const whole = !fits && id === ws.focused;
+      const box = whole ? area : rect;
+      return {
+        id,
+        src: ws.panes[id].url,
+        box: [`${box.x}px`, `${box.y}px`, `${box.width}px`, `${box.height}px`],
+        hidden: !fits && !whole,
+      };
+    });
+  }
+
+  test.each([
+    {
+      name: "控えが無ければ面 1 つ",
+      url: `${A}/`,
+      width: 1200,
+      height: 800,
+      saved: null,
+    },
+    {
+      name: "入れ子の並び",
+      url: `${A}/`,
+      width: 1600,
+      height: 900,
+      saved: cache,
+    },
+    {
+      name: "アドレス欄が別のプロジェクトの面のもの: その面へ",
+      url: `${B}/file?path=a.ts`,
+      width: 1600,
+      height: 900,
+      saved: cache,
+    },
+    {
+      name: "並ばない窓: フォーカスのある面だけ窓いっぱい",
+      url: `${A}/`,
+      width: 900,
+      height: 600,
+      saved: cache,
+    },
+  ])("$name", ({ url, width, height, saved }) => {
+    expect(runFirstWorkspace(url, width, height, saved)).toEqual(
+      expected(url, width, height, saved),
+    );
   });
 });
 

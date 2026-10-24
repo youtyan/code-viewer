@@ -1356,7 +1356,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
     "tabs-layout": {
       title: "Tabs and layout",
       intro:
-        "Open files and screens sit in tabs, grouped by project. Split the area in two to read things side by side.",
+        "Open files and screens sit in tabs. Split the window into panes, side by side or one above the other; each pane has its own project and tabs.",
       groups: [
         {
           title: "Tabs",
@@ -1372,57 +1372,49 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
           ],
         },
         {
-          title: "Groups",
+          title: "Panes and projects",
           blocks: [
             {
               kind: "list",
               items: [
-                "Select the colored label at the head of a group to collapse it.",
+                "Each pane shows the tabs of its own project only. Switch the pane to another project and back, and its tabs come back.",
+                "The project or agent you pick in the left sidebar opens in the focused pane (the one you last clicked). An agent that already shows in a pane is shown there.",
                 [
-                  "The label's ▾ offers ",
+                  "The ▾ next to the project name in the tab row offers ",
                   ui(l.mainTabs.newShellHere),
                   ", ",
                   ui(l.mainTabs.newAgentHere),
-                  " and ",
-                  ui(l.mainTabs.closeGroup),
-                  ".",
+                  " and the screens of that project.",
                 ],
-                "The Diff, History and other rows in ▾ open the same screens as the vertical strip on the left, as a tab of that project (switching to that project first if it is another one).",
               ],
-            },
-            {
-              kind: "figure",
-              figure: fig(
-                "tabs-groups",
-                "Tab groups of two projects and the ▾ menu of a label.",
-              ),
             },
           ],
         },
         {
-          title: "Split in two",
+          title: "Split panes",
           blocks: [
             {
               kind: "list",
               items: [
                 [
-                  "The split button at the right end of the tab row, or ",
+                  "The split button at the right end of the tab row, ",
                   ui(l.mainTabs.splitRight),
-                  " on a tab, shows two sides.",
+                  " on a tab, or g v splits the pane to the right; g s splits it downward. The new pane shows the front tab (a terminal or image moves there).",
                 ],
-                "The right side holds files, terminals and images.",
+                "Panes can be split again in either direction. Drag the line between panes to resize them; double-click it to make them even.",
                 [
-                  "Drag a tab, or use ",
                   ui(l.mainTabs.moveToOtherSide),
-                  ", to move it across.",
+                  " or Alt+click opens the tab in another pane (split to the right if there is none). A terminal shows in one pane at a time.",
                 ],
+                "Close the last tab of a pane, or press g q, to close the pane. g o and g O move to the next and previous pane.",
+                "When the window is too small for every pane, only the focused pane shows, and the bottom bar says how many are hidden.",
               ],
             },
             {
               kind: "figure",
               figure: fig(
                 "tabs-split",
-                "Two sides: a file on the left and a terminal on the right.",
+                "Two panes: a file on the left and a terminal on the right.",
               ),
             },
           ],
@@ -1449,7 +1441,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 " have one tab each per project.",
               ],
               "Files is not a tab: the folder view is what shows when no tab is selected.",
-              "With two windows open, both keep the same tabs.",
+              "Each window keeps its own panes and tabs. A new window starts from the panes last saved in another window.",
             ),
           ],
         },

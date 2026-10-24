@@ -100,6 +100,15 @@ export const KEYMAP_ACTIONS = [
   "main-pane-other",
   "project-previous",
   "project-next",
+  // 窓の面の並び (外側のページが受ける。core/workspace-bridge.ts の WORKSPACE_ACTIONS)。
+  "pane-split-right",
+  "pane-split-down",
+  "pane-close",
+  "pane-focus-previous",
+  "pane-focus-left",
+  "pane-focus-right",
+  "pane-focus-up",
+  "pane-focus-down",
 ] as const;
 
 export type KeymapAction = (typeof KEYMAP_ACTIONS)[number];
@@ -357,8 +366,14 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "main-tab-7", key: "7", pendingG: true },
   { action: "main-tab-8", key: "8", pendingG: true },
   { action: "main-tab-9", key: "9", pendingG: true },
-  // 2 面のとき、もう一方の面へフォーカスを移す (other)。
+  // もう一方 (外側のページが面を並べる窓では次) の面へフォーカスを移す (other)。
   { action: "main-pane-other", key: "o", pendingG: true },
+  // 窓の面を分ける・閉じる・前の面へ (vim の :vsplit・:split・:quit の頭文字)。
+  // 方向の面へは既定のキーを付けない (⌘⌥←→ などはブラウザのタブの切替と取り合う)。
+  { action: "pane-split-right", key: "v", pendingG: true },
+  { action: "pane-split-down", key: "s", pendingG: true },
+  { action: "pane-close", key: "q", pendingG: true },
+  { action: "pane-focus-previous", key: "o", shift: true, pendingG: true },
   // 左の一覧の並びで前・次のプロジェクトへ (⌘⇧↑↓。Windows / Linux は Ctrl+Shift)。
   // 移った先の前面は、そのプロジェクトのタブのグループで最後に前面だったタブ。
   { action: "project-previous", key: "arrowup", meta: true, shift: true },

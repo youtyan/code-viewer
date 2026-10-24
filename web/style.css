@@ -17941,11 +17941,48 @@ html[data-workspace="host"] #workspace {
   right: var(--chrome-right);
   bottom: var(--chrome-bottom);
 }
+/* 面 (iframe) と境界は、面の木 (core/workspace.ts) から views/workspace/host.ts が
+   px で置く (読み込みの最初は index.html の #first-workspace)。 */
 html[data-workspace="host"] #workspace > iframe {
+  position: absolute;
   display: block;
   width: 100%;
   height: 100%;
   border: 0;
+}
+.workspace-divider {
+  position: absolute;
+  z-index: 1;
+  background: var(--color-line-soft);
+  cursor: col-resize;
+  touch-action: none;
+}
+.workspace-divider[data-dir="column"] {
+  cursor: row-resize;
+}
+.workspace-divider:hover,
+.workspace-divider:focus-visible {
+  background: var(--color-accent);
+  outline: none;
+}
+/* 境界を引いている間は、面 (iframe) にポインタを取られない。 */
+#workspace.workspace-resizing > iframe {
+  pointer-events: none;
+}
+/* 面が 2 つ以上あるとき、フォーカスの無い面の前面のタブは強調色を使わない
+   (もう一方の面の選択中のタブと同じ)。フォーカスのある面はタブ列の下端に線
+   (下の body.main-split と同じ)。印は host が面に送る (html[data-pane-focus])。 */
+html[data-pane-focus="off"] .main-tab.main-tab-focused {
+  background: var(--color-tab-active);
+}
+html[data-pane-focus="off"] .main-tab.main-tab-focused::before {
+  content: none;
+}
+html[data-pane-focus="off"] .main-tab.main-tab-focused .main-tab-icon {
+  color: var(--color-text-2);
+}
+html[data-pane-focus="off"] .main-tab.main-tab-focused .main-tab-name {
+  -webkit-text-stroke: 0;
 }
 html[data-workspace="pane"] body {
   --nav-w: 0px;
@@ -18818,7 +18855,8 @@ body.gdp-nav-resizing {
 /* 2 面のとき、フォーカスのある面 (次に開くものが入る面) のタブ列の下端に、面の
    幅いっぱいの線。前面のタブの上端の線 (.main-tab-focused) はタブの幅だけで
    弱いので足す。タブの面の上に描く。1 面では出さない。 */
-body.main-split .main-tabs-pane.main-tabs-pane-focused::after {
+body.main-split .main-tabs-pane.main-tabs-pane-focused::after,
+html[data-pane-focus="on"] .main-tabs-pane.main-tabs-pane-focused::after {
   content: "";
   position: absolute;
   left: 0; right: 0; bottom: 0;

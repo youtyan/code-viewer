@@ -38,6 +38,8 @@ beforeEach(() => {
   posted = [];
   reply = () => Response.json({ ok: true });
   vi.stubGlobal("EventSource", FakeEventSource);
+  // 文書を離れる知らせ (pagehide) を受ける窓。
+  vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_url: string, init: RequestInit) => {
@@ -200,6 +202,47 @@ describe("切れたとき", () => {
     await settle();
 
     expect([first.closed, FakeEventSource.opened.length]).toEqual([true, 2]);
+  });
+
+  test("/_live が断られた (流しが CLOSED): 少し待ってから全部のチャンネルを閉じ、理由を出す", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const { openLiveSource } = await hub();
+    const source = openLiveSource({ kind: "events", project: null });
+    const seen = record(source, []);
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    stream().readyState = FakeEventSource.CLOSED;
+    stream().onerror?.();
+    const before = [source.readyState, [...seen], errors.mock.calls.length];
+    vi.advanceTimersByTime(200);
+    expect({
+      before,
+      after: [source.readyState, seen, errors.mock.calls.length],
+    }).toEqual({
+      before: [0, [], 0],
+      after: [2, ["onerror:2"], 1],
+    });
+  });
+
+  test("文書を離れる途中 (pagehide が続く) なら、断られたと扱わない", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const { openLiveSource } = await hub();
+    const source = openLiveSource({ kind: "events", project: null });
+    const seen = record(source, []);
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const leaving = stream();
+    leaving.readyState = FakeEventSource.CLOSED;
+    leaving.onerror?.();
+    window.dispatchEvent(new Event("pagehide"));
+    vi.advanceTimersByTime(200);
+    expect([seen, errors.mock.calls.length, leaving.closed]).toEqual([
+      [],
+      0,
+      true,
+    ]);
   });
 
   test.each([

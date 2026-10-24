@@ -69,12 +69,12 @@ function setViewport(viewport: Viewport): void {
     get: () => current.height,
   });
   window.matchMedia = ((query: string) => {
-    const list = Object.assign(new EventTarget(), {
-      media: query,
-      get matches() {
-        return matchesQuery(query);
-      },
-    });
+    // matches は本物と同じく、読んだときの幅で答える (Object.assign は getter を
+    // 呼んだ値を写すので、作ったときの答えで止まる)。
+    const list = Object.defineProperties(new EventTarget(), {
+      media: { value: query },
+      matches: { get: () => matchesQuery(query) },
+    }) as EventTarget & { matches: boolean };
     mediaLists.push({ list, query });
     return list;
   }) as unknown as typeof window.matchMedia;

@@ -87,8 +87,24 @@ function emit(channel: Channel, type: string, data: string): void {
   if (type === "error") channel.source.onerror?.(event);
 }
 
+/**
+ * 断られたと決めるまでの間。文書を離れる (読み直し・外側のページが面を閉じた・
+ * 面を移した) ときも、Chrome は pagehide より先に流れを切って、断られたときと
+ * 同じ error を出す。離れる文書ではこの間のタイマーは動かない。
+ */
+const LEAVE_GRACE_MS = 200;
+let leaveWatched = false;
+
 function connect(): void {
   if (stream) return;
+  if (!leaveWatched) {
+    leaveWatched = true;
+    window.addEventListener("pagehide", () => {
+      stream?.close();
+      stream = null;
+      client = null;
+    });
+  }
   const opened = new EventSource(apiUrl("live"));
   stream = opened;
   opened.addEventListener("hello", (event) => {
@@ -114,11 +130,14 @@ function connect(): void {
     client = null;
     if (opened.readyState === EventSource.CLOSED) {
       // /_live が断られた (EventSource は繋ぎ直さない)。開いていたチャンネルも閉じる。
-      console.error(
-        "[code-viewer] the live stream (/_live) was refused; closing its channels",
-      );
-      stream = null;
-      for (const channel of [...channels.values()]) failChannel(channel);
+      setTimeout(() => {
+        if (stream !== opened) return;
+        console.error(
+          "[code-viewer] the live stream (/_live) was refused; closing its channels",
+        );
+        stream = null;
+        for (const channel of [...channels.values()]) failChannel(channel);
+      }, LEAVE_GRACE_MS);
       return;
     }
     // 繋ぎ直している間。次の hello で全部を購読し直す。

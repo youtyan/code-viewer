@@ -1146,7 +1146,7 @@ describe("where a key works (inputs, terminals, the installed window)", () => {
     {
       name: "a different g prefix",
       action: "toggle-theme",
-      chord: { key: "s", pendingG: true },
+      chord: { key: "z", pendingG: true },
       expected: [],
     },
   ])("chordUsers: $name", ({ action, chord, expected }) => {

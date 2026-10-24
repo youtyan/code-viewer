@@ -1,31 +1,27 @@
-// 外側のページ (host) と面 (pane) のやりとり (形は core/workspace-bridge.ts)。host は
-// 左のサイドバーと最下段を描き、本文は #workspace の中の面 (iframe) が描く。
-// - 面は URL・最下段の面ごとの項目・見ているシェルを host に知らせ、host の頼みを受ける
-// - host は面の URL をアドレス欄に写す (replaceState。履歴は面の中に積まれる)
-// - 最下段の面ごとの項目は、host では面の部品の写しにする。host の app.ts が同じ
-//   部品に書いても面の値に戻す (host の通信や状態で面の表示を上書きしない)
-// - 写した部品 (サイドバーの面の画面へのリンクも) を host で押したら、面の同じ部品を押す
+// 面 (pane) の側のやりとり (形は core/workspace-bridge.ts、host の側は host.ts)。
+// - host の hello で、この面の id と保存してあったタブの配置を受け取る
+// - URL・最下段の面ごとの項目・見ているシェル・タブ・フォーカスを host に知らせる
+// - host の頼みを受ける (写した部品の押下はここで面の同じ部品を押す)
 
+import type { PaneId } from "../../core/workspace";
 import {
   type ClickModifiers,
-  HOST_HELLO,
   type HostCommand,
   isHostHello,
-  isMirroredId,
   MIRRORED_IDS,
   type MirroredId,
   type MirroredItem,
   type PaneMessage,
   type PaneProject,
   parseHostCommand,
-  parsePaneMessage,
 } from "../../core/workspace-bridge";
-import { PANE_FRAME_ATTRIBUTE } from "../../core/workspace-role";
 
 export type PaneBridge = {
   /** URL かプロジェクトが変わったかもしれない (同じなら送らない)。 */
   syncLocation(): void;
   send(message: PaneMessage): void;
+  /** host の hello (この面の id と、保存してあったタブの配置)。 */
+  hello: Promise<{ pane: PaneId; layout: unknown | null }>;
 };
 
 export function startPaneBridge(deps: {
@@ -36,6 +32,13 @@ export function startPaneBridge(deps: {
   let port: MessagePort | null = null;
   // host の hello (この文書を読み終えた後) までの知らせ。
   const queued: PaneMessage[] = [];
+  let greeted: (hello: { pane: PaneId; layout: unknown | null }) => void = () =>
+    undefined;
+  const hello = new Promise<{ pane: PaneId; layout: unknown | null }>(
+    (resolve) => {
+      greeted = resolve;
+    },
+  );
   const send = (message: PaneMessage) => {
     if (port) port.postMessage(message);
     else queued.push(message);
@@ -67,7 +70,13 @@ export function startPaneBridge(deps: {
       );
     };
     for (const message of queued.splice(0)) port.postMessage(message);
+    greeted({ pane: event.data.pane, layout: event.data.layout });
   });
+  // 押した・フォーカスが入った面が、窓のフォーカスのある面 (サイドバーと最下段の先)。
+  for (const type of ["pointerdown", "focusin"] as const)
+    document.addEventListener(type, () => send({ type: "focus" }), {
+      capture: true,
+    });
 
   let sentLocation = "";
   function syncLocation(): void {
@@ -126,7 +135,7 @@ export function startPaneBridge(deps: {
   queueMirror();
   syncLocation();
 
-  return { syncLocation, send };
+  return { syncLocation, send, hello };
 }
 
 function clickMirrored(id: MirroredId, modifiers: ClickModifiers): void {
@@ -135,208 +144,7 @@ function clickMirrored(id: MirroredId, modifiers: ClickModifiers): void {
   );
 }
 
-export type WorkspaceHost = {
-  /** 面に頼む。面にフォーカスを移す (続くキーは面が受ける)。 */
-  command(command: HostCommand): void;
-  /** 面に知らせる。フォーカスは動かさない。 */
-  notify(command: HostCommand): void;
-  /** 面で見ているシェル (前面のターミナルのタブ)。 */
-  viewedShells(): string[];
-  /** 面のプロジェクト。面が知らせるまでは null。 */
-  project(): PaneProject | null;
-};
-
-const MIRRORED_SELECTOR = MIRRORED_IDS.map((id) => `#${id}`).join(", ");
-
-export function startWorkspaceHost(deps: {
-  onLocation(project: PaneProject | null): void;
-  onViewing(): void;
-  onLookChanged(): void;
-  onNavCollapsed(collapsed: boolean): void;
-}): WorkspaceHost {
-  const frame = document.querySelector<HTMLIFrameElement>(
-    `#workspace > iframe[${PANE_FRAME_ATTRIBUTE}]`,
-  );
-  if (!frame)
-    throw new Error(
-      "#workspace has no pane frame (index.html #first-workspace)",
-    );
-  let port: MessagePort | null = null;
-  // 面の文書が読み終わる (口を渡す) までの頼み。
-  const queued: HostCommand[] = [];
-  let project: PaneProject | null = null;
-  let viewedShells: string[] = [];
-  const mirror = new Map<MirroredId, MirroredItem>();
-
-  // 面の文書が読み終わるたびに口を渡す (面が読み直したら前の口は捨てる。前の文書は
-  // もう居ない)。読み終わる前の iframe の文書は about:blank。
-  function handshake(): void {
-    const target = frame.contentWindow;
-    if (!target) throw new Error("the pane frame has no window");
-    const channel = new MessageChannel();
-    port?.close();
-    port = channel.port1;
-    port.onmessage = (message) => receive(parsePaneMessage(message.data));
-    port.onmessageerror = (message) => {
-      throw new Error(
-        `a pane message could not be read: ${String(message.data)}`,
-      );
-    };
-    target.postMessage({ type: HOST_HELLO }, location.origin, [channel.port2]);
-    for (const command of queued.splice(0)) port.postMessage(command);
-  }
-  function checkPane(): void {
-    const loaded = frame.contentDocument;
-    if (!loaded) {
-      leaveForSignIn();
-      return;
-    }
-    if (loaded.readyState === "complete" && loaded.URL !== "about:blank")
-      handshake();
-  }
-  frame.addEventListener("load", checkPane);
-  checkPane();
-
-  function receive(message: PaneMessage): void {
-    switch (message.type) {
-      case "location":
-        if (message.href !== location.href)
-          history.replaceState(history.state, "", message.href);
-        project = message.project;
-        deps.onLocation(project);
-        return;
-      case "mirror":
-        for (const item of message.items) {
-          mirror.set(item.id, item);
-          applyMirror(item);
-        }
-        return;
-      case "viewing":
-        viewedShells = message.shells;
-        deps.onViewing();
-        return;
-      case "look-changed":
-        deps.onLookChanged();
-        return;
-      case "nav-collapsed":
-        deps.onNavCollapsed(message.collapsed);
-        return;
-    }
-  }
-
-  // host の app.ts が写した部品に書いたら、面の値に戻す (戻した書き込みは値が同じ
-  // なので、もう一度は動かない)。
-  // title の付け外しは見ない: 吹き出し (views/title-tooltip.ts) は出している間だけ
-  // title を外し、書き戻されたらまた外す。戻すと両方が書き続けて窓が止まった。
-  for (const id of MIRRORED_IDS) {
-    const guard = new MutationObserver((records) => {
-      const item = mirror.get(id);
-      if (
-        item &&
-        records.some(
-          (record) =>
-            record.type !== "attributes" || record.attributeName !== "title",
-        )
-      )
-        applyMirror(item);
-    });
-    guard.observe(mirroredElement(id), {
-      attributes: true,
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
-  }
-
-  // 写した部品を押したら、面の同じ部品を押す。host の同じ id の部品の処理は
-  // 動かさない (捕捉で止める)。新しいタブで開くリンクの押し方はリンクのまま。
-  document.addEventListener(
-    "click",
-    (event) => {
-      const target =
-        event.target instanceof Element
-          ? event.target.closest<HTMLElement>(MIRRORED_SELECTOR)
-          : null;
-      const id = target?.id;
-      if (!target || id === undefined || !isMirroredId(id)) return;
-      if (
-        target instanceof HTMLAnchorElement &&
-        (target.target === "_blank" ||
-          event.button !== 0 ||
-          event.metaKey ||
-          event.ctrlKey ||
-          event.shiftKey ||
-          event.altKey)
-      )
-        return;
-      event.preventDefault();
-      event.stopPropagation();
-      command({
-        type: "click",
-        id,
-        modifiers: {
-          shiftKey: event.shiftKey,
-          altKey: event.altKey,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-        },
-      });
-    },
-    true,
-  );
-
-  function notify(next: HostCommand): void {
-    if (port) port.postMessage(next);
-    else queued.push(next);
-  }
-
-  function command(next: HostCommand): void {
-    // 面の文書にフォーカスを渡す (AI 向けのコピーはフォーカスのある文書でしか
-    // クリップボードに書けない。続くキーも面が受ける)。
-    frame.focus();
-    notify(next);
-  }
-
-  return {
-    command,
-    notify,
-    viewedShells: () => viewedShells,
-    project: () => project,
-  };
-}
-
-const SIGN_IN_RELOAD_KEY = "code-viewer:pane-sign-in-reload";
-
-/**
- * 面がこの origin を離れた (外部接続のサインインが切れ、Cloudflare Access のログインへ
- * 移された。ログインは枠の中に出せない)。窓ごと読み直して、サインインを一番上の
- * ページで出す。読み直した直後にまた離れたら、繰り返さずに理由を残す。
- */
-function leaveForSignIn(): void {
-  const last = sessionStorage.getItem(SIGN_IN_RELOAD_KEY);
-  if (last !== null && Date.now() - Number(last) < 30_000) {
-    console.error(
-      new Error(
-        "the pane left this origin again right after reloading for sign-in; not reloading again",
-      ),
-    );
-    return;
-  }
-  sessionStorage.setItem(SIGN_IN_RELOAD_KEY, String(Date.now()));
-  location.reload();
-}
-
-function applyMirror(item: MirroredItem): void {
-  const el = mirroredElement(item.id);
-  const wanted = new Map(item.attributes);
-  for (const name of el.getAttributeNames())
-    if (!wanted.has(name)) el.removeAttribute(name);
-  for (const [name, value] of wanted)
-    if (el.getAttribute(name) !== value) el.setAttribute(name, value);
-  if (el.innerHTML !== item.html) el.innerHTML = item.html;
-}
-
-function mirroredElement(id: MirroredId): HTMLElement {
+export function mirroredElement(id: MirroredId): HTMLElement {
   const el = document.getElementById(id);
   if (!el) throw new Error(`#${id} is missing from index.html`);
   return el;
