@@ -149,6 +149,9 @@ export function installTitleTooltips(doc: Document = document): () => void {
     }
     hide();
     if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+    // iframe (面・HTML と PDF のプレビュー) の title は読み上げのための名前。中の
+    // ページが自分の吹き出しを出すので、枠全体に出さない。
+    if (target instanceof win.HTMLIFrameElement) return;
     // 空の title は祖先の title を打ち消す (ブラウザの既定と同じ)。
     if (!anchor?.getAttribute("title")?.trim()) return;
     const current: Hover = { anchor, timer: null, shown: null };
