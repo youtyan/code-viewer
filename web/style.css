@@ -20378,19 +20378,30 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
    1 段目: 見出し (「FILES」・「変更ファイル」)・対象の ref (ファイル一覧だけ。既定の
    worktree はアイコンだけ、ほかを選んでいるときは値を出す)・件数・全部開く / 全部
    畳む・tree / flat (変更ファイルの一覧だけ。ファイル一覧は木に固定)。
-   2 段目: 絞り込み。見出しの文字は文字の線、右端の押せる領域は面の線。 */
+   2 段目: 絞り込み。見出しの文字は文字の線、右端の押せる領域は面の線。
+   幅が足りないとき削るのは題の文字だけ。対象の ref の列は中身 (少なくとも絵)
+   より細くしない (0 まで縮めていた間は、ref が列からはみ出して右の操作に重なった)。 */
 :is(#sidebar, #file-list) .sb-head {
   display: grid;
   grid-template:
     "title ref totals actions view toggle" var(--ui-control-sm)
     "filter filter filter filter filter filter" auto
-    / minmax(0, auto) minmax(0, 1fr) auto auto auto auto;
+    / minmax(0, auto) minmax(auto, 1fr) auto auto auto auto;
   align-items: center;
   column-gap: var(--space-1);
   row-gap: var(--space-2);
   padding: var(--space-3) var(--pad-face) var(--space-2) var(--pad-text);
   /* 詰め方は窓ではなくこの見出しの実幅で決める (列の幅は利用者が変える)。 */
   container: sidebar-head / inline-size;
+}
+/* ファイル一覧の見出しは切替 (view)・畳む (toggle) の列を使わない。空の列の間にも
+   column-gap が付き、最も狭い 180px では題の幅を 25px 食っていた。列の間は
+   詰め、間隔は右の要素の左の余白で取る (件数は素の規則の margin-left)。 */
+#file-list .sb-head {
+  column-gap: 0;
+}
+#file-list .sb-head > :is(#repo-target-wrap, .sb-actions) {
+  margin-left: var(--space-1);
 }
 :is(#sidebar, #file-list) .sb-head > .sb-title {
   grid-area: title;
@@ -20432,6 +20443,9 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   grid-area: ref;
   justify-self: start;
   max-width: 100%;
+  /* 狭いときは絵だけを残し、値と ▾ は切る。 */
+  min-width: var(--ui-control-sm);
+  overflow: hidden;
 }
 :is(#sidebar, #file-list) .sb-head > .sb-actions {
   grid-area: actions;
