@@ -64,6 +64,20 @@ grep -n "100vh\|100dvh" web/style.css \
 
 ## 骨格 — 左・上・下の固定物
 
+**窓は 2 つの文書でできている** (`core/workspace-role.ts`。役割は `index.html` の `#first-look` が
+`html[data-workspace]` に付ける)。デスクトップの一番上のページ (`host`) は左のサイドバーと最下段と
+面の場所 (`#workspace`) だけを描き、本文は `#workspace` の中の iframe (`pane`) の中で同じ app が描く。
+- 面の中には左のサイドバーと最下段が無い (`--nav-w` / `--statusbar-h` が 0。下の固定物の話は面の
+  中では `--chrome-left` = 0)。面の中の固定物は今までどおり `--chrome-*` だけを読めばよい
+- 面と host では SP の `@media` を外す (`#pane-media` が `embeddedMediaText` で書き換える)。電話の段
+  かを TS で読むときは `views/shell/workspace.ts` の `phoneMediaQuery()` を通す
+  (`web-src/test/workspace-role.test.ts` が直の `matchMedia(PHONE_MEDIA_QUERY)` を落とす)
+- 最下段の面ごとの項目 (接続状態・注釈・AI 向けのコピー・自動更新・通信の中止・リポジトリの Web
+  ページ・診断) と、サイドバーの面の画面へのリンクは、host では面の部品の写し
+  (`core/workspace-bridge.ts` の `MIRRORED_IDS`)。押すと面の同じ部品が押される。面ごとの部品を
+  最下段に足すなら `MIRRORED_IDS` に足す
+- SP の幅で開いた窓・ほかのページの中で開いた窓 (`single`) は今までどおりの 1 枚
+
 画面は次の固定物で囲まれている: 左のサイドバー (`#app-nav`、幅 `--nav-w`)、その右の一覧の列
 (下の「一覧の列」。頭 `#panel-head` は 2 段)、最上段のタブ列 (`#main-tabs`、高さ `--main-tabs-h`。
 **上の行は無い**: `web/index.html` のコメントと da82d59)、画面ごとのツールバー

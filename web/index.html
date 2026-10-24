@@ -31,17 +31,62 @@
      (web-src/test/first-screen.test.ts)。 -->
 <script id="first-look">
 (function () {
+  var root = document.documentElement;
+  // この窓の役割 (外側のページ host・面 pane・1 枚 single)。決まりは
+  // core/workspace-role.ts の decideWorkspaceRole と同じ。SP の条件は PHONE_MEDIA_QUERY。
+  var frame = window.frameElement;
+  var paneFrame = !!frame && frame.hasAttribute("data-cv-pane");
+  var phone = window.matchMedia("(max-width: 640px), (pointer: coarse) and (max-height: 500px)").matches;
+  var role = paneFrame ? "pane" : window.top === window && !phone ? "host" : "single";
+  root.dataset.workspace = role;
   var raw = window.localStorage.getItem("code-viewer:early-look");
   if (!raw) return;
   var look = JSON.parse(raw);
-  var root = document.documentElement;
   if (look.theme === "light" || look.theme === "dark") root.dataset.theme = look.theme;
   if (look.colorTheme) root.dataset.colorTheme = look.colorTheme;
+  // 面の中に左のサイドバーは無いが、畳んでいれば頭の先頭に「サイドバーを出す」の
+  // 場所を取る (幅は面の中では効かない。style.css の html[data-workspace="pane"])。
   if (look.navCollapsed) root.dataset.navCollapsed = "";
   if (look.navWidth > 0) root.style.setProperty("--nav-w", look.navWidth + "px");
 })();
 </script>
 <link rel="stylesheet" href="/style.css" />
+<!-- 外側のページ (host) と面 (pane) では SP の @media を効かせない。iframe の中の
+     @media は面の幅で決まるので、狭い面が SP の画面になる。host は窓を狭めても骨格を
+     変えない (面を入れたまま電話の段の骨格にすると崩れる)。書き換えは
+     core/workspace-role.ts の embeddedMediaText と同じ (web-src/test/first-screen.test.ts)。
+     style.css を読み終えてから走る (前の stylesheet が読み終わるまでスクリプトは待つ)。 -->
+<script id="pane-media">
+(function () {
+  if (document.documentElement.dataset.workspace === "single") return;
+  function limits(part, feature) {
+    var found = [];
+    var pattern = new RegExp(feature + "\\s*:\\s*(\\d+)px", "g");
+    for (var m = pattern.exec(part); m; m = pattern.exec(part)) found.push(Number(m[1]));
+    return found;
+  }
+  function phonePart(part) {
+    return limits(part, "max-width").some(function (w) { return w <= 640; }) ||
+      limits(part, "max-height").some(function (h) { return h <= 500; });
+  }
+  function embedded(media) {
+    var kept = media.split(",").map(function (part) { return part.trim(); })
+      .filter(function (part) { return part !== "" && !phonePart(part); });
+    return kept.length === 0 ? "not all" : kept.join(", ");
+  }
+  function rewrite(rules) {
+    for (var i = 0; i < rules.length; i += 1) {
+      var rule = rules[i];
+      if (rule instanceof CSSMediaRule) {
+        var next = embedded(rule.media.mediaText);
+        if (next !== rule.media.mediaText) rule.media.mediaText = next;
+      }
+      if (rule.cssRules) rewrite(rule.cssRules);
+    }
+  }
+  for (var s = 0; s < document.styleSheets.length; s += 1) rewrite(document.styleSheets[s].cssRules);
+})();
+</script>
 </head>
 <body>
 <!-- 最初の描画で、開いた画面の並びの場所を取る (URL から画面の印を付ける)。
@@ -55,6 +100,8 @@
      (head では body がまだ無い。style.css は読み終わっているので変数を読める)。 -->
 <script id="first-screen">
 (function () {
+  // 外側のページは本文を持たない (本文の並びは面の中の同じスクリプトが付ける)。
+  if (document.documentElement.dataset.workspace === "host") return;
   var raw = window.localStorage.getItem("code-viewer:early-look");
   var look = raw ? JSON.parse(raw) : {};
   var root = document.documentElement;
@@ -150,6 +197,23 @@
     </div>
     <div id="app-nav-resizer" class="app-nav-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="resize sidebar"></div>
   </aside>
+  <!-- 外側のページ (html[data-workspace="host"]) の本文の場所。面 (iframe) を 1 つ
+       置き、同じ URL の app を面として開く (core/workspace-role.ts)。app.js を待たずに
+       作り、面の読み込みを外側のページと並べて始める。やりとりは
+       views/workspace/bridge.ts。 -->
+  <div id="workspace">
+    <script id="first-workspace">
+    (function () {
+      if (document.documentElement.dataset.workspace !== "host") return;
+      var frame = document.createElement("iframe");
+      frame.setAttribute("data-cv-pane", "p1");
+      frame.setAttribute("allow", "clipboard-read; clipboard-write; fullscreen");
+      frame.title = "code viewer";
+      frame.src = location.href;
+      document.getElementById("workspace").appendChild(frame);
+    })();
+    </script>
+  </div>
   <!-- 上の行は持たない: 最上段は一覧の列の頭の 1 段目とタブ列。
        一覧の列の頭 (#panel-head) は左のサイドバーの右の 2 段で、幅は固定
        (--column-head-w)。1 段目 (#project-head) はタブ列と同じ高さで、いま見ている

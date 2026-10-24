@@ -105,7 +105,6 @@ import {
   withProject,
 } from "../../core/main-tabs";
 import { mergeLayouts } from "../../core/main-tabs-merge";
-import { PHONE_MEDIA_QUERY } from "../../core/mobile-layout";
 import { projectInitials } from "../../core/project-colors";
 import type { AppRoute } from "../../core/routes";
 import type { ShellSession } from "../../core/shell";
@@ -127,6 +126,7 @@ import {
   paintProjectColor,
   projectMark,
 } from "../projects/project-looks";
+import { phoneMediaQuery } from "../shell/workspace";
 import { type MainTabsLang, mainTabsText } from "./i18n";
 import {
   CLOSE_ICON_PATH,
@@ -394,7 +394,7 @@ export type MainTabsHandle = {
   openProjectMenu(
     root: string,
     anchor: HTMLElement,
-    options?: { picked?: () => void },
+    options?: { at?: { x: number; y: number }; picked?: () => void },
   ): void;
   /** 左の面の選択を外して本文の既定 (フォルダ表示) を出す (Files の入口)。 */
   showHome(): void;
@@ -914,7 +914,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     } | null;
   };
   const sections = {} as Record<PaneSide, Section>;
-  const phoneQuery = window.matchMedia(PHONE_MEDIA_QUERY);
+  const phoneQuery = phoneMediaQuery();
   for (const side of SIDES) sections[side] = createSection(side);
 
   // 面の境界。掴みしろ 6px、線は 1px (ホバー・ドラッグ中は 2px の強調)。

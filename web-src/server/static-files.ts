@@ -1,7 +1,7 @@
 // 画面のファイル (index.html・style.css・app.js・遅延バンドル・vendor) を配る。
 // 1 つで完結するサーバ (preview.ts) と入口のサーバ (entry/) が同じ表を使う。
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { APP_ENTRY_PATHS, SPA_PATHS } from "../core/routes";
 import { ROOT } from "./root";
@@ -80,7 +80,7 @@ export function staticFileSpec(
   return STATIC_FILE_MAP.get(pathname) ?? null;
 }
 
-export function staticFile(pathname: string): Response | null {
+export function staticFile(pathname: string, req: Request): Response | null {
   const spec = staticFileSpec(pathname);
   if (!spec) return null;
   const full = join(WEB_ROOT, spec[0]);
@@ -93,7 +93,17 @@ export function staticFile(pathname: string): Response | null {
       },
     });
   }
-  return new Response(readFileSync(full), {
-    headers: { "Content-Type": spec[1], "Cache-Control": "no-store" },
-  });
+  // 毎回確かめるが、変わっていなければ取り直さない (面の iframe ごとに app.js を
+  // 読み直さない)。作り直すと大きさか時刻が変わる。
+  const stat = statSync(full);
+  const etag = `W/"${stat.size.toString(36)}-${Math.floor(stat.mtimeMs).toString(36)}"`;
+  const headers = {
+    "Content-Type": spec[1],
+    "Cache-Control": "no-cache",
+    ETag: etag,
+  };
+  const cached = req.headers.get("if-none-match");
+  if (cached?.split(",").some((tag) => tag.trim() === etag))
+    return new Response(null, { status: 304, headers });
+  return new Response(readFileSync(full), { headers });
 }

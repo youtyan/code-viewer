@@ -138,7 +138,6 @@ import {
 import { renderMarkdownPreview } from "./core/markdown-preview";
 import {
   diffLayoutFor,
-  PHONE_MEDIA_QUERY,
   PHONE_TERMINAL_FONT_SIZE,
   TOUCH_MEDIA_QUERY,
 } from "./core/mobile-layout";
@@ -234,6 +233,7 @@ import type {
   UndoActionResponse,
   ViewState,
 } from "./core/types";
+import type { HostCommand } from "./core/workspace-bridge";
 import { createAccountsBand } from "./views/agents/accounts-band";
 import { createAccountsClient } from "./views/agents/accounts-client";
 import { createAccountDialogs } from "./views/agents/accounts-dialogs";
@@ -380,6 +380,7 @@ import {
   rememberEarlyProject,
 } from "./views/shell/early-look";
 import { type LiveSource, openLiveSource } from "./views/shell/live-hub";
+import { phoneMediaQuery, workspaceRole } from "./views/shell/workspace";
 import {
   CHANGES_LIST_DOM,
   createSidebar,
@@ -424,6 +425,12 @@ import {
   type ViewerSettingsText,
 } from "./views/viewer-settings";
 import { VIEWER_SETTINGS_TEXT } from "./views/viewer-settings-i18n";
+import {
+  type PaneBridge,
+  startPaneBridge,
+  startWorkspaceHost,
+  type WorkspaceHost,
+} from "./views/workspace/bridge";
 import { worktreeText } from "./views/worktree-i18n";
 import { createWorktreeView, type WorktreeView } from "./views/worktree-view";
 
@@ -475,6 +482,15 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const $ = <T extends Element = HTMLElement>(sel: string): T =>
     document.querySelector(sel) as T;
+  // この窓の役割 (core/workspace-role.ts)。外側のページ (host) は左のサイドバーと
+  // 最下段だけを描き、本文は面 (pane) の iframe の中の同じ app が描く。host では本文の
+  // 画面を始めず、本文に向けた操作 (プロジェクトの切替・エージェントを開く・画面を
+  // 移る・キー) を面に頼む (views/workspace/bridge.ts)。
+  const WORKSPACE_ROLE = workspaceRole();
+  let WORKSPACE_HOST: WorkspaceHost | null = null;
+  let PANE_BRIDGE: PaneBridge | null = null;
+  /** host: 面が最後に知らせたプロジェクト。 */
+  let WORKSPACE_PROJECT_ROOT: string | null = null;
   const $$ = <T extends Element = HTMLElement>(sel: string): T[] =>
     Array.from(document.querySelectorAll(sel)) as T[];
   const diffCardSelector = (path: string) =>
@@ -767,6 +783,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   function applyDocumentTitle(): void {
     const base = PROJECT_NAME ? `${PROJECT_NAME} - code viewer` : "code viewer";
     document.title = titleWithUnread(base, AGENT_UNREAD_COUNT);
+    // 窓の題名は host が面のプロジェクトで付ける。
+    PANE_BRIDGE?.syncLocation();
   }
 
   function setProjectName(project: string) {
@@ -1265,7 +1283,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /** 電話の段 (core/mobile-layout.ts。style.css の SP の節と同じ条件)。 */
-  const PHONE_QUERY = window.matchMedia(PHONE_MEDIA_QUERY);
+  const PHONE_QUERY = phoneMediaQuery();
   /** 指の画面 (キーの案内を出さない)。 */
   const TOUCH_QUERY = window.matchMedia(TOUCH_MEDIA_QUERY);
   /** 電話の段で切り替えた差分の並べ方 (保存しない。diffLayoutFor)。 */
@@ -4404,6 +4422,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function replaceUrlWithCurrentRoute(): void {
+    // host のアドレス欄は面の URL の写し (views/workspace/bridge.ts)。
+    if (WORKSPACE_ROLE === "host") return;
     const url = urlForRoute(STATE.route);
     const current = window.location.pathname + window.location.search;
     if (url !== current) {
@@ -5312,7 +5332,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   const {
     renderSettingsPage,
     openSettingsPage,
-    openSettingsAt,
+    openSettingsAt: openSettingsHere,
     headingInHash: settingsHeadingInHash,
   } = createSettingsPage({
     $,
@@ -5379,6 +5399,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     // インストールの案内 (PWA)。ブラウザが出す 1 度きりの event を今から受けておく。
     installOffer: createInstallOffer(window),
   });
+
+  /** 設定のページをその見出しで開く。host では面に頼む。 */
+  function openSettingsAt(heading: string, replace = false): void {
+    if (WORKSPACE_HOST) {
+      WORKSPACE_HOST.command({ type: "settings-at", heading });
+      return;
+    }
+    openSettingsHere(heading, replace);
+  }
 
   // ---------- Hunk expand: extracted to hunk-expand.ts ----------
   const { setupHunkExpand } = createHunkExpand({
@@ -6451,6 +6480,16 @@ window.GdpExpandLogic = GdpExpandLogic;
       e.preventDefault();
       return;
     }
+    // host (左のサイドバー・最下段) にフォーカスがあっても、操作の先は面の本文。
+    if (WORKSPACE_HOST) {
+      e.preventDefault();
+      WORKSPACE_HOST.command({
+        type: "keymap",
+        action: outcome.action,
+        repeated: e.repeat,
+      });
+      return;
+    }
     const handled = dispatchKeymapAction(
       outcome.action,
       scope,
@@ -6473,7 +6512,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 電話の段に入る・出ると、見せる差分の並べ方が変わる (電話では 1 列が既定)。
   PHONE_QUERY.addEventListener("change", () => setLayout(shownLayout(), false));
   setPageMode();
-  if (routePathname() === "/") {
+  if (WORKSPACE_ROLE !== "host" && routePathname() === "/") {
     setRoute(STATE.route, true);
   }
 
@@ -6767,6 +6806,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   loadInitialState().finally(() => {
+    if (WORKSPACE_ROLE === "host") return;
     // 設定とヘルプが 1 つのページだった頃の /help#<設定の見出し> は設定のページへ
     // (ヘルプには無い見出しなので、ヘルプのまま開くと何も出ない)。
     if (
@@ -8411,7 +8451,7 @@ window.GdpExpandLogic = GdpExpandLogic;
    */
   function listColumnShownWidth(): number {
     return listColumnBodyWidth({
-      overlaid: window.matchMedia(PHONE_MEDIA_QUERY).matches,
+      overlaid: phoneMediaQuery().matches,
       shown: LIST_COLUMN_WIDTH,
       headWidth: requireColumnHead().getBoundingClientRect().width,
     });
@@ -8472,8 +8512,7 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 電話では重ねて出す面なので、今の幅 (頭の実幅) のまま。
    */
   function splitListColumnWidth(): number {
-    if (window.matchMedia(PHONE_MEDIA_QUERY).matches)
-      return listColumnShownWidth();
+    if (phoneMediaQuery().matches) return listColumnShownWidth();
     return listColumnLayoutFor(SPLIT_NEED).width;
   }
 
@@ -8490,7 +8529,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       !!kind && LIST_COLUMN_HIDDEN,
     );
     // 電話では一覧の列は重ねて出す面なので、幅では畳まない。
-    const overlaid = window.matchMedia(PHONE_MEDIA_QUERY).matches;
+    const overlaid = phoneMediaQuery().matches;
     const action = fileListAction({
       folded: layout.filesFolded && !overlaid,
       autoHidden: FILE_LIST_AUTO_HIDDEN,
@@ -8778,6 +8817,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       TERMINAL_VIEW.markOpenedImage(null);
     syncHeaderMenu();
     AGENTS_SIDEBAR?.refresh();
+    sendViewedShells();
     syncLineRefPill();
     // ファイル一覧の選択の印は、フォーカスのある面のファイル。
     {
@@ -9132,6 +9172,10 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 最後に前面だったタブを前面に出す (無ければそのプロジェクトのフォルダ表示)。
    */
   function switchToProjectGroup(root: string, confirmRegister = false): void {
+    if (WORKSPACE_HOST) {
+      WORKSPACE_HOST.command({ type: "switch-project", root, confirmRegister });
+      return;
+    }
     if (root === MAIN_TABS.currentProject()) return;
     const tab = MAIN_TABS.prepareProjectSwitch(root);
     openProjectAt(
@@ -9197,8 +9241,20 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // エージェントの状態。どの画面にいても取り直し、ヘッダの件数・未読・通知に
   // 流す。一覧の画面 (/agents) も同じ結果を描く。
+  let sentViewedShells = "";
+  /** 面で映しているシェルを host に知らせる (host のサイドバーの選択の印と未読)。 */
+  function sendViewedShells(): void {
+    if (!PANE_BRIDGE) return;
+    const shells = viewedShells();
+    const key = shells.join(" ");
+    if (key === sentViewedShells) return;
+    sentViewedShells = key;
+    PANE_BRIDGE.send({ type: "viewing", shells });
+  }
+
   /** いま映しているシェル: 左右の面の前面のターミナルのタブ。 */
   function viewedShells(): string[] {
+    if (WORKSPACE_HOST) return WORKSPACE_HOST.viewedShells();
     const { fronts } = MAIN_TABS.panes();
     return [fronts.left, fronts.right]
       .map((tab) =>
@@ -9478,6 +9534,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     destination?: "opposite",
     returnTo?: () => void,
   ): void {
+    if (WORKSPACE_HOST) {
+      WORKSPACE_HOST.command({
+        type: "open-agent-pane",
+        pane,
+        opposite: destination === "opposite",
+      });
+      return;
+    }
     // 電話の段で引き出しや面が開いたままだと、開いた端末がその下に隠れる
     // (引き出しと面の中の行は押したときに自分で閉じるが、通知・最下段の件数・
     // 全体ボード・パレットから来たときは閉じていなかった)。
@@ -9534,10 +9598,14 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const AGENT_MONITOR = createAgentMonitor({
     getText: () => agentsText(STATE.language),
-    getNotifySettings: () => ({
-      waiting: APP_SETTINGS.agentNotifyWaiting !== false,
-      finished: APP_SETTINGS.agentNotifyDone !== false,
-    }),
+    // 面の中では知らせない (同じ窓の host が知らせる)。
+    getNotifySettings: () =>
+      WORKSPACE_ROLE === "pane"
+        ? { waiting: false, finished: false }
+        : {
+            waiting: APP_SETTINGS.agentNotifyWaiting !== false,
+            finished: APP_SETTINGS.agentNotifyDone !== false,
+          },
     isViewing: isViewingAgentPane,
     onUnreadCountChange: (count) => {
       if (count === AGENT_UNREAD_COUNT) return;
@@ -9603,6 +9671,10 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** Load the next project's state before replacing the current project. */
   function navigateProject(url: string, replace = false): Promise<void> {
+    if (WORKSPACE_HOST) {
+      WORKSPACE_HOST.command({ type: "navigate-project", url, replace });
+      return Promise.resolve();
+    }
     if (leavePaneViewFirst(() => void navigateProject(url, replace)))
       return Promise.resolve();
     const destination = new URL(url, window.location.href);
@@ -9722,7 +9794,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     actionHeaders,
     refresh: () => AGENT_MONITOR.refresh(),
     navigate: (url) => void navigateProject(url),
-    currentRoot: () => MAIN_TABS.currentProject(),
+    // host では面のプロジェクト (面が知らせるまでは、このページの URL のもの)。
+    currentRoot: () =>
+      WORKSPACE_HOST?.project()?.root ?? MAIN_TABS.currentProject(),
   });
 
   const AGENT_PANE_OPENER = createAgentPaneOpener({
@@ -9865,10 +9939,20 @@ window.GdpExpandLogic = GdpExpandLogic;
         // 電話の引き出しの＋のメニュー: 選んだら引き出しを閉じる (メニューは
         // 引き出しの外に開くので、引き出しの中の押下では閉じない。開いたまま
         // 選んだ画面・シェルを覆っていた)。
-        openProjectMenu: (root, anchor) =>
-          MAIN_TABS.openProjectMenu(root, anchor, {
-            picked: () => MOBILE_SHELL.close(),
-          }),
+        openProjectMenu: (root, anchor) => {
+          // host のメニューの中身は面のタブの並びで決まる。面の左端の、その行の
+          // 下に開く (面の上端は窓の上端)。
+          if (WORKSPACE_HOST)
+            WORKSPACE_HOST.command({
+              type: "project-menu",
+              root,
+              y: anchor.getBoundingClientRect().bottom + 4,
+            });
+          else
+            MAIN_TABS.openProjectMenu(root, anchor, {
+              picked: () => MOBILE_SHELL.close(),
+            });
+        },
         handoff: HANDOFF_ACTIONS,
         openBoard: () =>
           navigateToRoute({ screen: "agents", range: currentRange() }),
@@ -9905,7 +9989,14 @@ window.GdpExpandLogic = GdpExpandLogic;
           expandButton: navExpand,
           getWidth: () => APP_SETTINGS.navWidth,
           isCollapsed: () => APP_SETTINGS.navCollapsed === true,
-          save: (patch) => patchSettings(patch),
+          save: (patch) => {
+            patchSettings(patch);
+            // 畳んだ・開いたは、host と面の両方の骨格に効く。
+            if (patch.navCollapsed === undefined) return;
+            const collapsed = patch.navCollapsed;
+            WORKSPACE_HOST?.notify({ type: "nav-collapsed", collapsed });
+            PANE_BRIDGE?.send({ type: "nav-collapsed", collapsed });
+          },
           // 面の幅が変わるので端末の桁数を取り直す。
           onResize: () => TERMINAL_VIEW.refit(),
         })
@@ -9943,8 +10034,11 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // 使用量は最下段に常に出すので、アカウントの一覧はずっと取り直す
   // (周期の取り直しは通信中の表示の対象外。accounts-client.ts)。
-  ACCOUNTS_CLIENT.retain();
-  void ACCOUNTS_CLIENT.load({ background: true });
+  // 面の中の最下段は host が描く (使用量は host が取り直す)。
+  if (WORKSPACE_ROLE !== "pane") {
+    ACCOUNTS_CLIENT.retain();
+    void ACCOUNTS_CLIENT.load({ background: true });
+  }
   const usageStatusRoot = document.querySelector<HTMLElement>("#usage-status");
   const USAGE_STATUS = usageStatusRoot
     ? mountUsageStatus({
@@ -10129,6 +10223,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function navigateToRoute(route: AppRoute): void {
+    if (WORKSPACE_HOST) {
+      WORKSPACE_HOST.command({ type: "route", route });
+      return;
+    }
     if (leavePaneViewFirst(() => navigateToRoute(route))) return;
     history.pushState(historyStateForRoute(route), "", urlForRoute(route));
     scrollMainToTop();
@@ -10304,6 +10402,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     load();
   }
   window.addEventListener("popstate", () => {
+    if (WORKSPACE_ROLE === "host") return;
     // 1 ペイン表示を開いていれば、戻るはそれを閉じるだけ (URL は動いていない)。
     if (PANE_VIEW.handlePopState()) return;
     if (loadedProjectKey && projectKey() !== loadedProjectKey) {
@@ -10854,7 +10953,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   let eventSourceConnectTimer: number | null = null;
 
   function shouldConnectEventSource(): boolean {
-    return document.visibilityState === "visible";
+    // host はプロジェクトの知らせを使わない (本文は面が持つ)。
+    return WORKSPACE_ROLE !== "host" && document.visibilityState === "visible";
   }
 
   function disconnectEventSource(): void {
@@ -10911,7 +11011,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       void MAIN_TABS.refreshFromServer();
     });
     // 全プロジェクト共通の設定 (明暗・テーマ) を別の窓が書いた。
-    es.addEventListener("user-settings", refreshLook);
+    es.addEventListener("user-settings", () => {
+      refreshLook();
+      PANE_BRIDGE?.send({ type: "look-changed" });
+    });
     es.addEventListener("db-query", (event) => {
       DATABASE_VIEW.handleSse("db-query", (event as MessageEvent).data);
     });
@@ -10957,6 +11060,78 @@ window.GdpExpandLogic = GdpExpandLogic;
     window.addEventListener("load", schedule, { once: true });
   }
 
+  if (WORKSPACE_ROLE === "host")
+    WORKSPACE_HOST = startWorkspaceHost({
+      onLocation: (project) => {
+        if (!project) return;
+        const moved = project.root !== WORKSPACE_PROJECT_ROOT;
+        WORKSPACE_PROJECT_ROOT = project.root;
+        setProjectName(project.name);
+        AGENTS_SIDEBAR?.refresh();
+        // いま見ているプロジェクト (色・一覧の印) はこの URL で取り直した一覧で決まる。
+        if (moved) void AGENT_MONITOR.refresh();
+      },
+      onViewing: () => AGENTS_SIDEBAR?.refresh(),
+      onLookChanged: refreshLook,
+      onNavCollapsed: applyNavCollapsedFromOtherSide,
+    });
+  if (WORKSPACE_ROLE === "pane")
+    PANE_BRIDGE = startPaneBridge({
+      project: () => {
+        const root = MAIN_TABS.currentProject();
+        return root ? { root, name: PROJECT_NAME } : null;
+      },
+      onCommand: runHostCommand,
+    });
+  sendViewedShells();
+
+  /** host の頼み (左のサイドバー・最下段・キー) を面で動かす。 */
+  function runHostCommand(
+    command: Exclude<HostCommand, { type: "click" }>,
+  ): void {
+    switch (command.type) {
+      case "switch-project":
+        switchToProjectGroup(command.root, command.confirmRegister);
+        return;
+      case "navigate-project":
+        void navigateProject(command.url, command.replace);
+        return;
+      case "open-agent-pane":
+        openAgentPane(command.pane, command.opposite ? "opposite" : undefined);
+        return;
+      case "route":
+        navigateToRoute(command.route);
+        return;
+      case "settings-at":
+        openSettingsAt(command.heading);
+        return;
+      case "project-menu":
+        MAIN_TABS.openProjectMenu(command.root, document.body, {
+          at: { x: 4, y: command.y },
+        });
+        return;
+      case "keymap": {
+        const target = document.activeElement;
+        dispatchKeymapAction(
+          command.action,
+          keymapScope(target),
+          command.repeated,
+          target,
+        );
+        return;
+      }
+      case "nav-collapsed":
+        applyNavCollapsedFromOtherSide(command.collapsed);
+        return;
+    }
+  }
+
+  /** host と面の片方で左のサイドバーを畳んだ・開いた (書き込みは畳んだ側がした)。 */
+  function applyNavCollapsedFromOtherSide(collapsed: boolean): void {
+    mergeLocalSettings({ navCollapsed: collapsed });
+    APP_NAV?.sync();
+  }
+
   scheduleEventSourceConnect();
   window.addEventListener("pagehide", disconnectEventSource);
   // 入口の下で、このプロジェクトの裏を起こしている最中なら「起動中」を出す。
@@ -10992,6 +11167,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       disconnectEventSource();
       return;
     }
+    if (WORKSPACE_ROLE === "host") {
+      refreshLook();
+      return;
+    }
     scheduleEventSourceConnect();
     catchUpMissedChanges("visible");
     void ANNOTATIONS_UI?.refreshAnnotations();
@@ -10999,7 +11178,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     void MAIN_TABS.refreshFromServer();
     refreshLook();
   });
+  // 面の窓の focus は、host のサイドバーとの行き来でも来る。窓ごと離れた (別の
+  // アプリへ移った) 後に戻ったときだけ追いつく (離れたかは、面から外れた直後に窓の
+  // どこにもフォーカスが無いかで見る)。
+  let leftWindow = WORKSPACE_ROLE !== "pane";
+  if (WORKSPACE_ROLE === "pane")
+    window.addEventListener("blur", () =>
+      window.setTimeout(() => {
+        if (!window.parent.document.hasFocus()) leftWindow = true;
+      }, 0),
+    );
   window.addEventListener("focus", () => {
+    if (WORKSPACE_ROLE === "host") {
+      refreshLook();
+      return;
+    }
+    if (!leftWindow) return;
+    if (WORKSPACE_ROLE === "pane") leftWindow = false;
     scheduleEventSourceConnect();
     catchUpMissedChanges("visible");
     void ANNOTATIONS_UI?.refreshAnnotations();
