@@ -1406,6 +1406,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(l.mainTabs.moveToOtherSide),
                   " or Alt+click opens the tab in another pane (split to the right if there is none). A terminal shows in one pane at a time.",
                 ],
+                "Drag a tab onto another pane: drop it on an edge to split that pane there, or in the middle to move the tab into it. A tab of a project goes into the middle of a pane of the same project only.",
                 "Close the last tab of a pane, or press g q, to close the pane. g o and g O move to the next and previous pane.",
                 "When the window is too small for every pane, only the focused pane shows, and the bottom bar says how many are hidden.",
               ],

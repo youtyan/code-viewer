@@ -323,10 +323,14 @@ export type MainTabsDeps = {
    * - タブ列に出すのは、いま見ているプロジェクトのグループとプロジェクトの無いタブ
    *   だけ (ほかのプロジェクトのタブは残し、そのプロジェクトへ移ると出る)
    * - onEmptied: 利用者が最後のタブを閉じた (外側のページが面を閉じる)
+   * - dragStart / dragEnd: タブを掴んだ・やめた (外側のページがほかの面の上に落とす
+   *   先を出す)
    */
   paneMode?: {
     splitOut(tab: Tab, how: "split" | "move"): void;
     onEmptied(): void;
+    dragStart(tab: Tab): void;
+    dragEnd(): void;
   };
   /**
    * 一覧の列に今の画面の一覧 (Diff・History・作業ツリー) を出しているか。右の面を
@@ -2023,10 +2027,12 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   }
 
   function endDrag(): void {
+    const dragged = dragId;
     dragId = null;
     clearDropMarks();
     dropZone.hidden = true;
     document.body.classList.remove("main-tab-drag-active");
+    if (dragged !== null) deps.paneMode?.dragEnd();
   }
 
   // 描き直しで掴んだタブの要素が外れると、ブラウザによっては dragend が届かず、
@@ -2354,6 +2360,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       el.classList.add("main-tab-dragging");
       // body にはタブと別の印を付ける (同じ名前だとタブを薄くする規則が画面全体に当たっていた)。
       document.body.classList.add("main-tab-drag-active");
+      deps.paneMode?.dragStart(tab);
       // 1 面で、右に置ける種類 (ファイル・ターミナル・画像) のときだけ右に分割の落とす先を出す。
       dropZone.hidden = !(
         !layout.panes.right &&

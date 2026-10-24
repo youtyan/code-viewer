@@ -236,7 +236,11 @@ import type {
   ViewState,
 } from "./core/types";
 import type { SplitDir, Workspace } from "./core/workspace";
-import { type HostCommand, isWorkspaceAction } from "./core/workspace-bridge";
+import {
+  type HostCommand,
+  isWorkspaceAction,
+  type TabCarry,
+} from "./core/workspace-bridge";
 import { createAccountsBand } from "./views/agents/accounts-band";
 import { createAccountsClient } from "./views/agents/accounts-client";
 import { createAccountDialogs } from "./views/agents/accounts-dialogs";
@@ -1967,6 +1971,13 @@ window.GdpExpandLogic = GdpExpandLogic;
             splitOut: (tab: Tab, how: "split" | "move") =>
               splitOutTab(tab, how, "row"),
             onEmptied: () => PANE_BRIDGE?.send({ type: "emptied" }),
+            dragStart: (tab: Tab) =>
+              PANE_BRIDGE?.send({
+                type: "drag-start",
+                tabId: tab.id,
+                ...tabCarry(tab),
+              }),
+            dragEnd: () => PANE_BRIDGE?.send({ type: "drag-end" }),
           },
         }
       : {}),
@@ -2029,6 +2040,18 @@ window.GdpExpandLogic = GdpExpandLogic;
   function splitOutTab(tab: Tab, how: "split" | "move", dir: SplitDir): void {
     const bridge = PANE_BRIDGE;
     if (!bridge) return;
+    const carry = tabCarry(tab);
+    if (how === "move") bridge.send({ type: "open-elsewhere", ...carry });
+    else
+      bridge.send({ type: "split", dir, url: carry.url, layout: carry.layout });
+    if (how === "move" || tab.target.kind === "image")
+      MAIN_TABS.closeTab(tab.id);
+    else if (tab.target.kind === "terminal")
+      MAIN_TABS.closeTerminal(tab.target.session);
+  }
+
+  /** 別の面へ持っていくタブ (開く先の画面と、そのタブ 1 枚の配置)。 */
+  function tabCarry(tab: Tab): TabCarry {
     const front = MAIN_TABS.front()?.id === tab.id;
     const route = MAIN_TABS.tabRoute(tab);
     const here =
@@ -2055,20 +2078,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       },
       focused: "left",
     });
-    if (how === "move")
-      bridge.send({
-        type: "open-elsewhere",
-        route: tab.target.kind === "terminal" ? null : route,
-        terminal: tab.target.kind === "terminal" ? tab.target.session : null,
-        project: MAIN_TABS.groupOf(tab),
-        url,
-        layout,
-      });
-    else bridge.send({ type: "split", dir, url, layout });
-    if (how === "move" || tab.target.kind === "image")
-      MAIN_TABS.closeTab(tab.id);
-    else if (tab.target.kind === "terminal")
-      MAIN_TABS.closeTerminal(tab.target.session);
+    return {
+      route: tab.target.kind === "terminal" ? null : route,
+      terminal: tab.target.kind === "terminal" ? tab.target.session : null,
+      // 面のタブ列はその面のプロジェクトのタブだけを出すので、持ち物のある
+      // タブ (シェルはそのプロジェクトのもの) は同じプロジェクトの面にだけ開く。
+      project: MAIN_TABS.groupOf(tab),
+      url,
+      layout,
+    };
   }
 
   // 言語の当て直し (起動の途中でも呼ばれる) が読むので、ここで宣言する。
@@ -11274,6 +11292,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         return;
       case "open-terminal":
         MAIN_TABS.openTerminal(command.session);
+        return;
+      case "close-tab":
+        MAIN_TABS.closeTab(command.id);
         return;
       case "split-front": {
         const front = MAIN_TABS.front();

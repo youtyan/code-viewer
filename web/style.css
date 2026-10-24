@@ -17965,6 +17965,35 @@ html[data-workspace="host"] #workspace > iframe {
   background: var(--color-accent);
   outline: none;
 }
+/* タブを掴んでいる間、ほかの面の上に重ねる落とす先 (views/workspace/host.ts)。
+   印は落とすと行く所: 真ん中ならその面全体、端ならその側の半分。 */
+.workspace-drop-target {
+  position: absolute;
+  z-index: 2;
+}
+.workspace-drop-mark {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  pointer-events: none;
+}
+.workspace-drop-mark[hidden] {
+  display: none;
+}
+.workspace-drop-mark[data-zone="left"] {
+  right: 50%;
+}
+.workspace-drop-mark[data-zone="right"] {
+  left: 50%;
+}
+.workspace-drop-mark[data-zone="up"] {
+  bottom: 50%;
+}
+.workspace-drop-mark[data-zone="down"] {
+  top: 50%;
+}
 /* 境界を引いている間は、面 (iframe) にポインタを取られない。 */
 #workspace.workspace-resizing > iframe {
   pointer-events: none;
