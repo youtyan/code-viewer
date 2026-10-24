@@ -441,6 +441,37 @@ test.each([
   ).toBe(expected);
 });
 
+// 一覧の見出しの 1 段目で幅が足りないとき、削るのは題の文字だけ。対象の ref は
+// 絵の幅より細くせず、はみ出す分は切る (0 まで縮めていた間は、180px で ref が
+// 右の操作に重なった)。ファイル一覧は空の列 (切替・畳む) の間の隙間で題の幅を
+// 食わないよう、列の隙間を詰める。
+test.each([
+  {
+    name: "the ref keeps at least its icon",
+    selectors: [":is(#sidebar, #file-list) .sb-head > #repo-target-wrap"],
+    property: "min-width",
+    expected: "var(--ui-control-sm)",
+  },
+  {
+    name: "the ref clips what does not fit",
+    selectors: [":is(#sidebar, #file-list) .sb-head > #repo-target-wrap"],
+    property: "overflow",
+    expected: "hidden",
+  },
+  {
+    name: "the file list head has no gaps between empty columns",
+    selectors: [":is(#sidebar, #file-list) .sb-head", "#file-list .sb-head"],
+    property: "column-gap",
+    expected: "0",
+  },
+])("sidebar head first row: $name", ({ selectors, property, expected }) => {
+  expect(
+    cascadedDeclarations(rules, (candidate) =>
+      selectors.includes(candidate),
+    ).get(property),
+  ).toBe(expected);
+});
+
 // 設定・ヘルプ: 面が 640px 未満 (箱 580px 未満) なら目次を本文の上に畳む (2 面の
 // 面で目次 208px の横の本文が 186px になった)。広い面では開閉の 1 行を出さない。
 test.each([
