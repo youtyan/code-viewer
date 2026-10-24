@@ -41,6 +41,7 @@ import { abbreviateHome } from "../../core/agent-overview";
 import { formatErrorDetail } from "../../core/error-detail";
 import { CHECK_16_PATHS, iconSvg } from "../../core/icons";
 import type { SettingsDraft } from "../viewer-settings";
+import { accountTagList } from "./account-tags";
 import type { AccountsClient } from "./accounts-client";
 import {
   type AccountDialogs,
@@ -50,7 +51,6 @@ import {
   resultLine,
 } from "./accounts-dialogs";
 import type { AccountsText } from "./accounts-i18n";
-import { accountTagList } from "./account-tags";
 import type { AgentHooksSettings } from "./agent-hooks-settings";
 import { usageCheckBlock } from "./usage-check";
 

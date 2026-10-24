@@ -28,6 +28,7 @@ import { dirname, join } from "node:path";
 import {
   type AccountAgent,
   type AccountRegistry,
+  type AccountTag,
   type AddAccountInput,
   type AddAccountIssue,
   accountDirSlug,
@@ -48,11 +49,10 @@ import {
   removeAccount,
   renameAccount,
   SHARED_CONFIG_ENTRIES,
-  type AccountTag,
-  setAccountTags,
   type ShareEntry,
   type ShareSelectionIssue,
   type StoredAccount,
+  setAccountTags,
 } from "../../core/agent-accounts";
 import { errorWithCause } from "../../core/error-detail";
 import { resolvedFilePath, withFileLock } from "../file-lock";

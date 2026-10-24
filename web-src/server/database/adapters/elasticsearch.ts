@@ -1,4 +1,3 @@
-import { errorWithCause, formatErrorDetail } from "../../../core/error-detail";
 import type {
   EsIndexInfo,
   EsMapping,
@@ -7,6 +6,7 @@ import type {
   EsQueryResult,
   EsSearchResult,
 } from "../../../core/database/types";
+import { errorWithCause, formatErrorDetail } from "../../../core/error-detail";
 import type {
   DocSource,
   Queryable,

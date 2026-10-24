@@ -1,4 +1,3 @@
-import { errorWithCause, formatErrorDetail } from "../../../core/error-detail";
 import { createHash } from "node:crypto";
 import { createClient } from "@redis/client";
 import type {
@@ -7,6 +6,7 @@ import type {
   RedisType,
   RedisValue,
 } from "../../../core/database/types";
+import { errorWithCause, formatErrorDetail } from "../../../core/error-detail";
 import type {
   KvSource,
   SnapshotItem,
