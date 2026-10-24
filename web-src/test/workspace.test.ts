@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import { LAYOUT_VERSION, type SerializedLayout } from "../core/main-tabs";
 import {
   closePane,
+  dropZoneAt,
   freshPaneId,
   MIN_PANE_HEIGHT,
   MIN_PANE_WIDTH,
@@ -81,6 +82,23 @@ describe("splitPane / closePane", () => {
       tree,
       focused,
       panes: ["p1", "p2", "p3"].filter((id) => id !== close),
+    });
+  });
+
+  test("before なら新しい面を前 (左・上) に置く", () => {
+    const ws = splitPane(
+      singlePane("p1", "/a"),
+      "p1",
+      "column",
+      "p2",
+      entry("/b"),
+      true,
+    );
+    expect(ws.tree).toEqual({
+      dir: "column",
+      ratio: 0.5,
+      a: { pane: "p2" },
+      b: { pane: "p1" },
     });
   });
 
@@ -396,5 +414,20 @@ describe("routeUrl", () => {
   test("同じ URL なら同じ workspace を返す", () => {
     const ws = twoProjects();
     expect(routeUrl(ws, `${A}/`)).toBe(ws);
+  });
+});
+
+describe("dropZoneAt", () => {
+  const rect = { x: 100, y: 0, width: 400, height: 200 };
+  test.each([
+    { name: "真ん中", x: 300, y: 100, expected: "center" },
+    { name: "境界: 左の帯の内側 (24%)", x: 196, y: 100, expected: "left" },
+    { name: "境界: 左の帯のすぐ外 (25%)", x: 200, y: 100, expected: "center" },
+    { name: "右の端", x: 490, y: 100, expected: "right" },
+    { name: "上の端", x: 300, y: 10, expected: "up" },
+    { name: "下の端", x: 300, y: 190, expected: "down" },
+    { name: "角は近いほうの端 (左が近い)", x: 110, y: 30, expected: "left" },
+  ] as const)("$name → $expected", ({ x, y, expected }) => {
+    expect(dropZoneAt(rect, x, y)).toBe(expected);
   });
 });

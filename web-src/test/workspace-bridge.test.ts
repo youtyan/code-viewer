@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { AppRoute } from "../core/routes";
 import { singlePane, splitPane, type Workspace } from "../core/workspace";
 import {
   HOST_HELLO,
@@ -473,6 +474,133 @@ describe("host: 面の並び", () => {
     await vi.waitFor(() =>
       expect(saved[saved.length - 1]?.panes.p3?.url).toBe(`${A}/history`),
     );
+  });
+});
+
+describe("host: 掴んだタブをほかの面へ落とす", () => {
+  const route: AppRoute = {
+    screen: "history",
+    ref: "HEAD",
+    range: { from: "HEAD", to: "worktree" },
+  };
+  const carry = (project: string | null, terminal: string | null = null) => ({
+    route: terminal === null ? route : null,
+    terminal,
+    project,
+    url: `${B}/history`,
+    layout: { version: 5 } as never,
+  });
+
+  /** p2 は B のプロジェクト。p1 で掴んで、p2 の上の点に落とす。 */
+  async function dragOntoP2(
+    dragged: ReturnType<typeof carry>,
+    x: number,
+    y: number,
+  ) {
+    const started = await startHost();
+    const p1 = paneEnd(started.panes.p1);
+    const p2 = paneEnd(started.panes.p2);
+    p2.send({
+      type: "location",
+      href: `${location.origin}${B}/history`,
+      project: { root: "/work/b", name: "b" },
+    });
+    await vi.waitFor(() =>
+      expect(started.deps.onLocation).toHaveBeenCalledTimes(1),
+    );
+    p1.send({ type: "drag-start", tabId: "t1", ...dragged });
+    await vi.waitFor(() =>
+      expect(document.querySelectorAll(".workspace-drop-target").length).toBe(
+        1,
+      ),
+    );
+    const target = document.querySelector<HTMLElement>(
+      ".workspace-drop-target",
+    );
+    if (!target) throw new Error("no drop target");
+    target.getBoundingClientRect = () => new DOMRect(0, 0, 400, 200);
+    // happy-dom の DragEvent は座標を持たないので、同じ名前の MouseEvent で落とす。
+    const drop = new MouseEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      clientX: x,
+      clientY: y,
+    });
+    target.dispatchEvent(drop);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    return { ...started, p1, p2, accepted: drop.defaultPrevented };
+  }
+
+  test("掴んだ面の外の面にだけ落とす先を出し、掴むのをやめたら消す", async () => {
+    const { panes } = await startHost();
+    const p1 = paneEnd(panes.p1);
+    p1.send({ type: "drag-start", tabId: "t1", ...carry("/work/b") });
+    await vi.waitFor(() =>
+      expect(document.querySelectorAll(".workspace-drop-target").length).toBe(
+        1,
+      ),
+    );
+    p1.send({ type: "drag-end" });
+    await vi.waitFor(() =>
+      expect(document.querySelectorAll(".workspace-drop-target").length).toBe(
+        0,
+      ),
+    );
+  });
+
+  test.each([
+    {
+      name: "同じプロジェクトの面の真ん中: その面で開き、掴んだ面から閉じる",
+      dragged: carry("/work/b"),
+      p2: [{ type: "route", route }],
+      p1: [{ type: "close-tab", id: "t1" }],
+    },
+    {
+      name: "シェルは真ん中に落とせば開く (前の面から閉じるのは terminals の知らせ)",
+      dragged: carry(null, "shell-aaaaaa"),
+      p2: [{ type: "open-terminal", session: "shell-aaaaaa" }],
+      p1: [],
+    },
+  ])("$name", async ({ dragged, p2, p1 }) => {
+    const result = await dragOntoP2(dragged, 200, 100);
+    const sent = (commands: HostCommand[]) =>
+      commands.filter((command) =>
+        ["route", "open-terminal", "close-tab"].includes(command.type),
+      );
+    expect({
+      accepted: result.accepted,
+      p2: sent(result.p2.received),
+      p1: sent(result.p1.received),
+    }).toEqual({ accepted: true, p2, p1 });
+  });
+
+  test("別のプロジェクトのタブは真ん中に落とせない (何も送らない)", async () => {
+    const result = await dragOntoP2(carry("/work/a"), 200, 100);
+    expect({
+      accepted: result.accepted,
+      p2: result.p2.received.filter((command) => command.type === "route"),
+    }).toEqual({ accepted: false, p2: [] });
+  });
+
+  test("左の端に落とすと、その面の左に新しい面を作る", async () => {
+    const result = await dragOntoP2(carry("/work/a"), 10, 100);
+    const last = result.saved[result.saved.length - 1];
+    expect({
+      accepted: result.accepted,
+      tree: last?.tree,
+      p3: last?.panes.p3,
+      p1: result.p1.received.filter((command) => command.type === "close-tab"),
+    }).toEqual({
+      accepted: true,
+      tree: {
+        dir: "row",
+        ratio: 0.5,
+        a: { pane: "p1" },
+        b: { dir: "row", ratio: 0.5, a: { pane: "p3" }, b: { pane: "p2" } },
+      },
+      p3: { url: `${B}/history`, layout: { version: 5 } },
+      p1: [{ type: "close-tab", id: "t1" }],
+    });
   });
 });
 

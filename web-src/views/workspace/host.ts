@@ -11,6 +11,8 @@
 import { attachDragResizer } from "../../core/drag-resizer";
 import {
   closePane,
+  type DropZone,
+  dropZoneAt,
   freshPaneId,
   neighborPane,
   PANE_DIVIDER,
@@ -38,6 +40,7 @@ import {
   type PaneMessage,
   type PaneProject,
   parsePaneMessage,
+  type TabCarry,
   type WorkspaceAction,
 } from "../../core/workspace-bridge";
 import { PANE_FRAME_ATTRIBUTE } from "../../core/workspace-role";
@@ -256,6 +259,14 @@ export function startWorkspaceHost(deps: {
         return;
       case "workspace-action":
         run(message.action);
+        return;
+      case "drag-start": {
+        const { type: _type, tabId, ...carry } = message;
+        startDrag(runtime.id, tabId, carry);
+        return;
+      }
+      case "drag-end":
+        endDrag();
         return;
     }
   }
@@ -509,6 +520,106 @@ export function startWorkspaceHost(deps: {
   }
 
   new ResizeObserver(relayout).observe(root);
+
+  // ---- 掴んだタブをほかの面へ落とす ----
+  // 掴んだ面の外のほかの面の上にだけ、落とす先の箱を重ねる (掴んだ面の中のタブ列の
+  // 並べ替えは、その面が受ける)。端に落とすとその向きに分け、真ん中に落とすとその
+  // 面へ移す。持ち物のあるタブ (画面・ファイル・シェル) を真ん中に落とせるのは、同じ
+  // プロジェクトの面だけ (面のタブ列はその面のプロジェクトのタブだけを出す)。
+  let dragging: { from: PaneId; tabId: string; carry: TabCarry } | null = null;
+  const dropTargets: HTMLElement[] = [];
+
+  function startDrag(from: PaneId, tabId: string, carry: TabCarry): void {
+    endDrag();
+    dragging = { from, tabId, carry };
+    for (const runtime of panes.values()) {
+      if (runtime.id === from || runtime.frame.style.visibility === "hidden")
+        continue;
+      const target = document.createElement("div");
+      target.className = "workspace-drop-target";
+      const mark = document.createElement("div");
+      mark.className = "workspace-drop-mark";
+      mark.hidden = true;
+      target.append(mark);
+      for (const side of ["left", "top", "width", "height"] as const)
+        target.style[side] = runtime.frame.style[side];
+      const zoneOf = (event: DragEvent): DropZone | null => {
+        const box = target.getBoundingClientRect();
+        const zone = dropZoneAt(
+          { x: box.left, y: box.top, width: box.width, height: box.height },
+          event.clientX,
+          event.clientY,
+        );
+        return dropAllowed(runtime, zone) ? zone : null;
+      };
+      target.addEventListener("dragover", (event) => {
+        const zone = zoneOf(event);
+        mark.hidden = zone === null;
+        if (zone === null) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        mark.dataset.zone = zone;
+      });
+      target.addEventListener("dragleave", () => {
+        mark.hidden = true;
+      });
+      target.addEventListener("drop", (event) => {
+        const zone = zoneOf(event);
+        if (zone === null) return;
+        event.preventDefault();
+        dropOn(runtime.id, zone);
+      });
+      root?.append(target);
+      dropTargets.push(target);
+    }
+  }
+
+  function dropAllowed(target: PaneRuntime, zone: DropZone): boolean {
+    if (!dragging) return false;
+    const { carry } = dragging;
+    if (zone !== "center") return true;
+    if (carry.route === null && carry.terminal === null) return false;
+    return carry.project === null || target.project?.root === carry.project;
+  }
+
+  function dropOn(target: PaneId, zone: DropZone): void {
+    if (!dragging) return;
+    const { from, tabId, carry } = dragging;
+    endDrag();
+    if (zone === "center") {
+      const runtime = panes.get(target);
+      if (!runtime) return;
+      focusPane(target);
+      if (carry.terminal !== null)
+        send(runtime, { type: "open-terminal", session: carry.terminal });
+      else if (carry.route !== null)
+        send(runtime, { type: "route", route: carry.route });
+    } else {
+      const id = freshPaneId(workspace);
+      workspace = splitPane(
+        workspace,
+        target,
+        zone === "left" || zone === "right" ? "row" : "column",
+        id,
+        { url: carry.url, layout: carry.layout },
+        zone === "left" || zone === "up",
+      );
+      createFrame(id, carry.url);
+      for (const other of panes.values()) send(other, focusState(other.id));
+      relayout();
+      focusPane(id);
+      save();
+    }
+    // シェルは、開いた面が知らせたときに前の面から閉じる (terminals)。
+    const source = panes.get(from);
+    if (source && carry.terminal === null)
+      send(source, { type: "close-tab", id: tabId });
+  }
+
+  function endDrag(): void {
+    dragging = null;
+    for (const target of dropTargets.splice(0)) target.remove();
+  }
 
   /** 面の木に合わせて iframe を作る・消す・移す。 */
   /**

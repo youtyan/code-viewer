@@ -76,6 +76,19 @@ export type MirroredItem = {
 
 export type PaneProject = { root: string; name: string };
 
+/**
+ * 別の面へ持っていくタブ。route か terminal のどちらか、project は route の持ち物
+ * (同じプロジェクトの面にだけ開く)。開ける面が無ければ url と layout で新しい面を作る
+ * (layout はそのタブ 1 枚)。
+ */
+export type TabCarry = {
+  route: AppRoute | null;
+  terminal: string | null;
+  project: string | null;
+  url: string;
+  layout: SerializedLayout;
+};
+
 export type PaneMessage =
   | { type: "location"; href: string; project: PaneProject | null }
   | { type: "mirror"; items: MirroredItem[] }
@@ -96,19 +109,12 @@ export type PaneMessage =
    * (そのタブ 1 枚)。シェル・画像は面の側で閉じる (移す)。
    */
   | { type: "split"; dir: SplitDir; url: string; layout: SerializedLayout }
-  /**
-   * 別の面で開く (Alt＋クリック・反対の面へ)。route か terminal のどちらか。
-   * project は route の持ち物 (同じプロジェクトの面にだけ開く)。開ける面が無ければ
-   * url と layout で右に分ける。
-   */
-  | {
-      type: "open-elsewhere";
-      route: AppRoute | null;
-      terminal: string | null;
-      project: string | null;
-      url: string;
-      layout: SerializedLayout;
-    }
+  /** 別の面で開く (Alt＋クリック・反対の面へ)。開ける面が無ければ右に分ける。 */
+  | ({ type: "open-elsewhere" } & TabCarry)
+  /** タブを掴んだ (外側のページがほかの面の上に落とす先を出す)。 */
+  | ({ type: "drag-start"; tabId: string } & TabCarry)
+  /** 掴むのをやめた (落とした後も来る)。 */
+  | { type: "drag-end" }
   /** 利用者が面の最後のタブを閉じた (面が 2 つ以上なら host が面を閉じる)。 */
   | { type: "emptied" }
   /** 面の並びの操作 (キー)。 */
@@ -137,6 +143,8 @@ export type HostCommand =
   | { type: "close-terminal"; session: string }
   /** そのシェルのタブを開いて前面に出す。 */
   | { type: "open-terminal"; session: string }
+  /** そのタブを閉じる (別の面へ落として移した)。 */
+  | { type: "close-tab"; id: string }
   /** 面を分ける (キー)。面は前面のタブで split を送り返す。 */
   | { type: "split-front"; dir: SplitDir }
   /** 面が 2 つ以上あるか・この面にフォーカスがあるか (フォーカスの印)。 */
@@ -175,6 +183,8 @@ const PANE_MESSAGE_TYPES: readonly PaneMessage["type"][] = [
   "open-elsewhere",
   "emptied",
   "workspace-action",
+  "drag-start",
+  "drag-end",
 ];
 
 const HOST_COMMAND_TYPES: readonly HostCommand["type"][] = [
@@ -189,6 +199,7 @@ const HOST_COMMAND_TYPES: readonly HostCommand["type"][] = [
   "nav-collapsed",
   "close-terminal",
   "open-terminal",
+  "close-tab",
   "split-front",
   "focus-state",
 ];

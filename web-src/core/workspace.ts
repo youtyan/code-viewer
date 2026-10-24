@@ -70,7 +70,7 @@ export function freshPaneId(workspace: Workspace): PaneId {
 
 /**
  * target の面を dir の向きに 2 つに分け、新しい面 (id・entry) を後ろ (右か下) に
- * 置く。新しい面にフォーカスを移す。
+ * 置く (before なら前、左か上)。新しい面にフォーカスを移す。
  */
 export function splitPane(
   workspace: Workspace,
@@ -78,6 +78,7 @@ export function splitPane(
   dir: SplitDir,
   id: PaneId,
   entry: PaneEntry,
+  before = false,
 ): Workspace {
   if (!(target in workspace.panes))
     throw new Error(`split: no pane ${JSON.stringify(target)}`);
@@ -86,7 +87,9 @@ export function splitPane(
   const replace = (node: PaneNode): PaneNode => {
     if ("pane" in node)
       return node.pane === target
-        ? { dir, ratio: 0.5, a: node, b: { pane: id } }
+        ? before
+          ? { dir, ratio: 0.5, a: { pane: id }, b: node }
+          : { dir, ratio: 0.5, a: node, b: { pane: id } }
         : node;
     return { ...node, a: replace(node.a), b: replace(node.b) };
   };
@@ -245,6 +248,31 @@ export function neighborPane(
     if (!best || distance < best.distance) best = { id, distance };
   }
   return best?.id ?? null;
+}
+
+/** タブを落とす先: 面の端 (その向きに分ける) か真ん中 (その面へ移す)。 */
+export type DropZone = Direction | "center";
+
+/** 端とみなす幅 (面の幅・高さに対する割合)。 */
+const DROP_EDGE = 0.25;
+
+/**
+ * 面の中のその点に落とすと、どこへ行くか。端の帯 (DROP_EDGE) に入っていれば
+ * 一番近い端、どの帯にも入っていなければ真ん中。
+ */
+export function dropZoneAt(rect: Rect, x: number, y: number): DropZone {
+  const fx = (x - rect.x) / rect.width;
+  const fy = (y - rect.y) / rect.height;
+  const edges: Array<[Direction, number]> = [
+    ["left", fx],
+    ["right", 1 - fx],
+    ["up", fy],
+    ["down", 1 - fy],
+  ];
+  const [nearest, distance] = edges.reduce((best, edge) =>
+    edge[1] < best[1] ? edge : best,
+  );
+  return distance < DROP_EDGE ? nearest : "center";
 }
 
 /** 葉の並びで次 (+1) / 前 (-1) の面 (端では回る)。 */
