@@ -18,8 +18,8 @@ import {
   looksLikeBase64,
   MAX_PASTE_IMAGE_BYTES,
   PASTE_IMAGE_DIR,
-  pasteImageExtension,
   pastedImageName,
+  pasteImageExtension,
 } from "../../core/terminal-paste";
 
 /** 同じ秒に貼った画像の連番の上限。超えたら保存を断る (理由つき)。 */

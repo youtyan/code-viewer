@@ -13,7 +13,6 @@
 //
 // 書き込みは実装しない (applyMutations 未定義)。閲覧専用の接続として扱う。
 
-import { formatErrorDetail } from "../../../core/error-detail";
 import type {
   DbColumn,
   DbForeignKey,
@@ -22,6 +21,7 @@ import type {
   DbTableInfo,
   DbValue,
 } from "../../../core/database/types";
+import { formatErrorDetail } from "../../../core/error-detail";
 import type { RawDbValue } from "../serialize";
 import {
   buildRowKeyJson,

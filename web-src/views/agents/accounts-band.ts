@@ -31,6 +31,7 @@ import {
 import { formatErrorDetail } from "../../core/error-detail";
 import { CHEVRON_DOWN_16_PATH, iconSvg, KEBAB_16_PATH } from "../../core/icons";
 import { showContextMenu } from "../context-menu";
+import { accountTagList } from "./account-tags";
 import type { AccountsClient } from "./accounts-client";
 import {
   type AccountDialogs,
@@ -40,7 +41,6 @@ import {
   resultLine,
   runningCount,
 } from "./accounts-dialogs";
-import { accountTagList } from "./account-tags";
 import type { AccountsText } from "./accounts-i18n";
 import { usageCheckBlock, usageCheckMenuItem } from "./usage-check";
 import {

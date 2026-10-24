@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
+import { ACCOUNTS_AGENT_HELP } from "../server/accounts-cli";
 import {
   AGENT_GUIDES,
   buildAgentHelpIndex,
   parseAgentHelpArgs,
 } from "../server/agent-help";
-import { ACCOUNTS_AGENT_HELP } from "../server/accounts-cli";
 import { ANNOTATE_AGENT_HELP } from "../server/annotate-cli";
 import { DOCTOR_AGENT_HELP } from "../server/doctor-agent-help";
 import { FILE_AGENT_HELP } from "../server/file-cli";
