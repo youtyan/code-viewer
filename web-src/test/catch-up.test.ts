@@ -3,6 +3,7 @@ import {
   catchUpKind,
   createCatchUpGate,
   shouldAutoLoadForRoute,
+  sseUpdatePlan,
 } from "../core/catch-up";
 import type { AppRoute } from "../core/routes";
 
@@ -127,6 +128,85 @@ describe("diff catch-up policy", () => {
       expected: "diff" | "files" | null;
     }) => {
       expect(catchUpKind(route, options)).toBe(expected);
+    },
+  );
+
+  // ファイル一覧はどの画面にも出ているので、どの画面でも自動更新に従う。
+  // フォルダ表示のときだけ合わせていた間は、ファイルを開いている間に足した
+  // ファイルが一覧に出なかった (2 行目)。
+  const blob: AppRoute = {
+    screen: "file",
+    path: "README.md",
+    ref: "worktree",
+    view: "blob",
+    range,
+  };
+  test.each([
+    {
+      name: "the viewed file changed",
+      route: blob,
+      autoUpdate: true,
+      viewedFileUnchanged: false,
+      expected: { fileList: true, body: "load" },
+    },
+    {
+      name: "another file was added while a file is open",
+      route: blob,
+      autoUpdate: true,
+      viewedFileUnchanged: true,
+      expected: { fileList: true, body: null },
+    },
+    {
+      name: "diff of the worktree",
+      route: { screen: "diff", range },
+      autoUpdate: true,
+      viewedFileUnchanged: false,
+      expected: { fileList: true, body: "load" },
+    },
+    {
+      name: "database",
+      route: { screen: "database", range },
+      autoUpdate: true,
+      viewedFileUnchanged: false,
+      expected: { fileList: true, body: null },
+    },
+    {
+      name: "auto update off: the viewed file changed",
+      route: blob,
+      autoUpdate: false,
+      viewedFileUnchanged: false,
+      expected: { fileList: false, body: "banner" },
+    },
+    {
+      name: "auto update off: another file was added while a file is open",
+      route: blob,
+      autoUpdate: false,
+      viewedFileUnchanged: true,
+      expected: { fileList: false, body: null },
+    },
+    {
+      name: "auto update off: diff of the worktree",
+      route: { screen: "diff", range },
+      autoUpdate: false,
+      viewedFileUnchanged: false,
+      expected: { fileList: false, body: "banner" },
+    },
+  ] as const)(
+    "file change notice, $name",
+    ({
+      route,
+      autoUpdate,
+      viewedFileUnchanged,
+      expected,
+    }: {
+      route: AppRoute;
+      autoUpdate: boolean;
+      viewedFileUnchanged: boolean;
+      expected: ReturnType<typeof sseUpdatePlan>;
+    }) => {
+      expect(sseUpdatePlan(route, { autoUpdate, viewedFileUnchanged })).toEqual(
+        expected,
+      );
     },
   );
 

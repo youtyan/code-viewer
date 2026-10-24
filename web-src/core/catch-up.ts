@@ -25,12 +25,35 @@ export function shouldAutoLoadForRoute(
 }
 
 /**
+ * ファイルの変更の通知 (SSE の update をまとめた後) で読み直すもの。
+ * - fileList: ファイル一覧はどの画面にも出ているので、本文の画面と関係なく
+ *   自動更新の設定だけで決める (フォルダ表示のときだけ合わせていた間は、
+ *   ファイルを開いている間に増えたファイルが一覧に出なかった)
+ * - body: 本文を読み直す ("load")・帯で知らせる ("banner")・触らない (null)。
+ *   ファイルを開いているときは、見ているファイルが変わったときだけ
+ */
+export function sseUpdatePlan(
+  route: AppRoute,
+  options: {
+    autoUpdate: boolean;
+    historyWorktreeSelected?: boolean;
+    /** ファイルを開いていて、通知のパスがそのファイルに届かない。 */
+    viewedFileUnchanged: boolean;
+  },
+): { fileList: boolean; body: "load" | "banner" | null } {
+  const fileList = options.autoUpdate;
+  if (options.viewedFileUnchanged || !shouldAutoLoadForRoute(route, options))
+    return { fileList, body: null };
+  return { fileList, body: options.autoUpdate ? "load" : "banner" };
+}
+
+/**
  * 見えていなかった間 (SSE が切れていた・タブが背面だった) の変更の取り直し方。
  * その間の変更は通知が来ないので、戻ったときに必ず取り直す。
  * - "diff": 差分を読み直す (`load({ force: true })`)
  * - "files": Files の木と blob は差分を持たないので、変わったパスが不明な
  *   SSE の更新と同じ道 (`scheduleSseLoad(null)`) で取り直す
- * - null: 自動で読み直さない画面
+ * - null: 本文を自動で読み直さない画面 (ファイル一覧は同じく `scheduleSseLoad(null)`)
  */
 export function catchUpKind(
   route: AppRoute,
