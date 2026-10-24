@@ -36,12 +36,10 @@ import {
   type PaneSide,
   pushClosed,
   reopenClosed,
-  setCollapsed,
   type Tab,
   type TabTarget,
   tabGroups,
 } from "../core/main-tabs";
-import { mergeLayouts } from "../core/main-tabs-merge";
 import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import { lastTabNumber } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
@@ -129,13 +127,9 @@ async function loadMainTabs(
   const saved = saves.get(file);
   return saved ? { kind: "ok", ...saved } : { kind: "none" };
 }
-async function saveMainTabs(
-  file: string,
-  write: { baseRev: number | null; base: unknown; layout: unknown },
-): Promise<{ kind: "ok"; rev: number; layout: unknown; merged: false }> {
+async function saveMainTabs(file: string, layout: unknown): Promise<void> {
   const rev = (saves.get(file)?.rev ?? 0) + 1;
-  saves.set(file, { rev, layout: write.layout });
-  return { kind: "ok", rev, layout: write.layout, merged: false };
+  saves.set(file, { rev, layout });
 }
 
 beforeEach(() => {
@@ -264,24 +258,12 @@ function openWindow(
     loadSaved: async () => {
       const loaded = await loadMainTabs(file);
       return loaded.kind === "ok"
-        ? { layout: loaded.layout, rev: loaded.rev, root }
-        : { layout: null, rev: null, root };
+        ? { layout: loaded.layout, root }
+        : { layout: null, root };
     },
-    save: (layout, _keepalive, base) => {
-      // 保存は 1 本ずつ (サーバではファイルのロックが順に通す。ここでロックの
-      // 待ちに入ると、その再試行の時計が happy-dom の下で進まない)。
-      const written = saveQueue
-        .then(() =>
-          saveMainTabs(file, {
-            baseRev: base.rev,
-            base: base.layout,
-            layout,
-          }),
-        )
-        .then((saved) => {
-          if (saved.kind !== "ok") throw new Error(`not saved: ${saved.kind}`);
-          return saved;
-        });
+    save: (layout) => {
+      // 保存は 1 本ずつ (書いた順に読み戻せるように)。
+      const written = saveQueue.then(() => saveMainTabs(file, layout));
       saveQueue = written.then(
         () => undefined,
         () => undefined,
@@ -629,18 +611,12 @@ describe("サーバの再起動・保存の失敗", () => {
       errors.push(args);
     });
     const win = openWindow(w, A, fileRoute("a1.ts"), {
-      save: async (layout, _keepalive, base) => {
+      save: async (layout) => {
         if (fail) {
           fail = false;
           throw new Error("sample: the server restarted");
         }
-        const saved = await saveMainTabs(file, {
-          baseRev: base.rev,
-          base: base.layout,
-          layout,
-        });
-        if (saved.kind !== "ok") throw new Error(`not saved: ${saved.kind}`);
-        return saved;
+        await saveMainTabs(file, layout);
       },
     });
     await win.handle.restore({ keepSavedFront: true });
@@ -886,44 +862,6 @@ describe("不具合の再現: 読み直すと、一覧から消えたプロジ�
   });
 });
 
-describe("不具合の再現: 2 つの窓で同時に畳む・開くと、片方の操作が消える", () => {
-  const P = "/work/alpha";
-  const Q = "/work/beta";
-  function base() {
-    let layout = emptyLayout();
-    for (const [path, project] of [
-      ["p.ts", P],
-      ["q.ts", Q],
-    ] as const)
-      layout = openTab(
-        layout,
-        { kind: "file", path, project },
-        { preview: false, newId: () => path },
-      );
-    return layout;
-  }
-
-  test.each([
-    {
-      name: "この窓は P を、相手は Q を畳んだ",
-      from: base(),
-      mine: (l: ReturnType<typeof base>) => setCollapsed(l, P, true),
-      theirs: (l: ReturnType<typeof base>) => setCollapsed(l, Q, true),
-      expected: [P, Q],
-    },
-    {
-      name: "両方畳んであったのを、この窓は P を、相手は Q を開いた",
-      from: setCollapsed(setCollapsed(base(), P, true), Q, true),
-      mine: (l: ReturnType<typeof base>) => setCollapsed(l, P, false),
-      theirs: (l: ReturnType<typeof base>) => setCollapsed(l, Q, false),
-      expected: [],
-    },
-  ])("$name", ({ from, mine, theirs, expected }) => {
-    const merged = mergeLayouts(from, mine(from), theirs(from)).layout;
-    expect([...(merged.collapsed ?? [])].sort()).toEqual(expected);
-  });
-});
-
 describe("不具合の再現: スマホの幅から戻ると、右の面がグループの順に並ばない", () => {
   test("スマホの幅で右の面を預けている間にグループの並びが変わると、戻した右の面がグループの順に並ばない", async () => {
     const changes: Array<() => void> = [];
@@ -963,70 +901,5 @@ describe("不具合の再現: スマホの幅から戻ると、右の面がグ�
     } finally {
       window.matchMedia = originalMatchMedia;
     }
-  });
-});
-
-describe("不具合の再現: 読み直すと、別の窓が最後に保存した前面がこの窓の前面になる", () => {
-  test("この窓の前面はファイル (URL もそのファイル)、別の窓はシェルを前面にして後から保存した", async () => {
-    const w = world();
-    const mine = await seed(w);
-    const other = openWindow(w, A, fileRoute("a1.ts"));
-    await other.handle.restore({ keepSavedFront: true });
-    other.handle.openTerminal("shell-b");
-    await other.save();
-    await mine.handle.refreshFromServer();
-    await settle();
-    expect(labelOf(mine.handle.front() as Tab)).toBe("a1.ts");
-    const again = await reload(w, mine, A);
-    const front = again.handle.front();
-    expect([again.url(), front ? labelOf(front) : "-"]).toEqual([
-      "a1.ts",
-      "a1.ts",
-    ]);
-  });
-
-  test("窓の保存 (sessionStorage) が使えなくても読み直せる (保存した配置の前面になり、理由を 1 度出す)", async () => {
-    const error = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const broken: Pick<Storage, "getItem" | "setItem"> = {
-      getItem: () => {
-        throw new Error("sample storage is unavailable");
-      },
-      setItem: () => {
-        throw new Error("sample storage is unavailable");
-      },
-    };
-    const w = world();
-    const mine = openWindow(w, A, fileRoute("a1.ts"), {
-      windowStorage: broken,
-    });
-    await mine.handle.restore();
-    mine.keep(fileRoute("a1.ts"));
-    await mine.save();
-    const other = openWindow(w, A, fileRoute("a1.ts"));
-    await other.handle.restore({ keepSavedFront: true });
-    other.handle.openTerminal("shell-b");
-    await other.save();
-    await mine.handle.refreshFromServer();
-    await settle();
-    const again = await reload(w, mine, A);
-    const front = again.handle.front();
-    const reports = error.mock.calls.filter((call) =>
-      String(call[0]).includes("window storage"),
-    );
-    error.mockRestore();
-    expect({
-      front: front ? labelOf(front) : "-",
-      reports: reports.map((call) => String((call[1] as Error).message)),
-    }).toEqual({
-      // 今までの動き: 保存した配置の前面 (最後に書いた窓のシェル)。
-      front: "shell-b",
-      // 窓ごとに 1 度 (元の窓と、読み直した窓)。
-      reports: [
-        "sample storage is unavailable",
-        "sample storage is unavailable",
-      ],
-    });
   });
 });

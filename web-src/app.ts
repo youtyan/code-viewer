@@ -345,7 +345,6 @@ import {
   type PanesView,
   routeTarget,
   type SavedTabs,
-  type SavedWrite,
   SPLIT_DIVIDER_WIDTH,
   shellGroupOf,
   type ViewScreen,
@@ -509,8 +508,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         });
   /** 1 枚の画面: 読み込んだ窓の面の並び (フォーカスのある面のタブを読み書きする)。 */
   let SINGLE_WORKSPACE: Workspace | null = null;
-  /** 面: host へ送ったタブの配置の版 (面の中だけで数える)。 */
-  let PANE_TABS_REV = 0;
   /** host: 面が最後に知らせたプロジェクト。 */
   let WORKSPACE_PROJECT_ROOT: string | null = null;
   const $$ = <T extends Element = HTMLElement>(sel: string): T[] =>
@@ -1988,7 +1985,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (WORKSPACE_ROLE === "pane") {
       if (!PANE_BRIDGE) throw new Error("the pane bridge is not started yet");
       const hello = await PANE_BRIDGE.hello;
-      return { layout: hello.layout, rev: PANE_TABS_REV, root: SERVER_ROOT };
+      return { layout: hello.layout, root: SERVER_ROOT };
     }
     if (!WORKSPACE_STORE) throw new Error("this window has no workspace store");
     const loaded = await WORKSPACE_STORE.load(
@@ -1999,18 +1996,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     const pane = loaded.workspace.panes[loaded.workspace.focused];
     return {
       layout: pane?.layout ?? null,
-      rev: 0,
       root: loaded.root,
       ...(loaded.newer !== null ? { newer: loaded.newer } : {}),
     };
   }
 
   /** タブを書く (面は host へ送る。1 枚の画面はフォーカスのある面に書く)。 */
-  function saveTabs(layout: SerializedLayout, keepalive: boolean): SavedWrite {
+  async function saveTabs(
+    layout: SerializedLayout,
+    keepalive: boolean,
+  ): Promise<void> {
     const written = withTerminalTmux(layout, (session) =>
       TAB_TMUX_PLACES.get(session),
     );
-    PANE_TABS_REV += 1;
     if (PANE_BRIDGE) PANE_BRIDGE.send({ type: "tabs", layout: written });
     else if (WORKSPACE_STORE && SINGLE_WORKSPACE) {
       const focused = SINGLE_WORKSPACE.focused;
@@ -2030,7 +2028,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       WORKSPACE_STORE.save(SINGLE_WORKSPACE);
       if (keepalive) WORKSPACE_STORE.flush(true);
     }
-    return { rev: PANE_TABS_REV, layout: written, merged: false };
   }
 
   /**
@@ -11196,8 +11193,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         return;
       }
       catchUpMissedChanges("reconnect");
-      // 切れていた間のタブの変更 (SSE の tabs は届いていない)。
-      void MAIN_TABS.refreshFromServer();
     });
   }
 
@@ -11382,8 +11377,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     scheduleEventSourceConnect();
     catchUpMissedChanges("visible");
     void ANNOTATIONS_UI?.refreshAnnotations();
-    // 裏にあった間は SSE を切っているので、別の窓のタブの変更を取り直す。
-    void MAIN_TABS.refreshFromServer();
     refreshLook();
   });
   // 面の窓の focus は、host のサイドバーとの行き来でも来る。窓ごと離れた (別の
@@ -11406,7 +11399,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     scheduleEventSourceConnect();
     catchUpMissedChanges("visible");
     void ANNOTATIONS_UI?.refreshAnnotations();
-    void MAIN_TABS.refreshFromServer();
     refreshLook();
   });
 })();

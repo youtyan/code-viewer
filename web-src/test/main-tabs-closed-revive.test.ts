@@ -161,7 +161,6 @@ describe("本文の画面のタブを閉じてから読み直しても、閉じ�
     {
       name: "前面がターミナルの間に Data を閉じた (本文は残った Diff へ)",
       saved: layoutOf(["df", "db", "sh"], "sh"),
-      where: "here",
       body: "diff",
       front: "sh",
       after: ["diff", "shell-agent"],
@@ -169,7 +168,6 @@ describe("本文の画面のタブを閉じてから読み直しても、閉じ�
     {
       name: "前面の Data を閉じた (前面も本文も Diff へ)",
       saved: layoutOf(["df", "db"], "db"),
-      where: "here",
       body: "diff",
       front: "df",
       after: ["diff"],
@@ -177,53 +175,22 @@ describe("本文の画面のタブを閉じてから読み直しても、閉じ�
     {
       name: "最後の画面のタブを閉じた (本文はフォルダ表示へ)",
       saved: layoutOf(["db", "sh"], "sh"),
-      where: "here",
       body: "repo",
       front: "sh",
       after: ["shell-agent"],
     },
-    {
-      name: "別の窓で閉じたのが届いた (本文は残った Diff へ)",
-      saved: layoutOf(["df", "db", "sh"], "sh"),
-      where: "other",
-      body: "diff",
-      front: "sh",
-      after: ["diff", "shell-agent"],
-    },
-  ] as const)("$name", async ({ saved, where, body, front, after }) => {
-    let serverLayout: unknown = saved;
-    let serverRev = 1;
+  ] as const)("$name", async ({ saved, body, front, after }) => {
     const first = openWindow(saved, pageRoute("database"), {
-      loadSaved: async () => ({
-        layout: serverLayout,
-        rev: serverRev,
-        root: ROOT,
-      }),
+      loadSaved: async () => ({ layout: saved, root: ROOT }),
     });
     // 本文 (URL) は database。前面がターミナルなら `/database?terminal=…`。
     await first.handle.restore({ keepSavedFront: true });
     expect(first.tabs()).toContain("database");
 
-    let written: unknown;
-    if (where === "here") {
-      first.handle.closeTab("db");
-      first.handle.flush(false);
-      await Promise.resolve();
-      written = first.saves[first.saves.length - 1];
-    } else {
-      written = {
-        ...saved,
-        panes: [
-          {
-            ...saved.panes[0],
-            tabs: saved.panes[0].tabs.filter((tab) => tab.id !== "db"),
-          },
-        ],
-      };
-      serverLayout = written;
-      serverRev = 2;
-      await first.handle.refreshFromServer();
-    }
+    first.handle.closeTab("db");
+    first.handle.flush(false);
+    await Promise.resolve();
+    const written = first.saves[first.saves.length - 1];
     const closed = {
       tabs: first.tabs(),
       front: first.front(),

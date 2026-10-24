@@ -24,11 +24,9 @@
 // そのプロジェクトへ移る (deps.switchProject。読み直し)。別のプロジェクトの
 // ファイル・シェル・画像はその場で出す (面の箱。app.ts)。
 //
-// 保存は全プロジェクト共通の 1 つ (/_state/tabs)。読み戻しが済むまでは保存しない
-// (起動直後の 1 枚だけの配置で、保存してあった配置を上書きしないため)。前に読んだ
-// 版 (base と rev) を添えて書き、別の窓が先に書いていればサーバが重ねて返す。別の
-// 窓の変更は SSE (tabs) で知り、refreshFromServer で取り直して重ねる
-// (core/main-tabs-merge.ts)。
+// 保存は窓ごと (面の中は外側のページへ送り、1 枚の画面は窓ごとの保存へ書く。
+// app.ts)。読み戻しが済むまでは保存しない (起動直後の 1 枚だけの配置で、保存して
+// あった配置を上書きしないため)。窓どうしで重ねない。
 
 import type {
   AgentOverviewResponse,
@@ -104,7 +102,6 @@ import {
   WORKTREE_REF,
   withProject,
 } from "../../core/main-tabs";
-import { mergeLayouts } from "../../core/main-tabs-merge";
 import { projectInitials } from "../../core/project-colors";
 import type { AppRoute } from "../../core/routes";
 import type { ShellSession } from "../../core/shell";
@@ -241,15 +238,8 @@ export type MainTabsDeps = {
    * アプリより新しい版のファイル (書かない)、migration は前の版の保存を移した報告。
    */
   loadSaved(): Promise<SavedTabs>;
-  /**
-   * 書く。base は前に読んだ・書いた保存 (まだ無ければ rev と layout が null)。
-   * 返すのは書いた版の番号と値 (merged なら、別の窓の保存と重ねた値)。
-   */
-  save(
-    layout: SerializedLayout,
-    keepalive: boolean,
-    base: SavedBase,
-  ): Promise<SavedWrite | undefined>;
+  /** 書く。keepalive はページを離れるとき。失敗は reject する。 */
+  save(layout: SerializedLayout, keepalive: boolean): Promise<void>;
   /** 新しいタブの id。窓どうしでぶつからない値 (既定は乱数)。 */
   newTabId?(): string;
   /** プロジェクトの色・頭文字・名前 (知らなければ null。名前はパスの末尾で出す)。 */
@@ -359,15 +349,10 @@ export type MainTabsDeps = {
 
 export type SavedTabs = {
   layout: unknown;
-  rev?: number | null;
   root?: string | null;
   newer?: number;
   migration?: unknown;
 };
-
-export type SavedBase = { rev: number | null; layout: SerializedLayout | null };
-
-export type SavedWrite = { rev: number; layout: unknown; merged: boolean };
 
 /** 電話の段のタブの一覧の 1 行 (左の面のタブと、預けた右の面のタブ)。 */
 export type TabListEntry = {
@@ -518,8 +503,6 @@ export type MainTabsHandle = {
    * して保存し、そのタブを返す (無ければ null: 移った先はフォルダ表示)。
    */
   prepareProjectSwitch(root: string): Tab | null;
-  /** 保存を取り直し、別の窓の変更をこの窓の配置に重ねる (SSE の tabs・取り直し)。 */
-  refreshFromServer(): Promise<void>;
   /** テストと確認用。 */
   layout(): Layout;
 };
@@ -671,20 +654,10 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   /** このページのプロジェクトの根 (読み戻しで知る。知らなければ null)。 */
   let currentRoot: string | null = null;
-  /**
-   * 前に読んだ・書いた保存 (版の番号と値)。書くときに添え、別の窓の変更を重ねる
-   * ときの元にする (core/main-tabs-merge.ts)。
-   */
-  let base: { rev: number | null; layout: SerializedLayout | null } = {
-    rev: null,
-    layout: null,
-  };
-  /** 書いている最中か。書き終わるまで次の書き込みは待たせる (同じ base で 2 本送らない)。 */
+  /** 書いている最中か。書き終わるまで次の書き込みは待たせる (古い配置を後から書かない)。 */
   let saving = false;
   /** 書いている間に次の保存を頼まれた (書き終わったら書く)。 */
   let saveAgain = false;
-  /** 書いている間に取り直しを頼まれた (書き終わったら取り直す)。 */
-  let refreshAgain = false;
   let dragId: string | null = null;
   /**
    * 窓が 2 面を出せる幅より狭い間、預かっている右の面 (fitToWidth)。この間の
@@ -1291,9 +1264,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     if (!saveTimer) return;
     clearTimeout(saveTimer);
     saveTimer = null;
-    // 書いている最中なら、書き終わってから今の配置を書く (同じ base で 2 本送ると、
-    // 自分の 1 本目を別の窓の変更として重ねることになる)。ページを離れるときは
-    // 待てないので送る (サーバが重ねる)。
+    // 書いている最中なら、書き終わってから今の配置を書く (前の書き込みが後から
+    // 届いて今の配置を古い値で戻さない)。ページを離れるときは待てないので送る。
     if (saving && !keepalive) {
       saveAgain = true;
       return;
@@ -1302,16 +1274,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   }
 
   async function send(keepalive: boolean): Promise<void> {
-    const sentLayout = fullLayout();
-    const sent = serializeLayout(sentLayout, savedPageRoute);
     saving = true;
     try {
-      const written = await deps.save(sent, keepalive, baseToSend());
-      if (!written) return;
-      const remote = parseLayout(written.layout);
-      // 別の窓の保存と重ねて書いた: 重ねた値を、送った後のこの窓の変更と合わせる。
-      if (written.merged) applyRemote(sentLayout, remote);
-      base = { rev: written.rev, layout: written.layout as SerializedLayout };
+      await deps.save(serializeLayout(fullLayout(), savedPageRoute), keepalive);
     } catch (error) {
       console.error("[code-viewer] main tabs could not be saved", error);
     } finally {
@@ -1320,107 +1285,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         saveAgain = false;
         scheduleSave();
       }
-      if (refreshAgain) {
-        refreshAgain = false;
-        void refreshFromServer();
-      }
     }
-  }
-
-  /**
-   * 前に読んだ保存を、この窓のグループの順に並べ直した配置。この窓はグループの順に
-   * 並べ直して持つ (normalize) ので、並べ直す前の値と比べると、並べ直しただけの
-   * タブを「この窓で動かした」と数え、別の窓が右へ移したタブを古い場所へ戻していた。
-   */
-  function baseLayout(): Layout | null {
-    if (!base.layout) return null;
-    const saved = parseLayout(base.layout).layout;
-    return regroupIn(saved, layout, saved);
-  }
-
-  /** 書くときに添える base (並べ直した値。サーバはこれと比べて重ねる)。 */
-  function baseToSend(): SavedBase {
-    const from = baseLayout();
-    return { rev: base.rev, layout: from ? serializeLayout(from) : null };
-  }
-
-  /** 窓の間で共有する中身 (タブの並び・仮か・畳んだグループ)。前面は窓ごと。 */
-  function sharedSignature(target: Layout): string {
-    const pane = (side: PaneSide) =>
-      (side === "left" ? target.panes.left : target.panes.right)?.tabs.map(
-        (tab) => [tab.id, tab.target, tab.preview],
-      ) ?? null;
-    return JSON.stringify([
-      pane("left"),
-      pane("right"),
-      target.collapsed ?? [],
-    ]);
-  }
-
-  /**
-   * 別の窓の変更 (remote) を、この窓の配置に重ねる。from は remote の元になった
-   * この窓の値 (前に読んだ保存か、送った配置)。この窓にしか無い変更が残れば書く。
-   */
-  function applyRemote(
-    from: Layout | null,
-    remote: ReturnType<typeof parseLayout>,
-  ): void {
-    const merged = mergeLayouts(from, fullLayout(), remote.layout);
-    for (const [mine, theirs] of merged.renamed) {
-      const route = routes.get(mine);
-      routes.delete(mine);
-      if (route && !routes.has(theirs)) routes.set(theirs, route);
-    }
-    const fresh: Record<string, SerializedPageRoute> = {};
-    for (const [id, route] of Object.entries(remote.pageRoutes))
-      if (!routes.has(id)) fresh[id] = route;
-    seedPageRoutes(merged.layout, fresh);
-    const differs =
-      sharedSignature(merged.layout) !== sharedSignature(remote.layout);
-    commit(merged.layout, "stay", null, { save: differs });
-  }
-
-  async function refreshFromServer(): Promise<void> {
-    if (!saveEnabled) return;
-    // 書いている最中は、書いた結果が base を進める。書き終わってから取り直す。
-    if (saving) {
-      refreshAgain = true;
-      return;
-    }
-    let saved: SavedTabs;
-    try {
-      saved = await deps.loadSaved();
-    } catch (error) {
-      console.error(
-        "[code-viewer] main tabs: the saved layout could not be reloaded after another window changed it",
-        error,
-      );
-      return;
-    }
-    const rev = saved.rev ?? null;
-    // 版の番号は書くたびに進む。この窓が知っている版より新しいときだけ重ねる: 取り
-    // 直しの答えが、この窓の保存より前の版のまま後から届くことがある (それを重ねると、
-    // この窓がした分割などを古い値で戻していた)。
-    if (
-      rev === null ||
-      (base.rev !== null && rev <= base.rev) ||
-      saved.layout === null
-    )
-      return;
-    let remote: ReturnType<typeof parseLayout>;
-    try {
-      remote = parseLayout(saved.layout);
-    } catch (error) {
-      console.error(
-        "[code-viewer] main tabs: the layout saved by another window is broken; this window keeps its tabs. saved value:",
-        JSON.stringify(saved.layout),
-        error,
-      );
-      return;
-    }
-    const from = baseLayout();
-    base = { rev, layout: saved.layout as SerializedLayout };
-    applyRemote(from, remote);
   }
 
   /**
@@ -3064,13 +2929,6 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       openUrlRight();
       return;
     }
-    base = {
-      rev: loaded.rev ?? null,
-      layout:
-        saved === null || saved === undefined
-          ? null
-          : (saved as SerializedLayout),
-    };
     if (saved === null || saved === undefined) {
       saveEnabled = true;
       relayout();
@@ -3102,8 +2960,6 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         JSON.stringify(saved),
         error,
       );
-      // 退避した値は重ねる元にしない (この窓の配置で書き直す)。
-      base = { rev: base.rev, layout: null };
       saveEnabled = true;
       relayout();
       scheduleSave();
@@ -3386,7 +3242,6 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       scheduleSave();
     },
     prepareProjectSwitch,
-    refreshFromServer,
     layout: () => layout,
   };
 }

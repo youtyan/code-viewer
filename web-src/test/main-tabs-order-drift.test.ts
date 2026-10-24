@@ -1,5 +1,5 @@
 // メインの面のタブ列 (#main-tabs) が、利用者が何もしていないのに並び替わる経路の
-// 再現と、直した後の回帰テスト (1〜3 とも直した)。
+// 再現と、直した後の回帰テスト (1・2 とも直した)。
 //
 // 1. グループの並びが「左の一覧の並び」になっていなかった。PROJECT_LOOKS.order() が
 //    エージェント一覧の応答の projects の並び (tmux のペインの順が先、登録簿が後)
@@ -10,16 +10,11 @@
 //    ときにそのタブがグループの末尾へ行っていた (regroup は「今の位置」で並べ直す
 //    ため)。直した: 分からない間は控えのまま (shellGroupOf)、外れて戻ったタブは
 //    元の左隣の右へ (main-tabs-view の returnHome)。この節は緑。
-// 3. 2 つの窓が同時に並べ替えると、どちらも動かしていないタブが端へ飛んだ
-//    (mergeLayouts が「すぐ左のタブが変わった」タブを全部「動かした」と数えた)。
-//    直した: 動かしたタブは最長共通部分列に入らないものだけ (乱数の回帰テストは
-//    main-tabs-merge.test.ts)。
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { groupAgentPanesByPlace } from "../core/agent-overview";
-import type { Layout, Tab, TabTarget } from "../core/main-tabs";
-import { mergeLayouts } from "../core/main-tabs-merge";
+import type { TabTarget } from "../core/main-tabs";
 import type { RegisteredProjectInfo } from "../core/projects";
 import type { AppRoute } from "../core/routes";
 import type { ShellSession } from "../core/shell";
@@ -556,47 +551,4 @@ describe("shellGroupOf (シェルのタブのグループ)", () => {
       ).toBe(expected);
     },
   );
-});
-
-describe("2 つの窓が同時に並べ替える (mergeLayouts)", () => {
-  const tab = (id: string): Tab => ({
-    id,
-    preview: false,
-    target: { kind: "file", path: `${id}.ts`, project: ALPHA },
-  });
-  const one = (ids: string[]): Layout => ({
-    panes: {
-      left: { tabs: ids.map(tab), activeId: ids[0], recent: [ids[0]] },
-    },
-    focused: "left",
-  });
-
-  // base は両方の窓が前に読んだ保存、theirs は別の窓が先に書いた保存、mine は
-  // この窓の配置。サーバ (main-tabs-store.ts の saveMainTabs) は、この窓の base の
-  // 版が古いとき mergeSerializedLayouts でこれを重ねて書く。
-  test.each([
-    {
-      name: "両方の窓が 1 つずつ動かした: x はどちらも動かしていない",
-      // この窓: c を b の前へ。別の窓: a を x の前へ。
-      base: ["x", "a", "b", "c"],
-      mine: ["x", "a", "c", "b"],
-      theirs: ["a", "x", "b", "c"],
-      // 前は a c b x (x が右端へ飛んだ)。
-      expected: ["a", "x", "c", "b"],
-    },
-    {
-      name: "この窓だけが動かし、別の窓は右端に開いただけ: a・b は誰も動かしていない",
-      // この窓: 左端に m を開き、c を m の右へ。別の窓: 右端に t を開いた。
-      base: ["a", "b", "c"],
-      mine: ["m", "c", "a", "b"],
-      theirs: ["a", "b", "c", "t"],
-      // 前は b m c a t (a が b の右へ飛んだ)。
-      expected: ["m", "c", "a", "b", "t"],
-    },
-  ])("$name", ({ base, mine, theirs, expected }) => {
-    const merged = mergeLayouts(one(base), one(mine), one(theirs));
-    expect(merged.layout.panes.left.tabs.map((item) => item.id)).toEqual(
-      expected,
-    );
-  });
 });
