@@ -9772,6 +9772,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     onNotificationClick: (pane) => openAgentPane(pane.id),
     actionHeaders,
+    // 面は外側のページが取った一覧を受け取る (面ごとに tmux を問い合わせない)。
+    ...(WORKSPACE_ROLE === "pane"
+      ? {
+          relay: {
+            requestRefresh: () => PANE_BRIDGE?.send({ type: "agents-refresh" }),
+          },
+        }
+      : {}),
   });
   AGENT_MONITOR.subscribe(() => {
     PANE_VIEW.refreshHeader();
@@ -11221,6 +11229,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       })(),
       homeUrl: () => pageUrl("/"),
       onHidden: showHiddenPanes,
+      onAgentsRefresh: () => void AGENT_MONITOR.refresh(),
       onLocation: (project) => {
         if (!project) return;
         const moved = project.root !== WORKSPACE_PROJECT_ROOT;
@@ -11234,6 +11243,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       onLookChanged: refreshLook,
       onNavCollapsed: applyNavCollapsedFromOtherSide,
     });
+  // 外側のページが取ったエージェントの一覧を面へ配る。
+  if (WORKSPACE_HOST) {
+    const host = WORKSPACE_HOST;
+    AGENT_MONITOR.subscribe(() =>
+      host.share({ type: "agents", ...AGENT_MONITOR.latest() }),
+    );
+  }
   if (WORKSPACE_ROLE === "pane")
     PANE_BRIDGE = startPaneBridge({
       project: () => {
@@ -11290,6 +11306,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         return;
       case "close-tab":
         MAIN_TABS.closeTab(command.id);
+        return;
+      case "agents":
+        AGENT_MONITOR.receive(command);
         return;
       case "split-front": {
         const front = MAIN_TABS.front();

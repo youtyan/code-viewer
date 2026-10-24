@@ -66,6 +66,8 @@ async function mountBoard(
     snapshot: () => snapshot,
     subscribe: () => () => undefined,
     markRead: () => undefined,
+    latest: () => ({ overview: snapshot.overview, error: snapshot.error }),
+    receive: () => undefined,
     permission: () => extra.permission ?? "granted",
     requestPermission: async () => "granted",
   };

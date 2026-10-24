@@ -11,6 +11,7 @@
 // シェル・タブの配置) は面が host に知らせる。面の並び (分ける・閉じる・フォーカス) と
 // 保存は host が持つ (core/workspace.ts)。
 
+import type { AgentOverviewResponse } from "./agent-overview";
 import type { KeymapAction } from "./keymap";
 import type { SerializedLayout } from "./main-tabs";
 import type { AppRoute } from "./routes";
@@ -115,6 +116,8 @@ export type PaneMessage =
   | ({ type: "drag-start"; tabId: string } & TabCarry)
   /** 掴むのをやめた (落とした後も来る)。 */
   | { type: "drag-end" }
+  /** エージェントの一覧を取り直してほしい (面は自分では取り直さない)。 */
+  | { type: "agents-refresh" }
   /** 利用者が面の最後のタブを閉じた (面が 2 つ以上なら host が面を閉じる)。 */
   | { type: "emptied" }
   /** 面の並びの操作 (キー)。 */
@@ -145,6 +148,12 @@ export type HostCommand =
   | { type: "open-terminal"; session: string }
   /** そのタブを閉じる (別の面へ落として移した)。 */
   | { type: "close-tab"; id: string }
+  /** 外側のページが取ったエージェントの一覧 (面はこれを使う)。 */
+  | {
+      type: "agents";
+      overview: AgentOverviewResponse | null;
+      error: string;
+    }
   /** 面を分ける (キー)。面は前面のタブで split を送り返す。 */
   | { type: "split-front"; dir: SplitDir }
   /** 面が 2 つ以上あるか・この面にフォーカスがあるか (フォーカスの印)。 */
@@ -185,6 +194,7 @@ const PANE_MESSAGE_TYPES: readonly PaneMessage["type"][] = [
   "workspace-action",
   "drag-start",
   "drag-end",
+  "agents-refresh",
 ];
 
 const HOST_COMMAND_TYPES: readonly HostCommand["type"][] = [
@@ -200,6 +210,7 @@ const HOST_COMMAND_TYPES: readonly HostCommand["type"][] = [
   "close-terminal",
   "open-terminal",
   "close-tab",
+  "agents",
   "split-front",
   "focus-state",
 ];
