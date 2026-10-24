@@ -390,14 +390,45 @@ test("the sidebar head drops the totals below 22em", () => {
   ).toBe("none");
 });
 
-// 一覧の見出し: 題は省略しない。大・特大の既定の幅 (17.5em 以下) では、全部
-// 開く / 畳むを 2 段目へ下ろす (日本語・特大で題が「フ…」になった)。素の規則と
-// 合わせて重ねて、段の規則が勝つこと (前に書くと詳細度が同じ素の grid-area が
-// 勝ち、段が効かなかった)。
+// 一覧の見出し: 題は省略しない。大・特大の既定の幅 (17.5em 以下) では、変更
+// ファイルの一覧の全部開く / 畳むを 2 段目へ下ろす (日本語・特大で題が「フ…」に
+// なった)。素の規則と合わせて重ねて、段の規則が勝つこと (前に書くと詳細度が同じ
+// 素の grid-area が勝ち、段が効かなかった)。ファイル一覧は下ろさない (1 段目に
+// 切替が無く、下ろす先の列の幅が 0 で、操作が絞り込みの上に重なった)。
 test.each([
-  [":is(#sidebar, #file-list) .sb-head > .sb-actions", "2 / 5 / auto / 7"],
-  [":is(#sidebar, #file-list) .sb-head > .sb-filter-wrap", "2 / 1 / auto / 5"],
-])("narrow sidebar head: %s is placed at %s", (selector, expected) => {
+  {
+    name: "changes list actions go to the second row",
+    selectors: [
+      ":is(#sidebar, #file-list) .sb-head > .sb-actions",
+      "#sidebar .sb-head > .sb-actions",
+    ],
+    expected: "2 / 5 / auto / 7",
+  },
+  {
+    name: "changes list filter leaves room for them",
+    selectors: [
+      ":is(#sidebar, #file-list) .sb-head > .sb-filter-wrap",
+      "#sidebar .sb-head > .sb-filter-wrap",
+    ],
+    expected: "2 / 1 / auto / 5",
+  },
+  {
+    name: "file list actions stay on the first row",
+    selectors: [
+      ":is(#sidebar, #file-list) .sb-head > .sb-actions",
+      "#file-list .sb-head > .sb-actions",
+    ],
+    expected: "actions",
+  },
+  {
+    name: "file list filter takes the whole second row",
+    selectors: [
+      ":is(#sidebar, #file-list) .sb-head > .sb-filter-wrap",
+      "#file-list .sb-head > .sb-filter-wrap",
+    ],
+    expected: "filter",
+  },
+])("narrow sidebar head: $name", ({ selectors, expected }) => {
   expect(
     cascadedDeclarations(
       allRules.filter(
@@ -405,7 +436,7 @@ test.each([
           rule.atRule === null ||
           rule.atRule === "@container sidebar-head (max-width: 17.5em)",
       ),
-      (candidate) => candidate === selector,
+      (candidate) => selectors.includes(candidate),
     ).get("grid-area"),
   ).toBe(expected);
 });

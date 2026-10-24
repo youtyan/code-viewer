@@ -1666,9 +1666,10 @@ export function createRepoView(deps: RepoViewDeps) {
   let REPO_SIDEBAR_REFRESHING = false;
   let REPO_SIDEBAR_REFRESH_QUEUED = false;
 
-  // SSE 更新時のサイドバー再検証。invalidateRepoSidebar + 全再構築と違い、
-  // 既存 DOM とスクロール位置を温存したままサーバーの最新ツリーに合わせる。
+  // ファイル一覧をサーバーの最新ツリーに合わせる (再読み込みのボタン)。
+  // invalidateRepoSidebar + 全再構築と違い、既存 DOM とスクロール位置を温存する。
   // 進行中に次の更新が来たら完了後にもう一度だけ走らせ、取りこぼさない。
+  // 取り直せなかったら今のツリーは残し、失敗を投げる (ボタンが理由を出す)。
   async function refreshRepoSidebar(): Promise<void> {
     const project = projectGeneration;
     const ref = activeRepoTreeRef();
@@ -1720,22 +1721,24 @@ export function createRepoView(deps: RepoViewDeps) {
         );
         return;
       }
-      // 取り直しは次の SSE か手動更新で追いつくので、今のツリーはそのまま
-      // 残す。ただし失敗した事実と理由は捨てない。
-      console.error(
-        "[code-viewer] repository sidebar refresh failed",
-        ref,
-        error,
-      );
+      throw errorWithCause(`refresh the file list (${ref})`, error);
     } finally {
       if (project === projectGeneration) {
         REPO_SIDEBAR_REFRESHING = false;
         if (REPO_SIDEBAR_REFRESH_QUEUED) {
           REPO_SIDEBAR_REFRESH_QUEUED = false;
-          void refreshRepoSidebar();
+          followRepoSidebar();
         }
       }
     }
+  }
+
+  // ファイルの変更の通知で、待たずにファイル一覧を合わせる。取り直しは次の
+  // 通知か再読み込みのボタンで追いつくので、失敗は console に全文を残すだけ。
+  function followRepoSidebar(): void {
+    refreshRepoSidebar().catch((error: unknown) => {
+      console.error("[code-viewer] file list refresh failed", error);
+    });
   }
 
   return {
@@ -1763,6 +1766,7 @@ export function createRepoView(deps: RepoViewDeps) {
       invalidateRepoSidebar();
     },
     refreshRepoSidebar,
+    followRepoSidebar,
     showTrashError,
   };
 }

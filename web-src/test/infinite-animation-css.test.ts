@@ -9,6 +9,7 @@ import { expect, test } from "vitest";
 import { loadStyleSheet } from "./_css-fixture";
 
 const REVIEWED = [
+  "#file-list-reload.spinning svg",
   "#load-bar.active::after",
   "#reload-prom.spinning svg",
   "#reload.spinning",

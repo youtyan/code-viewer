@@ -479,40 +479,27 @@ describe("the file list on screens other than Files", () => {
 });
 
 describe("repo sidebar refresh failures", () => {
-  test.each([
-    {
-      name: "navigation cancellation",
-      error: new DOMException("cancelled by user", "AbortError"),
-      level: "info" as const,
-    },
-    {
-      name: "request failure",
-      error: new Error("sample failure"),
-      level: "error" as const,
-    },
-  ])(
-    "retains the reason for $name after project reset",
-    async ({ error, level }) => {
-      installFilelistDocument(() => true);
-      const pending = deferred<Response>();
-      globalThis.fetch = (() => pending.promise) as typeof fetch;
-      const log = vi.spyOn(console, level);
-      const { view } = makeRepoView(
-        { screen: "repo", ref: "worktree", path: "", range },
-        {
-          repoMode: true,
-          repoSidebarRef: "worktree",
-          repoSidebarDomReady: true,
-        },
-      );
-      const refreshing = view.refreshRepoSidebar();
-      view.resetProject();
-      pending.reject(error);
-      await refreshing;
-      expect(log.mock.calls.flat()).toContain(error);
-      log.mockRestore();
-    },
-  );
+  // 別のプロジェクトへ移って取り消された取り直しは失敗ではない (再読み込みの
+  // ボタンに失敗を出さない)。理由は info に残す。
+  test("a refresh cancelled by a project switch resolves and keeps the reason", async () => {
+    installFilelistDocument(() => true);
+    const pending = deferred<Response>();
+    globalThis.fetch = (() => pending.promise) as typeof fetch;
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const { view } = makeRepoView(
+      { screen: "repo", ref: "worktree", path: "", range },
+      { repoMode: true, repoSidebarRef: "worktree", repoSidebarDomReady: true },
+    );
+    const error = new DOMException("cancelled by user", "AbortError");
+
+    const refreshing = view.refreshRepoSidebar();
+    view.resetProject();
+    pending.reject(error);
+    await refreshing;
+
+    expect(info.mock.calls.flat()).toContain(error);
+    info.mockRestore();
+  });
 
   // 直す前は catch が引数を受け取らず、console にも画面にも理由が残らなかった
   // (同じファイルのほかの 3 か所は理由を出していた)。
@@ -560,7 +547,51 @@ describe("repo sidebar refresh failures", () => {
     errors.mockRestore();
   });
 
-  test("keeps the tree and logs the HTTP status and body of a failed refresh", async () => {
+  // 失敗しても今のツリーは残し、理由 (HTTP の状態と本文) ごと投げる。再読み込みの
+  // ボタンがそれを出す。別のプロジェクトへ移った後の失敗も、取り消しではないので投げる。
+  test.each([
+    { name: "a failed refresh", during: () => undefined },
+    {
+      name: "a refresh that fails after a project switch",
+      during: (view: { resetProject(): void }) => view.resetProject(),
+    },
+  ])(
+    "$name keeps the tree and throws the HTTP status and body",
+    async ({ during }) => {
+      installFilelistDocument(() => true);
+      const pending = deferred<Response>();
+      globalThis.fetch = (() => pending.promise) as typeof fetch;
+      const { view, calls } = makeRepoView(
+        { screen: "repo", ref: "worktree", path: "", range },
+        {
+          repoMode: true,
+          repoSidebarRef: "worktree",
+          repoSidebarDomReady: true,
+        },
+      );
+
+      const refreshing = view.refreshRepoSidebar();
+      during(view);
+      pending.resolve(
+        new Response("tree read failed: sample cause", {
+          status: 500,
+          statusText: "Internal Server Error",
+        }),
+      );
+
+      await expect(refreshing).rejects.toMatchObject({
+        message: "refresh the file list (worktree)",
+        cause: {
+          message:
+            "refresh repository tree (HTTP 500 Internal Server Error): tree read failed: sample cause",
+        },
+      });
+      expect(calls.sidebarRenders).toEqual([]);
+    },
+  );
+
+  // ファイルの変更の通知からの取り直しは待たないので、失敗は console に全文を残す。
+  test("following a file change logs a failed refresh with its whole reason", async () => {
     installFilelistDocument(() => true);
     globalThis.fetch = (async () =>
       new Response("tree read failed: sample cause", {
@@ -570,20 +601,23 @@ describe("repo sidebar refresh failures", () => {
     const errors = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
-    const { view, calls } = makeRepoView(
+    const { view } = makeRepoView(
       { screen: "repo", ref: "worktree", path: "", range },
       { repoMode: true, repoSidebarRef: "worktree", repoSidebarDomReady: true },
     );
 
-    await view.refreshRepoSidebar();
+    view.followRepoSidebar();
 
-    expect(calls.sidebarRenders).toEqual([]);
-    expect(errors).toHaveBeenCalledTimes(1);
-    const [message, ref, error] = errors.mock.calls[0];
-    expect([message, ref, (error as Error).message]).toEqual([
-      "[code-viewer] repository sidebar refresh failed",
-      "worktree",
-      "refresh repository tree (HTTP 500 Internal Server Error): tree read failed: sample cause",
+    await vi.waitFor(() => expect(errors).toHaveBeenCalledTimes(1));
+    expect(errors.mock.calls[0]).toMatchObject([
+      "[code-viewer] file list refresh failed",
+      {
+        message: "refresh the file list (worktree)",
+        cause: {
+          message:
+            "refresh repository tree (HTTP 500 Internal Server Error): tree read failed: sample cause",
+        },
+      },
     ]);
     errors.mockRestore();
   });

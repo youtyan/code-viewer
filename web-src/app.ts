@@ -32,6 +32,7 @@ import {
   catchUpKind,
   createCatchUpGate,
   shouldAutoLoadForRoute,
+  sseUpdatePlan,
 } from "./core/catch-up";
 import { changedPathsCoverPath } from "./core/changed-paths";
 import {
@@ -46,6 +47,7 @@ import {
   isTerminalTone,
   type TerminalTone,
 } from "./core/color-themes";
+import { showCopyFailure } from "./core/copy-failure";
 import {
   errorWithCause,
   formatErrorDetail,
@@ -2473,6 +2475,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     handleSidebarContextMenu,
     invalidateRepoSidebar,
     refreshRepoSidebar,
+    followRepoSidebar,
     showTrashError,
   } = REPO_VIEW;
 
@@ -2599,6 +2602,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       sidebar: {
         files: string;
         actions: string;
+        reload: string;
         expandAll: string;
         collapseAll: string;
         view: string;
@@ -2769,6 +2773,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       sidebar: {
         files: "Files",
         actions: "sidebar actions",
+        reload: "reload the file list",
         expandAll: "expand all folders",
         collapseAll: "collapse all folders",
         view: "view",
@@ -3035,6 +3040,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       sidebar: {
         files: "ファイル",
         actions: "サイドバー操作",
+        reload: "ファイル一覧を読み直す",
         expandAll: "すべてのフォルダを開く",
         collapseAll: "すべてのフォルダを閉じる",
         view: "表示",
@@ -3394,6 +3400,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
 
     syncSidebarTitle();
+    const fileListReload =
+      document.querySelector<HTMLButtonElement>("#file-list-reload");
+    if (fileListReload) {
+      fileListReload.title = text.sidebar.reload;
+      fileListReload.setAttribute("aria-label", text.sidebar.reload);
+    }
     // ファイル一覧と変更ファイルの一覧の見出しの操作と絞り込み。
     for (const dom of [FILE_LIST_DOM, CHANGES_LIST_DOM]) {
       document
@@ -5600,6 +5612,29 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   SIDEBAR.bindTreeActions();
   FILE_LIST.bindTreeActions();
+  // ファイル一覧の再読み込み。開いたフォルダとスクロール位置は残して、増えた・
+  // 消えたファイルだけを合わせる (本文には触れない)。
+  const FILE_LIST_RELOAD = $("#file-list-reload");
+  FILE_LIST_RELOAD.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+  FILE_LIST_RELOAD.addEventListener("click", () => {
+    if (FILE_LIST_RELOAD.classList.contains("spinning")) return;
+    FILE_LIST_RELOAD.classList.add("spinning");
+    FILE_LIST_RELOAD.setAttribute("aria-busy", "true");
+    refreshRepoSidebar()
+      .catch((error: unknown) => {
+        showCopyFailure(
+          FILE_LIST_RELOAD,
+          "reloading the file list failed",
+          error,
+          uiText().sidebar.reload,
+          6000,
+        );
+      })
+      .finally(() => {
+        FILE_LIST_RELOAD.classList.remove("spinning");
+        FILE_LIST_RELOAD.setAttribute("aria-busy", "false");
+      });
+  });
   $("#doctor-btn")?.addEventListener("click", (event) => {
     event.preventDefault();
     toggleDoctorSheet();
@@ -10696,6 +10731,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     ?.addEventListener("click", () => {
       const paths = bannerPendingPaths;
       hideChangeBanner();
+      followRepoSidebar();
       const route = STATE.route;
       if (!shouldAutoLoadCurrentRoute(route)) return;
       if (isBlobOrBlameFileRoute(route)) {
@@ -10756,11 +10792,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     if (route.screen === "repo") {
       // サイドバーのキャッシュは破棄しない。invalidate すると全消去・全再構築が
-      // 走ってスクロール位置と展開状態が飛ぶ。refreshRepoSidebar が既存 DOM を
-      // 温存したまま最新ツリーに合わせ、loadRepo はシグネチャ比較で同一内容の
-      // 再構築をスキップする。
+      // 走ってスクロール位置と展開状態が飛ぶ。ファイル一覧は scheduleSseLoad が
+      // 合わせ、loadRepo はシグネチャ比較で同一内容の再構築をスキップする。
       void loadRepo();
-      void refreshRepoSidebar();
       return;
     }
     if (route.screen !== "diff" && route.screen !== "history") {
@@ -10788,7 +10822,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   let sseTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingSseChangedPaths: Set<string> | null = new Set();
   function scheduleSseLoad(changedPaths?: string[] | null) {
-    if (!shouldAutoLoadCurrentRoute()) return;
     if (changedPaths && pendingSseChangedPaths) {
       for (const p of changedPaths) pendingSseChangedPaths.add(p);
     } else {
@@ -10800,15 +10833,17 @@ window.GdpExpandLogic = GdpExpandLogic;
       const paths = pendingSseChangedPaths;
       pendingSseChangedPaths = new Set();
       const route = STATE.route;
-      if (isBlobOrBlameFileRoute(route)) {
-        const viewingPath = route.path;
-        if (viewingPath && !changedPathsCoverPath(paths, viewingPath)) return;
-      }
-      if (STATE.autoUpdate) {
-        doSseLoad(paths);
-      } else {
-        showChangeBanner(paths);
-      }
+      const plan = sseUpdatePlan(route, {
+        autoUpdate: STATE.autoUpdate,
+        historyWorktreeSelected: HISTORY_VIEW.isWorktreeSelected(),
+        viewedFileUnchanged:
+          isBlobOrBlameFileRoute(route) &&
+          !!route.path &&
+          !changedPathsCoverPath(paths, route.path),
+      });
+      if (plan.fileList) followRepoSidebar();
+      if (plan.body === "load") doSseLoad(paths);
+      if (plan.body === "banner") showChangeBanner(paths);
     }, 350);
   }
 
@@ -10935,11 +10970,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function catchUpMissedChanges(reason: CatchUpReason) {
+    if (!catchUpGate(reason)) return;
     const historyWorktreeSelected = HISTORY_VIEW.isWorktreeSelected();
     const kind = catchUpKind(STATE.route, { historyWorktreeSelected });
-    if (!kind) return;
-    if (!catchUpGate(reason)) return;
-    if (kind === "files") {
+    // 本文を読み直さない画面でも、ファイル一覧は scheduleSseLoad が合わせる。
+    if (kind !== "diff") {
       scheduleSseLoad(null);
       return;
     }
@@ -10947,6 +10982,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       showChangeBanner(null);
       return;
     }
+    followRepoSidebar();
     void load({ force: true });
   }
 

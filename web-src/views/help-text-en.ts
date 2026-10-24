@@ -423,6 +423,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 code("*.ts"),
                 " a glob.",
               ],
+              "The file list follows files you add or delete. With auto update off, reload it with the button above the list.",
               "Relative links in Markdown lead where they do on GitHub.",
               "A symbolic link shows “→ target” and opens its target.",
               "Folder listings show the last commit date and the local modified date, and each can be sorted.",

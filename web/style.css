@@ -20455,13 +20455,17 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
    開く / 畳むを 2 段目へ下ろす (絞り込みが見出しの中にある画面ではその右、無い
    画面では 2 段目が増える。見出しの高さは sidebar.ts が測って
    --sidebar-head-h に書くので、下に貼り付く絞り込みはずれない)。自分の grid の
-   区画は container の中から変えられないので、線で置き直す。 */
+   区画は container の中から変えられないので、線で置き直す。
+   下ろすのは変更ファイルの一覧だけ。ファイル一覧の 1 段目には切替が無く、下ろす
+   先の列の幅が 0 なので、操作 (再読み込み・全部開く / 畳む) が絞り込みの上に重なり、
+   特大では絞り込みが 96px まで細った。ファイル一覧は操作を 1 段目に残し、2 段目を
+   絞り込みに渡す (最も狭い 180px・特大だけ題が縮む)。 */
 @container sidebar-head (max-width: 17.5em) {
-  :is(#sidebar, #file-list) .sb-head > .sb-actions {
+  #sidebar .sb-head > .sb-actions {
     grid-area: 2 / 5 / auto / 7;
     justify-self: end;
   }
-  :is(#sidebar, #file-list) .sb-head > .sb-filter-wrap {
+  #sidebar .sb-head > .sb-filter-wrap {
     grid-area: 2 / 1 / auto / 5;
   }
 }
@@ -20478,6 +20482,19 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 .view-head-row > #sidebar-toggle:hover {
   background: var(--color-raised);
   color: var(--color-text);
+}
+/* ファイル一覧の再読み込み: 取り直している間は絵を回す。失敗したら失敗の色
+   (理由は title。app.ts の FILE_LIST_RELOAD)。 */
+#file-list-reload.spinning svg {
+  animation: gdp-spin 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  #file-list-reload.spinning svg {
+    animation: none;
+  }
+}
+#file-list-reload.failed {
+  color: var(--color-failed);
 }
 :is(#sidebar, #file-list) .sb-head .sb-view-seg button {
   height: calc(var(--ui-control-sm) - var(--space-1));
