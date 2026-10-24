@@ -109,7 +109,7 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
 
 | どこが受けるか | 経路 | 決めるもの |
 |---|---|---|
-| 入口 | 画面のファイル・`/_agent/*`・`/_tmux/*`・`/_shell/*`・`/_worktree/open|stop`・`/_entry*` (`/_entry/backend` = 選んでいるプロジェクトの裏の状態) | `core/api-url.ts` の zone `entry` |
+| 入口 | 画面のファイル・`/_agent/*`・`/_tmux/*`・`/_shell/*`・`/_live*`・`/_worktree/open|stop`・`/_entry*` (`/_entry/backend` = 選んでいるプロジェクトの裏の状態) | `core/api-url.ts` の zone `entry` |
 | 裏 (入口が取り次ぐ) | それ以外の経路全部 (`/_settings`・`/_doctor`・`/_state/*` を含む) | zone `project` |
 
 - **新しい経路は `api-url.ts` の表に zone 付きで足す。** zone を間違えると、入口の下では
@@ -125,7 +125,16 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
   元のエラーを持つ 504 (`backend-timeout`) にする。見出しを受け取った後はダウンロードなどを
   通信停止で切らない。SSE は裏が 15 秒ごとに送る heartbeat の 3 倍、データが来なければ切る。
   ブラウザが要求を止めた場合は、これらの時間切れより先に裏への要求を止める
-- `/events` は最初に `retry:`（`server/runtime.ts` の `SSE_RETRY_MS`）を送り、切れた後の
+- **画面が張りっぱなしにする接続は 1 窓 1 本 (`/_live`)。** ブラウザは同じサーバへの接続を
+  6 本までしか張らない (HTTP/1.1) ので、知らせごとに EventSource を開くと、端末とページの
+  通知で残りの取得が詰まる。プロジェクトの通知・シェルの出力・SP のペインの出力は
+  `server/live/handle.ts` のチャンネルとして載せ、画面は `views/shell/live-hub.ts` の
+  `openLiveSource` (EventSource と同じ形) で開く。**新しい流しを足すときもチャンネルにし、
+  `new EventSource` を書かない** (`web-src/test/api-url-guard.test.ts` が落とす)。プロジェクトの通知のチャンネルは、入口ではブラウザと同じ
+  `/p/<鍵>/events` の取り次ぎ (`handleProjectPath`。`acquire` で数える) を通すので、購読の間は
+  裏を止めない
+- `/events` と `/_live` は最初に `retry:`（`core/live.ts` の `SSE_RETRY_MS`。サーバが閉じた
+  チャンネルの開き直しも同じだけ待つ）を送り、切れた後の
   ブラウザの繋ぎ直しを既定の約 3 秒より早める（入口を起動し直した後に画面が追いつくまでの
   待ちの大半だった）。**切れていた間の変更は通知されない**ので、繋ぎ直し（`open`）・
   タブが前面に戻ったとき・窓のフォーカスで `app.ts` の `catchUpMissedChanges` が取り直す。

@@ -1,8 +1,9 @@
-// SP の 1 ペイン表示の HTTP 入口。attach せずに 1 つのペインを映し、入力を送る。
+// SP の 1 ペイン表示。attach せずに 1 つのペインを映し、入力を送る。
 //
-// - GET  /_tmux/pane-stream?pane=%3  ペインの今 (snapshot) と続きの出力を SSE で流す
-//   (pane-watch.ts)。知らせは snapshot / output / gone / failed
-// - POST /_tmux/pane-input           ペインへ打鍵 (keys)・文字 (text)・Enter を送る
+// - startPaneStream  ペインの今 (snapshot) と続きの出力を流す (pane-watch.ts)。
+//   知らせは snapshot / output / gone / failed。流しは生きた知らせのチャンネル
+//   (live/handle.ts)
+// - POST /_tmux/pane-input  ペインへ打鍵 (keys)・文字 (text)・Enter を送る
 //
 // 文字は bracketed paste で貼る (paste-buffer -p)。アプリが求めていれば貼り付けの
 // 印で囲むので、改行を含む文を書きかけで送信せずに渡せる。一時バッファは貼った
@@ -10,55 +11,44 @@
 
 import { formatErrorDetail } from "../../core/error-detail";
 import { MAX_KEY_INPUT_LENGTH } from "../../core/shell";
-import { isTmuxPaneId } from "../../core/tmux";
+import { isTmuxPaneId, type TmuxPaneId } from "../../core/tmux";
 import { json, parsePostJsonBody, textError } from "../database/handle-shared";
-import { createSseStreamGroup } from "../sse-stream";
+import type { SseStream } from "../sse-stream";
 import { runTmux, tmuxLiteralArg } from "./command";
-import { closeAllPaneWatches, watchTmuxPane } from "./pane-watch";
+import { watchTmuxPane } from "./pane-watch";
 
-const PANE_STREAMS = createSseStreamGroup();
-
-/** サーバの終了時。流しと、その元の control mode のクライアントを全部閉じる。 */
-export function closePaneStreams(): void {
-  PANE_STREAMS.closeAll();
-  closeAllPaneWatches();
-}
-
-export function handlePaneStream(url: URL, cwd: string): Response {
-  const pane = url.searchParams.get("pane");
-  if (!isTmuxPaneId(pane)) return textError("invalid pane id", 400);
-  return PANE_STREAMS.open((stream) => {
-    const failed = (error: Error) => {
-      console.error(`[code-viewer] tmux pane stream failed (${pane})`, error);
-      stream.send(
-        "failed",
-        JSON.stringify({ error: formatErrorDetail(error) }),
-      );
-      stream.close();
-    };
-    const gone = () => {
-      stream.send("gone", "1");
-      stream.close();
-    };
-    watchTmuxPane(pane, cwd, {
-      snapshot: (snapshot) => stream.send("snapshot", JSON.stringify(snapshot)),
-      output: (data) => stream.send("output", JSON.stringify({ data })),
-      gone,
-      failed,
-    }).then(
-      (result) => {
-        if (result.status === "ok") stream.onClose(result.stop);
-        else if (result.status === "gone") gone();
-        else failed(result.error);
-      },
-      (error: unknown) =>
-        failed(
-          error instanceof Error
-            ? error
-            : new Error(`tmux pane watch threw ${String(error)}`),
-        ),
-    );
-  });
+export function startPaneStream(
+  pane: TmuxPaneId,
+  cwd: string,
+  stream: SseStream,
+): void {
+  const failed = (error: Error) => {
+    console.error(`[code-viewer] tmux pane stream failed (${pane})`, error);
+    stream.send("failed", JSON.stringify({ error: formatErrorDetail(error) }));
+    stream.close();
+  };
+  const gone = () => {
+    stream.send("gone", "1");
+    stream.close();
+  };
+  watchTmuxPane(pane, cwd, {
+    snapshot: (snapshot) => stream.send("snapshot", JSON.stringify(snapshot)),
+    output: (data) => stream.send("output", JSON.stringify({ data })),
+    gone,
+    failed,
+  }).then(
+    (result) => {
+      if (result.status === "ok") stream.onClose(result.stop);
+      else if (result.status === "gone") gone();
+      else failed(result.error);
+    },
+    (error: unknown) =>
+      failed(
+        error instanceof Error
+          ? error
+          : new Error(`tmux pane watch threw ${String(error)}`),
+      ),
+  );
 }
 
 type PaneInput = {

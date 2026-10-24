@@ -153,6 +153,8 @@ export type XtermTerminal = {
   blur(): void;
   clear(): void;
   reset(): void;
+  /** start〜end の行を描き直す (0 始まり、end を含む)。 */
+  refresh(start: number, end: number): void;
   dispose(): void;
   loadAddon(addon: XtermAddon): void;
   onData(handler: (data: string) => void): XtermDisposable;

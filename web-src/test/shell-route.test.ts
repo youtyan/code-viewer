@@ -26,13 +26,13 @@ describe("shell route dispatch", () => {
     expect(await call("/_shell/nope")).toBeNull();
   });
 
-  test.each([
-    { name: "rejects POST on the list", path: "/_shell/list" },
-    { name: "rejects POST on the stream", path: "/_shell/stream" },
-  ])("$name", async ({ path }) => {
-    const res = await call(path, { method: "POST" });
-    expect(res?.status).toBe(405);
-  });
+  test.each([{ name: "rejects POST on the list", path: "/_shell/list" }])(
+    "$name",
+    async ({ path }) => {
+      const res = await call(path, { method: "POST" });
+      expect(res?.status).toBe(405);
+    },
+  );
 
   test.each([
     { name: "rejects GET on create", path: "/_shell/create" },
@@ -42,21 +42,6 @@ describe("shell route dispatch", () => {
   ])("$name", async ({ path }) => {
     const res = await call(path);
     expect(res?.status).toBe(405);
-  });
-});
-
-describe("shell stream id validation", () => {
-  // 有効な id を渡すと購読が始まってしまうので、弾かれる値だけを見る。
-  test.each([
-    { name: "rejects a missing id", query: "" },
-    { name: "rejects an empty id", query: "?id=" },
-    { name: "rejects a tmux pane id", query: "?id=%2512" },
-    { name: "rejects a bare suffix", query: "?id=abc123" },
-    { name: "rejects a shell metacharacter", query: "?id=shell-abc;id" },
-    { name: "rejects a path traversal attempt", query: "?id=shell-../etc" },
-  ])("$name", async ({ query }) => {
-    const res = await call(`/_shell/stream${query}`);
-    expect(res?.status).toBe(400);
   });
 });
 

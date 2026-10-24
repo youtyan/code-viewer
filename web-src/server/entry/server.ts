@@ -406,12 +406,13 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
       },
     },
     {
-      label: "code-viewer shell stream close",
-      run: async () => (await import("../shell/handle")).closeShellStreams(),
+      label: "code-viewer live stream close",
+      run: async () => (await import("../live/handle")).closeLiveStreams(),
     },
     {
-      label: "code-viewer tmux pane stream close",
-      run: async () => (await import("../tmux/pane-stream")).closePaneStreams(),
+      label: "code-viewer tmux pane watch close",
+      run: async () =>
+        (await import("../tmux/pane-watch")).closeAllPaneWatches(),
     },
     {
       label: "code-viewer shell session close",
@@ -922,6 +923,35 @@ async function handleEntryRequest(
   const asset = staticFile(path);
   if (asset) return asset;
 
+  if (path === "/_live" || path === "/_live/channels") {
+    const { handleLiveRoute } = await import("../live/handle");
+    const deps = {
+      // 入口のプロジェクトの通知は /p/<鍵>/events。ブラウザが取りに来たのと
+      // 同じ道 (裏を起こす・購読を数える・取り次ぐ) を通す。
+      openEvents: (project: string | null) => {
+        if (project === null)
+          return Promise.resolve(
+            textError(
+              "the entry server serves project events under /p/<key>/events",
+              404,
+            ),
+          );
+        const eventsUrl = new URL(`/p/${project}/events`, url);
+        return handleProjectPath(
+          ctx,
+          new Request(eventsUrl),
+          eventsUrl,
+          publicOrigin,
+        );
+      },
+      paneCwd: async (request: Request) =>
+        (await selectedRoot(ctx, request)) ?? ctx.launchRoot,
+    };
+    return (
+      (await handleLiveRoute(req, url, deps, mutationAllowed)) ??
+      textError("not found", 404)
+    );
+  }
   const isAgent = path.startsWith("/_agent/");
   const isTmux = path.startsWith("/_tmux/");
   const isShell = path.startsWith("/_shell/");

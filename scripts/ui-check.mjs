@@ -19,6 +19,8 @@
 //   {"do":"key","key":"Escape"}  (code・vk・mods を足せる)
 //   {"do":"type","text":"ls -la"}  焦点のある所へ文字を入れて Enter ("enter":false で押さない)
 //   {"do":"eval","label":"名前","js":"document.title"}  値を results.json に残す
+//   {"do":"init","js":"window.__seen = []"}  この後に開くページで、ページのスクリプトより
+//     先に走らせる (EventSource を包んで数えるなど。次の goto から効く)
 //   {"do":"shot","name":"after-dark"} / {"do":"shot","name":"menu","sel":".gdp-context-menu"}
 //   {"do":"wait","ms":500}
 //
@@ -130,6 +132,11 @@ try {
     },
     async eval(step) {
       return evaluate(step.js);
+    },
+    async init(step) {
+      await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+        source: step.js,
+      });
     },
     async settings(step) {
       // プロジェクトの URL (/p/<鍵>/) の下の設定。入口の直下ではない。

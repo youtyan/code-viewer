@@ -57,6 +57,21 @@ describe("server paths go through apiUrl()", () => {
     expect(lines.some((line) => SERVER_PATH_LITERAL.test(line))).toBe(true);
   });
 
+  // 画面が張りっぱなしにする接続は 1 窓 1 本 (/_live)。ほかの場所で EventSource を
+  // 開くと、ブラウザが同じサーバへ張れる 6 本 (HTTP/1.1) を食い、取得が詰まる。
+  test("only the live hub opens an EventSource", () => {
+    const offenders = frontendSources()
+      .filter((file) => file !== "web-src/views/shell/live-hub.ts")
+      .flatMap((file) =>
+        readFileSync(file, "utf8")
+          .split("\n")
+          .map((line, index) => ({ line, at: `${file}:${index + 1}` }))
+          .filter(({ line }) => /\bnew EventSource\(/.test(line))
+          .map(({ line, at }) => `${at}: ${line.trim()}`),
+      );
+    expect(offenders).toEqual([]);
+  });
+
   test("no other frontend file writes a server path literal", () => {
     const offenders: string[] = [];
     for (const file of frontendSources()) {

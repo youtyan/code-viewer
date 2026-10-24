@@ -379,6 +379,7 @@ import {
   rememberEarlyLook,
   rememberEarlyProject,
 } from "./views/shell/early-look";
+import { type LiveSource, openLiveSource } from "./views/shell/live-hub";
 import {
   CHANGES_LIST_DOM,
   createSidebar,
@@ -10849,7 +10850,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const catchUpGate = createCatchUpGate(() => Date.now(), 1000);
   let openedOnce = false;
-  let eventSource: EventSource | null = null;
+  let eventSource: LiveSource | null = null;
   let eventSourceConnectTimer: number | null = null;
 
   function shouldConnectEventSource(): boolean {
@@ -10868,7 +10869,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function connectEventSource(): void {
     if (!shouldConnectEventSource()) return;
     if (eventSource) return;
-    const es = new EventSource(apiUrl("events"));
+    const es = openLiveSource({ kind: "events", project: projectKey() });
     eventSource = es;
     es.addEventListener("update", (event) => {
       const raw = (event as MessageEvent).data;

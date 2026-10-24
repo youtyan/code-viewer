@@ -59,6 +59,7 @@ import {
   type XtermTerminal,
   type XtermTheme,
 } from "../../core/xterm-loader";
+import { type LiveSource, openLiveSource } from "../shell/live-hub";
 import type { TerminalText } from "./i18n";
 import { openImageLightbox } from "./image-lightbox";
 import {
@@ -306,7 +307,7 @@ export function createTerminalScreen(
 
   let term: XtermTerminal | null = null;
   let fitAddon: XtermFitAddon | null = null;
-  let source: EventSource | null = null;
+  let source: LiveSource | null = null;
   let attached: ShellSession | null = null;
   let resizeObserver: ResizeObserver | null = null;
   /** 棚と端末を合わせた箱の大きさを棚に知らせる (狭すぎれば棚を畳む)。 */
@@ -507,6 +508,19 @@ export function createTerminalScreen(
   function refit(): void {
     if (!attached) return;
     scheduleShellResize();
+  }
+
+  // 隠れている間に開いた端末が見えるようになると、xterm は字の大きさを測り直して
+  // 描いた行を作り直し、描き直さない (xterm 6 の RenderService.handleCharSizeChanged)。
+  // 測り直す前に届いた出力が消えたまま残るので、見えるようになった次の描画で全体を
+  // 描き直す (右の面に開いた直後のエージェントの画面が、空のまま残った)。
+  let shownBefore = false;
+  function repaintWhenShown(): void {
+    const box = screenEl.getBoundingClientRect();
+    const shown = box.width >= 1 && box.height >= 1;
+    if (shown && !shownBefore)
+      requestAnimationFrame(() => term?.refresh(0, term.rows - 1));
+    shownBefore = shown;
   }
 
   function scheduleShellResize(): void {
@@ -1670,7 +1684,10 @@ export function createTerminalScreen(
     term = created;
     fitAddon = fit;
     if (!resizeObserver) {
-      resizeObserver = new ResizeObserver(() => refit());
+      resizeObserver = new ResizeObserver(() => {
+        repaintWhenShown();
+        refit();
+      });
       resizeObserver.observe(screenEl);
     }
     if (!roomObserver) {
@@ -1686,9 +1703,7 @@ export function createTerminalScreen(
   }
 
   function openSource(session: ShellSession, myGen: number): void {
-    const stream = new EventSource(
-      `${apiUrl("shellStream")}?id=${encodeURIComponent(session.id)}`,
-    );
+    const stream = openLiveSource({ kind: "shell", id: session.id });
     source = stream;
 
     const stale = () => disposed || myGen !== generation;
@@ -1750,7 +1765,7 @@ export function createTerminalScreen(
       deps.onTargetGone(session);
     });
     stream.onerror = () => {
-      // EventSource は自動で繋ぎ直す。落ちたままなら状態表示だけ残す。
+      // 流しは自動で繋ぎ直す (live-hub)。落ちたままなら状態表示だけ残す。
       if (stale()) return;
       showStatus(deps.getText().connecting);
       if (stream.readyState === EventSource.CLOSED) {

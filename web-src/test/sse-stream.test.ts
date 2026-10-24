@@ -1,4 +1,4 @@
-// ターミナルの出力と SP の 1 ペイン表示が使う、SSE の流し 1 本ずつの作り。
+// 生きた知らせ (/_live) とその中のチャンネルが使う、SSE の流し 1 本ずつの作り。
 // 片付けが呼ばれないと tmux の control mode のクライアントやシェルの購読が残り、
 // まとめて閉じられないとサーバが終了できない。
 
@@ -29,6 +29,29 @@ describe("createSseStreamGroup", () => {
       "text/event-stream",
       'event: snapshot\ndata: {"cols":80}\n\nevent: output\ndata: {"data":"x"}\n\n',
     ]);
+  });
+
+  // 中身が改行を含むと (プロジェクトの通知を載せ替えたとき)、行ごとの data に
+  // しないと枠が崩れ、続く行が知らせの外に出る。
+  test("改行を含む中身は行ごとの data にし、送れていない量を数える", async () => {
+    const group = createSseStreamGroup();
+    let backlog = -1;
+    const response = group.open((stream) => {
+      stream.send("m", "c1 update a\nb\r\nc");
+      backlog = stream.backlog();
+      stream.close();
+    });
+    expect([backlog, await readAll(response)]).toEqual([
+      44,
+      "event: m\ndata: c1 update a\ndata: b\ndata: c\n\n",
+    ]);
+  });
+
+  // 切れた後の繋ぎ直しを EventSource の既定 (約 3 秒) より早める。
+  test("retryMs を渡すと、開いた直後に retry を送る", async () => {
+    const group = createSseStreamGroup({ retryMs: 500 });
+    const response = group.open((stream) => stream.close());
+    expect(await readAll(response)).toBe("retry: 500\n\n");
   });
 
   test.each([

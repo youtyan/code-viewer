@@ -5,8 +5,9 @@
 //
 // デスクトップのターミナルは tmux の画面を自分で描かない。一覧 2 つ (panes /
 // clients) と、ペインを開く 1 つ (open) だけで、キー送信は /_shell/* が持つ。
-// SP の 1 ペイン表示だけは、1 つのペインを流す pane-stream と、そこへ送る
-// pane-input をここに持つ (送ったときの tmux の結果は tmux-pane-input.test.ts)。
+// SP の 1 ペイン表示だけは、1 つのペインへ送る pane-input をここに持つ (送った
+// ときの tmux の結果は tmux-pane-input.test.ts。流しは生きた知らせのチャンネルで、
+// 検証は live-route.test.ts)。
 
 import { describe, expect, test } from "vitest";
 import { handleTmuxRoute } from "../server/tmux/handle";
@@ -33,7 +34,6 @@ describe("tmux route dispatch", () => {
   test.each([
     { name: "rejects POST on the pane list", path: "/_tmux/panes" },
     { name: "rejects POST on the client list", path: "/_tmux/clients" },
-    { name: "rejects POST on the pane stream", path: "/_tmux/pane-stream" },
   ])("$name", async ({ path }) => {
     const res = await call(path, { method: "POST" });
     expect(res?.status).toBe(405);
@@ -45,20 +45,6 @@ describe("tmux route dispatch", () => {
   ])("$name", async ({ path }) => {
     const res = await call(path);
     expect(res?.status).toBe(405);
-  });
-});
-
-describe("tmux pane stream: ペインの id の検証", () => {
-  // 有効な id を渡すと control mode のクライアントを繋いでしまうので、弾かれる値だけを見る。
-  test.each([
-    { name: "rejects a missing pane", query: "" },
-    { name: "rejects an empty pane", query: "?pane=" },
-    { name: "rejects a pane without the prefix", query: "?pane=3" },
-    { name: "rejects a shell id", query: "?pane=shell-abc123" },
-    { name: "rejects a command separator", query: "?pane=%253%3Bid" },
-  ])("$name", async ({ query }) => {
-    const res = await call(`/_tmux/pane-stream${query}`);
-    expect(res?.status).toBe(400);
   });
 });
 

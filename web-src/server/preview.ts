@@ -25,6 +25,7 @@ import {
   type JournalTaskPriority,
   type JournalTaskStatus,
 } from "../core/journal";
+import { SSE_RETRY_MS } from "../core/live";
 import type {
   AnnotationTarget,
   AppSettingsState,
@@ -140,7 +141,6 @@ import {
   readFileTextRange,
   type SpawnStreamExit,
   SSE_HEARTBEAT_INTERVAL_MS,
-  SSE_RETRY_MS,
   startServer,
 } from "./runtime";
 import { DEFAULT_EXCLUDE_NAMES, normalizeGrepMax } from "./search";
@@ -3184,6 +3184,51 @@ function sendSse(event: string, data = "tick") {
   );
 }
 
+/**
+ * このプロジェクトの通知の流し (/events)。入口はブラウザの代わりにこれを取り次ぎ、
+ * 単体のサーバでは生きた知らせ (live/handle.ts) が直接読む。
+ */
+function openEventsResponse(): Response {
+  let ctrl: ReadableStreamDefaultController<Uint8Array>;
+  let keepalive: ReturnType<typeof setInterval>;
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        ctrl = controller;
+        sseClients.add(controller);
+        // 最初の行は注釈 (": ok") にする。`event: open` だと EventSource は
+        // 自分の open に続けてもう 1 度 open を配り、画面は繋ぎ直しと読んで
+        // 開くたびに全部を取り直していた (app.ts の connectEventSource)。
+        controller.enqueue(enc.encode(`retry: ${SSE_RETRY_MS}\n: ok\n\n`));
+        if (watchLimitReached !== null) {
+          controller.enqueue(
+            enc.encode(`event: watch-limit\ndata: ${watchLimitReached}\n\n`),
+          );
+        }
+        keepalive = setInterval(() => {
+          applySseClientOperation(
+            [controller],
+            "heartbeat",
+            removeSseClient,
+            (client) => client.enqueue(enc.encode(": ping\n\n")),
+          );
+        }, SSE_HEARTBEAT_INTERVAL_MS);
+        keepalive.unref?.();
+        sseKeepalives.set(controller, keepalive);
+      },
+      cancel() {
+        if (ctrl) removeSseClient(ctrl);
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+      },
+    },
+  );
+}
+
 function removeSseClient(ctrl: ReadableStreamDefaultController<Uint8Array>) {
   sseClients.delete(ctrl);
   const keepalive = sseKeepalives.get(ctrl);
@@ -3225,7 +3270,7 @@ const agentHandleModule = import("./terminal/handle");
 const worktreeHandleModule = import("./worktree/handle");
 
 const ENTRY_ONLY_PATH =
-  /^\/(?:_tmux|_shell|_agent)\/|^\/_worktree\/(?:open|stop)$/;
+  /^\/(?:_tmux|_shell|_agent)\/|^\/_worktree\/(?:open|stop)$|^\/_live(?:\/channels)?$/;
 
 // 待ち受けに失敗したら理由 (ポートが塞がっていれば次の一手) を 1 回出して終える。
 const server = await startServer({
@@ -3333,6 +3378,25 @@ const server = await startServer({
       );
       if (worktreeResponse) return worktreeResponse;
     }
+    if (url.pathname === "/_live" || url.pathname === "/_live/channels") {
+      const { handleLiveRoute } = await import("./live/handle");
+      const liveResponse = await handleLiveRoute(
+        req,
+        url,
+        {
+          openEvents: async (project) =>
+            project === null
+              ? openEventsResponse()
+              : text(
+                  `this server has no project ${project}; its events are at /events`,
+                  404,
+                ),
+          paneCwd: async () => cwd,
+        },
+        sideEffectRequestAllowed,
+      );
+      if (liveResponse) return liveResponse;
+    }
     if (url.pathname.startsWith("/_shell/")) {
       const { handleShellRoute } = await shellHandleModule;
       const shellResponse = await handleShellRoute(
@@ -3377,48 +3441,7 @@ const server = await startServer({
       triggerUpdate();
       return json({ ok: true, generation });
     }
-    if (url.pathname === "/events") {
-      let ctrl: ReadableStreamDefaultController<Uint8Array>;
-      let keepalive: ReturnType<typeof setInterval>;
-      return new Response(
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            ctrl = controller;
-            sseClients.add(controller);
-            // 最初の行は注釈 (": ok") にする。`event: open` だと EventSource は
-            // 自分の open に続けてもう 1 度 open を配り、画面は繋ぎ直しと読んで
-            // 開くたびに全部を取り直していた (app.ts の connectEventSource)。
-            controller.enqueue(enc.encode(`retry: ${SSE_RETRY_MS}\n: ok\n\n`));
-            if (watchLimitReached !== null) {
-              controller.enqueue(
-                enc.encode(
-                  `event: watch-limit\ndata: ${watchLimitReached}\n\n`,
-                ),
-              );
-            }
-            keepalive = setInterval(() => {
-              applySseClientOperation(
-                [controller],
-                "heartbeat",
-                removeSseClient,
-                (client) => client.enqueue(enc.encode(": ping\n\n")),
-              );
-            }, SSE_HEARTBEAT_INTERVAL_MS);
-            keepalive.unref?.();
-            sseKeepalives.set(controller, keepalive);
-          },
-          cancel() {
-            if (ctrl) removeSseClient(ctrl);
-          },
-        }),
-        {
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-          },
-        },
-      );
-    }
+    if (url.pathname === "/events") return openEventsResponse();
     return text("not found", 404);
   },
 }).catch((error: unknown) => {
@@ -3490,12 +3513,12 @@ const shutdown = createProcessShutdown([
   { label: "code-viewer registry cleanup", run: removeOwnServerRegistry },
   { label: "code-viewer SSE client close", run: closeSseClients },
   {
-    label: "code-viewer shell stream close",
-    run: async () => (await shellHandleModule).closeShellStreams(),
+    label: "code-viewer live stream close",
+    run: async () => (await import("./live/handle")).closeLiveStreams(),
   },
   {
-    label: "code-viewer tmux pane stream close",
-    run: async () => (await import("./tmux/pane-stream")).closePaneStreams(),
+    label: "code-viewer tmux pane watch close",
+    run: async () => (await import("./tmux/pane-watch")).closeAllPaneWatches(),
   },
   {
     label: "code-viewer shell session close",

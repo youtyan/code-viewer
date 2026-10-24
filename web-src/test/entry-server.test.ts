@@ -27,9 +27,9 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import type { AgentStatesResponse } from "../core/agent-state";
 import { PROJECT_HEADER } from "../core/api-url";
+import { SSE_RETRY_MS } from "../core/live";
 import type { RemoteAccessStatus } from "../core/remote-access";
 import type { EntryBackendFailure } from "../core/types";
-import { SSE_RETRY_MS } from "../server/runtime";
 import { rootFileKey } from "../server/server-registry";
 import { runGit } from "./_git-fixture";
 import { fetchPwaAssets, SERVED_PWA_ICONS } from "./_pwa-fixture";
@@ -603,18 +603,46 @@ describe("the entry server", () => {
         ).json()) as { state: string }
       ).state;
 
-    // SSE を購読している間は止めない。
-    const leave = new AbortController();
-    const events = await fetch(`${url}p/${key}/events`, {
-      signal: leave.signal,
+    // 画面がプロジェクトの通知を購読している間は止めない。画面は通知を
+    // 生きた知らせ (/_live) のチャンネルで購読する。
+    const live = await fetch(`${url}_live`);
+    const liveReader = live.body?.getReader();
+    if (!liveReader) throw new Error("/_live has no body");
+    // 流しは retry の行の後に hello を送る (届き方で断片が分かれる)。
+    const readUntil = async (text: string) => {
+      let seen = "";
+      while (!seen.includes(text)) {
+        const chunk = await liveReader.read();
+        if (chunk.done) throw new Error(`/_live ended before ${text}: ${seen}`);
+        seen += new TextDecoder().decode(chunk.value);
+      }
+      return seen;
+    };
+    const hello = await readUntil('"client"');
+    const client = /"client":"([0-9a-f]+)"/.exec(hello)?.[1];
+    const channels = (body: unknown) =>
+      fetch(`${url}_live/channels`, {
+        method: "POST",
+        headers: {
+          Origin: new URL(url).origin,
+          "X-Code-Viewer-Action": "1",
+          "Sec-Fetch-Site": "same-origin",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    const opened = await channels({
+      client,
+      open: [{ ch: "c1", kind: "events", project: key }],
     });
-    await events.body?.getReader().read();
+    expect(opened.status).toBe(200);
+    expect(await readUntil("c1 _open")).toContain("c1 _open");
     const first = backendPid(box, root);
     expect(await backendState()).toBe("running");
     await new Promise((resolve) => setTimeout(resolve, 3000));
     expect(alive(first)).toBe(true);
 
-    leave.abort();
+    expect((await channels({ client, close: ["c1"] })).status).toBe(200);
     expect(await waitUntil(() => !alive(first), 10_000)).toBe(true);
     expect(await backendState()).toBe("idle-stopped");
     // 入口の出力はパイプ越しなので、状態が変わった後に届く。
@@ -629,6 +657,7 @@ describe("the entry server", () => {
     const startedLine = `[code-viewer] entry: started the project process for ${root} again on request (stopped as idle`;
     await waitUntil(() => output().includes(startedLine), 5000);
     expect(output()).toContain(startedLine);
+    await liveReader.cancel();
   }, 30_000);
 
   test("the state of the selected project's process needs a known project", async () => {
