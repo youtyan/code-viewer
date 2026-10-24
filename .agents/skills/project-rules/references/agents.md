@@ -703,11 +703,9 @@ A のアカウントのエージェントの作業を、ログインし直さず
   `--idle-stop` 秒（既定 10 分）経った入口の裏だけ。止めた裏は「落ちた」扱いにせず、次の
   要求で黙って起こす（画面は起こしている間「起動中」を出す）。状態の型（`starting` /
   `running` / `idle-stopped` / `unreachable`）と条件の細部は `server.md` の入口の節
-- **タブは全プロジェクト共通**（2026-09-23 に利用者と決めた。前は
-  プロジェクトに属さないタブだけを共通にし、配置はプロジェクトごとだった）。タブは持ち物の
-  プロジェクトを持ち、タブ列はプロジェクトごとのグループに並ぶ（決まりは `ui-surface.md` の
-  「タブのグループ」）。保存は `main-tabs.json` の 1 つの配置で、窓どうしは版の番号 (`rev`) で
-  突き合わせる（8 の表）。別のプロジェクトのファイルはその場で `/p/<鍵>` から読み、Diff などの画面は
+- **タブは面ごと**（2026-10-24 に利用者と決めた。前は窓全体で 1 つの配置）。タブは持ち物の
+  プロジェクトを持ち、面のタブ列にはその面のプロジェクトのタブだけが並ぶ（決まりは `ui-surface.md` の
+  「面とプロジェクト」）。保存は `main-tabs.json` に窓ごと（8 の表）。別のプロジェクトのファイルはその場で `/p/<鍵>` から読み、Diff などの画面は
   そのプロジェクトへ移って出す。現在のプロジェクト以外の面では、**ファイルを読むことだけ**に限る
   （そのプロジェクトの面に渡す依存からは、注釈・ごみ箱・OS で開く・履歴・定義へ飛ぶ・フォルダ表示を
   外す: 同じパスのこのプロジェクトのファイルに当たる。`app.ts` の `foreignPane`）。切替で
@@ -895,7 +893,7 @@ find web-src -name '*.ts' -not -path 'web-src/server/*' -not -path 'web-src/test
 | `<状態>/agent-usage/` | statusLine を包むスクリプト・claude の使用量・`failures.log` | 同上 |
 | `<状態>/projects.json` | プロジェクトの登録簿（並び・名前・色） | 同上 |
 | `<状態>/settings.json` | 全プロジェクト共通の設定 | 同上 |
-| `<状態>/main-tabs.json` | メインの面のタブの配置（全プロジェクト共通の 1 つ）。形は `{ version: 2, rev, savedAt, layout }`（`server/main-tabs-store.ts`）、配置は `core/main-tabs.ts` の `LAYOUT_VERSION` 5（タブが持ち物のプロジェクトを持つ）。シェルのタブが映していた tmux の場所 `terminalTmux` は省略できる欄なので版を上げない（13）。書くたびに `rev` が進み、画面は前に読んだ `rev` と値を添えて書く。進んでいれば（別の窓が先に書いた）サーバが `core/main-tabs-merge.ts` で重ねて書く。各裏はこのファイルを `watchFile` で見て SSE の `tabs` を送り、画面が取り直す。前の版（`{ version: 1, projects: { <根>: { layout } }, common }`）を読んだらロックの中で 1 つの配置へ移し（`core/main-tabs-migrate.ts`。移せなかったものは場所・理由・元の値を返す）、元を `main-tabs.json.v1-<時刻>` に写す。新しい版のファイルは使わず上書きもしない。読めない配置は上書きせず、先に `POST /_state/tabs/backup` で `main-tabs.json.broken-<時刻>` へ写してから空で始める（写せなければ保存しない。理由は console.error）。`/_state/tabs` | 同上 |
+| `<状態>/main-tabs.json` | 窓ごとの面の並びとタブ。形は `{ version: 3, windows: { <窓の id>: { rev, savedAt, workspace } } }`（`server/main-tabs-store.ts`）、workspace は `core/workspace.ts` の面の木と面ごとの配置（配置は `core/main-tabs.ts` の `LAYOUT_VERSION` 5。シェルのタブが映していた tmux の場所 `terminalTmux` は省略できる欄なので版を上げない（13））。書くのはその窓の外側のページ（1 枚の画面は自分）だけで、窓どうしで重ねない。知らない窓には最後に書いた窓の写しを返し、窓は 8 つまで（古いものから捨てる。書いた窓は残す）。前の版のファイル（版 2 = 全部の窓で 1 つの配置、版 1 = プロジェクトごと）は配置を返して画面が面の木へ移し（`migrateLayout`。版 1 はロックの外で `core/main-tabs-migrate.ts` で 1 つの配置にする）、版 3 で書くときに元を `main-tabs.json.v<版>-<時刻>` に写す。新しい版のファイルは使わず上書きもしない。読めない配置は上書きせず、先に `POST /_state/workspace/backup` で `main-tabs.json.broken-<時刻>` へ写してから空で始める（写せなければ保存しない。理由は console.error）。`GET` / `PUT /_state/workspace`| 同上 |
 | `<状態>/server-logs/` | code-viewer が起こしたサーバ・裏の出力（起動に失敗したとき・落ちたとき末尾を理由に添える） | 同上 |
 | `<状態>/entry.json`・`entry.json.start.lock` | 動いている入口の `{url, pid, token, version, started_at}` と起動の排他 | 同上 |
 | `<状態>/agent-screen-rules.json`・`agent-screen-rules.migrated` | 画面ルールの保存済み上書き（ユーザー単位）と、リポジトリから写した・保存した・戻した印 | 同上 |

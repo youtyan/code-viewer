@@ -9,7 +9,6 @@ import { lastTabNumber } from "../core/pwa";
 import { type AppRoute, urlKeepsSavedFront } from "../core/routes";
 import { TAB_FLOOR_UNITS } from "../core/tab-widths";
 import { closeContextMenu } from "../views/context-menu";
-import type { SavedBase } from "../views/main-tabs/main-tabs-view";
 import {
   COMFORTABLE_PANE_WIDTH,
   createMainTabsView,
@@ -59,7 +58,6 @@ function setup(
   document.body.append(mount);
   const saves: SerializedLayout[] = [];
   /** 書くときに添えた base (前に読んだ・書いた保存)。 */
-  const bases: SavedBase[] = [];
   const backups: string[] = [];
   const fronts: string[] = [];
   const terminals: Array<{ open: string[]; closed: string[] }> = [];
@@ -102,13 +100,10 @@ function setup(
     },
     loadSaved: async () => ({
       layout: await loadSaved(),
-      rev: 1,
       root,
     }),
-    save: async (layout, _keepalive, base) => {
+    save: async (layout) => {
       saves.push(layout);
-      bases.push(base);
-      return undefined;
     },
     backupSaved: async () => {
       backups.push("backup");
@@ -132,7 +127,6 @@ function setup(
     mount,
     handle,
     saves,
-    bases,
     backups,
     fronts,
     terminals,
@@ -556,44 +550,6 @@ describe("main tabs view: プロジェクトのグループ", () => {
     handle.localize();
     expect(before).toEqual(strip(mount));
     expect(before[1]).toBe(`${LIB}(lib.ts diff Shell shell-lib)`);
-  });
-
-  test("取り直しの答えがこの窓の保存より古い版なら重ねない (閉じたタブを古い値で戻さない)", async () => {
-    vi.useFakeTimers();
-    const layouts: unknown[] = [];
-    let loads = 0;
-    const { handle, mount } = setup(
-      async () => saved,
-      undefined,
-      undefined,
-      fileRoute("src/app.ts"),
-      APP,
-      groupDeps([], {
-        // 1 回目は読み戻し (rev 1)。2 回目 (取り直し) は、保存 (rev 2) より前の
-        // rev 1 が遅れて届く。
-        loadSaved: async () => {
-          loads += 1;
-          return { layout: saved, rev: 1, root: APP };
-        },
-        save: async (layout) => {
-          layouts.push(layout);
-          return { rev: 2, layout, merged: false };
-        },
-      }),
-    );
-    await handle.restore();
-    mount
-      .querySelector<HTMLElement>('.main-tab[data-tab-id="l1"] .main-tab-close')
-      ?.click();
-    vi.advanceTimersByTime(1000);
-    await vi.waitFor(() => expect(layouts.length).toBe(1));
-    await Promise.resolve();
-    await handle.refreshFromServer();
-    vi.useRealTimers();
-    expect([loads, strip(mount)[1]]).toEqual([
-      2,
-      `${LIB}(diff Shell shell-lib)`,
-    ]);
   });
 
   // タブの幅 (fitTabs)。happy-dom は配置をしないので、タブの中身の幅を名前の長さから
