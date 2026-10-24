@@ -189,6 +189,7 @@ function expected(url: string, width: number, look: Look, nav: number) {
     filesRail: VIEW_RAIL,
     filesKeptOpen: false,
     preferred: list ? look.historyWidth || HISTORY_WIDTH.default : 0,
+    listKeptOpen: false,
     compact: HISTORY_WIDTH.min,
     tree: list === "history" || list === "worktree" ? files : 0,
     treeRail: TREE_RAIL,
@@ -203,8 +204,13 @@ function expected(url: string, width: number, look: Look, nav: number) {
     overview,
     list,
     hidden: userHidden || layout.filesFolded,
+    // 一覧を帯に畳んだら --list-w は書かない (帯の幅は CSS の --panelcol-rail-w)。
     layout: list
-      ? { width: `${layout.width}px`, folded: layout.treeFolded }
+      ? {
+          width: layout.listFolded ? "" : `${layout.width}px`,
+          folded: layout.treeFolded,
+          listFolded: layout.listFolded,
+        }
       : null,
   };
 }
@@ -223,6 +229,7 @@ function actual() {
       ? {
           width: document.documentElement.style.getPropertyValue("--list-w"),
           folded: body.hasAttribute("data-list-tree-folded"),
+          listFolded: body.hasAttribute("data-list-column-hidden"),
         }
       : null,
   };
@@ -289,10 +296,12 @@ describe("#first-screen は app.ts と同じ印を付ける", () => {
     expect(actual()).toEqual(expected(url, 1600, {}, nav));
   });
 
+  // 900 は Diff の一覧も帯に畳む幅 (面の中の狭い面と同じ決まり)。
   for (const { name, look } of LOOKS)
-    for (const width of [1100, 1280, 1600, 1900])
+    for (const width of [900, 1100, 1280, 1600, 1900])
       test.each([
         "/",
+        "/todiff",
         "/history",
         "/worktree",
         "/worktree?wt=%2Fsample%2Frepo-a-wt",

@@ -11,15 +11,17 @@ import { DIFF_SCREEN_TEXT } from "../views/diff-view-i18n";
 
 // 一覧の列の決まり (core/list-column.ts)。本文 = room − ファイル一覧 − 一覧 −
 // 変更ファイルの一覧。本文が need に足りなければ、(1) 一覧を詰めた幅 (240) に
-// し、(2) 変更ファイルの一覧を帯 (28) に畳み、(3) ファイル一覧を畳む。利用者が
-// 手で開いた列は畳まない。境目は既定の密度・左のサイドバー 280・ファイル一覧
-// 240 のとき room = 窓 − 280。
+// し、(2) 変更ファイルの一覧を帯 (28) に畳み、(3) ファイル一覧を畳み、(4) Diff の
+// 一覧も帯 (28) に畳む (狭い面)。利用者が手で開いた列は畳まない。境目は既定の密度・
+// 左のサイドバー 280・ファイル一覧 240 のとき room = 窓 − 280 (面の中は左の
+// サイドバーが無いので room = 面の幅)。
 describe("listColumnLayout", () => {
   const base = {
     files: 240,
     filesRail: 40,
     filesKeptOpen: false,
     preferred: 320,
+    listKeptOpen: false,
     compact: 240,
     tree: 240,
     treeRail: 28,
@@ -33,6 +35,7 @@ describe("listColumnLayout", () => {
     width: number;
     tree: number;
     filesFolded: boolean;
+    listFolded?: boolean;
   };
   const rows: Row[] = [
     // 1 面の History (need 480): 窓 1560 から全幅、1480 から詰め、1268 から変更
@@ -178,6 +181,15 @@ describe("listColumnLayout", () => {
       tree: 28,
       filesFolded: false,
     },
+    {
+      name: "1 面 Diff の面 600・一覧を開いた",
+      room: 600,
+      need: 480,
+      input: { tree: 0, listKeptOpen: true },
+      width: 240,
+      tree: 0,
+      filesFolded: true,
+    },
     // 利用者がファイル一覧を畳んでいる (files 0): 畳むものは無い
     {
       name: "2 面 History 1280・ファイル一覧を利用者が畳んだ",
@@ -264,6 +276,36 @@ describe("listColumnLayout", () => {
       tree: 0,
       filesFolded: true,
     },
+    // 狭い面 (面の中は room = 面の幅): ファイル一覧を畳んでも本文が足りなければ
+    // Diff の一覧も帯に畳む (面 760 まで詰めた一覧を出し、759 から畳む)。History の
+    // 一覧は本文に出すコミットを選ぶ入口なので、狭くても畳まない
+    {
+      name: "1 面 Diff の面 760",
+      room: 760,
+      need: 480,
+      input: { tree: 0 },
+      width: 240,
+      tree: 0,
+      filesFolded: true,
+    },
+    {
+      name: "1 面 Diff の面 759",
+      room: 759,
+      need: 480,
+      input: { tree: 0 },
+      width: 28,
+      tree: 0,
+      filesFolded: true,
+      listFolded: true,
+    },
+    {
+      name: "1 面 History の面 498",
+      room: 498,
+      need: 480,
+      width: 240,
+      tree: 28,
+      filesFolded: true,
+    },
     // 一覧の無い画面 (Files など): 2 面は 1481 からファイル一覧を出したまま
     {
       name: "2 面 Files 1481",
@@ -324,7 +366,7 @@ describe("listColumnLayout", () => {
   ];
   test.each(rows)(
     "$name → 一覧 $width・変更ファイルの一覧 $tree・ファイル一覧を畳む $filesFolded",
-    ({ room, need, input: extra, width, tree, filesFolded }) => {
+    ({ room, need, input: extra, width, tree, filesFolded, listFolded }) => {
       const input = { ...base, ...extra, room, need };
       expect(listColumnLayout(input)).toEqual({
         width,
@@ -332,6 +374,7 @@ describe("listColumnLayout", () => {
         tree,
         treeFolded: input.tree > 0 && tree !== input.tree,
         filesFolded,
+        listFolded: listFolded === true,
       });
     },
   );

@@ -151,14 +151,18 @@ grep -n "100vh\|100dvh" web/style.css \
   (`HISTORY_WIDTH.min` = 240。History は件名と札だけ) にし、(2) 変更ファイルの一覧を帯
   (`--panelcol-rail-w`) に畳み (`body[data-list-tree-folded]`。帯は開くボタン `.list-tree-open`)、
   (3) ファイル一覧を畳む (最後まで残す。`core/panel-column-policy.ts` の `fileListAction`。畳むボタンに
-  印と理由)。(4) それでも 2 面の下限 (`TIGHT_PANE_WIDTH` × 2 + 仕切り) に足りなければ右の面を預ける
-  (`main-tabs-view.ts` の `fitToWidth`)。左のサイドバーは畳まない。**利用者が手で開いた列は、その
-  セッションの間は自動で畳まない** (保存しない)。既定の密度・左のサイドバー 280・ファイル一覧 240 での
-  境目: 1 面の History は窓 1560 未満で詰め、1480 未満で変更ファイルの一覧を畳み、1268 未満でファイル
-  一覧を畳む。2 面の History は 2041・1961・1749、1229 未満で預ける。Diff は 1 面 1320 未満で詰め
-  1240 未満でファイル一覧を畳む、2 面は 1801・1721、1201 未満で預ける (預ける境目は、畳んだファイル
-  一覧が残す縦の帯 40 を含めて数える。`listColumnLayout` の `filesRail`)。一覧の無い画面の 2 面は 1481
-  未満でファイル一覧を畳む (`web-src/test/list-column.test.ts`)
+  印と理由)、(4) それでも足りなければ (狭い面) Diff の一覧 (変更ファイルの一覧) も帯に畳む
+  (`body[data-list-column-hidden]`。手で畳んだときと同じ帯で、開くボタンの説明に理由。History と
+  作業ツリーの一覧は本文に出すものを選ぶ入口なので畳まない)。(5) それでも 2 面の下限
+  (`TIGHT_PANE_WIDTH` × 2 + 仕切り) に足りなければ右の面を預ける (`main-tabs-view.ts` の `fitToWidth`)。
+  左のサイドバーは畳まない。**利用者が手で開いた列は、そのセッションの間は自動で畳まない** (保存
+  しない)。既定の密度・左のサイドバー 280・ファイル一覧 240 での境目: 1 面の History は窓 1560 未満で
+  詰め、1480 未満で変更ファイルの一覧を畳み、1268 未満でファイル一覧を畳む。2 面の History は
+  2041・1961・1749、1229 未満で預ける。Diff は 1 面 1320 未満で詰め 1240 未満でファイル一覧を畳み
+  1040 未満で一覧を畳む、2 面は 1801・1721・1521、989 未満で預ける (預ける境目は、畳んだファイル一覧が
+  残す縦の帯 40 を含めて数える。`listColumnLayout` の `filesRail`)。一覧の無い画面の 2 面は 1481 未満で
+  ファイル一覧を畳む。面の中は左のサイドバーが無いので面の幅で数え、Diff は面 760 未満で一覧を畳む
+  (`web-src/test/list-column.test.ts`)
 - **どの列も手で畳める**: ファイル一覧は頭の畳むボタン、一覧と変更ファイルの一覧は列の右端の線の
   中ほどのつまみ (`.list-fold` / `.sidebar-fold`。`views/list-tree-open.ts` の `createColumnFold`)。
   畳んだ一覧と変更ファイルの一覧は帯 (`.list-open` / `.sidebar-open` / `.list-tree-open`) になり、
@@ -201,6 +205,10 @@ grep -n "100vh\|100dvh" web/style.css \
   (`@container`。2 面の左の面は窓の半分以下になるので `@media` では決まらない)。
   実例: Data の `.db-root` の `container: db-pane` と `@container db-pane (max-width: 560px)`、
   Tools の `.tools-body` の `container: tools-pane` と `@container tools-pane (max-width: 560px)`
+- **本文の上の帯 (`#topbar`) は帯の実幅 (`@container topbar`) の段で詰め、詰めても入らない幅では
+  外した操作を「⋯」(`#topbar-more`。`views/topbar-more.ts`) のメニューにまとめる** (メニューは帯に
+  見えていない操作だけを並べ、押すと帯の同じボタンを押す)。帯に操作を足すなら、外す段と
+  `topbar-more.ts` の `FOLDABLE` に足す。外さない操作を帯の外へ押し出さない (横送りは最後の逃げ道)
 - **上に居座る固定物の高さは `--global-header-h` だけを読む。** 今はタブ列だけなので
   `--global-header-h: var(--main-tabs-h)` (`style.css` の `html, body`)。ツールバーの `top`・各ページの
   `--chrome-h` の上書き・sticky の `top`・面の箱の `top` はこれを読むので、上に固定物を足す / 消す

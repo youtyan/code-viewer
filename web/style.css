@@ -24059,6 +24059,68 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
   overflow-x: auto;
   scrollbar-width: none;
 }
+/* 上の段を全部当てても入らない帯 (狭い面・大きい文字・2 つの一覧を開いた 1280px の
+   窓): 外した操作を「⋯」のメニューにまとめる (views/topbar-more.ts。メニューは帯に
+   見えていない操作だけを並べ、押すと帯の同じボタンを押す)。段の幅はその画面の帯の
+   中身の幅で決める。Diff は比較対象と件数がある分だけ広く (日本語で約 50em、英語で
+   約 46em)、文字の切替 → 統合 / 分割 → 戻す・取り直し → 件数の行数の順に外す。History と作業
+   ツリーの帯は切替だけ (約 19em)。それでも入らない分は帯の中を横に送る (上)。 */
+#topbar-more {
+  display: none;
+  order: 5;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-3);
+  cursor: pointer;
+}
+#topbar-more:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+#topbar-more svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+@container topbar (max-width: 51em) {
+  body.gdp-diff-page #topbar :is(#ignore-ws, #syntax-highlight, #hide-tests) {
+    display: none;
+  }
+  body.gdp-diff-page #topbar-more {
+    display: inline-flex;
+  }
+}
+@container topbar (max-width: 40em) {
+  body.gdp-diff-page #topbar .seg {
+    display: none;
+  }
+}
+@container topbar (max-width: 34em) {
+  body.gdp-diff-page #topbar :is(#ref-reset, #reload-prom) {
+    display: none;
+  }
+}
+/* 最後に、件数の追加・削除の行数を省く (ファイルの数は残す。行数はファイルごとの
+   見出しにも出る)。 */
+@container topbar (max-width: 30em) {
+  body.gdp-diff-page #topbar #meta :is(.chip-add, .chip-del) {
+    display: none;
+  }
+}
+@container topbar (max-width: 20em) {
+  body:not(.gdp-diff-page) #topbar :is(#ignore-ws, #syntax-highlight, #hide-tests) {
+    display: none;
+  }
+  body:not(.gdp-diff-page) #topbar-more {
+    display: inline-flex;
+  }
+}
 /* ファイルの箱: 線と影を消し、コードの面を角丸で置く。箱の間は間隔で分ける。 */
 .d2h-file-wrapper {
   border: 0;
