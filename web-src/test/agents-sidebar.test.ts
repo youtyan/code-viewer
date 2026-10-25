@@ -380,18 +380,16 @@ describe("agents sidebar actions", () => {
   });
 
   // ui-surface.md の「タブの決まり」の例外: ターミナルは 1 か所にしか置けず仮にも
-  // ならないので、中ボタン・⌘/Ctrl も 1 回押すと同じ。Alt は反対の面。右ボタンは開かない。
+  // ならないので、中ボタン・⌘/Ctrl・Alt も 1 回押すと同じ。右ボタンは開かない。
   test.each([
-    ["click", "click", {}, [["%1", undefined]]],
-    ["Cmd+click", "click", { metaKey: true }, [["%1", undefined]]],
-    ["middle click", "auxclick", { button: 1 }, [["%1", undefined]]],
-    ["Alt+click", "click", { altKey: true }, [["%1", "opposite"]]],
+    ["click", "click", {}, ["%1"]],
+    ["Cmd+click", "click", { metaKey: true }, ["%1"]],
+    ["middle click", "auxclick", { button: 1 }, ["%1"]],
+    ["Alt+click", "click", { altKey: true }, ["%1"]],
     ["right button", "auxclick", { button: 2 }, []],
   ])("%s on an agent row opens %j", (_label, type, init, expected) => {
-    const opened: Array<[string, "opposite" | undefined]> = [];
-    const { root } = mount(withAgents, fakeActions(), (id, target) =>
-      opened.push([id, target]),
-    );
+    const opened: string[] = [];
+    const { root } = mount(withAgents, fakeActions(), (id) => opened.push(id));
     root
       .querySelector<HTMLElement>('[data-nav-item="pane:%1"]')
       ?.dispatchEvent(
@@ -400,16 +398,10 @@ describe("agents sidebar actions", () => {
     expect(opened).toEqual(expected);
   });
 
-  test("click, Alt+click, and the context menu use their respective targets", () => {
-    const opened: Array<[string, "opposite" | undefined]> = [];
-    const { root } = mount(withAgents, fakeActions(), (id, target) =>
-      opened.push([id, target]),
-    );
+  test("the context menu opens the row in a tab", () => {
+    const opened: string[] = [];
+    const { root } = mount(withAgents, fakeActions(), (id) => opened.push(id));
     const row = root.querySelector<HTMLElement>('[data-nav-item="pane:%1"]');
-    row?.click();
-    row?.dispatchEvent(
-      new MouseEvent("click", { bubbles: true, altKey: true }),
-    );
     row?.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
     );
@@ -418,20 +410,15 @@ describe("agents sidebar actions", () => {
         ".gdp-context-menu button",
       ),
     ];
-    // 3 つ目からは「別のアカウントで続ける…」(フックの無いペインなので押せず、
+    // 2 つ目からは「別のアカウントで続ける…」(フックの無いペインなので押せず、
     // 入れ方の案内が並ぶ。handoff の表は agents-handoff.test.ts)。
     expect(items.map((item) => item.textContent)).toEqual([
       "Open in a tab",
-      "Open in the opposite pane",
       "Continue with another account…",
       "Needs the agent hooks — show how to install",
     ]);
-    items[1]?.click();
-    expect(opened).toEqual([
-      ["%1", undefined],
-      ["%1", "opposite"],
-      ["%1", "opposite"],
-    ]);
+    items[0]?.click();
+    expect(opened).toEqual(["%1"]);
   });
 
   // 「別のアカウントで続ける…」は、フックが会話記録の場所を知らせたペインだけ
@@ -544,7 +531,7 @@ describe("agents sidebar actions", () => {
         ...document.querySelectorAll<HTMLButtonElement>(
           ".gdp-context-menu button",
         ),
-      ].slice(2);
+      ].slice(1);
       expect(
         buttons.map((button) => [button.textContent, button.disabled]),
       ).toEqual(items);

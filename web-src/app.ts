@@ -8517,7 +8517,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           // 開く (タブにしても 1 ペイン表示で開き、戻ると案内だけが残った)。
           onSelect: () =>
             pane && PHONE_QUERY.matches
-              ? openAgentPane(pane.id, undefined, reopenNewTabMenu)
+              ? openAgentPane(pane.id, reopenNewTabMenu)
               : MAIN_TABS.openTerminal(session.id),
         });
       }
@@ -8537,7 +8537,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       sessions.push({
         label: `${mark(pane.id, false)}${row.row}`,
         title: row.title,
-        onSelect: () => openAgentPane(pane.id, undefined, reopenNewTabMenu),
+        onSelect: () => openAgentPane(pane.id, reopenNewTabMenu),
       });
     }
     if (sessions.length > 0) items.push({ kind: "separator" }, ...sessions);
@@ -9714,11 +9714,7 @@ window.GdpExpandLogic = GdpExpandLogic;
    * エージェントのペインを開く (通知・サイドバー・全体ボード・パレット)。
    * 別のプロジェクトのペインならそのプロジェクトへ移る (agent-pane-opener.ts)。
    */
-  function openAgentPane(
-    pane: string,
-    destination?: "opposite",
-    returnTo?: () => void,
-  ): void {
+  function openAgentPane(pane: string, returnTo?: () => void): void {
     // host: そのシェルを出している面があればその面で、無ければフォーカスのある面で。
     if (WORKSPACE_HOST) {
       const shell =
@@ -9728,7 +9724,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       WORKSPACE_HOST.commandWhereTerminal(shell || null, {
         type: "open-agent-pane",
         pane,
-        opposite: false,
       });
       return;
     }
@@ -9736,7 +9731,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     // (引き出しと面の中の行は押したときに自分で閉じるが、通知・最下段の件数・
     // 全体ボード・パレットから来たときは閉じていなかった)。
     MOBILE_SHELL.close();
-    AGENT_PANE_OPENER(pane, destination, returnTo);
+    AGENT_PANE_OPENER(pane, returnTo);
   }
 
   /**
@@ -9750,26 +9745,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     };
   }
 
-  /** この画面のメインの面のタブで開く。サイドバーの修飾操作だけ反対面。 */
-  function openAgentPaneHere(
-    pane: string,
-    destination?: "opposite",
-    returnTo?: () => void,
-  ): void {
+  /** この画面のメインの面のタブで開く。 */
+  function openAgentPaneHere(pane: string, returnTo?: () => void): void {
     AGENT_MONITOR.markRead(pane);
     if (PHONE_QUERY.matches) {
       PANE_VIEW.open(pane, returnTo);
       return;
     }
-    const panes = MAIN_TABS.panes();
-    const side: PaneSide =
-      destination === "opposite"
-        ? panes.split
-          ? panes.focused === "left"
-            ? "right"
-            : "left"
-          : "right"
-        : panes.focused;
     // もうタブで開いていれば、そのタブを前面に出すだけ (シェルを増やさない)。
     const tabbed = [...TAB_SHELL_PANES].find(
       ([shell, opened]) =>
@@ -9777,13 +9759,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         MAIN_TABS.hasTerminal(shell),
     );
     if (tabbed) {
-      MAIN_TABS.openTerminal(
-        tabbed[0],
-        destination === "opposite" ? side : undefined,
-      );
+      MAIN_TABS.openTerminal(tabbed[0]);
       return;
     }
-    void TERMINAL_VIEW.openPaneInTab(pane, side);
+    void TERMINAL_VIEW.openPaneInTab(pane, MAIN_TABS.panes().focused);
   }
 
   const AGENT_MONITOR = createAgentMonitor({
@@ -10127,10 +10106,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         projects: PROJECT_ACTIONS,
         switchProject: (info) => switchToProjectGroup(info.root),
         getText: () => agentsText(STATE.language),
-        openPane: (pane, destination) =>
+        openPane: (pane) =>
           openAgentPane(
             pane,
-            destination,
             returnOnPhone(() => MOBILE_SHELL.openDrawer()),
           ),
         viewingPane: viewingAgentPane,
@@ -11305,7 +11283,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         void navigateProject(command.url, command.replace);
         return;
       case "open-agent-pane":
-        openAgentPane(command.pane, command.opposite ? "opposite" : undefined);
+        openAgentPane(command.pane);
         return;
       case "route":
         navigateToRoute(command.route);

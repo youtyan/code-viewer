@@ -133,7 +133,7 @@ export type ClickModifiers = {
 export type HostCommand =
   | { type: "switch-project"; root: string; confirmRegister: boolean }
   | { type: "navigate-project"; url: string; replace: boolean }
-  | { type: "open-agent-pane"; pane: string; opposite: boolean }
+  | { type: "open-agent-pane"; pane: string }
   | { type: "route"; route: AppRoute }
   | { type: "settings-at"; heading: string }
   /** 左のサイドバーのプロジェクトの ▾。面の左端の、その行の高さに開く。 */

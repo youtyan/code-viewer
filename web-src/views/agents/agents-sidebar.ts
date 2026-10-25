@@ -57,8 +57,8 @@ export type AgentsSidebarDeps = {
   monitor: AgentMonitor;
   projects: ProjectActions;
   getText(): AgentsText;
-  /** そのペインをターミナルで開く。opposite は反対の面 (1 面なら右へ分割)。 */
-  openPane(pane: string, destination?: "opposite"): void;
+  /** そのペインをターミナルで開く。 */
+  openPane(pane: string): void;
   /** いまターミナルで見ているペイン (行の選択の印)。 */
   viewingPane(): string | null;
   /** タブのグループと同じメニューを、選んだプロジェクトの＋から開く。 */
@@ -177,7 +177,6 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         : "",
       card.ageTitle,
       current.openPane,
-      current.openPaneOppositeHint,
     ]
       .filter(Boolean)
       .join("\n");
@@ -185,18 +184,18 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       "aria-label",
       `${current.state[pane.state]} · ${shown.kind} · ${shown.summary}`,
     );
-    const openHere = (destination?: "opposite") => {
+    const openHere = () => {
       deps.monitor.markRead(pane.id);
-      deps.openPane(pane.id, destination);
+      deps.openPane(pane.id);
       render(true);
     };
-    // ターミナルは 1 か所にしか置けず、仮にもならないので、中ボタン・⌘/Ctrl
-    // も 1 回押すと同じ (開くか前面に出す)。Alt は反対の面 (ui-surface.md の
-    // 「タブの決まり」の例外の表)。
+    // ターミナルは 1 か所にしか置けず、仮にもならないので、中ボタン・⌘/Ctrl・Alt
+    // も 1 回押すと同じ (開くか前面に出す。ui-surface.md の「タブの決まり」の
+    // 例外の表)。
     const openBy = (event: MouseEvent) => {
       if (event.button > 1) return;
       event.preventDefault();
-      openHere(event.altKey ? "opposite" : undefined);
+      openHere();
     };
     row.addEventListener("click", openBy);
     row.addEventListener("auxclick", openBy);
@@ -206,10 +205,6 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         row,
         [
           { label: current.openPane, onSelect: () => openHere() },
-          {
-            label: current.openPaneOpposite,
-            onSelect: () => openHere("opposite"),
-          },
           ...handoffMenuItems(pane, current, deps.handoff),
         ],
         { at: { x: event.clientX, y: event.clientY } },
