@@ -24,6 +24,8 @@ type MainTabsText = {
   splitBlocked: Record<"split" | "no-front" | "page" | "narrow", string>;
   /** 2 面のときの右の面のボタン: 右のタブを左へ移して 1 面に戻す。 */
   unsplit: string;
+  /** 面の中のタブ列の右端: この面を閉じる (面が 2 つ以上のときだけ出る)。 */
+  closePane: string;
   /** 窓が狭くて右の面を隠している間の、分割のボタンの説明。 */
   rightParked: (count: number) => string;
   /**
@@ -93,6 +95,7 @@ const EN: MainTabsText = {
   },
   unsplit:
     "Back to one side (moves the right tabs to the left; a file already open on the left closes on the right)",
+  closePane: "Close this pane (its tabs close; shells keep running)",
   rightParked: (count) =>
     `The right side (${count} tab${count === 1 ? "" : "s"}) is hidden because the window is too narrow for two sides. It comes back when the window is wide enough.`,
   rightParkedForList: (count) =>
@@ -154,6 +157,7 @@ const JA: MainTabsText = {
   },
   unsplit:
     "1 面に戻す (右のタブを左へ移します。左で開いているファイルは右を閉じます)",
+  closePane: "この面を閉じる (この面のタブも閉じます。シェルは動き続けます)",
   rightParked: (count) =>
     `窓が 2 面を出せる幅より狭いので、右の面 (タブ ${count} 枚) を隠しています。2 面を出せる幅になれば戻ります。`,
   rightParkedForList: (count) =>

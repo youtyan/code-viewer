@@ -1982,6 +1982,14 @@ window.GdpExpandLogic = GdpExpandLogic;
                 ...tabCarry(tab),
               }),
             dragEnd: () => PANE_BRIDGE?.send({ type: "drag-end" }),
+            // 押した面にフォーカスが移ってから届く (bridge.ts の pointerdown)。
+            closePane: () =>
+              PANE_BRIDGE?.send({
+                type: "workspace-action",
+                action: "pane-close",
+              }),
+            // style.css の閉じるボタンと同じ印 (面が 2 つ以上のときだけ on / off)。
+            many: () => Boolean(document.documentElement.dataset.paneFocus),
           },
         }
       : {}),
@@ -7824,15 +7832,15 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * 木・差分の一覧のファイルの行を、固定のタブ (new-tab) か反対の面
-   * (other-pane) で開く (ui-surface.md の「タブの決まり」)。木は今見ている
+   * 木・差分の一覧のファイルの行を、固定のタブ (new-tab)・反対の面
+   * (other-pane)・右に分けた面 (split) で開く (ui-surface.md の「タブの決まり」)。木は今見ている
    * 表示 (Code / Blame) を保ち、差分の一覧はその差分の新しい側の版 (消した
    * ファイルは古い側) を Code で開く。フォルダはタブにならないので普通の
    * クリックと同じ。
    */
   function openFileAs(
     file: SidebarItem,
-    intent: "new-tab" | "other-pane",
+    intent: "new-tab" | "other-pane" | "split",
     list: "diff" | "repo",
   ): void {
     const ref = REPO_SIDEBAR_REF || STATE.repoRef || "worktree";
@@ -7860,6 +7868,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       MAIN_TABS.openingNewTab(() => setRoute(route));
       if (route.view === "blob")
         void renderStandaloneSource({ path: route.path, ref: route.ref });
+      return;
+    }
+    if (intent === "split" && PANE_BRIDGE) {
+      const { url, layout } = fileCarry(route);
+      PANE_BRIDGE.send({ type: "split", dir: "row", url, layout });
       return;
     }
     openFileInOtherPane(route);
@@ -7922,35 +7935,39 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 右の面へファイルの route を開く (右にフォーカスがあるときの木・パレット、
    * Alt+クリック、右の面の中の移動)。開けなければ (1 面で狭い) false。
    */
+  /** ファイルの route を、ほかの面で開く形 (そのファイルのタブ 1 枚) にする。 */
+  function fileCarry(route: FileRoute): TabCarry {
+    const target = routeTarget(route, MAIN_TABS.currentProject());
+    return {
+      route,
+      terminal: null,
+      project: MAIN_TABS.currentProject(),
+      url: urlForRoute(route),
+      layout: serializeLayout({
+        panes: {
+          left: target
+            ? {
+                tabs: [
+                  {
+                    id: `t-${crypto.randomUUID().slice(0, 8)}`,
+                    target,
+                    preview: false,
+                  },
+                ],
+                activeId: null,
+                recent: [],
+              }
+            : { tabs: [], activeId: null, recent: [] },
+        },
+        focused: "left",
+      }),
+    };
+  }
+
   function openInRightPane(route: FileRoute, replace = false): boolean {
-    // 面の中: 外側のページが別の面 (無ければ右に分けた面) で開く。
+    // 面の中: 外側のページが別の面 (無ければこの面) で開く。
     if (PANE_BRIDGE) {
-      const target = routeTarget(route, MAIN_TABS.currentProject());
-      PANE_BRIDGE.send({
-        type: "open-elsewhere",
-        route,
-        terminal: null,
-        project: MAIN_TABS.currentProject(),
-        url: urlForRoute(route),
-        layout: serializeLayout({
-          panes: {
-            left: target
-              ? {
-                  tabs: [
-                    {
-                      id: `t-${crypto.randomUUID().slice(0, 8)}`,
-                      target,
-                      preview: false,
-                    },
-                  ],
-                  activeId: null,
-                  recent: [],
-                }
-              : { tabs: [], activeId: null, recent: [] },
-          },
-          focused: "left",
-        }),
-      });
+      PANE_BRIDGE.send({ type: "open-elsewhere", ...fileCarry(route) });
       return true;
     }
     if (!MAIN_TABS.openRouteRight(route)) return false;

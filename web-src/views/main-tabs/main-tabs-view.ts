@@ -315,12 +315,16 @@ export type MainTabsDeps = {
    * - onEmptied: 利用者が最後のタブを閉じた (外側のページが面を閉じる)
    * - dragStart / dragEnd: タブを掴んだ・やめた (外側のページがほかの面の上に落とす
    *   先を出す)
+   * - closePane: タブ列の右端の閉じるボタン (g q と同じ)
+   * - many: 窓に面が 2 つ以上あるか (「反対側へ移す」は移す先がある間だけ出す)
    */
   paneMode?: {
     splitOut(tab: Tab, how: "split" | "move"): void;
     onEmptied(): void;
     dragStart(tab: Tab): void;
     dragEnd(): void;
+    closePane(): void;
+    many(): boolean;
   };
   /**
    * 一覧の列に今の画面の一覧 (Diff・History・作業ツリー) を出しているか。右の面を
@@ -898,6 +902,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     list: HTMLElement;
     newButton: HTMLButtonElement;
     splitButton: HTMLButtonElement;
+    /** 面の中の「この面を閉じる」(面が 2 つ以上ある間だけ見せる。style.css)。 */
+    closeButton: HTMLButtonElement | null;
     /** 電話の段だけ出す「開いているタブ」と枚数の枠 (左の面だけ)。 */
     listButton: {
       button: HTMLButtonElement;
@@ -1003,11 +1009,22 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       listButton = { button, label, count };
     }
     actions.append(splitButton);
+    let closeButton: HTMLButtonElement | null = null;
+    const closePane = deps.paneMode?.closePane;
+    if (side === "left" && closePane) {
+      closeButton = document.createElement("button");
+      closeButton.type = "button";
+      closeButton.className = "main-tabs-action main-tabs-close-pane";
+      // 分割の絵 (向きだけ違う unsplit) と取り違えないよう、閉じるの × にする。
+      closeButton.innerHTML = iconSvg("main-tabs-action-icon", CLOSE_ICON_PATH);
+      closeButton.addEventListener("click", () => closePane());
+      actions.append(closeButton);
+    }
     strip.append(list, newButton);
     if (side === "left" && deps.lead) el.append(deps.lead);
     el.append(strip, actions);
     wireStrip(strip, side);
-    return { el, strip, list, newButton, splitButton, listButton };
+    return { el, strip, list, newButton, splitButton, closeButton, listButton };
   }
 
   function labelOf(target: TabTarget): string {
@@ -1599,7 +1616,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
 
   /**
    * タブのメニューの「右に分割」「反対の面へ移す」。面の中では外側のページに頼む
-   * (面が 1 つでも分けられる。移す先が無ければ右に分ける)。
+   * (分割は面が 1 つでも分ける。移すのは移す先の面がある間だけ出す)。
    */
   function splitItems(
     tab: Tab,
@@ -1613,10 +1630,14 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
           label: current.splitRight,
           onSelect: () => paneMode.splitOut(tab, "split"),
         },
-        {
-          label: current.moveToOtherSide,
-          onSelect: () => paneMode.splitOut(tab, "move"),
-        },
+        ...(paneMode.many()
+          ? [
+              {
+                label: current.moveToOtherSide,
+                onSelect: () => paneMode.splitOut(tab, "move"),
+              },
+            ]
+          : []),
       ];
     return [
       {
@@ -2285,10 +2306,17 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   function renderActions(): void {
     const current = text();
     // 押せない理由は 1 つだけ出す (条件を全部並べると、どれに当たったか読めない)。
-    const blocker = splitBlocker(layout) ?? (splitAllowed() ? null : "narrow");
+    // 面の中で分けるのは外側のページ (幅も外側が見る)。前面のタブがあれば分けられる。
+    const blocker = deps.paneMode
+      ? frontTab(layout, "left")
+        ? null
+        : "no-front"
+      : (splitBlocker(layout) ?? (splitAllowed() ? null : "narrow"));
     const allowed = blocker === null;
     for (const side of SIDES) {
-      const { newButton, splitButton, list } = sections[side];
+      const { newButton, splitButton, closeButton, list } = sections[side];
+      closeButton?.setAttribute("title", current.closePane);
+      closeButton?.setAttribute("aria-label", current.closePane);
       list.setAttribute(
         "aria-label",
         current.tabList(layout.panes.right ? side : null),

@@ -10,7 +10,7 @@
 | 置き場所 | 使うもの |
 |---|---|
 | 最下段の右の操作の塊 (`.statusbar-actions`。上の行が無くなって移った注釈・AI 向けのコピー・自動更新・通信の中止・テーマ・Web ページ) と、一覧の列の頭の 1 段目 (`#project-head`) のアイコンボタン (`#nav-expand`) | `global-icon-action` クラス (外部リンクは `global-icon-link`)。上の行 (`#global-header`) は無い (`web/index.html` のコメント) |
-| メインの面のタブ列 (`#main-tabs`、上の行の直下) | `views/main-tabs/main-tabs-view.ts`。タブは `main-tab` (絵 `main-tab-icon`・名前 `main-tab-name`・閉じる `main-tab-close` は選択中と hover だけ見せ、場所は常に取る)。プロジェクトごとのグループは札 `main-tab-group` (`main-tab-group-toggle` = 色の四角・名前・畳んだときの枚数、`main-tab-group-menu` = ▾) と並び `main-tabs-group-list` (下の「タブのグループ」)。＋ (`main-tabs-action main-tabs-new`) は最後のタブのすぐ右、分割 (`main-tabs-action main-tabs-split`) は列の外の右端 (下の「タブの決まり」)。種類ごとの絵は `views/main-tabs/tab-icons.ts`、page の名前は上の行の入口と同じ文言 (`uiText().nav`)。右クリックの項目の有効・無効は `core/main-tabs.ts` の `tabMenu` だけが決める。選択中の面は `--color-tab-active` |
+| メインの面のタブ列 (`#main-tabs`、上の行の直下) | `views/main-tabs/main-tabs-view.ts`。タブは `main-tab` (絵 `main-tab-icon`・名前 `main-tab-name`・閉じる `main-tab-close` は選択中と hover だけ見せ、場所は常に取る)。プロジェクトごとのグループは札 `main-tab-group` (`main-tab-group-toggle` = 色の四角・名前・畳んだときの枚数、`main-tab-group-menu` = ▾) と並び `main-tabs-group-list` (下の「タブのグループ」)。＋ (`main-tabs-action main-tabs-new`) は最後のタブのすぐ右、分割 (`main-tabs-action main-tabs-split`) は列の外の右端 (下の「タブの決まり」)。面の中では、その右に面を閉じるボタン (`main-tabs-close-pane`。面が 2 つ以上のときだけ見せる: `html[data-pane-focus]`)。種類ごとの絵は `views/main-tabs/tab-icons.ts`、page の名前は上の行の入口と同じ文言 (`uiText().nav`)。右クリックの項目の有効・無効は `core/main-tabs.ts` の `tabMenu` だけが決める。選択中の面は `--color-tab-active` |
 | 同じ場所のテキストボタン | 同上 + `width: auto; padding: 0 var(--space-2);` 程度の上書きに留める |
 | 左のサイドバー (`#app-nav`) の下端の項目 | `nav-foot-item` (アイコン + 文字)。見出しの横の小さな操作は `nav-icon-action` |
 | 左のサイドバーの行の操作 (hover で出る) | `nav-row-action`。場所を確保せず行の上に重ねる (`.nav-project-actions`) |
@@ -53,9 +53,14 @@
 |---|---|
 | 1 回押す・Enter | **仮のタブ** (名前が斜体)。その面に仮のタブがあれば置き換える。同じ中身のタブがあればそれを前面に出す (仮なら仮のまま) |
 | ダブルクリック・中ボタン・⌘/Ctrl＋クリック・Shift+Enter・右クリックの「新しいタブで開く」 | **固定のタブ** (名前が立体) で足す。同じ中身のタブがあれば前面に出して固定する |
-| Alt＋クリック・右クリックの「右に分割して開く」 | 反対の面 (1 面なら右に分けて) |
+| Alt＋クリック | 別の面 (面の中では、開ける面が無ければ今の面で開き、分けない) |
+| 右クリックの「右に分割して開く」 | 右に分けた面 |
 | Shift＋クリック | ブラウザに任せる (新しいウィンドウ。行はリンク) |
 
+- **面を分けるのは、利用者が分割を選んだときだけ** (分割のボタン・「右に分割」・「右に分割して開く」・g v / g s・タブを面の端へドラッグ)。
+  別の面で開く操作 (Alt＋クリック・端末のファイルのパス・「反対側へ移す」) は、開ける面が無ければ今の面で開く
+  (`views/workspace/host.ts` の `openElsewhere`)。「反対側へ移す」は面が 2 つ以上のときだけ出す。
+  勝手に分けると、分けるつもりの無い利用者の画面が毎回半分になった
 - **同じ中身**はファイルならパスと版 (`TabTarget` の `ref`。作業ツリーの版は `ref` を持たない)。
   **版が違えば別のタブ** (History から開いたコミットの版が、作業ツリーの版のタブを差し替えない)。
   同じ版で行の指定だけ違うのは同じタブ。作業ツリー以外の版のタブは名前に版の短い印を添える

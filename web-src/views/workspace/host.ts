@@ -362,20 +362,19 @@ export function startWorkspaceHost(deps: {
     message: Extract<PaneMessage, { type: "open-elsewhere" }>,
   ): void {
     // 最後にフォーカスがあった別の面 (画面・ファイルなら同じプロジェクトの面)。
-    const target = [...focusOrder, ...paneIds(workspace.tree)]
-      .reverse()
-      .find(
-        (id) =>
-          id !== from &&
-          panes.has(id) &&
-          (message.project === null ||
-            panes.get(id)?.project?.root === message.project),
-      );
-    const runtime = target ? panes.get(target) : undefined;
-    if (!runtime) {
-      split(from, "row", message.url, message.layout);
-      return;
-    }
+    // 無ければ分けずに頼んだ面で開く (分けるのは利用者が分割を選んだときだけ)。
+    const target =
+      [...focusOrder, ...paneIds(workspace.tree)]
+        .reverse()
+        .find(
+          (id) =>
+            id !== from &&
+            panes.has(id) &&
+            (message.project === null ||
+              panes.get(id)?.project?.root === message.project),
+        ) ?? from;
+    const runtime = panes.get(target);
+    if (!runtime) throw new Error(`the pane ${target} has no frame`);
     focusPane(runtime.id);
     if (message.terminal !== null)
       send(runtime, { type: "open-terminal", session: message.terminal });

@@ -449,32 +449,57 @@ describe("host: 面の並び", () => {
     expect(only?.tree).toEqual({ pane: "p1" });
   });
 
-  test("別の面で開く: 同じプロジェクトの面が無ければ右に分ける", async () => {
+  // 分けるのは利用者が分割を選んだときだけ。別の面で開く頼みは面を増やさない。
+  test.each([
+    {
+      name: "同じプロジェクトの面が無ければ、分けずに頼んだ面で開く",
+      other: { root: "/work/b", name: "b" },
+      opened: "p1",
+    },
+    {
+      name: "同じプロジェクトの面があれば、その面で開く",
+      other: { root: "/work/a", name: "a" },
+      opened: "p2",
+    },
+  ] as const)("別の面で開く: $name", async ({ other, opened }) => {
     const { panes, saved } = await startHost();
-    paneEnd(panes.p2).send({
+    const ends = { p1: paneEnd(panes.p1), p2: paneEnd(panes.p2) };
+    // 面ごとに口が別なので、p2 の知らせが届いてから p1 が頼む (届く順は決まらない)。
+    ends.p2.send({
       type: "location",
-      href: `${location.origin}${B}/history`,
-      project: { root: "/work/b", name: "b" },
+      href: `${location.origin}${B}/todif`,
+      project: other,
     });
-    paneEnd(panes.p1).send({
+    await vi.waitFor(() =>
+      expect(saved[saved.length - 1]?.panes.p2?.url).toBe(`${B}/todif`),
+    );
+    ends.p1.send({
       type: "location",
       href: `${location.origin}${A}/`,
       project: { root: "/work/a", name: "a" },
     });
-    paneEnd(panes.p1).send({
+    const route = {
+      screen: "history",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    ends.p1.send({
       type: "open-elsewhere",
-      route: {
-        screen: "history",
-        range: { from: "HEAD", to: "worktree" },
-      } as never,
+      route: route as never,
       terminal: null,
       project: "/work/a",
       url: `${A}/history`,
       layout: { version: 5 } as never,
     });
     await vi.waitFor(() =>
-      expect(saved[saved.length - 1]?.panes.p3?.url).toBe(`${A}/history`),
+      expect(
+        ends[opened].received.filter((command) => command.type === "route"),
+      ).toEqual([{ type: "route", route }]),
     );
+    expect(
+      [...document.querySelectorAll("iframe[data-cv-pane]")].map((frame) =>
+        frame.getAttribute("data-cv-pane"),
+      ),
+    ).toEqual(["p1", "p2"]);
   });
 });
 

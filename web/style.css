@@ -19104,6 +19104,11 @@ body.main-split .main-tabs-pane[data-side="left"] {
   width: var(--icon-md);
   height: var(--icon-md);
 }
+/* この面を閉じる: 面が 2 つ以上ある間だけ (host が面に html[data-pane-focus] を付ける)。 */
+html:not([data-pane-focus="on"]):not([data-pane-focus="off"])
+  .main-tabs-close-pane {
+  display: none;
+}
 /* ターミナルのタブは名前 (種類 · 状態) が長いので幅の上限を広げる (絵の指定 240)。 */
 .main-tab[data-kind="terminal"] {
   max-width: calc(var(--space-unit) * 60);
