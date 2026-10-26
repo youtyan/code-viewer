@@ -135,6 +135,8 @@ function mount(
     dismissed?: boolean;
     /** 設定の節と同じフックの状態 (種類ごと)。無い種類はまだ取っていない (null)。 */
     hookStates?: Partial<Record<HookAgent, AgentHookState>>;
+    /** 外側のページの左の一覧 (面を分けて開ける)。 */
+    splitProject?: AgentsSidebarDeps["splitProject"];
   } = {},
 ) {
   document.body.innerHTML =
@@ -154,6 +156,7 @@ function mount(
     projects: actions,
     getText: () => agentsText("en"),
     openPane,
+    ...(notify.splitProject ? { splitProject: notify.splitProject } : {}),
     viewingPane: () => null,
     openProjectMenu: (root, anchor) => projectMenus.push({ root, anchor }),
     handoff: {
@@ -1116,6 +1119,36 @@ describe("agents sidebar reordering projects", () => {
       [expected],
     ]);
   });
+
+  // 面を分けて開けるのは外側のページの左の一覧だけ (面の中・1 枚の画面には出さない)。
+  test.each([
+    { label: "Open to the right", split: true, expected: "row" },
+    { label: "Open below", split: true, expected: "column" },
+    { label: "Open to the right", split: false, expected: null },
+  ])(
+    "heading menu: $label (outer page: $split)",
+    ({ label, split, expected }) => {
+      const opened: string[] = [];
+      const { root } = mount(data, undefined, undefined, {
+        ...(split
+          ? { splitProject: (project, dir) => opened.push(`${project} ${dir}`) }
+          : {}),
+      });
+      toggle(root, "/work/sample-lib")
+        .closest(".nav-project-head")
+        ?.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+        );
+      const item = [
+        ...document.querySelectorAll<HTMLElement>(".gdp-context-menu button"),
+      ].find((button) => button.textContent === label);
+      item?.click();
+      expect([item !== undefined, opened]).toEqual([
+        split,
+        expected ? [`/work/sample-lib ${expected}`] : [],
+      ]);
+    },
+  );
 
   test("only registered headings can be dragged", () => {
     const { root } = mount(data);

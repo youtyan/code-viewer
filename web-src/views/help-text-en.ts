@@ -1401,6 +1401,13 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(l.mainTabs.splitRight),
                   " on a tab, or g v splits the pane to the right; g s splits it downward. The new pane shows the front tab (a terminal or image moves there).",
                 ],
+                [
+                  "In the left list, a project's ⋯ (or right-click) has ",
+                  ui(l.agents.projects.openToTheRight),
+                  " and ",
+                  ui(l.agents.projects.openBelow),
+                  ", which open that project in a new pane.",
+                ],
                 "Panes can be split again in either direction. Drag the line between panes to resize them; double-click it to make them even.",
                 [
                   ui(l.mainTabs.moveToOtherSide),

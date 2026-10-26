@@ -129,6 +129,13 @@ type FakePane = {
 function paneFrame(id: string, url: string): FakePane {
   const frame = document.createElement("iframe");
   frame.setAttribute("data-cv-pane", id);
+  const pane = paneWindow(frame, url);
+  document.getElementById("workspace")?.append(frame);
+  return pane;
+}
+
+/** iframe の中を、url を読み終えた面にする (host が作った iframe にも使う)。 */
+function paneWindow(frame: HTMLIFrameElement, url: string): FakePane {
   const hellos: FakePane["hellos"] = [];
   let shown: { readyState: string; URL: string } | null = {
     readyState: "complete",
@@ -143,7 +150,6 @@ function paneFrame(id: string, url: string): FakePane {
     },
   });
   Object.defineProperty(frame, "contentDocument", { get: () => shown });
-  document.getElementById("workspace")?.append(frame);
   return {
     frame,
     hellos,
@@ -500,6 +506,38 @@ describe("host: 面の並び", () => {
         frame.getAttribute("data-cv-pane"),
       ),
     ).toEqual(["p1", "p2"]);
+  });
+});
+
+describe("host: 左の一覧から面を分けて開く", () => {
+  test("新しい面を作り、エージェントの一覧を渡してから、プロジェクトの切り替えを頼む", async () => {
+    const { host, saved } = await startHost();
+    host.share({ type: "agents", overview: {} as never, error: "" });
+    host.splitWith("row", {
+      type: "switch-project",
+      root: "/work/b",
+      confirmRegister: false,
+    });
+    const frame = document.querySelector<HTMLIFrameElement>(
+      'iframe[data-cv-pane="p3"]',
+    );
+    if (!frame) throw new Error("the new pane has no frame");
+    const p3 = paneWindow(frame, `${A}/`);
+    frame.dispatchEvent(new Event("load"));
+    await vi.waitFor(() => expect(p3.hellos).toHaveLength(1));
+    const end = paneEnd(p3);
+    // 切り替えは一覧からプロジェクトを探すので、一覧が先に届く。
+    await vi.waitFor(() =>
+      expect(
+        end.received
+          .map((command) => command.type)
+          .filter((type) => type === "agents" || type === "switch-project"),
+      ).toEqual(["agents", "switch-project"]),
+    );
+    expect([
+      saved[saved.length - 1]?.focused,
+      frame.getAttribute("src"),
+    ]).toEqual(["p3", `${A}/`]);
   });
 });
 

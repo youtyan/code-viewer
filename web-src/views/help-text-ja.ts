@@ -1379,6 +1379,13 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   ui(l.mainTabs.splitRight),
                   "、または g v で右に、g s で下に分けます。新しい面には前面のタブが出ます (ターミナルと画像は移ります)。",
                 ],
+                [
+                  "左の一覧のプロジェクトの ⋯ (右クリックでも) の ",
+                  ui(l.agents.projects.openToTheRight),
+                  "・",
+                  ui(l.agents.projects.openBelow),
+                  " で、そのプロジェクトを新しい面に開きます。",
+                ],
                 "分けた面はどちらの向きにもさらに分けられます。面の間の線を引くと大きさが変わり、ダブルクリックで等分に戻ります。",
                 [
                   ui(l.mainTabs.moveToOtherSide),

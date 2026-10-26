@@ -68,6 +68,8 @@ export type WorkspaceHost = {
   project(): PaneProject | null;
   /** 面の並びの操作 (キー)。 */
   run(action: WorkspaceAction): void;
+  /** フォーカスのある面を分け、新しい面に頼む (左の一覧から別のプロジェクトを並べる)。 */
+  splitWith(dir: SplitDir, command: HostCommand): void;
 };
 
 type PaneRuntime = {
@@ -182,9 +184,11 @@ export function startWorkspaceHost(deps: {
       location.origin,
       [channel.port2],
     );
+    // 頼みより先に最後の値 (エージェントの一覧) を渡す。新しい面へのプロジェクトの
+    // 切り替えは、その一覧からプロジェクトを探す。
+    for (const command of shared.values()) runtime.port.postMessage(command);
     for (const command of runtime.queued.splice(0))
       runtime.port.postMessage(command);
-    for (const command of shared.values()) runtime.port.postMessage(command);
     send(runtime, focusState(runtime.id));
   }
 
@@ -824,6 +828,11 @@ export function startWorkspaceHost(deps: {
     ],
     project: () => panes.get(workspace.focused)?.project ?? null,
     run,
+    splitWith(dir, next) {
+      // 新しい面はこのページの画面で開き、頼み (読み終わるまで溜める) で移る。
+      split(workspace.focused, dir, deps.homeUrl(), null);
+      command(next);
+    },
   };
 }
 

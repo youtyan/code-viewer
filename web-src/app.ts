@@ -10128,6 +10128,16 @@ window.GdpExpandLogic = GdpExpandLogic;
             pane,
             returnOnPhone(() => MOBILE_SHELL.openDrawer()),
           ),
+        ...(WORKSPACE_ROLE === "host"
+          ? {
+              splitProject: (root: string, dir: SplitDir) =>
+                WORKSPACE_HOST?.splitWith(dir, {
+                  type: "switch-project",
+                  root,
+                  confirmRegister: false,
+                }),
+            }
+          : {}),
         viewingPane: viewingAgentPane,
         // 電話の引き出しの＋のメニュー: 選んだら引き出しを閉じる (メニューは
         // 引き出しの外に開くので、引き出しの中の押下では閉じない。開いたまま

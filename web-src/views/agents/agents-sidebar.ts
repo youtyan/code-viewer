@@ -1,5 +1,6 @@
 import { withoutProjectPrefix } from "../../core/api-url";
 import { formatErrorDetail } from "../../core/error-detail";
+import type { SplitDir } from "../../core/workspace";
 // 左のサイドバーの「プロジェクト → エージェント」の一覧。どの画面にいても出る。
 //
 //   PROJECTS                              [全体ボード]
@@ -59,6 +60,8 @@ export type AgentsSidebarDeps = {
   getText(): AgentsText;
   /** そのペインをターミナルで開く。 */
   openPane(pane: string): void;
+  /** 今の面を分けて、そのプロジェクトを開く (外側のページだけ。無ければメニューに出さない)。 */
+  splitProject?(root: string, dir: SplitDir): void;
   /** いまターミナルで見ているペイン (行の選択の印)。 */
   viewingPane(): string | null;
   /** タブのグループと同じメニューを、選んだプロジェクトの＋から開く。 */
@@ -327,6 +330,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       void deps.projects.open(info, currentPath(), { confirmRegister: false });
     });
     head.append(twisty, toggle);
+    const splitProject = deps.splitProject;
     const openMenu = (anchor: HTMLElement, at?: { x: number; y: number }) =>
       showProjectMenu(anchor, info, {
         actions: deps.projects,
@@ -334,6 +338,9 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         registeredCount:
           deps.monitor.snapshot().overview?.registry.projects.length ?? 0,
         at,
+        ...(splitProject
+          ? { split: (dir: SplitDir) => splitProject(info.root, dir) }
+          : {}),
       });
     // 右クリック (電話では長押し) で ⋯ と同じメニュー (上へ・下へを含む)。
     head.addEventListener("contextmenu", (event) => {
