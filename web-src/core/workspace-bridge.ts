@@ -110,7 +110,7 @@ export type PaneMessage =
    * (そのタブ 1 枚)。シェル・画像は面の側で閉じる (移す)。
    */
   | { type: "split"; dir: SplitDir; url: string; layout: SerializedLayout }
-  /** 別の面で開く (Alt＋クリック・反対の面へ)。開ける面が無ければ右に分ける。 */
+  /** 別の面で開く (Alt＋クリック・反対の面へ)。開ける面が無ければ送った面で開く。 */
   | ({ type: "open-elsewhere" } & TabCarry)
   /** タブを掴んだ (外側のページがほかの面の上に落とす先を出す)。 */
   | ({ type: "drag-start"; tabId: string } & TabCarry)
@@ -133,7 +133,7 @@ export type ClickModifiers = {
 export type HostCommand =
   | { type: "switch-project"; root: string; confirmRegister: boolean }
   | { type: "navigate-project"; url: string; replace: boolean }
-  | { type: "open-agent-pane"; pane: string; opposite: boolean }
+  | { type: "open-agent-pane"; pane: string }
   | { type: "route"; route: AppRoute }
   | { type: "settings-at"; heading: string }
   /** 左のサイドバーのプロジェクトの ▾。面の左端の、その行の高さに開く。 */

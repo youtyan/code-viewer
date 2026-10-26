@@ -6,6 +6,7 @@
 import type { AgentProjectInfo } from "../../core/agent-overview";
 import { PROJECT_COLORS } from "../../core/project-colors";
 import { canStopProjectServer } from "../../core/projects";
+import type { SplitDir } from "../../core/workspace";
 import { type ContextMenuItem, showContextMenu } from "../context-menu";
 import type { ProjectActions } from "./project-actions";
 import { projectLook, projectMark } from "./project-looks";
@@ -21,11 +22,19 @@ export function showProjectMenu(
     registeredCount: number;
     /** 右クリックで開くときのポインタの位置 (無ければ anchor の下)。 */
     at?: { x: number; y: number };
+    /** 今の面を分けてこのプロジェクトを開く (外側のページの左の一覧だけ)。 */
+    split?: (dir: SplitDir) => void;
   },
 ): void {
-  const { actions, text: t } = options;
+  const { actions, text: t, split } = options;
   const registered = info.registered;
   const items: ContextMenuItem[] = [];
+  if (split)
+    items.push(
+      { label: t.openToTheRight, onSelect: () => split("row") },
+      { label: t.openBelow, onSelect: () => split("column") },
+      { kind: "separator" },
+    );
   if (!registered) {
     items.push({
       label: t.register,

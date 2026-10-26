@@ -93,10 +93,15 @@ function claudeWindows(stdout: string): UsageWindow[] {
   const report = [...messages]
     .reverse()
     .find((message) => message.usage_report !== undefined);
-  const limits = object(
-    object(report?.usage_report, "usage_report").rate_limits,
-    "usage_report.rate_limits",
-  ).limits;
+  const rateLimits = object(report?.usage_report, "usage_report").rate_limits;
+  // null: the CLI itself could not load the usage. After the usage server
+  // refuses (HTTP 429) the CLI stops asking for a while, so every read in that
+  // time is null too.
+  if (rateLimits === null)
+    throw new Error(
+      "Claude Code could not load this account's usage (usage_report.rate_limits is null; its own /usage shows no limits either). The usage server may be refusing requests for a while (HTTP 429); retry later.",
+    );
+  const limits = object(rateLimits, "usage_report.rate_limits").limits;
   if (!Array.isArray(limits))
     throw new Error(
       `Claude /usage returned no structured limits: ${JSON.stringify(limits)}. Update the CLI or retry after signing in.`,

@@ -58,10 +58,10 @@ import {
 export type RepoViewDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;
   /**
-   * 木のファイルの右クリックの「新しいタブで開く」「右に分割して開く」
-   * (木の行の中ボタン・Alt＋クリックと同じ開き方。ui-surface.md のタブの決まり)。
+   * 木のファイルの右クリックの「新しいタブで開く」(木の行の中ボタンと同じ) と
+   * 「右に分割して開く」(面を右に分けて開く。ui-surface.md のタブの決まり)。
    */
-  openTreeFileAs(path: string, intent: "new-tab" | "other-pane"): void;
+  openTreeFileAs(path: string, intent: "new-tab" | "split"): void;
   setPageMode(): void;
   setStatus(s: "live" | "refreshing" | "error" | null): void;
   setProjectName(project: string): void;
@@ -499,7 +499,7 @@ export function createRepoView(deps: RepoViewDeps) {
             },
             {
               label: text.openToTheRight,
-              onSelect: () => deps.openTreeFileAs(entry.path, "other-pane"),
+              onSelect: () => deps.openTreeFileAs(entry.path, "split"),
             },
           ]
         : [];

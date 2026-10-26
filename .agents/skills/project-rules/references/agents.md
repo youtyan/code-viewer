@@ -120,9 +120,9 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
   題名で預けたタブの数を出す。広がれば同じ比で戻す。保存するのは預けた分を含む配置
 - タブ列の `+` は `app.ts` の `openNewTabMenu` / `newTabMenuItems` が作る。ファイル、新しいシェル、
   既存のシェルと tmux ペインを開き、全プロジェクトの一覧へも移れる
-- エージェントを開く既定は現在の面のタブ（`app.ts` の `openAgentPane`。サイドバー・パレット・
-  全体ボード・通知・最下段）。サイドバーの Alt+クリックと、行の右クリックのメニューの項目は
-  反対のメインの面に開き、1 面なら右の面を作る（`agents-sidebar.ts` の `openPane(pane, "opposite")`）。経路はどちらも `/_tmux/open`（ペイン → そのセッションのシェル）で、
+- エージェントは、そのシェルを出している面があればその面で、無ければフォーカスのある面の
+  タブで開く（`app.ts` の `openAgentPane`。サイドバー・パレット・全体ボード・通知・最下段で同じ。
+  修飾キーでも開く先は変わらない）。経路は `/_tmux/open`（ペイン → そのセッションのシェル）で、
   タブの中身はシェル（`shell-…`）
 - ペインが別のプロジェクト（移れるもの）のものなら、開く前にそのプロジェクトへ移る。判定は
   `core/projects.ts` の `agentPaneTarget` 1 か所（入口は `views/agents/agent-pane-opener.ts`）で、
@@ -576,7 +576,9 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 - Claude は `--safe-mode --print /usage --output-format stream-json --verbose`。
   構造化された `usage_report.rate_limits.limits` を読み、ローカルコマンドの成功と
   ターン数・費用・API 処理時間がすべて 0 であることを確認する。モデル API の接続先は
-  接続できないローカルポートに固定する。構造化された値が無い場合は失敗にする
+  接続できないローカルポートに固定する。構造化された値が無い場合は失敗にする。
+  `rate_limits` が null なのは CLI 自身が使用量を読めなかったとき（使用量のサーバが 429 で断ると、
+  CLI はしばらく問い合わせず、その間の `/usage` はずっと null）。失敗の詳しい文でそう伝える
 - Codex は既存の `login.ts` の RPC で app-server を起動する。initialize の応答を待ってから
   initialized と `account/rateLimits/read` を送る。シェルの制御文字が付く行も `jsonIn` で読む
 - 起動コマンドと環境は `agentCommandArgv`・`accountEnv` を使う。Claude の作業場所は

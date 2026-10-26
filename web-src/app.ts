@@ -1982,6 +1982,14 @@ window.GdpExpandLogic = GdpExpandLogic;
                 ...tabCarry(tab),
               }),
             dragEnd: () => PANE_BRIDGE?.send({ type: "drag-end" }),
+            // 押した面にフォーカスが移ってから届く (bridge.ts の pointerdown)。
+            closePane: () =>
+              PANE_BRIDGE?.send({
+                type: "workspace-action",
+                action: "pane-close",
+              }),
+            // style.css の閉じるボタンと同じ印 (面が 2 つ以上のときだけ on / off)。
+            many: () => Boolean(document.documentElement.dataset.paneFocus),
           },
         }
       : {}),
@@ -7824,15 +7832,15 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * 木・差分の一覧のファイルの行を、固定のタブ (new-tab) か反対の面
-   * (other-pane) で開く (ui-surface.md の「タブの決まり」)。木は今見ている
+   * 木・差分の一覧のファイルの行を、固定のタブ (new-tab)・反対の面
+   * (other-pane)・右に分けた面 (split) で開く (ui-surface.md の「タブの決まり」)。木は今見ている
    * 表示 (Code / Blame) を保ち、差分の一覧はその差分の新しい側の版 (消した
    * ファイルは古い側) を Code で開く。フォルダはタブにならないので普通の
    * クリックと同じ。
    */
   function openFileAs(
     file: SidebarItem,
-    intent: "new-tab" | "other-pane",
+    intent: "new-tab" | "other-pane" | "split",
     list: "diff" | "repo",
   ): void {
     const ref = REPO_SIDEBAR_REF || STATE.repoRef || "worktree";
@@ -7860,6 +7868,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       MAIN_TABS.openingNewTab(() => setRoute(route));
       if (route.view === "blob")
         void renderStandaloneSource({ path: route.path, ref: route.ref });
+      return;
+    }
+    if (intent === "split" && PANE_BRIDGE) {
+      const { url, layout } = fileCarry(route);
+      PANE_BRIDGE.send({ type: "split", dir: "row", url, layout });
       return;
     }
     openFileInOtherPane(route);
@@ -7922,35 +7935,39 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 右の面へファイルの route を開く (右にフォーカスがあるときの木・パレット、
    * Alt+クリック、右の面の中の移動)。開けなければ (1 面で狭い) false。
    */
+  /** ファイルの route を、ほかの面で開く形 (そのファイルのタブ 1 枚) にする。 */
+  function fileCarry(route: FileRoute): TabCarry {
+    const target = routeTarget(route, MAIN_TABS.currentProject());
+    return {
+      route,
+      terminal: null,
+      project: MAIN_TABS.currentProject(),
+      url: urlForRoute(route),
+      layout: serializeLayout({
+        panes: {
+          left: target
+            ? {
+                tabs: [
+                  {
+                    id: `t-${crypto.randomUUID().slice(0, 8)}`,
+                    target,
+                    preview: false,
+                  },
+                ],
+                activeId: null,
+                recent: [],
+              }
+            : { tabs: [], activeId: null, recent: [] },
+        },
+        focused: "left",
+      }),
+    };
+  }
+
   function openInRightPane(route: FileRoute, replace = false): boolean {
-    // 面の中: 外側のページが別の面 (無ければ右に分けた面) で開く。
+    // 面の中: 外側のページが別の面 (無ければこの面) で開く。
     if (PANE_BRIDGE) {
-      const target = routeTarget(route, MAIN_TABS.currentProject());
-      PANE_BRIDGE.send({
-        type: "open-elsewhere",
-        route,
-        terminal: null,
-        project: MAIN_TABS.currentProject(),
-        url: urlForRoute(route),
-        layout: serializeLayout({
-          panes: {
-            left: target
-              ? {
-                  tabs: [
-                    {
-                      id: `t-${crypto.randomUUID().slice(0, 8)}`,
-                      target,
-                      preview: false,
-                    },
-                  ],
-                  activeId: null,
-                  recent: [],
-                }
-              : { tabs: [], activeId: null, recent: [] },
-          },
-          focused: "left",
-        }),
-      });
+      PANE_BRIDGE.send({ type: "open-elsewhere", ...fileCarry(route) });
       return true;
     }
     if (!MAIN_TABS.openRouteRight(route)) return false;
@@ -8480,6 +8497,11 @@ window.GdpExpandLogic = GdpExpandLogic;
             ? void openShellIn(null, side)
             : showShellUnavailable(list.reason ?? ""),
       },
+      // 面の中にはグループの札 (その ▾) が無いので、エージェントもここから起こす。
+      {
+        label: mainTabsText(STATE.language).newAgentHere,
+        onSelect: () => launchAgent(MAIN_TABS.currentProject() ?? undefined),
+      },
       // Tools と Search は page のタブ (左の面にだけ開く)。
       { label: uiText().nav.tools, onSelect: () => openToolsPage() },
       { label: uiText().nav.search, onSelect: () => openSearchPage() },
@@ -8512,7 +8534,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           // 開く (タブにしても 1 ペイン表示で開き、戻ると案内だけが残った)。
           onSelect: () =>
             pane && PHONE_QUERY.matches
-              ? openAgentPane(pane.id, undefined, reopenNewTabMenu)
+              ? openAgentPane(pane.id, reopenNewTabMenu)
               : MAIN_TABS.openTerminal(session.id),
         });
       }
@@ -8532,7 +8554,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       sessions.push({
         label: `${mark(pane.id, false)}${row.row}`,
         title: row.title,
-        onSelect: () => openAgentPane(pane.id, undefined, reopenNewTabMenu),
+        onSelect: () => openAgentPane(pane.id, reopenNewTabMenu),
       });
     }
     if (sessions.length > 0) items.push({ kind: "separator" }, ...sessions);
@@ -9709,11 +9731,7 @@ window.GdpExpandLogic = GdpExpandLogic;
    * エージェントのペインを開く (通知・サイドバー・全体ボード・パレット)。
    * 別のプロジェクトのペインならそのプロジェクトへ移る (agent-pane-opener.ts)。
    */
-  function openAgentPane(
-    pane: string,
-    destination?: "opposite",
-    returnTo?: () => void,
-  ): void {
+  function openAgentPane(pane: string, returnTo?: () => void): void {
     // host: そのシェルを出している面があればその面で、無ければフォーカスのある面で。
     if (WORKSPACE_HOST) {
       const shell =
@@ -9723,7 +9741,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       WORKSPACE_HOST.commandWhereTerminal(shell || null, {
         type: "open-agent-pane",
         pane,
-        opposite: false,
       });
       return;
     }
@@ -9731,7 +9748,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     // (引き出しと面の中の行は押したときに自分で閉じるが、通知・最下段の件数・
     // 全体ボード・パレットから来たときは閉じていなかった)。
     MOBILE_SHELL.close();
-    AGENT_PANE_OPENER(pane, destination, returnTo);
+    AGENT_PANE_OPENER(pane, returnTo);
   }
 
   /**
@@ -9745,26 +9762,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     };
   }
 
-  /** この画面のメインの面のタブで開く。サイドバーの修飾操作だけ反対面。 */
-  function openAgentPaneHere(
-    pane: string,
-    destination?: "opposite",
-    returnTo?: () => void,
-  ): void {
+  /** この画面のメインの面のタブで開く。 */
+  function openAgentPaneHere(pane: string, returnTo?: () => void): void {
     AGENT_MONITOR.markRead(pane);
     if (PHONE_QUERY.matches) {
       PANE_VIEW.open(pane, returnTo);
       return;
     }
-    const panes = MAIN_TABS.panes();
-    const side: PaneSide =
-      destination === "opposite"
-        ? panes.split
-          ? panes.focused === "left"
-            ? "right"
-            : "left"
-          : "right"
-        : panes.focused;
     // もうタブで開いていれば、そのタブを前面に出すだけ (シェルを増やさない)。
     const tabbed = [...TAB_SHELL_PANES].find(
       ([shell, opened]) =>
@@ -9772,13 +9776,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         MAIN_TABS.hasTerminal(shell),
     );
     if (tabbed) {
-      MAIN_TABS.openTerminal(
-        tabbed[0],
-        destination === "opposite" ? side : undefined,
-      );
+      MAIN_TABS.openTerminal(tabbed[0]);
       return;
     }
-    void TERMINAL_VIEW.openPaneInTab(pane, side);
+    void TERMINAL_VIEW.openPaneInTab(pane, MAIN_TABS.panes().focused);
   }
 
   const AGENT_MONITOR = createAgentMonitor({
@@ -10122,12 +10123,21 @@ window.GdpExpandLogic = GdpExpandLogic;
         projects: PROJECT_ACTIONS,
         switchProject: (info) => switchToProjectGroup(info.root),
         getText: () => agentsText(STATE.language),
-        openPane: (pane, destination) =>
+        openPane: (pane) =>
           openAgentPane(
             pane,
-            destination,
             returnOnPhone(() => MOBILE_SHELL.openDrawer()),
           ),
+        ...(WORKSPACE_ROLE === "host"
+          ? {
+              splitProject: (root: string, dir: SplitDir) =>
+                WORKSPACE_HOST?.splitWith(dir, {
+                  type: "switch-project",
+                  root,
+                  confirmRegister: false,
+                }),
+            }
+          : {}),
         viewingPane: viewingAgentPane,
         // 電話の引き出しの＋のメニュー: 選んだら引き出しを閉じる (メニューは
         // 引き出しの外に開くので、引き出しの中の押下では閉じない。開いたまま
@@ -11300,7 +11310,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         void navigateProject(command.url, command.replace);
         return;
       case "open-agent-pane":
-        openAgentPane(command.pane, command.opposite ? "opposite" : undefined);
+        openAgentPane(command.pane);
         return;
       case "route":
         navigateToRoute(command.route);

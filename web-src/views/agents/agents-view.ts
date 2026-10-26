@@ -69,8 +69,7 @@ export type AgentsViewDeps = {
   setPageMode(): void;
   syncHeaderMenu(): void;
   /** そのペインを下のターミナルパネルで開く。 */
-  /** opposite は反対の面 (Alt＋クリック)。 */
-  openPane(pane: string, destination?: "opposite"): void;
+  openPane(pane: string): void;
   /** 設定画面の通知の項目へ。 */
   openNotificationSettings(): void;
   /** ページを読み込み直す (通知をブラウザで許可した後)。 */
@@ -245,10 +244,10 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     return current.state[filter];
   }
 
-  function select(pane: AgentPane, destination?: "opposite"): void {
+  function select(pane: AgentPane): void {
     selected = pane.id;
     deps.monitor.markRead(pane.id);
-    deps.openPane(pane.id, destination);
+    deps.openPane(pane.id);
     render(true);
   }
 
@@ -289,12 +288,11 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     ]
       .filter(Boolean)
       .join("\n");
-    // 左のサイドバーの行と同じ押し分け (中ボタン・⌘/Ctrl は 1 回押すと同じ、
-    // Alt は反対の面)。
+    // 左のサイドバーの行と同じ押し分け (中ボタン・⌘/Ctrl・Alt は 1 回押すと同じ)。
     const openBy = (event: MouseEvent) => {
       if (event.button > 1) return;
       event.preventDefault();
-      select(pane, event.altKey ? "opposite" : undefined);
+      select(pane);
     };
     row.addEventListener("click", openBy);
     row.addEventListener("auxclick", openBy);
@@ -305,10 +303,6 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
         row,
         [
           { label: current.openPane, onSelect: () => select(pane) },
-          {
-            label: current.openPaneOpposite,
-            onSelect: () => select(pane, "opposite"),
-          },
           ...handoffMenuItems(pane, current, deps.handoff),
         ],
         { at: { x: event.clientX, y: event.clientY } },

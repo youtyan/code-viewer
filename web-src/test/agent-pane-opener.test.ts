@@ -126,15 +126,13 @@ test("adding and removing the parameter keeps the rest of the URL", () => {
   expect(withOpenPaneOverlay(added, null)).toBe("/history?pane=right");
 });
 
-// 4 つの経路は同じ入口を、次の形で呼ぶ (app.ts の配線: 通知は
-// onNotificationClick、サイドバーは openPane (Alt+クリックは opposite)、
-// 全体ボードは openPane、パレットは Agents の run)。
+// 4 つの経路は同じ入口を呼ぶ (app.ts の配線: 通知は onNotificationClick、
+// サイドバーと全体ボードは openPane、パレットは Agents の run)。
 const ENTRIES = [
-  { entry: "notification", destination: undefined },
-  { entry: "sidebar", destination: undefined },
-  { entry: "sidebar (Alt+click)", destination: "opposite" as const },
-  { entry: "board", destination: undefined },
-  { entry: "palette", destination: undefined },
+  { entry: "notification" },
+  { entry: "sidebar" },
+  { entry: "board" },
+  { entry: "palette" },
 ];
 
 test.each(
@@ -149,7 +147,7 @@ test.each(
       },
     },
   ]),
-)("$entry, pane $pane → $expected", ({ pane: id, destination, expected }) => {
+)("$entry, pane $pane → $expected", ({ pane: id, expected }) => {
   let here: string | null = null;
   let moved: string | null = null;
   const open = createAgentPaneOpener({
@@ -162,6 +160,6 @@ test.each(
       here = paneId;
     },
   });
-  open(id, destination);
+  open(id);
   expect({ here, moved }).toEqual(expected);
 });

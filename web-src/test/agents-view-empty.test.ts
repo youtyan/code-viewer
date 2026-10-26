@@ -279,11 +279,7 @@ describe("the board row context menu", () => {
         transcriptPath: "/home/sample/log/sample.jsonl",
         cwd: "/work/sample",
       },
-      labels: [
-        "Open in a tab",
-        "Open in the opposite pane",
-        "Continue with another account…",
-      ],
+      labels: ["Open in a tab", "Continue with another account…"],
       click: "Continue with another account…",
       calls: ["handoff:%1"],
     },
@@ -292,7 +288,6 @@ describe("the board row context menu", () => {
       conversation: undefined,
       labels: [
         "Open in a tab",
-        "Open in the opposite pane",
         "Continue with another account…",
         "Needs the agent hooks — show how to install",
       ],

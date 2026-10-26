@@ -7,6 +7,9 @@ export type ProjectsText = {
   /** 見出しのメニューを開くボタン。 */
   menu: string;
   menuTitle: (name: string) => string;
+  /** 外側のページの左の一覧だけ: 今の面を分けて、このプロジェクトを開く。 */
+  openToTheRight: string;
+  openBelow: string;
   register: string;
   registerTitle: string;
   unregister: string;
@@ -95,6 +98,8 @@ export type ProjectsText = {
 export const PROJECTS_EN: ProjectsText = {
   menu: "⋯",
   menuTitle: (name) => `More for ${name}`,
+  openToTheRight: "Open to the right",
+  openBelow: "Open below",
   register: "Register project",
   registerTitle:
     "Keep this project in the list and the header switcher, even when no agent runs in it",
@@ -203,6 +208,8 @@ export const PROJECTS_EN: ProjectsText = {
 export const PROJECTS_JA: ProjectsText = {
   menu: "⋯",
   menuTitle: (name) => `${name} のその他の操作`,
+  openToTheRight: "右に分割して開く",
+  openBelow: "下に分割して開く",
   register: "プロジェクトに登録",
   registerTitle:
     "エージェントが居なくても、一覧とヘッダの切替にこのプロジェクトを出します",

@@ -531,6 +531,72 @@ describe("main tabs view: プロジェクトのグループ", () => {
     ]);
   });
 
+  /** 面の中のタブ列。many は窓に面が 2 つ以上あるか、closed は閉じるボタンの記録。 */
+  async function paneTabs(many = false, closed: string[] = []) {
+    const { handle, mount } = setup(
+      async () => saved,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      APP,
+      groupDeps([], {
+        paneMode: {
+          splitOut: () => undefined,
+          onEmptied: () => undefined,
+          dragStart: () => undefined,
+          dragEnd: () => undefined,
+          closePane: () => closed.push("pane"),
+          many: () => many,
+        },
+      }),
+    );
+    await handle.restore();
+    return mount;
+  }
+
+  test("面の中では札を出さず、その面のプロジェクトのタブをタブの順に並べる", async () => {
+    expect(strip(await paneTabs())).toEqual([
+      "-(>app.ts README.md agents)",
+      "+",
+    ]);
+  });
+
+  // 移す先の面が無いのに出すと、押したら面を分けていた。
+  test.each([
+    { many: false, moves: [] },
+    { many: true, moves: ["Move to other side"] },
+  ])(
+    "面の中: 面が 2 つ以上 ($many) のときだけ「反対側へ移す」を出す",
+    async ({ many, moves }) => {
+      const mount = await paneTabs(many);
+      mount
+        .querySelector(".main-tab")
+        ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      expect(
+        menuLabels().filter((label) => label.startsWith("Move to other side")),
+      ).toEqual(moves);
+    },
+  );
+
+  // 分割の可否と幅は外側のページが見る (左右 2 面の頃の幅の判定で、押せるのに薄くしていた)。
+  test("面の中: タブ列の右端の分割は押せる形で出し、閉じるボタンでこの面を閉じる", async () => {
+    const closed: string[] = [];
+    const mount = await paneTabs(true, closed);
+    const split = mount.querySelector<HTMLElement>(".main-tabs-split");
+    const button = mount.querySelector<HTMLElement>(".main-tabs-close-pane");
+    button?.click();
+    expect({
+      split: [split?.getAttribute("aria-disabled"), split?.title],
+      close: [button?.title, closed],
+    }).toEqual({
+      split: ["false", "Split right"],
+      close: [
+        "Close this pane (its tabs close; shells keep running)",
+        ["pane"],
+      ],
+    });
+  });
+
   test("シェルのグループが分かるまでは保存した控えで並べる (読み込み直後にタブが動かない)", async () => {
     let known = false;
     const { handle, mount } = setup(

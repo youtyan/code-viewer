@@ -68,6 +68,8 @@ export type WorkspaceHost = {
   project(): PaneProject | null;
   /** 面の並びの操作 (キー)。 */
   run(action: WorkspaceAction): void;
+  /** フォーカスのある面を分け、新しい面に頼む (左の一覧から別のプロジェクトを並べる)。 */
+  splitWith(dir: SplitDir, command: HostCommand): void;
 };
 
 type PaneRuntime = {
@@ -182,9 +184,11 @@ export function startWorkspaceHost(deps: {
       location.origin,
       [channel.port2],
     );
+    // 頼みより先に最後の値 (エージェントの一覧) を渡す。新しい面へのプロジェクトの
+    // 切り替えは、その一覧からプロジェクトを探す。
+    for (const command of shared.values()) runtime.port.postMessage(command);
     for (const command of runtime.queued.splice(0))
       runtime.port.postMessage(command);
-    for (const command of shared.values()) runtime.port.postMessage(command);
     send(runtime, focusState(runtime.id));
   }
 
@@ -362,20 +366,19 @@ export function startWorkspaceHost(deps: {
     message: Extract<PaneMessage, { type: "open-elsewhere" }>,
   ): void {
     // 最後にフォーカスがあった別の面 (画面・ファイルなら同じプロジェクトの面)。
-    const target = [...focusOrder, ...paneIds(workspace.tree)]
-      .reverse()
-      .find(
-        (id) =>
-          id !== from &&
-          panes.has(id) &&
-          (message.project === null ||
-            panes.get(id)?.project?.root === message.project),
-      );
-    const runtime = target ? panes.get(target) : undefined;
-    if (!runtime) {
-      split(from, "row", message.url, message.layout);
-      return;
-    }
+    // 無ければ分けずに頼んだ面で開く (分けるのは利用者が分割を選んだときだけ)。
+    const target =
+      [...focusOrder, ...paneIds(workspace.tree)]
+        .reverse()
+        .find(
+          (id) =>
+            id !== from &&
+            panes.has(id) &&
+            (message.project === null ||
+              panes.get(id)?.project?.root === message.project),
+        ) ?? from;
+    const runtime = panes.get(target);
+    if (!runtime) throw new Error(`the pane ${target} has no frame`);
     focusPane(runtime.id);
     if (message.terminal !== null)
       send(runtime, { type: "open-terminal", session: message.terminal });
@@ -825,6 +828,11 @@ export function startWorkspaceHost(deps: {
     ],
     project: () => panes.get(workspace.focused)?.project ?? null,
     run,
+    splitWith(dir, next) {
+      // 新しい面はこのページの画面で開き、頼み (読み終わるまで溜める) で移る。
+      split(workspace.focused, dir, deps.homeUrl(), null);
+      command(next);
+    },
   };
 }
 

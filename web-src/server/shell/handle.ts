@@ -54,6 +54,12 @@ export function startShellStream(id: ShellSessionId, stream: SseStream): void {
     return;
   }
   stream.onClose(() => sub.unsubscribe());
+  // そろえられなかったのは映していない別のシェル。このシェルの画面は流し続ける。
+  if (sub.aligned.status === "error")
+    console.error(
+      "[code-viewer] shell size alignment failed",
+      sub.aligned.error,
+    );
   stream.send("open", "ok");
   // 購読していない間に出ていた分を先に流す。開き直したときに画面が
   // 真っ白にならない。前の購読者に渡った分には流し直しの印を付ける:

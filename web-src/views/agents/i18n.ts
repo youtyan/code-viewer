@@ -59,10 +59,6 @@ export type AgentsText = {
   /** 見始めて 1 分未満。下限と言えるほどの長さが無い。 */
   elapsedJustWatched: string;
   openPane: string;
-  /** 行の右クリックのメニュー: 反対の面で開く。 */
-  openPaneOpposite: string;
-  /** サイドバーの行の説明に添える、修飾キーの案内。 */
-  openPaneOppositeHint: string;
   /** 行・タブの右クリックのメニュー: 別のアカウントで続ける (views/agents/handoff.ts)。 */
   handoff: string;
   handoffTitle: string;
@@ -513,8 +509,6 @@ const EN: AgentsText = {
   elapsedJustWatched:
     "Just started watching: when it entered this state is not known",
   openPane: "Open in a tab",
-  openPaneOpposite: "Open in the opposite pane",
-  openPaneOppositeHint: "Alt+click: open in the opposite pane",
   handoff: "Continue with another account…",
   handoffTitle:
     "Start claude or codex with another account in a new window of the same tmux session, and have it read this agent's conversation log and continue",
@@ -663,8 +657,6 @@ const JA: AgentsText = {
     `見始めてから変化なし。少なくとも ${lowerBound} 前からこの状態です`,
   elapsedJustWatched: "見始めたばかりで、この状態になった時刻は分かりません",
   openPane: "タブで開く",
-  openPaneOpposite: "反対の面で開く",
-  openPaneOppositeHint: "Alt+クリック: 反対の面で開く",
   handoff: "別のアカウントで続ける…",
   handoffTitle:
     "同じ tmux のセッションの新しいウィンドウで、別のアカウントの claude か codex を起動し、このエージェントの会話記録を読んで続きをやらせます",

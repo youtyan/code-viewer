@@ -1,5 +1,6 @@
 import { withoutProjectPrefix } from "../../core/api-url";
 import { formatErrorDetail } from "../../core/error-detail";
+import type { SplitDir } from "../../core/workspace";
 // 左のサイドバーの「プロジェクト → エージェント」の一覧。どの画面にいても出る。
 //
 //   PROJECTS                              [全体ボード]
@@ -57,8 +58,10 @@ export type AgentsSidebarDeps = {
   monitor: AgentMonitor;
   projects: ProjectActions;
   getText(): AgentsText;
-  /** そのペインをターミナルで開く。opposite は反対の面 (1 面なら右へ分割)。 */
-  openPane(pane: string, destination?: "opposite"): void;
+  /** そのペインをターミナルで開く。 */
+  openPane(pane: string): void;
+  /** 今の面を分けて、そのプロジェクトを開く (外側のページだけ。無ければメニューに出さない)。 */
+  splitProject?(root: string, dir: SplitDir): void;
   /** いまターミナルで見ているペイン (行の選択の印)。 */
   viewingPane(): string | null;
   /** タブのグループと同じメニューを、選んだプロジェクトの＋から開く。 */
@@ -177,7 +180,6 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         : "",
       card.ageTitle,
       current.openPane,
-      current.openPaneOppositeHint,
     ]
       .filter(Boolean)
       .join("\n");
@@ -185,18 +187,18 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       "aria-label",
       `${current.state[pane.state]} · ${shown.kind} · ${shown.summary}`,
     );
-    const openHere = (destination?: "opposite") => {
+    const openHere = () => {
       deps.monitor.markRead(pane.id);
-      deps.openPane(pane.id, destination);
+      deps.openPane(pane.id);
       render(true);
     };
-    // ターミナルは 1 か所にしか置けず、仮にもならないので、中ボタン・⌘/Ctrl
-    // も 1 回押すと同じ (開くか前面に出す)。Alt は反対の面 (ui-surface.md の
-    // 「タブの決まり」の例外の表)。
+    // ターミナルは 1 か所にしか置けず、仮にもならないので、中ボタン・⌘/Ctrl・Alt
+    // も 1 回押すと同じ (開くか前面に出す。ui-surface.md の「タブの決まり」の
+    // 例外の表)。
     const openBy = (event: MouseEvent) => {
       if (event.button > 1) return;
       event.preventDefault();
-      openHere(event.altKey ? "opposite" : undefined);
+      openHere();
     };
     row.addEventListener("click", openBy);
     row.addEventListener("auxclick", openBy);
@@ -206,10 +208,6 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         row,
         [
           { label: current.openPane, onSelect: () => openHere() },
-          {
-            label: current.openPaneOpposite,
-            onSelect: () => openHere("opposite"),
-          },
           ...handoffMenuItems(pane, current, deps.handoff),
         ],
         { at: { x: event.clientX, y: event.clientY } },
@@ -332,6 +330,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       void deps.projects.open(info, currentPath(), { confirmRegister: false });
     });
     head.append(twisty, toggle);
+    const splitProject = deps.splitProject;
     const openMenu = (anchor: HTMLElement, at?: { x: number; y: number }) =>
       showProjectMenu(anchor, info, {
         actions: deps.projects,
@@ -339,6 +338,9 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         registeredCount:
           deps.monitor.snapshot().overview?.registry.projects.length ?? 0,
         at,
+        ...(splitProject
+          ? { split: (dir: SplitDir) => splitProject(info.root, dir) }
+          : {}),
       });
     // 右クリック (電話では長押し) で ⋯ と同じメニュー (上へ・下へを含む)。
     head.addEventListener("contextmenu", (event) => {

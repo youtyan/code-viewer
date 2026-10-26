@@ -293,7 +293,7 @@ describe("repo view commit entries", () => {
   // ui-surface.md の「タブの決まり」: ファイルの右クリックで固定のタブ・反対の面に開ける。
   test.each([
     ["Open in new tab", "new-tab"],
-    ["Open to the right", "other-pane"],
+    ["Open to the right", "split"],
   ])("the file menu item %s opens the file as %s", async (label, intent) => {
     setupDom();
     globalThis.fetch = (async () =>
