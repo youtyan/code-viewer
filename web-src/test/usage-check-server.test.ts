@@ -157,6 +157,15 @@ describe("token-free usage checks", () => {
   test.each([
     { name: "missing usage report", lines: [RESULT] },
     {
+      // Claude Code が使用量を読めなかった (使用量のサーバが断った) とき。
+      name: "usage the CLI could not load",
+      lines: [
+        { type: "assistant", usage_report: { rate_limits: null } },
+        RESULT,
+      ],
+      detail: "Claude Code could not load this account's usage",
+    },
+    {
       name: "missing current limits",
       lines: [
         { type: "assistant", usage_report: { rate_limits: { limits: null } } },
@@ -195,14 +204,18 @@ describe("token-free usage checks", () => {
         },
       ],
     },
-  ])("$name fails and does not publish fresh data", async ({ lines }) => {
-    const { checker, publish } = harness(lines);
-    expect(await checker.check(ACCOUNT, "/sample/check")).toMatchObject({
-      status: "failed",
-      reason: "read-failed",
-    });
-    expect(publish).not.toHaveBeenCalled();
-  });
+  ])(
+    "$name fails and does not publish fresh data",
+    async ({ lines, detail = "" }) => {
+      const { checker, publish } = harness(lines);
+      expect(await checker.check(ACCOUNT, "/sample/check")).toMatchObject({
+        status: "failed",
+        reason: "read-failed",
+        detail: expect.stringContaining(detail),
+      });
+      expect(publish).not.toHaveBeenCalled();
+    },
+  );
   test("retains every RPC error field", async () => {
     const h = harness();
     h.rpc.mockResolvedValue({

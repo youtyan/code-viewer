@@ -576,7 +576,9 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 - Claude は `--safe-mode --print /usage --output-format stream-json --verbose`。
   構造化された `usage_report.rate_limits.limits` を読み、ローカルコマンドの成功と
   ターン数・費用・API 処理時間がすべて 0 であることを確認する。モデル API の接続先は
-  接続できないローカルポートに固定する。構造化された値が無い場合は失敗にする
+  接続できないローカルポートに固定する。構造化された値が無い場合は失敗にする。
+  `rate_limits` が null なのは CLI 自身が使用量を読めなかったとき（使用量のサーバが 429 で断ると、
+  CLI はしばらく問い合わせず、その間の `/usage` はずっと null）。失敗の詳しい文でそう伝える
 - Codex は既存の `login.ts` の RPC で app-server を起動する。initialize の応答を待ってから
   initialized と `account/rateLimits/read` を送る。シェルの制御文字が付く行も `jsonIn` で読む
 - 起動コマンドと環境は `agentCommandArgv`・`accountEnv` を使う。Claude の作業場所は
