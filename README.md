@@ -106,20 +106,22 @@ code-viewer
 | Area | What it holds |
 |---|---|
 | Left sidebar | Search, projects and their agents, **New agent**, **Settings**, **Help** |
-| List column | The current project and branch, six screen icons, the file list, and the list of the current screen (changed files, commits, worktrees) |
-| Tab row | Open files and screens, grouped by project |
-| Main area | The front tab. Can be split into two sides |
+| Panes | The window splits left / right and up / down. Each pane has its own project, list column, tab row and main area |
+| List column | The pane's project and branch, six screen icons, the file list, and the list of the current screen (changed files, commits, worktrees) |
+| Tab row | Open files, screens and terminals of the pane's project |
+| Main area | The front tab |
 | Bottom bar | Agents waiting / working, account usage, annotations, Copy AI context, auto update, theme, repository web page, Environment doctor |
 
 - Screens: **Files** (`g r`), **Diff** (`g d`), **History** (`g h`), **Worktrees**, **Data** (`g b`), **Work log** (`g j`).
 - Diff, History, Worktrees, Data and Work log each get one tab per project. Files is not a tab: the folder view shows when no tab is selected.
 - A file opened with one click gets a temporary tab (italic name) that the next file replaces. Double-click or **Keep open** keeps it. Middle-click or ⌘/Ctrl+click opens a kept tab.
 - A file at another revision opens in its own tab, named like `a.ts @ 1a2b3c4`.
-- Tab groups: a colored label per project. Select it to collapse the group; its ▾ has **New shell**, **New agent…**, that project's screens and **Close this group**.
-- Right-click a tab: **Close**, **Close others**, **Close to the right**, **Copy path**, **Split right**, **Move to other side** and more. Drag to reorder.
-- Split: the split button at the right of the tab row, **Split right**, or drag a tab to the right half. Screens stay on the left; files, terminals and images can go on either side. `g o` moves the focus to the other side.
+- Right-click a tab: **Close**, **Close others**, **Close to the right**, **Copy path**, **Split right**, **Move to other side** (with two or more panes) and more. Drag to reorder.
+- Split: the split button at the right end of the tab row, **Split right** on a tab, `g v` (right) / `g s` (down), **Open to the right** / **Open below** in a project's ⋯ in the sidebar, or drag a tab onto the edge of a pane.
+- Alt+click and file paths in a terminal open in another pane, or in the same pane when there is none (nothing splits on its own).
+- Close a pane: the × at the right end of the tab row (two or more panes), closing its last tab, or `g q`. `g o` / `g O` move to the next / previous pane.
 - Columns fold by hand, and fold by themselves when the window is narrow.
-- Tabs are shared by all projects and by every window.
+- Each pane remembers its tabs per project. Each window keeps its own panes; a new window starts from a copy of the last saved one.
 - Back / Forward return to the scroll position.
 
 ### Files
