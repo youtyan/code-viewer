@@ -204,6 +204,12 @@ describe("findImagePaths", () => {
     { name: "名前が無い", text: "see .png", expected: [] },
     { name: "名前が無い絶対パス", text: "/.png", expected: [] },
     { name: "画像パスが無い", text: "$ ls -la", expected: [] },
+    // 拡張子を見ずに掛けると長さの 2 乗の時間がかかり、ここで時間切れになる。
+    {
+      name: "拡張子の無いパスの文字が長く続く (罫線の -----)",
+      text: "-".repeat(200_000),
+      expected: [],
+    },
   ])("$name", ({ text, expected }) => {
     expect(findImagePaths(text)).toEqual(expected);
   });
