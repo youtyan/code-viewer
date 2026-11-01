@@ -7,8 +7,20 @@
 //
 // 制御文字はソースに直書きせず、ESC から組み立てる。
 
-import { describe, expect, test } from "vitest";
-import { closeLineColors } from "../server/tmux/capture";
+import { describe, expect, test, vi } from "vitest";
+import type { TmuxRunResult } from "../server/tmux/command";
+
+const mocks = vi.hoisted(() => ({ runTmux: vi.fn() }));
+vi.mock("../server/tmux/command", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../server/tmux/command")>()),
+  runTmux: mocks.runTmux,
+}));
+
+import {
+  captureTmuxPanes,
+  closeLineColors,
+  type TmuxCaptureResult,
+} from "../server/tmux/capture";
 
 const ESC = String.fromCharCode(27);
 const RESET = `${ESC}[0m`;
@@ -88,5 +100,88 @@ describe("closeLineColors", () => {
   test("本文の文字は落とさない", () => {
     const screen = `${BLUE_BG}NORMAL\n  372 # comment\n`;
     expect(stripSgr(closeLineColors(screen))).toBe("NORMAL\n  372 # comment\n");
+  });
+});
+
+/**
+ * tmux が返す本文: ペインごとに、頼まれた区切り・ペイン ID・大きさの行と画面。
+ * 区切りは呼ぶたびに変わるので、頼まれた -F から読む。
+ */
+function screens(
+  args: string[],
+  panes: Array<[string, string]>,
+): TmuxRunResult {
+  const format = args[args.indexOf("-F") + 1] ?? "";
+  const marker = format.slice(0, format.indexOf("#{pane_id}"));
+  return {
+    status: "ok",
+    stdout: panes
+      .map(([pane, text]) => `${marker}${pane} 80 24 1 2 0\n${text}\n`)
+      .join(""),
+  };
+}
+
+function summary(result: TmuxCaptureResult): string {
+  if (result.status === "ok")
+    return `ok ${result.screen.pane} ${result.screen.content}`;
+  if (result.status === "gone") return "gone";
+  return `error ${result.error.message}`;
+}
+
+describe("captureTmuxPanes", () => {
+  test.each([
+    {
+      name: "1 回の tmux で全部のペインを読む",
+      replies: [
+        (args: string[]) =>
+          screens(args, [
+            ["%1", "one"],
+            ["%2", "two"],
+          ]),
+      ],
+      expected: [`ok %1 one${RESET}\n`, `ok %2 two${RESET}\n`],
+    },
+    {
+      name: "閉じたペインがあれば 1 本ずつ読み直し、閉じたものは gone",
+      replies: [
+        (): TmuxRunResult => ({ status: "no-target" }),
+        (args: string[]) => screens(args, [["%1", "one"]]),
+        (): TmuxRunResult => ({ status: "no-target" }),
+      ],
+      expected: [`ok %1 one${RESET}\n`, "gone"],
+    },
+    {
+      name: "画面の数が合わなければ全部を失敗にする",
+      replies: [(args: string[]) => screens(args, [["%1", "one"]])],
+      expected: [
+        "error tmux capture returned 1 screens for 2 panes (%1 %2)",
+        "error tmux capture returned 1 screens for 2 panes (%1 %2)",
+      ],
+    },
+    {
+      name: "別のペインの画面が返れば、そのペインだけ失敗にする",
+      replies: [
+        (args: string[]) =>
+          screens(args, [
+            ["%1", "one"],
+            ["%3", "three"],
+          ]),
+      ],
+      expected: [
+        `ok %1 one${RESET}\n`,
+        "error tmux capture of %2 returned the screen of %3",
+      ],
+    },
+  ])("$name", async ({ replies, expected }) => {
+    mocks.runTmux.mockReset();
+    for (const reply of replies)
+      mocks.runTmux.mockImplementationOnce(async (args: string[]) =>
+        reply(args),
+      );
+
+    const results = await captureTmuxPanes(["%1", "%2"], "/repo");
+
+    expect(results.map(summary)).toEqual(expected);
+    expect(mocks.runTmux).toHaveBeenCalledTimes(replies.length);
   });
 });
