@@ -4,6 +4,9 @@
 //
 // - 再読み込みのたびに、素のシェルのペインに `1;2c0;276;0c` のような文字が
 //   打ち込まれる (tmux が attach したときの問い合わせに、xterm が答え直す)
+// - 流し直しを解釈している間に人が打った文字まで捨てると、打っても入らない
+//   端末になる (流し直しは最大 20 万文字ある)
+// - 送信が返らない間を黙っていると、打っても入らない理由が画面から分からない
 //
 // 前半は本物の xterm で「答えは書いたものを解釈している最中に出る」ことを
 // 確かめる。回避はこの順番に頼っているので、上流が変わればここが落ちる。
@@ -141,10 +144,28 @@ vi.mock("../core/xterm-loader", async () => {
   };
 });
 
-function fakeTerminal(): { typeByUser(data: string): void } {
+function fakeTerminal(): {
+  element: HTMLElement;
+  typeByUser(data: string): void;
+} {
   return (globalThis as Record<string, unknown>).__replayTestTerminal as {
+    element: HTMLElement;
     typeByUser(data: string): void;
   };
+}
+
+/**
+ * 人がキーを打つ: 本物の xterm は、ブラウザが配っている keydown の最中に打鍵を
+ * onData へ出す。happy-dom は isTrusted を持たないので、ブラウザの印を付ける。
+ */
+function typeDuringKeydown(data: string): void {
+  const term = fakeTerminal();
+  const emit = () => term.typeByUser(data);
+  term.element.addEventListener("keydown", emit);
+  const event = new KeyboardEvent("keydown", { bubbles: true });
+  Object.defineProperty(event, "isTrusted", { value: true });
+  term.element.dispatchEvent(event);
+  term.element.removeEventListener("keydown", emit);
 }
 
 const SESSION: ShellSession = {
@@ -167,6 +188,7 @@ function settle(): Promise<void> {
 describe("流し直しの印を読んで、端末の答えを送るか決める", () => {
   let screen: TerminalScreenHandle;
   let host: HTMLElement;
+  let statuses: Array<string | null>;
   let outputHandlers: Array<(event: MessageEvent<string>) => void> = [];
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -192,6 +214,7 @@ describe("流し直しの印を読んで、端末の答えを送るか決める"
     );
     vi.stubGlobal("fetch", fetchMock);
     outputHandlers = [];
+    statuses = [];
     vi.stubGlobal(
       "EventSource",
       class {
@@ -224,7 +247,8 @@ describe("流し直しの印を読んで、端末の答えを送るか決める"
       getFontSize: () => 13,
       actionHeaders: () => ({}),
       trackLoad: (promise) => promise,
-      onStatus: () => undefined,
+      onStatus: (message, overlay) =>
+        statuses.push(overlay ? `overlay: ${message}` : message),
       onTargetGone: () => undefined,
       onShellExited: () => undefined,
       tmuxWindow: () => null,
@@ -242,6 +266,7 @@ describe("流し直しの印を読んで、端末の答えを送るか決める"
   afterEach(() => {
     screen.dispose();
     host.remove();
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -279,5 +304,45 @@ describe("流し直しの印を読んで、端末の答えを送るか決める"
     await settle();
 
     expect(sentKeys()).toEqual([DA_ANSWER, "ls\r"]);
+  });
+
+  test("流し直しを解釈している間に人が打った文字は送り、その間の答えは送らない", async () => {
+    emitOutput({ data: `prompt${DA_QUERY}`, replay: true });
+    typeDuringKeydown("a");
+    await settle();
+
+    expect(sentKeys()).toEqual(["a"]);
+  });
+
+  test("送信が 1 秒を過ぎても返らなければ送信待ちを出し、返ったら消して、かかった時間を残す", async () => {
+    vi.useFakeTimers();
+    const warned = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    let answer: () => void = () => undefined;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = () => resolve(new Response(JSON.stringify({ ok: true })));
+        }),
+    );
+    statuses.length = 0;
+    typeDuringKeydown("a");
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(statuses).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    // 端末の下端に重ねる (行を足すと端末が縮み、tmux が描き直す)。
+    expect(statuses).toEqual(["overlay: Waiting to send input…"]);
+    // 動き続ける画面の出力で消さない。
+    emitOutput({ data: "spinner" });
+    await vi.advanceTimersByTimeAsync(1500);
+    answer();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(statuses).toEqual(["overlay: Waiting to send input…", null]);
+    expect(warned.mock.calls).toEqual([
+      ["[code-viewer] the shell input request for shell-replay took 2500ms"],
+    ]);
   });
 });

@@ -222,11 +222,13 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   function writeStatus(
     slot: Pick<ScreenSlot, "status" | "hint">,
     message: string | null,
+    overlay = false,
   ): void {
     for (const el of [slot.status, slot.hint]) {
       el.textContent = message ?? "";
       el.hidden = !message;
     }
+    slot.status.classList.toggle("terminal-status-overlay", overlay);
   }
 
   function slots(): ScreenSlot[] {
@@ -252,7 +254,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       getText: text,
       getFontSize: () => clampTerminalFontSize(deps.getFontSize()),
       // 状態の行は枠の中にあるので、付け替えても映しているシェルの状態が付いて行く。
-      onStatus: (message) => writeStatus({ status, hint }, message),
+      onStatus: (message, overlay) =>
+        writeStatus({ status, hint }, message, overlay),
       onTargetGone: (session) => forgetShell(session.id),
       onShellExited: (session) => {
         forgetShell(session.id);

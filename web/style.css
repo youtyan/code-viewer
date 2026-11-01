@@ -16810,6 +16810,7 @@ html[data-theme="dark"] .tools-code span[style] {
 /* xterm 1 つと状態の行の組 (views/terminal/terminal-view.ts の ScreenSlot)。
    パネルとメインのタブの間で、この箱ごと付け替える。 */
 .terminal-slot {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -20686,6 +20687,14 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   border-top: 1px solid var(--color-line-soft);
   color: var(--color-text-2);
   font-size: var(--ui-font-sm);
+}
+/* 数秒で消える知らせ (入力の送信待ち) は端末の下端に重ねる (.terminal-slot が
+   基準)。行として足すと端末が 1 行縮み、PTY と中の tmux が描き直す。消えるとき
+   にもう 1 回。 */
+.terminal-status.terminal-status-overlay {
+  position: absolute;
+  inset: auto 0 0;
+  background: var(--color-term);
 }
 
 /* 端末の画面と、その右の画像の棚を横に並べる行。 */
