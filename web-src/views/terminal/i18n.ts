@@ -49,6 +49,8 @@ export type TerminalText = {
   loadFailed: string;
   /** キー送信に失敗した。 */
   sendFailed: string;
+  /** キー送信が返らないまま待っている。 */
+  inputPending: string;
   resizeFailed: string;
   imageListFailed: string;
   /** 新しいシェルを開くボタン。 */
@@ -246,6 +248,7 @@ const EN: TerminalText = {
   shellListFailed: "Failed to load the shell list.",
   loadFailed: "Failed to load the terminal.",
   sendFailed: "Failed to send input.",
+  inputPending: "Waiting to send input…",
   resizeFailed: "Failed to resize the terminal.",
   imageListFailed: "Failed to inspect terminal images.",
   newShell: "New shell",
@@ -394,6 +397,7 @@ const JA: TerminalText = {
   shellListFailed: "シェル一覧を取得できませんでした。",
   loadFailed: "ターミナルを読み込めませんでした。",
   sendFailed: "入力を送信できませんでした。",
+  inputPending: "入力の送信を待っています…",
   resizeFailed: "ターミナルの大きさを変更できませんでした。",
   imageListFailed: "ターミナルの画像を確認できませんでした。",
   newShell: "新しいシェル",
@@ -479,6 +483,7 @@ const JA: TerminalText = {
   imageShelfResize: "画像の棚の大きさを変える",
   imageShelfExpand: (count) => `画像の棚を開く (${count} 件)`,
   imageSize: (width, height) => `${width} × ${height}`,
+  // ai-dup-check: allow -- ok:EN の imageRejected の訳。分岐の形が同じなのは訳だから
   imageRejected: (reason, bytes) => {
     switch (reason) {
       case "missing":

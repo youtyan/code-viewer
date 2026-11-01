@@ -18,7 +18,7 @@ import {
   type TerminalPaneLayout,
 } from "../../core/terminal-images";
 import type { TmuxClient, TmuxPaneId } from "../../core/tmux";
-import { captureTmuxPane } from "../tmux/capture";
+import { captureTmuxPanes } from "../tmux/capture";
 import { TMUX_FIELD_SEP as FIELD_SEP, runTmux } from "../tmux/command";
 
 /**
@@ -272,8 +272,10 @@ export async function readImageOrigins(
   if (candidates.length === 0) return { layout, sightings: [], paths };
   const errors: string[] = [];
   const texts: PaneText[] = [];
-  const captures = await Promise.all(
-    layout.panes.map((pane) => captureTmuxPane(pane.id, cwd, historyLines)),
+  const captures = await captureTmuxPanes(
+    layout.panes.map((pane) => pane.id),
+    cwd,
+    historyLines,
   );
   captures.forEach((capture, index) => {
     const pane = layout.panes[index];

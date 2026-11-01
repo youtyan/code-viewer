@@ -484,6 +484,23 @@ describe("subscribeShell replay split", () => {
     expect(sub?.replay).toBe("");
     expect(sub?.unseen.startsWith("y")).toBe(true);
   });
+
+  test("many small chunks keep only the newest 200,000 characters", async () => {
+    const created = await createShellSession(process.cwd());
+    if (created.status !== "ok") throw new Error("expected a shell session");
+    const id = created.session.id;
+    const noop = () => undefined;
+
+    pty.emitData("a".repeat(150_000));
+    pty.emitData("b".repeat(150_000));
+    pty.emitData("c".repeat(150_000));
+    const buffer = readShellBuffer(id);
+    const sub = subscribeShell(id, noop, noop);
+
+    expect(buffer?.totalChars).toBe(450_000);
+    expect(buffer?.replay).toBe(`${"b".repeat(50_000)}${"c".repeat(150_000)}`);
+    expect(sub?.unseen).toBe(buffer?.replay);
+  });
 });
 
 describe("terminal size follows the operating view", () => {

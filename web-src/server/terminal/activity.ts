@@ -30,10 +30,9 @@ import { formatErrorDetail } from "../../core/error-detail";
 // 画面とタイトルの同一性を見るだけなので、差分取得と同じハッシュで足りる。
 import { hashLine } from "../../core/terminal-capture";
 import { listShellSessions, readShellBuffer } from "../shell/session";
-import { captureTmuxPane } from "../tmux/capture";
+import { captureTmuxPanes, type TmuxCaptureResult } from "../tmux/capture";
 import { readTmuxServerGeneration } from "../tmux/command";
 import { type ListTmuxPanesOptions, listTmuxPanes } from "../tmux/panes";
-import { mapWithConcurrency } from "../worktree/list";
 import {
   getConversationStoreErrors,
   restoreSavedConversations,
@@ -111,15 +110,22 @@ export const OVERRIDE_CHANGE_STREAK = Math.ceil(
   OVERRIDE_MOTION_MS / ACTIVITY_POLL_INTERVAL_MS,
 );
 
-/** capture-pane の同時実行数。子プロセス数をこの値より増やさない。 */
-export const ACTIVITY_CAPTURE_CONCURRENCY = 8;
+/**
+ * tmux を 1 回起こして読むペインの数。組は 1 つずつ順に読む。
+ *
+ * ペインごとに tmux を起こしていた頃は、起こすたびに入口のサーバの手が
+ * 塞がり (1 本数 ms、混むと 100ms 超)、1 周で 20 本以上を起こす間ずっと
+ * 打鍵とシェルの出力が待たされていた。全部を 1 回にしないのは、混んだ
+ * マシンで期限に掛かったとき、読めた組まで失わないため。
+ */
+export const ACTIVITY_CAPTURE_BATCH = 8;
 /**
  * 1 周で capture-pane を掛けるペインの上限。続きは次の周で見る。
  *
- * 並列化で 1 周が短くなっても単位時間あたりの子プロセス数を増やさないよう、
- * 3 組までに抑える。ペインが多い場合も巡回位置を持ち回って全件を見る。
+ * tmux の仕事 (画面を読む量) を単位時間あたりで増やさないよう、3 組までに
+ * 抑える。ペインが多い場合も巡回位置を持ち回って全件を見る。
  */
-export const MAX_PANES_PER_SWEEP = ACTIVITY_CAPTURE_CONCURRENCY * 3;
+export const MAX_PANES_PER_SWEEP = ACTIVITY_CAPTURE_BATCH * 3;
 /** 一覧・世代確認・capture を含む巡回 1 回の上限。 */
 export const ACTIVITY_SWEEP_TIMEOUT_MS = 6000;
 /**
@@ -466,18 +472,26 @@ async function sweepOnce(
       offset,
       MAX_PANES_PER_SWEEP,
     );
-    const captures = await mapWithConcurrency(
-      batch,
-      ACTIVITY_CAPTURE_CONCURRENCY,
-      async (pane) => {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) return { pane, result: null };
-        return {
-          pane,
-          result: await captureTmuxPane(pane.id, cwd, 0, remaining),
-        };
-      },
-    );
+    const captures: {
+      pane: (typeof batch)[number];
+      result: TmuxCaptureResult | null;
+    }[] = [];
+    for (let at = 0; at < batch.length; at += ACTIVITY_CAPTURE_BATCH) {
+      const group = batch.slice(at, at + ACTIVITY_CAPTURE_BATCH);
+      const remaining = deadline - Date.now();
+      const results =
+        remaining > 0
+          ? await captureTmuxPanes(
+              group.map((pane) => pane.id),
+              cwd,
+              0,
+              remaining,
+            )
+          : null;
+      // 期限で始められなかった組は null (遅延)。結果は group と同じ順・同じ数。
+      for (const [index, pane] of group.entries())
+        captures.push({ pane, result: results ? results[index] : null });
+    }
     // 期限で始められなかったペインは、次の周の先頭にする。越えて進めると、
     // 混んでいる間は同じ位置のペインが毎周打ち切られて読まれなくなる。
     const firstDeferred = captures.findIndex(({ result }) => result === null);

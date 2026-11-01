@@ -161,8 +161,11 @@ export type TerminalScreenDeps = {
   /** 副作用リクエスト用のヘッダ (app.ts の actionHeaders)。 */
   actionHeaders(): HeadersInit;
   getText(): TerminalText;
-  /** 画面下に出す状態メッセージ。null で消す。 */
-  onStatus(message: string | null): void;
+  /**
+   * 画面下に出す状態メッセージ。null で消す。overlay は端末の下端に重ねて出す
+   * (行を足すと端末が 1 行縮み、PTY と中の tmux が描き直す。数秒で消える知らせ用)。
+   */
+  onStatus(message: string | null, overlay?: boolean): void;
   /** 映していたシェルが無くなった。一覧を取り直してもらう。 */
   onTargetGone(session: ShellSession): void;
   /** 映していたシェルが終わった (exit・tmux から抜けた・映していたペインが終わった)。 */
@@ -278,6 +281,12 @@ export function terminalTheme(): XtermTheme {
 /** 貼り付けの知らせ (保存した場所) を出しておく時間。読み切れる長さ。 */
 const PASTE_NOTICE_MS = 8000;
 
+/**
+ * 入力の送信がこれより長く返らなければ、送信待ちを状態の行に出す。打鍵の往復は
+ * 普段は数 ms なので、1 秒待つのは接続の空き待ちかサーバが止まっているとき。
+ */
+const INPUT_PENDING_NOTICE_MS = 1000;
+
 export function createTerminalScreen(
   deps: TerminalScreenDeps,
 ): TerminalScreenHandle {
@@ -324,8 +333,11 @@ export function createTerminalScreen(
   /** 状態の行に出している文。貼り付けの知らせを時間で消すときに、後から出た別の文を消さないため。 */
   let shownStatus: string | null = null;
   let pasteNoticeTimer: ReturnType<typeof setTimeout> | null = null;
-  /** 出している貼り付けの知らせ。出力が来ても消さない (打ち込んだパスの反響で消えた)。 */
-  let pasteNotice: string | null = null;
+  /**
+   * 出力が来ても消さない状態の文 (貼り付けの知らせ・入力の送信待ち)。貼り付けの
+   * 知らせは打ち込んだパスの反響で、送信待ちは動き続ける画面で消えていた。
+   */
+  let keptStatus: string | null = null;
   // attach の世代。読み込みを待つ間に別の対象へ切り替えられたら、後から
   // 返ってきた初期化で画面を作り直さない。
   let generation = 0;
@@ -342,9 +354,9 @@ export function createTerminalScreen(
   // いない書き込みの数。流し直しの中の問い合わせ (tmux が attach したときの
   // DA など) に xterm は答え直すが、その答えを待つ者はもういないので、PTY へ
   // 送ると利用者のペインに `1;2c0;276;0c` のような文字として入る。この間に
-  // xterm が出す文字は送らない。xterm の onData は答えと打鍵を区別しないので、
-  // この数ミリ秒 (attach の直後、流し直しを解釈している間) に打った分も送られ
-  // ない。
+  // xterm が答えとして出す文字は送らない。打鍵は、人の操作の最中に出たか
+  // (inputEvent) で答えと見分けて送る: 流し直しは最大 20 万文字あり、解釈の
+  // 間の打鍵まで捨てていた頃は、打っても入らない端末になっていた。
   let replayWrites = 0;
   // 出力から拾った綴りと、最後に問い合わせた時刻。attach ごとに作り直す
   // (clear するのではなく作り直すのは、飛んでいる問い合わせが次の対象の
@@ -615,6 +627,14 @@ export function createTerminalScreen(
     pendingInput = "";
     fitShellToContainer(false, false);
     const size = shellViewport(claim);
+    // 返らない間は、打っても画面が動かない。黙って待たせず、待っていると出す。
+    const pendingNotice = deps.getText().inputPending;
+    const startedAt = Date.now();
+    const pendingTimer = setTimeout(() => {
+      if (disposed || myGen !== generation) return;
+      keptStatus = pendingNotice;
+      showStatus(pendingNotice, true);
+    }, INPUT_PENDING_NOTICE_MS);
     try {
       const res = await deps.trackLoad(
         fetch(apiUrl("shellKeys"), {
@@ -648,6 +668,16 @@ export function createTerminalScreen(
         showStatus(`${deps.getText().sendFailed}\n${formatErrorDetail(error)}`);
       }
     } finally {
+      clearTimeout(pendingTimer);
+      const waited = Date.now() - startedAt;
+      if (waited >= INPUT_PENDING_NOTICE_MS)
+        console.warn(
+          `[code-viewer] the shell input request for ${target.id} took ${waited}ms`,
+        );
+      if (keptStatus === pendingNotice) {
+        keptStatus = null;
+        if (!disposed && shownStatus === pendingNotice) showStatus(null);
+      }
       sending = false;
       if (pendingInput) void flushInput();
     }
@@ -1493,19 +1523,19 @@ export function createTerminalScreen(
    * 打ち込むのは改行を付けない。人が続けて文章を書いてから送れるようにする
    * (勝手に送ると、画像だけが単独で送信されてしまう)。
    */
-  function showStatus(message: string | null): void {
+  function showStatus(message: string | null, overlay = false): void {
     shownStatus = message;
-    deps.onStatus(message);
+    deps.onStatus(message, overlay);
   }
 
   /** 貼り付けた画像をどこに置いたかを、しばらく状態の行に出す。 */
   function showPasteNotice(message: string): void {
     showStatus(message);
-    pasteNotice = message;
+    keptStatus = message;
     if (pasteNoticeTimer) clearTimeout(pasteNoticeTimer);
     pasteNoticeTimer = setTimeout(() => {
       pasteNoticeTimer = null;
-      pasteNotice = null;
+      if (keptStatus === message) keptStatus = null;
       if (!disposed && shownStatus === message) showStatus(null);
     }, PASTE_NOTICE_MS);
   }
@@ -1674,13 +1704,11 @@ export function createTerminalScreen(
       scheduleLinks();
     });
     created.onData((data) => {
-      if (replayWrites > 0) return;
       // Microtasks can run between capture and xterm's listener. Event phase stays
       // active until dispatch finishes; later terminal query replies remain passive.
-      enqueueInput(
-        data,
-        inputEvent !== null && inputEvent.eventPhase !== Event.NONE,
-      );
+      const typed = inputEvent !== null && inputEvent.eventPhase !== Event.NONE;
+      if (replayWrites > 0 && !typed) return;
+      enqueueInput(data, typed);
     });
     // Shift+Enter は「送信せずに改行」。xterm の既定では Enter と同じ CR に
     // なってしまい、書きかけのまま送信されるので、ここで横取りする。
@@ -1741,8 +1769,8 @@ export function createTerminalScreen(
           term.write(payload.data);
         }
         scanShellOutput(payload.data);
-        // 出力が戻ったので、前の失敗の行を片付ける (貼り付けの知らせは残す)。
-        if (shownStatus !== pasteNotice) showStatus(null);
+        // 出力が戻ったので、前の失敗の行を片付ける (貼り付けの知らせと送信待ちは残す)。
+        if (shownStatus !== keptStatus) showStatus(null);
       } catch (error) {
         console.error("[code-viewer] terminal output event failed", error);
         showStatus(

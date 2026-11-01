@@ -344,6 +344,12 @@ const IMAGE_PATH_RE = new RegExp(
 );
 
 /**
+ * IMAGE_PATH_RE と QUOTED_IMAGE_PATH_RE のどちらにも要る `.拡張子`。これが
+ * 無い本文には、どちらも当たらない。
+ */
+const EXTENSION_RE = new RegExp(`\\.(?:${EXTENSIONS})(?![\\p{L}\\p{N}])`, "iu");
+
+/**
  * 引用符で囲まれた、空白を含みうるパス。`'/tmp/my shots/a b.png'` のように
  * 引用符で囲むのは、空白入りのパスを渡すときの普通の書き方。
  *
@@ -397,6 +403,10 @@ type ImagePathMatch = { path: string; index: number; length: number };
  * `'/tmp/a b.png'` から `b.png` も別に拾ってしまう。
  */
 function matchImagePaths(text: string): ImagePathMatch[] {
+  // どちらの形も `.拡張子` で終わる。無い本文には掛けない: IMAGE_PATH_RE は
+  // パスの文字が長く続く所 (罫線の `-----` など) で始点ごとに末尾まで読み直し、
+  // 長さの 2 乗の時間がかかる (入口のサーバの手が 100ms 以上塞がっていた)。
+  if (!EXTENSION_RE.test(text)) return [];
   const matches: ImagePathMatch[] = [];
   let rest = text;
   for (const match of text.matchAll(QUOTED_IMAGE_PATH_RE)) {

@@ -62,7 +62,7 @@ type PtyModule = {
 type SessionEntry = {
   meta: ShellSession;
   pty: PtyProcess;
-  /** 購読開始時に流し込む直近の出力。 */
+  /** 購読開始時に流し込む直近の出力。上限の 2 倍まで伸びる。読むときは replayTail。 */
   replay: string;
   /**
    * 開始からの累積文字数。replay から溢れて捨てた分も数える。差分で本文を
@@ -434,7 +434,12 @@ export async function createShellSession(
   };
 
   child.onData((chunk) => {
-    entry.replay = `${entry.replay}${chunk}`.slice(-REPLAY_BUFFER_LIMIT);
+    // 切り詰めるのは上限の 2 倍を超えたときだけ。出力のたびに切ると、tmux の
+    // 描き直しの細かい出力ごとに溜め置き全体 (20 万文字) を写し直し、入口の
+    // サーバの手が塞がって打鍵が遅れていた。読む側は replayTail で上限に揃える。
+    entry.replay += chunk;
+    if (entry.replay.length > REPLAY_BUFFER_LIMIT * 2)
+      entry.replay = replayTail(entry);
     entry.totalChars += chunk.length;
     entry.unseenChars =
       entry.listeners.size > 0
@@ -521,11 +526,12 @@ export function subscribeShell(
   if (!entry) return null;
   entry.listeners.add(onData);
   entry.exitListeners.add(onExit);
-  const seenChars = entry.replay.length - entry.unseenChars;
+  const replay = replayTail(entry);
+  const seenChars = replay.length - Math.min(entry.unseenChars, replay.length);
   entry.unseenChars = 0;
   return {
-    replay: entry.replay.slice(0, seenChars),
-    unseen: entry.replay.slice(seenChars),
+    replay: replay.slice(0, seenChars),
+    unseen: replay.slice(seenChars),
     aligned: alignUnseenTmuxShells(entry),
     unsubscribe() {
       entry.listeners.delete(onData);
@@ -540,7 +546,14 @@ export function readShellBuffer(
 ): { replay: string; totalChars: number } | null {
   const entry = sessions.get(id);
   if (!entry) return null;
-  return { replay: entry.replay, totalChars: entry.totalChars };
+  return { replay: replayTail(entry), totalChars: entry.totalChars };
+}
+
+/** 溜め置きのうち、渡してよい末尾 (REPLAY_BUFFER_LIMIT まで)。 */
+function replayTail(entry: SessionEntry): string {
+  return entry.replay.length > REPLAY_BUFFER_LIMIT
+    ? entry.replay.slice(-REPLAY_BUFFER_LIMIT)
+    : entry.replay;
 }
 
 export type ShellWriteResult =
