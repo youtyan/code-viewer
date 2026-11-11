@@ -31,19 +31,19 @@ export function stepDiagramScale(value: number, direction: -1 | 1): number {
   return clampDiagramScale(value + direction * BUTTON_STEP);
 }
 
-export function createDiagramViewport(options: {
-  containerClassName: string;
-  contentClassName: string;
-  onScaleChange?: (scale: number) => void;
-}): DiagramViewport {
-  const container = document.createElement("div");
-  container.className = options.containerClassName;
-  const content = document.createElement("div");
-  content.className = options.contentClassName;
-  container.appendChild(content);
+export type DiagramViewportControls = Omit<
+  DiagramViewport,
+  "container" | "content"
+>;
 
+/** 用意した箱 (container) と中身 (content) に、ズームとドラッグパンを付ける。
+ * DOM は作らない (箱は使う側の部品 cv-diagram-viewport が描く)。 */
+export function attachDiagramViewport(
+  container: HTMLElement,
+  content: HTMLElement,
+  options: { onScaleChange?: (scale: number) => void } = {},
+): DiagramViewportControls {
   let scale = 1;
-
   function applyZoom(next: number): void {
     scale = clampDiagramScale(next);
     content.style.transform = `scale(${scale})`;
@@ -90,8 +90,6 @@ export function createDiagramViewport(options: {
   applyZoom(1);
 
   return {
-    container,
-    content,
     zoomIn: () => applyZoom(stepDiagramScale(scale, 1)),
     zoomOut: () => applyZoom(stepDiagramScale(scale, -1)),
     reset: () => applyZoom(1),
@@ -103,5 +101,24 @@ export function createDiagramViewport(options: {
       window.removeEventListener("mousemove", onWindowMouseMove);
       window.removeEventListener("mouseup", onWindowMouseUp);
     },
+  };
+}
+
+/** 箱と中身を作ってから attachDiagramViewport を付ける形。まだ宣言的に描いて
+ * いない画面 (ER 図・画像の拡大) のためのもの。 */
+export function createDiagramViewport(options: {
+  containerClassName: string;
+  contentClassName: string;
+  onScaleChange?: (scale: number) => void;
+}): DiagramViewport {
+  const container = document.createElement("div");
+  container.className = options.containerClassName;
+  const content = document.createElement("div");
+  content.className = options.contentClassName;
+  container.appendChild(content);
+  return {
+    container,
+    content,
+    ...attachDiagramViewport(container, content, options),
   };
 }

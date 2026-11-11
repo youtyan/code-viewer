@@ -3,16 +3,8 @@
 // reject で渡し、覚えている一覧は失敗で変えない。xterm は描かないので画面は
 // 差し替える。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { PROJECT_HEADER } from "../core/api-url";
 import type { ShellSession, ShellSessionId } from "../core/shell";
 import type { TerminalScreenDeps } from "../views/terminal/terminal-screen";
@@ -65,14 +57,6 @@ vi.mock("../views/terminal/terminal-screen", () => ({
 }));
 
 const { createTerminalView } = await import("../views/terminal/terminal-view");
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   vi.unstubAllGlobals();

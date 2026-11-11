@@ -4,8 +4,8 @@
 // エージェントでないだけなら、登録の代わりに今までの「すべてのペインを表示」。
 // 起動中でない登録プロジェクトは、左のサイドバーと同じ判定で下の「停止中」へ。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import type {
   AgentOverviewResponse,
   AgentPane,
@@ -18,14 +18,6 @@ import type { PanePreview } from "../views/agents/pane-preview";
 import type { ProjectActions } from "../views/projects/project-actions";
 import { info, overview as overviewWith } from "./_agents-sidebar-fixture";
 import { agentPane } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 function overview(panes: AgentPane[]): AgentOverviewResponse {
   return {

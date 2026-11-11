@@ -48,7 +48,7 @@ import {
   runningProjectRoots,
 } from "../../core/project-running";
 import { showContextMenu } from "../context-menu";
-import { renderEmptyState } from "../empty-state";
+import { renderEmptyState } from "../ui/empty-state";
 import type { PageView } from "../page-view";
 import type { ProjectActions } from "../projects/project-actions";
 import { projectLook, projectMark } from "../projects/project-looks";

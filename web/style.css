@@ -15737,7 +15737,7 @@ body.db-resizing {
 }
 /* 入力側ヘッダは clear ボタンが直下に 1 つだけなので、それを右端に寄せる。
    出力側はボタン群を .tools-pane-actions がまとめて右に送る。 */
-.tools-pane-head > .tools-pane-action {
+.tools-pane-head > cv-button > .tools-pane-action {
   margin-left: auto;
 }
 .tools-pane-action[disabled] {
@@ -25886,6 +25886,18 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   border-color: transparent;
   background: var(--color-select);
   box-shadow: var(--glow-select);
+}
+
+/* ======================================================================
+   部品の外側の要素 (cv-*)。部品は Shadow DOM を使わず、中に標準の要素
+   (button・input・select・a・div) を描く。外側の要素は箱を作らず、中身を親の
+   並び (flex・grid) にそのまま並べる。外側の要素に hidden を付けない (この規則が
+   既定の display: none に勝つ)。隠すのは中の要素。部品を足したらここに名前を足す
+   (ui-components.test.ts が見る)。決まりは
+   .agents/skills/project-rules/references/ui-components.md。
+   ====================================================================== */
+:where(cv-button, cv-diagram-viewport, cv-empty-state, cv-icon, cv-resizer, cv-scratchpad-pane, cv-segmented) {
+  display: contents;
 }
 
 /* ======================================================================

@@ -11,7 +11,7 @@ import { SEARCH_16_PATH } from "../core/icons";
 import { linkOpenIntent, type OpenIntent } from "../core/link-click";
 import { buildGrepRequestParams, parseGrepQuery } from "../core/search-palette";
 import type { GrepResponse } from "../core/types";
-import { renderEmptyState } from "./empty-state";
+import { renderEmptyState } from "./ui/empty-state";
 import {
   type SearchPaletteLanguage,
   searchPaletteText,

@@ -29,7 +29,7 @@ import {
   TERMINAL_FONT_SIZE_STEP,
 } from "../../core/tmux";
 import type { ContextMenuItem } from "../context-menu";
-import { renderEmptyState } from "../empty-state";
+import { renderEmptyState } from "../ui/empty-state";
 import { type TerminalLang, type TerminalText, terminalText } from "./i18n";
 import type { ImageShelfLayout } from "./image-shelf";
 import {

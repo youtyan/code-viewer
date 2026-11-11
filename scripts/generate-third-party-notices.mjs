@@ -22,6 +22,7 @@ const distributedPackageRoots = [
   "d3-dsv",
   "highlight.js",
   "jose",
+  "lit",
   "markdown-it",
   "markdown-it-anchor",
   "markdown-it-footnote",

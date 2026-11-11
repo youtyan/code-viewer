@@ -179,26 +179,22 @@ describe("line reference pill copy failures", () => {
 
 describe("a tools pane whose render throws", () => {
   test("shows the whole cause chain in the status line and its title", async () => {
-    const { createScratchpadPane } = await import(
-      "../views/tools/scratchpad-pane"
-    );
-    const { toolsText } = await import("../views/tools/i18n");
+    const { mountScratchpadPane } = await import("./_tools-pane");
+    const { flushRenders } = await import("../views/ui/render-queue");
     const failure = errorWithCause(
       "sample render failed",
       new RangeError("sample limit"),
     );
-    const pane = createScratchpadPane(toolsText("en"), "Output", "Input", {
-      toolClassName: "tools-pane-test",
-      initialText: "sample input",
-      onInput: () => undefined,
-      render: () => Promise.reject(failure),
+    const pane = mountScratchpadPane({
+      value: "sample input",
+      renderOutput: () => Promise.reject(failure),
     });
-    document.body.replaceChildren(pane.el);
 
     pane.refresh();
     await settle();
+    flushRenders();
 
-    const status = pane.el.querySelector<HTMLElement>(".tools-pane-status");
+    const status = pane.querySelector<HTMLElement>(".tools-pane-status");
     expect([
       status?.textContent,
       status?.title,

@@ -289,7 +289,7 @@ import { createDiffView, type RenderResult } from "./views/diff-view";
 import { DIFF_SCREEN_TEXT, type DiffScreenText } from "./views/diff-view-i18n";
 import { createDoctorView, doctorText } from "./views/doctor-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
-import { renderEmptyState } from "./views/empty-state";
+import { renderEmptyState } from "./views/ui/empty-state";
 import {
   removeFileHistoryShell as removeRenderedFileHistoryShell,
   renderFileHistoryShell as renderFileHistoryShellView,
@@ -423,7 +423,7 @@ import {
 import { createTerminalView } from "./views/terminal/terminal-view";
 import { installTitleTooltips } from "./views/title-tooltip";
 import { toolsText } from "./views/tools/i18n";
-import { createToolsView } from "./views/tools/tools-view";
+import { createToolsPresenter } from "./views/tools/tools-presenter";
 import { mountTopbarMore } from "./views/topbar-more";
 import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
@@ -7253,7 +7253,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // Tools sheet — doctor sheet と同じ「AppRoute から独立した 1 クエリキーの
   // オーバーレイ」。違いは開いているツール名まで URL に載せる点だけ。
-  const TOOLS_VIEW = createToolsView({
+  const TOOLS_VIEW = createToolsPresenter({
     $: <T extends Element = HTMLElement>(sel: string) =>
       document.querySelector<T>(sel),
     trackLoad,

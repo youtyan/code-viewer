@@ -30,6 +30,7 @@ description: Use at the start of any implementation, investigation, or review in
 | このリポジトリで何かを探す / ビルド・dev サーバの挙動を知る / どこに置くか迷う | `.agents/skills/project-rules/references/orientation.md` |
 | サイズ・位置・固定物・スクロール領域を変える。見切れ・はみ出しを直す | `.agents/skills/project-rules/references/ui-layout.md` |
 | コントロール・アイコン・文言・状態表示・装飾を足す / 変える | `.agents/skills/project-rules/references/ui-surface.md` |
+| 画面のコードを書く / 書き直す (presenter・view・部品 `cv-*`)。画面のテストを書く | `.agents/skills/project-rules/references/ui-components.md` |
 | ルート・ハンドラ・CLI・外部プロセス連携を足す / 変える。`fetch` を書く | `.agents/skills/project-rules/references/server.md` |
 | 依存を足す / 消す / 上げる。バンドル構成を変える | `.agents/skills/project-rules/references/dependencies.md` |
 | 「〜が原因だ」と口に出す・書く直前。UI を変えて、実画面（砂場と headless Chrome）で確かめる | `.agents/skills/project-rules/references/diagnose.md` |
