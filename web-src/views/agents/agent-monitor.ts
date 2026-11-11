@@ -144,9 +144,14 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       ? `${projectInitials(info.name)} ${info.name}`
       : pane.project;
     const title =
-      transition === "waiting"
-        ? text.notifyWaitingTitle(project)
-        : text.notifyFinishedTitle(project);
+      transition !== "waiting"
+        ? text.notifyFinishedTitle(project)
+        : pane.attention
+          ? text.notifyAttentionTitle(
+              text.attention[pane.attention.kind],
+              project,
+            )
+          : text.notifyWaitingTitle(project);
     // 同じペインの同じ変化は 1 枚に畳む。同じサーバを複数のタブで開いて
     // いても、OS の通知が重ならない。
     const notification = new api(title, {

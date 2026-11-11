@@ -77,7 +77,7 @@ describe("agentEventForHook", () => {
     ],
     ["claude", { hook_event_name: "Notification" }, null],
     ["claude", { hook_event_name: "Stop" }, "stop"],
-    ["claude", { hook_event_name: "StopFailure" }, "stop"],
+    ["claude", { hook_event_name: "StopFailure", error: "rate_limit" }, "ask"],
     ["claude", { hook_event_name: "SessionEnd" }, "exit"],
     ["claude", { hook_event_name: "PermissionRequest" }, null],
     ["claude", { hook_event_name: "PreToolUse" }, null],

@@ -9,7 +9,11 @@ import type {
   HookRowAction,
 } from "../../core/agent-hooks";
 import type { AgentKind, AgentTransition } from "../../core/agent-overview";
-import type { AgentState } from "../../core/agent-state";
+import type {
+  AgentAttention,
+  AgentAttentionKind,
+  AgentState,
+} from "../../core/agent-state";
 import { elapsedBucket } from "../../core/terminal-board";
 import {
   PROJECTS_EN,
@@ -47,6 +51,13 @@ export type AgentsText = {
   unreadFinished: string;
   /** エージェントのカードの札 (見ていない間に入力待ちになった・終わった)。 */
   cardBadge: Record<AgentTransition, string>;
+  /**
+   * 入力待ちの理由 (フックが知らせたとき)。札と状態の語を「入力待ち」の代わりに
+   * これにする。エラーは種類 (`rate_limit` など) を後ろに添える。
+   */
+  attention: Record<AgentAttentionKind, string>;
+  /** 理由の補足 (行の title)。種類と詳しい文。 */
+  attentionTitle: (attention: AgentAttention) => string;
   /** 状態が変わってからの経過。刻み方はターミナルの一覧と同じ。 */
   elapsed: (ms: number) => string;
   /** 状態が変わった瞬間を見ていないペインの経過時間の欄。 */
@@ -110,6 +121,8 @@ export type AgentsText = {
   notifyRequestFailed: string;
   /** ブラウザ通知の本文。 */
   notifyWaitingTitle: (project: string) => string;
+  /** 入力待ちの理由が分かるときの通知の題 (reason は attention の文言)。 */
+  notifyAttentionTitle: (reason: string, project: string) => string;
   notifyFinishedTitle: (project: string) => string;
   /** ヘッダの件数表示。 */
   headerWaiting: string;
@@ -502,6 +515,21 @@ const EN: AgentsText = {
   unreadWaiting: "Started waiting for input while you were away",
   unreadFinished: "Finished while you were away",
   cardBadge: { waiting: "Needs input", finished: "Done" },
+  attention: {
+    permission: "Needs permission",
+    question: "Has a question",
+    error: "Stopped on an error",
+  },
+  attentionTitle: (attention) =>
+    [
+      attention.kind === "error"
+        ? "The turn stopped on an error. It does not continue until you reply."
+        : "Waiting for your answer.",
+      attention.reason ? `Error: ${attention.reason}` : "",
+      attention.detail,
+    ]
+      .filter(Boolean)
+      .join("\n"),
   elapsed: (ms) => terminalText("en").elapsed(elapsedBucket(ms)),
   elapsedUnknown: "–",
   elapsedAtLeast: (lowerBound) =>
@@ -564,6 +592,7 @@ const EN: AgentsText = {
   notifyUnsupported: "This browser cannot show notifications",
   notifyRequestFailed: "Could not ask for notification permission",
   notifyWaitingTitle: (project) => `Needs input · ${project}`,
+  notifyAttentionTitle: (reason, project) => `${reason} · ${project}`,
   notifyFinishedTitle: (project) => `Finished · ${project}`,
   headerWaiting: "Needs input",
   headerWorking: "Working",
@@ -651,6 +680,21 @@ const JA: AgentsText = {
   unreadWaiting: "見ていない間に入力待ちになりました",
   unreadFinished: "見ていない間に終わりました",
   cardBadge: { waiting: "入力待ち", finished: "完了" },
+  attention: {
+    permission: "許可待ち",
+    question: "質問あり",
+    error: "エラーで停止",
+  },
+  attentionTitle: (attention) =>
+    [
+      attention.kind === "error"
+        ? "エラーでターンが止まりました。返事をするまで進みません。"
+        : "あなたの答えを待っています。",
+      attention.reason ? `エラー: ${attention.reason}` : "",
+      attention.detail,
+    ]
+      .filter(Boolean)
+      .join("\n"),
   elapsed: (ms) => terminalText("ja").elapsed(elapsedBucket(ms)),
   elapsedUnknown: "–",
   elapsedAtLeast: (lowerBound) =>
@@ -712,6 +756,7 @@ const JA: AgentsText = {
   notifyUnsupported: "このブラウザは通知に対応していません",
   notifyRequestFailed: "通知の許可を求められませんでした",
   notifyWaitingTitle: (project) => `入力待ち · ${project}`,
+  notifyAttentionTitle: (reason, project) => `${reason} · ${project}`,
   notifyFinishedTitle: (project) => `完了 · ${project}`,
   headerWaiting: "入力待ち",
   headerWorking: "作業中",

@@ -286,6 +286,9 @@ export async function buildAgentOverview(
           })
         : null,
       ...(conversation ? { conversation: conversation.conversation } : {}),
+      ...(record?.attention && record.state === "waiting"
+        ? { attention: record.attention }
+        : {}),
     });
   }
 

@@ -10,6 +10,7 @@
 
 import type { PaneAccount } from "./agent-accounts";
 import type {
+  AgentAttention,
   AgentConversation,
   AgentState,
   AgentStateObservationError,
@@ -110,6 +111,11 @@ export type AgentPane = {
    * この欄を持たない古い版のサーバでは無い。
    */
   conversation?: AgentConversation;
+  /**
+   * 入力待ちの理由 (許可・質問・エラーで停止)。フックが知らせた入力待ちの
+   * ペインだけ。古い版のサーバには無い。
+   */
+  attention?: AgentAttention;
 };
 
 /**

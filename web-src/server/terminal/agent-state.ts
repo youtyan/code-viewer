@@ -13,6 +13,7 @@
 // 持つ点だけが違う。
 
 import type {
+  AgentAttention,
   AgentConversation,
   AgentEvent,
   AgentState,
@@ -131,6 +132,8 @@ export type RecordAgentStateInput = {
   agent?: ReportedAgent;
   /** フックが渡した会話の場所。送られてこなければ前の値を残す。 */
   conversation?: AgentConversation;
+  /** 入力待ちの理由 (フックが知らせたときだけ)。 */
+  attention?: AgentAttention;
 };
 
 /**
@@ -161,6 +164,9 @@ export function recordAgentState(
     // 未読の完了状態を解けるのは read / 新しい hook だけ。画面には直前の
     // 作業表示や入力欄が残りうるため、それを根拠に done を消してはいけない。
     if (previous.state === "done") return previous;
+    // エラーで止まったもの (StopFailure) も同じ。画面には入力欄が出ているので
+    // 待機のルールに当たるが、人が手を入れるまで止まったまま。
+    if (previous.attention?.kind === "error") return previous;
     const visibleRule = input.source === "screen" && input.override === true;
     const motionPromoting =
       input.source === "activity" &&
@@ -208,6 +214,15 @@ export function recordAgentState(
   // 種類と終了の印は申告だけが決める。画面観測の記録でも前の値を引き継ぐ。
   const agent = input.agent ?? previous?.agent;
   if (agent) record.agent = agent;
+  // 理由は入力待ちの間だけ持つ。申告は自分の理由で置き換え、画面の観測は
+  // 入力待ちのままなら前の理由を残す。
+  const attention =
+    next !== "waiting"
+      ? undefined
+      : input.source === "hook"
+        ? input.attention
+        : previous?.attention;
+  if (attention) record.attention = attention;
   const ended =
     input.source === "hook" ? input.event === "exit" : previous?.ended;
   if (ended) record.ended = true;

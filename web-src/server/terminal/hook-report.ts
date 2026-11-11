@@ -19,6 +19,7 @@
 
 import {
   type AgentHookFailure,
+  agentAttentionForHook,
   agentEventForHook,
   type HookAgent,
 } from "../../core/agent-hooks";
@@ -239,12 +240,16 @@ export async function reportAgentHook(
       detail: `the hook input has conversation fields that are not reported (not a string, not an absolute path, control characters, or longer than ${MAX_CONVERSATION_FIELD} characters): ${rejected.join(", ")}`,
     });
   }
+  // 入力待ちの理由 (許可・質問・エラーで停止)。古い版のサーバは知らない欄を
+  // 読み飛ばすので、そのまま足してよい。
+  const attention = agentAttentionForHook(agent, input);
   const body = {
     target,
     event,
     at,
     agent,
     ...(prompt === undefined ? {} : { lastPrompt: prompt }),
+    ...(attention === null ? {} : { attention }),
     ...(conversation === null ? {} : { conversation }),
   };
   const reached: string[] = [];

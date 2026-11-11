@@ -10,10 +10,10 @@
 // 足せる。押したとき・キー・未読を読んだ扱いは呼び出し側 (行の作り方は場所ごとに
 // 違う) が持つ。
 
-import { html, nothing, render, type TemplateResult } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { live } from "lit/directives/live.js";
 import { ref } from "lit/directives/ref.js";
+import { html, nothing, render, type TemplateResult } from "lit/html.js";
 import {
   type AgentPane,
   type AgentTransition,
@@ -83,8 +83,22 @@ export function agentCardTemplate(
   const age = agentAge(pane, text);
   const items: AgentCardExtra[] = [];
   if (hasTask) items.push({ cls: "agent-card-kind", text: shown.kind });
+  // 入力待ちの理由が分かれば (許可・質問・エラーで停止)、「入力待ち」の代わりに出す。
+  const attention =
+    pane.state === "waiting" && pane.attention ? pane.attention : null;
+  const attentionTitle = attention ? text.attentionTitle(attention) : undefined;
   if (!unread)
-    items.push({ cls: "agent-card-state", text: text.state[pane.state] });
+    items.push({
+      cls: attention
+        ? `agent-card-state agent-card-attention-${attention.kind}`
+        : "agent-card-state",
+      text: attention
+        ? [text.attention[attention.kind], attention.reason]
+            .filter(Boolean)
+            .join(" · ")
+        : text.state[pane.state],
+      title: attentionTitle,
+    });
   items.push({ cls: "agent-card-age", text: age.text, title: age.title });
   if (pane.worktree)
     items.push({
@@ -96,7 +110,14 @@ export function agentCardTemplate(
   const template = html`${agentStateMarkTemplate(pane.state)}<span class="agent-card-head"
       ><span class="agent-card-name">${name}</span>${
         unread
-          ? html`<span class=${`agent-card-badge agent-card-badge-${unread}`}>${text.cardBadge[unread]}</span>`
+          ? html`<span
+              class=${`agent-card-badge agent-card-badge-${unread}`}
+              title=${ifDefined(unread === "waiting" ? attentionTitle : undefined)}
+            >${
+              unread === "waiting" && attention
+                ? text.attention[attention.kind]
+                : text.cardBadge[unread]
+            }</span>`
           : nothing
       }</span
     ><span class="agent-card-meta">${items.map(

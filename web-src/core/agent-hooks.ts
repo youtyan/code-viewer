@@ -15,7 +15,12 @@
 // 見分ける。ほかのツールが入れたフックは読むだけで、1 つも消さず、順序も
 // 変えない。
 
-import type { AgentEvent } from "./agent-state";
+import {
+  type AgentAttention,
+  type AgentEvent,
+  MAX_ATTENTION_TEXT,
+} from "./agent-state";
+import { hasControlCharacter } from "./control-chars";
 
 export const HOOK_AGENTS = ["claude", "codex"] as const;
 
@@ -59,6 +64,8 @@ export type HookSpec = {
  * - codex には async が無い。ツールごとに呼ばれる出来事 (PostToolUse) は
  *   入れず、許可の後に作業へ戻ったことは画面の観測に任せる
  * - codex の SessionEnd と Interrupt は既定 1 秒・上限 3 秒 (公式)
+ * - claude の StopFailure (API の失敗・上限・認証切れでターンが止まった) は
+ *   完了にしない。人の手が要る (ask) として、理由を agentAttentionForHook で添える
  */
 export const HOOK_SPECS: Record<HookAgent, readonly HookSpec[]> = {
   claude: [
@@ -93,9 +100,10 @@ export const HOOK_SPECS: Record<HookAgent, readonly HookSpec[]> = {
 /** フックの入力で、SessionStart が要約による作り直しかどうかを見る欄。 */
 const COMPACT_SOURCE = "compact";
 
-const CLAUDE_ASK_NOTIFICATIONS = new Set([
-  "permission_prompt",
-  "elicitation_dialog",
+/** claude の Notification のうち入力待ちとして申告するものと、その理由。 */
+const CLAUDE_ASK_NOTIFICATIONS = new Map<string, AgentAttention["kind"]>([
+  ["permission_prompt", "permission"],
+  ["elicitation_dialog", "question"],
 ]);
 
 /**
@@ -115,7 +123,7 @@ export function agentEventForHook(
   if (name === "SessionEnd") return "exit";
   if (agent === "claude") {
     if (name === "PostToolUse") return "progress";
-    if (name === "StopFailure") return "stop";
+    if (name === "StopFailure") return "ask";
     if (name === "Notification") {
       return typeof input.notification_type === "string" &&
         CLAUDE_ASK_NOTIFICATIONS.has(input.notification_type)
@@ -126,6 +134,44 @@ export function agentEventForHook(
   }
   if (name === "PermissionRequest") return "ask";
   if (name === "Interrupt") return "ready";
+  return null;
+}
+
+/** 理由・補足に載せる文字。制御文字を空白にして上限で切る。 */
+function attentionText(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = [...value]
+    .map((char) => (hasControlCharacter(char) ? " " : char))
+    .join("")
+    .trim();
+  return text.slice(0, MAX_ATTENTION_TEXT);
+}
+
+/**
+ * 入力待ち (ask) の理由。agentEventForHook が ask を返す入力にだけ値を返す。
+ * StopFailure の欄 (`error` = 種類、`error_details` = 補足) は claude の公式の
+ * hooks の文書のもの。
+ */
+export function agentAttentionForHook(
+  agent: HookAgent,
+  input: Record<string, unknown>,
+): AgentAttention | null {
+  if (agentEventForHook(agent, input) !== "ask") return null;
+  const name = input.hook_event_name;
+  if (name === "StopFailure") {
+    return {
+      kind: "error",
+      reason: attentionText(input.error),
+      detail: attentionText(input.error_details),
+    };
+  }
+  if (name === "Notification" && typeof input.notification_type === "string") {
+    const kind = CLAUDE_ASK_NOTIFICATIONS.get(input.notification_type);
+    return kind ? { kind, reason: "", detail: "" } : null;
+  }
+  if (name === "PermissionRequest") {
+    return { kind: "permission", reason: "", detail: "" };
+  }
   return null;
 }
 

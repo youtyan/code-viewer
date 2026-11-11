@@ -40,6 +40,7 @@ import type { AgentScreenRuleIssue } from "../../core/agent-screen";
 import {
   type AgentStatesResponse,
   clipAgentStateText,
+  isAgentAttention,
   isAgentConversation,
   isAgentEvent,
   isReportedAgent,
@@ -191,6 +192,7 @@ async function handleStatePost(
     agent?: unknown;
     relay?: unknown;
     conversation?: unknown;
+    attention?: unknown;
   };
 
   const target = body.target;
@@ -214,6 +216,9 @@ async function handleStatePost(
   ) {
     return textError("invalid conversation", 400);
   }
+  if (body.attention !== undefined && !isAgentAttention(body.attention)) {
+    return textError("invalid attention", 400);
+  }
   const now = Date.now();
   if (
     body.at !== undefined &&
@@ -235,6 +240,7 @@ async function handleStatePost(
     conversation: isAgentConversation(body.conversation)
       ? body.conversation
       : undefined,
+    attention: isAgentAttention(body.attention) ? body.attention : undefined,
   });
   if (!record) return textError("invalid event", 400);
   // 画面で「読んだ」ときは、ほかのサーバにも伝える (read-relay.ts)。送り先
