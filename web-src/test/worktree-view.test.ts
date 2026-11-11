@@ -15,9 +15,13 @@ import type { WorktreeFileChange, WorktreeItem } from "../core/worktree";
 import { worktreeText } from "../views/worktree-i18n";
 import {
   createWorktreeView,
+  DEFAULT_VIEW,
   type WorktreeAgent,
+  type WorktreeFileEntry,
+  type WorktreePanelProps,
   type WorktreeView,
   type WorktreeViewOptions,
+  type WorktreeViewView,
 } from "../views/worktree-view";
 
 const TEXT = worktreeText("en");
@@ -297,6 +301,8 @@ async function mountWith(
     highlighter?: unknown;
     commits?: CommitPayload;
     agents?: WorktreeAgent[];
+    /** 描き方を差し替える (presenter のテスト)。 */
+    view?: WorktreeViewView;
   } = {},
 ): Promise<Mounted> {
   installDiff2Html();
@@ -320,44 +326,47 @@ async function mountWith(
     hideTests: options.hideTests ?? false,
     syntax: false,
   };
-  const view = createWorktreeView({
-    getRoute: () => current,
-    getOptions: () => displayOptions,
-    isTestPath: (path: string) => path.includes(".test."),
-    getSidebarView: () => options.sidebarView ?? "flat",
-    loadHljs: () => Promise.resolve(options.highlighter ?? null),
-    setRoute: (next) => {
-      routes.push(next);
-      if (next.screen === "worktree") current = next;
+  const view = createWorktreeView(
+    {
+      getRoute: () => current,
+      getOptions: () => displayOptions,
+      isTestPath: (path: string) => path.includes(".test."),
+      getSidebarView: () => options.sidebarView ?? "flat",
+      loadHljs: () => Promise.resolve(options.highlighter ?? null),
+      setRoute: (next) => {
+        routes.push(next);
+        if (next.screen === "worktree") current = next;
+      },
+      currentRange: () => RANGE,
+      trackLoad: (promise) => promise,
+      getText: () => TEXT,
+      setPageMode: () => undefined,
+      syncHeaderMenu: () => undefined,
+      onSidebarOwner: (owned) => owners.push(owned),
+      setStatus: () => undefined,
+      // 実物 (app.ts) と同じ形のボタンを返す。中身の挙動はここでは見ない。
+      createOpenPathButton: (_path, _kind, title) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "gdp-file-header-icon gdp-open-path";
+        if (title) {
+          button.title = title;
+          button.setAttribute("aria-label", title);
+        }
+        return button;
+      },
+      // 何をどう呼んだかを記録する。成否は openPathResult で差し替える。
+      openPathInOs: (path, kind) => {
+        openedPaths.push({ path, kind });
+        return openPathResult
+          ? Promise.resolve()
+          : Promise.reject(new Error("sample open failure"));
+      },
+      getAgents: () => options.agents ?? [],
+      subscribeAgents: () => () => undefined,
     },
-    currentRange: () => RANGE,
-    trackLoad: (promise) => promise,
-    getText: () => TEXT,
-    setPageMode: () => undefined,
-    syncHeaderMenu: () => undefined,
-    onSidebarOwner: (owned) => owners.push(owned),
-    setStatus: () => undefined,
-    // 実物 (app.ts) と同じ形のボタンを返す。中身の挙動はここでは見ない。
-    createOpenPathButton: (_path, _kind, title) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-file-header-icon gdp-open-path";
-      if (title) {
-        button.title = title;
-        button.setAttribute("aria-label", title);
-      }
-      return button;
-    },
-    // 何をどう呼んだかを記録する。成否は openPathResult で差し替える。
-    openPathInOs: (path, kind) => {
-      openedPaths.push({ path, kind });
-      return openPathResult
-        ? Promise.resolve()
-        : Promise.reject(new Error("sample open failure"));
-    },
-    getAgents: () => options.agents ?? [],
-    subscribeAgents: () => () => undefined,
-  });
+    options.view,
+  );
   await view.enter();
   // 差分は「見えたものから」読む。IntersectionObserver の無い環境では全部
   // 読みに行く実装なので、その fetch と json() が片付くまで回す。
@@ -2695,5 +2704,55 @@ describe("worktree rows by keyboard", () => {
       role: filelist.getAttribute("role"),
       file: route?.screen === "worktree" ? route.file : null,
     }).toEqual({ role: "listbox", file: "top.ts" });
+  });
+});
+
+// 作業ツリーの画面 (views/worktree-view.ts) の presenter。描き方を記録する view に
+// 差し替え、一覧の行と変更ファイルに渡す値と、行を選んだときの route を見る。
+describe("the worktree view presenter", () => {
+  test("gives the view one row per worktree and the picked worktree's files", async () => {
+    const panels: WorktreePanelProps[] = [];
+    const files: WorktreeFileEntry[][] = [];
+    const feature = item({
+      name: "feature-x",
+      path: "/repo/.worktrees/feature-x",
+      displayPath: ".worktrees/feature-x",
+      branch: "feature-x",
+      fileCount: 1,
+      files: [file({ path: "src/a.ts" })],
+    });
+    const { routes } = await mountWith(
+      response([item({ name: "repo", current: true }), feature]),
+      {
+        route: { wt: feature.id },
+        view: {
+          ...DEFAULT_VIEW,
+          panel: (props) => {
+            panels.push(props);
+            return DEFAULT_VIEW.panel(props);
+          },
+          files: (entries) => {
+            files.push([...entries]);
+            return DEFAULT_VIEW.files(entries);
+          },
+        },
+      },
+    );
+    const body = panels[panels.length - 1]?.body;
+    if (body?.kind !== "list") throw new Error("the list is not shown");
+    expect(body.rows.map((row) => [row.name, row.active])).toEqual([
+      ["repo", false],
+      ["feature-x", true],
+    ]);
+    expect(
+      (files[files.length - 1] ?? []).flatMap((entry) =>
+        entry.kind === "file" ? [entry.path] : [],
+      ),
+    ).toEqual(["src/a.ts"]);
+    body.onSelect(body.rows[0]?.id ?? "");
+    expect(routes[routes.length - 1]).toMatchObject({
+      screen: "worktree",
+      wt: body.rows[0]?.id,
+    });
   });
 });

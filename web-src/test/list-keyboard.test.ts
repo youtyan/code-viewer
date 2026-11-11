@@ -370,11 +370,6 @@ async function mountHistory() {
       if (!found) throw new Error(`missing ${selector}`);
       return found;
     },
-    escapeHtml: (value) =>
-      String(value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/"/g, "&quot;"),
     getRoute: () => route,
     setRoute: (next) => {
       route = next;

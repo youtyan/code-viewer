@@ -1,3 +1,6 @@
+import { repeat } from "lit/directives/repeat.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 import {
   errorWithCause,
@@ -27,7 +30,6 @@ import {
   CHECK_16_PATHS,
   CHEVRON_LEFT_16_PATH,
   COPY_16_PATHS,
-  iconSvg,
   SYNC_16_PATH,
 } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
@@ -48,6 +50,8 @@ import {
   syncListTabStop,
 } from "./list-tab-stop";
 import { pageLanguage } from "./page-language";
+import { iconTemplate } from "./ui/icon";
+import { detachedElement, renderOwned, templateElement } from "./ui/renderer";
 
 export const HISTORY_BODY_COLLAPSE_LINES = 10;
 export const HISTORY_WORKTREE_COMMIT = "worktree";
@@ -169,7 +173,6 @@ export function historyWorktreeLabel(lang: HistoryLang): string {
 
 export type HistoryViewDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
-  escapeHtml(s: unknown): string;
   getRoute(): AppRoute;
   setRoute(route: AppRoute, replace?: boolean): void;
   // Sets STATE.from/to to the commit range and reloads the diff pane.
@@ -213,115 +216,340 @@ export type HistoryPanelDomOptions = {
   variant?: "page" | "file";
 };
 
+/** 一覧の枠 (見出し・更新・絞り込み・帯・一覧・状態)。中身は presenter が描く。 */
+export type HistoryPanelProps = {
+  /** 履歴の画面か (id を付け、ref を選ぶ欄を置く)。ファイルの履歴のタブは false。 */
+  page: boolean;
+  label: string;
+  title: string;
+  refreshTitle: string;
+  filter: {
+    placeholder: string;
+    title: string;
+    clearLabel: string;
+    clearTitle: string;
+    /** 名前の候補 (datalist) の id。 */
+    authorListId: string;
+  };
+};
+
+/** 一覧の 1 行。 */
+export type HistoryRowProps =
+  | { kind: "worktree"; key: string; active: boolean; label: string }
+  | { kind: "group"; key: string; label: string; graph: string }
+  | {
+      kind: "commit";
+      key: string;
+      sha: string;
+      shortSha: string;
+      subject: string;
+      author: string;
+      /** 相対 (無ければ null: 絶対だけ出す) と絶対の時刻。 */
+      when: { relative: string | null; absolute: string };
+      active: boolean;
+      fresh: boolean;
+      inRange: boolean;
+      /** 枝の線の SVG (history-graph.ts。数だけから作る)。 */
+      graph: string;
+      refs: {
+        chips: { className: string; title: string; name: string }[];
+        /** 枝の名前を全部 (入りきらない札の分も)。無ければ ""。 */
+        names: string;
+      } | null;
+    };
+
+/** 選んだコミットの頭の操作。 */
+export type HistoryActionsProps = {
+  copy: {
+    title: string;
+    state: "idle" | "copied" | "failed";
+    onClick(): void;
+  } | null;
+  /** リポジトリの Web の画面へのリンク (外から受け取った要素)。 */
+  link: HTMLElement | null;
+  parents: {
+    label: string;
+    items: { label: string; pressed: boolean; onClick(): void }[];
+  } | null;
+  comparing: { label: string; clearLabel: string; onClear(): void } | null;
+};
+
+/** 選んだコミット (または作業ツリー) の頭と本文。 */
+export type HistoryCommitInfoProps = {
+  back: { label: string; onClick(): void } | null;
+  /** 作業ツリーのときは null (頭を隠す)。 */
+  head: {
+    sha: string;
+    author: string;
+    date: string;
+    actions: HistoryActionsProps;
+  } | null;
+  subject: string;
+  /** 本文 (描いた Markdown)。無いときは null で隠す。 */
+  body: { content: unknown } | null;
+};
+
+export type HistoryBodyProps = {
+  rendered: HTMLElement;
+  expanded: boolean;
+  label: string;
+  onToggle(): void;
+};
+
+/** 履歴の画面 (createHistoryView) の描き方。 */
+export type HistoryViewView = {
+  panel(props: HistoryPanelProps): unknown;
+  /** 選んだコミットの箱 (中身は commitInfo が描く)。 */
+  commitInfoFrame(props: { page: boolean; label: string }): unknown;
+  list(rows: readonly HistoryRowProps[]): unknown;
+  commitInfo(props: HistoryCommitInfoProps): unknown;
+  /** 長い本文を畳む箱。 */
+  body(props: HistoryBodyProps): unknown;
+  authorOptions(values: readonly string[]): unknown;
+};
+
+const graphCell = (graph: string) =>
+  html`<span class="history-graph-cell">${graph ? unsafeHTML(graph) : nothing}</span>`;
+
+function rowTemplate(row: HistoryRowProps): unknown {
+  if (row.kind === "group")
+    return html`<li class="history-group" aria-hidden="true">${graphCell(row.graph)}${row.label}</li>`;
+  if (row.kind === "worktree")
+    return html`<li
+      class=${`history-item history-item-worktree${row.active ? " active" : ""}`}
+      data-sha=${HISTORY_WORKTREE_COMMIT}
+      role="option"
+      tabindex="-1"
+    ><span class="history-graph-cell"></span><span class="history-title"><span
+          class="subject"
+          title=${row.label}
+        >${row.label}</span></span><span class="meta2"><span class="sha"
+          >HEAD..worktree</span
+        ><span class="author">Working tree</span></span></li>`;
+  const cls = [
+    "history-item",
+    row.active ? "active" : "",
+    row.fresh ? "history-item-fresh" : "",
+    row.inRange ? "history-item-in-range" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return html`<li class=${cls} data-sha=${row.sha} role="option" tabindex="-1"
+    >${graphCell(row.graph)}<span class="history-title"><span
+        class="subject"
+        title=${row.subject}
+      >${row.subject}</span>${
+        row.refs
+          ? html`<span class="history-refs" title=${row.refs.names || nothing}
+              >${row.refs.chips.map(
+                (chip) =>
+                  html`<span class=${chip.className} title=${chip.title}
+                    >${chip.name}</span
+                  >`,
+              )}</span
+            >`
+          : nothing
+      }</span><span class="meta2"><span class="sha">${row.shortSha}</span><span
+        class="author"
+      >${row.author}</span><span class="when" title=${row.when.absolute}>${
+        row.when.relative === null
+          ? html`<span class="when-abs">${row.when.absolute}</span>`
+          : html`<span class="when-rel">${row.when.relative}</span> <span
+                class="when-abs"
+              >(${row.when.absolute})</span>`
+      }</span></span></li>`;
+}
+
+function actionsTemplate(props: HistoryActionsProps): unknown {
+  return html`${
+    props.copy
+      ? html`<button
+          type="button"
+          class=${`gdp-btn gdp-btn-sm hci-copy${props.copy.state === "idle" ? "" : ` ${props.copy.state}`}`}
+          title=${props.copy.title}
+          aria-label=${props.copy.title}
+          @click=${props.copy.onClick}
+        >${
+          props.copy.state === "copied"
+            ? iconTemplate(CHECK_16_PATHS, "octicon-check")
+            : iconTemplate(COPY_16_PATHS, "octicon-copy")
+        }</button>`
+      : nothing
+  }${props.link ?? nothing}${
+    props.parents
+      ? html`<span class="hci-compare-label">${props.parents.label}</span>${props.parents.items.map(
+          (item) => html`<button
+            type="button"
+            class="gdp-btn gdp-btn-sm hci-parent"
+            aria-pressed=${String(item.pressed)}
+            @click=${item.onClick}
+          >${item.label}</button>`,
+        )}`
+      : nothing
+  }${
+    props.comparing
+      ? html`<span class="hci-compare-label">${props.comparing.label}</span><button
+            type="button"
+            class="gdp-btn gdp-btn-sm hci-compare-clear"
+            @click=${props.comparing.onClear}
+          >${props.comparing.clearLabel}</button>`
+      : nothing
+  }`;
+}
+
+export const DEFAULT_VIEW: HistoryViewView = {
+  panel: (props) => html`<aside
+    id=${props.page ? "history-panel" : nothing}
+    class=${props.page ? nothing : "gdp-file-history-panel"}
+    ?hidden=${props.page}
+    aria-label=${props.label}
+    tabindex="-1"
+  ><div class="history-head"><span class="history-title">${props.title}</span>${
+    props.page
+      ? html`<span
+          data-ref-selector-mount=""
+          data-ref-id="history-ref"
+          data-placeholder="ref..."
+          data-title="history ref"
+        ></span>`
+      : nothing
+  }<button
+        type="button"
+        class="history-refresh"
+        title=${props.refreshTitle}
+        aria-label=${props.refreshTitle}
+      >${iconTemplate(SYNC_16_PATH, "octicon-sync")}<span
+          class="history-refresh-label"
+        ></span></button><span
+        class="db-refresh-result history-refresh-result"
+        aria-live="polite"
+        hidden
+      ></span></div><div class="history-filter-wrap"><input
+        id=${props.page ? "history-filter" : nothing}
+        class=${props.page ? nothing : "history-filter"}
+        type="search"
+        placeholder=${props.filter.placeholder}
+        title=${props.filter.title}
+        autocomplete="off"
+        list=${props.filter.authorListId}
+      /><button
+        type="button"
+        id=${props.page ? "history-filter-clear" : nothing}
+        class="history-filter-clear"
+        hidden
+        title=${props.filter.clearTitle}
+        aria-label=${props.filter.clearTitle}
+      >${props.filter.clearLabel}</button><datalist
+        id=${props.filter.authorListId}
+      ></datalist></div><div
+      id=${props.page ? "history-banner" : nothing}
+      class="history-banner"
+      hidden
+      role="status"
+    ></div><ol
+      id=${props.page ? "history-list" : nothing}
+      class="history-list"
+    ></ol><div
+      id=${props.page ? "history-sentinel" : nothing}
+      class="history-sentinel"
+      aria-hidden="true"
+    ></div><div
+      id=${props.page ? "history-status" : nothing}
+      class="history-status"
+      hidden
+      role="status"
+    ></div></aside>`,
+  commitInfoFrame: (props) => html`<section
+    id=${props.page ? "history-commit-info" : nothing}
+    class=${props.page ? "history-commit-info" : "history-commit-info gdp-file-history-commit-info"}
+    hidden
+    aria-label=${props.label}
+  ></section>`,
+  list: (rows) =>
+    repeat(
+      rows,
+      (row) => row.key,
+      (row) => rowTemplate(row),
+    ),
+  commitInfo: (props) => html`<div class="hci-back-slot">${
+    props.back
+      ? html`<button
+          type="button"
+          class="gdp-btn hci-back"
+          @click=${props.back.onClick}
+        >${iconTemplate([CHEVRON_LEFT_16_PATH], "hci-back-icon")}<span
+            >${props.back.label}</span
+          ></button>`
+      : nothing
+  }</div><div class="hci-head" ?hidden=${!props.head}><span class="hci-sha"
+        >${props.head?.sha ?? ""}</span
+      ><span class="hci-author">${props.head?.author ?? ""}</span><span
+        class="hci-date"
+      >${props.head?.date ?? ""}</span><span class="hci-actions">${
+        props.head ? actionsTemplate(props.head.actions) : nothing
+      }</span></div><h2 class="hci-subject">${props.subject}</h2><div
+      class="hci-body"
+      ?hidden=${!props.body}
+    >${props.body?.content ?? nothing}</div>`,
+  body: (props) => html`<div class="hci-body-expandable"><div
+      class=${props.expanded ? "hci-body-collapsible expanded" : "hci-body-collapsible"}
+    >${props.rendered}</div><div
+      class="hci-body-toggle"
+      role="button"
+      tabindex="0"
+      aria-expanded=${props.expanded ? "true" : "false"}
+      @click=${props.onToggle}
+      @keydown=${(event: KeyboardEvent) => {
+        if (isImeComposing(event)) return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        props.onToggle();
+      }}
+    >${props.label}</div></div>`,
+  authorOptions: (values) =>
+    values.map((value) => html`<option value=${value}></option>`),
+};
+
 export function buildHistoryPanelDom(
   options: HistoryPanelDomOptions = {},
+  view: HistoryViewView = DEFAULT_VIEW,
 ): Omit<HistoryViewMount, "commitInfo"> {
-  const variant = options.variant || "page";
-  const page = variant === "page";
-  const panel = document.createElement("aside");
-  if (page) {
-    panel.id = "history-panel";
-    panel.hidden = true;
-  } else {
-    panel.className = "gdp-file-history-panel";
-  }
-  panel.setAttribute("aria-label", historyText(pageLanguage()).panelLabel);
-  // Focusable so j / k land in the "history" keymap scope after a click.
-  panel.tabIndex = -1;
-
-  const panelHead = document.createElement("div");
-  panelHead.className = "history-head";
-  const title = document.createElement("span");
-  title.className = "history-title";
-  title.textContent = historyText(pageLanguage()).commitsTitle;
-  panelHead.appendChild(title);
-
-  const refreshButton = document.createElement("button");
-  refreshButton.type = "button";
-  refreshButton.className = "history-refresh";
-  refreshButton.title = HISTORY_TEXT.en.refreshTitle;
-  refreshButton.setAttribute("aria-label", HISTORY_TEXT.en.refreshTitle);
-  refreshButton.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
-  const refreshLabel = document.createElement("span");
-  refreshLabel.className = "history-refresh-label";
-  refreshLabel.textContent = "";
-  refreshButton.appendChild(refreshLabel);
-  const refreshResult = document.createElement("span");
-  refreshResult.className = "db-refresh-result history-refresh-result";
-  refreshResult.setAttribute("aria-live", "polite");
-  refreshResult.hidden = true;
-
-  if (page) {
-    const refMount = document.createElement("span");
-    refMount.dataset.refSelectorMount = "";
-    refMount.dataset.refId = "history-ref";
-    refMount.dataset.placeholder = "ref...";
-    refMount.dataset.title = "history ref";
-    panelHead.appendChild(refMount);
-  }
-  panelHead.append(refreshButton, refreshResult);
-
-  const filterWrap = document.createElement("div");
-  filterWrap.className = "history-filter-wrap";
-  const filterInput = document.createElement("input");
-  if (page) filterInput.id = "history-filter";
-  else filterInput.className = "history-filter";
-  filterInput.type = "search";
-  filterInput.placeholder = HISTORY_TEXT.en.filterPlaceholder;
-  filterInput.title = HISTORY_TEXT.en.filterTitle;
-  filterInput.autocomplete = "off";
+  const page = (options.variant || "page") === "page";
   // "author:<name>" suggestions, filled from /_authors on first focus.
-  const authorList = document.createElement("datalist");
-  authorList.id = page
+  const authorListId = page
     ? "history-filter-authors"
     : `history-filter-authors-${Math.random().toString(36).slice(2, 8)}`;
-  filterInput.setAttribute("list", authorList.id);
-  const filterClearButton = document.createElement("button");
-  filterClearButton.type = "button";
-  if (page) filterClearButton.id = "history-filter-clear";
-  filterClearButton.className = "history-filter-clear";
-  filterClearButton.hidden = true;
-  filterClearButton.textContent = HISTORY_TEXT.en.filterClearLabel;
-  filterClearButton.title = HISTORY_TEXT.en.filterClearTitle;
-  filterClearButton.setAttribute(
-    "aria-label",
-    HISTORY_TEXT.en.filterClearTitle,
+  const panel = templateElement(
+    view.panel({
+      page,
+      label: historyText(pageLanguage()).panelLabel,
+      title: historyText(pageLanguage()).commitsTitle,
+      refreshTitle: HISTORY_TEXT.en.refreshTitle,
+      filter: {
+        placeholder: HISTORY_TEXT.en.filterPlaceholder,
+        title: HISTORY_TEXT.en.filterTitle,
+        clearLabel: HISTORY_TEXT.en.filterClearLabel,
+        clearTitle: HISTORY_TEXT.en.filterClearTitle,
+        authorListId,
+      },
+    }),
   );
-  filterWrap.append(filterInput, filterClearButton, authorList);
-
-  const banner = document.createElement("div");
-  if (page) banner.id = "history-banner";
-  banner.className = "history-banner";
-  banner.hidden = true;
-  banner.setAttribute("role", "status");
-
-  const list = document.createElement("ol");
-  if (page) list.id = "history-list";
-  list.className = "history-list";
-
-  const sentinel = document.createElement("div");
-  if (page) sentinel.id = "history-sentinel";
-  sentinel.className = "history-sentinel";
-  sentinel.setAttribute("aria-hidden", "true");
-
-  const status = document.createElement("div");
-  if (page) status.id = "history-status";
-  status.className = "history-status";
-  status.hidden = true;
-  status.setAttribute("role", "status");
-
-  panel.append(panelHead, filterWrap, banner, list, sentinel, status);
+  const part = <T extends Element>(selector: string): T => {
+    const element = panel.querySelector<T>(selector);
+    if (!element) throw new Error(`history panel: ${selector} was not drawn`);
+    return element;
+  };
   return {
     panel,
-    list,
-    banner,
-    status,
-    sentinel,
-    filterInput,
-    filterClearButton,
-    authorList,
-    refreshButton,
-    refreshResult,
+    list: part<HTMLOListElement>(".history-list"),
+    banner: part<HTMLElement>(".history-banner"),
+    status: part<HTMLElement>(".history-status"),
+    sentinel: part<HTMLElement>(".history-sentinel"),
+    filterInput: part<HTMLInputElement>(".history-filter-wrap input"),
+    filterClearButton: part<HTMLButtonElement>(".history-filter-clear"),
+    authorList: part<HTMLDataListElement>("datalist"),
+    refreshButton: part<HTMLButtonElement>(".history-refresh"),
+    refreshResult: part<HTMLElement>(".history-refresh-result"),
   };
 }
 
@@ -329,46 +557,34 @@ export type HistoryCommitInfoDomOptions = {
   variant?: "page" | "file";
 };
 
+/** まだ何も選んでいない箱の中身 (頭は空で出し、本文は隠す)。 */
+const NO_COMMIT_INFO: HistoryCommitInfoProps = {
+  back: null,
+  head: {
+    sha: "",
+    author: "",
+    date: "",
+    actions: { copy: null, link: null, parents: null, comparing: null },
+  },
+  subject: "",
+  body: null,
+};
+
+/**
+ * 選んだコミットの箱。中身は作ったときから presenter と同じ描き方 (renderOwned)
+ * で描くので、選び直しても中の要素は同じものが残る。
+ */
 export function buildHistoryCommitInfoDom(
   options: HistoryCommitInfoDomOptions = {},
+  view: HistoryViewView = DEFAULT_VIEW,
 ): HTMLElement {
-  const variant = options.variant || "page";
-  const page = variant === "page";
-  const info = document.createElement("section");
-  if (page) info.id = "history-commit-info";
-  info.className = page
-    ? "history-commit-info"
-    : "history-commit-info gdp-file-history-commit-info";
-  info.hidden = true;
-  info.setAttribute("aria-label", historyText(pageLanguage()).selectedCommit);
-  const head = document.createElement("div");
-  head.className = "hci-head";
-  const sha = document.createElement("span");
-  if (page) sha.id = "hci-sha";
-  sha.className = "hci-sha";
-  const author = document.createElement("span");
-  if (page) author.id = "hci-author";
-  author.className = "hci-author";
-  const date = document.createElement("span");
-  if (page) date.id = "hci-date";
-  date.className = "hci-date";
-  // Per-commit actions (copy sha, web link, parent / range compare). Filled
-  // by the view on selection so they always describe the shown commit.
-  const actions = document.createElement("span");
-  actions.className = "hci-actions";
-  head.append(sha, author, date, actions);
-  const subject = document.createElement("h2");
-  if (page) subject.id = "hci-subject";
-  subject.className = "hci-subject";
-  const body = document.createElement("div");
-  if (page) body.id = "hci-body";
-  body.className = "hci-body";
-  body.hidden = true;
-  // 電話の段で一覧へ戻るボタン (選ぶたびに作る。デスクトップでは CSS が隠す)。
-  // ファイルの履歴のタブも、電話の段では一覧とコミットが別のページ。
-  const back = document.createElement("div");
-  back.className = "hci-back-slot";
-  info.append(back, head, subject, body);
+  const info = templateElement(
+    view.commitInfoFrame({
+      page: (options.variant || "page") === "page",
+      label: historyText(pageLanguage()).selectedCommit,
+    }),
+  );
+  renderOwned(info, view.commitInfo(NO_COMMIT_INFO));
   return info;
 }
 
@@ -396,45 +612,35 @@ export function historyBodyToggleLabel(
   return expanded ? t.bodyExpandClose : t.bodyExpandMore(remainingLines);
 }
 
+/** 長い本文は畳んで出す (開閉はこの箱の中だけの状態)。短ければそのまま。 */
 export function buildExpandableHistoryBody(
   rendered: HTMLElement,
   rawText: string,
   lang: HistoryLang,
+  view: HistoryViewView = DEFAULT_VIEW,
 ): HTMLElement {
   const lineCount = historyBodyLineCount(rawText);
   if (lineCount <= HISTORY_BODY_COLLAPSE_LINES) return rendered;
-  const wrap = document.createElement("div");
-  wrap.className = "hci-body-expandable";
-  const collapsible = document.createElement("div");
-  collapsible.className = "hci-body-collapsible";
-  collapsible.appendChild(rendered);
-  const button = document.createElement("div");
-  button.className = "hci-body-toggle";
-  button.setAttribute("role", "button");
-  button.setAttribute("tabindex", "0");
   const remainingLines = lineCount - HISTORY_BODY_COLLAPSE_LINES;
-  const sync = () => {
-    const expanded = collapsible.classList.contains("expanded");
-    button.textContent = historyBodyToggleLabel(expanded, remainingLines, lang);
-    button.setAttribute("aria-expanded", expanded ? "true" : "false");
-  };
-  const toggle = () => {
-    collapsible.classList.toggle("expanded");
-    sync();
-  };
-  button.addEventListener("click", toggle);
-  button.addEventListener("keydown", (event) => {
-    if (isImeComposing(event)) return;
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    toggle();
-  });
-  sync();
-  wrap.append(collapsible, button);
-  return wrap;
+  let expanded = false;
+  const box = detachedElement(() =>
+    view.body({
+      rendered,
+      expanded,
+      label: historyBodyToggleLabel(expanded, remainingLines, lang),
+      onToggle: () => {
+        expanded = !expanded;
+        box.draw();
+      },
+    }),
+  );
+  return box.element;
 }
 
-export function createHistoryView(deps: HistoryViewDeps) {
+export function createHistoryView(
+  deps: HistoryViewDeps,
+  view: HistoryViewView = DEFAULT_VIEW,
+) {
   const defaultMount: HistoryViewMount = {
     panel: deps.$<HTMLElement>("#history-panel"),
     list: deps.$<HTMLOListElement>("#history-list"),
@@ -473,7 +679,6 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let generation = 0; // bumped on ref switch / re-enter to drop stale fetches
   let selectionGeneration = 0; // bumped on selection changes to drop stale async commits
   let selectedSha = "";
-  let activeHistoryRow: HTMLElement | null = null;
   let query = "";
   let mode: "history" | "file" = "history";
   let routeRef = "HEAD";
@@ -489,6 +694,19 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let authorsLoadedFor = "";
   // git log -L range when the log is restricted to a few lines of a file.
   let lineRange: HistoryLineRange | undefined;
+  /** 選んだコミットの箱に出しているもの。本文は描いた Markdown (届くまで null)。 */
+  let shown:
+    | { kind: "none" }
+    | { kind: "worktree" }
+    | {
+        kind: "commit";
+        commit: HistoryCommit;
+        body: HTMLElement | null;
+        link: HTMLElement | null;
+      } = { kind: "none" };
+  /** 選んだコミットの sha をコピーした結果 (少しの間だけ印を出す)。 */
+  let copyState: "idle" | "copied" | "failed" = "idle";
+  let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   type HistoryScope = {
     mode: "history" | "file";
@@ -663,11 +881,8 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   function clearCommitInfo() {
-    const info = commitInfoElement();
-    if (!info) return;
-    info.hidden = true;
-    info.querySelector<HTMLElement>(".hci-head")?.removeAttribute("hidden");
-    info.querySelector<HTMLElement>(".hci-body")?.replaceChildren();
+    shown = { kind: "none" };
+    drawCommitInfo();
   }
 
   function relativeWhen(iso: string): string {
@@ -686,15 +901,17 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
-  /** 「相対 (絶対)」の時刻を、相対と絶対の 2 つの span に分けて返す。一覧が
-   * 狭いときは CSS が絶対の方を隠す (列の幅をそろえるため)。相対が絶対と同じ
-   * (古いコミット) なら絶対だけ。 */
-  function displayWhenHtml(iso: string): string {
+  /** 「相対 (絶対)」の時刻。一覧が狭いときは CSS が絶対の方を隠す (列の幅を
+   * そろえるため)。相対が絶対と同じ (古いコミット) なら絶対だけ (relative は null)。 */
+  function displayWhen(iso: string): {
+    relative: string | null;
+    absolute: string;
+  } {
     const relative = relativeWhen(iso);
     const absolute = absoluteWhen(iso);
     if (relative === absolute || relative === absolute.slice(0, 10))
-      return `<span class="when-abs">${deps.escapeHtml(absolute)}</span>`;
-    return `<span class="when-rel">${deps.escapeHtml(relative)}</span> <span class="when-abs">(${deps.escapeHtml(absolute)})</span>`;
+      return { relative: null, absolute };
+    return { relative, absolute };
   }
 
   function historyItemSelector(sha: string): string {
@@ -739,56 +956,30 @@ export function createHistoryView(deps: HistoryViewDeps) {
       });
   }
 
-  function refChipsHtml(commit: HistoryCommit): string {
+  function refChips(
+    commit: HistoryCommit,
+  ): Extract<HistoryRowProps, { kind: "commit" }>["refs"] {
     const text = historyText(deps.getLanguage());
-    const chips: string[] = [];
-    for (const ref of commit.refs ?? []) {
-      const classes = [
+    const chips = (commit.refs ?? []).map((ref) => ({
+      className: [
         "history-ref",
         `history-ref-${ref.kind}`,
         ref.head ? "history-ref-head" : "",
       ]
         .filter(Boolean)
-        .join(" ");
-      chips.push(
-        `<span class="${classes}" title="${deps.escapeHtml(text.refTitle(ref.kind, ref.name))}">${deps.escapeHtml(ref.name)}</span>`,
-      );
-    }
-    if (commit.parents.length > 1) {
-      chips.push(
-        `<span class="history-ref history-ref-merge" title="${deps.escapeHtml(text.mergeBadge)}">${deps.escapeHtml(text.mergeBadge)}</span>`,
-      );
-    }
+        .join(" "),
+      title: text.refTitle(ref.kind, ref.name),
+      name: ref.name,
+    }));
+    if (commit.parents.length > 1)
+      chips.push({
+        className: "history-ref history-ref-merge",
+        title: text.mergeBadge,
+        name: text.mergeBadge,
+      });
     // 入りきらない札は隠れる (style.css の B-1) ので、全部の名前は title に。
     const names = (commit.refs ?? []).map((ref) => ref.name).join(", ");
-    return chips.length
-      ? `<span class="history-refs"${names ? ` title="${deps.escapeHtml(names)}"` : ""}>${chips.join("")}</span>`
-      : "";
-  }
-
-  function commitRow(
-    commit: HistoryCommit,
-    inRange: boolean,
-    graph: string,
-  ): string {
-    const active = commit.sha === selectedSha ? " active" : "";
-    const fresh = commit.sha === freshSha ? " history-item-fresh" : "";
-    const ranged = inRange ? " history-item-in-range" : "";
-    return (
-      `<li class="history-item${active}${fresh}${ranged}" data-sha="${deps.escapeHtml(commit.sha)}" role="option" tabindex="-1">` +
-      `<span class="history-graph-cell">${graph}</span>` +
-      // 件名と枝の札は 1 つの箱で幅を分け合う (style.css の B-1)。
-      `<span class="history-title">` +
-      `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` +
-      refChipsHtml(commit) +
-      `</span>` +
-      `<span class="meta2">` +
-      `<span class="sha">${deps.escapeHtml(shortSha(commit.sha))}</span>` +
-      `<span class="author">${deps.escapeHtml(commit.author)}</span>` +
-      `<span class="when" title="${deps.escapeHtml(absoluteWhen(commit.when))}">${displayWhenHtml(commit.when)}</span>` +
-      `</span>` +
-      `</li>`
-    );
+    return chips.length ? { chips, names } : null;
   }
 
   // Rows covered by the current Shift+click range: from the selected (newer)
@@ -807,67 +998,95 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return shas;
   }
 
-  function worktreeRow(): string {
-    const active = selectedSha === HISTORY_WORKTREE_COMMIT ? " active" : "";
-    return (
-      `<li class="history-item history-item-worktree${active}" data-sha="${HISTORY_WORKTREE_COMMIT}" role="option" tabindex="-1">` +
-      `<span class="history-graph-cell"></span>` +
-      `<span class="history-title">` +
-      `<span class="subject" title="${deps.escapeHtml(historyWorktreeLabel(deps.getLanguage()))}">${deps.escapeHtml(historyWorktreeLabel(deps.getLanguage()))}</span>` +
-      `</span>` +
-      `<span class="meta2">` +
-      `<span class="sha">HEAD..worktree</span>` +
-      `<span class="author">Working tree</span>` +
-      `</span>` +
-      `</li>`
-    );
-  }
+  /** 枝の線は一覧が変わったときだけ数え直す (選び直しでは同じ)。 */
+  let graphCache: {
+    commits: HistoryCommit[];
+    linear: boolean;
+    graph: ReturnType<typeof buildHistoryGraph>;
+    rows: Map<string, GraphRow>;
+  } | null = null;
 
-  function renderList() {
-    syncRefreshButton(activeMount.refreshButton);
-    syncRefreshResult(activeMount.refreshResult);
-    const now = new Date();
-    const html: string[] = mode === "history" ? [worktreeRow()] : [];
-    const inRange = rangeShas();
-    // 枝の線は全体の履歴のときだけ。絞り込み中・1 ファイルの履歴は並んだ行が
-    // 親子とは限らないので、行を上から順につないだ 1 本の線にする。
+  function graphFor(linear: boolean) {
+    if (graphCache?.commits === commits && graphCache.linear === linear)
+      return graphCache;
     const graphCommits = commits.filter(
       (commit) => commit.sha !== HISTORY_WORKTREE_COMMIT,
     );
-    const graph = buildHistoryGraph(graphCommits, {
-      linear: mode !== "history" || query !== "" || !!pathFilter,
-    });
-    const graphRows = new Map<string, GraphRow>();
+    const graph = buildHistoryGraph(graphCommits, { linear });
+    const rows = new Map<string, GraphRow>();
     graphCommits.forEach((commit, i) => {
-      graphRows.set(commit.sha, graph.rows[i]);
+      rows.set(commit.sha, graph.rows[i]);
     });
+    graphCache = { commits, linear, graph, rows };
+    return graphCache;
+  }
+
+  function listRows(): HistoryRowProps[] {
+    const now = new Date();
+    const worktree = (): HistoryRowProps => ({
+      kind: "worktree",
+      key: HISTORY_WORKTREE_COMMIT,
+      active: selectedSha === HISTORY_WORKTREE_COMMIT,
+      label: historyWorktreeLabel(deps.getLanguage()),
+    });
+    const rows: HistoryRowProps[] = mode === "history" ? [worktree()] : [];
+    const inRange = rangeShas();
+    // 枝の線は全体の履歴のときだけ。絞り込み中・1 ファイルの履歴は並んだ行が
+    // 親子とは限らないので、行を上から順につないだ 1 本の線にする。
+    const { graph, rows: graphRows } = graphFor(
+      mode !== "history" || query !== "" || !!pathFilter,
+    );
     let lastGroup = "";
     for (const commit of commits) {
       if (commit.sha === HISTORY_WORKTREE_COMMIT) {
-        html.push(worktreeRow());
+        rows.push(worktree());
         continue;
       }
       const row = graphRows.get(commit.sha);
       const group = historyGroupLabel(commit.when, now);
       if (group !== lastGroup) {
-        html.push(
-          `<li class="history-group" aria-hidden="true"><span class="history-graph-cell">${historyGraphPassSvg(passingLanes(row), graph.lanes)}</span>${deps.escapeHtml(group)}</li>`,
-        );
+        rows.push({
+          kind: "group",
+          key: `group:${group}:${commit.sha}`,
+          label: group,
+          graph: historyGraphPassSvg(passingLanes(row), graph.lanes),
+        });
         lastGroup = group;
       }
-      html.push(
-        commitRow(
-          commit,
-          inRange.has(commit.sha),
-          row ? historyGraphSvg(row, graph.lanes) : "",
-        ),
-      );
+      rows.push({
+        kind: "commit",
+        key: commit.sha,
+        sha: commit.sha,
+        shortSha: shortSha(commit.sha),
+        subject: commit.subject,
+        author: commit.author,
+        when: displayWhen(commit.when),
+        active: commit.sha === selectedSha,
+        fresh: commit.sha === freshSha,
+        inRange: inRange.has(commit.sha),
+        graph: row ? historyGraphSvg(row, graph.lanes) : "",
+        refs: refChips(commit),
+      });
     }
-    // 作り直す前に、行にあったフォーカスを控える (作り直すと body へ落ちる)。
-    const focused = focusedListRow(list, HISTORY_ROW_SELECTOR, rowSha);
-    list.innerHTML = html.join("");
-    activeHistoryRow = list.querySelector<HTMLElement>(".history-item.active");
+    // 同じ行が 2 度並ぶ (作業ツリーの行) ときも、鍵は 1 つずつにする。
+    const seen = new Map<string, number>();
+    return rows.map((row) => {
+      const count = seen.get(row.key) ?? 0;
+      seen.set(row.key, count + 1);
+      return count === 0 ? row : { ...row, key: `${row.key}#${count}` };
+    });
+  }
+
+  function drawList(focused?: FocusedListRow | null) {
+    renderOwned(list, view.list(listRows()));
     syncListTabStopHere(focused);
+  }
+
+  function renderList() {
+    syncRefreshButton(activeMount.refreshButton);
+    syncRefreshResult(activeMount.refreshResult);
+    // 描き直す前に、行にあったフォーカスを控える (行が入れ替わると body へ落ちる)。
+    drawList(focusedListRow(list, HISTORY_ROW_SELECTOR, rowSha));
     syncRefreshStatusText();
   }
 
@@ -949,178 +1168,151 @@ export function createHistoryView(deps: HistoryViewDeps) {
     clearButton.hidden = !(input?.value || "");
   }
 
-  async function updateCommitInfo(commit: HistoryCommit | null) {
+  function commitInfoProps(): HistoryCommitInfoProps {
+    const text = historyText(deps.getLanguage());
+    const back = { label: text.backToList, onClick: backToList };
+    if (shown.kind === "none") return NO_COMMIT_INFO;
+    if (shown.kind === "worktree")
+      return {
+        back,
+        head: null,
+        subject: historyWorktreeLabel(deps.getLanguage()),
+        body: null,
+      };
+    const { commit } = shown;
+    const t = Date.parse(commit.when);
+    return {
+      back,
+      head: {
+        sha: commit.sha,
+        author: commit.author,
+        date: Number.isFinite(t)
+          ? new Date(t).toLocaleString(deps.getLanguage())
+          : commit.when,
+        actions: commitActions(commit, shown.link),
+      },
+      subject: commit.subject,
+      // 本文のあるコミットは、Markdown が描けるまで空の箱を出しておく。
+      body: commit.body ? { content: shown.body ?? nothing } : null,
+    };
+  }
+
+  function drawCommitInfo() {
     const info = commitInfoElement();
     if (!info) return;
+    renderOwned(info, view.commitInfo(commitInfoProps()));
+    info.hidden = shown.kind === "none";
+  }
+
+  async function updateCommitInfo(commit: HistoryCommit | null) {
+    if (!commitInfoElement()) return;
     if (!commit) {
       clearCommitInfo();
       return;
     }
     const gen = generation;
-    const set = (sel: string, text: string) => {
-      const el = info.querySelector<HTMLElement>(sel);
-      if (el) el.textContent = text;
-    };
-    info.querySelector<HTMLElement>(".hci-head")?.removeAttribute("hidden");
-    renderBack(info);
-    set(".hci-sha", commit.sha);
-    set(".hci-author", commit.author);
-    renderCommitActions(info, commit);
-    const t = Date.parse(commit.when);
-    set(
-      ".hci-date",
-      Number.isFinite(t)
-        ? new Date(t).toLocaleString(deps.getLanguage())
-        : commit.when,
+    if (copyTimer) clearTimeout(copyTimer);
+    copyTimer = null;
+    copyState = "idle";
+    const link = deps.commitWebLink?.(commit.sha) ?? null;
+    link?.classList.add("hci-link");
+    shown = { kind: "commit", commit, body: null, link };
+    drawCommitInfo();
+    if (!commit.body) return;
+    const rendered = await renderMarkdownPreview(
+      commit.body,
+      { path: "COMMIT_MSG", ref: commit.sha },
+      { syntaxHighlight: deps.getSyntaxHighlight() },
     );
-    set(".hci-subject", commit.subject);
-    const body = info.querySelector<HTMLElement>(".hci-body");
-    if (body) {
-      body.replaceChildren();
-      if (!commit.body) {
-        body.hidden = true;
-      } else {
-        body.hidden = false;
-        const rendered = await renderMarkdownPreview(
-          commit.body,
-          { path: "COMMIT_MSG", ref: commit.sha },
-          { syntaxHighlight: deps.getSyntaxHighlight() },
-        );
-        if (gen !== generation || selectedSha !== commit.sha) return;
-        body.replaceChildren(
-          buildExpandableHistoryBody(rendered, commit.body, deps.getLanguage()),
-        );
-      }
-    }
-    info.hidden = false;
+    if (gen !== generation || selectedSha !== commit.sha) return;
+    if (shown.kind !== "commit" || shown.commit !== commit) return;
+    shown = {
+      ...shown,
+      body: buildExpandableHistoryBody(
+        rendered,
+        commit.body,
+        deps.getLanguage(),
+        view,
+      ),
+    };
+    drawCommitInfo();
   }
 
-  function renderCommitActions(info: HTMLElement, commit: HistoryCommit) {
-    const actions = info.querySelector<HTMLElement>(".hci-actions");
-    if (!actions) return;
-    actions.replaceChildren();
+  function commitActions(
+    commit: HistoryCommit,
+    link: HTMLElement | null,
+  ): HistoryActionsProps {
     const text = historyText(deps.getLanguage());
-    if (deps.copyText) {
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.className = "gdp-btn gdp-btn-sm hci-copy";
-      copy.title = text.copyShaTitle;
-      copy.setAttribute("aria-label", text.copyShaTitle);
-      copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-      let resetTimer: ReturnType<typeof setTimeout> | null = null;
-      const copyText = deps.copyText;
-      copy.addEventListener("click", () => {
-        void copyText(commit.sha)
-          .then(() => {
-            copy.innerHTML = iconSvg("octicon-check", CHECK_16_PATHS);
-            copy.title = text.copiedTitle;
-            copy.classList.add("copied");
-          })
-          .catch((err: unknown) => {
-            console.error("Failed to copy commit sha", err);
-            copy.title = text.copyFailedTitle;
-            copy.classList.add("failed");
-          })
-          .finally(() => {
-            if (resetTimer) clearTimeout(resetTimer);
-            resetTimer = setTimeout(() => {
-              copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-              copy.title = text.copyShaTitle;
-              copy.classList.remove("copied", "failed");
-            }, 1200);
-          });
-      });
-      actions.appendChild(copy);
-    }
-    const link = deps.commitWebLink?.(commit.sha);
-    if (link) {
-      link.classList.add("hci-link");
-      actions.appendChild(link);
-    }
-    if (commit.parents.length > 1) {
-      const label = document.createElement("span");
-      label.className = "hci-compare-label";
-      label.textContent = text.compareWith;
-      actions.appendChild(label);
-      commit.parents.forEach((parent, index) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "gdp-btn gdp-btn-sm hci-parent";
-        button.textContent = text.parentLabel(index + 1, shortSha(parent));
-        const active = compareSha ? compareSha === parent : index === 0;
-        button.setAttribute("aria-pressed", String(active));
-        button.addEventListener("click", () => {
-          void selectCommit(commit, { compare: index === 0 ? "" : parent });
-        });
-        actions.appendChild(button);
-      });
-    }
-    if (compareSha && !commit.parents.includes(compareSha)) {
-      const label = document.createElement("span");
-      label.className = "hci-compare-label";
-      label.textContent = text.comparing(
-        shortSha(compareSha),
-        shortSha(commit.sha),
-      );
-      const clear = document.createElement("button");
-      clear.type = "button";
-      clear.className = "gdp-btn gdp-btn-sm hci-compare-clear";
-      clear.textContent = text.clearCompare;
-      clear.addEventListener("click", () => {
-        void selectCommit(commit, { compare: "" });
-      });
-      actions.append(label, clear);
-    }
+    const copyText = deps.copyText;
+    return {
+      copy: copyText
+        ? {
+            title:
+              copyState === "copied"
+                ? text.copiedTitle
+                : copyState === "failed"
+                  ? text.copyFailedTitle
+                  : text.copyShaTitle,
+            state: copyState,
+            onClick: () => {
+              void copyText(commit.sha)
+                .then(() => {
+                  copyState = "copied";
+                })
+                .catch((err: unknown) => {
+                  console.error("Failed to copy commit sha", err);
+                  copyState = "failed";
+                })
+                .finally(() => {
+                  drawCommitInfo();
+                  if (copyTimer) clearTimeout(copyTimer);
+                  copyTimer = setTimeout(() => {
+                    copyTimer = null;
+                    copyState = "idle";
+                    drawCommitInfo();
+                  }, 1200);
+                });
+            },
+          }
+        : null,
+      link,
+      parents:
+        commit.parents.length > 1
+          ? {
+              label: text.compareWith,
+              items: commit.parents.map((parent, index) => ({
+                label: text.parentLabel(index + 1, shortSha(parent)),
+                pressed: compareSha ? compareSha === parent : index === 0,
+                onClick: () => {
+                  void selectCommit(commit, {
+                    compare: index === 0 ? "" : parent,
+                  });
+                },
+              })),
+            }
+          : null,
+      comparing:
+        compareSha && !commit.parents.includes(compareSha)
+          ? {
+              label: text.comparing(shortSha(compareSha), shortSha(commit.sha)),
+              clearLabel: text.clearCompare,
+              onClear: () => {
+                void selectCommit(commit, { compare: "" });
+              },
+            }
+          : null,
+    };
   }
 
   function updateWorktreeInfo() {
-    const info = commitInfoElement();
-    if (!info) return;
-    info.querySelector<HTMLElement>(".hci-head")?.setAttribute("hidden", "");
-    renderBack(info);
-    const subject = info.querySelector<HTMLElement>(".hci-subject");
-    if (subject) {
-      subject.textContent = historyWorktreeLabel(deps.getLanguage());
-    }
-    const body = info.querySelector<HTMLElement>(".hci-body");
-    if (body) {
-      body.hidden = true;
-      body.replaceChildren();
-    }
-    info.hidden = false;
+    shown = { kind: "worktree" };
+    drawCommitInfo();
   }
 
+  /** 選んだ行と Shift+click の範囲の色を描き直す (行は作り直さないので、行への
+   * 参照とスクロールの位置は残る)。 */
   function updateActiveRow() {
-    if (
-      activeHistoryRow &&
-      (!("isConnected" in activeHistoryRow) || activeHistoryRow.isConnected)
-    ) {
-      activeHistoryRow.classList.remove("active");
-    } else {
-      list
-        .querySelectorAll<HTMLElement>(".history-item.active")
-        .forEach((row) => {
-          row.classList.remove("active");
-        });
-    }
-    activeHistoryRow = selectedSha
-      ? list.querySelector<HTMLElement>(historyItemSelector(selectedSha))
-      : null;
-    activeHistoryRow?.classList.add("active");
-    updateRangeRows();
-    syncListTabStopHere();
-  }
-
-  // Toggle the Shift+click range tint in place (no list rebuild, so row
-  // references and scroll position survive a selection change).
-  function updateRangeRows() {
-    const inRange = rangeShas();
-    list.querySelectorAll<HTMLElement>(".history-item").forEach((row) => {
-      row.classList.toggle(
-        "history-item-in-range",
-        inRange.has(row.dataset.sha || ""),
-      );
-    });
+    drawList();
   }
 
   function selectableShas(): string[] {
@@ -1229,21 +1421,6 @@ export function createHistoryView(deps: HistoryViewDeps) {
     updateActiveRow();
     await updateCommitInfo(null);
     deps.showEmptyDiffPane();
-  }
-
-  function renderBack(info: HTMLElement) {
-    const slot = info.querySelector<HTMLElement>(".hci-back-slot");
-    if (!slot) return;
-    const label = historyText(deps.getLanguage()).backToList;
-    const back = document.createElement("button");
-    back.type = "button";
-    back.className = "gdp-btn hci-back";
-    back.innerHTML = iconSvg("hci-back-icon", [CHEVRON_LEFT_16_PATH]);
-    const name = document.createElement("span");
-    name.textContent = label;
-    back.append(name);
-    back.addEventListener("click", backToList);
-    slot.replaceChildren(back);
   }
 
   async function selectCommit(
@@ -1759,12 +1936,11 @@ export function createHistoryView(deps: HistoryViewDeps) {
       )
       .then((res) => {
         if (activeMount.authorList !== list || key !== ref) return;
-        list.replaceChildren(
-          ...res.authors.map((author) => {
-            const option = document.createElement("option");
-            option.value = `author:${author.name}`;
-            return option;
-          }),
+        renderOwned(
+          list,
+          view.authorOptions(
+            res.authors.map((author) => `author:${author.name}`),
+          ),
         );
       })
       .catch((err: unknown) => {

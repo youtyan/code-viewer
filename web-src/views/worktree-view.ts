@@ -1,3 +1,6 @@
+import { live } from "lit/directives/live.js";
+import { repeat } from "lit/directives/repeat.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl, projectKey } from "../core/api-url";
 
 // 作業ツリーの画面。骨格も行の見た目も History 画面のものをそのまま使う。
@@ -20,7 +23,6 @@ import {
   CHEVRON_DOWN_16_PATH,
   COPY_16_PATHS,
   FOLDER_ICON_PATHS,
-  iconSvg,
   KEBAB_16_PATH,
 } from "../core/icons";
 import { projectDestination } from "../core/projects";
@@ -52,6 +54,8 @@ import { enhanceMediaCard } from "./media-embed";
 import { pageLanguage } from "./page-language";
 import type { PageView } from "./page-view";
 import { treeLevelPad } from "./tree-indent";
+import { iconTemplate } from "./ui/icon";
+import { detachedElement, renderOwned, templateElement } from "./ui/renderer";
 import { showFormDialog } from "./ui-dialog";
 import type { WorktreeText } from "./worktree-i18n";
 
@@ -166,42 +170,528 @@ function failureMessage(operation: string, error: unknown): string {
   return `${operation}\n${formatErrorDetail(error)}`;
 }
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className: string,
-  text?: string,
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
 /** ファイル 1 件を指す鍵。同じパスが未コミットと分岐後の両方に出るため。 */
 function fileKey(file: WorktreeFileChange): string {
   return `${file.origin}:${file.path}`;
-}
-
-/** Repository のツリーと同じ折りたたみ矢印。 */
-function chevronSvg(): string {
-  return iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
-}
-
-/** 同じくフォルダのアイコン。開閉で形が変わる。 */
-function folderSvg(collapsed: boolean): string {
-  return iconSvg(
-    collapsed
-      ? "octicon-file-directory-fill"
-      : "octicon-file-directory-open-fill",
-    collapsed ? FOLDER_ICON_PATHS.closed : FOLDER_ICON_PATHS.open,
-  );
 }
 
 function matches(haystack: string, needle: string): boolean {
   return !needle || haystack.toLowerCase().includes(needle.toLowerCase());
 }
 
-export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
+/** 一覧やファイルの欄に挟む 1 行の知らせ。error は理由の全文 (赤)。 */
+export type WorktreeNote = { text: string; error: boolean };
+
+/** 文字列を写すボタン。押した後の印 (copied / failed) は押したボタンに付ける。 */
+export type WorktreeCopyProps = {
+  title: string;
+  /** 文字つきならその文字。null はアイコンだけ。 */
+  label: string | null;
+  onCopy(button: HTMLButtonElement): void;
+};
+
+export type WorktreeWhen = { text: string; title: string };
+
+/** 作業ツリーの一覧の 1 行。 */
+export type WorktreeRowProps = {
+  id: string;
+  active: boolean;
+  current: boolean;
+  conflict: boolean;
+  /** 見出しのブランチ (ブランチが無ければ「detached」の語)。 */
+  heading: string;
+  name: string;
+  path: string;
+  badges: { label: string; title: string }[];
+  branch: { text: string; title: string | null };
+  files: string;
+  lastCommit: WorktreeWhen | null;
+  lastTouched: WorktreeWhen | null;
+  divergence: string;
+  merge: WorktreeCopyProps | null;
+  /** いちばん急ぐエージェント (more はほかの数)。居なければ null。 */
+  agents: {
+    state: string;
+    label: string;
+    more: number;
+    title: string;
+  } | null;
+  open: {
+    label: string;
+    title: string;
+    disabled: boolean;
+    onClick(): void;
+  } | null;
+  menu: {
+    title: string;
+    label: string;
+    onOpen(anchor: HTMLElement): void;
+  } | null;
+  error: string | null;
+};
+
+/** 左の一覧の箱 (#worktree-panel) の中。 */
+export type WorktreePanelProps = {
+  title: string;
+  count: string | null;
+  refresh: { label: string; title: string; onClick(): void };
+  add: { label: string; title: string; onClick(): void };
+  filter: { value: string; placeholder: string; onInput(value: string): void };
+  notes: WorktreeNote[];
+  overlaps: { text: string; title: string } | null;
+  body:
+    | { kind: "note"; note: WorktreeNote }
+    | {
+        kind: "list";
+        columns: string[];
+        label: string;
+        rows: WorktreeRowProps[];
+        onSelect(id: string): void;
+        /** 一覧の下の説明 (メインの 1 本だけのとき)。 */
+        footer: string | null;
+      };
+};
+
+export type WorktreeFileProps = {
+  path: string;
+  key: string;
+  status: string;
+  statusTitle: string;
+  label: string;
+  depth: number;
+  active: boolean;
+  nameTitle: string;
+  overlap: { count: number; title: string } | null;
+};
+
+/** 変更ファイルの欄 (#filelist) の 1 項目。フォルダは子を持つ。 */
+export type WorktreeFileEntry =
+  | { kind: "group"; text: string }
+  | { kind: "legend"; text: string }
+  | { kind: "note"; note: WorktreeNote }
+  | {
+      kind: "commit";
+      subject: string;
+      sha: string;
+      author: string;
+      when: WorktreeWhen;
+    }
+  | ({ kind: "file" } & WorktreeFileProps)
+  | {
+      kind: "dir";
+      key: string;
+      label: string;
+      depth: number;
+      collapsed: boolean;
+      onToggle(event: Event): void;
+      children: WorktreeFileEntry[];
+    };
+
+export type WorktreeAddFormProps = {
+  intro: string;
+  name: { label: string; placeholder: string; onInput(value: string): void };
+  branch: { label: string; placeholder: string; hint: string };
+  /** 作る場所 (置き場所が分からないときは null で出さない)。 */
+  target: {
+    label: string;
+    path: string;
+    hint: string;
+    hintLabel: string;
+  } | null;
+};
+
+export type WorktreeRemoveFormProps = {
+  /** 本文の段落 (順に)。hint は小さい字。 */
+  paragraphs: { text: string; hint: boolean }[];
+  /** ロックの説明と［ロックを外す］(段落のどこに置くかは afterParagraph)。 */
+  unlock: {
+    afterParagraph: number;
+    unlocked: boolean;
+    unlockedText: string;
+    note: string;
+    command: string;
+    label: string;
+    busy: boolean;
+    result: string;
+    onUnlock(): void;
+  } | null;
+  /** 変更が残っている作業ツリーの警告と、確かめのチェック。 */
+  dirty: { note: string; lose: string; force: string } | null;
+};
+
+export type WorktreeShellProps = {
+  path: string;
+  key: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  loading: string;
+};
+
+/** 作業ツリーの画面 (createWorktreeView) の描き方。 */
+export type WorktreeViewView = {
+  panel(props: WorktreePanelProps): unknown;
+  files(entries: readonly WorktreeFileEntry[]): unknown;
+  addForm(props: WorktreeAddFormProps): unknown;
+  removeForm(props: WorktreeRemoveFormProps): unknown;
+  /** 差分の欄 (#diff) に出すもの。どれも 1 つの要素。 */
+  diff: {
+    intro(props: {
+      title: string;
+      paragraphs: string[];
+      button: { label: string; onClick(): void };
+    }): unknown;
+    info(text: string, alert?: boolean): unknown;
+    empty(props: {
+      title: string;
+      body: string;
+      openFolder: HTMLElement | null;
+      copy: WorktreeCopyProps | null;
+    }): unknown;
+    shell(props: WorktreeShellProps): unknown;
+    truncated(props: {
+      text: string;
+      open: { label: string; onClick(): void };
+    }): unknown;
+    /** diff2html が描く箱。 */
+    host(): unknown;
+    mediaUnavailable(text: string): unknown;
+  };
+};
+
+const noteTemplate = (note: WorktreeNote) =>
+  html`<div
+    class="history-status"
+    role=${note.error ? "alert" : nothing}
+    style=${note.error ? "color: var(--danger)" : nothing}
+  >${note.text}</div>`;
+
+const whenTemplate = (when: WorktreeWhen) =>
+  html`<span class="when" title=${when.title}>${when.text}</span>`;
+
+function copyTemplate(props: WorktreeCopyProps): unknown {
+  return html`<button
+    type="button"
+    class=${props.label ? "gdp-btn gdp-btn-sm gdp-copy-path" : "gdp-file-header-icon gdp-copy-path"}
+    title=${props.title}
+    aria-label=${props.title}
+    @click=${(event: Event) => {
+      event.stopPropagation();
+      props.onCopy(event.currentTarget as HTMLButtonElement);
+    }}
+  >${props.label ?? iconTemplate(COPY_16_PATHS, "octicon-copy")}</button>`;
+}
+
+/** Repository のツリーと同じフォルダのアイコン。開閉で形が変わる。 */
+const folderTemplate = (collapsed: boolean) =>
+  iconTemplate(
+    collapsed ? FOLDER_ICON_PATHS.closed : FOLDER_ICON_PATHS.open,
+    collapsed
+      ? "octicon-file-directory-fill"
+      : "octicon-file-directory-open-fill",
+  );
+
+function rowTemplate(row: WorktreeRowProps): unknown {
+  const cls = [
+    "history-item",
+    row.active ? "active" : "",
+    row.current ? "worktree-current" : "",
+    row.conflict ? "worktree-conflict" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return html`<li
+    class=${cls}
+    data-wt=${row.id}
+    aria-current=${row.active ? "true" : nothing}
+  ><span class="worktree-row-head"><span class="worktree-row-branch"
+        >${row.heading}</span
+      ><span class="subject" title=${row.path}>${row.name}</span>${
+        row.badges.length
+          ? html`<span class="worktree-row-badges">${row.badges.map(
+              (badge, index) =>
+                html`${index ? " · " : nothing}<span
+                    class="worktree-badge"
+                    title=${badge.title}
+                    >${badge.label}</span
+                  >`,
+            )}</span>`
+          : nothing
+      }</span><span class="worktree-row-path" title=${row.path}>${row.path}</span><span
+      class="meta2 worktree-row-meta"
+    ><span class="sha" title=${row.branch.title ?? nothing}>${row.branch.text}</span><span
+        class="author worktree-row-files"
+      >${row.files}</span>${row.lastCommit ? whenTemplate(row.lastCommit) : nothing}${
+        row.lastTouched ? whenTemplate(row.lastTouched) : nothing
+      }</span><span class="meta2 worktree-row-divergence"><span
+        class="author worktree-row-compare"
+        title=${row.divergence}
+      >${row.divergence}</span>${row.merge ? copyTemplate(row.merge) : nothing}</span><span
+      class="worktree-row-agents"
+      title=${row.agents?.title ?? nothing}
+    >${
+      row.agents
+        ? html`<i
+              class=${`terminal-mark terminal-mark-${row.agents.state}`}
+              aria-hidden="true"
+            ></i><span
+              class=${`worktree-row-agent-state worktree-row-agent-${row.agents.state}`}
+              >${row.agents.label}</span
+            >${
+              row.agents.more > 0
+                ? html`<span class="worktree-row-agent-more"
+                    >+${row.agents.more}</span
+                  >`
+                : nothing
+            }`
+        : nothing
+    }</span><span class="worktree-row-actions">${
+      row.open
+        ? html`<button
+            type="button"
+            class="gdp-btn worktree-row-open"
+            title=${row.open.title}
+            ?disabled=${row.open.disabled}
+            @click=${(event: Event) => {
+              // 行のクリック (選択) と混ぜない。
+              event.stopPropagation();
+              row.open?.onClick();
+            }}
+          >${row.open.label}</button>`
+        : nothing
+    }${
+      row.menu
+        ? html`<button
+            type="button"
+            class="worktree-row-menu"
+            title=${row.menu.title}
+            aria-label=${row.menu.label}
+            aria-haspopup="menu"
+            @click=${(event: Event) => {
+              // 行のクリック (選択) と混ぜない。メニューを開くだけ。
+              event.stopPropagation();
+              row.menu?.onOpen(event.currentTarget as HTMLElement);
+            }}
+          >${iconTemplate(KEBAB_16_PATH, "octicon-kebab-horizontal")}</button>`
+        : nothing
+    }</span>${
+      row.error
+        ? html`<span class="meta2"><span class="author" style="color: var(--danger)"
+              >${row.error}</span
+            ></span>`
+        : nothing
+    }</li>`;
+}
+
+function fileTemplate(file: WorktreeFileProps): unknown {
+  return html`<li
+    class=${`tree-file${file.active ? " active" : ""}${file.overlap ? " worktree-overlap" : ""}`}
+    tabindex="-1"
+    data-path=${file.path}
+    data-key=${file.key}
+    data-type="blob"
+    style=${`--lvl-pad: ${treeLevelPad(file.depth)}`}
+  ><span class="chev-spacer"></span><span
+      class=${`badge ${file.status}`}
+      title=${file.statusTitle}
+    >${file.status}</span><span class="name" title=${file.nameTitle}>${file.label}</span>${
+      file.overlap
+        ? html`<span class="stat worktree-overlap-count" title=${file.overlap.title}
+            >${file.overlap.count}</span
+          >`
+        : nothing
+    }</li>`;
+}
+
+function fileEntryTemplate(entry: WorktreeFileEntry): unknown {
+  switch (entry.kind) {
+    case "group":
+      return html`<li class="worktree-file-group">${entry.text}</li>`;
+    case "legend":
+      return html`<li class="worktree-overlap-legend">${entry.text}</li>`;
+    case "note":
+      return noteTemplate(entry.note);
+    case "commit":
+      return html`<li class="history-item worktree-commit"><span
+          class="subject"
+          title=${entry.subject}
+        >${entry.subject}</span><span class="meta2"><span class="sha"
+            >${entry.sha}</span
+          ><span class="author">${entry.author}</span>${whenTemplate(entry.when)}</span></li>`;
+    case "file":
+      return fileTemplate(entry);
+    case "dir":
+      // 子は .tree-dir の**兄弟**として置く。CSS が
+      // `#filelist.tree .tree-dir.collapsed + .tree-children` で畳むため、
+      // 中に入れると折りたたみが効かず、行も横に並んでしまう。
+      return html`<li
+          class=${entry.collapsed ? "tree-dir collapsed" : "tree-dir"}
+          tabindex="-1"
+          data-type="tree"
+          data-worktree-dir=${entry.key}
+          style=${`--lvl-pad: ${treeLevelPad(entry.depth)}`}
+        ><span class="chev" @click=${entry.onToggle}>${iconTemplate(
+          CHEVRON_DOWN_16_PATH,
+          "octicon-chevron-down",
+        )}</span><span class="dir-icon" @click=${entry.onToggle}>${folderTemplate(
+          entry.collapsed,
+        )}</span><span class="name" title=${entry.label}>${entry.label}</span></li
+        ><ul class="tree-children">${entry.children.map(fileEntryTemplate)}</ul>`;
+  }
+}
+
+export const DEFAULT_VIEW: WorktreeViewView = {
+  panel: (props) => html`<div class="history-head"><span class="history-title"
+        >${props.title}</span
+      >${props.count === null ? nothing : html`<span class="worktree-count">${props.count}</span>`}<button
+        type="button"
+        class="gdp-btn gdp-btn-sm worktree-head-btn"
+        title=${props.refresh.title}
+        @click=${props.refresh.onClick}
+      >${props.refresh.label}</button><button
+        type="button"
+        class="gdp-btn gdp-btn-sm worktree-head-btn worktree-head-add"
+        title=${props.add.title}
+        @click=${props.add.onClick}
+      >${props.add.label}</button></div><div class="history-filter-wrap"><input
+        class="history-filter"
+        type="search"
+        autocomplete="off"
+        placeholder=${props.filter.placeholder}
+        .value=${live(props.filter.value)}
+        @input=${(event: Event) =>
+          props.filter.onInput((event.currentTarget as HTMLInputElement).value)}
+      /></div>${props.notes.map(noteTemplate)}${
+        props.overlaps
+          ? html`<div class="history-banner" title=${props.overlaps.title}>${props.overlaps.text}</div>`
+          : nothing
+      }${
+        props.body.kind === "note"
+          ? noteTemplate(props.body.note)
+          : html`<div class="worktree-columns" aria-hidden="true">${props.body.columns.map(
+              (label) => html`<span>${label}</span>`,
+            )}</div><ol
+                class="history-list"
+                aria-label=${props.body.label}
+                @click=${(event: Event) => {
+                  const row = (
+                    event.target as HTMLElement | null
+                  )?.closest<HTMLElement>(".history-item");
+                  const id = row?.dataset.wt;
+                  if (id && props.body.kind === "list") props.body.onSelect(id);
+                }}
+              >${repeat(
+                props.body.rows,
+                (row) => row.id,
+                (row) => rowTemplate(row),
+              )}</ol>${props.body.footer === null ? nothing : noteTemplate({ text: props.body.footer, error: false })}`
+      }`,
+  files: (entries) => entries.map(fileEntryTemplate),
+  addForm: (props) => html`<div class="worktree-form"><p class="worktree-hint"
+      >${props.intro}</p
+    ><label class="worktree-field"><span>${props.name.label}</span><input
+        class="gdp-dialog-input"
+        type="text"
+        placeholder=${props.name.placeholder}
+        @input=${(event: Event) =>
+          props.name.onInput((event.currentTarget as HTMLInputElement).value)}
+      /></label><label class="worktree-field"><span>${props.branch.label}</span><input
+        class="gdp-dialog-input"
+        type="text"
+        placeholder=${props.branch.placeholder}
+      /><span class="worktree-hint">${props.branch.hint}</span></label>${
+        props.target
+          ? html`<div class="worktree-target"><span class="worktree-target-label"
+              >${props.target.label}</span
+            ><span class="worktree-target-path" title=${props.target.path}
+              >${props.target.path}</span
+            ><span
+              class="worktree-hint-mark"
+              title=${props.target.hint}
+              tabindex="0"
+              role="note"
+              aria-label=${`${props.target.hintLabel}: ${props.target.hint}`}
+            >?</span></div>`
+          : nothing
+      }</div>`,
+  removeForm: (props) => {
+    const unlock = props.unlock;
+    const unlockBlock = unlock
+      ? unlock.unlocked
+        ? html`<div class="worktree-unlock"><p class="worktree-hint">${unlock.unlockedText}</p></div>`
+        : html`<div class="worktree-warn worktree-unlock"><p>${unlock.note}</p><pre
+              class="worktree-unlock-command terminal-mono"
+            >${unlock.command}</pre><button
+              type="button"
+              class="gdp-btn gdp-btn-sm"
+              ?disabled=${unlock.busy}
+              @click=${unlock.onUnlock}
+            >${unlock.label}</button><p class="worktree-unlock-result">${unlock.result}</p></div>`
+      : nothing;
+    return html`<div class="worktree-form">${props.paragraphs.map(
+      (paragraph, index) =>
+        html`<p class=${paragraph.hint ? "worktree-hint" : nothing}>${paragraph.text}</p>${
+          unlock && unlock.afterParagraph === index ? unlockBlock : nothing
+        }`,
+    )}${
+      props.dirty
+        ? html`<p class="worktree-warn"><span>! ${props.dirty.note}</span><br /><span
+                >${props.dirty.lose}</span
+              ></p><label class="worktree-check"><input type="checkbox" /><span
+                >${props.dirty.force}</span
+              ></label>`
+        : nothing
+    }</div>`;
+  },
+  diff: {
+    intro: (
+      props,
+    ) => html`<div class="worktree-intro"><p class="worktree-intro-title"
+        >${props.title}</p
+      >${props.paragraphs.map((text) => html`<p>${text}</p>`)}<button
+        type="button"
+        class="gdp-btn gdp-btn-sm"
+        @click=${props.button.onClick}
+      >${props.button.label}</button></div>`,
+    info: (text, alert = false) =>
+      html`<div class="gdp-info" role=${alert ? "alert" : nothing}>${text}</div>`,
+    empty: (props) => html`<div class="gdp-info worktree-empty-diff"><p
+        >${props.title}</p
+      ><p>${props.body}</p>${
+        props.copy
+          ? html`<span class="worktree-empty-diff-actions">${props.openFolder ?? nothing}${copyTemplate(props.copy)}</span>`
+          : nothing
+      }</div>`,
+    shell: (props) => html`<div
+      class="gdp-file-shell"
+      data-path=${props.path}
+      data-key=${props.key}
+      data-status=${props.status}
+    ><div class="gdp-shell-header"><span class=${`status-pill ${props.status}`}
+          >${props.status}</span
+        ><span class="path">${props.path}</span><span class="stats"><span
+            class="a"
+            >+${props.additions}</span
+          ><span class="d">−${props.deletions}</span></span></div
+      ><div class="gdp-shell-body"><div class="gdp-info">${props.loading}</div></div
+    ></div>`,
+    truncated: (
+      props,
+    ) => html`<div class="gdp-info worktree-diff-truncated"><span
+        >${props.text}</span
+      ><button type="button" class="gdp-btn gdp-btn-sm" @click=${props.open.onClick}
+        >${props.open.label}</button
+      ></div>`,
+    host: () => html`<div></div>`,
+    mediaUnavailable: (text) =>
+      html`<div class="media-empty" role="alert">${text}</div>`,
+  },
+};
+
+export function createWorktreeView(
+  deps: WorktreeViewDeps,
+  view: WorktreeViewView = DEFAULT_VIEW,
+): WorktreeView {
   let mounted = false;
   let viewGeneration = 0;
   let lifecycle = 0;
@@ -229,6 +719,8 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   let restoredRouteKey: string | null = null;
   let observer: IntersectionObserver | null = null;
   let unsubscribeAgents: (() => void) | null = null;
+  /** 畳んだフォルダ (行の鍵)。一覧を描き直すと全部開く (前と同じ)。 */
+  let collapsedDirs = new Set<string>();
 
   const listPanel = document.getElementById("worktree-panel");
   // 一覧と変更ファイルの行 (Tab の止まり場所と行の上のキー。views/list-tab-stop.ts)。
@@ -258,18 +750,6 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     return mounted && seq === lifecycle && route() !== null;
   }
 
-  /** 絞り込みは使い回す。作り直すと打っている最中に focus が飛ぶ。 */
-  const worktreeFilterInput = (() => {
-    const input = el("input", "history-filter");
-    input.type = "search";
-    input.autocomplete = "off";
-    input.addEventListener("input", () => {
-      worktreeFilter = input.value;
-      renderList();
-    });
-    return input;
-  })();
-
   function sidebarFilter(): HTMLInputElement | null {
     return document.querySelector<HTMLInputElement>("#sb-filter");
   }
@@ -289,14 +769,18 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     window.setTimeout(() => renderFiles(), 0);
   }
 
+  /** 木の全部のフォルダを畳む / 開く (サイドバーの「全部畳む / 開く」)。 */
   function setAllDirsCollapsed(collapsed: boolean): void {
     const list = document.getElementById("filelist");
     if (!list) return;
-    for (const dir of list.querySelectorAll<HTMLElement>(".tree-dir")) {
-      dir.classList.toggle("collapsed", collapsed);
-      const icon = dir.querySelector<HTMLElement>(":scope > .dir-icon");
-      if (icon) icon.innerHTML = folderSvg(collapsed);
-    }
+    collapsedDirs = new Set(
+      collapsed
+        ? [...list.querySelectorAll<HTMLElement>(".tree-dir")].map(
+            (dir) => dir.dataset.worktreeDir ?? "",
+          )
+        : [],
+    );
+    drawFiles();
   }
 
   function onExpandAll(): void {
@@ -392,7 +876,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     refreshRequested = false;
     if (listPanel) {
       listPanel.hidden = true;
-      listPanel.replaceChildren();
+      renderOwned(listPanel, nothing);
     }
     sidebarFilter()?.removeEventListener("input", onSidebarFilter);
     document
@@ -409,7 +893,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     document
       .getElementById("sb-collapse-all")
       ?.removeEventListener("click", onCollapseAll);
-    document.getElementById("filelist")?.replaceChildren();
+    const fileList = document.getElementById("filelist");
+    if (fileList) renderOwned(fileList, nothing);
+    collapsedDirs = new Set();
     document.getElementById("diff")?.replaceChildren();
     document.body.classList.remove("gdp-worktree-page");
     document.body.removeAttribute("data-worktree-overview");
@@ -625,74 +1111,52 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     }
   }
 
-  function labeledInput(
-    label: string,
-    placeholder: string,
-    hint?: string,
-  ): { wrap: HTMLElement; input: HTMLInputElement } {
-    const wrap = document.createElement("label");
-    wrap.className = "worktree-field";
-    wrap.appendChild(el("span", "", label));
-    // 入力欄はダイアログ共通のクラス。
-    const input = el("input", "gdp-dialog-input");
-    input.type = "text";
-    input.placeholder = placeholder;
-    wrap.appendChild(input);
-    if (hint) wrap.appendChild(el("span", "worktree-hint", hint));
-    return { wrap, input };
-  }
-
   async function addWorktree(): Promise<void> {
     const seq = lifecycle;
     const t = text();
-    const body = el("div", "worktree-form");
-    // 何のための操作かを先に 1 行。未経験者はここで初めて意味を知る。
-    body.appendChild(el("p", "worktree-hint", t.addDialog.intro));
-    const name = labeledInput(
-      t.addDialog.nameLabel,
-      t.addDialog.namePlaceholder,
-    );
-    const branch = labeledInput(
-      t.addDialog.branchLabel,
-      t.addDialog.branchPlaceholder,
-      t.addDialog.branchHint,
-    );
-    body.append(name.wrap, branch.wrap);
-
     // 押す前に「どこに何ができるか」を実パスで見せる。置き場所はサーバ側で
     // <repoRoot>/.worktrees に固定なので、ここに出る値が確定した結果になる。
     // 取れていないときは行ごと出さない (嘘のパスを見せない)。
+    // 追加先はリポジトリの中なので、放っておくと git status に未追跡として
+    // 出続ける。.gitignore を書き換えるのはリポジトリ側の判断なので伝える
+    // だけにするが、作るかどうかの判断には要らないので本文に並べない。
     const parent = data?.addParent || "";
-    if (parent) {
-      const targetRow = el("div", "worktree-target");
-      targetRow.appendChild(
-        el("span", "worktree-target-label", t.addDialog.targetLabel),
-      );
-      const targetPath = el("span", "worktree-target-path");
-      targetRow.appendChild(targetPath);
-      // 追加先はリポジトリの中なので、放っておくと git status に未追跡として
-      // 出続ける。.gitignore を書き換えるのはリポジトリ側の判断なので伝える
-      // だけにするが、作るかどうかの判断には要らないので本文に並べない。
-      const hint = el("span", "worktree-hint-mark", "?");
-      hint.title = t.gitignoreHint;
-      hint.tabIndex = 0;
-      hint.setAttribute("role", "note");
-      hint.setAttribute(
-        "aria-label",
-        `${t.addDialog.gitignoreLabel}: ${t.gitignoreHint}`,
-      );
-      targetRow.appendChild(hint);
-      body.appendChild(targetRow);
-      const syncTarget = () => {
-        const value = name.input.value.trim();
-        targetPath.textContent = value
-          ? `${parent}/${value}`
-          : t.addDialog.targetPending(parent);
-        targetPath.title = targetPath.textContent;
-      };
-      name.input.addEventListener("input", syncTarget);
-      syncTarget();
-    }
+    let typedName = "";
+    const form = detachedElement(() =>
+      view.addForm({
+        // 何のための操作かを先に 1 行。未経験者はここで初めて意味を知る。
+        intro: t.addDialog.intro,
+        name: {
+          label: t.addDialog.nameLabel,
+          placeholder: t.addDialog.namePlaceholder,
+          onInput: (value) => {
+            typedName = value.trim();
+            form.draw();
+          },
+        },
+        branch: {
+          label: t.addDialog.branchLabel,
+          placeholder: t.addDialog.branchPlaceholder,
+          hint: t.addDialog.branchHint,
+        },
+        target: parent
+          ? {
+              label: t.addDialog.targetLabel,
+              path: typedName
+                ? `${parent}/${typedName}`
+                : t.addDialog.targetPending(parent),
+              hint: t.gitignoreHint,
+              hintLabel: t.addDialog.gitignoreLabel,
+            }
+          : null,
+      }),
+    );
+    const body = form.element;
+    const [nameInput, branchInput] = body.querySelectorAll("input");
+    if (!nameInput || !branchInput)
+      throw new Error("worktree add dialog: the inputs were not drawn");
+    const name = { input: nameInput };
+    const branch = { input: branchInput };
 
     const submitted = await showFormDialog<{ name: string; branch: string }>({
       title: t.addDialog.title,
@@ -737,98 +1201,108 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   /**
-   * 消す画面の「ロックされています」と、実行するコマンド、［ロックを外す］。
-   * 外したらこの欄を「外しました」に替え、そのまま消せる。失敗は git の出力を全部出す。
+   * 消す画面の本文。ロックされていれば理由と実行するコマンド、［ロックを外す］を
+   * 出す。外したらその欄を「外しました」に替え、そのまま消せる。失敗は git の
+   * 出力を全部出す。
    */
-  function unlockBlock(item: WorktreeItem): HTMLElement {
-    const t = text();
-    const box = el("div", "worktree-warn worktree-unlock");
-    const quoted = /[^\w./-]/.test(item.path)
-      ? `'${item.path.split("'").join("'\\''")}'`
-      : item.path;
-    const button = el("button", "gdp-btn gdp-btn-sm", t.removeDialog.unlock);
-    button.type = "button";
-    const result = el("p", "worktree-unlock-result");
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      result.textContent = "";
-      try {
-        await deps.trackLoad(
-          postWorktreeAction(apiUrl("worktreeUnlock"), { path: item.path }),
-        );
-        box.className = "worktree-unlock";
-        box.replaceChildren(el("p", "worktree-hint", t.removeDialog.unlocked));
-      } catch (error) {
-        button.disabled = false;
-        result.textContent = failureMessage(t.removeDialog.unlockFailed, error);
-      }
-    });
-    box.append(
-      el("p", "", t.removeDialog.lockedNote),
-      el(
-        "pre",
-        "worktree-unlock-command terminal-mono",
-        `git worktree unlock ${quoted}`,
-      ),
-      button,
-      result,
-    );
-    return box;
-  }
-
   async function removeWorktree(item: WorktreeItem): Promise<void> {
     if (busyPath) return;
     const seq = lifecycle;
     const t = text();
-    const body = el("div", "worktree-form");
+    const paragraphs: { text: string; hint: boolean }[] = [];
     // フォルダが無い行は「消えます」とは言えない。管理情報の掃除であることを
     // 伝える別文面にする (サーバ側も remove ではなく prune に切り替わる)。
+    // ロックされた作業ツリーは git worktree remove が断り、ロックされた登録は
+    // prune が黙って飛ばす (サーバが 409 で返す)。押す前に理由と、その場で外す
+    // 操作を、本文の 2 段目の後ろに出す。
     if (item.missing) {
-      body.appendChild(el("p", "", t.removeDialog.missingBody(item.name)));
-      body.appendChild(el("p", "worktree-hint", t.removeDialog.missingNote));
-      // ロックされた登録は prune が黙って飛ばす (サーバが 409 で返す)。
-      // 押す前に理由と、その場で外す操作を出す。
-      if (item.locked) body.appendChild(unlockBlock(item));
+      paragraphs.push(
+        { text: t.removeDialog.missingBody(item.name), hint: false },
+        { text: t.removeDialog.missingNote, hint: true },
+      );
       // prune は対象を 1 本に絞れないので、同じ状態の登録が他にあれば
       // まとめて消えることを先に伝える。飛ばされるロック済みは数に入れない。
       const otherMissing = (data?.worktrees || []).filter(
         (candidate) =>
           candidate.missing && !candidate.locked && candidate.id !== item.id,
       ).length;
-      if (otherMissing > 0) {
-        body.appendChild(
-          el("p", "worktree-hint", t.removeDialog.missingOthers(otherMissing)),
-        );
-      }
+      if (otherMissing > 0)
+        paragraphs.push({
+          text: t.removeDialog.missingOthers(otherMissing),
+          hint: true,
+        });
     } else {
-      body.appendChild(el("p", "", t.removeDialog.body(item.name)));
-      body.appendChild(el("p", "", t.removeDialog.diskNote(item.path)));
-      // ロックされた作業ツリーは git worktree remove が断る。
-      if (item.locked) body.appendChild(unlockBlock(item));
-    }
-    if (item.branch) {
-      body.appendChild(
-        el("p", "worktree-hint", t.removeDialog.branchNote(item.branch)),
+      paragraphs.push(
+        { text: t.removeDialog.body(item.name), hint: false },
+        { text: t.removeDialog.diskNote(item.path), hint: false },
       );
     }
-    let force: HTMLInputElement | null = null;
-    if (!item.missing && item.changedCount > 0) {
-      // 警告は最初から見せる。チェックを入れたときに出現する形だと、
-      // 読む前に押せてしまう。
-      const warn = el("p", "worktree-warn");
-      warn.appendChild(
-        el("span", "", `! ${t.removeDialog.dirtyNote(item.changedCount)}`),
-      );
-      warn.appendChild(document.createElement("br"));
-      warn.appendChild(el("span", "", t.removeDialog.dirtyLose));
-      body.appendChild(warn);
-      const forceWrap = document.createElement("label");
-      forceWrap.className = "worktree-check";
-      force = document.createElement("input");
-      force.type = "checkbox";
-      forceWrap.append(force, el("span", "", t.removeDialog.force));
-      body.appendChild(forceWrap);
-    }
+    if (item.branch)
+      paragraphs.push({
+        text: t.removeDialog.branchNote(item.branch),
+        hint: true,
+      });
+    const quoted = /[^\w./-]/.test(item.path)
+      ? `'${item.path.split("'").join("'\\''")}'`
+      : item.path;
+    const unlock = { busy: false, unlocked: false, result: "" };
+    // 警告は最初から見せる。チェックを入れたときに出現する形だと、読む前に
+    // 押せてしまう。
+    const dirty = !item.missing && item.changedCount > 0;
+    const form = detachedElement(() =>
+      view.removeForm({
+        paragraphs,
+        unlock: item.locked
+          ? {
+              afterParagraph: 1,
+              unlocked: unlock.unlocked,
+              unlockedText: t.removeDialog.unlocked,
+              note: t.removeDialog.lockedNote,
+              command: `git worktree unlock ${quoted}`,
+              label: t.removeDialog.unlock,
+              busy: unlock.busy,
+              result: unlock.result,
+              onUnlock: () => {
+                unlock.busy = true;
+                unlock.result = "";
+                form.draw();
+                void deps
+                  .trackLoad(
+                    postWorktreeAction(apiUrl("worktreeUnlock"), {
+                      path: item.path,
+                    }),
+                  )
+                  .then(() => {
+                    unlock.unlocked = true;
+                  })
+                  .catch((error: unknown) => {
+                    unlock.result = failureMessage(
+                      t.removeDialog.unlockFailed,
+                      error,
+                    );
+                  })
+                  .finally(() => {
+                    unlock.busy = false;
+                    form.draw();
+                  });
+              },
+            }
+          : null,
+        dirty: dirty
+          ? {
+              note: t.removeDialog.dirtyNote(item.changedCount),
+              lose: t.removeDialog.dirtyLose,
+              force: t.removeDialog.force,
+            }
+          : null,
+      }),
+    );
+    const body = form.element;
+    const force = dirty
+      ? body.querySelector<HTMLInputElement>(".worktree-check input")
+      : null;
+    if (dirty && !force)
+      throw new Error("worktree remove dialog: the confirmation was not drawn");
 
     const submitted = await showFormDialog<{ force: boolean }>({
       title: t.removeDialog.title,
@@ -943,20 +1417,6 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     return badges;
   }
 
-  function headButton(
-    label: string,
-    title: string,
-    onClick: () => void,
-  ): HTMLButtonElement {
-    // 文字を入れるボタンは共通の .gdp-btn。History の .history-refresh は
-    // 幅も高さも固定のアイコン枠なので、文字を入れると潰れる。
-    const button = el("button", "gdp-btn gdp-btn-sm worktree-head-btn", label);
-    button.type = "button";
-    button.title = title;
-    button.addEventListener("click", onClick);
-    return button;
-  }
-
   /**
    * 「フォルダを開く」。中身は app.ts の共有ファクトリがそのまま作る
    * (Repository / Diff / サイドバー / ソースと同じもの)。
@@ -991,32 +1451,31 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
    * 箱の寸法は変えない (ui-surface「箱の寸法を状態で変えない」)。
    * label を渡すと文字つき、渡さなければアイコンだけになる。
    */
-  function copyButton(
+  /**
+   * 文字列 1 つをクリップボードへ写すボタン。押した後に変わるのは色だけで、
+   * 箱の寸法は変えない (ui-surface「箱の寸法を状態で変えない」)。
+   * label を渡すと文字つき、渡さなければアイコンだけになる。
+   */
+  function copyProps(
     value: string,
     title: string,
     label?: string,
-  ): HTMLButtonElement {
-    const button = el(
-      "button",
-      label
-        ? "gdp-btn gdp-btn-sm gdp-copy-path"
-        : "gdp-file-header-icon gdp-copy-path",
-      label,
-    );
-    button.type = "button";
-    button.title = title;
-    button.setAttribute("aria-label", title);
-    if (!label) button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-    button.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      button.classList.remove("copied", "failed");
-      button.classList.add((await copyText(value)) ? "copied" : "failed");
-      window.setTimeout(
-        () => button.classList.remove("copied", "failed"),
-        1200,
-      );
-    });
-    return button;
+  ): WorktreeCopyProps {
+    return {
+      title,
+      label: label ?? null,
+      onCopy: (button) => {
+        // 押したボタンへの一瞬の印 (状態の置き場ではない)。
+        button.classList.remove("copied", "failed");
+        void copyText(value).then((ok) => {
+          button.classList.add(ok ? "copied" : "failed");
+          window.setTimeout(
+            () => button.classList.remove("copied", "failed"),
+            1200,
+          );
+        });
+      },
+    };
   }
 
   /**
@@ -1067,12 +1526,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   /** 「パスをコピー」。cd して作業を始めるためのもの。 */
-  function copyPathButton(
+  function copyPathProps(
     item: WorktreeItem,
     withLabel: boolean,
-  ): HTMLButtonElement {
+  ): WorktreeCopyProps {
     const t = text();
-    return copyButton(
+    return copyProps(
       item.path,
       t.actions.copyPathTitle,
       withLabel ? t.actions.copyPath : undefined,
@@ -1097,11 +1556,11 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     };
   }
 
-  function copyMergeButton(item: WorktreeItem): HTMLButtonElement | null {
+  function copyMergeProps(item: WorktreeItem): WorktreeCopyProps | null {
     const merge = mergeCommand(item);
     if (!merge) return null;
     const t = text();
-    return copyButton(
+    return copyProps(
       merge.command,
       t.actions.copyMergeTitle(merge.base, merge.branch),
     );
@@ -1244,25 +1703,6 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     return items;
   }
 
-  /** 行の右端に置く「…」。押すまで操作は 1 つも見えない。 */
-  function rowMenuButton(item: WorktreeItem): HTMLButtonElement | null {
-    const items = rowMenuItems(item);
-    if (!items.length) return null;
-    const t = text();
-    const button = el("button", "worktree-row-menu");
-    button.type = "button";
-    button.title = t.actions.menuTitle;
-    button.setAttribute("aria-label", t.actions.menuFor(item.name));
-    button.setAttribute("aria-haspopup", "menu");
-    button.innerHTML = iconSvg("octicon-kebab-horizontal", KEBAB_16_PATH);
-    button.addEventListener("click", (event) => {
-      // 行のクリック (選択) と混ぜない。メニューを開くだけ。
-      event.stopPropagation();
-      showContextMenu(button, rowMenuItems(item));
-    });
-    return button;
-  }
-
   /**
    * その作業ツリーで動いているエージェント (cwd が中にあるもの)。作業ツリーが
    * 入れ子のときは、いちばん深い作業ツリーに数える。急ぐものを先に。
@@ -1284,337 +1724,210 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   /** 行のエージェントの欄: いちばん急ぐものの印と状態、ほかは数だけ。 */
-  function agentsCell(item: WorktreeItem): HTMLElement {
-    const cell = el("span", "worktree-row-agents");
+  function agentsProps(item: WorktreeItem): WorktreeRowProps["agents"] {
     const agents = agentsIn(item);
     const first = agents[0];
-    if (!first) return cell;
-    const mark = el("i", `terminal-mark terminal-mark-${first.state}`);
-    mark.setAttribute("aria-hidden", "true");
-    const label = el(
-      "span",
-      `worktree-row-agent-state worktree-row-agent-${first.state}`,
-      first.stateLabel,
-    );
-    cell.append(mark, label);
-    if (agents.length > 1)
-      cell.appendChild(
-        el("span", "worktree-row-agent-more", `+${agents.length - 1}`),
-      );
-    cell.title = agents
-      .map((agent) => `${agent.kind} · ${agent.stateLabel}`)
-      .join("\n");
-    return cell;
+    if (!first) return null;
+    return {
+      state: first.state,
+      label: first.stateLabel,
+      more: agents.length - 1,
+      title: agents
+        .map((agent) => `${agent.kind} · ${agent.stateLabel}`)
+        .join("\n"),
+    };
   }
 
-  /**
-   * 行の右端の「開く」(メニューの「別タブで見る」と同じ操作)。場所は最初から
-   * 取ってあり、選んだときに現れたりしない (押し間違えない)。
-   */
-  function openButton(item: WorktreeItem): HTMLButtonElement | null {
-    if (item.missing || item.bare) return null;
+  function whenOf(iso: string, format: (relative: string) => string) {
+    const parsed = Date.parse(iso);
+    return Number.isFinite(parsed)
+      ? {
+          text: format(
+            relativeTimeText(Math.round(parsed / 1000), pageLanguage()),
+          ),
+          absolute: new Date(parsed).toLocaleString(pageLanguage()),
+        }
+      : { text: format(iso), absolute: null };
+  }
+
+  function rowProps(
+    item: WorktreeItem,
+    selected: string | undefined,
+  ): WorktreeRowProps {
     const t = text();
-    const button = el("button", "gdp-btn worktree-row-open", t.openShort);
-    button.type = "button";
-    button.title = t.openTitle;
-    button.disabled = !!busyPath;
-    button.addEventListener("click", (event) => {
-      // 行のクリック (選択) と混ぜない。
-      event.stopPropagation();
-      void openWorktree(item);
-    });
-    return button;
+    const commit = item.lastCommit;
+    const committed = commit ? whenOf(commit.when, (value) => value) : null;
+    // 最終更新は mtime ベース。コミットせずに置かれた作業ツリーでも動く。
+    const touched = item.lastTouched
+      ? whenOf(item.lastTouched, (value) => t.lastTouched(value))
+      : null;
+    const menuItems = rowMenuItems(item);
+    return {
+      id: item.id,
+      active: item.id === selected,
+      current: item.current,
+      conflict: item.divergence?.mergeState === "conflict",
+      // 1 段目: 見出しはブランチ (フォルダは 2 段目のパスで読める) + 名前 + 状態
+      // バッジ (右寄せ)。
+      heading: item.branch || t.badges.detached,
+      name: item.name,
+      // 2 段目: フォルダの場所。**displayPath (リポジトリからの相対) ではなく
+      // 実パスを出す。** 相対だと本体の行が "." だけになる。全体は title に。
+      path: item.path,
+      badges: worktreeBadges(item),
+      // 3 段目: ブランチ・変更数・最終コミット。ブランチが無い作業ツリーは
+      // その旨を出し、理由を title に添える。
+      branch: {
+        text: item.branch || t.badges.detached,
+        title: item.branch ? null : t.badges.detachedTitle,
+      },
+      files: item.fileCount ? t.files.heading(item.fileCount) : t.files.none,
+      // ホバーでは件名と絶対日時の両方を出す。
+      lastCommit:
+        commit && committed
+          ? {
+              text: committed.text,
+              title: committed.absolute
+                ? `${commit.subject}\n${committed.absolute}`
+                : commit.subject,
+            }
+          : null,
+      lastTouched:
+        touched && item.lastTouched
+          ? { text: touched.text, title: touched.absolute ?? item.lastTouched }
+          : null,
+      // 4 段目: マージできるか + 位置関係。フル文は title に。そのまま入る行に
+      // だけ、取り込むコマンドのコピー (アイコンだけ) を添える。
+      divergence: divergenceSummary(item),
+      merge: copyMergeProps(item),
+      agents: agentsProps(item),
+      // 操作: 「開く」と「…」。「…」は行を選ばなくても、その行に対して実行できる。
+      // 「開く」は一覧だけのとき (何も選んでいない) にだけ置く。選んだ後の
+      // 狭い一覧では今までどおり「…」だけ (選んだ瞬間にボタンが増えると誤爆する)。
+      open:
+        !selected && !item.missing && !item.bare
+          ? {
+              label: t.openShort,
+              title: t.openTitle,
+              disabled: !!busyPath,
+              onClick: () => void openWorktree(item),
+            }
+          : null,
+      // 行の右端の「…」。押すまで操作は 1 つも見えない。
+      menu: menuItems.length
+        ? {
+            title: t.actions.menuTitle,
+            label: t.actions.menuFor(item.name),
+            onOpen: (anchor) => showContextMenu(anchor, rowMenuItems(item)),
+          }
+        : null,
+      error: item.error || null,
+    };
   }
 
-  function note(body: string, isError = false): HTMLElement {
-    const node = el("div", "history-status", body);
-    node.hidden = false;
-    if (isError) {
-      node.setAttribute("role", "alert");
-      node.style.color = "var(--danger)";
-    }
-    return node;
-  }
-
-  function renderList(): void {
-    if (!listPanel) return;
-    // 一覧はエージェントの状態が変わるたびに頭ごと作り直す。頭の部品 (再読み込み・
-    // 作成・絞り込み欄) にあったフォーカスも、作り直した後の同じ部品へ戻す
-    // (戻さないと body へ落ち、Tab が一覧の先へ進めず、絞り込み欄の入力も途切れた)。
-    const head = focusedHeadControl(listPanel);
-    try {
-      renderListRows(listPanel);
-    } finally {
-      restoreHeadControl(listPanel, head);
-    }
-  }
-
-  type FocusedHeadControl =
-    | { kind: "filter"; start: number | null; end: number | null }
-    | { kind: "button"; index: number };
-
-  function headButtons(panel: HTMLElement): HTMLElement[] {
-    return [...panel.querySelectorAll<HTMLElement>(".history-head button")];
-  }
-
-  function focusedHeadControl(panel: HTMLElement): FocusedHeadControl | null {
-    const focused = document.activeElement as HTMLElement | null;
-    if (!focused || !panel.contains(focused)) return null;
-    if (focused === worktreeFilterInput)
-      return {
-        kind: "filter",
-        start: worktreeFilterInput.selectionStart,
-        end: worktreeFilterInput.selectionEnd,
-      };
-    const index = headButtons(panel).indexOf(focused);
-    return index < 0 ? null : { kind: "button", index };
-  }
-
-  function restoreHeadControl(
-    panel: HTMLElement,
-    head: FocusedHeadControl | null,
-  ): void {
-    if (!head) return;
-    if (head.kind === "button") {
-      headButtons(panel)[head.index]?.focus({ preventScroll: true });
-      return;
-    }
-    if (!worktreeFilterInput.isConnected) return;
-    worktreeFilterInput.focus({ preventScroll: true });
-    if (head.start !== null && head.end !== null)
-      worktreeFilterInput.setSelectionRange(head.start, head.end);
-  }
-
-  function renderListRows(listPanel: HTMLElement): void {
+  function panelProps(): WorktreePanelProps {
     const t = text();
-    // 作り直す前に、行にあったフォーカスを控える (作り直すと body へ落ちる)。
-    const focused = focusedListRow(
-      listPanel,
-      WORKTREE_ROW_SELECTOR,
-      worktreeKey,
-    );
-    listPanel.replaceChildren();
-
-    const head = el("div", "history-head");
-    head.appendChild(el("span", "history-title", t.panes.worktrees));
-    if (data?.worktrees.length)
-      head.appendChild(
-        el("span", "worktree-count", t.panes.count(data.worktrees.length)),
-      );
-    head.appendChild(
-      headButton(t.refresh, t.refreshTitle, () => {
-        void refresh();
-      }),
-    );
-    // 作業ツリーを足すのはこの画面の主の操作 (ボタンの種類の主)。
-    const add = headButton(t.add, t.addTitle, () => {
-      void addWorktree();
-    });
-    add.classList.add("worktree-head-add");
-    head.appendChild(add);
-    listPanel.appendChild(head);
-
-    worktreeFilterInput.placeholder = t.panes.filterWorktrees;
-    const filterWrap = el("div", "history-filter-wrap");
-    filterWrap.appendChild(worktreeFilterInput);
-    listPanel.appendChild(filterWrap);
-
+    const notes: WorktreeNote[] = [];
     // 基準ブランチ名は各行の 4 段目に載るので、見つからなかったときだけ
     // 理由をここに出す。
-    if (data && !data.baseBranch) {
-      listPanel.appendChild(note(t.baseUnknown));
-    }
-    if (message) listPanel.appendChild(note(message, messageIsError));
-
+    if (data && !data.baseBranch)
+      notes.push({ text: t.baseUnknown, error: false });
+    if (message) notes.push({ text: message, error: messageIsError });
     const overlaps = data?.overlaps || [];
-    if (overlaps.length) {
-      const banner = el("div", "history-banner");
-      banner.hidden = false;
-      banner.textContent = `${t.overlaps.heading(overlaps.length)} — ${t.overlaps.intro}`;
-      banner.title = overlaps
-        .map((overlap) =>
-          t.overlaps.entry(
-            overlap.path,
-            overlap.worktreeIds.map((id) => worktreeLabel(id)),
-          ),
-        )
-        .join("\n");
-      listPanel.appendChild(banner);
-    }
-
-    if (!data) {
-      listPanel.appendChild(note(t.loading));
-      return;
-    }
-    if (!data.worktrees.length) {
-      listPanel.appendChild(note(t.empty));
-      return;
-    }
+    const head = {
+      title: t.panes.worktrees,
+      count: data?.worktrees.length
+        ? t.panes.count(data.worktrees.length)
+        : null,
+      refresh: {
+        label: t.refresh,
+        title: t.refreshTitle,
+        onClick: () => void refresh(),
+      },
+      // 作業ツリーを足すのはこの画面の主の操作 (ボタンの種類の主)。
+      add: {
+        label: t.add,
+        title: t.addTitle,
+        onClick: () => void addWorktree(),
+      },
+      filter: {
+        value: worktreeFilter,
+        placeholder: t.panes.filterWorktrees,
+        onInput: (value: string) => {
+          worktreeFilter = value;
+          renderList();
+        },
+      },
+      notes,
+      overlaps: overlaps.length
+        ? {
+            text: `${t.overlaps.heading(overlaps.length)} — ${t.overlaps.intro}`,
+            title: overlaps
+              .map((overlap) =>
+                t.overlaps.entry(
+                  overlap.path,
+                  overlap.worktreeIds.map((id) => worktreeLabel(id)),
+                ),
+              )
+              .join("\n"),
+          }
+        : null,
+    };
+    const note = (text: string): WorktreePanelProps["body"] => ({
+      kind: "note",
+      note: { text, error: false },
+    });
+    if (!data) return { ...head, body: note(t.loading) };
+    if (!data.worktrees.length) return { ...head, body: note(t.empty) };
     const items = data.worktrees.filter(
       (item) =>
         matches(item.name, worktreeFilter) ||
         matches(item.branch, worktreeFilter) ||
         matches(item.displayPath, worktreeFilter),
     );
-    if (!items.length) {
-      listPanel.appendChild(note(t.panes.noWorktreeMatch));
-      return;
-    }
-
+    if (!items.length) return { ...head, body: note(t.panes.noWorktreeMatch) };
     const selected = route()?.wt;
+    return {
+      ...head,
+      body: {
+        kind: "list",
+        columns: [
+          t.columns.branch,
+          t.columns.compared(data.baseBranch || ""),
+          t.columns.changes,
+          t.columns.agents,
+          "",
+        ],
+        // 行の中にボタン (取り込みのコピー・「…」・「開く」) があるので listbox に
+        // せず、並び (ol) のまま名前を付け、選んでいる行は aria-current で伝える。
+        label: t.panes.worktrees,
+        rows: items.map((item) => rowProps(item, selected)),
+        // 別の作業ツリーへ移ったらファイル選択は持ち越さない。
+        onSelect: (id) =>
+          navigate({ wt: id, file: undefined, origin: undefined }),
+        // メインの 1 本しか無いときは、この一覧に何が並ぶかを 1 行で伝える。
+        footer: data.worktrees.length === 1 ? t.intro.listNote : null,
+      },
+    };
+  }
+
+  function renderList(): void {
+    if (!listPanel) return;
+    // 描き直す前に、行にあったフォーカスを控える (行が入れ替わったときに戻す)。
+    // 頭の部品 (再読み込み・作成・絞り込み欄) は描き直しても同じ要素のまま。
+    const focused = focusedListRow(
+      listPanel,
+      WORKTREE_ROW_SELECTOR,
+      worktreeKey,
+    );
+    const props = panelProps();
     // 選んでいないときは一覧だけを画面いっぱいに出す (行は列にそろえる)。
     // 選ぶと今までどおり 一覧 → 変更ファイル → 差分。
-    document.body.toggleAttribute("data-worktree-overview", !selected);
-    const columns = el("div", "worktree-columns");
-    columns.setAttribute("aria-hidden", "true");
-    for (const label of [
-      t.columns.branch,
-      t.columns.compared(data.baseBranch || ""),
-      t.columns.changes,
-      t.columns.agents,
-      "",
-    ])
-      columns.appendChild(el("span", "", label));
-    listPanel.appendChild(columns);
-    const list = el("ol", "history-list");
-    for (const item of items) {
-      const row = el("li", "history-item");
-      row.dataset.wt = item.id;
-      if (item.id === selected) row.classList.add("active");
-      if (item.current) row.classList.add("worktree-current");
-      if (item.divergence?.mergeState === "conflict") {
-        row.classList.add("worktree-conflict");
-      }
-
-      // 1 段目: 名前 + 状態バッジ (右寄せ)。一覧だけのときは名前の代わりに
-      // ブランチを見出しにする (フォルダは 2 段目のパスで読める)。
-      const head = el("span", "worktree-row-head");
-      head.appendChild(
-        el("span", "worktree-row-branch", item.branch || t.badges.detached),
-      );
-      const subject = el("span", "subject", item.name);
-      subject.title = item.path;
-      head.appendChild(subject);
-      const badges = worktreeBadges(item);
-      if (badges.length) {
-        const wrap = el("span", "worktree-row-badges");
-        badges.forEach((badge, index) => {
-          if (index) wrap.appendChild(document.createTextNode(" · "));
-          const node = el("span", "worktree-badge", badge.label);
-          node.title = badge.title;
-          wrap.appendChild(node);
-        });
-        head.appendChild(wrap);
-      }
-      row.appendChild(head);
-
-      // 2 段目: フォルダの場所。「それはどこのフォルダなのか」が一番知りたい
-      // 情報なのでホバーに隠さない。
-      //
-      // **displayPath (リポジトリからの相対) ではなく実パスを出す。** 相対だと
-      // 本体の行が "." だけになり、他の行も「リポジトリがどこにあるか」を
-      // 知っている人にしか読めない。長いので頭側を省略し、全体は title に。
-      const pathLine = el("span", "worktree-row-path", item.path);
-      pathLine.title = item.path;
-      row.appendChild(pathLine);
-
-      // 3 段目: ブランチ・変更数・最終コミット。
-      const meta = el("span", "meta2 worktree-row-meta");
-      // ブランチ名の枠。ブランチが無い作業ツリーはその旨を出し、他のバッジと
-      // 同じように理由を title に添える。
-      const branchName = el("span", "sha", item.branch || t.badges.detached);
-      if (!item.branch) branchName.title = t.badges.detachedTitle;
-      meta.appendChild(branchName);
-      meta.appendChild(
-        el(
-          "span",
-          "author worktree-row-files",
-          item.fileCount ? t.files.heading(item.fileCount) : t.files.none,
-        ),
-      );
-      if (item.lastCommit) {
-        const parsed = Date.parse(item.lastCommit.when);
-        const when = el(
-          "span",
-          "when",
-          Number.isFinite(parsed)
-            ? relativeTimeText(Math.round(parsed / 1000), pageLanguage())
-            : item.lastCommit.when,
-        );
-        // ホバーでは件名と絶対日時の両方を出す。
-        when.title = Number.isFinite(parsed)
-          ? `${item.lastCommit.subject}\n${new Date(parsed).toLocaleString(pageLanguage())}`
-          : item.lastCommit.subject;
-        meta.appendChild(when);
-      }
-      // 最終更新は mtime ベース。コミットせずに置かれた作業ツリーでも動く。
-      if (item.lastTouched) {
-        const parsed = Date.parse(item.lastTouched);
-        const when = el(
-          "span",
-          "when",
-          Number.isFinite(parsed)
-            ? t.lastTouched(
-                relativeTimeText(Math.round(parsed / 1000), pageLanguage()),
-              )
-            : t.lastTouched(item.lastTouched),
-        );
-        when.title = Number.isFinite(parsed)
-          ? new Date(parsed).toLocaleString(pageLanguage())
-          : item.lastTouched;
-        meta.appendChild(when);
-      }
-      row.appendChild(meta);
-
-      // 4 段目: マージできるか + 位置関係。フル文は title に。
-      const second = el("span", "meta2 worktree-row-divergence");
-      const summary = divergenceSummary(item);
-      const summaryText = el("span", "author worktree-row-compare", summary);
-      summaryText.title = summary;
-      second.appendChild(summaryText);
-      // そのまま入る行にだけ、取り込むコマンドのコピーを添える。文字は
-      // 増やさずアイコンだけにする (この段は既に省略が効く狭さのため)。
-      const merge = copyMergeButton(item);
-      if (merge) second.appendChild(merge);
-      row.appendChild(second);
-      row.appendChild(agentsCell(item));
-      // 操作: 「開く」と「…」。「…」は行を選ばなくても、その行に対して実行できる。
-      // 「開く」は一覧だけのとき (何も選んでいない) にだけ置く。選んだ後の
-      // 狭い一覧では今までどおり「…」だけ (選んだ瞬間にボタンが増えると誤爆する)。
-      const actions = el("span", "worktree-row-actions");
-      const open = selected ? null : openButton(item);
-      if (open) actions.appendChild(open);
-      const menu = rowMenuButton(item);
-      if (menu) actions.appendChild(menu);
-      row.appendChild(actions);
-
-      if (item.error) {
-        const error = el("span", "meta2");
-        const detail = el("span", "author", item.error);
-        detail.style.color = "var(--danger)";
-        error.appendChild(detail);
-        row.appendChild(error);
-      }
-
-      // 操作は選んだ行の内側にだけ出す。
-      list.appendChild(row);
-    }
-    list.addEventListener("click", (event) => {
-      const row = (event.target as HTMLElement | null)?.closest<HTMLElement>(
-        ".history-item",
-      );
-      const id = row?.dataset.wt;
-      if (!id) return;
-      // 別の作業ツリーへ移ったらファイル選択は持ち越さない。
-      navigate({ wt: id, file: undefined, origin: undefined });
-    });
-    listPanel.appendChild(list);
-    // 行の中にボタン (取り込みのコピー・「…」・「開く」) があるので listbox に
-    // せず、並び (ol) のまま名前を付け、選んでいる行は aria-current で伝える。
-    list.setAttribute("aria-label", t.panes.worktrees);
-    for (const row of list.querySelectorAll<HTMLElement>(".history-item"))
-      if (row.classList.contains("active"))
-        row.setAttribute("aria-current", "true");
+    if (props.body.kind === "list")
+      document.body.toggleAttribute("data-worktree-overview", !route()?.wt);
+    renderOwned(listPanel, view.panel(props));
+    const list = listPanel.querySelector<HTMLElement>(".history-list");
+    if (!list) return;
     syncListTabStop(list, {
       rows: worktreeRows(),
       keyOf: worktreeKey,
@@ -1624,31 +1937,6 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       fallback: listPanel,
       memo: listPanel,
     });
-
-    // メインの 1 本しか無いときは、この一覧に何が並ぶかを 1 行で伝える。
-    if (data.worktrees.length === 1) {
-      listPanel.appendChild(note(t.intro.listNote));
-    }
-  }
-
-  /**
-   * まだ 1 本も作っていないときの説明カード。何も無い右ペインに出すので
-   * 説明がノイズにならず、2 本目を作った時点で二度と出ない (永続化しない)。
-   */
-  function introCard(): HTMLElement {
-    const t = text();
-    const card = el("div", "worktree-intro");
-    card.appendChild(el("p", "worktree-intro-title", t.intro.cardTitle));
-    card.appendChild(el("p", "", t.intro.cardWhat));
-    card.appendChild(el("p", "", t.intro.cardWhy));
-    card.appendChild(el("p", "", t.intro.cardHow));
-    const button = el("button", "gdp-btn gdp-btn-sm", t.intro.cardButton);
-    button.type = "button";
-    button.addEventListener("click", () => {
-      void addWorktree();
-    });
-    card.appendChild(button);
-    return card;
   }
 
   /**
@@ -1717,107 +2005,75 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     return [label, current];
   }
 
-  function fileRow(
+  function fileProps(
     item: WorktreeItem,
     file: WorktreeFileChange,
     depth: number,
     label: string,
-  ): HTMLLIElement {
+  ): WorktreeFileEntry {
     const t = text();
-    const row = el("li", "tree-file");
-    row.tabIndex = -1;
-    row.dataset.path = file.path;
-    row.dataset.key = fileKey(file);
-    row.dataset.type = "blob";
     const currentRoute = route();
-    if (
-      currentRoute?.file === file.path &&
-      currentRoute.origin === file.origin
-    ) {
-      row.classList.add("active");
-    }
-    row.style.setProperty("--lvl-pad", treeLevelPad(depth));
-    row.appendChild(el("span", "chev-spacer"));
-    const badge = el("span", `badge ${file.status}`, file.status);
-    badge.title = t.files.statusTitles[file.status] || file.status;
-    row.appendChild(badge);
-    const name = el("span", "name", label);
-    name.title = file.path;
-    row.appendChild(name);
     // 重なりは行末に「何本と重なっているか」の数で出す。色を変えると、
-    // 重なりが多いリポジトリでは一覧がまるごと染まって読めなくなる
-    // (実測: ある worktree 群では 147 ファイルが該当した)。
+    // 重なりが多いリポジトリでは一覧がまるごと染まって読めなくなる。
     // .badge は M / A / D の 1 文字用の枠なので語も入れられない。
     const others = overlapOthers(item, file);
-    if (others.length) {
-      row.classList.add("worktree-overlap");
-      const mark = el(
-        "span",
-        "stat worktree-overlap-count",
-        String(others.length),
-      );
-      mark.title = t.files.overlapTitle(others);
-      row.appendChild(mark);
-      name.title = `${file.path}\n${t.files.overlapTitle(others)}`;
-    }
-    return row;
+    return {
+      kind: "file",
+      path: file.path,
+      key: fileKey(file),
+      status: file.status,
+      statusTitle: t.files.statusTitles[file.status] || file.status,
+      label,
+      depth,
+      active:
+        currentRoute?.file === file.path && currentRoute.origin === file.origin,
+      nameTitle: others.length
+        ? `${file.path}\n${t.files.overlapTitle(others)}`
+        : file.path,
+      overlap: others.length
+        ? { count: others.length, title: t.files.overlapTitle(others) }
+        : null,
+    };
   }
 
-  function renderTreeInto(
-    parent: HTMLElement,
+  function treeEntries(
     item: WorktreeItem,
     node: FileTree,
     depth: number,
     path: string,
-  ): void {
-    for (const entry of node.order) {
+  ): WorktreeFileEntry[] {
+    return node.order.map((entry): WorktreeFileEntry => {
       if ("file" in entry) {
         const parts = entry.file.path.split("/");
-        parent.appendChild(
-          fileRow(
-            item,
-            entry.file,
-            depth,
-            parts[parts.length - 1] || entry.file.path,
-          ),
+        return fileProps(
+          item,
+          entry.file,
+          depth,
+          parts[parts.length - 1] || entry.file.path,
         );
-        continue;
       }
       const rawChild = node.dirs.get(entry.dir);
       if (!rawChild) throw new Error(`worktree tree: ${entry.dir} has no node`);
       const [label, child] = collapseChain(entry.dir, rawChild);
-      const li = el("li", "tree-dir");
-      li.tabIndex = -1;
-      li.dataset.type = "tree";
       // 行の鍵 (描き直しをまたいでフォーカスを戻す)。区切り (未コミット /
       // コミット済み) ごとに同じフォルダが出るので、区切りから始める。
-      li.dataset.worktreeDir = `${path}/${label}`;
-      li.style.setProperty("--lvl-pad", treeLevelPad(depth));
-      const chev = el("span", "chev");
-      chev.innerHTML = chevronSvg();
-      const icon = el("span", "dir-icon");
-      icon.innerHTML = folderSvg(false);
-      const name = el("span", "name", label);
-      name.title = label;
-      li.append(chev, icon, name);
-      const toggle = (event: Event) => {
-        event.stopPropagation();
-        const collapsed = li.classList.toggle("collapsed");
-        icon.innerHTML = folderSvg(collapsed);
-        // 畳んだ中に止まり場所があれば、見えている行へ移す。
-        const list = document.getElementById("filelist");
-        if (list) syncFileTabStop(list);
+      const key = `${path}/${label}`;
+      return {
+        kind: "dir",
+        key,
+        label,
+        depth,
+        collapsed: collapsedDirs.has(key),
+        onToggle: (event) => {
+          event.stopPropagation();
+          if (collapsedDirs.has(key)) collapsedDirs.delete(key);
+          else collapsedDirs.add(key);
+          // 畳んだ中に止まり場所があれば、見えている行へ移す。
+          drawFiles();
+        },
+        children: treeEntries(item, child, depth + 1, key),
       };
-      chev.addEventListener("click", toggle);
-      icon.addEventListener("click", toggle);
-      parent.appendChild(li);
-      // 子は .tree-dir の**兄弟**として置く。CSS が
-      // `#filelist.tree .tree-dir.collapsed + .tree-children` で畳むため、
-      // 中に入れると折りたたみが効かず、行も横に並んでしまう。
-      const children = el("ul", "tree-children");
-      renderTreeInto(children, item, child, depth + 1, `${path}/${label}`);
-      parent.appendChild(children);
-    }
+    });
   }
 
   async function loadCommits(
@@ -1875,9 +2131,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     }
   }
 
-  function renderCommits(list: HTMLElement, item: WorktreeItem): void {
+  function commitEntries(item: WorktreeItem): WorktreeFileEntry[] {
     const divergence = item.divergence;
-    if (!divergence || divergence.ahead < 1) return;
+    if (!divergence || divergence.ahead < 1) return [];
     const key = `${item.id}|${item.branch}|${divergence.base}|${acceptedServerGeneration}`;
     if (commitsFor !== key) {
       commitsFor = key;
@@ -1887,57 +2143,45 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       commitsError = "";
       void loadCommits(item, key, lifecycle);
     }
-
     const t = text();
-    list.appendChild(
-      el("li", "worktree-file-group", t.commits.heading(divergence.base)),
-    );
-    if (commitsLoading) {
-      list.appendChild(note(t.commits.loading));
-      return;
-    }
-    if (commitsError) {
-      const failure = note(commitsError);
-      failure.style.color = "var(--danger)";
-      list.appendChild(failure);
-      return;
-    }
-    if (!commits.length) {
-      list.appendChild(note(t.commits.none));
-      return;
-    }
-    for (const commit of commits) {
-      const row = el("li", "history-item worktree-commit");
-      const subject = el("span", "subject", commit.subject);
-      subject.title = commit.subject;
-      const meta = el("span", "meta2");
-      meta.appendChild(el("span", "sha", commit.sha.slice(0, 7)));
-      meta.appendChild(el("span", "author", commit.author));
-      const parsed = Date.parse(commit.when);
-      const when = el(
-        "span",
-        "when",
-        Number.isFinite(parsed)
-          ? relativeTimeText(Math.round(parsed / 1000), pageLanguage())
-          : commit.when,
-      );
-      when.title = Number.isFinite(parsed)
-        ? new Date(parsed).toLocaleString(pageLanguage())
-        : commit.when;
-      meta.appendChild(when);
-      row.append(subject, meta);
-      list.appendChild(row);
-    }
-    if (commitsHasMore) {
-      list.appendChild(
-        note(t.commits.truncated(commits.length, divergence.ahead)),
-      );
-    }
+    const heading: WorktreeFileEntry = {
+      kind: "group",
+      text: t.commits.heading(divergence.base),
+    };
+    const note = (text: string, error = false): WorktreeFileEntry => ({
+      kind: "note",
+      note: { text, error },
+    });
+    if (commitsLoading) return [heading, note(t.commits.loading)];
+    if (commitsError) return [heading, note(commitsError, true)];
+    if (!commits.length) return [heading, note(t.commits.none)];
+    return [
+      heading,
+      ...commits.map((commit): WorktreeFileEntry => {
+        const when = whenOf(commit.when, (value) => value);
+        return {
+          kind: "commit",
+          subject: commit.subject,
+          sha: commit.sha.slice(0, 7),
+          author: commit.author,
+          when: { text: when.text, title: when.absolute ?? commit.when },
+        };
+      }),
+      ...(commitsHasMore
+        ? [note(t.commits.truncated(commits.length, divergence.ahead))]
+        : []),
+    ];
   }
 
+  /** 一覧が変わった (選び直し・絞り込み・読み込み)。畳んだフォルダは全部開く。 */
   function renderFiles(): void {
+    collapsedDirs = new Set();
+    drawFiles();
+  }
+
+  function drawFiles(): void {
     const list = document.getElementById("filelist");
-    // 作り直す前に、行にあったフォーカスを控える。
+    // 描き直す前に、行にあったフォーカスを控える。
     const focused = list
       ? focusedListRow(list, FILE_ROW_SELECTOR, fileRowKey)
       : null;
@@ -2073,43 +2317,39 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     if (title) title.textContent = t.panes.fileListLabel;
     if (totals) totals.textContent = t.files.heading(item.fileCount);
     list.removeAttribute("data-diff-list");
-    list.replaceChildren();
-    renderCommits(list, item);
-    if (!item.fileCount) {
-      list.appendChild(note(t.files.none));
-      return;
-    }
+    renderOwned(list, view.files(fileEntries(item, tree)));
+  }
+
+  function fileEntries(item: WorktreeItem, tree: boolean): WorktreeFileEntry[] {
+    const t = text();
+    const entries = commitEntries(item);
+    const note = (text: string): WorktreeFileEntry => ({
+      kind: "note",
+      note: { text, error: false },
+    });
+    if (!item.fileCount) return [...entries, note(t.files.none)];
     const shown = visibleFiles(item);
-    if (!shown.length) {
-      list.appendChild(note(t.panes.noFileMatch));
-      return;
-    }
+    if (!shown.length) return [...entries, note(t.panes.noFileMatch)];
     // ⇄ が 1 つでも出るなら、その意味を先頭に置く。出ないなら置かない。
-    if (shown.some((entry) => overlapOthers(item, entry).length > 0)) {
-      list.appendChild(
-        el("li", "worktree-overlap-legend", t.intro.overlapLegend),
-      );
-    }
+    if (shown.some((entry) => overlapOthers(item, entry).length > 0))
+      entries.push({ kind: "legend", text: t.intro.overlapLegend });
     // ツリー用の CSS は #filelist.tree にぶら下がっている。
     for (const group of ["uncommitted", "committed"] as const) {
       const files = shown.filter((file) => file.origin === group);
       if (!files.length) continue;
       // 区切りの見出し。パスの行ではないので .tree-file の省略ルール
       // (nowrap + ellipsis) に乗せない。乗せると日本語が 1 文字ずつ縦に潰れる。
-      list.appendChild(
-        el(
-          "li",
-          "worktree-file-group",
-          group === "uncommitted" ? t.files.uncommitted : t.files.committed,
-        ),
-      );
-      if (tree) renderTreeInto(list, item, buildTree(files), 0, group);
-      else {
-        for (const file of files) {
-          list.appendChild(fileRow(item, file, 0, file.path));
-        }
-      }
+      entries.push({
+        kind: "group",
+        text: group === "uncommitted" ? t.files.uncommitted : t.files.committed,
+      });
+      if (tree) entries.push(...treeEntries(item, buildTree(files), 0, group));
+      else
+        entries.push(
+          ...files.map((file) => fileProps(item, file, 0, file.path)),
+        );
     }
+    return entries;
   }
 
   /**
@@ -2220,7 +2460,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       detachStickyHScroll(shell);
       body.replaceChildren();
       if (!res.diff.trim()) {
-        body.appendChild(el("div", "gdp-info", t.panes.diffEmpty));
+        body.replaceChildren(
+          templateElement(view.diff.info(t.panes.diffEmpty)),
+        );
       } else {
         // 差分が描けたら自前の見出しは畳む。diff2html が同じ内容の見出し
         // (パス・CHANGED・Viewed) を出すので、残すと 2 段になる。Diff
@@ -2230,21 +2472,16 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         if (head) head.style.display = "none";
         if (res.truncated) {
           // 全部見る入口 (行の右端の「開く」と同じ操作) を知らせの横に置く。
-          const notice = el("div", "gdp-info worktree-diff-truncated");
-          const open = el("button", "gdp-btn gdp-btn-sm", t.open);
-          open.type = "button";
-          open.addEventListener("click", () => void openWorktree(item));
-          notice.append(
-            el(
-              "span",
-              "",
-              t.panes.diffTruncated(res.renderedHunks, res.totalHunks),
+          body.appendChild(
+            templateElement(
+              view.diff.truncated({
+                text: t.panes.diffTruncated(res.renderedHunks, res.totalHunks),
+                open: { label: t.open, onClick: () => void openWorktree(item) },
+              }),
             ),
-            open,
           );
-          body.appendChild(notice);
         }
-        const host = el("div", "");
+        const host = templateElement(view.diff.host());
         body.appendChild(host);
         // 描画は Diff ビューアと同じ diff2html。設定も揃えてある。
         const ui = new window.Diff2HtmlUI(
@@ -2286,13 +2523,11 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
                 side,
               }).toString()}`,
             onMediaError: (_side, media) => {
-              const failure = el(
-                "div",
-                "media-empty",
-                t.panes.mediaUnavailable,
+              media.replaceWith(
+                templateElement(
+                  view.diff.mediaUnavailable(t.panes.mediaUnavailable),
+                ),
               );
-              failure.setAttribute("role", "alert");
-              media.replaceWith(failure);
             },
           },
         );
@@ -2300,14 +2535,11 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       shell.classList.add("loaded");
     } catch (error) {
       if (!isCurrent(seq) || !shell.isConnected) return;
-      body.replaceChildren();
-      const failure = el(
-        "div",
-        "gdp-info",
-        failureMessage(t.panes.diffFailed, error),
+      body.replaceChildren(
+        templateElement(
+          view.diff.info(failureMessage(t.panes.diffFailed, error), true),
+        ),
       );
-      failure.setAttribute("role", "alert");
-      body.appendChild(failure);
       shell.classList.add("loaded");
     }
   }
@@ -2323,56 +2555,67 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     diff.replaceChildren();
     if (!item) {
       // 1 本も作られていない (= メインだけ) なら、これが何の画面かの説明を
-      // 出す。2 本目があるのに未選択なら、いつもの案内。
-      if (data && data.worktrees.length === 1) {
-        diff.appendChild(introCard());
-      } else {
-        diff.appendChild(el("div", "gdp-info", t.panes.selectWorktree));
-      }
+      // 出す。2 本目があるのに未選択なら、いつもの案内。説明は何も無い右ペインに
+      // 出すので説明がノイズにならず、2 本目を作った時点で二度と出ない。
+      diff.replaceChildren(
+        templateElement(
+          data && data.worktrees.length === 1
+            ? view.diff.intro({
+                title: t.intro.cardTitle,
+                paragraphs: [
+                  t.intro.cardWhat,
+                  t.intro.cardWhy,
+                  t.intro.cardHow,
+                ],
+                button: {
+                  label: t.intro.cardButton,
+                  onClick: () => void addWorktree(),
+                },
+              })
+            : view.diff.info(t.panes.selectWorktree),
+        ),
+      );
       diffFor = "";
       return;
     }
     if (!item.fileCount) {
       // 空のままにせず、次にやること (そのフォルダで編集する) を書く。
-      const card = el("div", "gdp-info worktree-empty-diff");
-      card.appendChild(el("p", "", t.emptyDiff.title));
-      card.appendChild(el("p", "", t.emptyDiff.body(item.path)));
-      if (!item.missing && !item.bare) {
-        const buttons = el("span", "worktree-empty-diff-actions");
-        // リポジトリの外に在る作業ツリーは OS で開けない (パスは写せる)。
-        const openFolder = openFolderButton(item, true);
-        if (openFolder) buttons.appendChild(openFolder);
-        buttons.appendChild(copyPathButton(item, true));
-        card.appendChild(buttons);
-      }
-      diff.appendChild(card);
+      // リポジトリの外に在る作業ツリーは OS で開けない (パスは写せる)。
+      const usable = !item.missing && !item.bare;
+      diff.replaceChildren(
+        templateElement(
+          view.diff.empty({
+            title: t.emptyDiff.title,
+            body: t.emptyDiff.body(item.path),
+            openFolder: usable ? openFolderButton(item, true) : null,
+            copy: usable ? copyPathProps(item, true) : null,
+          }),
+        ),
+      );
       diffFor = diffKey(item);
       return;
     }
 
     const files = visibleFiles(item);
     if (!files.length) {
-      diff.appendChild(el("div", "gdp-info", t.panes.noFileMatch));
+      diff.replaceChildren(
+        templateElement(view.diff.info(t.panes.noFileMatch)),
+      );
       diffFor = diffKey(item);
       return;
     }
     const pending = new Map<HTMLElement, WorktreeFileChange>();
     for (const file of files) {
-      const shell = el("div", "gdp-file-shell");
-      shell.dataset.path = file.path;
-      shell.dataset.key = fileKey(file);
-      shell.dataset.status = file.status;
-      const head = el("div", "gdp-shell-header");
-      head.appendChild(el("span", `status-pill ${file.status}`, file.status));
-      head.appendChild(el("span", "path", file.path));
-      const stats = el("span", "stats");
-      stats.appendChild(el("span", "a", `+${file.additions}`));
-      stats.appendChild(el("span", "d", `−${file.deletions}`));
-      head.appendChild(stats);
-      shell.appendChild(head);
-      const body = el("div", "gdp-shell-body");
-      body.appendChild(el("div", "gdp-info", t.panes.diffLoading));
-      shell.appendChild(body);
+      const shell = templateElement(
+        view.diff.shell({
+          path: file.path,
+          key: fileKey(file),
+          status: file.status,
+          additions: file.additions,
+          deletions: file.deletions,
+          loading: t.panes.diffLoading,
+        }),
+      );
       diff.appendChild(shell);
       pending.set(shell, file);
     }

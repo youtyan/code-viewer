@@ -7132,7 +7132,6 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const HISTORY_VIEW = createHistoryView({
     $,
-    escapeHtml,
     getRoute: () => STATE.route,
     setRoute,
     listIsPage: () => PHONE_QUERY.matches,
