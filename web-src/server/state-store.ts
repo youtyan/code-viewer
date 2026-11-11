@@ -323,6 +323,9 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   const terminalClipboardWrite = optionalBoolean(raw.terminalClipboardWrite);
   if (terminalClipboardWrite !== undefined)
     out.terminalClipboardWrite = terminalClipboardWrite;
+  const terminalOptionAsAlt = optionalBoolean(raw.terminalOptionAsAlt);
+  if (terminalOptionAsAlt !== undefined)
+    out.terminalOptionAsAlt = terminalOptionAsAlt;
   const agentHookHintDismissed = optionalBoolean(raw.agentHookHintDismissed);
   if (agentHookHintDismissed !== undefined)
     out.agentHookHintDismissed = agentHookHintDismissed;

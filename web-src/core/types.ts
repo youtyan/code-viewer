@@ -256,6 +256,11 @@ export type AppSettingsState = {
    * クリップボードに書くか。未設定なら書く。読み出しはいつも断る。
    */
   terminalClipboardWrite?: boolean;
+  /**
+   * macOS の Option キーを Alt (Meta) として端末へ送るか。未設定なら送らない
+   * (JIS の配列では Option+¥ でバックスラッシュを打つので、既定で奪わない)。
+   */
+  terminalOptionAsAlt?: boolean;
   /** 入力待ち・完了のときに短い音を鳴らすか (ブラウザの通知とは別)。未設定なら鳴らさない。 */
   agentNotifySound?: boolean;
   /** エージェント一覧の「フックを入れられます」の案内を閉じた。 */

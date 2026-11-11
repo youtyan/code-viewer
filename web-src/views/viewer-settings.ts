@@ -49,6 +49,8 @@ export type ViewerSettingsText = {
   imageShelfPlacementHelp: string;
   terminalClipboardWriteLabel: string;
   terminalClipboardWriteHelp: string;
+  terminalOptionAsAltLabel: string;
+  terminalOptionAsAltHelp: string;
   imageShelfPlacementNames: Record<TerminalImageShelfPlacement, string>;
   language: string;
   fileListFontSize: string;
@@ -146,6 +148,7 @@ export type ViewerSettingsChoices = {
   agentNotifyDone: boolean;
   agentNotifySound: boolean;
   terminalClipboardWrite: boolean;
+  terminalOptionAsAlt: boolean;
   inferFkRails: boolean;
   s3TooltipEnabled: boolean;
 };
@@ -322,6 +325,7 @@ const TOGGLES = {
   agentNotifyDone: "agent-notify-done",
   agentNotifySound: "agent-notify-sound",
   terminalClipboardWrite: "terminal-clipboard-write",
+  terminalOptionAsAlt: "terminal-option-as-alt",
   inferFkRails: "datastore-infer-fk",
   s3TooltipEnabled: "datastore-s3-tooltip",
 } as const;
@@ -391,6 +395,7 @@ export type ViewerSettingsSectionProps =
       terminalTone: { label: string; select: SelectProps; help: string };
       shelfPlacement: { label: string; select: SelectProps; help: string };
       clipboardWrite: { toggle: ToggleProps; help: string };
+      optionAsAlt: { toggle: ToggleProps; help: string };
       language: { label: string; select: SelectProps };
       sidebarFontSize: { label: string; select: SelectProps; help: string };
       codeFontSize: { label: string; select: SelectProps };
@@ -626,7 +631,9 @@ function sectionTemplate(section: ViewerSettingsSectionProps): unknown {
           section.shelfPlacement.select,
         )}${help("viewer-image-shelf-placement-help", section.shelfPlacement.help)}${toggleTemplate(
           section.clipboardWrite.toggle,
-        )}${help("viewer-clipboard-write-help", section.clipboardWrite.help)}<label
+        )}${help("viewer-clipboard-write-help", section.clipboardWrite.help)}${toggleTemplate(
+          section.optionAsAlt.toggle,
+        )}${help("viewer-option-as-alt-help", section.optionAsAlt.help)}<label
           for="viewer-language"
         >${section.language.label}</label>${selectTemplate(section.language.select)}<label
           for="sidebar-font-size"
@@ -1034,6 +1041,14 @@ export function createViewerSettings(
         ),
         help: text.terminalClipboardWriteHelp,
       },
+      optionAsAlt: {
+        toggle: toggleProps(
+          "terminalOptionAsAlt",
+          text.terminalOptionAsAltLabel,
+          c.terminalOptionAsAlt,
+        ),
+        help: text.terminalOptionAsAltHelp,
+      },
       language: {
         label: text.language,
         select: choiceSelect(
@@ -1373,6 +1388,7 @@ export function createViewerSettings(
       agentNotifyDone: next.agentNotifyDone,
       agentNotifySound: next.agentNotifySound,
       terminalClipboardWrite: next.terminalClipboardWrite,
+      terminalOptionAsAlt: next.terminalOptionAsAlt,
       inferFkRails: next.inferFkRails,
       s3TooltipEnabled: next.s3TooltipEnabled,
     };

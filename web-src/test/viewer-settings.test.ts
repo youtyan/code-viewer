@@ -82,6 +82,8 @@ const EN_TEXT: ViewerSettingsText = {
   terminalClipboardWriteLabel: "Let terminal programs copy",
   agentNotifySoundLabel: "Also play a sound",
   terminalClipboardWriteHelp: "OSC 52 copies.",
+  terminalOptionAsAltLabel: "Use Option as Alt",
+  terminalOptionAsAltHelp: "Option shortcuts.",
   imageShelfPlacementNames: {
     right: "Right of the terminal",
     left: "Left of the terminal",
@@ -201,6 +203,7 @@ function defaultValues(): ViewerSettingsValues {
     watchLimitApplies: true,
     uploadEnabled: true,
     terminalClipboardWrite: true,
+    terminalOptionAsAlt: false,
     agentNotifySound: false,
     agentNotifyWaiting: true,
     agentNotifyDone: true,
@@ -880,6 +883,10 @@ describe("viewer settings form", () => {
       choice: { agentNotifyWaiting: false },
     },
     { selector: "#agent-notify-done", choice: { agentNotifyDone: false } },
+    {
+      selector: "#terminal-option-as-alt",
+      choice: { terminalOptionAsAlt: true },
+    },
     { selector: "#datastore-infer-fk", choice: { inferFkRails: true } },
     { selector: "#datastore-s3-tooltip", choice: { s3TooltipEnabled: false } },
   ] satisfies Array<{

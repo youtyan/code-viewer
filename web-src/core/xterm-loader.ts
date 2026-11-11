@@ -43,6 +43,11 @@ export type XtermOptions = {
    * どちらの描画でも効く。淡色 (SGR 2) はこの半分)。
    */
   minimumContrastRatio?: number;
+  /**
+   * macOS で Option キーを Meta (ESC を前に付けた Alt) として送る。偽なら Option は
+   * キー配列の字 (å・¥ など) を打つ。
+   */
+  macOptionIsMeta?: boolean;
   /** 画面に出さない書き込み専用にするとき (読み取り専用ペイン)。 */
   disableStdin?: boolean;
   /** capture-pane の出力は行末に改行しか持たないので CR を補う。 */

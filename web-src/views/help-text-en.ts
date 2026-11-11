@@ -1362,6 +1362,11 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(cat.appearance.label),
                   ". Programs are never allowed to read the clipboard.",
                 ],
+                [
+                  "To use Option shortcuts on macOS, such as Option+Enter for a new line in claude, turn on ",
+                  ui(l.settings.terminalOptionAsAltLabel),
+                  " in the same place.",
+                ],
               ],
             },
           ],

@@ -1340,6 +1340,11 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   ui(l.settings.terminalClipboardWriteLabel),
                   " を外します。クリップボードを読ませることはしません。",
                 ],
+                [
+                  "macOS で claude の Option+Enter (改行) などを使うには、同じ所の ",
+                  ui(l.settings.terminalOptionAsAltLabel),
+                  " を入れます。",
+                ],
               ],
             },
           ],

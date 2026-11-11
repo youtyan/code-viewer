@@ -24,6 +24,7 @@ import {
 
 type Options = {
   minimumContrastRatio?: number;
+  macOptionIsMeta?: boolean;
   theme?: { background?: string; foreground?: string; red?: string };
 };
 
@@ -134,9 +135,10 @@ describe("the terminal colors", () => {
   let screen: TerminalScreenHandle;
   let style: HTMLStyleElement;
 
-  async function open(look: Look): Promise<void> {
+  async function open(look: Look, optionAsAlt?: () => boolean): Promise<void> {
     applyLook(look);
     screen = createTerminalScreen({
+      optionAsAlt,
       getText: () => terminalText("en"),
       getFontSize: () => 13,
       actionHeaders: () => ({}),
@@ -277,5 +279,18 @@ describe("the terminal colors", () => {
       option: terminalOptions().minimumContrastRatio,
       constant: TERMINAL_MINIMUM_CONTRAST_RATIO,
     }).toEqual({ option: 4.5, constant: 4.5 });
+  });
+
+  test("Option is sent as Alt only while the setting is on, and a change applies at the next key", async () => {
+    let on = false;
+    await open({ theme: "dark" }, () => on);
+    expect(terminalOptions().macOptionIsMeta).toBe(false);
+
+    on = true;
+    const screenEl = screen.el.querySelector(".terminal-screen");
+    screenEl?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", altKey: true }),
+    );
+    expect(terminalOptions().macOptionIsMeta).toBe(true);
   });
 });

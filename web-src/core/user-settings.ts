@@ -38,6 +38,7 @@ export const USER_SETTING_KEYS = [
   "terminalImageShelfWidth",
   "terminalImageShelfHeight",
   "terminalClipboardWrite",
+  "terminalOptionAsAlt",
   "terminalPanelOpen",
   "navCollapsed",
   "navWidth",

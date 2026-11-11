@@ -182,6 +182,11 @@ export type TerminalScreenDeps = {
   getFontSize(): number;
   /** 端末のプログラムが送ったコピー (OSC 52) をクリップボードに書くか。無ければ書く。 */
   allowClipboardWrite?(): boolean;
+  /**
+   * macOS の Option キーを Alt (Meta) として送るか (設定の「Option キーを Alt として
+   * 送る」)。無ければ送らない (Option はキー配列の字を打つ)。
+   */
+  optionAsAlt?(): boolean;
   /** 画像の棚を畳んでいるか (ユーザー単位の設定)。 */
   isImageShelfCollapsed(): boolean;
   /** 棚を畳んだ・開いた。保存は呼び出し側。 */
@@ -461,6 +466,9 @@ export function createTerminalScreen(
   }
 
   function operate(event: Event): void {
+    // 設定を変えたらすぐ効くように、キーを xterm が読む前 (捕捉) に当て直す。
+    if (event.type === "keydown" && term)
+      term.options.macOptionIsMeta = deps.optionAsAlt?.() === true;
     if (!event.isTrusted || !inputEnabled || !attached || disposed) return;
     hasOperated = true;
     inputEvent = event;
@@ -1755,6 +1763,7 @@ export function createTerminalScreen(
       customGlyphs: true,
       theme: terminalTheme(),
       minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+      macOptionIsMeta: deps.optionAsAlt?.() === true,
     });
     // 明暗・テーマ・ターミナルの明暗 (html の data-theme / data-color-theme /
     // data-terminal-tone) が変わったら色を当て直す。

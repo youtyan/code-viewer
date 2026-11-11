@@ -63,6 +63,9 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
     terminalClipboardWriteLabel: "Let terminal programs copy to the clipboard",
     terminalClipboardWriteHelp:
       "Copies sent from inside the terminal (OSC 52), such as tmux copy mode. They can only write; reading the clipboard is always refused.",
+    terminalOptionAsAltLabel: "Use Option as Alt in the terminal (macOS)",
+    terminalOptionAsAltHelp:
+      "Sends Option shortcuts to the program, like Option+Enter for a new line in claude. While on, Option no longer types characters such as å or (on JIS keyboards) the backslash.",
     language: "Language",
     fileListFontSize: "UI font size",
     fileListFontSizeHelp: "Applies to everything except code.",
@@ -214,6 +217,10 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
       "ターミナルのプログラムにクリップボードへコピーさせる",
     terminalClipboardWriteHelp:
       "端末の中から送られたコピー (OSC 52。tmux のコピーモードなど) をクリップボードに書きます。書くだけで、クリップボードを読ませることはしません。",
+    terminalOptionAsAltLabel:
+      "ターミナルで Option キーを Alt として使う (macOS)",
+    terminalOptionAsAltHelp:
+      "claude の Option+Enter (改行) などの操作がプログラムに届きます。入れている間は、Option で打つ字 (JIS 配列のバックスラッシュなど) は打てません。",
     language: "言語",
     fileListFontSize: "UIの文字サイズ",
     fileListFontSizeHelp: "コードの本文以外のすべてに効きます。",
