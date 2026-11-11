@@ -1,3 +1,5 @@
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl, routePathname } from "../../core/api-url";
 import { inferRailsForeignKeys } from "../../core/database/infer-fk";
 import type {
@@ -25,7 +27,6 @@ import {
 } from "../../core/error-detail";
 import {
   CHEVRON_LEFT_16_PATH,
-  iconSvg,
   PENCIL_16_PATH,
   PLUS_16_PATH,
   SEARCH_16_PATH,
@@ -36,6 +37,8 @@ import { makeId } from "../../core/id";
 import { isImeComposing } from "../../core/keyboard";
 import { type AppRoute, type DiffRange, parseRoute } from "../../core/routes";
 import type { AnnotationTarget, DbUiPrefs, DbUiState } from "../../core/types";
+import { iconTemplate } from "../ui/icon";
+import { templateElement, templateElements } from "../ui/renderer";
 import { showAlertDialog } from "../ui-dialog";
 import { createAbortGuard } from "./abort-guard";
 import {
@@ -372,10 +375,214 @@ function labelFromDbId(
   return lastSlash >= 0 ? normalized.slice(lastSlash + 1) : normalized;
 }
 
+function drawnPart<T extends Element>(part: Ref<T>): T {
+  const element = part.value;
+  if (!element)
+    throw new Error("database view: a part of the screen was not drawn");
+  return element;
+}
+
+/**
+ * データストアの画面の描き方。画面はタブごとの面 (接続の選択・ツールバー・
+ * テーブルの一覧・表・各エクスプローラ・履歴) を組み合わせ、出し分けは
+ * presenter が hidden で切り替える。view は箱と部品の形 (テンプレート) を持ち、
+ * presenter は作った要素へ中身の部品を入れ、出し分けや文言を書き込む。
+ */
+export type DatabaseViewView = {
+  dbSelect: () => unknown;
+  schemaSelect: () => unknown;
+  refreshLabel: () => unknown;
+  refreshResult: () => unknown;
+  /** 接続の選択の行とスキーマの選択。 */
+  toolbar: (props: { selectRow: Node[]; schemaSelect: Node }) => unknown;
+  innerTab: (label: string, active: boolean) => unknown;
+  tabBar: (tabs: Node[]) => unknown;
+  sidebar: (width: string | null) => unknown;
+  iconToolbar: (buttons: Node[]) => unknown;
+  prefsBar: () => unknown;
+  explorerSidebarHost: () => unknown;
+  sidebarResize: () => unknown;
+  noDatastoresPane: () => unknown;
+  /** データストアの無い面・選ぶ前の面の操作。refreshLabel が null なら読み直しは出さない。 */
+  noDatastoresActions: (props: {
+    refreshLabel: string | null;
+    addLabel: string;
+    onRefresh: () => void;
+    onAdd: () => void;
+  }) => unknown;
+  mainContent: (children: Node[]) => unknown;
+  upperArea: (children: Node[]) => unknown;
+  historyResizer: () => unknown;
+  historyPane: (props: {
+    height: string | null;
+    history: Node;
+    log: Node;
+    refs: {
+      historyTabContent: Ref<HTMLElement>;
+      logTabContent: Ref<HTMLElement>;
+    };
+  }) => unknown;
+  historyDock: (props: {
+    historyLabel: string;
+    logLabel: string;
+    closeLabel: string;
+    closeTitle: string;
+    refs: {
+      historyTab: Ref<HTMLButtonElement>;
+      logTab: Ref<HTMLButtonElement>;
+      close: Ref<HTMLButtonElement>;
+    };
+  }) => unknown;
+  /** 電話の段で一覧と表を行き来するボタン (文言は label の箱へ後から入れる)。 */
+  phoneListButton: (className: string, label: Ref<HTMLElement>) => unknown;
+  container: (children: Node[]) => unknown;
+  dockerNotice: (message: string) => unknown;
+  options: (options: { value: string; label: string }[]) => unknown;
+  /** 「データストアを選択」の先頭の行 (文言は後から入れる)。 */
+  placeholderOption: () => unknown;
+  /** 複数のタブを束ねる外側 (タブの並びと面の置き場)。 */
+  root: (props: {
+    newTabTitle: string;
+    refs: {
+      tabsBar: Ref<HTMLElement>;
+      tabsList: Ref<HTMLElement>;
+      newTab: Ref<HTMLButtonElement>;
+      tabHost: Ref<HTMLElement>;
+    };
+  }) => unknown;
+  tabChip: (props: {
+    id: string;
+    label: string;
+    closeLabel: string;
+    refs: { label: Ref<HTMLElement>; close: Ref<HTMLButtonElement> };
+    onClose: (event: MouseEvent) => void;
+  }) => unknown;
+};
+
+export const DEFAULT_VIEW: DatabaseViewView = {
+  dbSelect: () => html`<select class="db-file-select"></select>`,
+  schemaSelect: () =>
+    html`<select class="db-file-select db-schema-select" hidden></select>`,
+  refreshLabel: () => html`<span class="db-refresh-label"></span>`,
+  refreshResult: () =>
+    html`<span class="db-refresh-result" hidden aria-live="polite"></span>`,
+  toolbar: ({ selectRow, schemaSelect }) =>
+    html`<div class="db-toolbar"><div class="db-select-row">${selectRow}</div>${schemaSelect}</div>`,
+  innerTab: (label, active) =>
+    html`<button class=${active ? "db-tab active" : "db-tab"} type="button"
+      >${label}</button
+    >`,
+  tabBar: (tabs) => html`<div class="db-tab-bar">${tabs}</div>`,
+  sidebar: (width) =>
+    html`<div
+      class="db-sidebar"
+      style=${width === null ? nothing : `width: ${width};`}
+    ></div>`,
+  iconToolbar: (buttons) =>
+    html`<div class="db-icon-toolbar" role="toolbar">${buttons}</div>`,
+  prefsBar: () => html`<div class="db-prefs-bar"></div>`,
+  explorerSidebarHost: () => html`<div class="db-explorer-sidebar-host"></div>`,
+  sidebarResize: () => html`<div class="db-sidebar-resize"></div>`,
+  noDatastoresPane: () => html`<div class="db-no-datastores" hidden></div>`,
+  noDatastoresActions: (p) =>
+    html`<div class="db-no-datastores-actions">${
+      p.refreshLabel === null
+        ? nothing
+        : html`<button
+            type="button"
+            class="db-btn db-btn-primary db-no-datastores-action"
+            @click=${p.onRefresh}
+          >${p.refreshLabel}</button>`
+    }<button
+        type="button"
+        class="db-btn db-no-datastores-action"
+        @click=${p.onAdd}
+      >${p.addLabel}</button></div>`,
+  mainContent: (children) =>
+    html`<div class="db-main-content">${children}</div>`,
+  upperArea: (children) => html`<div class="db-upper-area">${children}</div>`,
+  historyResizer: () => html`<div class="db-history-resizer"></div>`,
+  historyPane: (p) =>
+    html`<div
+      class="db-history-pane"
+      style=${p.height === null ? nothing : `height: ${p.height};`}
+    ><div class="db-history-pane-content" ${ref(p.refs.historyTabContent)}
+        >${p.history}</div
+      ><div
+        class="db-history-pane-content"
+        hidden
+        ${ref(p.refs.logTabContent)}
+      >${p.log}</div></div>`,
+  historyDock: (p) =>
+    html`<div class="db-history-dock" role="tablist"><button
+        type="button"
+        class="db-history-dock-tab active"
+        role="tab"
+        aria-selected="true"
+        ${ref(p.refs.historyTab)}
+      >${p.historyLabel}</button><button
+        type="button"
+        class="db-history-dock-tab"
+        role="tab"
+        aria-selected="false"
+        ${ref(p.refs.logTab)}
+      >${p.logLabel}</button><div class="db-history-dock-spacer"></div><button
+        type="button"
+        class="db-history-dock-close"
+        aria-label=${p.closeLabel}
+        title=${p.closeTitle}
+        ${ref(p.refs.close)}
+      >×</button></div>`,
+  phoneListButton: (className, label) =>
+    html`<button type="button" class=${className}>${iconTemplate(
+      CHEVRON_LEFT_16_PATH,
+      "db-phone-list-open-icon",
+    )}<span ${ref(label)}></span></button>`,
+  container: (children) => html`<div class="db-container">${children}</div>`,
+  dockerNotice: (message) =>
+    html`<div class="db-docker-notice">${message}</div>`,
+  options: (options) =>
+    options.map(
+      (option) => html`<option value=${option.value}>${option.label}</option>`,
+    ),
+  placeholderOption: () => html`<option value="" disabled></option>`,
+  root: ({ newTabTitle, refs }) =>
+    html`<div class="db-root"><div class="db-tabs-bar" ${ref(refs.tabsBar)}><div
+          class="db-tabs-list"
+          role="tablist"
+          ${ref(refs.tabsList)}
+        ></div><button
+          type="button"
+          class="db-tabs-new-btn"
+          title=${newTabTitle}
+          ${ref(refs.newTab)}
+        >+</button></div
+      ><div class="db-tab-host" ${ref(refs.tabHost)}></div></div>`,
+  tabChip: (p) =>
+    html`<div
+      class="db-tabs-chip"
+      data-tab-id=${p.id}
+      role="tab"
+      aria-selected="false"
+      tabindex="-1"
+    ><span class="db-tabs-chip-label" title=${p.label} ${ref(p.refs.label)}
+        >${p.label}</span
+      ><button
+        type="button"
+        class="db-tabs-chip-close"
+        tabindex="-1"
+        title=${p.closeLabel}
+        aria-label=${p.closeLabel}
+        ${ref(p.refs.close)}
+        @click=${p.onClose}
+      >×</button></div>`,
+};
+
 function createTabPane(
   outerDeps: DatabasePaneDeps,
   cb: TabPaneCallbacks,
   initial: TabPaneInitial = {},
+  paneView: DatabaseViewView = DEFAULT_VIEW,
 ): TabPaneInternal {
   // 内部で deps.setRoute を呼ぶたびに active かどうかで実体呼び出しを抑制、
   // 同時に onStateChange を発火させて外側 (タブバーの label 更新 / persist) を
@@ -440,15 +647,14 @@ function createTabPane(
   let historyRefreshPending: ReturnType<typeof setTimeout> | null = null;
   let isRefreshingDatastores = false;
 
-  const dbSelect = document.createElement("select");
-  dbSelect.className = "db-file-select";
+  const dbSelect = templateElement<HTMLSelectElement>(paneView.dbSelect());
   reloc(() => {
     dbSelect.title = paneText().nav.selectDatastore;
   });
 
-  const schemaSelect = document.createElement("select");
-  schemaSelect.className = "db-file-select db-schema-select";
-  schemaSelect.hidden = true;
+  const schemaSelect = templateElement<HTMLSelectElement>(
+    paneView.schemaSelect(),
+  );
   reloc(() => {
     schemaSelect.title = paneText().nav.selectSchema;
   });
@@ -462,13 +668,9 @@ function createTabPane(
     },
   });
   dbRefreshBtn.classList.add("db-refresh-btn");
-  const dbRefreshLabel = document.createElement("span");
-  dbRefreshLabel.className = "db-refresh-label";
+  const dbRefreshLabel = templateElement(paneView.refreshLabel());
   dbRefreshBtn.appendChild(dbRefreshLabel);
-  const dbRefreshResult = document.createElement("span");
-  dbRefreshResult.className = "db-refresh-result";
-  dbRefreshResult.hidden = true;
-  dbRefreshResult.setAttribute("aria-live", "polite");
+  const dbRefreshResult = templateElement(paneView.refreshResult());
   syncDbRefreshButton();
 
   const connectionDialogDeps = {
@@ -562,30 +764,31 @@ function createTabPane(
   }
   syncConnectionActions();
 
-  const dbSelectRow = document.createElement("div");
-  dbSelectRow.className = "db-select-row";
-  dbSelectRow.append(
-    dbSelect,
-    dbRefreshBtn,
-    addConnectionBtn,
-    editConnectionBtn,
-    deleteConnectionBtn,
-    dbRefreshResult,
+  const dbToolbar = templateElement(
+    paneView.toolbar({
+      selectRow: [
+        dbSelect,
+        dbRefreshBtn,
+        addConnectionBtn,
+        editConnectionBtn,
+        deleteConnectionBtn,
+        dbRefreshResult,
+      ],
+      schemaSelect,
+    }),
   );
 
-  const dbToolbar = document.createElement("div");
-  dbToolbar.className = "db-toolbar";
-  dbToolbar.append(dbSelectRow, schemaSelect);
-
-  const tabBar = document.createElement("div");
-  tabBar.className = "db-tab-bar";
-  const tabData = createInnerTab("Data", true);
-  const tabSchema = createInnerTab("Schema", false);
+  const tabData = templateElement<HTMLButtonElement>(
+    paneView.innerTab("Data", true),
+  );
+  const tabSchema = templateElement<HTMLButtonElement>(
+    paneView.innerTab("Schema", false),
+  );
   reloc(() => {
     tabData.textContent = paneText().nav.dataTab;
     tabSchema.textContent = paneText().nav.schemaTab;
   });
-  tabBar.append(tabData, tabSchema);
+  const tabBar = templateElement(paneView.tabBar([tabData, tabSchema]));
 
   let currentTab: TabName = initial.view ?? "data";
 
@@ -613,11 +816,11 @@ function createTabPane(
     },
   });
 
-  const sidebar = document.createElement("div");
-  sidebar.className = "db-sidebar";
   // sidebar 幅はタブごとに独立 (タブ A で狭めてもタブ B には反映しない)。
   // initial 値があれば復元し、なければ CSS の default を使う。
-  if (initial.sidebarWidth) sidebar.style.width = initial.sidebarWidth;
+  const sidebar = templateElement(
+    paneView.sidebar(initial.sidebarWidth ?? null),
+  );
 
   // 関連パネルの高さ(px)。sidebar 幅 / history 高さと同様にタブごとに独立して
   // tabs.json へ永続化する。initial があれば復元する。
@@ -640,12 +843,6 @@ function createTabPane(
   // ユーザーから指摘を受けた。アイコンツールバーに置き換えて、サイドバー
   // 最上端に集約する。kind === redis / elasticsearch ではこのツールバーごと
   // 隠す (applyVisibility が toolsSection.hidden を制御)。
-  const toolsSection = document.createElement("div");
-  toolsSection.className = "db-icon-toolbar";
-  toolsSection.setAttribute("role", "toolbar");
-  reloc(() => {
-    toolsSection.setAttribute("aria-label", paneText().nav.toolbar);
-  });
 
   const erBtn = makeIconButton({
     label: paneText().nav.er,
@@ -704,19 +901,22 @@ function createTabPane(
     localizeIconButton(snapshotBtn, t.snapshot, t.snapshotTitle);
   });
 
-  toolsSection.append(erBtn, searchBtn, snapshotBtn);
+  const toolsSection = templateElement(
+    paneView.iconToolbar([erBtn, searchBtn, snapshotBtn]),
+  );
+  reloc(() => {
+    toolsSection.setAttribute("aria-label", paneText().nav.toolbar);
+  });
 
   // 設定トグル (Rails FK 推測など) はビューア設定パネルへ移したので、
   // ここの prefs バーは現状空。#16 (Edit モードトグル集約) で再利用予定。
-  const prefsBar = document.createElement("div");
-  prefsBar.className = "db-prefs-bar";
+  const prefsBar = templateElement(paneView.prefsBar());
 
   // explorer (redis/es/s3) 用のサイドバースロット host。各 explorer が自前で
   // 構築した sidebarSlot をここに mount し、applyVisibility が kind ごとに
   // toggle する。SQL kind では全て hidden になり、空のまま下に流れる
   // (Query History toggle / table list がその下に来る)。
-  const explorerSidebarHost = document.createElement("div");
-  explorerSidebarHost.className = "db-explorer-sidebar-host";
+  const explorerSidebarHost = templateElement(paneView.explorerSidebarHost());
 
   // 順序: アイコンツールバー → DB select → prefs バー → explorer sidebar → table list。
   sidebar.append(
@@ -727,8 +927,7 @@ function createTabPane(
     tableList.el,
   );
 
-  const resizeHandle = document.createElement("div");
-  resizeHandle.className = "db-sidebar-resize";
+  const resizeHandle = templateElement(paneView.sidebarResize());
   sidebar.appendChild(resizeHandle);
 
   let resizing = false;
@@ -980,9 +1179,7 @@ function createTabPane(
     dynamodbExplorer.sidebarSlot,
   );
 
-  const noDatastoresPane = document.createElement("div");
-  noDatastoresPane.className = "db-no-datastores";
-  noDatastoresPane.hidden = true;
+  const noDatastoresPane = templateElement(paneView.noDatastoresPane());
 
   function renderNoDatastoresEmpty(): void {
     const t = paneText().nav;
@@ -998,28 +1195,24 @@ function createTabPane(
       hint: t.noDatastoresHint,
       iconPath: ICON_PATH_SNAPSHOT,
     });
-    const actionRow = document.createElement("div");
-    actionRow.className = "db-no-datastores-actions";
-    const refresh = document.createElement("button");
-    refresh.type = "button";
-    refresh.className = "db-btn db-btn-primary db-no-datastores-action";
-    refresh.textContent = t.refreshDatastores;
-    refresh.addEventListener("click", () => {
-      void refreshDatastoreList();
-    });
-    actionRow.append(refresh, addConnectionAction());
+    const actionRow = noDatastoresActions(t.refreshDatastores);
     noDatastoresPane
       .querySelector<HTMLElement>(".db-pane-empty")
       ?.appendChild(actionRow);
   }
 
-  function addConnectionAction(): HTMLButtonElement {
-    const addConnection = document.createElement("button");
-    addConnection.type = "button";
-    addConnection.className = "db-btn db-no-datastores-action";
-    addConnection.textContent = paneText().nav.addConnection;
-    addConnection.addEventListener("click", () => addConnectionBtn.click());
-    return addConnection;
+  // データストアの無い面・選ぶ前の面の操作 (読み直す・接続を足す)。
+  function noDatastoresActions(refreshLabel: string | null): HTMLElement {
+    return templateElement(
+      paneView.noDatastoresActions({
+        refreshLabel,
+        addLabel: paneText().nav.addConnection,
+        onRefresh: () => {
+          void refreshDatastoreList();
+        },
+        onAdd: () => addConnectionBtn.click(),
+      }),
+    );
   }
 
   // 新しいタブの本文。データストアの無いときと同じ面・同じ見せ方で、
@@ -1030,9 +1223,7 @@ function createTabPane(
       hint: t.chooseDatastoreHint,
       iconPath: ICON_PATH_SNAPSHOT,
     });
-    const actionRow = document.createElement("div");
-    actionRow.className = "db-no-datastores-actions";
-    actionRow.append(addConnectionAction());
+    const actionRow = noDatastoresActions(null);
     noDatastoresPane
       .querySelector<HTMLElement>(".db-pane-empty")
       ?.appendChild(actionRow);
@@ -1040,81 +1231,68 @@ function createTabPane(
       datastorePlaceholder.textContent = t.selectDatastore;
   }
 
-  const mainContent = document.createElement("div");
-  mainContent.className = "db-main-content";
-  mainContent.append(
-    tabBar,
-    queryEditor.el,
-    grid.el,
-    schemaView.el,
-    erDiagram.el,
-    globalSearchView.el,
-    snapshotView.el,
-    redisExplorer.el,
-    esExplorer.el,
-    s3Explorer.el,
-    dynamodbExplorer.el,
-    noDatastoresPane,
+  const mainContent = templateElement(
+    paneView.mainContent([
+      tabBar,
+      queryEditor.el,
+      grid.el,
+      schemaView.el,
+      erDiagram.el,
+      globalSearchView.el,
+      snapshotView.el,
+      redisExplorer.el,
+      esExplorer.el,
+      s3Explorer.el,
+      dynamodbExplorer.el,
+      noDatastoresPane,
+    ]),
   );
   queryEditor.el.hidden = true;
   globalSearchView.el.hidden = true;
   snapshotView.el.hidden = true;
 
-  const upperArea = document.createElement("div");
-  upperArea.className = "db-upper-area";
-  upperArea.append(sidebar, mainContent);
+  const upperArea = templateElement(paneView.upperArea([sidebar, mainContent]));
 
-  const historyResizer = document.createElement("div");
-  historyResizer.className = "db-history-resizer";
+  const historyResizer = templateElement(paneView.historyResizer());
 
-  const historyPane = document.createElement("div");
-  historyPane.className = "db-history-pane";
-  // history pane の高さもタブごとに独立。initial が無ければ CSS の default。
-  if (initial.historyHeight) historyPane.style.height = initial.historyHeight;
   // クエリ履歴とセッションログを「クエリ履歴 / ログ」の 2 タブで切替表示する。
-  // 両 view が pane を共有し、DOM 自体は両方積んで hidden で切替。
-  const historyTabContent = document.createElement("div");
-  historyTabContent.className = "db-history-pane-content";
-  historyTabContent.appendChild(historyView.el);
-  const logTabContent = document.createElement("div");
-  logTabContent.className = "db-history-pane-content";
-  logTabContent.hidden = true;
-  logTabContent.appendChild(sessionLogView.el);
-  historyPane.append(historyTabContent, logTabContent);
+  // 両 view が pane を共有し、DOM 自体は両方積んで hidden で切替。history pane
+  // の高さもタブごとに独立。initial が無ければ CSS の default。
+  const historyRefs = {
+    historyTabContent: createRef<HTMLElement>(),
+    logTabContent: createRef<HTMLElement>(),
+  };
+  const historyPane = templateElement(
+    paneView.historyPane({
+      height: initial.historyHeight ?? null,
+      history: historyView.el,
+      log: sessionLogView.el,
+      refs: historyRefs,
+    }),
+  );
+  const historyTabContent = drawnPart(historyRefs.historyTabContent);
+  const logTabContent = drawnPart(historyRefs.logTabContent);
 
   // 下端の常駐 dock: タブストリップは pane の外 (常駐領域) に
   // 置く。クリックでアクティブ切替 + pane を開く / アクティブタブ再クリック
   // で pane を閉じる。右端の close ボタンでも閉じられる。
-  const historyDock = document.createElement("div");
-  historyDock.className = "db-history-dock";
-  historyDock.setAttribute("role", "tablist");
-  const historyTabBtn = document.createElement("button");
-  historyTabBtn.type = "button";
-  historyTabBtn.className = "db-history-dock-tab";
-  historyTabBtn.setAttribute("role", "tab");
-  historyTabBtn.textContent = paneText().sessionLog.historyTabLabel;
-  historyTabBtn.classList.add("active");
-  historyTabBtn.setAttribute("aria-selected", "true");
-  const logTabBtn = document.createElement("button");
-  logTabBtn.type = "button";
-  logTabBtn.className = "db-history-dock-tab";
-  logTabBtn.setAttribute("role", "tab");
-  logTabBtn.textContent = paneText().sessionLog.tabLabel;
-  logTabBtn.setAttribute("aria-selected", "false");
-  const historyDockSpacer = document.createElement("div");
-  historyDockSpacer.className = "db-history-dock-spacer";
-  const historyDockClose = document.createElement("button");
-  historyDockClose.type = "button";
-  historyDockClose.className = "db-history-dock-close";
-  historyDockClose.setAttribute("aria-label", paneText().nav.queryHistory);
-  historyDockClose.title = paneText().nav.queryHistoryTitle;
-  historyDockClose.textContent = "×";
-  historyDock.append(
-    historyTabBtn,
-    logTabBtn,
-    historyDockSpacer,
-    historyDockClose,
+  const dockRefs = {
+    historyTab: createRef<HTMLButtonElement>(),
+    logTab: createRef<HTMLButtonElement>(),
+    close: createRef<HTMLButtonElement>(),
+  };
+  const historyDock = templateElement(
+    paneView.historyDock({
+      historyLabel: paneText().sessionLog.historyTabLabel,
+      logLabel: paneText().sessionLog.tabLabel,
+      closeLabel: paneText().nav.queryHistory,
+      closeTitle: paneText().nav.queryHistoryTitle,
+      refs: dockRefs,
+    }),
   );
+  const historyTabBtn = drawnPart(dockRefs.historyTab);
+  const logTabBtn = drawnPart(dockRefs.logTab);
+  const historyDockClose = drawnPart(dockRefs.close);
 
   // 復元時の active タブ。`initial.activeHistoryTab` が "log" なら log を
   // 表示済み状態で起動する (未指定なら default の history)。
@@ -1266,21 +1444,15 @@ function createTabPane(
   }
   applyVisibility();
 
-  const container = document.createElement("div");
-  container.className = "db-container";
-
   // 電話の段: 接続とテーブルの一覧を、表 (Redis などの画面も) と別のページにする。
   // 縦に積むと表の行の高さが 0 になり、データが 1 行も見えなかった。一覧はこの
   // ボタンで開き、テーブルを選ぶか接続を切り替えたら閉じる (出し分けは style.css
   // の SP の節。デスクトップではボタンを出さない)。
-  const phoneListButton = document.createElement("button");
-  phoneListButton.type = "button";
-  phoneListButton.className = "db-phone-list-open";
-  phoneListButton.innerHTML = iconSvg("db-phone-list-open-icon", [
-    CHEVRON_LEFT_16_PATH,
-  ]);
-  const phoneListLabel = document.createElement("span");
-  phoneListButton.append(phoneListLabel);
+  const phoneListLabelRef = createRef<HTMLElement>();
+  const phoneListButton = templateElement(
+    paneView.phoneListButton("db-phone-list-open", phoneListLabelRef),
+  );
+  const phoneListLabel = drawnPart(phoneListLabelRef);
   reloc(() => {
     phoneListLabel.textContent = paneText().nav.phoneList;
   });
@@ -1289,14 +1461,11 @@ function createTabPane(
   });
   mainContent.prepend(phoneListButton);
   // 一覧のページから表へ戻る (テーブルを選び直すほかに戻り方が無かった)。
-  const phoneListBack = document.createElement("button");
-  phoneListBack.type = "button";
-  phoneListBack.className = "db-phone-list-back";
-  phoneListBack.innerHTML = iconSvg("db-phone-list-open-icon", [
-    CHEVRON_LEFT_16_PATH,
-  ]);
-  const phoneListBackLabel = document.createElement("span");
-  phoneListBack.append(phoneListBackLabel);
+  const phoneListBackLabelRef = createRef<HTMLElement>();
+  const phoneListBack = templateElement(
+    paneView.phoneListButton("db-phone-list-back", phoneListBackLabelRef),
+  );
+  const phoneListBackLabel = drawnPart(phoneListBackLabelRef);
   reloc(() => {
     phoneListBackLabel.textContent = paneText().nav.phoneListBack;
   });
@@ -1318,15 +1487,9 @@ function createTabPane(
   // 下から: dock (タブストリップ常駐) → resizer (pane open 時のみ表示) → pane
   // → 上に upperArea。表示順は flex column で上から upperArea → resizer
   // → pane → dock。
-  container.append(upperArea, historyResizer, historyPane, historyDock);
-
-  function createInnerTab(text: string, active: boolean): HTMLButtonElement {
-    const btn = document.createElement("button");
-    btn.className = `db-tab${active ? " active" : ""}`;
-    btn.type = "button";
-    btn.textContent = text;
-    return btn;
-  }
+  const container = templateElement(
+    paneView.container([upperArea, historyResizer, historyPane, historyDock]),
+  );
 
   function clearDockerNotice() {
     const notice = mainContent.querySelector<HTMLElement>(".db-docker-notice");
@@ -1336,10 +1499,7 @@ function createTabPane(
 
   function showDockerNotice(message: string) {
     clearDockerNotice();
-    const notice = document.createElement("div");
-    notice.className = "db-docker-notice";
-    notice.textContent = message;
-    mainContent.prepend(notice);
+    mainContent.prepend(templateElement(paneView.dockerNotice(message)));
   }
 
   function setTableListStatus(message: string, options?: { error?: boolean }) {
@@ -1447,13 +1607,13 @@ function createTabPane(
   }
 
   function renderSchemaOptions(schemas: string[], selected?: string | null) {
-    schemaSelect.innerHTML = "";
-    for (const schema of schemas) {
-      const opt = document.createElement("option");
-      opt.value = schema;
-      opt.textContent = schema;
-      schemaSelect.appendChild(opt);
-    }
+    schemaSelect.replaceChildren(
+      ...templateElements(
+        paneView.options(
+          schemas.map((schema) => ({ value: schema, label: schema })),
+        ),
+      ),
+    );
     schemaSelect.hidden = schemas.length === 0;
     schemaSelect.disabled = schemas.length === 0;
     if (selected && schemas.includes(selected)) {
@@ -2361,12 +2521,12 @@ function createTabPane(
     } else {
       clearDockerNotice();
     }
-    dbSelect.innerHTML = "";
     if (files.length === 0) {
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.textContent = paneText().nav.noDatastores;
-      dbSelect.appendChild(opt);
+      dbSelect.replaceChildren(
+        ...templateElements(
+          paneView.options([{ value: "", label: paneText().nav.noDatastores }]),
+        ),
+      );
       dbSelect.disabled = true;
       currentDbInfo = null;
       syncConnectionActions();
@@ -2388,23 +2548,26 @@ function createTabPane(
       return;
     }
     dbSelect.disabled = false;
-    const optionsFragment = document.createDocumentFragment();
-    for (const f of files) {
-      const opt = document.createElement("option");
-      opt.value = f.id;
-      const isDocker = f.id.startsWith("docker:");
-      const isSupabase = f.id.startsWith("supabase:");
-      const label = f.savedConnection
-        ? f.name
-        : isDocker
-          ? `${f.name} (Docker)`
-          : isSupabase
-            ? `${f.name} (Supabase)`
-            : `${f.path} (${formatSize(f.sizeBytes)})`;
-      opt.textContent = label;
-      optionsFragment.appendChild(opt);
-    }
-    dbSelect.appendChild(optionsFragment);
+    dbSelect.replaceChildren(
+      ...templateElements(
+        paneView.options(
+          files.map((f) => {
+            const isDocker = f.id.startsWith("docker:");
+            const isSupabase = f.id.startsWith("supabase:");
+            return {
+              value: f.id,
+              label: f.savedConnection
+                ? f.name
+                : isDocker
+                  ? `${f.name} (Docker)`
+                  : isSupabase
+                    ? `${f.name} (Supabase)`
+                    : `${f.path} (${formatSize(f.sizeBytes)})`,
+            };
+          }),
+        ),
+      ),
+    );
 
     const autoSelectFirst = options.autoSelectFirst ?? true;
     if (db && !files.find((f) => f.id === db)) {
@@ -2412,9 +2575,9 @@ function createTabPane(
     }
     if (!db && !autoSelectFirst) {
       // 選んでいないことを select にも出す (value だけ空にすると空の箱になる)。
-      datastorePlaceholder = document.createElement("option");
-      datastorePlaceholder.value = "";
-      datastorePlaceholder.disabled = true;
+      datastorePlaceholder = templateElement<HTMLOptionElement>(
+        paneView.placeholderOption(),
+      );
       dbSelect.prepend(datastorePlaceholder);
       dbSelect.value = "";
       awaitingDatastoreChoice = true;
@@ -2776,24 +2939,18 @@ function makeIconButton(opts: {
   pathD: string;
   onClick: () => void;
 }): HTMLButtonElement {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "db-icon-btn";
-  btn.title = opts.title;
-  btn.setAttribute("aria-label", opts.label);
-  const NS = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("viewBox", "0 0 16 16");
-  svg.setAttribute("width", "16");
-  svg.setAttribute("height", "16");
-  svg.setAttribute("aria-hidden", "true");
-  const path = document.createElementNS(NS, "path");
-  path.setAttribute("d", opts.pathD);
-  path.setAttribute("fill", "currentColor");
-  svg.appendChild(path);
-  btn.appendChild(svg);
-  btn.addEventListener("click", opts.onClick);
-  return btn;
+  return templateElement<HTMLButtonElement>(
+    html`<button
+      type="button"
+      class="db-icon-btn"
+      title=${opts.title}
+      aria-label=${opts.label}
+      @click=${opts.onClick}
+    ><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path
+          d=${opts.pathD}
+          fill="currentColor"
+        ></path></svg></button>`,
+  );
 }
 
 /** アイコンボタンの title / aria-label を言語切替時に再適用する。 */
@@ -2816,7 +2973,10 @@ function localizeIconButton(
 
 // ----- 外側: 複数 TabPane を束ねる -----
 
-export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
+export function createDatabaseView(
+  deps: DatabaseViewDeps,
+  view: DatabaseViewView = DEFAULT_VIEW,
+): DatabaseView {
   let mounted = false;
   const outerText = (): DbText => dbText(deps.getLanguage?.() ?? "en");
   const tabsById = new Map<string, DbTabEntry>();
@@ -3242,24 +3402,19 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     );
   }
 
-  const tabsBar = document.createElement("div");
-  tabsBar.className = "db-tabs-bar";
-  const tabsList = document.createElement("div");
-  tabsList.className = "db-tabs-list";
-  tabsList.setAttribute("role", "tablist");
-  const newTabBtn = document.createElement("button");
-  newTabBtn.type = "button";
-  newTabBtn.className = "db-tabs-new-btn";
-  newTabBtn.title = outerText().nav.newTab;
-  newTabBtn.textContent = "+";
-  tabsBar.append(tabsList, newTabBtn);
-
-  const tabHost = document.createElement("div");
-  tabHost.className = "db-tab-host";
-
-  const root = document.createElement("div");
-  root.className = "db-root";
-  root.append(tabsBar, tabHost);
+  const rootRefs = {
+    tabsBar: createRef<HTMLElement>(),
+    tabsList: createRef<HTMLElement>(),
+    newTab: createRef<HTMLButtonElement>(),
+    tabHost: createRef<HTMLElement>(),
+  };
+  const root = templateElement(
+    view.root({ newTabTitle: outerText().nav.newTab, refs: rootRefs }),
+  );
+  const tabsBar = drawnPart(rootRefs.tabsBar);
+  const tabsList = drawnPart(rootRefs.tabsList);
+  const newTabBtn = drawnPart(rootRefs.newTab);
+  const tabHost = drawnPart(rootRefs.tabHost);
 
   function setActive(id: string): void {
     activeTabId = id;
@@ -3541,33 +3696,25 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   ): string {
     const id = initial?.id || makeId("t");
 
-    const chip = document.createElement("div");
-    chip.className = "db-tabs-chip";
-    chip.dataset.tabId = id;
-    chip.setAttribute("role", "tab");
-    chip.setAttribute("aria-selected", "false");
-    chip.tabIndex = -1;
-
-    const labelEl = document.createElement("span");
-    labelEl.className = "db-tabs-chip-label";
     const initialLabel = labelFromDbId(initial?.dbId, outerText().nav.newTab);
-    labelEl.textContent = initialLabel;
-    labelEl.title = initialLabel;
-
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "db-tabs-chip-close";
-    closeBtn.tabIndex = -1;
-    closeBtn.textContent = "×";
-    const closeTabLabel = outerText().nav.closeTab(initialLabel);
-    closeBtn.title = closeTabLabel;
-    closeBtn.setAttribute("aria-label", closeTabLabel);
-    closeBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      closeTab(id);
-    });
-
-    chip.append(labelEl, closeBtn);
+    const chipRefs = {
+      label: createRef<HTMLElement>(),
+      close: createRef<HTMLButtonElement>(),
+    };
+    const chip = templateElement(
+      view.tabChip({
+        id,
+        label: initialLabel,
+        closeLabel: outerText().nav.closeTab(initialLabel),
+        refs: chipRefs,
+        onClose: (e) => {
+          e.stopPropagation();
+          closeTab(id);
+        },
+      }),
+    );
+    const labelEl = drawnPart(chipRefs.label);
+    const closeBtn = drawnPart(chipRefs.close);
     attachTabDragHandlers(chip, closeBtn, id);
     chip.addEventListener("click", () => setActive(id));
     chip.addEventListener("keydown", (e) => {
@@ -3632,6 +3779,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         s3: initial?.s3,
         dynamodb: initial?.dynamodb,
       },
+      view,
     );
     pane.el.hidden = true;
 
@@ -4065,8 +4213,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     lastSavedTabsRaw = null;
     dbUiLoadPromise = null;
     dbUiState = { version: 1, columnWidths: {} };
-    tabsList.innerHTML = "";
-    tabHost.innerHTML = "";
+    tabsList.replaceChildren();
+    tabHost.replaceChildren();
     activeTabId = null;
     root.remove();
     document.body.classList.remove("gdp-database-page");

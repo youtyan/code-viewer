@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ContextMenuItem } from "../views/context-menu";
 import {
   createDatabaseView,
+  DEFAULT_VIEW,
   TABLE_SELECT_FETCH_DELAY_MS,
 } from "../views/database/database-view";
 import { waitFor } from "./_test-helpers";
@@ -171,21 +172,25 @@ function restoredTabLabels(): string[] {
 
 function createViewForTest(
   overrides: Partial<Parameters<typeof createDatabaseView>[0]> = {},
+  look: Parameters<typeof createDatabaseView>[1] = DEFAULT_VIEW,
 ) {
-  return createDatabaseView({
-    setRoute() {
-      /* noop */
+  return createDatabaseView(
+    {
+      setRoute() {
+        /* noop */
+      },
+      setPageMode() {
+        /* noop */
+      },
+      currentRange: () => ({ from: "HEAD", to: "worktree" }),
+      trackLoad: (promise) => promise,
+      syncHeaderMenu() {
+        /* noop */
+      },
+      ...overrides,
     },
-    setPageMode() {
-      /* noop */
-    },
-    currentRange: () => ({ from: "HEAD", to: "worktree" }),
-    trackLoad: (promise) => promise,
-    syncHeaderMenu() {
-      /* noop */
-    },
-    ...overrides,
-  });
+    look,
+  );
 }
 
 function baseFilesResponse() {
@@ -2680,6 +2685,50 @@ describe("database view SQL error rendering", () => {
         String(call[0]).includes("Local History"),
       ),
     ).toBe(true);
+    await leaveView(view);
+  });
+});
+
+describe("the database view's view", () => {
+  test("passes the opened tab and the datastores to the view", async () => {
+    installDatabaseDom();
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return jsonResponse({});
+    });
+    const chips: Parameters<(typeof DEFAULT_VIEW)["tabChip"]>[0][] = [];
+    const options: Parameters<(typeof DEFAULT_VIEW)["options"]>[0][] = [];
+    const view = createViewForTest(
+      {},
+      {
+        ...DEFAULT_VIEW,
+        tabChip: (props) => {
+          chips.push(props);
+          return DEFAULT_VIEW.tabChip(props);
+        },
+        options: (list) => {
+          options.push(list);
+          return DEFAULT_VIEW.options(list);
+        },
+      },
+    );
+    await view.enter("docker:db");
+    // 接続の選択肢 (スキーマの選択肢も同じ部品で描く)。
+    const datastores = () =>
+      options.find((list) =>
+        list.some((option) => option.value === "docker:db"),
+      );
+    await waitFor(() => datastores() !== undefined);
+    expect([chips.length, datastores()?.map((option) => option.label)]).toEqual(
+      [1, ["db (Docker)"]],
+    );
     await leaveView(view);
   });
 });

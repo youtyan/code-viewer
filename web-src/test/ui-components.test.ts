@@ -124,30 +124,7 @@ const DECLARATIVE = [
   "web-src/views/annotations/",
   "web-src/views/annotations-player.ts",
   "web-src/views/journal-view.ts",
-  "web-src/views/database/shiki-sql.ts",
-  "web-src/views/database/query-value.ts",
-  "web-src/views/database/pref-toggle.ts",
-  "web-src/views/database/pane-status.ts",
-  "web-src/views/database/detail-table.ts",
-  "web-src/views/database/detail-tabs.ts",
-  "web-src/views/database/related-list.ts",
-  "web-src/views/database/row-detail.ts",
-  "web-src/views/database/grid-recency.ts",
-  "web-src/views/database/time-zone-picker.ts",
-  "web-src/views/database/connection-dialog.ts",
-  "web-src/views/database/global-search-view.ts",
-  "web-src/views/database/session-log-view.ts",
-  "web-src/views/database/table-list.ts",
-  "web-src/views/database/er-diagram.ts",
-  "web-src/views/database/query-history-view.ts",
-  "web-src/views/database/schema-view.ts",
-  "web-src/views/database/elasticsearch-explorer.ts",
-  "web-src/views/database/dynamodb-explorer.ts",
-  "web-src/views/database/redis-explorer.ts",
-  "web-src/views/database/s3-explorer.ts",
-  "web-src/views/database/query-editor.ts",
-  "web-src/views/database/snapshot-view.ts",
-  "web-src/views/database/table-grid.ts",
+  "web-src/views/database/",
 ];
 
 /**
@@ -168,7 +145,7 @@ const EXCEPTIONS: Record<string, { count: number; reason: string }> = {
 };
 
 /** まだ書き直していない所も含めた、命令的な組み立ての数の上限。書き直したら下げる。 */
-const IMPERATIVE_LIMIT = 275;
+const IMPERATIVE_LIMIT = 219;
 
 function imperativeCount(file: string): number {
   return [...readFileSync(file, "utf8").matchAll(IMPERATIVE_DOM)].length;
