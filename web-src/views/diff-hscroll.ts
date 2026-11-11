@@ -11,7 +11,9 @@
 // .gdp-hscroll-host)。Split の左右は既存の同期 (diff-view.ts の
 // syncSideScrollCard) で連動し、ここは左右それぞれに 1 本ずつ出す。
 
+import { html } from "lit/html.js";
 import { mirroredScrollLeft, needsProxyScrollbar } from "../core/hscroll-proxy";
+import { templateElement } from "./ui/renderer";
 
 type Lane = { source: HTMLElement; proxy: HTMLElement; inner: HTMLElement };
 
@@ -37,18 +39,21 @@ export function attachStickyHScroll(card: HTMLElement): void {
       wrapper.querySelectorAll<HTMLElement>(".d2h-code-wrapper"),
     );
     if (sources.length === 0) continue;
-    const row = document.createElement("div");
-    row.className = "gdp-hscroll";
-    row.setAttribute("aria-hidden", "true");
-    const lanes: Lane[] = sources.map((source) => {
-      const proxy = document.createElement("div");
-      proxy.className = "gdp-hscroll-lane";
-      // 押せる操作ではない (中身の横送りと同じもの)。キーの順に入れない。
-      proxy.tabIndex = -1;
-      const inner = document.createElement("div");
-      inner.className = "gdp-hscroll-inner";
-      proxy.append(inner);
-      row.append(proxy);
+    // 中身の表 1 つに 1 本 (左右の表示では 2 本)。押せる操作ではない (中身の
+    // 横送りと同じもの) ので、キーの順に入れない。
+    const row = templateElement(
+      html`<div class="gdp-hscroll" aria-hidden="true">${sources.map(
+        () =>
+          html`<div class="gdp-hscroll-lane" tabindex="-1"><div
+              class="gdp-hscroll-inner"
+            ></div></div>`,
+      )}</div>`,
+    );
+    const lanes: Lane[] = sources.map((source, index) => {
+      const proxy = row.children[index];
+      const inner = proxy?.firstElementChild;
+      if (!(proxy instanceof HTMLElement) || !(inner instanceof HTMLElement))
+        throw new Error("sticky scrollbar: a lane was not drawn");
       return { source, proxy, inner };
     });
     wrapper.append(row);

@@ -76,6 +76,17 @@ export function templateElement<T extends Element = HTMLElement>(
 }
 
 /**
+ * テンプレートの最上段の要素を全部、どこにも置かずに作る。表の行をまとめて
+ * 差し込むときなど、1 つの箱に包めない並びに使う (描き直さない)。
+ */
+export function templateElements(template: unknown): Element[] {
+  defineUiComponents();
+  const fragment = document.createDocumentFragment();
+  render(template, fragment);
+  return [...fragment.children];
+}
+
+/**
  * templateElement の描き直せる形。テンプレートの最初の要素を作って返し、
  * draw() でその要素の中を描き直す (要素は外の部品が置く。ダイアログの本文など)。
  * テンプレートの最上段の形 (最初の要素の種類) は描き直しで変えないこと。

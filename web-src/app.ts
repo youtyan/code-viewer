@@ -5566,7 +5566,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     STATE,
     setRoute,
     currentRange,
-    escapeHtml,
     trackLoad,
     diffCardSelector,
     getHljs,

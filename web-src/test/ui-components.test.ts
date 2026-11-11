@@ -104,6 +104,11 @@ const DECLARATIVE = [
   "web-src/views/repository-web-link.ts",
   "web-src/views/definition-jump.ts",
   "web-src/views/breadcrumb-fit.ts",
+  "web-src/views/diff-view.ts",
+  "web-src/views/hunk-expand.ts",
+  "web-src/views/diff-hscroll.ts",
+  "web-src/views/diff-line-select.ts",
+  "web-src/views/empty-diff-pane.ts",
 ];
 
 /**
@@ -116,10 +121,15 @@ const EXCEPTIONS: Record<string, { count: number; reason: string }> = {
     reason:
       "重ね合わせの層の箱 (cv-layer) を body に置く。宣言的に描く先がまだ DOM に無いため",
   },
+  "web-src/views/diff-view.ts": {
+    count: 1,
+    reason:
+      "diff2html が描いた行の本文を、色付けの道具が返した HTML に置き換える (外の部品が描いた DOM。行ごとに lit の根を作ると、何千行の差分の色付けが重くなる)",
+  },
 };
 
 /** まだ書き直していない所も含めた、命令的な組み立ての数の上限。書き直したら下げる。 */
-const IMPERATIVE_LIMIT = 1480;
+const IMPERATIVE_LIMIT = 1411;
 
 function imperativeCount(file: string): number {
   return [...readFileSync(file, "utf8").matchAll(IMPERATIVE_DOM)].length;

@@ -1,3 +1,4 @@
+import { html, nothing } from "lit/html.js";
 // Diff view: per-file lazy rendering pipeline (queue + IntersectionObserver),
 // diff2html mounting, viewed-state, scroll spy, route line focus with
 // re-anchoring, idle syntax highlight, and the diff meta header.
@@ -31,7 +32,6 @@ import {
   COLLAPSE_ALL_16_PATHS,
   COPY_16_PATHS,
   EXPAND_ALL_16_PATHS,
-  iconSvg,
 } from "../core/icons";
 import type { AppRoute, SourceLineTarget } from "../core/routes";
 import { isPreviewableSource } from "../core/source-meta";
@@ -55,6 +55,8 @@ import {
   type ExpandStackElement,
 } from "./hunk-expand";
 import { enhanceMediaCard } from "./media-embed";
+import { iconTemplate } from "./ui/icon";
+import { detachedElement, renderOwned, templateElement } from "./ui/renderer";
 
 export type DiffViewDeps = {
   STATE: {
@@ -68,7 +70,6 @@ export type DiffViewDeps = {
   };
   setRoute(route: AppRoute, replace?: boolean): void;
   currentRange(): { from: string; to: string };
-  escapeHtml(s: unknown): string;
   trackLoad: <T>(promise: Promise<T>) => Promise<T>;
   diffCardSelector(path: string): string;
   getHljs(): HljsApi | null;
@@ -144,19 +145,11 @@ export type RenderResult = {
 
 type ScrollSpyHandler = EventListener & { _raf?: number | null };
 
-/**
- * 名前をフォルダ (最後の / まで) とファイル名に分ける。電話の幅では、フォルダは
- * 1 行に収めて省き、ファイル名は折り返して全部出す (style.css の SP の節)。
- * 文字は変えない (textContent はそのまま)。
- */
-function splitFileName(name: HTMLElement): void {
-  const text = name.textContent ?? "";
+/** 名前をフォルダ (最後の / まで) とファイル名に分けた値。分けられないときは null。 */
+function splitFileNameProps(text: string): DiffFileNameProps | null {
   const cut = text.lastIndexOf("/") + 1;
-  if (cut === 0) return;
-  const dir = document.createElement("span");
-  dir.className = "gdp-file-name-dir";
-  dir.textContent = text.slice(0, cut);
-  name.replaceChildren(dir, text.slice(cut));
+  if (cut === 0) return null;
+  return { dir: text.slice(0, cut), base: text.slice(cut) };
 }
 
 export function isDiffShellDomIntact(
@@ -204,12 +197,11 @@ export function fileStatusBadge(
   titles: Record<FileStatusMark, string>,
 ): HTMLElement {
   const ch = (status || "M")[0].toUpperCase();
-  const span = document.createElement("span");
-  span.className = `badge ${ch}`;
-  span.textContent = ch;
-  span.dataset.fileStatus = ch;
-  span.title = fileStatusTitle(ch, titles);
-  return span;
+  return templateElement(
+    html`<span class=${`badge ${ch}`} data-file-status=${ch} title=${fileStatusTitle(ch, titles)}
+      >${ch}</span
+    >`,
+  );
 }
 
 function fileStatusTitle(
@@ -220,14 +212,284 @@ function fileStatusTitle(
   return byMark[ch] ?? ch;
 }
 
-export function createDiffView(deps: DiffViewDeps) {
+/** 追加・削除の数 (カードの見出しの .stats と、差分の見出しの .gdp-stat-text)。 */
+export type DiffCountsProps = { additions: number; deletions: number };
+
+export type DiffMetaChip = { className: string; text: string };
+
+/** 上の帯 (#meta) の札。 */
+export type DiffMetaProps = {
+  error: string;
+  /** ファイル数・追加・削除と、種類ごとの数 (0 のものは入れない)。 */
+  chips: DiffMetaChip[];
+  /** 確認済みの進み具合と「次の未確認」。変更ファイルが無いときは null。 */
+  viewed: {
+    text: string;
+    title: string;
+    state: "empty" | "partial" | "done";
+    next: {
+      label: string;
+      title: string;
+      disabled: boolean;
+      onClick(): void;
+    };
+  } | null;
+  updated: { text: string; title: string };
+};
+
+/** 中身が届く前のカード (外枠・見出し・本文の箱)。 */
+export type DiffCardProps = {
+  path: string;
+  key: string;
+  status: string;
+  displayPath: string;
+  sizeClass: string;
+  /** 見出しの大きさの札 (無いときは空)。 */
+  sizeTag: string;
+  counts: DiffCountsProps;
+  viewed: boolean;
+};
+
+/** 自動では読まないファイルの置き札。 */
+export type DiffManualLoadProps = {
+  note: string;
+  /** 追加したファイルだけ (ファイルとして開く)。 */
+  openFile: { label: string; title: string; onClick(): void } | null;
+  preview: { label: string; onClick(): void };
+  full: { label: string; title: string; onClick(): void };
+};
+
+export type DiffLoadFailureProps = {
+  detail: string;
+  message: string;
+  retry: { label: string; onClick(): void };
+};
+
+/** 残りのハンクを読む帯。 */
+export type DiffMoreHunksProps = {
+  note: string;
+  more: { label: string; title: string; onClick(): void };
+  all: { label: string; onClick(): void };
+  busy: boolean;
+};
+
+export type DiffHeaderButtonProps = {
+  label: string;
+  onClick(event: Event): void;
+};
+
+export type DiffFileNameProps = { dir: string; base: string };
+
+export type DiffBreadcrumbProps = {
+  label: string;
+  /** 段。最後が今の段 (押せない)。段が無いときはパスを 1 つの今の段にする。 */
+  parts: { label: string; onClick: (() => void) | null }[];
+};
+
+/** 差分の画面 (createDiffView) の描き方。 */
+export type DiffViewView = {
+  meta(props: DiffMetaProps): unknown;
+  card(props: DiffCardProps): unknown;
+  counts(props: DiffCountsProps): unknown;
+  noContent(text: string): unknown;
+  manualLoad(props: DiffManualLoadProps): unknown;
+  loadFailure(props: DiffLoadFailureProps): unknown;
+  moreHunks(props: DiffMoreHunksProps): unknown;
+  /** 差分の見出し (diff2html が描いたもの) に足す部品。 */
+  header: {
+    toggle(props: DiffHeaderButtonProps): unknown;
+    copyPath(props: DiffHeaderButtonProps): unknown;
+    unfold(props: { onClick(event: Event): void }): unknown;
+    unfoldIcon(expanded: boolean): unknown;
+    statText(props: DiffCountsProps): unknown;
+    /** 5 つの四角 (add・del・nu)。 */
+    statSquares(squares: readonly ("add" | "del" | "nu")[]): unknown;
+    previewFile(props: DiffHeaderButtonProps & { title: string }): unknown;
+    viewFile(props: { onClick(event: Event): void }): unknown;
+  };
+  fileName(props: DiffFileNameProps): unknown;
+  breadcrumb(props: DiffBreadcrumbProps): unknown;
+  /** カードの高さの見積もりに使う、見えない見本のカード。 */
+  measureCard(): unknown;
+};
+
+const countsTemplate = (props: DiffCountsProps) =>
+  html`<span class="a">+${props.additions}</span><span class="d"
+      >−${props.deletions}</span
+    >`;
+
+export const DEFAULT_VIEW: DiffViewView = {
+  meta: (props) => html`${
+    props.error
+      ? html`<span class="chip chip-error">${props.error}</span>`
+      : nothing
+  }${props.chips.map(
+    (chip) => html`<span class=${`chip ${chip.className}`}>${chip.text}</span>`,
+  )}${
+    props.viewed
+      ? html`<span
+            class=${`chip chip-viewed chip-viewed-${props.viewed.state}`}
+            title=${props.viewed.title}
+            >${props.viewed.text}</span
+          ><button
+            type="button"
+            class="chip chip-next-unviewed"
+            ?disabled=${props.viewed.next.disabled}
+            title=${props.viewed.next.title}
+            @click=${props.viewed.next.onClick}
+          >${props.viewed.next.label}</button>`
+      : nothing
+  }<span class="chip chip-updated" title=${props.updated.title}
+      >${props.updated.text}</span
+    >`,
+  card: (props) => html`<div
+    class=${`gdp-file-shell pending${props.viewed ? " viewed" : ""}`}
+    data-path=${props.path}
+    data-key=${props.key}
+    data-size-class=${props.sizeClass}
+    data-status=${props.status}
+  ><div class="gdp-shell-header"><span class=${`status-pill ${props.status}`}
+        >${props.status}</span
+      ><span class="path">${props.displayPath}</span><span class="stats"
+        >${countsTemplate(props.counts)}</span
+      ><span class=${`size-tag ${props.sizeTag}`}>${props.sizeTag}</span
+      ><span class="loading-indicator" hidden>loading…</span></div
+    ><div class="gdp-shell-body"></div
+  ></div>`,
+  counts: countsTemplate,
+  noContent: (text) => html`<div class="gdp-info">${text}</div>`,
+  manualLoad: (props) => html`<div class="gdp-manual-load"><div
+      class="gdp-manual-note"
+    >${props.note}</div>${
+      props.openFile
+        ? html`<button
+            class="gdp-show-full"
+            title=${props.openFile.title}
+            @click=${props.openFile.onClick}
+          >${props.openFile.label}</button>`
+        : nothing
+    }<button class="gdp-show-full" @click=${props.preview.onClick}
+      >${props.preview.label}</button
+    ><button
+      class="gdp-show-full secondary"
+      title=${props.full.title}
+      @click=${props.full.onClick}
+    >${props.full.label}</button></div>`,
+  loadFailure: (props) => html`<div class="gdp-error" title=${props.detail}
+    >${props.message} — <button
+      type="button"
+      class="retry"
+      @click=${props.retry.onClick}
+    >${props.retry.label}</button></div>`,
+  moreHunks: (props) => html`<div class="gdp-show-full-wrap"><span
+      class="gdp-hunk-note"
+    >${props.note}</span><button
+      class="gdp-show-full"
+      title=${props.more.title || nothing}
+      ?disabled=${props.busy}
+      @click=${props.more.onClick}
+    >${props.more.label}</button><button
+      class="gdp-show-full secondary"
+      ?disabled=${props.busy}
+      @click=${props.all.onClick}
+    >${props.all.label}</button></div>`,
+  header: {
+    toggle: (props) => html`<button
+      type="button"
+      class="gdp-file-header-icon gdp-file-toggle"
+      title=${props.label}
+      aria-label=${props.label}
+      aria-expanded="true"
+      @click=${props.onClick}
+    >${iconTemplate(CHEVRON_DOWN_16_PATH, "octicon-chevron-down")}</button>`,
+    copyPath: (props) => html`<button
+      type="button"
+      class="gdp-file-header-icon gdp-copy-path"
+      title=${props.label}
+      aria-label=${props.label}
+      @click=${props.onClick}
+    >${iconTemplate(COPY_16_PATHS, "octicon-copy")}</button>`,
+    unfold: (props) => html`<button
+      type="button"
+      class="gdp-file-header-icon gdp-file-unfold"
+      @click=${props.onClick}
+    ></button>`,
+    unfoldIcon: (expanded) =>
+      expanded
+        ? iconTemplate(COLLAPSE_ALL_16_PATHS, "octicon-fold")
+        : iconTemplate(EXPAND_ALL_16_PATHS, "octicon-unfold"),
+    statText: (props) =>
+      html`<span class="gdp-stat-text">${countsTemplate(props)}</span>`,
+    statSquares: (squares) =>
+      html`<span class="gdp-stat-squares">${squares.map(
+        (kind) => html`<span class=${`sq ${kind}`}></span>`,
+      )}</span>`,
+    previewFile: (props) => html`<button
+      type="button"
+      class="gdp-preview-file gdp-btn gdp-btn-sm"
+      title=${props.title}
+      @click=${props.onClick}
+    >${props.label}</button>`,
+    viewFile: (props) => html`<button
+      type="button"
+      class="gdp-view-file gdp-btn gdp-btn-sm"
+      @click=${props.onClick}
+    ></button>`,
+  },
+  fileName: (props) =>
+    html`<span class="gdp-file-name-dir">${props.dir}</span>${props.base}`,
+  breadcrumb: (props) => html`<nav
+    class="gdp-file-breadcrumb"
+    aria-label=${props.label}
+  >${props.parts.map(
+    (part, index) =>
+      html`${
+        index > 0
+          ? html`<span class="gdp-file-breadcrumb-sep">/</span>`
+          : nothing
+      }${
+        part.onClick
+          ? html`<button
+            type="button"
+            class="gdp-file-breadcrumb-part"
+            @click=${part.onClick}
+          >${part.label}</button>`
+          : html`<span class="gdp-file-breadcrumb-current">${part.label}</span>`
+      }`,
+  )}</nav>`,
+  measureCard: () => html`<div
+    class="gdp-file-shell loaded"
+    aria-hidden="true"
+    style="visibility:hidden;pointer-events:none;content-visibility:visible"
+  ><div class="gdp-shell-body"></div></div>`,
+};
+
+/** 差分の見出しの 5 つの四角を、追加と削除の割合で分ける。 */
+function statSquares(additions: number, deletions: number) {
+  const SEG = 5;
+  const total = additions + deletions;
+  let aSeg = 0;
+  let dSeg = 0;
+  if (total > 0) {
+    aSeg = Math.round((additions / total) * SEG);
+    dSeg = Math.max(0, SEG - aSeg);
+    if (additions > 0 && aSeg === 0) aSeg = 1;
+    if (deletions > 0 && dSeg === 0) dSeg = 1;
+    const over = aSeg + dSeg - SEG;
+    if (over > 0) dSeg -= over;
+  }
+  return Array.from({ length: SEG }, (_, i) =>
+    i < aSeg ? "add" : i < aSeg + dSeg ? "del" : "nu",
+  ) as ("add" | "del" | "nu")[];
+}
+
+export function createDiffView(deps: DiffViewDeps, view = DEFAULT_VIEW) {
   const {
     $,
     $$,
     STATE,
     setRoute,
     currentRange,
-    escapeHtml,
     trackLoad,
     diffCardSelector,
     getHljs,
@@ -387,9 +649,7 @@ export function createDiffView(deps: DiffViewDeps) {
     const label = expanded ? text.collapseExpandedLines : text.expandAllLines;
     button.title = label;
     button.setAttribute("aria-label", label);
-    button.innerHTML = expanded
-      ? iconSvg("octicon-fold", COLLAPSE_ALL_16_PATHS)
-      : iconSvg("octicon-unfold", EXPAND_ALL_16_PATHS);
+    renderOwned(button, view.header.unfoldIcon(expanded));
   }
 
   function setProjectBranch(branch: string) {
@@ -403,6 +663,13 @@ export function createDiffView(deps: DiffViewDeps) {
   }
 
   let metaFilesForViewedProgress: FileMeta[] = [];
+  /** 上の帯に出している差分の要約。無いときは帯を空にする。 */
+  let metaShown: {
+    meta: DiffMeta;
+    updatedAt: string;
+    /** 「次の未確認」が押せるか。描いた直後は数だけの見込み。 */
+    hasUnviewed: boolean;
+  } | null = null;
 
   function viewedProgressFor(files: FileMeta[]) {
     const total = files.length;
@@ -412,53 +679,72 @@ export function createDiffView(deps: DiffViewDeps) {
     return { viewed, total };
   }
 
-  function applyViewedProgressChipState(
-    chip: HTMLElement,
-    viewed: number,
-    total: number,
-  ) {
-    chip.textContent = diffText().viewedProgress(viewed, total);
-    chip.classList.toggle("chip-viewed-empty", viewed === 0);
-    chip.classList.toggle("chip-viewed-partial", viewed > 0 && viewed < total);
-    chip.classList.toggle("chip-viewed-done", total > 0 && viewed === total);
+  function metaProps(shown: NonNullable<typeof metaShown>): DiffMetaProps {
+    const { meta } = shown;
+    const text = diffText();
+    const chips: DiffMetaChip[] = [];
+    if (meta.totals) {
+      chips.push(
+        { className: "chip-files", text: text.files(meta.totals.files) },
+        { className: "chip-add", text: `+${meta.totals.additions}` },
+        { className: "chip-del", text: `−${meta.totals.deletions}` },
+      );
+    }
+    const kinds = summarizeDiffFileKinds(meta.files);
+    for (const [className, label, count] of [
+      ["chip-added", text.kindAdded, kinds.added],
+      ["chip-deleted", text.kindDeleted, kinds.deleted],
+      ["chip-renamed", text.kindRenamed, kinds.renamed],
+      ["chip-heavy", text.kindHeavy, kinds.heavy],
+      ["chip-binary", text.kindBinary, kinds.binary],
+      ["chip-media", text.kindMedia, kinds.media],
+    ] as const) {
+      if (count > 0) chips.push({ className, text: `${count} ${label}` });
+    }
+    const { viewed, total } = viewedProgressFor(metaFilesForViewedProgress);
+    return {
+      error: meta.error || "",
+      chips,
+      viewed:
+        total > 0
+          ? {
+              text: text.viewedProgress(viewed, total),
+              title: text.viewedProgressTitle,
+              state:
+                viewed === 0 ? "empty" : viewed === total ? "done" : "partial",
+              next: {
+                label: shown.hasUnviewed ? text.nextUnviewed : text.allViewed,
+                title: shown.hasUnviewed
+                  ? text.nextUnviewedTitle
+                  : text.allViewedTitle,
+                disabled: !shown.hasUnviewed,
+                onClick: () => {
+                  scrollToNextUnviewedFile();
+                },
+              },
+            }
+          : null,
+      updated: {
+        text: text.updated(shown.updatedAt),
+        title: text.updatedTitle,
+      },
+    };
+  }
+
+  function drawMeta() {
+    const el = $("#meta");
+    renderOwned(el, metaShown ? view.meta(metaProps(metaShown)) : nothing);
   }
 
   function syncViewedProgressChip() {
-    const chip = document.querySelector<HTMLElement>("#meta .chip-viewed");
-    if (chip) {
-      const { viewed, total } = viewedProgressFor(metaFilesForViewedProgress);
-      if (total <= 0) chip.remove();
-      else applyViewedProgressChipState(chip, viewed, total);
-    }
-    syncNextUnviewedButton();
-  }
-
-  function applyNextUnviewedButtonState(
-    button: HTMLButtonElement,
-    hasUnviewed: boolean,
-  ) {
-    const text = diffText();
-    button.disabled = !hasUnviewed;
-    button.textContent = hasUnviewed ? text.nextUnviewed : text.allViewed;
-    button.title = hasUnviewed ? text.nextUnviewedTitle : text.allViewedTitle;
-  }
-
-  function syncNextUnviewedButton() {
-    const button = document.querySelector<HTMLButtonElement>(
-      "#meta .chip-next-unviewed",
-    );
-    if (!button) return;
-    const { total } = viewedProgressFor(metaFilesForViewedProgress);
-    if (total <= 0) {
-      button.remove();
-      return;
-    }
+    if (!metaShown) return;
     // DOM-derived (not just totals) so a live search filter that hides every
     // remaining unviewed row correctly disables the button too. Safe here:
     // this only runs from applyViewedState(), which itself already requires
     // #filelist li rows to exist (renderShell renders the sidebar before
-    // calling applyViewedState - see the ordering note on renderMeta above).
-    applyNextUnviewedButtonState(button, nextUnviewedFilePath() !== null);
+    // calling applyViewedState - see the ordering note on renderMeta).
+    metaShown.hasUnviewed = nextUnviewedFilePath() !== null;
+    drawMeta();
   }
 
   // Next unviewed file lookup walks the same "currently visible" sidebar
@@ -570,85 +856,26 @@ export function createDiffView(deps: DiffViewDeps) {
   }
 
   function renderMeta(meta: DiffMeta | null) {
-    const el = $("#meta");
     if (!meta) {
-      el.textContent = "";
+      metaShown = null;
       metaFilesForViewedProgress = [];
+      drawMeta();
       return;
     }
     setProjectName(meta.project || "");
     setProjectBranch(meta.branch || "");
     metaFilesForViewedProgress = meta.files || [];
-    el.innerHTML = "";
-    const text = diffText();
-    if (meta.error) {
-      const error = document.createElement("span");
-      error.className = "chip chip-error";
-      error.textContent = meta.error;
-      el.appendChild(error);
-    }
-    if (meta.totals) {
-      const files = document.createElement("span");
-      files.className = "chip chip-files";
-      files.textContent = text.files(meta.totals.files);
-      el.appendChild(files);
-      const add = document.createElement("span");
-      add.className = "chip chip-add";
-      add.textContent = `+${meta.totals.additions}`;
-      el.appendChild(add);
-      const del = document.createElement("span");
-      del.className = "chip chip-del";
-      del.textContent = `−${meta.totals.deletions}`;
-      el.appendChild(del);
-    }
-    const kinds = summarizeDiffFileKinds(meta.files);
-    const kindChip = (className: string, label: string, count: number) => {
-      if (count <= 0) return;
-      const chip = document.createElement("span");
-      chip.className = `chip ${className}`;
-      chip.textContent = `${count} ${label}`;
-      el.appendChild(chip);
-    };
-    kindChip("chip-added", text.kindAdded, kinds.added);
-    kindChip("chip-deleted", text.kindDeleted, kinds.deleted);
-    kindChip("chip-renamed", text.kindRenamed, kinds.renamed);
-    kindChip("chip-heavy", text.kindHeavy, kinds.heavy);
-    kindChip("chip-binary", text.kindBinary, kinds.binary);
-    kindChip("chip-media", text.kindMedia, kinds.media);
-    const viewedProgress = viewedProgressFor(metaFilesForViewedProgress);
-    if (viewedProgress.total > 0) {
-      const viewed = document.createElement("span");
-      viewed.className = "chip chip-viewed";
-      viewed.title = text.viewedProgressTitle;
-      applyViewedProgressChipState(
-        viewed,
-        viewedProgress.viewed,
-        viewedProgress.total,
-      );
-      el.appendChild(viewed);
-      const nextUnviewed = document.createElement("button");
-      nextUnviewed.type = "button";
-      nextUnviewed.className = "chip chip-next-unviewed";
+    const { viewed, total } = viewedProgressFor(metaFilesForViewedProgress);
+    metaShown = {
+      meta,
+      updatedAt: new Date().toLocaleTimeString([], { hour12: false }),
       // renderShell() calls renderMeta() before renderSidebar(), so #filelist
       // rows for this file list do not exist yet - approximate with totals
-      // here. syncNextUnviewedButton() (run after applyViewedState(), always
+      // here. syncViewedProgressChip() (run after applyViewedState(), always
       // after renderSidebar()) refines this with the DOM-aware check.
-      applyNextUnviewedButtonState(
-        nextUnviewed,
-        viewedProgress.viewed < viewedProgress.total,
-      );
-      nextUnviewed.addEventListener("click", () => {
-        scrollToNextUnviewedFile();
-      });
-      el.appendChild(nextUnviewed);
-    }
-    const u = document.createElement("span");
-    u.className = "chip chip-updated";
-    u.title = text.updatedTitle;
-    u.textContent = text.updated(
-      new Date().toLocaleTimeString([], { hour12: false }),
-    );
-    el.appendChild(u);
+      hasUnviewed: viewed < total,
+    };
+    drawMeta();
   }
 
   let SUPPRESS_SPY_UNTIL = 0;
@@ -1001,9 +1228,7 @@ export function createDiffView(deps: DiffViewDeps) {
   function resetReusableCard(card: DiffCardElement, file: FileMeta) {
     card.classList.remove("loaded", "loading", "error", "manual-load");
     card.classList.add("pending");
-    card.replaceChildren();
-    const tmp = createPlaceholder(file);
-    while (tmp.firstChild) card.appendChild(tmp.firstChild);
+    card.replaceChildren(...createPlaceholder(file).childNodes);
     card.dataset.path = file.path;
     card.dataset.key = fileKey(file);
     card.dataset.sizeClass = file.size_class || "small";
@@ -1134,16 +1359,7 @@ export function createDiffView(deps: DiffViewDeps) {
         } else if (sigChanged) {
           // 署名の変化は「内容が変わった」ことが確定している。従来どおり
           // stale-while-revalidate で可視インバリデーションする。
-          const stats = card.querySelector(".gdp-shell-header .stats");
-          if (stats) {
-            stats.innerHTML =
-              '<span class="a">+' +
-              (f.additions || 0) +
-              "</span>" +
-              '<span class="d">−' +
-              (f.deletions || 0) +
-              "</span>";
-          }
+          drawCardCounts(card, f);
           card._file = f;
           const didInvalidate = invalidateLoadedCard(
             card,
@@ -1222,16 +1438,7 @@ export function createDiffView(deps: DiffViewDeps) {
           resetReusableCard(old, f);
           invalidatedCards++;
         } else {
-          const stats = old.querySelector(".gdp-shell-header .stats");
-          if (stats) {
-            stats.innerHTML =
-              '<span class="a">+' +
-              (f.additions || 0) +
-              "</span>" +
-              '<span class="d">−' +
-              (f.deletions || 0) +
-              "</span>";
-          }
+          drawCardCounts(old, f);
           old._file = f;
         }
         ordered.push(old);
@@ -1314,14 +1521,9 @@ export function createDiffView(deps: DiffViewDeps) {
     if (known) return known;
     const gapRowHeight = Number.parseFloat(lineHeight);
     if (!Number.isFinite(gapRowHeight) || gapRowHeight <= 0) return null;
-    const probe = document.createElement("div");
-    probe.className = "gdp-file-shell loaded";
-    probe.setAttribute("aria-hidden", "true");
-    probe.style.cssText =
-      "visibility:hidden;pointer-events:none;content-visibility:visible";
-    const body = document.createElement("div");
-    body.className = "gdp-shell-body";
-    probe.appendChild(body);
+    const probe = templateElement(view.measureCard());
+    const body = probe.querySelector<HTMLElement>(".gdp-shell-body");
+    if (!body) throw new Error("diff view: the sample card has no body");
     root.appendChild(probe);
     try {
       new window.Diff2HtmlUI(
@@ -1415,7 +1617,11 @@ export function createDiffView(deps: DiffViewDeps) {
     el: Element | null | undefined,
   ): ((text: string) => number) | null {
     if (!el) return null;
-    const context = document.createElement("canvas").getContext("2d");
+    // 測るだけなので DOM に置かない画布を使う (無い環境では測らない)。
+    const context =
+      typeof OffscreenCanvas === "undefined"
+        ? null
+        : new OffscreenCanvas(1, 1).getContext("2d");
     if (!context) return null;
     const style = getComputedStyle(el);
     context.font = [
@@ -1480,53 +1686,36 @@ export function createDiffView(deps: DiffViewDeps) {
     placeholderWidthObserver.observe(root);
   }
 
+  function counts(f: FileMeta): DiffCountsProps {
+    return { additions: f.additions || 0, deletions: f.deletions || 0 };
+  }
+
+  /** 中身が届く前のカードの見出しの数を描き直す。 */
+  function drawCardCounts(card: HTMLElement, f: FileMeta) {
+    const stats = card.querySelector<HTMLElement>(".gdp-shell-header .stats");
+    if (stats) renderOwned(stats, view.counts(counts(f)));
+  }
+
   function createPlaceholder(f: FileMeta): DiffCardElement {
-    const card = document.createElement("div") as DiffCardElement;
-    card.className = "gdp-file-shell pending";
-    card.dataset.path = f.path;
-    card.dataset.key = f.key || f.path;
-    card.dataset.sizeClass = f.size_class || "small";
-    card.dataset.status = f.status || "M";
+    const card = templateElement<DiffCardElement>(
+      view.card({
+        path: f.path,
+        key: f.key || f.path,
+        status: f.status || "M",
+        displayPath: filePathDisplayText(f.display_path || f.path),
+        sizeClass: f.size_class || "small",
+        sizeTag: f.size_class || "",
+        counts: counts(f),
+        viewed: STATE.viewedFiles.has(f.path),
+      }),
+    );
     card._file = f;
-    card.classList.toggle("viewed", STATE.viewedFiles.has(f.path));
     const height = placeholderHeight(f);
     if (height) {
       card.style.minHeight = `${height}px`;
       card.dataset.estimatedHeight = "";
       watchPlaceholderWidth();
     }
-
-    const head = document.createElement("div");
-    head.className = "gdp-shell-header";
-    head.innerHTML =
-      '<span class="status-pill ' +
-      escapeHtml(f.status || "M") +
-      '">' +
-      escapeHtml(f.status || "M") +
-      "</span>" +
-      '<span class="path">' +
-      escapeHtml(filePathDisplayText(f.display_path || f.path)) +
-      "</span>" +
-      '<span class="stats">' +
-      '<span class="a">+' +
-      (f.additions || 0) +
-      "</span>" +
-      '<span class="d">−' +
-      (f.deletions || 0) +
-      "</span>" +
-      "</span>" +
-      '<span class="size-tag ' +
-      escapeHtml(f.size_class || "") +
-      '">' +
-      escapeHtml(f.size_class || "") +
-      "</span>" +
-      '<span class="loading-indicator" hidden>loading…</span>';
-    card.appendChild(head);
-
-    const body = document.createElement("div");
-    body.className = "gdp-shell-body";
-    card.appendChild(body);
-
     return card;
   }
 
@@ -1628,54 +1817,42 @@ export function createDiffView(deps: DiffViewDeps) {
     if (indicator) indicator.hidden = true;
     const body = card.querySelector<HTMLElement>(".gdp-shell-body");
     if (!body) return;
-    body.innerHTML = "";
-
-    const wrap = document.createElement("div");
-    wrap.className = "gdp-manual-load";
-
-    const note = document.createElement("div");
-    note.className = "gdp-manual-note";
     const text = diffText();
     const reason = manualLoadReason(file);
-    note.textContent = text.manualNote(reason ? text.manualReason[reason] : "");
-
-    const previewBtn = document.createElement("button");
-    previewBtn.className = "gdp-show-full";
-    previewBtn.textContent = text.loadPreview;
-    previewBtn.addEventListener("click", () => {
-      body.innerHTML = "";
+    const load = (mode: "preview" | "full", url: string) => {
+      body.replaceChildren();
       card.dataset.manualLoad = "1";
-      card.dataset.manualMode = "preview";
+      card.dataset.manualMode = mode;
       card.classList.remove("manual-load");
-      loadFile(file, card, buildPreviewUrl(file, 3));
-    });
-
-    const openFileBtn = document.createElement("button");
-    openFileBtn.className = "gdp-show-full";
-    openFileBtn.textContent = text.openAsFile;
-    openFileBtn.title = text.openAsFileTitle;
-    openFileBtn.addEventListener("click", () => {
-      setRoute(sourceRouteForDiffFile(file));
-      applySourceRouteToShell();
-    });
-
-    const fullBtn = document.createElement("button");
-    fullBtn.className = "gdp-show-full secondary";
-    fullBtn.textContent = text.loadFullDiff;
-    fullBtn.title = text.loadFullDiffTitle;
-    fullBtn.addEventListener("click", () => {
-      body.innerHTML = "";
-      card.dataset.manualLoad = "1";
-      card.dataset.manualMode = "full";
-      card.classList.remove("manual-load");
-      loadFile(file, card, file.load_url);
-    });
-
-    wrap.appendChild(note);
-    if (file.status === "A") wrap.appendChild(openFileBtn);
-    wrap.appendChild(previewBtn);
-    wrap.appendChild(fullBtn);
-    body.appendChild(wrap);
+      loadFile(file, card, url);
+    };
+    body.replaceChildren(
+      templateElement(
+        view.manualLoad({
+          note: text.manualNote(reason ? text.manualReason[reason] : ""),
+          openFile:
+            file.status === "A"
+              ? {
+                  label: text.openAsFile,
+                  title: text.openAsFileTitle,
+                  onClick: () => {
+                    setRoute(sourceRouteForDiffFile(file));
+                    applySourceRouteToShell();
+                  },
+                }
+              : null,
+          preview: {
+            label: text.loadPreview,
+            onClick: () => load("preview", buildPreviewUrl(file, 3)),
+          },
+          full: {
+            label: text.loadFullDiff,
+            title: text.loadFullDiffTitle,
+            onClick: () => load("full", file.load_url),
+          },
+        }),
+      ),
+    );
   }
 
   function nextIdle(timeout = 500): Promise<void> {
@@ -1814,22 +1991,24 @@ export function createDiffView(deps: DiffViewDeps) {
     const body = card.querySelector<HTMLElement>(".gdp-shell-body");
     if (!body || !card._loadFailure) return;
     const text = diffText();
-    const panel = document.createElement("div");
-    panel.className = "gdp-error";
-    panel.title = formatErrorDetail(card._loadFailure);
-    const retry = document.createElement("button");
-    retry.type = "button";
-    retry.className = "retry";
-    retry.textContent = text.retry;
-    retry.addEventListener("click", () => {
-      delete card._loadFailure;
-      card.classList.remove("error");
-      card.classList.add("pending");
-      body.innerHTML = "";
-      enqueueLoad(file, card, 1);
-    });
-    panel.append(`${text.loadFailed} — `, retry);
-    body.replaceChildren(panel);
+    body.replaceChildren(
+      templateElement(
+        view.loadFailure({
+          detail: formatErrorDetail(card._loadFailure),
+          message: text.loadFailed,
+          retry: {
+            label: text.retry,
+            onClick: () => {
+              delete card._loadFailure;
+              card.classList.remove("error");
+              card.classList.add("pending");
+              body.replaceChildren();
+              enqueueLoad(file, card, 1);
+            },
+          },
+        }),
+      ),
+    );
   }
 
   async function loadDiffFile(path: string): Promise<boolean> {
@@ -1857,15 +2036,14 @@ export function createDiffView(deps: DiffViewDeps) {
     const body = card.querySelector<HTMLElement>(".gdp-shell-body");
     if (!body) return;
     if (!data.diff?.trim()) {
-      const info = document.createElement("div");
-      info.className = "gdp-info";
-      info.textContent = diffText().noContent;
-      body.replaceChildren(info);
+      body.replaceChildren(
+        templateElement(view.noContent(diffText().noContent)),
+      );
       return;
     }
 
     detachStickyHScroll(card);
-    body.innerHTML = "";
+    body.replaceChildren();
     const layout = file.force_layout || STATE.layout;
     const hljsRef = getHljs();
     const ui = new window.Diff2HtmlUI(
@@ -1890,7 +2068,12 @@ export function createDiffView(deps: DiffViewDeps) {
     if (fileName && filePathNeedsEscaping(file.path)) {
       fileName.textContent = filePathDisplayText(file.path);
     }
-    if (fileName) splitFileName(fileName);
+    // 電話の幅では、フォルダは 1 行に収めて省き、ファイル名は折り返して全部
+    // 出す (style.css の SP の節)。文字は変えない。
+    const nameParts = fileName
+      ? splitFileNameProps(fileName.textContent ?? "")
+      : null;
+    if (fileName && nameParts) renderOwned(fileName, view.fileName(nameParts));
     if (STATE.ignoreWs) suppressWhitespaceOnlyInlineHighlights(body);
 
     enhanceMediaCard(file, card);
@@ -1947,44 +2130,30 @@ export function createDiffView(deps: DiffViewDeps) {
   }
 
   function createFileBreadcrumb(path: string, ref?: string): HTMLElement {
-    const nav = document.createElement("nav");
-    nav.className = "gdp-file-breadcrumb";
-    nav.setAttribute("aria-label", diffText().filePath);
     const parts = path.split("/").filter(Boolean);
-    const allParts = getProjectName() ? [getProjectName(), ...parts] : parts;
-    allParts.forEach((part, index) => {
-      if (index > 0) {
-        const sep = document.createElement("span");
-        sep.className = "gdp-file-breadcrumb-sep";
-        sep.textContent = "/";
-        nav.appendChild(sep);
-      }
-      const isCurrent = index === allParts.length - 1;
-      const crumb = document.createElement(isCurrent ? "span" : "button");
-      crumb.className =
-        index === allParts.length - 1
-          ? "gdp-file-breadcrumb-current"
-          : "gdp-file-breadcrumb-part";
-      crumb.textContent = filePathDisplayText(part);
-      if (!isCurrent && crumb instanceof HTMLButtonElement) {
-        crumb.type = "button";
-        crumb.addEventListener("click", () => {
-          const projectOffset = getProjectName() ? 1 : 0;
-          const currentPath = parts
-            .slice(0, Math.max(0, index - projectOffset + 1))
-            .join("/");
-          setRoute(repoRoute(ref || "worktree", currentPath));
-          loadRepo();
-        });
-      }
-      nav.appendChild(crumb);
-    });
-    if (!allParts.length) {
-      const crumb = document.createElement("span");
-      crumb.className = "gdp-file-breadcrumb-current";
-      crumb.textContent = filePathDisplayText(path);
-      nav.appendChild(crumb);
-    }
+    const project = getProjectName();
+    const allParts = project ? [project, ...parts] : parts;
+    const projectOffset = project ? 1 : 0;
+    const nav = templateElement(
+      view.breadcrumb({
+        label: diffText().filePath,
+        parts: allParts.length
+          ? allParts.map((part, index) => ({
+              label: filePathDisplayText(part),
+              onClick:
+                index === allParts.length - 1
+                  ? null
+                  : () => {
+                      const currentPath = parts
+                        .slice(0, Math.max(0, index - projectOffset + 1))
+                        .join("/");
+                      setRoute(repoRoute(ref || "worktree", currentPath));
+                      loadRepo();
+                    },
+            }))
+          : [{ label: filePathDisplayText(path), onClick: null }],
+      }),
+    );
     // 深いパスで入りきらないときは真ん中の段を「…」に畳む。
     fitBreadcrumb(nav, allParts.map(filePathDisplayText).join("/"));
     return nav;
@@ -2063,18 +2232,21 @@ export function createDiffView(deps: DiffViewDeps) {
       if (word) word.textContent = ` ${text.viewed}`;
     }
     if (!header.querySelector(".gdp-file-toggle")) {
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "gdp-file-header-icon gdp-file-toggle";
-      toggle.title = text.collapseFile;
-      toggle.setAttribute("aria-label", text.collapseFile);
-      toggle.setAttribute("aria-expanded", "true");
-      toggle.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
-      toggle.addEventListener("click", (e) => {
-        e.stopPropagation();
-        setFileCollapsed(card, !card.classList.contains("gdp-file-collapsed"));
-      });
-      header.insertBefore(toggle, header.firstChild);
+      header.insertBefore(
+        templateElement(
+          view.header.toggle({
+            label: text.collapseFile,
+            onClick: (e) => {
+              e.stopPropagation();
+              setFileCollapsed(
+                card,
+                !card.classList.contains("gdp-file-collapsed"),
+              );
+            },
+          }),
+        ),
+        header.firstChild,
+      );
     }
     header
       .querySelectorAll<HTMLInputElement>(".d2h-file-collapse-input")
@@ -2089,54 +2261,53 @@ export function createDiffView(deps: DiffViewDeps) {
       });
     if (!header.querySelector(".gdp-copy-path")) {
       const nameWrapper = header.querySelector(".d2h-file-name-wrapper");
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.className = "gdp-file-header-icon gdp-copy-path";
-      copy.title = text.copyFilePath;
-      copy.setAttribute("aria-label", text.copyFilePath);
-      copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-      copy.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const path = filePathClipboardText(file.path);
-        if (!path) return;
-        try {
-          await navigator.clipboard.writeText(path);
-          copy.classList.add("copied");
-          setTimeout(() => {
-            copy.classList.remove("copied");
-          }, 1200);
-        } catch (error) {
-          showCopyFailure(
-            copy,
-            "copying the file path failed",
-            error,
-            text.copyFilePath,
-            1200,
-          );
-        }
-      });
+      const copy = templateElement(
+        view.header.copyPath({
+          label: text.copyFilePath,
+          onClick: async (e) => {
+            e.stopPropagation();
+            const path = filePathClipboardText(file.path);
+            if (!path) return;
+            try {
+              await navigator.clipboard.writeText(path);
+              copy.classList.add("copied");
+              setTimeout(() => {
+                copy.classList.remove("copied");
+              }, 1200);
+            } catch (error) {
+              showCopyFailure(
+                copy,
+                "copying the file path failed",
+                error,
+                text.copyFilePath,
+                1200,
+              );
+            }
+          },
+        }),
+      );
       const statusTag = nameWrapper
         ? nameWrapper.querySelector(".d2h-tag")
         : null;
-      if (statusTag) statusTag.insertAdjacentElement("afterend", copy);
-      else if (nameWrapper)
-        nameWrapper.insertAdjacentElement("beforeend", copy);
+      if (statusTag) statusTag.after(copy);
+      else if (nameWrapper) nameWrapper.append(copy);
       else header.insertBefore(copy, header.firstChild);
     }
     if (!header.querySelector(".gdp-file-unfold")) {
-      const unfold = document.createElement("button");
-      unfold.type = "button";
-      unfold.className = "gdp-file-header-icon gdp-file-unfold";
+      const unfold = templateElement<HTMLButtonElement>(
+        view.header.unfold({
+          onClick: (e) => {
+            e.stopPropagation();
+            expandAllFileContext(card, file);
+          },
+        }),
+      );
       setUnfoldButtonState(
         unfold,
         card.classList.contains("gdp-context-expanded"),
       );
-      unfold.addEventListener("click", (e) => {
-        e.stopPropagation();
-        expandAllFileContext(card, file);
-      });
       const copy = header.querySelector(".gdp-copy-path");
-      if (copy) copy.insertAdjacentElement("afterend", unfold);
+      if (copy) copy.after(unfold);
       else header.appendChild(unfold);
     }
     if (!header.querySelector(".gdp-open-path")) {
@@ -2146,81 +2317,56 @@ export function createDiffView(deps: DiffViewDeps) {
         "file-parent",
         text.openParentFolder,
       );
-      if (unfold) unfold.insertAdjacentElement("afterend", openPath);
+      if (unfold) unfold.after(openPath);
       else header.appendChild(openPath);
     }
     // Numeric counts (matches GitHub: "+10 -113 ▰▰▰▰▰")
-    if (!header.querySelector(".gdp-stat-text")) {
-      const stats = document.createElement("span");
-      stats.className = "gdp-stat-text";
-      stats.innerHTML =
-        '<span class="a">+' +
-        (file.additions || 0) +
-        "</span>" +
-        '<span class="d">−' +
-        (file.deletions || 0) +
-        "</span>";
-      header.appendChild(stats);
-    }
-    const total = (file.additions || 0) + (file.deletions || 0);
-    const SEG = 5;
-    let aSeg: number;
-    let dSeg: number;
-    if (total === 0) {
-      aSeg = 0;
-      dSeg = 0;
-    } else {
-      aSeg = Math.round((file.additions / total) * SEG);
-      dSeg = Math.max(0, SEG - aSeg);
-      if (file.additions > 0 && aSeg === 0) aSeg = 1;
-      if (file.deletions > 0 && dSeg === 0) dSeg = 1;
-      const over = aSeg + dSeg - SEG;
-      if (over > 0) dSeg -= over;
-    }
-    const wrap = document.createElement("span");
-    wrap.className = "gdp-stat-squares";
-    for (let i = 0; i < SEG; i++) {
-      const box = document.createElement("span");
-      if (i < aSeg) box.className = "sq add";
-      else if (i < aSeg + dSeg) box.className = "sq del";
-      else box.className = "sq nu";
-      wrap.appendChild(box);
-    }
-    header.appendChild(wrap);
+    if (!header.querySelector(".gdp-stat-text"))
+      header.appendChild(templateElement(view.header.statText(counts(file))));
+    header.appendChild(
+      templateElement(
+        view.header.statSquares(
+          statSquares(file.additions || 0, file.deletions || 0),
+        ),
+      ),
+    );
     if (
       !header.querySelector(".gdp-preview-file") &&
       isPreviewableSource(fileSourceTarget(file).path)
     ) {
-      const previewFile = document.createElement("button");
-      previewFile.type = "button";
-      previewFile.className = "gdp-preview-file gdp-btn gdp-btn-sm";
-      previewFile.textContent = text.preview;
-      previewFile.title = text.previewTitle;
-      previewFile.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const target = fileSourceTarget(file);
-        setRoute({
-          screen: "file",
-          path: target.path,
-          ref: target.ref,
-          view: "blob",
-          preview: true,
-          range: currentRange(),
-        });
-        applySourceRouteToShell();
-      });
-      header.appendChild(previewFile);
+      header.appendChild(
+        templateElement(
+          view.header.previewFile({
+            label: text.preview,
+            title: text.previewTitle,
+            onClick: (e) => {
+              e.stopPropagation();
+              const target = fileSourceTarget(file);
+              setRoute({
+                screen: "file",
+                path: target.path,
+                ref: target.ref,
+                view: "blob",
+                preview: true,
+                range: currentRange(),
+              });
+              applySourceRouteToShell();
+            },
+          }),
+        ),
+      );
     }
     if (!header.querySelector(".gdp-view-file")) {
-      const viewFile = document.createElement("button");
-      viewFile.type = "button";
-      viewFile.className = "gdp-view-file gdp-btn gdp-btn-sm";
+      const viewFile = templateElement<HTMLButtonElement>(
+        view.header.viewFile({
+          onClick: (e) => {
+            e.stopPropagation();
+            setRoute(sourceRouteForDiffFile(file));
+            applySourceRouteToShell();
+          },
+        }),
+      );
       setViewFileButtonState(viewFile, false);
-      viewFile.addEventListener("click", (e) => {
-        e.stopPropagation();
-        setRoute(sourceRouteForDiffFile(file));
-        applySourceRouteToShell();
-      });
       header.appendChild(viewFile);
     } else {
       setViewFileButtonState(
@@ -2299,33 +2445,37 @@ export function createDiffView(deps: DiffViewDeps) {
     const old = card.querySelector(".gdp-show-full-wrap");
     if (old) old.remove();
 
-    const wrap = document.createElement("div");
-    wrap.className = "gdp-show-full-wrap";
-
     const text = diffText();
     const step = Math.min(10, remaining);
-    const moreBtn = document.createElement("button");
-    moreBtn.className = "gdp-show-full";
-    moreBtn.textContent = text.showNextHunks(step);
-    moreBtn.addEventListener("click", () => loadMore(rendered + step, false));
-
-    const allBtn = document.createElement("button");
-    allBtn.className = "gdp-show-full secondary";
-    allBtn.textContent = text.showAllHunks(remaining);
-    allBtn.addEventListener("click", () => loadMore(total, true));
-
-    const note = document.createElement("span");
-    note.className = "gdp-hunk-note";
-    note.textContent = text.hunksShown(rendered, total);
-
-    wrap.appendChild(note);
-    wrap.appendChild(moreBtn);
-    wrap.appendChild(allBtn);
-    card.appendChild(wrap);
+    // 押した後の表示 (読み込み中・データが変わった・失敗) は、この帯の中だけの状態。
+    const state = {
+      busy: false,
+      moreLabel: text.showNextHunks(step),
+      moreTitle: "",
+    };
+    const more = detachedElement(() =>
+      view.moreHunks({
+        note: text.hunksShown(rendered, total),
+        more: {
+          label: state.moreLabel,
+          title: state.moreTitle,
+          onClick: () => loadMore(rendered + step, false),
+        },
+        all: {
+          label: text.showAllHunks(remaining),
+          onClick: () => loadMore(total, true),
+        },
+        busy: state.busy,
+      }),
+    );
+    const show = (next: Partial<typeof state>) => {
+      Object.assign(state, next);
+      more.draw();
+    };
+    card.appendChild(more.element);
 
     function loadMore(count: number, full: boolean) {
-      moreBtn.disabled = allBtn.disabled = true;
-      moreBtn.textContent = text.loading;
+      show({ busy: true, moreLabel: text.loading });
       const myGen = getServerGeneration();
       trackLoad<FileDiffResponse>(
         Promise.resolve()
@@ -2344,11 +2494,10 @@ export function createDiffView(deps: DiffViewDeps) {
       )
         .then((next) => {
           if (myGen !== getServerGeneration()) {
-            moreBtn.textContent = text.dataChanged;
-            moreBtn.disabled = allBtn.disabled = false;
+            show({ busy: false, moreLabel: text.dataChanged });
             return;
           }
-          wrap.remove();
+          more.element.remove();
           card._diffData = next;
           mountDiff(card, file, next);
           if (
@@ -2366,9 +2515,11 @@ export function createDiffView(deps: DiffViewDeps) {
             error,
           );
           console.error(failure);
-          moreBtn.disabled = allBtn.disabled = false;
-          moreBtn.textContent = text.failedRetry;
-          moreBtn.title = formatErrorDetail(failure);
+          show({
+            busy: false,
+            moreLabel: text.failedRetry,
+            moreTitle: formatErrorDetail(failure),
+          });
         });
     }
   }

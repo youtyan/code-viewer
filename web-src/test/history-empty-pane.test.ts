@@ -1,3 +1,4 @@
+import "./_dom";
 import { describe, expect, test } from "vitest";
 import type { DiffMeta, FileMeta, SidebarItem } from "../core/types";
 import { showEmptyHistoryDiffPane } from "../views/empty-diff-pane";
@@ -34,7 +35,8 @@ function emptyElement() {
 
 describe("history empty diff pane", () => {
   test("clears stale diff sidebar, metadata, and repo sidebar cache", () => {
-    const diff = { innerHTML: "<section>stale diff</section>" };
+    const diff = document.createElement("div");
+    diff.append(document.createElement("section"));
     const empty = emptyElement();
     let files: FileMeta[] = [{ path: "stale.ts", load_url: "/stale" }];
     let lastMeta: DiffMeta | null = {
@@ -49,7 +51,7 @@ describe("history empty diff pane", () => {
     const statuses: string[] = [];
 
     showEmptyHistoryDiffPane({
-      diff: diff as HTMLElement,
+      diff,
       empty: empty.el,
       renderSidebar(nextFiles) {
         sidebarRenders.push(nextFiles);
@@ -82,7 +84,7 @@ describe("history empty diff pane", () => {
       }),
     });
 
-    expect(diff.innerHTML).toBe("");
+    expect(diff.childNodes.length).toBe(0);
     expect(sidebarRenders).toEqual([[]]);
     expect(files).toEqual([]);
     expect(lastMeta).toBeNull();

@@ -4,7 +4,11 @@ import type { AppRoute } from "../core/routes";
 import type { DiffCardElement, DiffMeta, FileMeta } from "../core/types";
 import {
   createDiffView,
+  DEFAULT_VIEW,
+  type DiffManualLoadProps,
+  type DiffMetaProps,
   type DiffViewDeps,
+  type DiffViewView,
   isDiffShellDomIntact,
   shouldRenderDiffSidebar,
 } from "../views/diff-view";
@@ -107,6 +111,8 @@ function createDiffViewForShellTest(
       | "setRoute"
     > & {
       syntaxHighlight: boolean;
+      /** 描き方を差し替える (presenter のテスト)。 */
+      view: DiffViewView;
     }
   > = {},
 ) {
@@ -129,83 +135,85 @@ function createDiffViewForShellTest(
     path: string;
     options?: { reveal?: boolean };
   }> = [];
-  const view = createDiffView({
-    STATE: state,
-    setRoute:
-      overrides.setRoute ??
-      (() => {
+  const view = createDiffView(
+    {
+      STATE: state,
+      setRoute:
+        overrides.setRoute ??
+        (() => {
+          /* noop */
+        }),
+      currentRange: () => route.range,
+      trackLoad: (promise) => promise,
+      diffCardSelector: (path) =>
+        `.gdp-file-shell[data-path="${CSS.escape(path)}"]`,
+      getHljs: overrides.getHljs ?? (() => null),
+      inferLang: overrides.inferLang ?? (() => null),
+      lineTargetStart: (line) => {
+        if (!line) return null;
+        return typeof line === "number" ? line : line.start;
+      },
+      fileSourceTarget: (file) => ({ path: file.path, ref: "head" }),
+      applySourceRouteToShell:
+        overrides.applySourceRouteToShell ??
+        (() => {
+          /* noop */
+        }),
+      setupHunkExpand() {
         /* noop */
-      }),
-    currentRange: () => route.range,
-    escapeHtml: (value) => String(value ?? ""),
-    trackLoad: (promise) => promise,
-    diffCardSelector: (path) =>
-      `.gdp-file-shell[data-path="${CSS.escape(path)}"]`,
-    getHljs: overrides.getHljs ?? (() => null),
-    inferLang: overrides.inferLang ?? (() => null),
-    lineTargetStart: (line) => {
-      if (!line) return null;
-      return typeof line === "number" ? line : line.start;
-    },
-    fileSourceTarget: (file) => ({ path: file.path, ref: "head" }),
-    applySourceRouteToShell:
-      overrides.applySourceRouteToShell ??
-      (() => {
+      },
+      applyInlineAnnotations() {
         /* noop */
+      },
+      applyFilter() {
+        /* noop */
+      },
+      markActive(path, options) {
+        markActiveCalls.push({ path, options });
+      },
+      renderSidebar() {
+        sidebarRenders++;
+        // 本物 (sidebar.ts) と同じく、差分の一覧を描いた印を付ける。
+        document.querySelector("#filelist")?.setAttribute("data-diff-list", "");
+      },
+      isRepositorySidebarMode: () => false,
+      loadRepo: async () => undefined,
+      repoRoute: (ref, path) => ({
+        screen: "repo",
+        ref,
+        path,
+        range: route.range,
       }),
-    setupHunkExpand() {
-      /* noop */
+      setProjectName() {
+        /* noop */
+      },
+      getProjectName: () => "",
+      createOpenPathButton: () => document.createElement("button"),
+      persistViewedFiles() {
+        /* noop */
+      },
+      applyHideTests() {
+        /* noop */
+      },
+      getServerGeneration: () => serverGeneration,
+      setServerGeneration: (generation) => {
+        serverGeneration = generation;
+      },
+      invalidateRepoSidebar() {
+        /* noop */
+      },
+      diffText: () => text,
+      getDiffRoot: overrides.getDiffRoot,
+      $: <T extends Element = HTMLElement>(sel: string): T => {
+        const found = document.querySelector<T>(sel);
+        if (!found) throw new Error(`missing ${sel}`);
+        return found;
+      },
+      $$: <T extends Element = HTMLElement>(sel: string): T[] =>
+        Array.from(document.querySelectorAll<T>(sel)),
     },
-    applyInlineAnnotations() {
-      /* noop */
-    },
-    applyFilter() {
-      /* noop */
-    },
-    markActive(path, options) {
-      markActiveCalls.push({ path, options });
-    },
-    renderSidebar() {
-      sidebarRenders++;
-      // 本物 (sidebar.ts) と同じく、差分の一覧を描いた印を付ける。
-      document.querySelector("#filelist")?.setAttribute("data-diff-list", "");
-    },
-    isRepositorySidebarMode: () => false,
-    loadRepo: async () => undefined,
-    repoRoute: (ref, path) => ({
-      screen: "repo",
-      ref,
-      path,
-      range: route.range,
-    }),
-    setProjectName() {
-      /* noop */
-    },
-    getProjectName: () => "",
-    createOpenPathButton: () => document.createElement("button"),
-    persistViewedFiles() {
-      /* noop */
-    },
-    applyHideTests() {
-      /* noop */
-    },
-    getServerGeneration: () => serverGeneration,
-    setServerGeneration: (generation) => {
-      serverGeneration = generation;
-    },
-    invalidateRepoSidebar() {
-      /* noop */
-    },
-    diffText: () => text,
-    getDiffRoot: overrides.getDiffRoot,
-    $: <T extends Element = HTMLElement>(sel: string): T => {
-      const found = document.querySelector<T>(sel);
-      if (!found) throw new Error(`missing ${sel}`);
-      return found;
-    },
-    $$: <T extends Element = HTMLElement>(sel: string): T[] =>
-      Array.from(document.querySelectorAll<T>(sel)),
-  });
+    overrides.view,
+  );
   return {
     view,
     state,
@@ -2142,5 +2150,102 @@ describe("diff view expand all lines", () => {
       ),
     }).toEqual({ failed, reason: failed, logged: failed });
     errorSpy.mockRestore();
+  });
+});
+
+// 差分の画面 (views/diff-view.ts) の presenter。描き方を記録する view に差し替え、
+// view に渡す値と、押したときの読み込み・移動を見る。描くのは既定の view。
+describe("the diff view presenter", () => {
+  function recordingView() {
+    const meta: DiffMetaProps[] = [];
+    const manual: DiffManualLoadProps[] = [];
+    const view: DiffViewView = {
+      ...DEFAULT_VIEW,
+      meta: (props) => {
+        meta.push(props);
+        return DEFAULT_VIEW.meta(props);
+      },
+      manualLoad: (props) => {
+        manual.push(props);
+        return DEFAULT_VIEW.manualLoad(props);
+      },
+    };
+    return { view, meta, manual };
+  }
+  const last = <T>(items: T[]): T | undefined => items[items.length - 1];
+
+  test("marking a file viewed redraws the progress, and the next button moves to the unviewed file", () => {
+    setupDiffDom();
+    const { view: recording, meta } = recordingView();
+    const { view, markActiveCalls } = createDiffViewForShellTest(
+      defaultDiffText,
+      { view: recording },
+    );
+    view.renderMeta(
+      makeMeta([makeFile("a.ts", 1, 0, "/a"), makeFile("b.ts", 0, 2, "/b")]),
+    );
+    installSidebarFileRow("a.ts");
+    installSidebarFileRow("b.ts");
+    expect(last(meta)?.chips.map((chip) => chip.className)).toEqual([
+      "chip-files",
+      "chip-add",
+      "chip-del",
+    ]);
+
+    view.setFileViewed("a.ts", true);
+    const viewed = last(meta)?.viewed;
+    expect([viewed?.text, viewed?.state, viewed?.next.disabled]).toEqual([
+      defaultDiffText.viewedProgress(1, 2),
+      "partial",
+      false,
+    ]);
+    viewed?.next.onClick();
+    expect(markActiveCalls().map((call) => call.path)).toEqual(["b.ts"]);
+  });
+
+  test("a file not loaded on its own offers a preview, and the preview loads the first hunks", async () => {
+    setupDiffDom();
+    const originalFetch = globalThis.fetch;
+    // 読み込みは返さない (ここでは頼んだ URL だけを見る)。
+    const fetchMock = vi.fn<typeof fetch>(
+      () => new Promise<Response>(() => undefined),
+    );
+    globalThis.fetch = fetchMock;
+    try {
+      const { view: recording, manual } = recordingView();
+      const { view } = createDiffViewForShellTest(defaultDiffText, {
+        view: recording,
+      });
+      const file = makeFile(
+        "huge.ts",
+        900,
+        900,
+        "/file_diff?path=huge.ts",
+        undefined,
+        { size_class: "huge" },
+      );
+      view.renderShell(makeMeta([file]));
+      const card = document.querySelector<DiffCardElement>(".gdp-file-shell");
+      if (!card) throw new Error("no card");
+      view.enqueueLoad(file, card);
+      const props = last(manual);
+      expect([props?.note, props?.openFile, props?.preview.label]).toEqual([
+        defaultDiffText.manualNote(defaultDiffText.manualReason.huge),
+        null,
+        defaultDiffText.loadPreview,
+      ]);
+      props?.preview.onClick();
+      // 読み込みは次の機会に頼む (loadFile)。
+      await waitFor(() => fetchMock.mock.calls.length > 0);
+      const url = new URL(String(fetchMock.mock.calls[0]?.[0]), "http://x");
+      expect([
+        url.pathname,
+        url.searchParams.get("mode"),
+        url.searchParams.get("max_hunks"),
+        card.dataset.manualMode,
+      ]).toEqual(["/file_diff", "preview", "3", "preview"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

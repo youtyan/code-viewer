@@ -1,3 +1,4 @@
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 // Hunk expand subsystem (GitHub-style ↕ controls at hunk separators).
 //
@@ -14,6 +15,7 @@ import type {
 } from "../core/types";
 import { DIFF_SCREEN_TEXT } from "./diff-view-i18n";
 import { pageLanguage } from "./page-language";
+import { templateElement, templateElements } from "./ui/renderer";
 
 type HunkInfo = {
   oldStart: number;
@@ -83,25 +85,24 @@ function showExpandFailure(
   anchors: HTMLTableRowElement[],
   operation: string,
   error: unknown,
+  view: HunkExpandView,
 ): void {
   console.error(`[code-viewer] ${operation} failed`, error);
-  const text = `${EXPAND_FAILURE_TEXT[pageLanguage()]}: ${formatErrorDetail(error)}`;
+  const message = `${EXPAND_FAILURE_TEXT[pageLanguage()]}: ${formatErrorDetail(error)}`;
   anchors.forEach((anchor, index) => {
     clearExpandFailure([anchor]);
-    const row = document.createElement("tr");
-    row.className = "gdp-expand-error-row";
-    const cell = document.createElement("td");
-    cell.colSpan = Math.max(
-      1,
-      [...anchor.cells].reduce((sum, td) => sum + td.colSpan, 0),
+    anchor.after(
+      templateElement(
+        view.failureRow({
+          colSpan: Math.max(
+            1,
+            [...anchor.cells].reduce((sum, td) => sum + td.colSpan, 0),
+          ),
+          message,
+          alert: index === 0,
+        }),
+      ),
     );
-    const message = document.createElement("div");
-    message.className = "gdp-error";
-    if (index === 0) message.setAttribute("role", "alert");
-    message.textContent = text;
-    cell.appendChild(message);
-    row.appendChild(cell);
-    anchor.after(row);
   });
 }
 
@@ -123,27 +124,89 @@ const EXPAND_ICON_PATHS = {
   down: "M8 12.5 12.25 8.25l-1.06-1.06L8.75 9.63V3h-1.5v6.63L4.81 7.19 3.75 8.25 8 12.5z",
 };
 
-export function createExpandStack(buttons: ExpandButtonSpec[]) {
-  const stack = document.createElement("div");
-  stack.className = "gdp-expand-stack";
-  buttons.forEach((spec) => {
-    const button = document.createElement("button");
-    button.className = "gdp-expand-btn";
-    button.title = spec.title;
-    button.setAttribute("aria-label", spec.title);
-    button.innerHTML =
-      '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
-      '<path fill="currentColor" d="' +
-      EXPAND_ICON_PATHS[spec.direction] +
-      '"/></svg>';
-    button.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (button.disabled) return;
-      spec.onClick();
-    });
-    stack.appendChild(button);
-  });
-  return stack;
+/** 差し込む文脈の行 (ハンクの間の隠れた行)。 */
+export type ContextRowsProps = {
+  lines: readonly string[];
+  /** 最初の行の新しい側・古い側の行番号。 */
+  newStart: number;
+  oldStart: number;
+  /** before: ハンクの見出しの上に、after: 下に差し込む。 */
+  dir: "before" | "after";
+  /** 左右の表示か。左右なら sideIndex の側 (0 = 古い側) の行番号だけ出す。 */
+  isSplit: boolean;
+  sideIndex: number;
+};
+
+/** 行を広げる部品の描き方 (createHunkExpand)。 */
+export type HunkExpandView = {
+  /** 行番号の欄に置く ↑ / ↓ のボタンの束。 */
+  stack(buttons: readonly ExpandButtonSpec[]): unknown;
+  /** 最後のハンクの後の「下へ広げる」行 (ボタンは 1 つ目の欄に後から入れる)。 */
+  trailingRow(isSplit: boolean): unknown;
+  contextRows(props: ContextRowsProps): unknown;
+  failureRow(props: {
+    colSpan: number;
+    message: string;
+    alert: boolean;
+  }): unknown;
+};
+
+export const DEFAULT_VIEW: HunkExpandView = {
+  stack: (buttons) =>
+    html`<div class="gdp-expand-stack">${buttons.map(
+      (spec) => html`<button
+      class="gdp-expand-btn"
+      title=${spec.title}
+      aria-label=${spec.title}
+      @click=${(event: Event) => {
+        event.stopPropagation();
+        if ((event.currentTarget as HTMLButtonElement).disabled) return;
+        spec.onClick();
+      }}
+    ><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path
+          fill="currentColor"
+          d=${EXPAND_ICON_PATHS[spec.direction]}
+        ></path></svg></button>`,
+    )}</div>`,
+  trailingRow: (
+    isSplit,
+  ) => html`<tr class="gdp-hunk-row gdp-trailing-expand-row"><td
+      class=${isSplit ? "d2h-code-side-linenumber d2h-info" : "d2h-code-linenumber d2h-info"}
+    ></td><td class="d2h-info"><div
+        class=${isSplit ? "d2h-code-side-line" : "d2h-code-line"}
+      ></div></td></tr>`,
+  // diff2html's own context rows render the prefix/content spans with a
+  // newline+indent between them, which collapses to one visible space.
+  // Match that whitespace exactly so inserted rows align with native ones.
+  contextRows: (props) =>
+    props.lines.map(
+      (
+        line,
+        i,
+      ) => html`<tr class="gdp-inserted-ctx" data-gdp-dir=${props.dir}>${
+        props.isSplit
+          ? html`<td class="d2h-code-side-linenumber d2h-cntx">${
+              props.sideIndex === 0 ? props.oldStart + i : props.newStart + i
+            }</td>`
+          : html`<td class="d2h-code-linenumber d2h-cntx"><div class="line-num1">${
+              props.oldStart + i
+            }</div><div class="line-num2">${props.newStart + i}</div></td>`
+      }<td class="d2h-cntx"><div
+          class=${props.isSplit ? "d2h-code-side-line" : "d2h-code-line"}
+        ><span class="d2h-code-line-prefix">&nbsp;</span> <span
+            class="d2h-code-line-ctn"
+          >${line}</span></div></td></tr>`,
+    ),
+  failureRow: (props) => html`<tr class="gdp-expand-error-row"><td
+      colspan=${props.colSpan}
+    ><div class="gdp-error" role=${props.alert ? "alert" : nothing}>${props.message}</div></td></tr>`,
+};
+
+export function createExpandStack(
+  buttons: ExpandButtonSpec[],
+  view: HunkExpandView = DEFAULT_VIEW,
+): HTMLElement {
+  return templateElement(view.stack(buttons));
 }
 
 /**
@@ -151,27 +214,23 @@ export function createExpandStack(buttons: ExpandButtonSpec[]) {
  * 本物の行 (attachTrailingExpandControls) と、Diff のカードの見積もりで高さを
  * 測る見本 (views/diff-view.ts の measuredCardMetrics) が同じ形を使う。
  */
-export function createTrailingExpandRow(isSplit: boolean): {
+export function createTrailingExpandRow(
+  isSplit: boolean,
+  view: HunkExpandView = DEFAULT_VIEW,
+): {
   tr: HTMLTableRowElement;
   ln: HTMLTableCellElement;
 } {
-  const tr = document.createElement("tr");
-  tr.className = "gdp-hunk-row gdp-trailing-expand-row";
-  const ln = document.createElement("td");
-  ln.className = isSplit
-    ? "d2h-code-side-linenumber d2h-info"
-    : "d2h-code-linenumber d2h-info";
-  const info = document.createElement("td");
-  info.className = "d2h-info";
-  const spacer = document.createElement("div");
-  spacer.className = isSplit ? "d2h-code-side-line" : "d2h-code-line";
-  info.appendChild(spacer);
-  tr.appendChild(ln);
-  tr.appendChild(info);
+  const tr = templateElement<HTMLTableRowElement>(view.trailingRow(isSplit));
+  const ln = tr.cells[0];
+  if (!ln) throw new Error("hunk expand: the trailing row has no cell");
   return { tr, ln };
 }
 
-export function createHunkExpand(deps: HunkExpandDeps) {
+export function createHunkExpand(
+  deps: HunkExpandDeps,
+  view: HunkExpandView = DEFAULT_VIEW,
+) {
   // ---------- Hunk expand (mimics GitHub's ↕ at hunk separators) ----------
   // Parse "@@ -OLD,COUNT +NEW,COUNT @@" out of a row's text.
   // The text may be wrapped in leading/trailing whitespace from diff2html,
@@ -428,7 +487,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         })
         .catch((error: unknown) => {
           setBusy(false);
-          showExpandFailure(anchors, operation, error);
+          showExpandFailure(anchors, operation, error, view);
         });
     };
 
@@ -489,7 +548,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
             ),
         });
       }
-      return createExpandStack(buttons);
+      return createExpandStack(buttons, view);
     };
 
     // One-shot full-gap expansion for "expand all context": fetches the
@@ -572,7 +631,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         const tbody = sib.tr.parentElement;
         if (!tbody) return null;
         const isSplit = !!sib.tr.querySelector("td.d2h-code-side-linenumber");
-        const { tr, ln } = createTrailingExpandRow(isSplit);
+        const { tr, ln } = createTrailingExpandRow(isSplit, view);
         tbody.appendChild(tr);
         return { tr, ln, sideIndex: sib.sideIndex || 0 };
       })
@@ -652,7 +711,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         })
         .catch((error: unknown) => {
           setBusy(false);
-          showExpandFailure(anchors, operation, error);
+          showExpandFailure(anchors, operation, error, view);
         });
     };
     // One-shot expansion to EOF for "expand all context": a single large
@@ -664,13 +723,16 @@ export function createHunkExpand(deps: HunkExpandDeps) {
       return fetchAndInsert(100000);
     };
     rows.forEach((row) => {
-      const stack = createExpandStack([
-        {
-          direction: "down",
-          title: DIFF_SCREEN_TEXT[pageLanguage()].showMoreLinesUnknown,
-          onClick: () => void fetchAndInsert(),
-        },
-      ]) as ExpandStackElement;
+      const stack = createExpandStack(
+        [
+          {
+            direction: "down",
+            title: DIFF_SCREEN_TEXT[pageLanguage()].showMoreLinesUnknown,
+            onClick: () => void fetchAndInsert(),
+          },
+        ],
+        view,
+      ) as ExpandStackElement;
       stack._gdpExpandFully = expandFully;
       row.ln.appendChild(stack);
     });
@@ -730,7 +792,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
           );
           return;
         }
-        showExpandFailure(anchors, operation, error);
+        showExpandFailure(anchors, operation, error, view);
       });
   }
 
@@ -751,51 +813,10 @@ export function createHunkExpand(deps: HunkExpandDeps) {
     if (!tbody) return;
     const anchor = dir === "after" ? targetTr.nextElementSibling : targetTr;
     const isSplit = !!targetTr.querySelector("td.d2h-code-side-linenumber");
-    const frag = document.createDocumentFragment();
-    for (let i = 0; i < lines.length; i++) {
-      const tr = document.createElement("tr");
-      tr.className = "gdp-inserted-ctx";
-      if (dir) tr.dataset.gdpDir = dir;
-      let lnHtml: string;
-      if (isSplit) {
-        const num = sideIndex === 0 ? oldStart + i : newStart + i;
-        lnHtml = `<td class="d2h-code-side-linenumber d2h-cntx">${num}</td>`;
-      } else {
-        lnHtml =
-          '<td class="d2h-code-linenumber d2h-cntx">' +
-          '<div class="line-num1">' +
-          (oldStart + i) +
-          "</div>" +
-          '<div class="line-num2">' +
-          (newStart + i) +
-          "</div>" +
-          "</td>";
-      }
-      tr.innerHTML =
-        lnHtml +
-        '<td class="d2h-cntx">' +
-        '<div class="' +
-        (isSplit ? "d2h-code-side-line" : "d2h-code-line") +
-        '">' +
-        // diff2html's own context rows render the prefix/content spans with a
-        // newline+indent between them, which collapses to one visible space.
-        // Match that whitespace exactly so inserted rows align with native ones.
-        '<span class="d2h-code-line-prefix">&nbsp;</span> ' +
-        '<span class="d2h-code-line-ctn">' +
-        escapeHtmlText(lines[i]) +
-        "</span>" +
-        "</div>" +
-        "</td>";
-      frag.appendChild(tr);
-    }
-    tbody.insertBefore(frag, anchor);
-  }
-
-  function escapeHtmlText(s: unknown): string {
-    return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    for (const row of templateElements(
+      view.contextRows({ lines, newStart, oldStart, dir, isSplit, sideIndex }),
+    ))
+      tbody.insertBefore(row, anchor);
   }
 
   return { setupHunkExpand };

@@ -20,7 +20,7 @@ export type EmptyDiffPaneText = {
 };
 
 export function showEmptyHistoryDiffPane(deps: EmptyDiffPaneDeps) {
-  if (deps.diff) deps.diff.innerHTML = "";
+  deps.diff?.replaceChildren();
   deps.placeSidebarToggle();
   deps.renderSidebar([], undefined);
   deps.setFiles([]);

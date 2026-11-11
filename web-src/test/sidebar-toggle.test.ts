@@ -334,16 +334,13 @@ describe("sidebar toggle placement", () => {
     const dom = installHeadDom();
     const state = { sidebarHidden: false };
     const sidebar = createSidebarForTest(state);
+    // 差分の面にフォルダ表示の帯が残っている (空の面にすると一緒に消える)。
+    const diff = document.createElement("div");
     const repoToolbar = document.createElement("div");
     repoToolbar.className = "gdp-repo-toolbar";
-    dom.body.appendChild(repoToolbar);
+    diff.appendChild(repoToolbar);
+    dom.body.appendChild(diff);
     sidebar.applySidebarHidden(true);
-
-    const diff = {
-      set innerHTML(_value: string) {
-        repoToolbar.remove();
-      },
-    } as unknown as HTMLElement;
 
     showEmptyHistoryDiffPane({
       diff,
