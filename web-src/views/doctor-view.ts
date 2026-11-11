@@ -7,12 +7,7 @@
 
 import { html, nothing, type TemplateResult } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
-import type {
-  DoctorGroup,
-  DoctorReport,
-  DoctorRow,
-  DoctorStatus,
-} from "../core/doctor-types";
+import type { DoctorReport, DoctorStatus } from "../core/doctor-types";
 import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 import { renderOwned } from "./ui/renderer";
 
@@ -76,10 +71,35 @@ function statusLabel(text: DoctorText, status: DoctorStatus): string {
   return text.statusLabels[status];
 }
 
-function rowTemplate(text: DoctorText, row: DoctorRow): TemplateResult {
+/** 診断の 1 行。 */
+export type DoctorRowProps = {
+  status: DoctorStatus;
+  pill: string;
+  title: string;
+  detail: string;
+  hint: string;
+};
+
+export type DoctorSheetProps = {
+  title: string;
+  refresh: { label: string; disabled: boolean; onClick(): void };
+  close: { label: string; onClick(): void };
+  summary: string;
+  content:
+    | { kind: "none" }
+    | { kind: "message"; text: string }
+    | {
+        kind: "groups";
+        groups: { id: string; title: string; rows: DoctorRowProps[] }[];
+      };
+};
+
+export type DoctorView = (props: DoctorSheetProps) => unknown;
+
+function rowTemplate(row: DoctorRowProps): TemplateResult {
   return html`<div class="doctor-row ui-table-row" data-status=${row.status}><span
       class=${`doctor-row-pill doctor-row-pill-${row.status}`}
-      >${statusLabel(text, row.status)}</span
+      >${row.pill}</span
     ><div class="doctor-row-body"><div class="doctor-row-title">${row.title}</div>${
       row.detail
         ? html`<div class="doctor-row-detail">${row.detail}</div>`
@@ -87,12 +107,41 @@ function rowTemplate(text: DoctorText, row: DoctorRow): TemplateResult {
     }${row.hint ? html`<div class="doctor-row-hint">${row.hint}</div>` : nothing}</div></div>`;
 }
 
-function groupTemplate(text: DoctorText, group: DoctorGroup): unknown {
-  if (group.rows.length === 0) return nothing;
-  return html`<section class="doctor-group" data-group=${group.id}><h2
-      class="doctor-group-title"
-    >${group.title}</h2>${group.rows.map((row) => rowTemplate(text, row))}</section>`;
-}
+export const DEFAULT_VIEW: DoctorView = (props) => {
+  const content = props.content;
+  return html`<div class="doctor-header"><h1>${props.title}</h1><button
+      type="button"
+      class="doctor-refresh"
+      ?disabled=${props.refresh.disabled}
+      @click=${(event: Event) => {
+        event.preventDefault();
+        props.refresh.onClick();
+      }}
+    >${props.refresh.label}</button><button
+      type="button"
+      class="doctor-close"
+      aria-label=${props.close.label}
+      title=${props.close.label}
+      @click=${(event: Event) => {
+        event.preventDefault();
+        props.close.onClick();
+      }}
+    >×</button></div><div class="doctor-summary">${props.summary}</div><div
+      class="doctor-content"
+    >${
+      content.kind === "message"
+        ? html`<div class="doctor-empty">${content.text}</div>`
+        : content.kind === "groups"
+          ? content.groups.map((group) =>
+              group.rows.length === 0
+                ? nothing
+                : html`<section class="doctor-group" data-group=${group.id}><h2
+                      class="doctor-group-title"
+                    >${group.title}</h2>${group.rows.map(rowTemplate)}</section>`,
+            )
+          : nothing
+    }</div>`;
+};
 
 /** 診断の結果の段階。idle はまだ一度も読んでいない。 */
 type DoctorState =
@@ -108,7 +157,10 @@ export type DoctorViewHandle = {
   refresh(): Promise<void>;
 };
 
-export function createDoctorView(deps: DoctorViewDeps): DoctorViewHandle {
+export function createDoctorView(
+  deps: DoctorViewDeps,
+  view: DoctorView = DEFAULT_VIEW,
+): DoctorViewHandle {
   let state: DoctorState = { kind: "idle" };
   let busy = false;
 
@@ -120,51 +172,53 @@ export function createDoctorView(deps: DoctorViewDeps): DoctorViewHandle {
     return deps.$<HTMLElement>("#doctor-sheet-overlay");
   }
 
-  function sheetTemplate(): TemplateResult {
+  function sheetProps(): DoctorSheetProps {
     const text = doctorText(deps.getLanguage());
     const report = state.kind === "report" ? state.report : null;
-    const summary = !report
-      ? ""
-      : report.worstStatus === "error"
-        ? text.worstError
-        : report.worstStatus === "warn"
-          ? text.worstWarn
-          : text.worstOk;
-    const content =
-      state.kind === "loading"
-        ? html`<div class="doctor-empty">${text.refreshing}</div>`
-        : state.kind === "failed"
-          ? html`<div class="doctor-empty">${`${text.loadFailed}: ${state.message}`}</div>`
-          : report && !report.groups.length
-            ? html`<div class="doctor-empty">${text.empty}</div>`
-            : report
-              ? report.groups.map((group) => groupTemplate(text, group))
-              : nothing;
-    return html`<div class="doctor-header"><h1>${text.title}</h1><button
-        type="button"
-        class="doctor-refresh"
-        ?disabled=${busy}
-        @click=${(event: Event) => {
-          event.preventDefault();
-          void load();
-        }}
-      >${text.refresh}</button><button
-        type="button"
-        class="doctor-close"
-        aria-label=${text.close}
-        title=${text.close}
-        @click=${(event: Event) => {
-          event.preventDefault();
-          deps.onCloseRequest?.();
-        }}
-      >×</button></div><div class="doctor-summary">${summary}</div><div
-        class="doctor-content"
-      >${content}</div>`;
+    return {
+      title: text.title,
+      refresh: {
+        label: text.refresh,
+        disabled: busy,
+        onClick: () => void load(),
+      },
+      close: { label: text.close, onClick: () => deps.onCloseRequest?.() },
+      summary: !report
+        ? ""
+        : report.worstStatus === "error"
+          ? text.worstError
+          : report.worstStatus === "warn"
+            ? text.worstWarn
+            : text.worstOk,
+      content:
+        state.kind === "loading"
+          ? { kind: "message", text: text.refreshing }
+          : state.kind === "failed"
+            ? { kind: "message", text: `${text.loadFailed}: ${state.message}` }
+            : report && !report.groups.length
+              ? { kind: "message", text: text.empty }
+              : report
+                ? {
+                    kind: "groups",
+                    groups: report.groups.map((group) => ({
+                      id: group.id,
+                      title: group.title,
+                      rows: group.rows.map((row) => ({
+                        status: row.status,
+                        pill: statusLabel(text, row.status),
+                        title: row.title,
+                        detail: row.detail ?? "",
+                        hint: row.hint ?? "",
+                      })),
+                    })),
+                  }
+                : { kind: "none" },
+    };
   }
 
   function draw(): void {
     const mount = getMount();
-    if (mount) renderOwned(mount, sheetTemplate());
+    if (mount) renderOwned(mount, view(sheetProps()));
   }
 
   async function load(): Promise<void> {

@@ -5,7 +5,12 @@ import {
   type KeyBinding,
   resolveKeyBindings,
 } from "../core/keymap";
-import { createQuickHelp } from "../views/quick-help";
+import {
+  createQuickHelp,
+  DEFAULT_VIEW,
+  type QuickHelpProps,
+  type QuickHelpView,
+} from "../views/quick-help";
 
 function installFixtureDom() {
   document.body.innerHTML = [
@@ -29,19 +34,23 @@ function makeQuickHelp(
   onOpenFull?: () => void,
   onOpenSettings?: () => void,
   bindings: KeyBinding[] = DEFAULT_KEY_BINDINGS,
+  view?: QuickHelpView,
 ) {
   installFixtureDom();
-  const quickHelp = createQuickHelp({
-    $: <T extends Element = HTMLElement>(sel: string): T => {
-      const found = document.querySelector(sel);
-      if (!found) throw new Error(`missing fixture element: ${sel}`);
-      return found as T;
+  const quickHelp = createQuickHelp(
+    {
+      $: <T extends Element = HTMLElement>(sel: string): T => {
+        const found = document.querySelector(sel);
+        if (!found) throw new Error(`missing fixture element: ${sel}`);
+        return found as T;
+      },
+      getLanguage: () => language,
+      getKeyBindings: () => bindings,
+      openFullKeybindings: () => onOpenFull?.(),
+      openSettings: () => onOpenSettings?.(),
     },
-    getLanguage: () => language,
-    getKeyBindings: () => bindings,
-    openFullKeybindings: () => onOpenFull?.(),
-    openSettings: () => onOpenSettings?.(),
-  });
+    view,
+  );
   // 呼び出し側 (ヘルプのページ) と同じく、ボタンの click で開閉する。
   document
     .querySelector("#sample-trigger")
@@ -193,5 +202,27 @@ describe("quick help popover", () => {
       (el) => el.textContent,
     );
     expect(groupTitles).toEqual(["グローバル", "メインパネル"]);
+  });
+});
+
+describe("the quick help presenter", () => {
+  test("gives the view the often used groups only when it opens", () => {
+    const shown: QuickHelpProps[] = [];
+    const quickHelp = makeQuickHelp(
+      "en",
+      undefined,
+      undefined,
+      undefined,
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    expect(shown).toEqual([]);
+    quickHelp.open();
+    expect(shown[0]?.groups.map((group) => group.title)).toEqual([
+      "Global",
+      "Main Panel",
+    ]);
   });
 });

@@ -19,14 +19,17 @@ import { AGENT_HOOKS_SECTION_ID } from "../views/agents/agent-hooks-settings";
 import { REMOTE_ACCESS_SECTION_ID } from "../views/remote-access-settings";
 import {
   createViewerSettings,
+  DEFAULT_VIEW,
   SETTINGS_CATEGORIES,
   type SettingsCategory,
   type SettingsDraft,
   type ThemeChoice,
   type ViewerSettingsChoices,
   type ViewerSettingsDraft,
+  type ViewerSettingsFormProps,
   type ViewerSettingsText,
   type ViewerSettingsValues,
+  type ViewerSettingsView,
 } from "../views/viewer-settings";
 import {
   baseRules,
@@ -231,6 +234,7 @@ function setup(
     saveRules?: (value: string) => Promise<void>;
     resetRules?: () => Promise<void>;
     draft?: SettingsDraft;
+    view?: ViewerSettingsView;
   } = {},
 ) {
   document.body.innerHTML = '<div id="host"></div>';
@@ -263,67 +267,73 @@ function setup(
     },
   };
 
-  const settings = createViewerSettings({
-    getText: () => (language === "ja" ? JA_TEXT : EN_TEXT),
-    getTheme: () => theme,
-    setTheme: (choice) => {
-      calls.theme.push(choice);
-      theme = choice;
+  const settings = createViewerSettings(
+    {
+      getText: () => (language === "ja" ? JA_TEXT : EN_TEXT),
+      getTheme: () => theme,
+      setTheme: (choice) => {
+        calls.theme.push(choice);
+        theme = choice;
+      },
+      getColorTheme: () => colorTheme,
+      setColorTheme: (choice) => {
+        calls.colorTheme.push(choice);
+        colorTheme = choice;
+      },
+      getValues: () => {
+        calls.getValues++;
+        return { ...values };
+      },
+      getDefaultValues: () => ({ ...defaults }),
+      onChoose: (choice) => {
+        calls.choose.push(choice);
+        Object.assign(values, choice);
+      },
+      refresh:
+        options.refresh ??
+        (async () => {
+          calls.refresh++;
+        }),
+      onSave:
+        options.save ??
+        (async (draft, saveOptions) => {
+          calls.save.push({
+            draft: { ...draft },
+            restoreDefaults: saveOptions.restoreDefaults,
+          });
+          Object.assign(values, draft);
+        }),
+      onAgentRulesSave:
+        options.saveRules ??
+        (async (value) => {
+          calls.agentRulesSave.push(value);
+        }),
+      onAgentRulesReset:
+        options.resetRules ??
+        (async () => {
+          calls.agentRulesReset++;
+          values.agentRulesJson =
+            '{\n  "version": 1,\n  "rules": ["default"]\n}\n';
+          values.agentRulesSource = "default";
+        }),
+      // 見出しの id はほかの画面が openSettingsAt で使う本物 (移し先のテスト)。
+      agentHooksSection: sectionWithHeading(AGENT_HOOKS_SECTION_ID, "Hooks"),
+      agentAccountsSection: sectionWithHeading(
+        ACCOUNTS_SECTION_ID,
+        "Accounts list",
+      ),
+      shortcutsSection: sectionWithHeading(
+        SHORTCUT_SECTION_ID,
+        "Shortcut list",
+      ),
+      remoteAccessSection: sectionWithHeading(
+        REMOTE_ACCESS_SECTION_ID,
+        "Remote access status",
+      ),
+      drafts: options.draft ? [options.draft] : [],
     },
-    getColorTheme: () => colorTheme,
-    setColorTheme: (choice) => {
-      calls.colorTheme.push(choice);
-      colorTheme = choice;
-    },
-    getValues: () => {
-      calls.getValues++;
-      return { ...values };
-    },
-    getDefaultValues: () => ({ ...defaults }),
-    onChoose: (choice) => {
-      calls.choose.push(choice);
-      Object.assign(values, choice);
-    },
-    refresh:
-      options.refresh ??
-      (async () => {
-        calls.refresh++;
-      }),
-    onSave:
-      options.save ??
-      (async (draft, saveOptions) => {
-        calls.save.push({
-          draft: { ...draft },
-          restoreDefaults: saveOptions.restoreDefaults,
-        });
-        Object.assign(values, draft);
-      }),
-    onAgentRulesSave:
-      options.saveRules ??
-      (async (value) => {
-        calls.agentRulesSave.push(value);
-      }),
-    onAgentRulesReset:
-      options.resetRules ??
-      (async () => {
-        calls.agentRulesReset++;
-        values.agentRulesJson =
-          '{\n  "version": 1,\n  "rules": ["default"]\n}\n';
-        values.agentRulesSource = "default";
-      }),
-    // 見出しの id はほかの画面が openSettingsAt で使う本物 (移し先のテスト)。
-    agentHooksSection: sectionWithHeading(AGENT_HOOKS_SECTION_ID, "Hooks"),
-    agentAccountsSection: sectionWithHeading(
-      ACCOUNTS_SECTION_ID,
-      "Accounts list",
-    ),
-    shortcutsSection: sectionWithHeading(SHORTCUT_SECTION_ID, "Shortcut list"),
-    remoteAccessSection: sectionWithHeading(
-      REMOTE_ACCESS_SECTION_ID,
-      "Remote access status",
-    ),
-    drafts: options.draft ? [options.draft] : [],
-  });
+    options.view,
+  );
 
   return {
     settings,
@@ -1652,5 +1662,38 @@ describe("every choice field on the page has the settings look", () => {
           appearance !== "none" || cursor !== "pointer",
       ),
     ).toEqual([]);
+  });
+});
+
+describe("the viewer settings presenter", () => {
+  test("gives the view only the open category's sections; typing marks the save bar unsaved", () => {
+    const forms: ViewerSettingsFormProps[] = [];
+    const { settings, host } = setup({
+      view: {
+        ...DEFAULT_VIEW,
+        form: (props) => {
+          forms.push(props);
+          return DEFAULT_VIEW.form(props);
+        },
+      },
+    });
+    settings.mount(host);
+    settings.setCategory("files");
+    const last = () => forms[forms.length - 1];
+    const shown = () =>
+      last()
+        ?.sections.filter((section) =>
+          section.key === "external" ? false : !section.box.hidden,
+        )
+        .map((section) => section.key);
+    expect(shown()).toEqual(["excluded", "uploads"]);
+    const excluded = last()?.sections.find(
+      (section) => section.key === "excluded",
+    );
+    if (excluded?.key !== "excluded") throw new Error("no excluded section");
+    excluded.omitDirs.onInput("vendor");
+    expect([last()?.footer.status.state, last()?.footer.save.disabled]).toEqual(
+      ["unsaved", false],
+    );
   });
 });

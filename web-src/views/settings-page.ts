@@ -2,7 +2,7 @@
 // 保存」。フォームの実体は views/viewer-settings.ts、使い方の案内はヘルプの
 // ページ (views/help-page.ts) にある。
 
-import { html, nothing, type TemplateResult } from "lit/html.js";
+import { html, nothing } from "lit/html.js";
 import type { AppRoute, DiffRange } from "../core/routes";
 import { agentsText } from "./agents/i18n";
 import {
@@ -79,23 +79,66 @@ const NAV_TOGGLE_TEXT: Record<HelpLanguage, string> = {
   ja: "目次",
 };
 
-export function createSettingsPage(deps: SettingsPageDeps) {
+/** 本文の頭 (分類の名前・説明・ヘルプへの 1 行)。この下にフォームを置く。 */
+export type SettingsArticleProps = {
+  title: string;
+  description: string;
+  help: {
+    before: string;
+    label: string;
+    href: string;
+    after: string;
+    onOpen(): void;
+  } | null;
+};
+
+export type SettingsPageView = {
+  /** 本文の箱 (article.gdp-help-content。フォームはこの中に足す)。 */
+  article(props: SettingsArticleProps): unknown;
+  /** 見出しの下の検索の行の箱 (検索欄はこの中に足す)。 */
+  searchRow(props: { onInput(): void }): unknown;
+};
+
+export const DEFAULT_VIEW: SettingsPageView = {
+  article: (
+    props,
+  ) => html`<article class="gdp-help-content"><h2>${props.title}</h2><p
+      >${props.description}</p
+    >${
+      props.help
+        ? html`<p class="gdp-help-shortcut-link">${props.help.before}<a
+              href=${props.help.href}
+              @click=${(event: MouseEvent) => {
+                event.preventDefault();
+                props.help?.onOpen();
+              }}
+            >${props.help.label}</a
+            >${props.help.after}</p>`
+        : nothing
+    }</article>`,
+  searchRow: (props) =>
+    html`<div class="gdp-help-search-row" @input=${props.onInput}></div>`,
+};
+
+export function createSettingsPage(
+  deps: SettingsPageDeps,
+  view: SettingsPageView = DEFAULT_VIEW,
+) {
   const shell = createPageShell();
 
   function helpLink(
     category: SettingsCategory,
     lang: HelpLanguage,
-  ): TemplateResult | typeof nothing {
+  ): SettingsArticleProps["help"] {
     const entry = CATEGORY_HELP_LINKS[category];
-    if (!entry) return nothing;
-    return html`<p class="gdp-help-shortcut-link">${entry.before[lang]}<a
-        href=${`/help?section=${entry.section}`}
-        @click=${(event: MouseEvent) => {
-          event.preventDefault();
-          deps.openHelpSection(entry.section);
-        }}
-      >${`${agentsText(lang).sidebar.help} › ${helpSectionName(lang, entry.section)}`}</a
-      >${lang === "ja" ? " にあります。" : "."}</p>`;
+    if (!entry) return null;
+    return {
+      before: entry.before[lang],
+      label: `${agentsText(lang).sidebar.help} › ${helpSectionName(lang, entry.section)}`,
+      href: `/help?section=${entry.section}`,
+      after: lang === "ja" ? " にあります。" : ".",
+      onOpen: () => deps.openHelpSection(entry.section),
+    };
   }
 
   function renderSettingsPage(options: { openedSection?: boolean } = {}) {
@@ -111,24 +154,25 @@ export function createSettingsPage(deps: SettingsPageDeps) {
 
     // 本文の頭 (分類の名前と説明) を描き、その下にフォーム (使い回す要素) を置く。
     const article = templateElement(
-      html`<article class="gdp-help-content"><h2>${current?.label ?? ""}</h2><p
-          >${current?.description ?? ""}</p
-        >${helpLink(active, lang)}</article>`,
+      view.article({
+        title: current?.label ?? "",
+        description: current?.description ?? "",
+        help: helpLink(active, lang),
+      }),
     );
     deps.mountViewerSettings(article);
 
     // 設定の検索は見出しの下。電話の段の目次 (1 段目) で打ち始めたら、結果を
     // 出す本文 (2 段目) へ。
     const searchRow = templateElement(
-      html`<div
-        class="gdp-help-search-row"
-        @input=${() => {
-          if (view.navOpen()) view.closeNav();
-        }}
-      ></div>`,
+      view.searchRow({
+        onInput: () => {
+          if (page.navOpen()) page.closeNav();
+        },
+      }),
     );
     deps.mountSettingsSearch(searchRow);
-    const view = shell.render(deps.$("#diff"), {
+    const page = shell.render(deps.$("#diff"), {
       page: "settings",
       lang,
       title: agentsText(lang).sidebar.settings,

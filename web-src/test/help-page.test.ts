@@ -29,15 +29,23 @@ import {
 } from "../views/help-keybindings";
 import {
   createHelpPage,
+  DEFAULT_VIEW as HELP_VIEW,
+  type HelpArticleProps,
   type HelpLanguage,
   type HelpPageDeps,
+  type HelpPageView,
   type HelpSection,
   helpSectionName,
   openHelpKeybindings,
 } from "../views/help-page";
 import { mobileShellText } from "../views/mobile-shell-i18n";
 import { quickHelpText } from "../views/quick-help-i18n";
-import { createSettingsPage } from "../views/settings-page";
+import {
+  createSettingsPage,
+  DEFAULT_VIEW as SETTINGS_VIEW,
+  type SettingsArticleProps,
+  type SettingsPageView,
+} from "../views/settings-page";
 import type { SettingsCategory } from "../views/viewer-settings";
 
 /** インストールの案内を出さないブラウザ (案内の中身は pwa.test.ts)。 */
@@ -193,43 +201,50 @@ const SAMPLE_HEADINGS: Record<string, SettingsCategory> = {
 };
 
 /** keepDom: 前のページ (ヘルプ) を描いたまま開く (ページを移ったとき)。 */
-function renderSettings(lang: HelpLanguage = "en", keepDom = false) {
+function renderSettings(
+  lang: HelpLanguage = "en",
+  keepDom = false,
+  view?: SettingsPageView,
+) {
   if (!keepDom) document.body.innerHTML = FIXTURE_DOM;
   const range = { from: "HEAD", to: "worktree" };
   let route: AppRoute = { screen: "repo", ref: "worktree", path: "", range };
   let category: SettingsCategory = "files";
   const searchHosts: HTMLElement[] = [];
   const openedHelp: HelpSection[] = [];
-  const page = createSettingsPage({
-    $: fixture$,
-    setRoute: (next) => {
-      route = next;
+  const page = createSettingsPage(
+    {
+      $: fixture$,
+      setRoute: (next) => {
+        route = next;
+      },
+      setPageMode: () => undefined,
+      setStatus: () => undefined,
+      currentRange: () => range,
+      cancelActiveSourceLoad: () => true,
+      removeStandaloneSource: () => undefined,
+      clearLoadQueue: () => undefined,
+      getLanguage: () => lang,
+      mountViewerSettings: () => undefined,
+      mountSettingsSearch: (host) => {
+        searchHosts.push(host);
+      },
+      settingsCategories: () => SAMPLE_CATEGORIES,
+      getSettingsCategory: () => category,
+      setSettingsCategory: (next) => {
+        category = next;
+      },
+      revealHeading: (id) => {
+        const owner = SAMPLE_HEADINGS[id];
+        if (owner) category = owner;
+      },
+      hasHeading: (id) => id in SAMPLE_HEADINGS,
+      openHelpSection: (section) => {
+        openedHelp.push(section);
+      },
     },
-    setPageMode: () => undefined,
-    setStatus: () => undefined,
-    currentRange: () => range,
-    cancelActiveSourceLoad: () => true,
-    removeStandaloneSource: () => undefined,
-    clearLoadQueue: () => undefined,
-    getLanguage: () => lang,
-    mountViewerSettings: () => undefined,
-    mountSettingsSearch: (host) => {
-      searchHosts.push(host);
-    },
-    settingsCategories: () => SAMPLE_CATEGORIES,
-    getSettingsCategory: () => category,
-    setSettingsCategory: (next) => {
-      category = next;
-    },
-    revealHeading: (id) => {
-      const owner = SAMPLE_HEADINGS[id];
-      if (owner) category = owner;
-    },
-    hasHeading: (id) => id in SAMPLE_HEADINGS,
-    openHelpSection: (section) => {
-      openedHelp.push(section);
-    },
-  });
+    view,
+  );
   page.openSettingsPage();
   return {
     page,
@@ -270,6 +285,7 @@ function renderHelpPage(
   lang: HelpLanguage,
   section: HelpSection | string,
   overrides: Partial<HelpPageDeps> = {},
+  view?: HelpPageView,
 ) {
   document.body.innerHTML = FIXTURE_DOM;
   let route: AppRoute = {
@@ -279,28 +295,31 @@ function renderHelpPage(
     range: { from: "HEAD", to: "worktree" },
   };
   const calls: string[] = [];
-  const page = createHelpPage({
-    $: fixture$,
-    getRoute: () => route,
-    setRoute: (next) => {
-      route = next;
+  const page = createHelpPage(
+    {
+      $: fixture$,
+      getRoute: () => route,
+      setRoute: (next) => {
+        route = next;
+      },
+      setPageMode: () => undefined,
+      cancelActiveSourceLoad: () => true,
+      removeStandaloneSource: () => undefined,
+      clearLoadQueue: () => undefined,
+      currentRange: () => ({ from: "HEAD", to: "worktree" }),
+      syncHeaderMenu: () => undefined,
+      getLanguage: () => lang,
+      codeViewerVersion: () => "1.2.3",
+      helpLabels: (labelLang) => helpLabels(labelLang, APP_LABELS[labelLang]),
+      openAccountsSettings: () => calls.push("openAccountsSettings"),
+      toggleKeyboardShortcuts: () => calls.push("toggleKeyboardShortcuts"),
+      getKeyBindings: () => DEFAULT_KEY_BINDINGS,
+      openShortcutSettings: () => calls.push("openShortcutSettings"),
+      installOffer: HIDDEN_INSTALL_OFFER,
+      ...overrides,
     },
-    setPageMode: () => undefined,
-    cancelActiveSourceLoad: () => true,
-    removeStandaloneSource: () => undefined,
-    clearLoadQueue: () => undefined,
-    currentRange: () => ({ from: "HEAD", to: "worktree" }),
-    syncHeaderMenu: () => undefined,
-    getLanguage: () => lang,
-    codeViewerVersion: () => "1.2.3",
-    helpLabels: (labelLang) => helpLabels(labelLang, APP_LABELS[labelLang]),
-    openAccountsSettings: () => calls.push("openAccountsSettings"),
-    toggleKeyboardShortcuts: () => calls.push("toggleKeyboardShortcuts"),
-    getKeyBindings: () => DEFAULT_KEY_BINDINGS,
-    openShortcutSettings: () => calls.push("openShortcutSettings"),
-    installOffer: HIDDEN_INSTALL_OFFER,
-    ...overrides,
-  });
+    view,
+  );
   page.renderHelpPage();
   return { page, calls, route: () => route };
 }
@@ -1140,5 +1159,51 @@ describe("help page captures", () => {
       heavy: files.filter((_, index) => sizes[index] > MAX_IMAGE_BYTES),
       total: sizes.reduce((sum, size) => sum + size, 0) <= MAX_TOTAL_BYTES,
     }).toEqual({ wide: [], heavy: [], total: true });
+  });
+});
+
+describe("the help page presenter", () => {
+  test("gives the view the section's title and the keybinding link, and opens the shortcuts", () => {
+    const articles: HelpArticleProps[] = [];
+    const { calls } = renderHelpPage(
+      "en",
+      "keybindings",
+      {},
+      {
+        ...HELP_VIEW,
+        article: (props) => {
+          articles.push(props);
+          return HELP_VIEW.article(props);
+        },
+        header: (props) => {
+          props.shortcuts.onClick();
+          return HELP_VIEW.header(props);
+        },
+      },
+    );
+    expect([
+      articles[0]?.groups.length ? "groups" : "none",
+      articles[0]?.shortcutLink !== null,
+      articles[0]?.install.visible,
+      calls,
+    ]).toEqual(["groups", true, false, ["toggleKeyboardShortcuts"]]);
+  });
+});
+
+describe("the settings page presenter", () => {
+  test("gives the view the name and description of the open category", () => {
+    const articles: SettingsArticleProps[] = [];
+    const { category } = renderSettings("en", false, {
+      ...SETTINGS_VIEW,
+      article: (props) => {
+        articles.push(props);
+        return SETTINGS_VIEW.article(props);
+      },
+    });
+    const shown = SAMPLE_CATEGORIES.find((item) => item.id === category());
+    expect([articles[0]?.title, articles[0]?.description]).toEqual([
+      shown?.label,
+      shown?.description,
+    ]);
   });
 });

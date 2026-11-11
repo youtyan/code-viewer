@@ -25,7 +25,28 @@ export type QuickHelpDeps = {
   openSettings(): void;
 };
 
-export function createQuickHelp(deps: QuickHelpDeps) {
+/** 小窓に並べる分類 (見出しとキーの表の行)。 */
+export type QuickHelpProps = {
+  lang: HelpKeybindingLanguage;
+  groups: { title: string; rows: Array<[string, string]> }[];
+};
+
+export type QuickHelpView = (props: QuickHelpProps) => unknown;
+
+export const DEFAULT_VIEW: QuickHelpView = (props) => {
+  const blocks = helpBlocks(props.lang);
+  return props.groups.map(
+    (group) =>
+      html`<section class="gdp-help-group"><h3>${group.title}</h3>${blocks.keyTable(
+        group.rows,
+      )}</section>`,
+  );
+};
+
+export function createQuickHelp(
+  deps: QuickHelpDeps,
+  view: QuickHelpView = DEFAULT_VIEW,
+) {
   const popover = deps.$<HTMLElement>("#quick-help-popover");
   const titleEl = deps.$<HTMLElement>("#quick-help-title");
   const closeBtn = deps.$<HTMLButtonElement>("#quick-help-close");
@@ -43,15 +64,15 @@ export function createQuickHelp(deps: QuickHelpDeps) {
       deps.getKeyBindings(),
       QUICK_HELP_GROUP_TITLES_EN,
     );
-    const blocks = helpBlocks(deps.getLanguage());
     renderOwned(
       groupsHost,
-      groups.map(
-        (group) =>
-          html`<section class="gdp-help-group"><h3>${group.title}</h3>${blocks.keyTable(
-            group.rows,
-          )}</section>`,
-      ),
+      view({
+        lang: deps.getLanguage(),
+        groups: groups.map((group) => ({
+          title: group.title,
+          rows: group.rows,
+        })),
+      }),
     );
   }
 

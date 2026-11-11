@@ -327,7 +327,487 @@ const DRAFT_FIELD_IDS = {
   watchLimit: "scope-watch-limit",
 } as const;
 
-export function createViewerSettings(deps: ViewerSettingsDeps) {
+type SelectProps = {
+  id: string;
+  value: string;
+  options: readonly { value: string; label: string }[];
+  onChange(value: string): void;
+};
+
+type ToggleProps = {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange(checked: boolean): void;
+};
+
+type TextareaProps = {
+  id: string;
+  label: string;
+  rows: number;
+  value: string;
+  disabled: boolean;
+  help: { id: string; text: string };
+  onInput(value: string): void;
+};
+
+/** 自分で描く節の箱 (出すか・分類にその節だけか)。 */
+type SectionBox = { hidden: boolean; sole: boolean };
+
+/** 見出しの横の「全プロジェクト共通」。 */
+type SharedTag = { text: string; title: string };
+
+/** 節。持ち主から受け取る節 (element) は、出す / 隠すを presenter が決める。 */
+export type ViewerSettingsSectionProps =
+  | { key: "external"; element: HTMLElement }
+  | {
+      key: "display";
+      box: SectionBox;
+      title: string;
+      shared: SharedTag;
+      colorTheme: {
+        label: string;
+        help: string;
+        choices: {
+          id: ColorTheme;
+          name: string;
+          pressed: boolean;
+          onPick(): void;
+        }[];
+      };
+      theme: {
+        label: string;
+        select: SelectProps;
+        help: string;
+        keyHelp: string;
+      };
+      terminalTone: { label: string; select: SelectProps; help: string };
+      shelfPlacement: { label: string; select: SelectProps; help: string };
+      language: { label: string; select: SelectProps };
+      sidebarFontSize: { label: string; select: SelectProps; help: string };
+      codeFontSize: { label: string; select: SelectProps };
+      userSettingsError: string;
+    }
+  | {
+      key: "uploads";
+      box: SectionBox;
+      title: string;
+      toggle: ToggleProps;
+      help: string;
+    }
+  | {
+      key: "agentNotify";
+      box: SectionBox;
+      title: string;
+      shared: SharedTag;
+      help: string;
+      waiting: ToggleProps;
+      done: ToggleProps;
+    }
+  | {
+      key: "excluded";
+      box: SectionBox;
+      title: string;
+      omitDirs: TextareaProps;
+      excludeNames: TextareaProps;
+      source: string;
+    }
+  | {
+      key: "datastores";
+      box: SectionBox;
+      title: string;
+      inferFk: ToggleProps;
+      inferFkHelp: string;
+      s3Tooltip: ToggleProps;
+      s3TooltipHelp: string;
+    }
+  | {
+      key: "watch";
+      box: SectionBox;
+      title: string;
+      label: string;
+      min: number;
+      max: number;
+      value: string;
+      disabled: boolean;
+      help: string;
+      onInput(value: string): void;
+    }
+  | {
+      key: "rules";
+      box: SectionBox;
+      title: string;
+      purpose: string;
+      source: string;
+      error: string;
+      highlightError: string;
+      edit: string;
+      label: string;
+      help: readonly string[];
+      guide: {
+        title: string;
+        intro: string;
+        fields: string;
+        matchers: string;
+        regions: string;
+        example: string;
+      };
+      /** 色付けした規則の HTML (色付けできなければ空)。 */
+      highlighted: string;
+      value: string;
+      disabled: boolean;
+      onInput(value: string): void;
+      onScroll(): void;
+      reset: { label: string; disabled: boolean; onClick(): void };
+    };
+
+export type ViewerSettingsFormProps = {
+  /** 検索で何も当たらないときの文 (当たれば null)。 */
+  searchEmpty: string | null;
+  sections: ViewerSettingsSectionProps[];
+  footer: {
+    hidden: boolean;
+    note: string;
+    status: { state: string; text: string };
+    saveError: string;
+    refreshError: string;
+    reset: {
+      label: string;
+      hidden: boolean;
+      disabled: boolean;
+      onClick(): void;
+    };
+    save: { label: string; disabled: boolean; onClick(): void };
+  };
+};
+
+export type ViewerSettingsSearchProps = {
+  placeholder: string;
+  value: string;
+  onInput(value: string): void;
+};
+
+export type ViewerSettingsView = {
+  /** 設定の節と保存の帯 (箱 .scope-settings の中)。 */
+  form(props: ViewerSettingsFormProps): unknown;
+  /** 見出しの下の検索欄 (箱 .scope-settings-search-wrap の中)。 */
+  search(props: ViewerSettingsSearchProps): unknown;
+};
+
+function sectionClass(box: SectionBox, extra = ""): string {
+  return [
+    "scope-settings-section",
+    extra,
+    box.sole ? "scope-settings-section-sole" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function sharedTagTemplate(tag: SharedTag): TemplateResult {
+  return html`<span class="scope-settings-shared" title=${tag.title}>${tag.text}</span>`;
+}
+
+function help(id: string, text: unknown): TemplateResult {
+  return html`<p class="scope-settings-help" id=${id}>${text}</p>`;
+}
+
+function errorLine(id: string, text: string): TemplateResult {
+  return html`<p
+    class="scope-settings-help scope-settings-refresh-error"
+    id=${id}
+    ?hidden=${!text}
+  >${text}</p>`;
+}
+
+function selectTemplate(props: SelectProps): TemplateResult {
+  return html`<select
+    id=${props.id}
+    .value=${live(props.value)}
+    @change=${(event: Event) =>
+      props.onChange((event.currentTarget as HTMLSelectElement).value)}
+  >${props.options.map(
+    (option) =>
+      html`<option value=${option.value} ?selected=${option.value === props.value}
+        >${option.label}</option
+      >`,
+  )}</select>`;
+}
+
+function toggleTemplate(props: ToggleProps): TemplateResult {
+  return html`<label class="scope-settings-toggle"><input
+      type="checkbox"
+      id=${props.id}
+      .checked=${live(props.checked)}
+      @change=${(event: Event) =>
+        props.onChange((event.currentTarget as HTMLInputElement).checked)}
+    /><span>${props.label}</span></label>`;
+}
+
+function textareaTemplate(props: TextareaProps): TemplateResult {
+  return html`<label for=${props.id}>${props.label}</label><textarea
+      id=${props.id}
+      rows=${props.rows}
+      spellcheck="false"
+      ?disabled=${props.disabled}
+      .value=${live(props.value)}
+      @input=${(event: Event) =>
+        props.onInput((event.currentTarget as HTMLTextAreaElement).value)}
+    ></textarea>${help(props.help.id, props.help.text)}`;
+}
+
+function titleTemplate(
+  id: string,
+  title: string,
+  shared?: SharedTag,
+): TemplateResult {
+  return shared
+    ? html`<div class="scope-settings-title-row"><strong
+          class="scope-settings-section-title"
+          id=${id}
+        >${title}</strong>${sharedTagTemplate(shared)}</div>`
+    : html`<strong class="scope-settings-section-title" id=${id}>${title}</strong>`;
+}
+
+function sectionTemplate(section: ViewerSettingsSectionProps): unknown {
+  switch (section.key) {
+    case "external":
+      return section.element;
+    case "display":
+      // テーマの各見本はライトとダークの小さなコードと差分を並べ、そのテーマの
+      // 名前の層の色 (html と同じ data-color-theme / data-theme) で描く。押すと
+      // すぐに当てる (明暗はそのまま)。
+      return html`<div
+        class=${sectionClass(section.box)}
+        data-settings-section="display"
+        ?hidden=${section.box.hidden}
+      >${titleTemplate("display-section-title", section.title, section.shared)}<label
+          id="viewer-color-theme-label"
+        >${section.colorTheme.label}</label><div
+          id="viewer-color-theme"
+          class="theme-picker"
+          role="group"
+          aria-labelledby="viewer-color-theme-label"
+        >${section.colorTheme.choices.map(
+          (choice) => html`<button
+            type="button"
+            class="theme-choice"
+            data-color-theme-choice=${choice.id}
+            aria-pressed=${String(choice.pressed)}
+            @click=${choice.onPick}
+          ><span class="theme-swatch" aria-hidden="true">${[...THEME_CHOICES]
+            .reverse()
+            .map(
+              (mode) => html`<span
+                class="theme-swatch-pane"
+                data-theme=${mode}
+                data-color-theme=${choice.id === DEFAULT_COLOR_THEME ? nothing : choice.id}
+              >${THEME_SWATCH}</span>`,
+            )}</span><span class="theme-choice-name">${choice.name}</span></button>`,
+        )}</div>${help("viewer-color-theme-help", section.colorTheme.help)}<label
+          for="viewer-theme"
+        >${section.theme.label}</label>${selectTemplate(section.theme.select)}${help(
+          "viewer-theme-help",
+          html`${section.theme.help}<span class="gdp-key-hint">${section.theme.keyHelp}</span>`,
+        )}<label for="viewer-terminal-tone">${section.terminalTone.label}</label>${selectTemplate(
+          section.terminalTone.select,
+        )}${help("viewer-terminal-tone-help", section.terminalTone.help)}<label
+          for="viewer-image-shelf-placement"
+        >${section.shelfPlacement.label}</label>${selectTemplate(
+          section.shelfPlacement.select,
+        )}${help("viewer-image-shelf-placement-help", section.shelfPlacement.help)}<label
+          for="viewer-language"
+        >${section.language.label}</label>${selectTemplate(section.language.select)}<label
+          for="sidebar-font-size"
+        >${section.sidebarFontSize.label}</label>${selectTemplate(
+          section.sidebarFontSize.select,
+        )}${help("ui-font-size-help", section.sidebarFontSize.help)}<label
+          for="code-font-size"
+        >${section.codeFontSize.label}</label>${selectTemplate(
+          section.codeFontSize.select,
+        )}${errorLine("user-settings-error", section.userSettingsError)}</div>`;
+    case "uploads":
+      return html`<div
+        class=${sectionClass(section.box)}
+        data-settings-section="uploads"
+        ?hidden=${section.box.hidden}
+      >${titleTemplate("upload-section-title", section.title)}${toggleTemplate(
+        section.toggle,
+      )}${help("upload-help", section.help)}</div>`;
+    case "agentNotify":
+      // エージェント一覧の「通知は有効です」から、この見出しへ飛んでくる。節は
+      // 見出し → 何のための設定かの 1 文 → 操作 (説明は 2 つのチェックボックスの両方に掛かる)。
+      return html`<div
+        class=${sectionClass(section.box)}
+        data-settings-section="agentNotify"
+        ?hidden=${section.box.hidden}
+      >${titleTemplate("agent-notify-section-title", section.title, section.shared)}${help(
+        "agent-notify-help",
+        section.help,
+      )}${toggleTemplate(section.waiting)}${toggleTemplate(section.done)}</div>`;
+    case "excluded":
+      return html`<div
+        class=${sectionClass(section.box)}
+        data-settings-section="excluded"
+        ?hidden=${section.box.hidden}
+      >${titleTemplate("excluded-section-title", section.title)}${textareaTemplate(
+        section.omitDirs,
+      )}${textareaTemplate(section.excludeNames)}<p id="scope-omit-source"
+          >${section.source}</p
+        ></div>`;
+    case "datastores":
+      return html`<div
+        class=${sectionClass(section.box)}
+        data-settings-section="datastores"
+        ?hidden=${section.box.hidden}
+      >${titleTemplate("datastore-section-title", section.title)}${toggleTemplate(
+        section.inferFk,
+      )}${help("datastore-infer-fk-help", section.inferFkHelp)}${toggleTemplate(
+        section.s3Tooltip,
+      )}${help("datastore-s3-tooltip-help", section.s3TooltipHelp)}</div>`;
+    case "watch": {
+      // スライダーと数の欄は同じ値を持つ (どちらを動かしても、もう片方が付いてくる)。
+      const onWatch = (event: Event) =>
+        section.onInput((event.currentTarget as HTMLInputElement).value);
+      return html`<div
+        class=${sectionClass(section.box)}
+        id="watch-settings-section"
+        data-settings-section="watch"
+        ?hidden=${section.box.hidden}
+      ><strong class="scope-settings-section-title" id="watch-section-title"
+          >${section.title}</strong
+        ><label for="scope-watch-limit">${section.label}</label><div
+          class="scope-watch-limit-row"
+        ><input
+          id="scope-watch-limit-range"
+          type="range"
+          step="16"
+          min=${section.min}
+          max=${section.max}
+          aria-label=${section.label}
+          ?disabled=${section.disabled}
+          .value=${live(section.value)}
+          @input=${onWatch}
+          @change=${onWatch}
+        /><input
+          id="scope-watch-limit"
+          type="number"
+          step="1"
+          min=${section.min}
+          max=${section.max}
+          ?disabled=${section.disabled}
+          .value=${live(section.value)}
+          @input=${onWatch}
+          @change=${onWatch}
+        /></div>${help("scope-watch-limit-help", section.help)}</div>`;
+    }
+    case "rules":
+      // 誤りは畳んだ中に入れない (閉じたままでも読めるように)。編集の欄は既定で
+      // 畳む。普段は触らないもので、開いたままだと長い JSON が分類の大半を占めていた。
+      return html`<div
+        class=${sectionClass(section.box, "agent-screen-rules-section")}
+        data-settings-section="rules"
+        ?hidden=${section.box.hidden}
+      ><strong class="scope-settings-section-title" id="agent-screen-rules-title"
+          >${section.title}</strong
+        >${help("agent-screen-rules-purpose", section.purpose)}${help(
+          "agent-screen-rules-source",
+          section.source,
+        )}${errorLine("agent-screen-rules-error", section.error)}${errorLine(
+          "agent-screen-rules-highlight-error",
+          section.highlightError,
+        )}<details id="agent-screen-rules-details" class="agent-screen-rules-details"
+          ><summary>${section.edit}</summary><label for="agent-screen-rules"
+            >${section.label}</label
+          ><div id="agent-screen-rules-help">${section.help.map(
+            (paragraph) =>
+              html`<p class="scope-settings-help">${paragraph}</p>`,
+          )}</div><details id="agent-screen-rules-guide" class="agent-screen-rules-guide" open
+            ><summary>${section.guide.title}</summary><p class="scope-settings-help"
+              >${section.guide.intro}</p
+            ><p class="scope-settings-help">${section.guide.fields}</p><p
+              class="scope-settings-help"
+            >${section.guide.matchers}</p><p class="scope-settings-help"
+              >${section.guide.regions}</p
+            ><pre class="agent-screen-rules-guide-example">${section.guide.example}</pre></details
+          ><div class="agent-screen-rules-editor"><pre
+            class="agent-screen-rules-highlight"
+            aria-hidden="true"
+          >${section.highlighted ? unsafeHTML(section.highlighted) : section.value}</pre><textarea
+            id="agent-screen-rules"
+            rows="24"
+            spellcheck="false"
+            aria-describedby="agent-screen-rules-help agent-screen-rules-source agent-screen-rules-error agent-screen-rules-highlight-error"
+            ?disabled=${section.disabled}
+            .value=${live(section.value)}
+            @input=${(event: Event) =>
+              section.onInput(
+                (event.currentTarget as HTMLTextAreaElement).value,
+              )}
+            @scroll=${section.onScroll}
+          ></textarea></div><div class="scope-settings-actions"><button
+            type="button"
+            class="gdp-btn"
+            id="agent-screen-rules-reset"
+            ?disabled=${section.reset.disabled}
+            @click=${section.reset.onClick}
+          >${section.reset.label}</button></div></details
+        ></div>`;
+  }
+}
+
+export const DEFAULT_VIEW: ViewerSettingsView = {
+  form: (props) => html`<p
+      class="scope-settings-help"
+      id="scope-settings-search-empty"
+      ?hidden=${props.searchEmpty === null}
+    >${props.searchEmpty ?? ""}</p>${props.sections.map(sectionTemplate)}<div
+      class="scope-settings-footer"
+      ?hidden=${props.footer.hidden}
+    >${help("scope-settings-save-note", props.footer.note)}<p
+        class="scope-settings-help"
+        id="scope-settings-save-status"
+        aria-live="polite"
+        data-state=${props.footer.status.state}
+      >${props.footer.status.text}</p>${errorLine(
+        "scope-settings-save-error",
+        props.footer.saveError,
+      )}${errorLine("scope-settings-refresh-error", props.footer.refreshError)}<div
+        class="scope-settings-actions"
+      ><button
+        id="scope-omit-reset"
+        type="button"
+        class="gdp-btn"
+        ?hidden=${props.footer.reset.hidden}
+        ?disabled=${props.footer.reset.disabled}
+        @click=${props.footer.reset.onClick}
+      >${props.footer.reset.label}</button><button
+        id="scope-settings-save"
+        type="button"
+        class="scope-settings-primary-action"
+        ?disabled=${props.footer.save.disabled}
+        @click=${props.footer.save.onClick}
+      >${props.footer.save.label}</button></div></div>`,
+  search: (
+    props,
+  ) => html`${iconTemplate(SEARCH_16_PATH, "scope-settings-search-icon")}<input
+      type="search"
+      id="scope-settings-search"
+      class="scope-settings-search"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder=${props.placeholder}
+      aria-label=${props.placeholder}
+      .value=${live(props.value)}
+      @input=${(event: Event) =>
+        props.onInput((event.currentTarget as HTMLInputElement).value)}
+    />`,
+};
+
+export function createViewerSettings(
+  deps: ViewerSettingsDeps,
+  view: ViewerSettingsView = DEFAULT_VIEW,
+) {
   // 節の箱。設定のページが置き、中はここが描く (ページを描き直しても使い回す)。
   let root: HTMLElement | null = null;
   // 検索欄の箱。設定のページの見出しの下に置く。
@@ -397,112 +877,71 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
 
   // ---- 描く ----------------------------------------------------------------
 
-  function sectionClass(key: SectionKey, extra = ""): string {
-    return [
-      "scope-settings-section",
-      extra,
-      sole === key ? "scope-settings-section-sole" : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
+  function box(key: SectionKey): SectionBox {
+    return { hidden: !visible.get(key), sole: sole === key };
   }
 
-  function sharedTagTemplate(text: ViewerSettingsText): TemplateResult {
-    return html`<span class="scope-settings-shared" title=${text.sharedTagTitle}
-      >${text.sharedTag}</span
-    >`;
-  }
-
-  function help(id: string, text: unknown): TemplateResult {
-    return html`<p class="scope-settings-help" id=${id}>${text}</p>`;
-  }
-
-  function errorLine(id: string, text: string): TemplateResult {
-    return html`<p
-      class="scope-settings-help scope-settings-refresh-error"
-      id=${id}
-      ?hidden=${!text}
-    >${text}</p>`;
-  }
-
-  function selectTemplate<T extends string>(
-    id: string,
-    current: string,
-    options: readonly { value: T; label: string }[],
-    onChange: (value: string) => void,
-  ): TemplateResult {
-    return html`<select
-      id=${id}
-      .value=${live(current)}
-      @change=${(event: Event) =>
-        onChange((event.currentTarget as HTMLSelectElement).value)}
-    >${options.map(
-      (option) =>
-        html`<option value=${option.value} ?selected=${option.value === current}
-          >${option.label}</option
-        >`,
-    )}</select>`;
-  }
-
-  function toggleTemplate(
-    field: ToggleField,
-    label: string,
-    checked: boolean,
-  ): TemplateResult {
-    return html`<label class="scope-settings-toggle"><input
-        type="checkbox"
-        id=${TOGGLES[field]}
-        .checked=${live(checked)}
-        @change=${(event: Event) => {
-          const next = (event.currentTarget as HTMLInputElement).checked;
-          if (choices) choices = { ...choices, [field]: next };
-          deps.onChoose({ [field]: next });
-        }}
-      /><span>${label}</span></label>`;
+  function sharedTag(text: ViewerSettingsText): SharedTag {
+    return { text: text.sharedTag, title: text.sharedTagTitle };
   }
 
   /** 選ぶ欄は選んだ時点で当てて保存する (下書きにしない)。 */
   function choose<K extends keyof ViewerSettingsChoices>(
     field: K,
-    value: string,
+    value: ViewerSettingsChoices[K],
   ): void {
     if (choices) choices = { ...choices, [field]: value };
     deps.onChoose({ [field]: value } as Partial<ViewerSettingsChoices>);
   }
 
-  function colorThemePickerTemplate(text: ViewerSettingsText): TemplateResult {
-    // 各見本はライトとダークの小さなコードと差分を並べ、そのテーマの名前の層の色
-    // (html と同じ data-color-theme / data-theme) で描く。押すとすぐに当てる
-    // (明暗はそのまま)。
-    return html`<div
-      id="viewer-color-theme"
-      class="theme-picker"
-      role="group"
-      aria-labelledby="viewer-color-theme-label"
-    >${COLOR_THEMES.map(
-      (id) => html`<button
-        type="button"
-        class="theme-choice"
-        data-color-theme-choice=${id}
-        aria-pressed=${String(id === colorTheme)}
-        @click=${() => deps.setColorTheme(id)}
-      ><span class="theme-swatch" aria-hidden="true">${[...THEME_CHOICES]
-        .reverse()
-        .map(
-          (mode) => html`<span
-            class="theme-swatch-pane"
-            data-theme=${mode}
-            data-color-theme=${id === DEFAULT_COLOR_THEME ? nothing : id}
-          >${THEME_SWATCH}</span>`,
-        )}</span><span class="theme-choice-name">${text.colorThemeNames[id]}</span></button>`,
-    )}</div>`;
+  function toggleProps(
+    field: ToggleField,
+    label: string,
+    checked: boolean,
+  ): ToggleProps {
+    return {
+      id: TOGGLES[field],
+      label,
+      checked,
+      onChange: (next) => choose(field, next),
+    };
   }
 
-  function displayTemplate(
+  function choiceSelect(
+    field: Exclude<keyof ViewerSettingsChoices, ToggleField>,
+    id: string,
+    value: string,
+    options: readonly { value: string; label: string }[],
+  ): SelectProps {
+    return { id, value, options, onChange: (next) => choose(field, next) };
+  }
+
+  function draftTextarea(
+    field: "omitDirs" | "excludeNames",
+    label: string,
+    rows: number,
+    helpText: { id: string; text: string },
+  ): TextareaProps {
+    return {
+      id: DRAFT_FIELD_IDS[field],
+      label,
+      rows,
+      value: general[field],
+      disabled: generalSavePending,
+      help: helpText,
+      onInput: (value) => {
+        if (generalSavePending) return;
+        general[field] = value;
+        markGeneralDirty(field);
+      },
+    };
+  }
+
+  function displayProps(
     text: ViewerSettingsText,
     v: ViewerSettingsValues,
     c: ViewerSettingsChoices,
-  ): TemplateResult {
+  ): ViewerSettingsSectionProps {
     const sizes = FONT_SIZE_VALUES.map((value) => ({
       value,
       label: (
@@ -514,136 +953,98 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
         } satisfies Record<FontSizeValue, string>
       )[value],
     }));
-    return html`<div
-      class=${sectionClass("display")}
-      data-settings-section="display"
-      ?hidden=${!visible.get("display")}
-    ><div class="scope-settings-title-row"><strong
-        class="scope-settings-section-title"
-        id="display-section-title"
-      >${text.display}</strong>${sharedTagTemplate(text)}</div><label
-      id="viewer-color-theme-label"
-    >${text.colorTheme}</label>${colorThemePickerTemplate(text)}${help(
-      "viewer-color-theme-help",
-      text.colorThemeHelp,
-    )}<label for="viewer-theme">${text.theme}</label>${selectTemplate(
-      "viewer-theme",
-      themeChoice,
-      THEME_CHOICES.map((value) => ({
-        value,
-        label: text.themeNames[value] ?? value,
-      })),
-      (value) => {
-        const choice = THEME_CHOICES.find((item) => item === value);
-        if (!choice) return;
-        themeChoice = choice;
-        deps.setTheme(choice);
+    return {
+      key: "display",
+      box: box("display"),
+      title: text.display,
+      shared: sharedTag(text),
+      colorTheme: {
+        label: text.colorTheme,
+        help: text.colorThemeHelp,
+        choices: COLOR_THEMES.map((id) => ({
+          id,
+          name: text.colorThemeNames[id],
+          pressed: id === colorTheme,
+          onPick: () => deps.setColorTheme(id),
+        })),
       },
-    )}${help(
-      "viewer-theme-help",
-      html`${text.themeHelp}<span class="gdp-key-hint">${text.themeKeyHelp}</span>`,
-    )}<label for="viewer-terminal-tone">${text.terminalTone}</label>${selectTemplate(
-      "viewer-terminal-tone",
-      c.terminalTone,
-      TERMINAL_TONES.map((value) => ({
-        value,
-        label: text.terminalToneNames[value] ?? value,
-      })),
-      (value) => choose("terminalTone", value),
-    )}${help("viewer-terminal-tone-help", text.terminalToneHelp)}<label
-      for="viewer-image-shelf-placement"
-    >${text.imageShelfPlacement}</label>${selectTemplate(
-      "viewer-image-shelf-placement",
-      c.terminalImageShelfPlacement,
-      TERMINAL_IMAGE_SHELF_PLACEMENTS.map((value) => ({
-        value,
-        label: text.imageShelfPlacementNames[value] ?? value,
-      })),
-      (value) => choose("terminalImageShelfPlacement", value),
-    )}${help("viewer-image-shelf-placement-help", text.imageShelfPlacementHelp)}<label
-      for="viewer-language"
-    >${text.language}</label>${selectTemplate(
-      "viewer-language",
-      c.language,
-      LANGUAGE_VALUES,
-      (value) => choose("language", value),
-    )}<label for="sidebar-font-size">${text.fileListFontSize}</label>${selectTemplate(
-      "sidebar-font-size",
-      c.sidebarFontSize,
-      sizes,
-      (value) => choose("sidebarFontSize", value),
-    )}${help("ui-font-size-help", text.fileListFontSizeHelp)}<label
-      for="code-font-size"
-    >${text.codeFontSize}</label>${selectTemplate(
-      "code-font-size",
-      c.codeFontSize,
-      sizes,
-      (value) => choose("codeFontSize", value),
-    )}${errorLine(
-      "user-settings-error",
-      v.userSettingsError ? text.userSettingsError(v.userSettingsError) : "",
-    )}</div>`;
-  }
-
-  function textareaTemplate(
-    field: "omitDirs" | "excludeNames",
-    rows: number,
-  ): TemplateResult {
-    return html`<textarea
-      id=${DRAFT_FIELD_IDS[field]}
-      rows=${rows}
-      spellcheck="false"
-      ?disabled=${generalSavePending}
-      .value=${live(general[field])}
-      @input=${(event: Event) => {
-        if (generalSavePending) return;
-        general[field] = (event.currentTarget as HTMLTextAreaElement).value;
-        markGeneralDirty(field);
-      }}
-    ></textarea>`;
-  }
-
-  function watchTemplate(
-    text: ViewerSettingsText,
-    v: ViewerSettingsValues,
-  ): TemplateResult {
-    // スライダーと数の欄は同じ値を持つ (どちらを動かしても、もう片方が付いてくる)。
-    const onWatch = (event: Event) => {
-      if (generalSavePending) return;
-      general.watchLimit = (event.currentTarget as HTMLInputElement).value;
-      markGeneralDirty("watchLimit");
+      theme: {
+        label: text.theme,
+        select: {
+          id: "viewer-theme",
+          value: themeChoice,
+          options: THEME_CHOICES.map((value) => ({
+            value,
+            label: text.themeNames[value] ?? value,
+          })),
+          onChange: (value) => {
+            const choice = THEME_CHOICES.find((item) => item === value);
+            if (!choice) return;
+            themeChoice = choice;
+            deps.setTheme(choice);
+          },
+        },
+        help: text.themeHelp,
+        keyHelp: text.themeKeyHelp,
+      },
+      terminalTone: {
+        label: text.terminalTone,
+        select: choiceSelect(
+          "terminalTone",
+          "viewer-terminal-tone",
+          c.terminalTone,
+          TERMINAL_TONES.map((value) => ({
+            value,
+            label: text.terminalToneNames[value] ?? value,
+          })),
+        ),
+        help: text.terminalToneHelp,
+      },
+      shelfPlacement: {
+        label: text.imageShelfPlacement,
+        select: choiceSelect(
+          "terminalImageShelfPlacement",
+          "viewer-image-shelf-placement",
+          c.terminalImageShelfPlacement,
+          TERMINAL_IMAGE_SHELF_PLACEMENTS.map((value) => ({
+            value,
+            label: text.imageShelfPlacementNames[value] ?? value,
+          })),
+        ),
+        help: text.imageShelfPlacementHelp,
+      },
+      language: {
+        label: text.language,
+        select: choiceSelect(
+          "language",
+          "viewer-language",
+          c.language,
+          LANGUAGE_VALUES,
+        ),
+      },
+      sidebarFontSize: {
+        label: text.fileListFontSize,
+        select: choiceSelect(
+          "sidebarFontSize",
+          "sidebar-font-size",
+          c.sidebarFontSize,
+          sizes,
+        ),
+        help: text.fileListFontSizeHelp,
+      },
+      codeFontSize: {
+        label: text.codeFontSize,
+        select: choiceSelect(
+          "codeFontSize",
+          "code-font-size",
+          c.codeFontSize,
+          sizes,
+        ),
+      },
+      userSettingsError: v.userSettingsError
+        ? text.userSettingsError(v.userSettingsError)
+        : "",
     };
-    return html`<div
-      class=${sectionClass("watch")}
-      id="watch-settings-section"
-      data-settings-section="watch"
-      ?hidden=${!visible.get("watch")}
-    ><strong class="scope-settings-section-title" id="watch-section-title"
-        >${text.watchTitle}</strong
-      ><label for="scope-watch-limit">${text.watchLimit}</label><div
-        class="scope-watch-limit-row"
-      ><input
-        id="scope-watch-limit-range"
-        type="range"
-        step="16"
-        min=${v.watchLimitMin}
-        max=${v.watchLimitMax}
-        aria-label=${text.watchLimit}
-        ?disabled=${generalSavePending}
-        .value=${live(general.watchLimit)}
-        @input=${onWatch}
-        @change=${onWatch}
-      /><input
-        id="scope-watch-limit"
-        type="number"
-        step="1"
-        min=${v.watchLimitMin}
-        max=${v.watchLimitMax}
-        ?disabled=${generalSavePending}
-        .value=${live(general.watchLimit)}
-        @input=${onWatch}
-        @change=${onWatch}
-      /></div>${help("scope-watch-limit-help", text.watchLimitHelp(v.watchLimitDefault))}</div>`;
   }
 
   function agentRulesHighlightHtml(): string {
@@ -673,70 +1074,9 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
         : text.agentRulesSourceDefault;
   }
 
-  function rulesTemplate(
+  function footerProps(
     text: ViewerSettingsText,
-    v: ViewerSettingsValues,
-  ): TemplateResult {
-    const code = agentRulesHighlightHtml();
-    // 誤りは畳んだ中に入れない (閉じたままでも読めるように)。編集の欄は既定で
-    // 畳む。普段は触らないもので、開いたままだと長い JSON が分類の大半を占めていた。
-    return html`<div
-      class=${sectionClass("rules", "agent-screen-rules-section")}
-      data-settings-section="rules"
-      ?hidden=${!visible.get("rules")}
-    ><strong class="scope-settings-section-title" id="agent-screen-rules-title"
-        >${text.agentRulesTitle}</strong
-      >${help("agent-screen-rules-purpose", text.agentRulesPurpose)}${help(
-        "agent-screen-rules-source",
-        agentRulesSourceText(text, v),
-      )}${errorLine("agent-screen-rules-error", agentRulesError)}${errorLine(
-        "agent-screen-rules-highlight-error",
-        agentRulesHighlightError,
-      )}<details id="agent-screen-rules-details" class="agent-screen-rules-details"
-        ><summary>${text.agentRulesEdit}</summary><label for="agent-screen-rules"
-          >${text.agentRulesLabel}</label
-        ><div id="agent-screen-rules-help">${text.agentRulesHelp.map(
-          (paragraph) => html`<p class="scope-settings-help">${paragraph}</p>`,
-        )}</div><details id="agent-screen-rules-guide" class="agent-screen-rules-guide" open
-          ><summary>${text.agentRulesGuideTitle}</summary><p class="scope-settings-help"
-            >${text.agentRulesGuideIntro}</p
-          ><p class="scope-settings-help">${text.agentRulesGuideFields}</p><p
-            class="scope-settings-help"
-          >${text.agentRulesGuideMatchers}</p><p class="scope-settings-help"
-            >${text.agentRulesGuideRegions}</p
-          ><pre class="agent-screen-rules-guide-example">${text.agentRulesGuideExample}</pre></details
-        ><div class="agent-screen-rules-editor"><pre
-          class="agent-screen-rules-highlight"
-          aria-hidden="true"
-        >${code ? unsafeHTML(code) : agentRulesValue}</pre><textarea
-          id="agent-screen-rules"
-          rows="24"
-          spellcheck="false"
-          aria-describedby="agent-screen-rules-help agent-screen-rules-source agent-screen-rules-error agent-screen-rules-highlight-error"
-          ?disabled=${generalSavePending}
-          .value=${live(agentRulesValue)}
-          @input=${(event: Event) => {
-            if (generalSavePending) return;
-            agentRulesValue = (event.currentTarget as HTMLTextAreaElement)
-              .value;
-            markAgentRulesDirty(false);
-          }}
-          @scroll=${syncAgentRulesScroll}
-        ></textarea></div><div class="scope-settings-actions"><button
-          type="button"
-          class="gdp-btn"
-          id="agent-screen-rules-reset"
-          ?disabled=${generalSavePending}
-          @click=${() => {
-            // 組み込みの規則を欄に入れるだけ。保存するまで今の規則のまま動く。
-            agentRulesValue = deps.getValues().agentRulesDefaultJson;
-            markAgentRulesDirty(true);
-          }}
-        >${text.agentRulesReset}</button></div></details
-      ></div>`;
-  }
-
-  function footerTemplate(text: ViewerSettingsText): TemplateResult {
+  ): ViewerSettingsFormProps["footer"] {
     const dirty = anyDirty();
     const state =
       generalStatus === "saving"
@@ -746,178 +1086,207 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
           : generalStatus === "saved"
             ? "saved"
             : "clean";
-    // 保存の帯は、保存する欄のある節が出ている間と、ほかの分類に未保存の変更が
-    // 残っている間 (保存の口をなくさない) だけ出す。
-    const hidden =
-      !SAVED_SECTIONS.some((key) => visible.get(key)) &&
-      !dirty &&
-      !generalSavePending;
-    return html`<div class="scope-settings-footer" ?hidden=${hidden}>${help(
-      "scope-settings-save-note",
-      text.saveNote,
-    )}<p
-      class="scope-settings-help"
-      id="scope-settings-save-status"
-      aria-live="polite"
-      data-state=${state}
-    >${
-      state === "saving"
-        ? text.saving
-        : state === "unsaved"
-          ? text.unsaved
-          : state === "saved"
-            ? text.saved
-            : text.noChanges
-    }</p>${errorLine("scope-settings-save-error", saveError)}${errorLine(
-      "scope-settings-refresh-error",
+    return {
+      // 保存の帯は、保存する欄のある節が出ている間と、ほかの分類に未保存の変更が
+      // 残っている間 (保存の口をなくさない) だけ出す。
+      hidden:
+        !SAVED_SECTIONS.some((key) => visible.get(key)) &&
+        !dirty &&
+        !generalSavePending,
+      note: text.saveNote,
+      status: {
+        state,
+        text:
+          state === "saving"
+            ? text.saving
+            : state === "unsaved"
+              ? text.unsaved
+              : state === "saved"
+                ? text.saved
+                : text.noChanges,
+      },
+      saveError,
       refreshError,
-    )}<div class="scope-settings-actions"><button
-      id="scope-omit-reset"
-      type="button"
-      class="gdp-btn"
-      ?hidden=${!GENERAL_SECTIONS.some((key) => visible.get(key))}
-      ?disabled=${generalSavePending}
-      @click=${() => {
-        applyGeneralFields(deps.getDefaultValues(), true);
-        restoreDefaults = true;
-        changedGeneralFields.clear();
-        for (const field of GENERAL_SETTING_FIELDS)
-          changedGeneralFields.add(field);
-        generalDirty = true;
-        generalStatus = "dirty";
-        saveError = "";
-        draw();
-      }}
-    >${text.reset}</button><button
-      id="scope-settings-save"
-      type="button"
-      class="scope-settings-primary-action"
-      ?disabled=${generalSavePending || !dirty}
-      @click=${() => {
-        void saveChanges();
-      }}
-    >${generalStatus === "saving" ? text.saving : text.save}</button></div></div>`;
+      reset: {
+        label: text.reset,
+        hidden: !GENERAL_SECTIONS.some((key) => visible.get(key)),
+        disabled: generalSavePending,
+        onClick: () => {
+          applyGeneralFields(deps.getDefaultValues(), true);
+          restoreDefaults = true;
+          changedGeneralFields.clear();
+          for (const field of GENERAL_SETTING_FIELDS)
+            changedGeneralFields.add(field);
+          generalDirty = true;
+          generalStatus = "dirty";
+          saveError = "";
+          draw();
+        },
+      },
+      save: {
+        label: generalStatus === "saving" ? text.saving : text.save,
+        disabled: generalSavePending || !dirty,
+        onClick: () => {
+          void saveChanges();
+        },
+      },
+    };
   }
 
-  function formTemplate(): TemplateResult | typeof nothing {
+  function formProps(): ViewerSettingsFormProps | null {
     const v = values;
     const c = choices;
-    if (!v || !c) return nothing;
+    if (!v || !c) return null;
     const text = deps.getText();
-    const ownSection = (
-      key: SectionKey,
-      id: string,
-      title: string,
-      content: unknown,
-      titleTag?: TemplateResult,
-    ) => html`<div
-      class=${sectionClass(key)}
-      data-settings-section=${key}
-      ?hidden=${!visible.get(key)}
-    >${
-      titleTag
-        ? html`<div class="scope-settings-title-row"><strong
-              class="scope-settings-section-title"
-              id=${id}
-            >${title}</strong>${titleTag}</div>`
-        : html`<strong class="scope-settings-section-title" id=${id}>${title}</strong>`
-    }${content}</div>`;
-    const sections: Record<SectionKey, unknown> = {
-      display: displayTemplate(text, v, c),
-      uploads: ownSection(
-        "uploads",
-        "upload-section-title",
-        text.uploadsTitle,
-        html`${toggleTemplate("uploadEnabled", text.uploadEnabledLabel, c.uploadEnabled)}${help(
-          "upload-help",
-          text.uploadEnabledHelp,
-        )}`,
-      ),
-      // エージェント一覧の「通知は有効です」から、この見出しへ飛んでくる。節は
-      // 見出し → 何のための設定かの 1 文 → 操作 (説明は 2 つのチェックボックスの両方に掛かる)。
-      agentNotify: ownSection(
-        "agentNotify",
-        "agent-notify-section-title",
-        text.agentNotifyTitle,
-        html`${help("agent-notify-help", text.agentNotifyHelp)}${toggleTemplate(
+    const sections: Record<SectionKey, ViewerSettingsSectionProps> = {
+      display: displayProps(text, v, c),
+      uploads: {
+        key: "uploads",
+        box: box("uploads"),
+        title: text.uploadsTitle,
+        toggle: toggleProps(
+          "uploadEnabled",
+          text.uploadEnabledLabel,
+          c.uploadEnabled,
+        ),
+        help: text.uploadEnabledHelp,
+      },
+      agentNotify: {
+        key: "agentNotify",
+        box: box("agentNotify"),
+        title: text.agentNotifyTitle,
+        shared: sharedTag(text),
+        help: text.agentNotifyHelp,
+        waiting: toggleProps(
           "agentNotifyWaiting",
           text.agentNotifyWaitingLabel,
           c.agentNotifyWaiting,
-        )}${toggleTemplate("agentNotifyDone", text.agentNotifyDoneLabel, c.agentNotifyDone)}`,
-        sharedTagTemplate(text),
-      ),
-      excluded: ownSection(
-        "excluded",
-        "excluded-section-title",
-        text.excludedDirectories,
-        html`<label for="scope-omit-dirs">${text.omitDirs}</label>${textareaTemplate(
-          "omitDirs",
-          6,
-        )}${help("scope-omit-dirs-help", text.omitDirsHelp)}<label
-            for="scope-exclude-names"
-          >${text.excludeNames}</label
-          >${textareaTemplate("excludeNames", 4)}${help(
-            "scope-exclude-names-help",
-            text.excludeNamesHelp,
-          )}<p id="scope-omit-source">${v.scopeSource}</p>`,
-      ),
-      datastores: ownSection(
-        "datastores",
-        "datastore-section-title",
-        text.datastoreTitle,
-        html`${toggleTemplate("inferFkRails", text.datastoreInferFkLabel, c.inferFkRails)}${help(
-          "datastore-infer-fk-help",
-          text.datastoreInferFkHelp,
-        )}${toggleTemplate(
+        ),
+        done: toggleProps(
+          "agentNotifyDone",
+          text.agentNotifyDoneLabel,
+          c.agentNotifyDone,
+        ),
+      },
+      excluded: {
+        key: "excluded",
+        box: box("excluded"),
+        title: text.excludedDirectories,
+        omitDirs: draftTextarea("omitDirs", text.omitDirs, 6, {
+          id: "scope-omit-dirs-help",
+          text: text.omitDirsHelp,
+        }),
+        excludeNames: draftTextarea("excludeNames", text.excludeNames, 4, {
+          id: "scope-exclude-names-help",
+          text: text.excludeNamesHelp,
+        }),
+        source: v.scopeSource,
+      },
+      datastores: {
+        key: "datastores",
+        box: box("datastores"),
+        title: text.datastoreTitle,
+        inferFk: toggleProps(
+          "inferFkRails",
+          text.datastoreInferFkLabel,
+          c.inferFkRails,
+        ),
+        inferFkHelp: text.datastoreInferFkHelp,
+        s3Tooltip: toggleProps(
           "s3TooltipEnabled",
           text.datastoreS3TooltipLabel,
           c.s3TooltipEnabled,
-        )}${help("datastore-s3-tooltip-help", text.datastoreS3TooltipHelp)}`,
-      ),
-      watch: watchTemplate(text, v),
-      rules: rulesTemplate(text, v),
-      agentHooks: deps.agentHooksSection,
-      accounts: deps.agentAccountsSection,
-      shortcuts: deps.shortcutsSection,
-      remote: deps.remoteAccessSection,
+        ),
+        s3TooltipHelp: text.datastoreS3TooltipHelp,
+      },
+      watch: {
+        key: "watch",
+        box: box("watch"),
+        title: text.watchTitle,
+        label: text.watchLimit,
+        min: v.watchLimitMin,
+        max: v.watchLimitMax,
+        value: general.watchLimit,
+        disabled: generalSavePending,
+        help: text.watchLimitHelp(v.watchLimitDefault),
+        onInput: (value) => {
+          if (generalSavePending) return;
+          general.watchLimit = value;
+          markGeneralDirty("watchLimit");
+        },
+      },
+      rules: {
+        key: "rules",
+        box: box("rules"),
+        title: text.agentRulesTitle,
+        purpose: text.agentRulesPurpose,
+        source: agentRulesSourceText(text, v),
+        error: agentRulesError,
+        highlightError: agentRulesHighlightError,
+        edit: text.agentRulesEdit,
+        label: text.agentRulesLabel,
+        help: text.agentRulesHelp,
+        guide: {
+          title: text.agentRulesGuideTitle,
+          intro: text.agentRulesGuideIntro,
+          fields: text.agentRulesGuideFields,
+          matchers: text.agentRulesGuideMatchers,
+          regions: text.agentRulesGuideRegions,
+          example: text.agentRulesGuideExample,
+        },
+        highlighted: agentRulesHighlightHtml(),
+        value: agentRulesValue,
+        disabled: generalSavePending,
+        onInput: (value) => {
+          if (generalSavePending) return;
+          agentRulesValue = value;
+          markAgentRulesDirty(false);
+        },
+        onScroll: syncAgentRulesScroll,
+        reset: {
+          label: text.agentRulesReset,
+          disabled: generalSavePending,
+          onClick: () => {
+            // 組み込みの規則を欄に入れるだけ。保存するまで今の規則のまま動く。
+            agentRulesValue = deps.getValues().agentRulesDefaultJson;
+            markAgentRulesDirty(true);
+          },
+        },
+      },
+      agentHooks: { key: "external", element: deps.agentHooksSection },
+      accounts: { key: "external", element: deps.agentAccountsSection },
+      shortcuts: { key: "external", element: deps.shortcutsSection },
+      remote: { key: "external", element: deps.remoteAccessSection },
     };
     const trimmed = query.trim();
     const shown = SECTION_ORDER.some(([key]) => visible.get(key));
-    return html`<p
-      class="scope-settings-help"
-      id="scope-settings-search-empty"
-      ?hidden=${!trimmed || shown}
-    >${trimmed ? text.searchNoMatch(trimmed) : ""}</p>${SECTION_ORDER.map(
-      ([key]) => sections[key],
-    )}${footerTemplate(text)}`;
-  }
-
-  function searchTemplate(): TemplateResult {
-    const text = deps.getText();
-    return html`${iconTemplate(SEARCH_16_PATH, "scope-settings-search-icon")}<input
-      type="search"
-      id="scope-settings-search"
-      class="scope-settings-search"
-      autocomplete="off"
-      spellcheck="false"
-      placeholder=${text.searchPlaceholder}
-      aria-label=${text.searchPlaceholder}
-      .value=${live(query)}
-      @input=${(event: Event) => {
-        query = (event.currentTarget as HTMLInputElement).value;
-        applyCategory();
-      }}
-    />`;
+    return {
+      searchEmpty: trimmed && !shown ? text.searchNoMatch(trimmed) : null,
+      sections: SECTION_ORDER.map(([key]) => sections[key]),
+      footer: footerProps(text),
+    };
   }
 
   function drawSearch(): void {
-    renderOwned(searchWrap, searchTemplate());
+    const text = deps.getText();
+    renderOwned(
+      searchWrap,
+      view.search({
+        placeholder: text.searchPlaceholder,
+        value: query,
+        onInput: (value) => {
+          query = value;
+          applyCategory();
+        },
+      }),
+    );
   }
 
   function draw(): void {
     drawSearch();
     if (!root) return;
-    renderOwned(root, formTemplate());
+    const props = formProps();
+    renderOwned(root, props ? view.form(props) : nothing);
     // 持ち主から受け取った節は、出す / 隠すと見出しの省き方だけをここが決める。
     for (const [key, element] of Object.entries(external) as [
       SectionKey,

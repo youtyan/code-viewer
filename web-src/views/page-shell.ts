@@ -5,7 +5,7 @@
 // 画面も中身を差し替えるので、枠を描くたびに箱が #diff に居るかを確かめ、
 // 居なければ箱を作り直して置く。
 
-import { html, nothing, type TemplateResult } from "lit/html.js";
+import { html, nothing } from "lit/html.js";
 import { phoneMediaQuery } from "./shell/workspace";
 import { renderOwned, templateElement } from "./ui/renderer";
 
@@ -40,7 +40,52 @@ export type PageShellParts = {
   openedSection: boolean;
 };
 
-export function createPageShell() {
+/** 枠に描くもの。 */
+export type PageShellProps = {
+  page: PageShellParts["page"];
+  lang: PageShellParts["lang"];
+  title: string;
+  headerActions: unknown;
+  searchRow: unknown;
+  nav: (
+    | { kind: "heading"; label: string }
+    | { kind: "item"; label: string; active: boolean; onSelect(): void }
+  )[];
+  article: unknown;
+  /** 狭い面の目次の開閉。 */
+  toggle: { text: string; current: string; open: boolean; onToggle(): void };
+};
+
+export type PageShellView = (props: PageShellProps) => unknown;
+
+export const DEFAULT_VIEW: PageShellView = (props) => html`<section
+  class="gdp-help-shell"
+  data-page=${props.page}
+  lang=${props.lang}
+><header class="gdp-help-header"><h1>${props.title}</h1>${
+  props.headerActions ?? nothing
+}</header>${props.searchRow ?? nothing}<div
+  class=${props.toggle.open ? "gdp-help-layout gdp-help-nav-open" : "gdp-help-layout"}
+><button
+  type="button"
+  class="gdp-help-nav-toggle"
+  aria-controls="gdp-help-nav"
+  aria-expanded=${String(props.toggle.open)}
+  @click=${props.toggle.onToggle}
+><span class="gdp-help-nav-toggle-label">${props.toggle.text}</span><span
+  class="gdp-help-nav-toggle-current"
+>${props.toggle.current}</span></button><nav class="gdp-help-nav" id="gdp-help-nav">${props.nav.map(
+  (item) =>
+    item.kind === "heading"
+      ? html`<div class="gdp-help-nav-heading">${item.label}</div>`
+      : html`<button
+          type="button"
+          class=${item.active ? "active" : ""}
+          @click=${item.onSelect}
+        >${item.label}</button>`,
+)}</nav>${props.article}</div></section>`;
+
+export function createPageShell(view: PageShellView = DEFAULT_VIEW) {
   // 狭い面 (style.css の @container help-shell) では目次を本文の上に畳む。既定は
   // 畳み、節を選んだらまた畳む (描き直しても開いたままにはしない)。
   // 電話の段では 2 段の画面: 目次を開いている間は目次だけ (1 段目)、節を選ぶと
@@ -51,47 +96,43 @@ export function createPageShell() {
   let host: HTMLElement | null = null;
   let parts: PageShellParts | null = null;
 
-  function shellTemplate(current: PageShellParts): TemplateResult {
+  function shellProps(current: PageShellParts): PageShellProps {
     const active = current.nav.find(
       (item): item is Extract<PageShellNavItem, { kind: "item" }> =>
         item.kind === "item" && item.active,
     );
-    return html`<section
-      class="gdp-help-shell"
-      data-page=${current.page}
-      lang=${current.lang}
-    ><header class="gdp-help-header"><h1>${current.title}</h1>${
-      current.headerActions ?? nothing
-    }</header>${current.searchRow ?? nothing}<div
-      class=${navOpen ? "gdp-help-layout gdp-help-nav-open" : "gdp-help-layout"}
-    ><button
-      type="button"
-      class="gdp-help-nav-toggle"
-      aria-controls="gdp-help-nav"
-      aria-expanded=${String(navOpen)}
-      @click=${() => {
-        navOpen = !navOpen;
-        draw();
-      }}
-    ><span class="gdp-help-nav-toggle-label">${current.toggleText}</span><span
-      class="gdp-help-nav-toggle-current"
-    >${active?.label ?? ""}</span></button><nav class="gdp-help-nav" id="gdp-help-nav">${current.nav.map(
-      (item) =>
+    return {
+      page: current.page,
+      lang: current.lang,
+      title: current.title,
+      headerActions: current.headerActions,
+      searchRow: current.searchRow,
+      nav: current.nav.map((item) =>
         item.kind === "heading"
-          ? html`<div class="gdp-help-nav-heading">${item.label}</div>`
-          : html`<button
-              type="button"
-              class=${item.active ? "active" : ""}
-              @click=${() => {
+          ? item
+          : {
+              ...item,
+              onSelect: () => {
                 navOpen = false;
                 item.onSelect();
-              }}
-            >${item.label}</button>`,
-    )}</nav>${current.article}</div></section>`;
+              },
+            },
+      ),
+      article: current.article,
+      toggle: {
+        text: current.toggleText,
+        current: active?.label ?? "",
+        open: navOpen,
+        onToggle: () => {
+          navOpen = !navOpen;
+          draw();
+        },
+      },
+    };
   }
 
   function draw(): void {
-    if (host && parts) renderOwned(host, shellTemplate(parts));
+    if (host && parts) renderOwned(host, view(shellProps(parts)));
   }
 
   /** 枠を描いて target の中身と差し替える。返す closeNav は目次の 1 段目を閉じる。 */

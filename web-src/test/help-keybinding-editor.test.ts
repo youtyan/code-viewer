@@ -23,9 +23,10 @@ import {
   closeOpenDialog,
 } from "./_dialog-helpers";
 
-const { createShortcutSettings } = await import(
+const { createShortcutSettings, DEFAULT_VIEW } = await import(
   "../views/help-keybinding-editor"
 );
+type ShortcutSettingsProps = Parameters<typeof DEFAULT_VIEW>[0];
 
 afterEach(() => {
   closeOpenDialog();
@@ -34,24 +35,31 @@ afterEach(() => {
 
 type Harness = ReturnType<typeof setup>;
 
-function setup(saved: KeymapOverrides = {}, mac = true) {
+function setup(
+  saved: KeymapOverrides = {},
+  mac = true,
+  view: typeof DEFAULT_VIEW = DEFAULT_VIEW,
+) {
   const state = {
     saved,
     saves: [] as KeymapOverrides[],
     downloads: [] as Array<{ fileName: string; text: string }>,
     notified: 0,
   };
-  const settings = createShortcutSettings({
-    getLanguage: () => "en",
-    mac,
-    getSaved: () => state.saved,
-    save: async (next) => {
-      state.saves.push(next);
-      state.saved = next;
+  const settings = createShortcutSettings(
+    {
+      getLanguage: () => "en",
+      mac,
+      getSaved: () => state.saved,
+      save: async (next) => {
+        state.saves.push(next);
+        state.saved = next;
+      },
+      getSharedTag: () => ({ text: "All projects", title: "Shared" }),
+      download: (fileName, text) => state.downloads.push({ fileName, text }),
     },
-    getSharedTag: () => ({ text: "All projects", title: "Shared" }),
-    download: (fileName, text) => state.downloads.push({ fileName, text }),
-  });
+    view,
+  );
   settings.draft.subscribe(() => {
     state.notified += 1;
   });
@@ -786,5 +794,26 @@ describe("the table look of the list", () => {
     expect(
       Array.from(rows).every((item) => item.classList.contains("ui-table-row")),
     ).toBe(true);
+  });
+});
+
+describe("the shortcut settings presenter", () => {
+  test("filters the rows it gives the view, and opening a row gives it the details", () => {
+    const shown: ShortcutSettingsProps[] = [];
+    setup({}, true, (props) => {
+      shown.push(props);
+      return DEFAULT_VIEW(props);
+    });
+    const last = () => shown[shown.length - 1];
+    last()?.filter.onInput("no such shortcut at all");
+    expect([last()?.groups.length, last()?.empty !== null]).toEqual([0, true]);
+    last()?.filter.onInput("");
+    const row = last()?.groups[0]?.rows[0];
+    row?.onToggle();
+    const opened = last()?.groups[0]?.rows[0];
+    expect([opened?.expanded, opened?.detail?.action]).toEqual([
+      true,
+      row?.action,
+    ]);
   });
 });

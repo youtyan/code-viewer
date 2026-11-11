@@ -297,7 +297,267 @@ type Pending = {
 
 type KeyLabel = { label: string; pwa: boolean };
 
-export function createShortcutSettings(deps: ShortcutSettingsDeps) {
+type Toggle = {
+  /** 描き直しの後にフォーカスを戻す先の名前。 */
+  focusKey: string;
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange(checked: boolean): void;
+};
+
+type Button = { focusKey: string; label: string; onClick(): void };
+
+/** 開いた行の中身 (キーごとの効く所・足す・既定に戻す・取り合いの確認)。 */
+export type ShortcutDetailProps = {
+  action: KeymapAction;
+  chords: {
+    id: string;
+    label: string;
+    wheres: Toggle[];
+    remove: Button & { title: string };
+  }[];
+  browserNote: string | null;
+  add: Button & {
+    pressed: boolean;
+    /** フォーカスが離れた (記録をやめるか、presenter が決める)。 */
+    onBlur(button: HTMLElement): void;
+  };
+  gFirst: Toggle;
+  restore: Button & { disabled: boolean };
+  conflict: { message: string; replace: Button; cancel: Button } | null;
+  notice: string | null;
+};
+
+export type ShortcutRowProps = {
+  action: KeymapAction;
+  label: string;
+  changed: string | null;
+  keys: KeyLabel[];
+  noKey: string;
+  pwaTitle: string;
+  expanded: boolean;
+  onToggle(): void;
+  detail: ShortcutDetailProps | null;
+};
+
+export type ShortcutSettingsProps = {
+  title: string;
+  shared: { text: string; title: string };
+  intro: string;
+  filter: { placeholder: string; value: string; onInput(value: string): void };
+  exportJson: Button;
+  /** 押すとファイルを選ぶ欄を開く (選んだファイルは onImportFile)。 */
+  importJson: { focusKey: string; label: string };
+  editJson: Button & { pressed: boolean };
+  resetAll: Button;
+  onImportFile(input: HTMLInputElement): void;
+  json: {
+    open: boolean;
+    label: string;
+    help: readonly string[];
+    text: string;
+    issues: string[];
+    onInput(value: string): void;
+  };
+  /** 絞り込みで何も残らないときの文 (残れば null)。 */
+  empty: string | null;
+  groups: {
+    key: string;
+    title: string;
+    keysColumn: string;
+    rows: ShortcutRowProps[];
+  }[];
+};
+
+export type ShortcutSettingsView = (props: ShortcutSettingsProps) => unknown;
+
+function toggleTemplate(toggle: Toggle, className = ""): TemplateResult {
+  return html`<label
+    class=${className ? `shortcut-where ${className}` : "shortcut-where"}
+    ><input
+      type="checkbox"
+      data-focus-key=${toggle.focusKey}
+      ?disabled=${toggle.disabled === true}
+      .checked=${live(toggle.checked)}
+      @change=${(event: Event) =>
+        toggle.onChange((event.currentTarget as HTMLInputElement).checked)}
+    /><span>${toggle.label}</span></label
+  >`;
+}
+
+function buttonTemplate(button: Button, className: string): TemplateResult {
+  return html`<button
+    type="button"
+    class=${className}
+    data-focus-key=${button.focusKey}
+    @click=${button.onClick}
+  >${button.label}</button>`;
+}
+
+function detailTemplate(detail: ShortcutDetailProps): TemplateResult {
+  return html`<div class="shortcut-row-detail" id=${`shortcut-detail-${detail.action}`}>${
+    detail.chords.length
+      ? html`<ul class="shortcut-chords">${repeat(
+          detail.chords,
+          (chord) => chord.id,
+          (
+            chord,
+          ) => html`<li class="shortcut-chord"><kbd>${chord.label}</kbd><span
+              class="shortcut-wheres"
+              >${chord.wheres.map((where) => toggleTemplate(where))}</span
+            ><button
+              type="button"
+              class="shortcut-chord-remove"
+              data-focus-key=${chord.remove.focusKey}
+              aria-label=${chord.remove.title}
+              title=${chord.remove.title}
+              @click=${chord.remove.onClick}
+            >×</button></li>`,
+        )}</ul>${
+          detail.browserNote
+            ? html`<p class="scope-settings-help shortcut-chord-note">${detail.browserNote}</p>`
+            : nothing
+        }`
+      : nothing
+  }<div class="shortcut-row-actions"><button
+      type="button"
+      class="gdp-btn gdp-btn-sm shortcut-add"
+      data-focus-key=${detail.add.focusKey}
+      aria-pressed=${String(detail.add.pressed)}
+      @click=${detail.add.onClick}
+      @blur=${(event: FocusEvent) =>
+        detail.add.onBlur(event.currentTarget as HTMLElement)}
+    >${detail.add.label}</button>${toggleTemplate(detail.gFirst, "shortcut-gfirst")}<button
+      type="button"
+      class="gdp-btn gdp-btn-sm"
+      data-focus-key=${detail.restore.focusKey}
+      ?disabled=${detail.restore.disabled}
+      @click=${detail.restore.onClick}
+    >${detail.restore.label}</button></div>${
+      detail.conflict
+        ? html`<div class="shortcut-conflict" role="alert"><p>${detail.conflict.message}</p>${buttonTemplate(
+            detail.conflict.replace,
+            "gdp-btn gdp-btn-sm shortcut-conflict-replace",
+          )}${buttonTemplate(
+            detail.conflict.cancel,
+            "gdp-btn gdp-btn-sm shortcut-conflict-cancel",
+          )}</div>`
+        : nothing
+    }${
+      detail.notice
+        ? html`<p class="scope-settings-help shortcut-notice" role="status">${detail.notice}</p>`
+        : nothing
+    }</div>`;
+}
+
+function rowTemplate(row: ShortcutRowProps): TemplateResult {
+  // キーは幅をそろえた升に 1 つずつ入れる (折り返しても列がそろう)。
+  return html`<div
+    class="shortcut-row ui-table-row"
+    data-action=${row.action}
+    data-changed=${ifDefined(row.changed !== null ? "true" : undefined)}
+  ><button
+    type="button"
+    class="shortcut-row-head"
+    data-focus-key=${`${row.action}:head`}
+    aria-expanded=${String(row.expanded)}
+    aria-controls=${`shortcut-detail-${row.action}`}
+    @click=${row.onToggle}
+  ><span class="shortcut-name">${row.label}</span><span class="shortcut-changed"
+      >${row.changed ?? ""}</span
+    ><span class="shortcut-keys">${
+      row.keys.length
+        ? nothing
+        : html`<span class="shortcut-none">${row.noKey}</span>`
+    }${row.keys.map(
+      (key) =>
+        html`<span class="shortcut-key"><kbd>${key.label}</kbd>${
+          key.pwa
+            ? html`<span class="shortcut-key-pwa" title=${row.pwaTitle}>PWA</span>`
+            : nothing
+        }</span>`,
+    )}</span></button>${row.detail ? detailTemplate(row.detail) : nothing}</div>`;
+}
+
+export const DEFAULT_VIEW: ShortcutSettingsView = (props) => html`<div
+    class="scope-settings-title-row"
+  ><strong class="scope-settings-section-title" id="shortcut-settings-title"
+      >${props.title}</strong
+    ><span class="scope-settings-shared" title=${props.shared.title}
+      >${props.shared.text}</span
+    ></div
+  ><p class="scope-settings-help">${props.intro}</p><div class="shortcut-toolbar"><input
+      type="search"
+      class="shortcut-filter"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder=${props.filter.placeholder}
+      aria-label=${props.filter.placeholder}
+      .value=${live(props.filter.value)}
+      @input=${(event: Event) =>
+        props.filter.onInput((event.currentTarget as HTMLInputElement).value)}
+    />${buttonTemplate(props.exportJson, "gdp-btn gdp-btn-sm")}<button
+      type="button"
+      class="gdp-btn gdp-btn-sm"
+      data-focus-key=${props.importJson.focusKey}
+      @click=${(event: MouseEvent) =>
+        (event.currentTarget as HTMLElement).parentElement
+          ?.querySelector<HTMLInputElement>("input[type=file]")
+          ?.click()}
+    >${props.importJson.label}</button><button
+      type="button"
+      class="gdp-btn gdp-btn-sm"
+      data-focus-key=${props.editJson.focusKey}
+      aria-pressed=${String(props.editJson.pressed)}
+      @click=${props.editJson.onClick}
+    >${props.editJson.label}</button>${buttonTemplate(props.resetAll, "gdp-btn gdp-btn-sm")}<input
+      type="file"
+      accept=".json,application/json"
+      hidden
+      @change=${(event: Event) =>
+        props.onImportFile(event.currentTarget as HTMLInputElement)}
+    /></div
+  ><div class="shortcut-json" ?hidden=${!props.json.open}><label for="shortcut-json"
+      >${props.json.label}</label
+    ><div>${props.json.help.map(
+      (paragraph) => html`<p class="scope-settings-help">${paragraph}</p>`,
+    )}</div><textarea
+      id="shortcut-json"
+      rows="12"
+      spellcheck="false"
+      aria-invalid=${String(props.json.issues.length > 0)}
+      .value=${live(props.json.text)}
+      @input=${(event: Event) =>
+        props.json.onInput((event.currentTarget as HTMLTextAreaElement).value)}
+    ></textarea><ul
+      class="shortcut-json-issues"
+      role="alert"
+      ?hidden=${props.json.issues.length === 0}
+    >${props.json.issues.map((line) => html`<li>${line}</li>`)}</ul></div
+  ><p class="scope-settings-help shortcut-filter-empty" ?hidden=${props.empty === null}
+    >${props.empty ?? ""}</p
+  ><div class="shortcut-list">${repeat(
+    props.groups,
+    (group) => group.key,
+    // 見出しの行: 分類の名前と、キーの列の名前 (行と同じ列の組み)。
+    (group) => html`<section class="shortcut-group"><div
+        class="shortcut-group-head ui-table-head"
+      ><h4 class="shortcut-group-title">${group.title}</h4><span></span><span
+          class="shortcut-group-keys"
+          >${group.keysColumn}</span
+        ></div
+      >${repeat(
+        group.rows,
+        (row) => row.action,
+        (row) => rowTemplate(row),
+      )}</section>`,
+  )}</div>`;
+
+export function createShortcutSettings(
+  deps: ShortcutSettingsDeps,
+  view: ShortcutSettingsView = DEFAULT_VIEW,
+) {
   const defaults = defaultKeyBindings(deps.mac);
   let draft: KeymapOverrides = tidyOverrides(deps.getSaved(), defaults);
   let expanded: KeymapAction | null = null;
@@ -423,31 +683,11 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
   }
 
   // ---------- 描画 ----------
-  function whereToggleTemplate(
-    label: string,
-    checked: boolean,
-    focusKey: string,
-    onChange: (checked: boolean) => void,
-    options: { disabled?: boolean; className?: string } = {},
-  ): TemplateResult {
-    return html`<label
-      class=${options.className ? `shortcut-where ${options.className}` : "shortcut-where"}
-      ><input
-        type="checkbox"
-        data-focus-key=${focusKey}
-        ?disabled=${options.disabled === true}
-        .checked=${live(checked)}
-        @change=${(event: Event) =>
-          onChange((event.currentTarget as HTMLInputElement).checked)}
-      /><span>${label}</span></label
-    >`;
-  }
-
-  function chordTemplate(
+  function chordProps(
     action: KeymapAction,
     chord: KeyChord,
     index: number,
-  ): TemplateResult {
+  ): ShortcutDetailProps["chords"][number] {
     const t = text();
     const label = chordLabel(action, chord);
     const where = chordWhere(action, chord, defaults);
@@ -464,42 +704,46 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
       changed();
     };
     const key = `${action}:${keyChordId(chord)}`;
-    return html`<li class="shortcut-chord"><kbd>${label}</kbd><span
-        class="shortcut-wheres"
-        >${whereToggleTemplate(
-          t.whereInputs,
-          where.inputs,
-          `${key}:inputs`,
-          (inputs) => set({ inputs }),
-        )}${whereToggleTemplate(
-          t.whereTerminal,
-          where.terminal,
-          `${key}:terminal`,
-          (terminal) => set({ terminal }),
-        )}${whereToggleTemplate(
-          t.wherePwa,
-          where.pwa || taken,
-          `${key}:pwa`,
-          (pwa) => set({ pwa }),
-          { disabled: taken },
-        )}</span
-      ><button
-        type="button"
-        class="shortcut-chord-remove"
-        data-focus-key=${`${key}:remove`}
-        aria-label=${t.removeKey(label)}
-        title=${t.removeKey(label)}
-        @click=${() => {
+    return {
+      id: keyChordId(chord),
+      label,
+      wheres: [
+        {
+          focusKey: `${key}:inputs`,
+          label: t.whereInputs,
+          checked: where.inputs,
+          onChange: (inputs) => set({ inputs }),
+        },
+        {
+          focusKey: `${key}:terminal`,
+          label: t.whereTerminal,
+          checked: where.terminal,
+          onChange: (terminal) => set({ terminal }),
+        },
+        {
+          focusKey: `${key}:pwa`,
+          label: t.wherePwa,
+          checked: where.pwa || taken,
+          disabled: taken,
+          onChange: (pwa) => set({ pwa }),
+        },
+      ],
+      remove: {
+        focusKey: `${key}:remove`,
+        label: "×",
+        title: t.removeKey(label),
+        onClick: () => {
           setChords(
             action,
             chordsOf(action).filter((_, at) => at !== index),
           );
           changed();
-        }}
-      >×</button></li>`;
+        },
+      },
+    };
   }
 
-  function detailTemplate(action: KeymapAction): TemplateResult {
+  function detailProps(action: KeymapAction): ShortcutDetailProps {
     const t = text();
     const chords = chordsOf(action);
     // ブラウザが先に取るキーの説明は行に 1 回 (キーごとに繰り返さない)。
@@ -507,26 +751,17 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
       .filter((chord) => browserTabTakes(chord, deps.mac))
       .map((chord) => chordLabel(action, chord));
     const ja = deps.getLanguage() === "ja";
-    return html`<div class="shortcut-row-detail" id=${`shortcut-detail-${action}`}>${
-      chords.length
-        ? html`<ul class="shortcut-chords">${repeat(
-            chords,
-            (chord) => keyChordId(chord),
-            (chord, index) => chordTemplate(action, chord, index),
-          )}</ul>${
-            taken.length
-              ? html`<p class="scope-settings-help shortcut-chord-note">${t.browserTakes(
-                  taken.join(ja ? "・" : ", "),
-                )}</p>`
-              : nothing
-          }`
-        : nothing
-    }<div class="shortcut-row-actions"><button
-        type="button"
-        class="gdp-btn gdp-btn-sm shortcut-add"
-        data-focus-key=${`${action}:add`}
-        aria-pressed=${String(recording === action)}
-        @click=${() => {
+    return {
+      action,
+      chords: chords.map((chord, index) => chordProps(action, chord, index)),
+      browserNote: taken.length
+        ? t.browserTakes(taken.join(ja ? "・" : ", "))
+        : null,
+      add: {
+        focusKey: `${action}:add`,
+        label: recording === action ? t.pressKey : t.addKey,
+        pressed: recording === action,
+        onClick: () => {
           if (recording === action) {
             stopRecording();
             render();
@@ -538,103 +773,87 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
           notice = null;
           document.addEventListener("keydown", onRecordKeydown, true);
           render();
-        }}
-        @blur=${(event: FocusEvent) => {
+        },
+        onBlur: (add) => {
           // フォーカスが記録のボタンから離れたら記録をやめる (押し損ねたキーが後で
           // 割り当たらないように)。描き直しでボタンが外れたときの blur (Chrome は
           // 外す途中の、まだ付いている要素に出す) では止めない。
-          const add = event.currentTarget as HTMLElement;
           queueMicrotask(() => {
             if (recording !== action || !add.isConnected) return;
             stopRecording();
             render();
           });
-        }}
-      >${recording === action ? t.pressKey : t.addKey}</button>${whereToggleTemplate(
-        t.gFirst,
-        gFirst,
-        `${action}:g`,
-        (checked) => {
+        },
+      },
+      gFirst: {
+        focusKey: `${action}:g`,
+        label: t.gFirst,
+        checked: gFirst,
+        onChange: (checked) => {
           gFirst = checked;
         },
-        { className: "shortcut-gfirst" },
-      )}<button
-        type="button"
-        class="gdp-btn gdp-btn-sm"
-        data-focus-key=${`${action}:restore`}
-        ?disabled=${draft[action] === undefined}
-        @click=${() => {
+      },
+      restore: {
+        focusKey: `${action}:restore`,
+        label: t.restore,
+        disabled: draft[action] === undefined,
+        onClick: () => {
           const next = { ...draft };
           delete next[action];
           draft = next;
           pending = null;
           notice = null;
           changed();
-        }}
-      >${t.restore}</button></div>${
+        },
+      },
+      conflict:
         pending?.action === action
-          ? html`<div class="shortcut-conflict" role="alert"><p>${t.conflict(
-              chordLabel(action, pending.chord),
-              pending.users
-                .map((user) => actionLabel(user, deps.getLanguage()))
-                .join(ja ? "」「" : ", "),
-            )}</p><button
-              type="button"
-              class="gdp-btn gdp-btn-sm shortcut-conflict-replace"
-              data-focus-key=${`${action}:replace`}
-              @click=${replacePending}
-            >${t.replace}</button><button
-              type="button"
-              class="gdp-btn gdp-btn-sm shortcut-conflict-cancel"
-              data-focus-key=${`${action}:cancel`}
-              @click=${() => {
-                pending = null;
-                render();
-              }}
-            >${t.cancel}</button></div>`
-          : nothing
-      }${
-        notice?.action === action
-          ? html`<p class="scope-settings-help shortcut-notice" role="status">${notice.text}</p>`
-          : nothing
-      }</div>`;
+          ? {
+              message: t.conflict(
+                chordLabel(action, pending.chord),
+                pending.users
+                  .map((user) => actionLabel(user, deps.getLanguage()))
+                  .join(ja ? "」「" : ", "),
+              ),
+              replace: {
+                focusKey: `${action}:replace`,
+                label: t.replace,
+                onClick: replacePending,
+              },
+              cancel: {
+                focusKey: `${action}:cancel`,
+                label: t.cancel,
+                onClick: () => {
+                  pending = null;
+                  render();
+                },
+              },
+            }
+          : null,
+      notice: notice?.action === action ? notice.text : null,
+    };
   }
 
-  function rowTemplate(action: KeymapAction, keys: KeyLabel[]): TemplateResult {
+  function rowProps(action: KeymapAction, keys: KeyLabel[]): ShortcutRowProps {
     const t = text();
     const changedAction = draft[action] !== undefined;
-    // キーは幅をそろえた升に 1 つずつ入れる (折り返しても列がそろう)。
-    return html`<div
-      class="shortcut-row ui-table-row"
-      data-action=${action}
-      data-changed=${ifDefined(changedAction ? "true" : undefined)}
-    ><button
-      type="button"
-      class="shortcut-row-head"
-      data-focus-key=${`${action}:head`}
-      aria-expanded=${String(expanded === action)}
-      aria-controls=${`shortcut-detail-${action}`}
-      @click=${() => {
+    return {
+      action,
+      label: actionLabel(action, deps.getLanguage()),
+      changed: changedAction ? t.changed : null,
+      keys,
+      noKey: t.noKey,
+      pwaTitle: t.wherePwa,
+      expanded: expanded === action,
+      onToggle: () => {
         stopRecording();
         pending = null;
         notice = null;
         expanded = expanded === action ? null : action;
         render();
-      }}
-    ><span class="shortcut-name">${actionLabel(action, deps.getLanguage())}</span><span
-      class="shortcut-changed"
-    >${changedAction ? t.changed : ""}</span><span class="shortcut-keys">${
-      keys.length
-        ? nothing
-        : html`<span class="shortcut-none">${t.noKey}</span>`
-    }${keys.map(
-      (key) =>
-        html`<span class="shortcut-key"><kbd>${key.label}</kbd>${
-          key.pwa
-            ? html`<span class="shortcut-key-pwa" title=${t.wherePwa}>PWA</span>`
-            : nothing
-        }</span>`,
-    )}</span></button>${expanded === action ? detailTemplate(action) : nothing}</div>`;
+      },
+      detail: expanded === action ? detailProps(action) : null,
+    };
   }
 
   /** 行に出すキー。PWA の窓だけで効くキーは印を付ける (文字の後ろに足さない)。 */
@@ -647,19 +866,14 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
     }));
   }
 
-  function sectionTemplate(): TemplateResult {
+  function viewProps(): ShortcutSettingsProps {
     const t = text();
     const tag = deps.getSharedTag();
     const needle = query.trim().toLocaleLowerCase();
     let shown = 0;
-    const groups: {
-      group: (typeof KEYMAP_GROUPS)[number];
-      rows: TemplateResult[];
-      actions: KeymapAction[];
-    }[] = [];
+    const groups: ShortcutSettingsProps["groups"] = [];
     for (const group of KEYMAP_GROUPS) {
-      const rows: TemplateResult[] = [];
-      const actions: KeymapAction[] = [];
+      const rows: ShortcutRowProps[] = [];
       for (const action of actionsInGroup(group)) {
         const keys = keyLabels(action);
         const haystack = [
@@ -670,109 +884,70 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
           .join("\n")
           .toLocaleLowerCase();
         if (needle && !haystack.includes(needle)) continue;
-        rows.push(rowTemplate(action, keys));
-        actions.push(action);
+        rows.push(rowProps(action, keys));
       }
       if (!rows.length) continue;
       shown += rows.length;
-      groups.push({ group, rows, actions });
+      groups.push({
+        key: group,
+        title: keymapGroupTitle(group, deps.getLanguage()),
+        keysColumn: t.keysColumn,
+        rows,
+      });
     }
-    const issues = jsonReadError
-      ? [jsonReadError]
-      : jsonIssues.map((issue) =>
-          t.jsonIssue(issue, t.issue[issue.code](issue.detail ?? "")),
-        );
-    return html`<div class="scope-settings-title-row"><strong
-        class="scope-settings-section-title"
-        id="shortcut-settings-title"
-      >${t.title}</strong><span class="scope-settings-shared" title=${tag.title}
-        >${tag.text}</span
-      ></div><p class="scope-settings-help">${t.intro}</p><div class="shortcut-toolbar"><input
-        type="search"
-        class="shortcut-filter"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder=${t.filterPlaceholder}
-        aria-label=${t.filterPlaceholder}
-        .value=${live(query)}
-        @input=${(event: Event) => {
-          query = (event.currentTarget as HTMLInputElement).value;
+    return {
+      title: t.title,
+      shared: { text: tag.text, title: tag.title },
+      intro: t.intro,
+      filter: {
+        placeholder: t.filterPlaceholder,
+        value: query,
+        onInput: (value) => {
+          query = value;
           render();
-        }}
-      /><button
-        type="button"
-        class="gdp-btn gdp-btn-sm"
-        data-focus-key="export"
-        @click=${() => {
+        },
+      },
+      exportJson: {
+        focusKey: "export",
+        label: t.exportJson,
+        onClick: () => {
           deps.download("code-viewer-shortcuts.json", `${draftJson(true)}\n`);
-        }}
-      >${t.exportJson}</button><button
-        type="button"
-        class="gdp-btn gdp-btn-sm"
-        data-focus-key="import"
-        @click=${() =>
-          element
-            .querySelector<HTMLInputElement>(
-              ".shortcut-toolbar input[type=file]",
-            )
-            ?.click()}
-      >${t.importJson}</button><button
-        type="button"
-        class="gdp-btn gdp-btn-sm"
-        data-focus-key="json"
-        aria-pressed=${String(jsonOpen)}
-        @click=${toggleJson}
-      >${t.editJson}</button><button
-        type="button"
-        class="gdp-btn gdp-btn-sm"
-        data-focus-key="reset-all"
-        @click=${resetAll}
-      >${t.resetAll}</button><input
-        type="file"
-        accept=".json,application/json"
-        hidden
-        @change=${importFile}
-      /></div><div class="shortcut-json" ?hidden=${!jsonOpen}><label for="shortcut-json"
-        >${t.jsonLabel}</label
-      ><div>${t.jsonHelp.map(
-        (paragraph) => html`<p class="scope-settings-help">${paragraph}</p>`,
-      )}</div><textarea
-        id="shortcut-json"
-        rows="12"
-        spellcheck="false"
-        aria-invalid=${String(issues.length > 0)}
-        .value=${live(jsonText)}
-        @input=${(event: Event) => {
-          jsonText = (event.currentTarget as HTMLTextAreaElement).value;
+        },
+      },
+      importJson: { focusKey: "import", label: t.importJson },
+      editJson: {
+        focusKey: "json",
+        label: t.editJson,
+        pressed: jsonOpen,
+        onClick: toggleJson,
+      },
+      resetAll: { focusKey: "reset-all", label: t.resetAll, onClick: resetAll },
+      onImportFile: importFile,
+      json: {
+        open: jsonOpen,
+        label: t.jsonLabel,
+        help: t.jsonHelp,
+        text: jsonText,
+        issues: jsonReadError
+          ? [jsonReadError]
+          : jsonIssues.map((issue) =>
+              t.jsonIssue(issue, t.issue[issue.code](issue.detail ?? "")),
+            ),
+        onInput: (value) => {
+          jsonText = value;
           readJson();
-        }}
-      ></textarea><ul class="shortcut-json-issues" role="alert" ?hidden=${issues.length === 0}>${issues.map(
-        (line) => html`<li>${line}</li>`,
-      )}</ul></div><p
-        class="scope-settings-help shortcut-filter-empty"
-        ?hidden=${shown > 0}
-      >${shown > 0 ? "" : t.filterEmpty(query.trim())}</p><div class="shortcut-list">${repeat(
-        groups,
-        (entry) => entry.group,
-        (entry) =>
-          // 見出しの行: 分類の名前と、キーの列の名前 (行と同じ列の組み)。
-          html`<section class="shortcut-group"><div class="shortcut-group-head ui-table-head"><h4
-                class="shortcut-group-title"
-              >${keymapGroupTitle(entry.group, deps.getLanguage())}</h4><span></span><span
-                class="shortcut-group-keys"
-              >${t.keysColumn}</span></div>${repeat(
-                entry.rows,
-                (_, index) => entry.actions[index],
-                (row) => row,
-              )}</section>`,
-      )}</div>`;
+        },
+      },
+      empty: shown > 0 ? null : t.filterEmpty(query.trim()),
+      groups,
+    };
   }
 
   function render(): void {
     const focusKey = (document.activeElement as HTMLElement | null)?.dataset
       ?.focusKey;
     const focusInside = element.contains(document.activeElement);
-    renderOwned(element, sectionTemplate());
+    renderOwned(element, view(viewProps()));
     // 押したボタンが描き直しで外れた (行を畳んだなど) ときは、同じ役のボタンへ戻す。
     if (focusInside && focusKey && !element.contains(document.activeElement)) {
       element
@@ -804,8 +979,7 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
     notify();
   }
 
-  function importFile(event: Event): void {
-    const input = event.currentTarget as HTMLInputElement;
+  function importFile(input: HTMLInputElement): void {
     const file = input.files?.[0];
     input.value = "";
     if (!file) return;
