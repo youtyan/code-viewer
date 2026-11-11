@@ -8371,10 +8371,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * タブ列の「＋」のメニュー: ファイルを開く・新しいシェル・既存のセッション
-   * (このサーバのシェルと、このプロジェクトの tmux のペイン)。一覧は開く
-   * 直前に取り直す。取れなかったら、理由をメニューの 1 行に出す (ファイルと
-   * 新しいシェルは使えるままにする)。
+   * タブ列の「＋」のメニュー: 開ける画面 (左の帯と同じ順)・ファイルを開く・
+   * 新しいシェル・新しいエージェント。シェルの一覧は、シェルを開けるか (開けない
+   * ときは理由を出す) を知るために開く直前に取り直す。取れなかったら、新しい
+   * シェルは押せるままにする (押したときに作れなければ理由を出す)。
    */
   async function openNewTabMenu(
     side: PaneSide,
@@ -8475,12 +8475,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     list: ShellListResponse | Error,
   ): ContextMenuItem[] {
     const t = terminalText(STATE.language);
-    const a = agentsText(STATE.language);
-    const overview = AGENT_MONITOR.snapshot().overview;
-    const unread = AGENT_MONITOR.snapshot().unread;
-    // 電話でここから開いたペインは、戻るでこのメニューへ戻す。
-    const reopenNewTabMenu = returnOnPhone(() => MAIN_TABS.openNewTabMenu());
-    const items: ContextMenuItem[] = [
+    return [
+      ...MAIN_TABS.newTabScreenItems(side),
+      { kind: "separator" },
       {
         label: TOUCH_QUERY.matches
           ? t.newTabOpenFile
@@ -8508,82 +8505,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         label: mainTabsText(STATE.language).newAgentHere,
         onSelect: () => launchAgent(MAIN_TABS.currentProject() ?? undefined),
       },
-      // Tools と Search は page のタブ (左の面にだけ開く)。
-      { label: uiText().nav.tools, onSelect: () => openToolsPage() },
-      { label: uiText().nav.search, onSelect: () => openSearchPage() },
     ];
-    const sessions: ContextMenuItem[] = [];
-    /** タブで開いていない未読のペイン (印を付け、まとめて読んだことにできる)。 */
-    const unreadPanes: string[] = [];
-    const mark = (paneId: string | undefined, tabbed: boolean): string => {
-      if (!paneId || tabbed || !unread.has(paneId)) return "";
-      unreadPanes.push(paneId);
-      return "● ";
-    };
-    if (list instanceof Error) {
-      sessions.push({
-        label: t.shellListFailed,
-        title: formatErrorDetail(list),
-        disabled: true,
-        onSelect: () => undefined,
-      });
-    } else {
-      for (const session of list.sessions) {
-        const tabbed = MAIN_TABS.hasTerminal(session.id);
-        const pane = paneForShell(session.id);
-        sessions.push({
-          label: `${mark(pane?.id, tabbed)}${terminalTabInfo(session.id).label}${tabbed ? ` · ${t.inTab}` : ""}`,
-          title: [pane ? paneText(pane, a).title : session.command, session.cwd]
-            .filter(Boolean)
-            .join("\n"),
-          // 電話でペインを映すシェルは、タブではなくそのペインの 1 ペイン表示で
-          // 開く (タブにしても 1 ペイン表示で開き、戻ると案内だけが残った)。
-          onSelect: () =>
-            pane && PHONE_QUERY.matches
-              ? openAgentPane(pane.id, reopenNewTabMenu)
-              : MAIN_TABS.openTerminal(session.id),
-        });
-      }
-    }
-    // このプロジェクトの tmux のペインのうち、上のシェルが映していないもの。
-    const shown = new Set(
-      list instanceof Error ? [] : list.sessions.map((item) => item.id),
-    );
-    const current = overview?.projects.find(
-      (item) => item.server.status === "current",
-    );
-    for (const pane of overview?.panes ?? []) {
-      if (pane.project !== current?.root) continue;
-      if (pane.shownInShell !== "" && shown.has(pane.shownInShell)) continue;
-      // 行の形はサイドバー・パレット・タブと同じ決まり (pane-text.ts)。
-      const row = paneText(pane, a);
-      sessions.push({
-        label: `${mark(pane.id, false)}${row.row}`,
-        title: row.title,
-        onSelect: () => openAgentPane(pane.id, reopenNewTabMenu),
-      });
-    }
-    if (sessions.length > 0) items.push({ kind: "separator" }, ...sessions);
-    else if (!(list instanceof Error))
-      items.push(
-        { kind: "separator" },
-        { label: t.noShells, disabled: true, onSelect: () => undefined },
-      );
-    items.push({ kind: "separator" });
-    if (unreadPanes.length > 0)
-      items.push({
-        label: t.markAllRead(unreadPanes.length),
-        title: t.unreadTitle,
-        onSelect: () => {
-          for (const pane of unreadPanes) AGENT_MONITOR.markRead(pane);
-        },
-      });
-    items.push({
-      label: t.allSessions,
-      onSelect: () =>
-        navigateToRoute({ screen: "agents", range: currentRange() }),
-    });
-    return items;
   }
 
   /** タブの右クリックの「セッションを止める」。確かめてから止め、タブも閉じる。 */

@@ -1,5 +1,6 @@
 import "./_dom";
 import { readFileSync } from "node:fs";
+import { render } from "lit/html.js";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { listColumnLayout } from "../core/list-column";
 import type { SerializedLayout, TabTarget } from "../core/main-tabs";
@@ -8,12 +9,13 @@ import { HISTORY_WIDTH } from "../core/panel-sizes";
 import { lastTabNumber } from "../core/pwa";
 import { type AppRoute, urlKeepsSavedFront } from "../core/routes";
 import { TAB_FLOOR_UNITS } from "../core/tab-widths";
-import { closeContextMenu } from "../views/context-menu";
+import { type ContextMenuItem, closeContextMenu } from "../views/context-menu";
 import {
   COMFORTABLE_PANE_WIDTH,
   createMainTabsPresenter,
   type MainTabsDeps,
   type MainTabsHandle,
+  NEW_TAB_SCREENS,
   routeTarget,
   SPLIT_DIVIDER_WIDTH,
   VIEW_SCREENS,
@@ -1236,6 +1238,117 @@ describe("main tabs view: プロジェクトのグループ", () => {
         screenRows(mount, LIB).every((row) => row.includes("(disabled)")),
         screenRows(mount, APP).some((row) => row.includes("(disabled)")),
       ]).toEqual([true, false]);
+    });
+  });
+
+  // タブの ＋ のメニューの頭 (残りのファイル・シェル・エージェントの行は app.ts の
+  // newTabMenuItems が足す)。行の形はグループの ▾ の画面の行と同じ。
+  describe("＋ のメニューの画面の行", () => {
+    const setupNewTab = async (initial: AppRoute = fileRoute("src/app.ts")) => {
+      const calls: string[] = [];
+      const ctx = setup(
+        async () => saved,
+        undefined,
+        undefined,
+        initial,
+        APP,
+        groupDeps(calls, {}),
+      );
+      await ctx.handle.restore();
+      return { ...ctx, calls };
+    };
+    const rows = (items: ContextMenuItem[]) =>
+      items.map((item) =>
+        item.kind === "separator"
+          ? "---"
+          : `${item.leading ? "◆ " : ""}${item.label}${item.checked ? " ✓" : ""}${item.disabled ? " (disabled)" : ""}`,
+      );
+
+    test("左の帯と同じ順に、ページのタブで開ける画面を並べる (ヘルプと設定は無い)", async () => {
+      const { handle } = await setupNewTab();
+      expect(rows(handle.newTabScreenItems("left"))).toEqual([
+        "◆ repo ✓",
+        "◆ diff",
+        "◆ history",
+        "◆ worktree",
+        "◆ database",
+        "◆ journal",
+        "◆ agents",
+        "◆ search",
+        "◆ tools",
+      ]);
+    });
+
+    test("行の絵はページのタブと同じ絵", async () => {
+      const { handle } = await setupNewTab();
+      const host = document.createElement("div");
+      const icons = handle.newTabScreenItems("left").map((item) => {
+        if (item.kind === "separator") return [];
+        render(item.leading, host);
+        return [...host.querySelectorAll("path")].map((path) =>
+          path.getAttribute("d"),
+        );
+      });
+      expect(icons).toEqual(
+        [...NEW_TAB_SCREENS].map((screen) => [pageIconPaths(screen)].flat()),
+      );
+    });
+
+    test("本文が全体ボードなら、その行に印が付く", async () => {
+      const { handle } = await setupNewTab({ screen: "agents", range });
+      expect(
+        rows(handle.newTabScreenItems("left")).filter((row) =>
+          row.endsWith("✓"),
+        ),
+      ).toEqual(["◆ agents ✓"]);
+    });
+
+    test.each([
+      {
+        name: "タブの無い画面: その画面へ移り、このプロジェクトのタブになる",
+        row: "history",
+        navigations: ["history"],
+        strip: [
+          `${LIB}(lib.ts diff Shell shell-lib)`,
+          `${APP}(app.ts >history README.md)`,
+          "-(agents)",
+        ],
+      },
+      {
+        name: "全体ボード: 開いているタブ (どのプロジェクトのものでもない) を前面にする",
+        row: "agents",
+        navigations: ["agents"],
+        strip: [
+          `${LIB}(lib.ts diff Shell shell-lib)`,
+          `${APP}(app.ts README.md)`,
+          "-(>agents)",
+        ],
+      },
+      {
+        name: "ファイル: フォルダ表示 (タブにしない)",
+        row: "repo",
+        navigations: ["repo"],
+        strip: [
+          `${LIB}(lib.ts diff Shell shell-lib)`,
+          `${APP}(app.ts README.md)`,
+          "-(agents)",
+        ],
+      },
+    ])("$name", async ({ name: _name, row, ...expected }) => {
+      const { mount, calls, handle, navigations } = await setupNewTab();
+      const item = handle
+        .newTabScreenItems("left")
+        .find((entry) => entry.kind !== "separator" && entry.label === row);
+      if (!item || item.kind === "separator") throw new Error(`no ${row} row`);
+      item.onSelect();
+      expect({
+        calls,
+        navigations: navigations.map((entry) => entry.to),
+        // プロジェクトのグループと、どのプロジェクトのものでもないタブ (-)。
+        strip: strip(mount).filter(
+          (entry) => entry.startsWith("/work/") || entry.startsWith("-("),
+        ),
+      }).toEqual({ calls: [], ...expected });
     });
   });
 

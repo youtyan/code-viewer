@@ -1264,7 +1264,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 [
                   "Select the + in the tab row, then ",
                   ui(l.terminal.newShell),
-                  " or one of the listed sessions (",
+                  " (",
                   key("Ctrl+`"),
                   ").",
                 ],
@@ -1287,7 +1287,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
             {
               kind: "list",
               items: [
-                "Closing a tab does not stop the shell or the agent. Reopen it from the +.",
+                "Closing a tab does not stop the shell or the agent. Reopen it from the left sidebar, the palette, or the Agents screen.",
                 [
                   "To stop one, right-click its tab and choose ",
                   ui(l.mainTabs.stopSession),
@@ -1380,11 +1380,11 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 "Each pane shows the tabs of its own project only. Switch the pane to another project and back, and its tabs come back.",
                 "The project or agent you pick in the left sidebar opens in the focused pane (the one you last clicked). An agent that already shows in a pane is shown there.",
                 [
-                  "The + in the tab row opens ",
+                  "The + in the tab row opens the screens of the project (files, diff, history, and more), ",
                   ui(l.terminal.newShell),
-                  " and ",
+                  ", and ",
                   ui(l.mainTabs.newAgentHere),
-                  ". The screens of the project open from the icons at the head of the list column.",
+                  ". The screens also open from the icons at the head of the list column.",
                 ],
               ],
             },

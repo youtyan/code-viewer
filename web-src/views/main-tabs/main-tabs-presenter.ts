@@ -150,6 +150,19 @@ export const VIEW_SCREENS = [
 ] as const;
 export type ViewScreen = (typeof VIEW_SCREENS)[number];
 
+/**
+ * タブの ＋ のメニューに並べる画面 (左の帯と同じ順)。グループの ▾ の画面に、
+ * ページのタブで開けるエージェント・検索・ツールを足したもの。ヘルプと設定は
+ * 入れない。
+ */
+export const NEW_TAB_SCREENS = [
+  ...VIEW_SCREENS,
+  "agents",
+  "search",
+  "tools",
+] as const;
+export type MenuScreen = (typeof NEW_TAB_SCREENS)[number];
+
 /** 保存をまとめる間隔。並べ替えや連続した移動を 1 回の書き込みにする。 */
 const SAVE_DELAY_MS = 300;
 const DRAG_TYPE = "application/x-code-viewer-main-tab";
@@ -392,6 +405,11 @@ export type MainTabsHandle = {
   openImage(path: string, pane?: OpenOptions["pane"]): void;
   /** フォーカスのある面の＋のメニューを開く (キー操作・パレットから)。 */
   openNewTabMenu(): void;
+  /**
+   * ＋ のメニューの画面の行 (いま見ているプロジェクト)。押すと side の面に
+   * フォーカスを移してから、その画面のタブを前面に出す (無ければ開く)。
+   */
+  newTabScreenItems(side: PaneSide): ContextMenuItem[];
   /**
    * サイドバーの＋から、フォーカスのある面のプロジェクトのメニューを開く。
    * picked は項目を選んだとき (取り消しでは呼ばない)、その項目より先に呼ぶ。
@@ -1517,15 +1535,15 @@ export function createMainTabsPresenter(
   }
 
   /**
-   * グループの ▾ の画面の行: そのプロジェクトのその画面を、そのグループのタブ
+   * グループの ▾ とタブの ＋ の画面の行: そのプロジェクトのその画面を、そのグループのタブ
    * として前面に出す (開いていればそのタブ、無ければ開く)。別のプロジェクトなら
    * そのプロジェクトへ移ってから (タブの前面に出すときと同じ)。repo (ファイル) は
    * タブにしないので、そのプロジェクトのフォルダ表示。
    */
-  function openScreenIn(root: string, screen: ViewScreen): void {
+  function openScreenIn(root: string | null, screen: MenuScreen): void {
     const here = root === currentRoot;
     if (screen === "repo") {
-      if (here) changeAndGo(showHome);
+      if (here || root === null) changeAndGo(showHome);
       else switchWithout(root, null);
       return;
     }
@@ -1540,7 +1558,7 @@ export function createMainTabsPresenter(
       return;
     }
     const route = deps.defaultRoute({ kind: "page", page: screen });
-    if (here) deps.navigate(route);
+    if (here || root === null) deps.navigate(route);
     else switchWithout(root, route);
   }
 
@@ -1556,7 +1574,7 @@ export function createMainTabsPresenter(
    * (左の前面がターミナル・画像・別のプロジェクトのタブ) なら無し。ファイルは
    * ファイル (repo)、ファイルの差分の route は差分 (app.ts の headerRouteForFront と同じ)。
    */
-  function shownScreen(): ViewScreen | null {
+  function shownScreen(): MenuScreen | null {
     if (routeSideOf(layout, currentRoot) === null) return null;
     const route = deps.currentRoute();
     if (route.screen === "file")
@@ -1565,7 +1583,7 @@ export function createMainTabsPresenter(
         route.view === "history"
         ? "repo"
         : "diff";
-    return VIEW_SCREENS.find((screen) => screen === route.screen) ?? null;
+    return NEW_TAB_SCREENS.find((screen) => screen === route.screen) ?? null;
   }
 
   /** グループの ▾ の「このプロジェクトに切り替える」。 */
@@ -2579,19 +2597,13 @@ export function createMainTabsPresenter(
     // 画面の行。別のプロジェクトは移って開く (移れなければ押せない)。印は
     // いま見ているプロジェクトの、本文に出ている画面だけ。
     const shown = here ? shownScreen() : null;
-    const screens: ContextMenuItem[] = VIEW_SCREENS.map((screen) => {
-      return {
-        label: deps.pageLabel(screen),
-        leading: html`<span class="gdp-context-menu-icon">${iconTemplate(
-          pageIconPaths(screen),
-          "gdp-context-menu-icon-svg",
-        )}</span>`,
-        checked: screen === shown,
+    const screens = VIEW_SCREENS.map((screen) =>
+      screenMenuItem(screen, shown, {
         disabled: !here && !deps.switchProject,
         ...(here ? {} : { title: current.openScreenInTitle(look.name) }),
         onSelect: () => openScreenIn(key, screen),
-      };
-    });
+      }),
+    );
     return [
       // メニューの頭はプロジェクトの名前 (札には頭文字しか無い)。押せない行。
       {
@@ -2636,6 +2648,38 @@ export function createMainTabsPresenter(
         onSelect: () => closeByUser((l) => closeGroup(l, key, keyOf)),
       },
     ];
+  }
+
+  /**
+   * 画面を開く行 (グループの ▾ と タブの ＋)。アイコンと名前はページのタブと
+   * 同じ。印は本文に出ている画面。
+   */
+  function screenMenuItem(
+    screen: MenuScreen,
+    shown: MenuScreen | null,
+    options: { disabled?: boolean; title?: string; onSelect(): void },
+  ): ContextMenuItem {
+    return {
+      label: deps.pageLabel(screen),
+      leading: html`<span class="gdp-context-menu-icon">${iconTemplate(
+        pageIconPaths(screen),
+        "gdp-context-menu-icon-svg",
+      )}</span>`,
+      checked: screen === shown,
+      ...options,
+    };
+  }
+
+  function newTabScreenItems(side: PaneSide): ContextMenuItem[] {
+    const shown = shownScreen();
+    return NEW_TAB_SCREENS.map((screen) =>
+      screenMenuItem(screen, shown, {
+        onSelect: () => {
+          focusSide(side);
+          openScreenIn(currentRoot, screen);
+        },
+      }),
+    );
   }
 
   /** 面ごとに、最後に見える所まで送った前面のタブ (render)。 */
@@ -3065,6 +3109,7 @@ export function createMainTabsPresenter(
     openNewTabMenu() {
       openNewTabMenuIn(layout.panes.right ? layout.focused : "left");
     },
+    newTabScreenItems,
     openProjectMenu,
     front: () => activeTab(layout),
     panes: () => panesView(layout, currentRoot),

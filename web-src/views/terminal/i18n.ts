@@ -58,8 +58,6 @@ export type TerminalText = {
   newShellTitle: string;
   /** node-pty が無い環境。 */
   shellUnavailable: string;
-  /** シェルがまだ 1 つも無い。 */
-  noShells: string;
   /** シェルのプロセスが終了した。 */
   shellExited: (exitCode: number | null) => string;
   /** 開いていたシェルが無くなっていた。 */
@@ -106,12 +104,6 @@ export type TerminalText = {
   newTabOpenFileKeys: string;
   /** 一覧の行がタブで開いているときの添え書き。 */
   inTab: string;
-  /** 未読の印 (● ) の説明。 */
-  unreadTitle: string;
-  /** タブで開いていない未読を全部読んだことにする。 */
-  markAllRead: (count: number) => string;
-  /** 全部のプロジェクトのセッションを見る (Agents の一覧へ)。 */
-  allSessions: string;
   /** 「セッションを止める」の確かめ。 */
   stopConfirmTitle: string;
   stopConfirmMessage: (name: string) => string;
@@ -255,7 +247,6 @@ const EN: TerminalText = {
   newShellTitle: "open a new shell in this repository",
   shellUnavailable:
     "Opening shells needs the optional package @lydell/node-pty, which is not installed. Reinstalling code-viewer with it opens shells:",
-  noShells: "No shell is open yet.",
   shellExited: (exitCode) =>
     exitCode === null
       ? "The shell has exited."
@@ -286,9 +277,6 @@ const EN: TerminalText = {
   newTabOpenFile: "Open a file…",
   newTabOpenFileKeys: "⌘K",
   inTab: "in a tab",
-  unreadTitle: "● = unread: it changed state while you were away",
-  markAllRead: (count) => `Mark all as read (${count})`,
-  allSessions: "All sessions in every project…",
   stopConfirmTitle: "Stop this session?",
   stopConfirmMessage: (name) =>
     `${name} will end, and whatever is running in it stops. Its tab closes too.`,
@@ -404,7 +392,6 @@ const JA: TerminalText = {
   newShellTitle: "このリポジトリで新しいシェルを開きます",
   shellUnavailable:
     "シェルを開くには任意の依存 @lydell/node-pty が要りますが、入っていません。入れ直すと開けます:",
-  noShells: "開いているシェルはありません。",
   shellExited: (exitCode) =>
     exitCode === null
       ? "シェルが終了しました。"
@@ -435,9 +422,6 @@ const JA: TerminalText = {
   newTabOpenFile: "ファイルを開く…",
   newTabOpenFileKeys: "⌘K",
   inTab: "タブで表示中",
-  unreadTitle: "● = 未読: 離れている間に状態が変わりました",
-  markAllRead: (count) => `すべて読んだことにする (${count})`,
-  allSessions: "すべてのプロジェクトのセッション…",
   stopConfirmTitle: "このセッションを止めますか？",
   stopConfirmMessage: (name) =>
     `${name} を終了します。中で動いているものも止まり、タブも閉じます。`,

@@ -1,5 +1,5 @@
 // エージェント・tmux のペインを 1 行で見せる文字の決まり (1 か所)。サイドバー
-// の作業の欄・「＋」のメニューの行・パレットの補足・ターミナルのタブの名前が
+// の作業の欄・全体ボードの行・パレットの補足・ターミナルのタブの名前が
 // 同じ関数の値を使う。tmux / shell の既定の題名 (空・コマンド名・ホスト名の
 // ような ASCII の 1 語) は作業の要約として見せず、状態の語にする。ホスト名は
 // どこにも出さない。
@@ -58,14 +58,14 @@ describe("pane text: one rule for every place", () => {
       summary: paneTaskSummary(target),
       sidebarTask: text.summary,
       tabName: text.headline,
-      newTabMenuRow: text.row,
+      previewName: text.row,
       paletteDetail: text.detail,
       tooltip: text.title,
     }).toEqual({
       summary,
       sidebarTask: shown,
       tabName: `claude · ${shown}`,
-      newTabMenuRow: `claude · ${shown} · sample:0.0`,
+      previewName: `claude · ${shown} · sample:0.0`,
       paletteDetail: `${shown} · sample:0.0`,
       tooltip:
         summary === null
