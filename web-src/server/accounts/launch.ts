@@ -14,12 +14,17 @@
 import {
   type AccountAgent,
   type AccountEntry,
+  LAUNCH_FAILURE_LINE_MAX,
+  LAUNCH_FAILURE_LINES,
+  type LaunchedPaneStatus,
   tmuxLaunchArgs,
   tmuxSessionName,
 } from "../../core/agent-accounts";
 import { hasControlCharacter } from "../../core/control-chars";
+import { errorWithCause } from "../../core/error-detail";
+import { isTmuxPaneId } from "../../core/tmux";
 import { commandNotFoundDetail } from "../command-resolver";
-import { runTmux } from "../tmux/command";
+import { runTmux, TMUX_FIELD_SEP } from "../tmux/command";
 import { AccountError } from "./registry";
 
 export type LaunchedPane = {
@@ -125,6 +130,71 @@ export async function openAccountWindow(options: {
     );
   }
   return { paneId, session, created: !exists };
+}
+
+/**
+ * 起動したペインがまだ動いているか、失敗して終わったか (remain-on-exit failed で
+ * 残っている)。終わっていれば終了コードと画面の最後の行を返す。読むだけで、
+ * ペインにもオプションにも書かない。tmux が答えられないときは理由つきで投げる。
+ */
+export async function launchedPaneStatus(
+  paneId: string,
+  cwd: string,
+  run: typeof runTmux = runTmux,
+): Promise<LaunchedPaneStatus> {
+  if (!isTmuxPaneId(paneId)) throw new Error(`not a tmux pane id: ${paneId}`);
+  const shown = await run(
+    [
+      "display-message",
+      "-p",
+      "-t",
+      paneId,
+      ["#{pane_id}", "#{pane_dead}", "#{pane_dead_status}"].join(
+        TMUX_FIELD_SEP,
+      ),
+    ],
+    cwd,
+  );
+  if (shown.status === "no-target" || shown.status === "no-server") {
+    return { kind: "gone" };
+  }
+  if (shown.status !== "ok") {
+    throw errorWithCause(
+      `tmux could not tell how ${paneId} is (${shown.status})`,
+      shown.status === "error" ? shown.error : undefined,
+    );
+  }
+  const [id, dead, status] = shown.stdout.trim().split(TMUX_FIELD_SEP);
+  // 無いペインを -t で指すと、tmux は今のペインを答えることがある。
+  if (id !== paneId) return { kind: "gone" };
+  if (dead !== "1") return { kind: "running" };
+  const captured = await run(
+    ["capture-pane", "-p", "-J", "-t", paneId, "-S", "-200"],
+    cwd,
+  );
+  if (captured.status !== "ok") {
+    throw errorWithCause(
+      `tmux could not read the screen of ${paneId} (${captured.status})`,
+      captured.status === "error" ? captured.error : undefined,
+    );
+  }
+  const lines = captured.stdout
+    .split("\n")
+    .map((line) =>
+      [...line]
+        .map((char) => (hasControlCharacter(char) ? " " : char))
+        .join("")
+        .trimEnd()
+        .slice(0, LAUNCH_FAILURE_LINE_MAX),
+    )
+    .filter((line) => line.trim() !== "")
+    .slice(-LAUNCH_FAILURE_LINES);
+  const code = Number(status);
+  return {
+    kind: "exited",
+    status: status !== "" && Number.isInteger(code) ? code : null,
+    lines,
+  };
 }
 
 /** 種類ごとの公式のサブコマンド (ログインと、ログインの状態)。 */

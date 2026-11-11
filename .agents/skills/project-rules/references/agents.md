@@ -635,6 +635,12 @@ reset が古い reset より許容差を超えて前へ戻るか、古い窓が�
   会話記録を読む案は 4 の「中身は読まない」を変えるので採らなかった）。利用者が自分の
   シェルで起こす claude には足さない
 - 起動・ログインのウィンドウには `remain-on-exit failed`。すぐ失敗して閉じても理由が読める
+- 起動・ログインで開いたペインは、`LAUNCH_FAILURE_CHECK_MS`（3 秒）後に 1 度だけ
+  `GET /_agent/launch/status`（`server/accounts/launch.ts` の `launchedPaneStatus`。`display-message` と
+  `capture-pane` を読むだけ）で確かめ、失敗して終わっていれば終了コードと画面の最後の行を
+  確認のダイアログで出して「ウインドウを開く」を添える（`views/agents/launch-failure.ts`、配線は `app.ts` の
+  `LAUNCH_FAILURES`）。開いたタブには tmux の「Pane is dead」しか出ないことがあり、気付かれなかった。
+  確かめられなかったときは理由を console と最下段の吹き出しに出す
 - ログインのウィンドウは `LOGIN_SESSION` に置き、起動先の既定の候補から外す
 - 起動の画面のアカウントは、行ごとに 5 時間・週の使用量と「いつの値か」を並べた一覧から選ぶ
   （`accounts-dialogs.ts` の `renderAccounts`、部品は 5 の使用量と同じ `usage-meter.ts`）。

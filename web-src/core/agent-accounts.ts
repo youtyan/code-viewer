@@ -1437,3 +1437,23 @@ export type LaunchResponse = {
    */
   statusLineError: string;
 };
+
+/**
+ * 起動の直後に、起動したペインがどうなったか (GET /_agent/launch/status)。
+ * 起動したウィンドウには remain-on-exit failed が付いているので、失敗して
+ * 終わったペインは残り、終了コードと画面の最後の行が読める。
+ * - running: まだ動いている
+ * - exited: 終わった (失敗。status は終了コード、読めなければ null)
+ * - gone: もう無い (正常に終わって閉じた・閉じられた)
+ */
+export type LaunchedPaneStatus =
+  | { kind: "running" }
+  | { kind: "exited"; status: number | null; lines: string[] }
+  | { kind: "gone" };
+
+/** 起動からこの時間までに終わったものを「起動に失敗した」として知らせる。 */
+export const LAUNCH_FAILURE_CHECK_MS = 3000;
+
+/** 知らせに添える画面の最後の行の数と、1 行の上限 (文字数)。 */
+export const LAUNCH_FAILURE_LINES = 5;
+export const LAUNCH_FAILURE_LINE_MAX = 300;

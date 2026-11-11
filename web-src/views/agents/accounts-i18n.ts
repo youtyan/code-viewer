@@ -299,6 +299,13 @@ export type AccountsText = {
   launchCopyFailed: string;
   launchRun: string;
   launchStarted: (session: string) => string;
+  /** 起動したペインがすぐ失敗して終わったときの知らせ (launch-failure.ts)。 */
+  launchFailedTitle: string;
+  launchFailedBody: (status: number | null, lines: readonly string[]) => string;
+  launchFailedOpen: string;
+  launchFailedClose: string;
+  /** 起動したペインを確かめられなかったとき (最下段の吹き出し)。 */
+  launchCheckFailed: (detail: string) => string;
   launchRememberFailed: string;
   /** 起動はしたが、プロジェクトの statusLine を読めず使用量を記録できない。 */
   launchStatusLineFailed: string;
@@ -699,6 +706,17 @@ export const ACCOUNTS_EN: AccountsText = {
   launchCopyFailed: "Could not copy the command",
   launchRun: "Launch",
   launchStarted: (session) => `Started in ${session}.`,
+  launchFailedTitle: "The agent stopped right after it started",
+  launchFailedBody: (status, lines) =>
+    [
+      status === null
+        ? "Its window stayed open; the exit code could not be read."
+        : `It exited with code ${status}. Its window stayed open.`,
+      ...(lines.length > 0 ? ["", "Last lines:", ...lines] : []),
+    ].join("\n"),
+  launchFailedOpen: "Open the window",
+  launchFailedClose: "Close",
+  launchCheckFailed: (detail) => `Could not check the started agent: ${detail}`,
   launchRememberFailed: "Started, but the choice could not be remembered:",
   launchStatusLineFailed:
     "Started, but this session will not record usage because the project's statusLine could not be read:",
@@ -1082,6 +1100,18 @@ export const ACCOUNTS_JA: AccountsText = {
   launchCopyFailed: "コマンドをコピーできませんでした",
   launchRun: "起動",
   launchStarted: (session) => `${session} で起動しました。`,
+  launchFailedTitle: "起動した直後にエージェントが終わりました",
+  launchFailedBody: (status, lines) =>
+    [
+      status === null
+        ? "ウインドウは残してあります。終了コードは読めませんでした。"
+        : `終了コード ${status} で終わりました。ウインドウは残してあります。`,
+      ...(lines.length > 0 ? ["", "最後の行:", ...lines] : []),
+    ].join("\n"),
+  launchFailedOpen: "ウインドウを開く",
+  launchFailedClose: "閉じる",
+  launchCheckFailed: (detail) =>
+    `起動したエージェントを確かめられませんでした: ${detail}`,
   launchRememberFailed: "起動しましたが、選んだものを覚えられませんでした:",
   launchStatusLineFailed:
     "起動しましたが、プロジェクトの statusLine を読めなかったので、このセッションの使用量は記録されません:",

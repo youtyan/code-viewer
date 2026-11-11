@@ -70,6 +70,7 @@ import {
   handleAccountsPlanGet,
   handleAccountsPost,
   handleLaunchPost,
+  handleLaunchStatusGet,
   handleLoginPost,
   handleStatusLineApplyPost,
   handleStatusLineFailuresDelete,
@@ -959,6 +960,11 @@ export function handleAgentRoute(
         methods: ["POST"],
         sideEffect: true,
         handler: () => handleLaunchPost(req),
+      },
+      "/_agent/launch/status": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handleLaunchStatusGet(url, cwd),
       },
       "/_agent/statusline/plan": {
         methods: ["GET"],

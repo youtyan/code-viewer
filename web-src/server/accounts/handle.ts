@@ -9,6 +9,7 @@
 //                                          (usage-check.ts。終わるまで待って結果を返す)
 // - POST   /_agent/launch                 エージェントを tmux の新しいウィンドウで起動する
 //                                          (handoff を付けると「別のアカウントで続ける」)
+// - GET    /_agent/launch/status?pane=%N  起動したペインが動いているか・失敗して終わったか
 // - GET    /_agent/statusline/plan        claude の statusLine を包む・戻すと何が変わるか
 // - POST   /_agent/statusline/apply       確認した計画を実行する
 // - DELETE /_agent/statusline/failures    包むスクリプトの失敗の記録を消す
@@ -32,6 +33,7 @@ import {
 import { hasControlCharacter } from "../../core/control-chars";
 import { formatErrorDetail } from "../../core/error-detail";
 import { isProjectColor } from "../../core/project-colors";
+import { isTmuxPaneId } from "../../core/tmux";
 import {
   json,
   parseBoundedJsonBody,
@@ -50,6 +52,7 @@ import {
 import {
   accountWindowName,
   agentCommandArgv,
+  launchedPaneStatus,
   loginWindowArgv,
   openAccountWindow,
 } from "./launch";
@@ -475,6 +478,24 @@ function claudeAccount(id: unknown): AccountEntry {
     throw new AccountError("statusLine is a claude setting", "invalid");
   }
   return account;
+}
+
+/** 起動の直後に、起動したペインの様子を読む (launchedPaneStatus)。読むだけ。 */
+export async function handleLaunchStatusGet(
+  url: URL,
+  cwd: string,
+): Promise<Response> {
+  const pane = url.searchParams.get("pane") ?? "";
+  if (!isTmuxPaneId(pane)) return textError("invalid pane", 400);
+  try {
+    return json(await launchedPaneStatus(pane, cwd));
+  } catch (error) {
+    console.error(
+      `[code-viewer] could not read the launched pane ${pane}`,
+      error,
+    );
+    return json({ error: formatErrorDetail(error), code: "failed" }, 500);
+  }
 }
 
 export function handleStatusLinePlanGet(url: URL): Response {

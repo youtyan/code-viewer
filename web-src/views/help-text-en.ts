@@ -761,6 +761,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   " at the bottom of the page.",
                 ],
                 "The launch dialog shows the exact command it will run.",
+                "If the agent stops right after it starts (a mistyped command, an expired sign-in), you get its exit code and last lines. Its window stays open so you can read why.",
                 "claude starts in the classic renderer even if fullscreen is set, because fullscreen keeps no earlier output in tmux for the phone to read.",
               ],
             },

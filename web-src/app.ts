@@ -272,6 +272,7 @@ import {
   handoffMenuItems,
 } from "./views/agents/handoff";
 import { agentsText } from "./views/agents/i18n";
+import { createLaunchFailureWatch } from "./views/agents/launch-failure";
 import { paneText, shellName } from "./views/agents/pane-text";
 import { createUsageStatusPresenter } from "./views/agents/usage-status";
 import { createAnnotationsPlayer } from "./views/annotations-player";
@@ -5311,6 +5312,32 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
   });
 
+  // 起動した直後に失敗して終わったエージェントを知らせる (views/agents/launch-failure.ts)。
+  const LAUNCH_FAILURES = createLaunchFailureWatch({
+    onFailed: (pane, failure) => {
+      const t = agentsText(STATE.language).accounts;
+      void showConfirmDialog({
+        title: t.launchFailedTitle,
+        body: t.launchFailedBody(failure.status, failure.lines),
+        confirmLabel: t.launchFailedOpen,
+        cancelLabel: t.launchFailedClose,
+      }).then((open) => {
+        if (open) openAgentPane(pane);
+      });
+    },
+    onError: (pane, error) => {
+      console.error(
+        `[code-viewer] could not check the launched pane ${pane}`,
+        error,
+      );
+      TERMINAL_NOTICE.show(
+        agentsText(STATE.language).accounts.launchCheckFailed(
+          formatErrorDetail(error),
+        ),
+      );
+    },
+  });
+
   // ---------- Accounts: views/agents/accounts-*.ts ----------
   // エージェント一覧の帯と設定画面の節が同じ結果を見る。取り直すのは、
   // どちらかが画面にある間だけ (retain)。
@@ -5319,7 +5346,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     client: ACCOUNTS_CLIENT,
     getText: () => agentsText(STATE.language).accounts,
     // 一覧の監視役と画面の関数は後で作られる。押されたときにだけ呼ぶ。
-    openPane: (pane) => openAgentPane(pane),
+    // 起動・ログインで開いたペインは、すぐ失敗して終わっていないかを後で確かめる。
+    openPane: (pane) => {
+      openAgentPane(pane);
+      LAUNCH_FAILURES.watch(pane);
+    },
     getOverview: () => AGENT_MONITOR.snapshot().overview,
     serverRoot: () => ACCOUNTS_CLIENT.snapshot().data?.serverRoot ?? "",
     refreshOverview: () => AGENT_MONITOR.refresh(),
