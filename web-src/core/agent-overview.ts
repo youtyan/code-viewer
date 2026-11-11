@@ -622,6 +622,44 @@ export function groupAgentPanesByUrgency(
 }
 
 /**
+ * 全体ボードの「急ぐ順」の段。子エージェント (@agent-parent) は親の下に字下げした
+ * まま、親子のまとまり (木) ごと段に入る。木の段は木の中で一番急ぐ状態 (作業役が
+ * 入力待ちなら、指揮役の行ごと入力待ちの段に上がる)。段の中は、その状態のものが
+ * 変わったのが新しい順、同じなら親の tmux の場所の順。空の段は返さない。
+ */
+export function groupAgentTreesByUrgency(
+  panes: AgentPane[],
+): { state: AgentState; rows: { pane: AgentPane; depth: number }[] }[] {
+  const trees: { pane: AgentPane; depth: number }[][] = [];
+  for (const entry of nestAgentPanes(panes)) {
+    const tree = trees[trees.length - 1];
+    if (entry.depth === 0 || !tree) trees.push([entry]);
+    else tree.push(entry);
+  }
+  const rank = (state: AgentState) => URGENCY_ORDER.indexOf(state);
+  const ranked = trees.map((tree) => {
+    const head = tree[0].pane;
+    const state = tree.reduce<AgentState>(
+      (best, { pane }) => (rank(pane.state) < rank(best) ? pane.state : best),
+      head.state,
+    );
+    const at = Math.max(
+      ...tree
+        .filter(({ pane }) => pane.state === state)
+        .map(({ pane }) => pane.updatedAt),
+    );
+    return { tree, head, state, at };
+  });
+  return URGENCY_ORDER.map((state) => ({
+    state,
+    rows: ranked
+      .filter((item) => item.state === state)
+      .sort((a, b) => b.at - a.at || comparePanePlace(a.head, b.head))
+      .flatMap((item) => item.tree),
+  })).filter((group) => group.rows.length > 0);
+}
+
+/**
  * 手が要るエージェント (入力待ち → 完了・未読) を回る順。キーで次・前へ移る
  * ときに使う。同じ段の中は tmux の場所の順にして、回っている間に順が入れ
  * 替わらないようにする。渡す一覧は未読の完了を done にした後のもの

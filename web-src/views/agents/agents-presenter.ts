@@ -34,6 +34,7 @@ import {
   filterAgentPanes,
   groupAgentPanes,
   groupAgentPanesByUrgency,
+  groupAgentTreesByUrgency,
   matchesStateFilter,
   nestAgentPanes,
   notifyPermissionView,
@@ -592,11 +593,15 @@ export function createAgentsPresenter(
    */
   function urgencyEntries(panes: AgentPane[]): BoardListEntry[] {
     const current = text();
-    return groupAgentPanesByUrgency(panes).map((group) => ({
+    // 子エージェントは親の下に字下げのまま、親子ごと一番急ぐ子の段に入る。
+    return groupAgentTreesByUrgency(panes).map((group) => ({
       kind: "section",
       state: group.state,
       label: current.state[group.state],
-      rows: group.panes.map((pane) => rowProps(pane, projectLabel(pane))),
+      rows: group.rows.map(({ pane, depth }) => ({
+        ...rowProps(pane, projectLabel(pane)),
+        depth,
+      })),
     }));
   }
 
