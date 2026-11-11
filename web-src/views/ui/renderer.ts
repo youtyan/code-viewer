@@ -43,3 +43,34 @@ export function createRenderer(
     },
   };
 }
+
+const owned = new WeakSet<Node>();
+
+/**
+ * 画面の箱 (web/index.html に書いてある要素など) の中を、いまここで template で
+ * 描く。最初に描くときに、箱にもとからあった中身 (lit が描いていないもの) を
+ * 外す (lit はもとの中身の後ろに描き足すので)。2 回目からは描き直すだけ。
+ */
+export function renderOwned(container: HTMLElement, template: unknown): void {
+  defineUiComponents();
+  if (!owned.has(container)) {
+    container.replaceChildren();
+    owned.add(container);
+  }
+  render(template, container);
+}
+
+/**
+ * テンプレートの最初の要素を、どこにも置かずに作る。置き場所が描く側に無い
+ * 1 つの要素 (外の部品に渡す要素・後から決まった所へ動かす要素) に使う。
+ */
+export function templateElement<T extends Element = HTMLElement>(
+  template: unknown,
+): T {
+  defineUiComponents();
+  const fragment = document.createDocumentFragment();
+  render(template, fragment);
+  const element = fragment.firstElementChild;
+  if (!element) throw new Error("templateElement: the template has no element");
+  return element as T;
+}

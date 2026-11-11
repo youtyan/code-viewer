@@ -269,7 +269,7 @@ import {
 } from "./views/agents/handoff";
 import { agentsText } from "./views/agents/i18n";
 import { paneText, shellName } from "./views/agents/pane-text";
-import { mountUsageStatus } from "./views/agents/usage-status";
+import { createUsageStatusPresenter } from "./views/agents/usage-status";
 import { createAnnotationsPlayer } from "./views/annotations-player";
 import {
   ANNOTATION_ENTRY_PARAM,
@@ -10247,7 +10247,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
   const usageStatusRoot = document.querySelector<HTMLElement>("#usage-status");
   const USAGE_STATUS = usageStatusRoot
-    ? mountUsageStatus({
+    ? createUsageStatusPresenter({
         root: usageStatusRoot,
         client: ACCOUNTS_CLIENT,
         getText: () => agentsText(STATE.language),

@@ -4,10 +4,11 @@
 // キーの行だけを足す (style.css の「空の状態の案内」の節)。文言は呼び出し側が
 // 自分の i18n から渡す (ここは言語を持たない)。
 
-import { html, nothing, render } from "lit/html.js";
+import { html, nothing } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { defineElement } from "./element";
 import { iconTemplate } from "./icon";
+import { templateElement } from "./renderer";
 
 export const CV_EMPTY_STATE = "cv-empty-state";
 
@@ -103,9 +104,7 @@ export function emptyStateTemplate(options: EmptyStateOptions): unknown {
  * 宣言的に描く画面は <cv-empty-state .options=${…}> を使う。
  */
 export function renderEmptyState(options: EmptyStateOptions): HTMLElement {
-  const fragment = document.createDocumentFragment();
-  render(emptyStateTemplate(options), fragment);
-  return fragment.querySelector("section") as HTMLElement;
+  return templateElement(emptyStateTemplate(options));
 }
 
 export function defineCvEmptyState(): void {

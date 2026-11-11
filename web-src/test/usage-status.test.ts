@@ -13,7 +13,13 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { AccountStatus, AccountsResponse } from "../core/agent-accounts";
 import type { AccountsSnapshot } from "../views/agents/accounts-client";
 import { agentsText } from "../views/agents/i18n";
-import { mountUsageStatus } from "../views/agents/usage-status";
+import {
+  DEFAULT_VIEW as USAGE_DEFAULT_VIEW,
+  type UsagePopoverProps,
+  type UsageStatusView,
+  type UsageStatusViewProps,
+} from "../views/agents/usage-status-view";
+import { createUsageStatusPresenter } from "../views/agents/usage-status";
 
 const NOW = Date.now();
 const MINUTE = 60_000;
@@ -85,7 +91,7 @@ type Harness = {
 
 let harness: Harness;
 
-function mount(accounts: AccountStatus[]): void {
+function mount(accounts: AccountStatus[], view?: UsageStatusView): void {
   document.body.style.setProperty("--space-4", "16px");
   const root = document.createElement("div");
   root.id = "usage-status";
@@ -103,32 +109,35 @@ function mount(accounts: AccountStatus[]): void {
       for (const listener of listeners) listener();
     },
   };
-  mountUsageStatus({
-    root,
-    client: {
-      snapshot: () => snapshot,
-      subscribe(listener) {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
+  createUsageStatusPresenter(
+    {
+      root,
+      client: {
+        snapshot: () => snapshot,
+        subscribe(listener) {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        async load() {
+          h.loads += 1;
+          if (h.failNextLoad) {
+            h.setSnapshot({ data: snapshot.data, error: h.failNextLoad });
+            h.failNextLoad = "";
+          }
+        },
       },
-      async load() {
-        h.loads += 1;
-        if (h.failNextLoad) {
-          h.setSnapshot({ data: snapshot.data, error: h.failNextLoad });
-          h.failNextLoad = "";
-        }
+      getText: () => agentsText("en"),
+      openSettings: () => undefined,
+      openBoard: () => {
+        h.boards += 1;
+      },
+      login: async (target) => {
+        h.logins.push(target.id);
+        return "Sign-in opened";
       },
     },
-    getText: () => agentsText("en"),
-    openSettings: () => undefined,
-    openBoard: () => {
-      h.boards += 1;
-    },
-    login: async (target) => {
-      h.logins.push(target.id);
-      return "Sign-in opened";
-    },
-  });
+    view,
+  );
   harness = h;
 }
 
@@ -404,5 +413,51 @@ describe("usage collection that is off", () => {
     expect(harness.boards).toBe(1);
     // 移ったら小窓は閉じる。
     expect(popover()).toBeNull();
+  });
+});
+
+// presenter (usage-status.ts) を、表示を差し替えて確かめる。閉じたときに同じ位置の
+// ボタンへフォーカスを戻すので、差し替える view は渡された値を記録してから既定の
+// 表示に渡す。見るのは view に渡す値と、取り直し・ログイン (モデルの呼び出し)。
+describe("usage status presenter", () => {
+  function mountWithView(accounts: AccountStatus[]) {
+    const items: UsageStatusViewProps[] = [];
+    const popovers: UsagePopoverProps[] = [];
+    mount(accounts, {
+      items: (props) => {
+        items.push(props);
+        return USAGE_DEFAULT_VIEW.items(props);
+      },
+      popover: (props) => {
+        popovers.push(props);
+        return USAGE_DEFAULT_VIEW.popover(props);
+      },
+    });
+    return {
+      lastItems: () => items[items.length - 1],
+      lastPopover: () => popovers[popovers.length - 1],
+    };
+  }
+
+  test("each account with a readable usage reaches the view with its windows", () => {
+    const { lastItems } = mountWithView([account({ id: "claude:default" })]);
+    expect(
+      lastItems().items.map((item) => [
+        item.kind,
+        item.windows.map((window) => window.value),
+        item.warnLabel,
+      ]),
+    ).toEqual([["claude", ["42%", "81%"], "High"]]);
+  });
+
+  test("toggling an item from the view opens the popover, and refresh reloads the accounts", async () => {
+    const { lastItems, lastPopover } = mountWithView([
+      account({ id: "claude:default" }),
+    ]);
+    lastItems().onToggle("claude:default", new Event("click"));
+    lastPopover().onRefresh();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect([lastItems().items[0]?.expanded, harness.loads]).toEqual([true, 1]);
   });
 });

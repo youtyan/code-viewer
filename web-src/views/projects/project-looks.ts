@@ -18,13 +18,14 @@
 // 取り直すたびに update へ渡す。色の値そのものは web/style.css の名前の層にある
 // (core/project-colors.ts の先頭)。
 
-import { html, render, type TemplateResult } from "lit/html.js";
+import { html, type TemplateResult } from "lit/html.js";
 import {
   type AgentOverviewResponse,
   type AgentProjectInfo,
   compareProjectsByRegistry,
 } from "../../core/agent-overview";
 import { type ProjectColor, projectInitials } from "../../core/project-colors";
+import { templateElement } from "../ui/renderer";
 
 export type ProjectLook = {
   root: string;
@@ -72,9 +73,7 @@ export function projectMarkTemplate(
  * 画面は projectMarkTemplate を使う。
  */
 export function projectMark(look: ProjectLook, className = ""): HTMLElement {
-  const fragment = document.createDocumentFragment();
-  render(projectMarkTemplate(look, className), fragment);
-  return fragment.querySelector("span") as HTMLElement;
+  return templateElement(projectMarkTemplate(look, className));
 }
 
 /** 今のテーマでの色の値 (#rrggbb)。 */

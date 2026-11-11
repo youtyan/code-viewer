@@ -19,7 +19,6 @@ import {
   parsePaneMessage,
 } from "../core/workspace-bridge";
 import { TITLE_TOOLTIP_DELAY_MS } from "../views/title-tooltip";
-import { startWorkspaceHost } from "../views/workspace/host";
 import type { WorkspaceStore } from "../views/workspace/store";
 
 const BODY = (() => {
@@ -87,6 +86,15 @@ describe("知らせと頼みの形", () => {
     expect(isHostHello(data)).toBe(expected);
   });
 });
+
+/**
+ * host の部品を、このテストの窓で読み込み直す。host は lit で描く。lit は読み込んだ
+ * 時点の document を掴むので、窓を作り直したら読み込み直す。
+ */
+async function loadHost() {
+  vi.resetModules();
+  return import("../views/workspace/host");
+}
 
 // host は文書ごとに受け口 (押下の捕捉・message) を置くので、テストごとに窓を作り直す。
 beforeEach(() => {
@@ -188,6 +196,7 @@ async function startHost(loaded: Workspace = twoPanes()) {
     onHidden: vi.fn(),
     onAgentsRefresh: vi.fn(),
   };
+  const { startWorkspaceHost } = await loadHost();
   const host = startWorkspaceHost(deps);
   await vi.waitFor(() =>
     expect(Object.values(panes).every((pane) => pane.hellos.length === 1)).toBe(
@@ -710,6 +719,7 @@ describe("host: 読み込みの最初に作った面", () => {
     const first = paneFrame("p1", `${B}/history`);
     first.frame.setAttribute("src", `${B}/history`);
     const { store } = fakeStore(twoPanes());
+    const { startWorkspaceHost } = await loadHost();
     startWorkspaceHost({
       store,
       homeUrl: () => `${A}/`,

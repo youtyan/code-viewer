@@ -18,13 +18,15 @@ export type CvIconProps = {
 export function iconTemplate(
   paths: string | readonly string[],
   cls?: string,
+  /** 絵の元の大きさ (core/icons.ts の path が描かれた枠。12 か 16)。 */
+  size: 12 | 16 = 16,
 ): unknown {
   const list = typeof paths === "string" ? [paths] : paths;
   return html`<svg
     class=${cls ? `octicon ${cls}` : "octicon"}
-    viewBox="0 0 16 16"
-    width="16"
-    height="16"
+    viewBox=${`0 0 ${size} ${size}`}
+    width=${size}
+    height=${size}
     fill="currentColor"
     aria-hidden="true"
   >${list.map((path) => svg`<path fill="currentColor" d=${path}></path>`)}</svg>`;

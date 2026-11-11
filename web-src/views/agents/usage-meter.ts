@@ -7,12 +7,14 @@
 // 80% 以上は琥珀の色と「注意」の文字の両方で示す (色だけに頼らない)。リセットの
 // 時刻を過ぎた値は今の値ではないので、割合を薄くして「リセット済み」と書く。
 
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import type {
   AccountLogin,
   AccountUsage,
   UsageWindowView,
 } from "../../core/agent-accounts";
 import { usageIsStale } from "../../core/agent-accounts";
+import { templateElement } from "../ui/renderer";
 import type { AccountsText } from "./accounts-i18n";
 
 /** バーの幅に使う割合。100 を超えた値もバーは満杯で止める。 */
@@ -49,43 +51,28 @@ export function resetClock(
  * reset: 右端に書くもの。remaining = 「あと 1時間58分でリセット」(最下段・起動の
  * 画面)、clock = 「06:10 に戻る」(全体ボードのカード。棒を % の前に置く)、none = 書かない。
  */
-export function usageMeterRow(
+export function usageMeterTemplate(
   view: UsageWindowView,
   now: number,
   t: AccountsText,
   options: { reset: "remaining" | "clock" | "none" },
-): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "usage-meter";
-  row.classList.toggle("warn", view.warn);
-  row.classList.toggle("expired", view.expired);
-  const name = document.createElement("span");
-  name.className = "usage-meter-name";
-  name.textContent = t.windowName(view.window);
-  const value = document.createElement("span");
-  value.className = "usage-meter-value";
-  const percent = document.createElement("span");
-  percent.textContent = `${Math.round(view.window.usedPercent)}%`;
-  value.appendChild(percent);
-  if (view.warn) {
-    const warn = document.createElement("span");
-    warn.className = "usage-meter-warn";
-    warn.textContent = t.warn;
-    value.appendChild(warn);
-  }
-  const bar = document.createElement("span");
-  bar.className = "usage-meter-bar";
-  bar.setAttribute("aria-hidden", "true");
-  const fill = document.createElement("span");
-  fill.className = "usage-meter-fill";
-  fill.style.width = `${usageBarPercent(view.window.usedPercent)}%`;
-  bar.appendChild(fill);
-  if (options.reset === "clock") {
-    row.classList.add("usage-meter-clock");
-    row.append(name, bar, value);
-  } else {
-    row.append(name, value, bar);
-  }
+): TemplateResult {
+  const cls = [
+    "usage-meter",
+    view.warn ? "warn" : "",
+    view.expired ? "expired" : "",
+    options.reset === "clock" ? "usage-meter-clock" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const name = html`<span class="usage-meter-name">${t.windowName(view.window)}</span>`;
+  const value = html`<span class="usage-meter-value"><span>${`${Math.round(view.window.usedPercent)}%`}</span>${
+    view.warn ? html`<span class="usage-meter-warn">${t.warn}</span>` : nothing
+  }</span>`;
+  const bar = html`<span class="usage-meter-bar" aria-hidden="true"><span
+      class="usage-meter-fill"
+      style=${`width: ${usageBarPercent(view.window.usedPercent)}%;`}
+    ></span></span>`;
   const reset = view.expired
     ? t.resetPassed
     : view.window.resetsAt <= 0
@@ -93,13 +80,7 @@ export function usageMeterRow(
       : options.reset === "clock"
         ? resetClock(view.window.resetsAt, now, t)
         : t.resetsIn(t.duration(view.window.resetsAt - now));
-  if (options.reset !== "none") {
-    const resetEl = document.createElement("span");
-    resetEl.className = "usage-meter-reset";
-    resetEl.textContent = reset;
-    row.appendChild(resetEl);
-  }
-  row.title = [
+  const title = [
     `${t.windowName(view.window)} ${Math.round(view.window.usedPercent)}%`,
     view.warn ? t.warn : "",
     reset,
@@ -109,7 +90,28 @@ export function usageMeterRow(
   ]
     .filter(Boolean)
     .join("\n");
-  return row;
+  return html`<div class=${cls} title=${title}>${
+    options.reset === "clock"
+      ? html`${name}${bar}${value}`
+      : html`${name}${value}${bar}`
+  }${
+    options.reset !== "none"
+      ? html`<span class="usage-meter-reset">${reset}</span>`
+      : nothing
+  }</div>`;
+}
+
+/**
+ * まだ宣言的に描いていない画面のための、行の要素を 1 つ返す形。宣言的に描く
+ * 画面は usageMeterTemplate を使う。
+ */
+export function usageMeterRow(
+  view: UsageWindowView,
+  now: number,
+  t: AccountsText,
+  options: { reset: "remaining" | "clock" | "none" },
+): HTMLElement {
+  return templateElement(usageMeterTemplate(view, now, t, options));
 }
 
 /**
