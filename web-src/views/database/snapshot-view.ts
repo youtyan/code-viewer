@@ -1,3 +1,7 @@
+import { keyed } from "lit/directives/keyed.js";
+import { live } from "lit/directives/live.js";
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../../core/api-url";
 import type {
   DbTableInfo,
@@ -7,6 +11,7 @@ import type {
 } from "../../core/database/types";
 import { errorWithCause } from "../../core/error-detail";
 import { isImeComposing } from "../../core/keyboard";
+import { detachedElement, templateElements } from "../ui/renderer";
 import { type DbText, dbText } from "./i18n";
 import { reportDatastoreFailure, requireOkResponse } from "./report-failure";
 
@@ -63,7 +68,508 @@ function arraysEqual(a: string[], b: string[]): boolean {
   return sa.every((v, i) => v === sb[i]);
 }
 
-export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
+type Failure = { operation: string; message: string };
+
+/** 差分の 1 テーブル分の行: 読み込み中・失敗・描いた表 (行が無ければ空)。 */
+type DiffRowsState =
+  | { loading: true }
+  | { failure: Failure }
+  | { nodes: Node[] };
+
+/** 右の差分の欄。seq が変わるたびに作り直す (前の目次の見張りも外す)。 */
+type DiffPane =
+  | null
+  | { seq: number; loading: true }
+  | { seq: number; failure: Failure }
+  | {
+      seq: number;
+      beforeId: string;
+      afterId: string;
+      tables: SnapshotDiffTableSummary[];
+    };
+
+export type SnapshotViewProps = {
+  text: DbText["snapshot"];
+  jobs: { job: ActiveJob; cancelling: boolean; onCancel: () => void }[];
+  selector: {
+    visible: boolean;
+    tables: DbTableInfo[];
+    selected: ReadonlySet<string>;
+    filter: string;
+    creating: boolean;
+    failure: Failure | null;
+  };
+  left: {
+    /** 一覧を描き直した回数。変わるたびに左の欄を作り直す。 */
+    seq: number;
+    snapshots: SnapshotMeta[];
+    failure: Failure | null;
+    diffBefore: string;
+    diffAfter: string;
+    diffBusy: boolean;
+    deleteArmed: string | null;
+    noteDialog: { snapshotId: string; note: string } | null;
+  };
+  diff: DiffPane;
+  diffRows: ReadonlyMap<string, DiffRowsState>;
+  hiddenTables: ReadonlySet<string>;
+  activeChip: string | null;
+  refs: {
+    filter: Ref<HTMLInputElement>;
+    note: Ref<HTMLInputElement>;
+    noteDialog: Ref<HTMLInputElement>;
+    right: Ref<HTMLElement>;
+    toc: Ref<HTMLElement>;
+  };
+  onCreate: () => void;
+  onRefresh: () => void;
+  onFilter: (value: string) => void;
+  onFilterKeydown: (event: KeyboardEvent) => void;
+  onToggleTable: (name: string, checked: boolean) => void;
+  onSelectAll: () => void;
+  onDeselectAll: () => void;
+  onConfirm: () => void;
+  onCancelSelector: () => void;
+  onDiffBefore: (id: string) => void;
+  onDiffAfter: (id: string) => void;
+  onDiff: () => void;
+  onEditNote: (snapshot: SnapshotMeta) => void;
+  onDelete: (id: string) => void;
+  onSaveNote: () => void;
+  onCloseNote: () => void;
+  onNoteKeydown: (event: KeyboardEvent) => void;
+  onToggleDiffTable: (name: string) => void;
+  onChip: (sectionId: string) => void;
+};
+
+export type SnapshotViewView = (props: SnapshotViewProps) => unknown;
+
+const failureTemplate = (failure: Failure) =>
+  html`<div class="db-snapshot-error" data-snapshot-failure=${failure.operation}
+    >${failure.message}</div
+  >`;
+
+function diffSectionId(tableName: string): string {
+  return `diff-table-${tableName.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+}
+
+// 差分セクションに出す対象:
+//   (1) 行差分が 1 件以上ある (coverage:"both" で +/~/- が立っている)
+//   (2) 片側 snapshot だけにあるテーブル (coverage:"before-only"/"after-only")
+//       — レコードが消えた/増えたのではなく「比較不能」と知らせるため。
+function changedTablesOf(
+  tables: SnapshotDiffTableSummary[],
+): SnapshotDiffTableSummary[] {
+  return tables.filter(
+    (t) =>
+      t.insertedCount + t.updatedCount + t.deletedCount > 0 ||
+      (t.coverage && t.coverage !== "both"),
+  );
+}
+
+const incomplete = (t: SnapshotDiffTableSummary) =>
+  t.coverage === "before-only" || t.coverage === "after-only";
+
+// 1 テーブルぶんのカウント / 未取得 badge。`coverage === "both"` または未指定
+// なら git diff 風カウント (+N: 緑、~N: 黄、-N: 赤)、片側未取得ならニュートラル
+// badge。テーブル header / toc chip の両方から使う。
+function coverageOrStats(
+  tx: DbText["snapshot"],
+  summary: SnapshotDiffTableSummary,
+): unknown {
+  if (summary.coverage === "before-only")
+    return html`<span class="db-snapshot-diff-coverage-badge before-only"
+      >${tx.coverageBeforeOnly}</span
+    >`;
+  if (summary.coverage === "after-only")
+    return html`<span class="db-snapshot-diff-coverage-badge after-only"
+      >${tx.coverageAfterOnly}</span
+    >`;
+  const stat = (cls: string, prefix: string, n: number) =>
+    n > 0
+      ? html`<span class=${`db-snapshot-diff-stat ${cls}`}>${prefix}${n}</span>`
+      : nothing;
+  return html`${stat("add", "+", summary.insertedCount)}${stat(
+    "upd",
+    "~",
+    summary.updatedCount,
+  )}${stat("del", "-", summary.deletedCount)}`;
+}
+
+function progressTemplate(p: SnapshotViewProps): unknown {
+  const t = p.text;
+  return p.jobs.map(({ job, cancelling, onCancel }) => {
+    let label: string;
+    let state: string;
+    if (job.errorMessage) {
+      label = `${t.errorPrefix}: ${job.errorMessage}`;
+      state = "error";
+    } else if (job.aborted) {
+      label = t.aborted;
+      state = "aborted";
+    } else if (job.done) {
+      label = t.statusDone;
+      state = "done";
+    } else if (job.total > 0 && job.table) {
+      // 実際に進行中の table が確定している時だけ「Snapshotting X (i/total)」
+      // を出す。`started` SSE 受信直後は total はあっても table がまだ無く、
+      // ここで `progressLabel("", 0, total)` を呼ぶと i18n の三項分岐が
+      // "Finalizing…" 側に倒れて、開始した瞬間に「仕上げ中」と表示される
+      // フリッカが出る。
+      label = t.progressLabel(job.table, job.index ?? 0, job.total);
+      state = "running";
+    } else {
+      label = t.creating;
+      state = "running";
+    }
+    return html`<div
+      class=${`db-snapshot-progress-row ${state}`}
+      data-snapshot-id=${job.id}
+    ><span class="db-snapshot-progress-label" title=${job.errorMessage ?? nothing}
+        >${label}</span
+      >${
+        job.done
+          ? nothing
+          : html`<button
+              type="button"
+              class="db-snapshot-job-cancel-btn"
+              ?disabled=${cancelling}
+              @click=${cancelling ? nothing : onCancel}
+            >${cancelling ? t.cancelling : t.cancel}</button>`
+      }</div>`;
+  });
+}
+
+function selectorTemplate(p: SnapshotViewProps): unknown {
+  const t = p.text;
+  const sel = p.selector;
+  const needle = sel.filter.trim().toLowerCase();
+  const shown = sel.tables.filter(
+    (tbl) => !needle || tbl.name.toLowerCase().includes(needle),
+  );
+  return html`${sel.failure ? failureTemplate(sel.failure) : nothing}<div
+      class="db-snapshot-table-selector-header"
+    ><span>${t.selectTablesHeader}</span><span class="db-snapshot-table-counter"
+        >${t.tableCounter(sel.selected.size, sel.tables.length)}</span
+      ></div
+    ><div class="db-snapshot-table-filter"><input
+        type="search"
+        class="db-snapshot-table-filter-input"
+        placeholder=${t.filterPlaceholder}
+        .value=${live(sel.filter)}
+        ${ref(p.refs.filter)}
+        @input=${(event: Event) =>
+          p.onFilter((event.currentTarget as HTMLInputElement).value)}
+        @keydown=${p.onFilterKeydown}
+      /></div
+    ><div class="db-snapshot-table-checkboxes">${shown.map(
+      (tbl) =>
+        html`<label class="db-snapshot-table-row"><input
+            type="checkbox"
+            .value=${tbl.name}
+            .checked=${sel.selected.has(tbl.name)}
+            @change=${(event: Event) =>
+              p.onToggleTable(
+                tbl.name,
+                (event.currentTarget as HTMLInputElement).checked,
+              )}
+          /><span class="db-snapshot-table-row-name">${tbl.name}</span><span
+            class="db-snapshot-table-row-count"
+            >${tbl.rowCount != null ? t.rowCount(tbl.rowCount).trim() : ""}</span
+          ></label>`,
+    )}${
+      shown.length === 0 && needle
+        ? html`<div class="db-snapshot-table-row-empty">${t.empty}</div>`
+        : nothing
+    }</div
+    ><div class="db-snapshot-select-actions"><button
+        type="button"
+        class="db-btn db-btn-sm"
+        @click=${p.onSelectAll}
+      >${t.selectAll}</button><button
+        type="button"
+        class="db-btn db-btn-sm"
+        @click=${p.onDeselectAll}
+      >${t.deselectAll}</button></div
+    ><div class="db-snapshot-note-row"><label class="db-snapshot-note-field"
+        ><span class="db-snapshot-note-label">${t.noteLabel}</span><input
+          type="text"
+          class="db-snapshot-note-input"
+          placeholder=${t.notePlaceholder}
+          ${ref(p.refs.note)}
+      /></label></div
+    ><div class="db-snapshot-action-row"><button
+        type="button"
+        class="db-snapshot-confirm-btn"
+        ?disabled=${sel.creating || sel.selected.size === 0}
+        @click=${p.onConfirm}
+      >${sel.creating ? t.creating : t.confirm}</button><button
+        type="button"
+        class="db-snapshot-cancel-btn"
+        @click=${p.onCancelSelector}
+      >${t.cancel}</button></div>`;
+}
+
+function snapshotLabel(t: DbText["snapshot"], s: SnapshotMeta): string {
+  const date = new Date(s.createdAt).toLocaleString();
+  const note = s.note ? ` — ${s.note}` : "";
+  return t.label(date, s.tables.length, note);
+}
+
+function leftTemplate(p: SnapshotViewProps): unknown {
+  const t = p.text;
+  const left = p.left;
+  const failure = left.failure ? failureTemplate(left.failure) : nothing;
+  const dialog = left.noteDialog;
+  const dialogTemplate = dialog
+    ? html`<div class="db-snapshot-inline-dialog"><input
+          type="text"
+          class="db-snapshot-note-input"
+          placeholder=${t.noteInputPlaceholder}
+          .value=${dialog.note}
+          ${ref(p.refs.noteDialog)}
+          @keydown=${p.onNoteKeydown}
+        /><button
+          type="button"
+          class="db-snapshot-confirm-btn"
+          @click=${p.onSaveNote}
+        >${t.saveNote}</button><button type="button" @click=${p.onCloseNote}
+          >${t.cancel}</button
+        ></div>`
+    : nothing;
+  const dialogInList =
+    dialog !== null &&
+    left.snapshots.some((snap) => snap.id === dialog.snapshotId);
+  if (left.snapshots.length === 0)
+    return html`${failure}${dialogInList ? nothing : dialogTemplate}<div
+        class="db-snapshot-empty"
+      >${t.empty}</div>`;
+  const done = left.snapshots.filter((s) => s.status === "done");
+  // 新しい snapshot が上に来る並び順 (created_at desc)。
+  // 大量に snapshot が溜まった時、最新を探すのにスクロールしないで済む。
+  const sorted = [...done].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+  const select = (value: string, onChange: (id: string) => void) =>
+    html`<select
+      class="db-snapshot-diff-select"
+      @change=${(event: Event) =>
+        onChange((event.currentTarget as HTMLSelectElement).value)}
+    >${sorted.map(
+      (s) =>
+        html`<option value=${s.id} ?selected=${s.id === value}
+          >${snapshotLabel(t, s)}</option
+        >`,
+    )}</select>`;
+  // 左ペイン上部の sticky エリア: diff 選択プルダウン + ボタン
+  // (一覧が何百件あろうとプルダウンに常時アクセスできる)。左ペインは横幅が
+  // 狭いので、各プルダウンを「ラベル + select」の行構成にして縦に積む。
+  return html`${failure}${dialogInList ? nothing : dialogTemplate}<div
+      class="db-snapshot-sticky-header"
+    >${
+      done.length >= 2
+        ? html`<div class="db-snapshot-diff-create"><label
+              class="db-snapshot-diff-row is-before"
+              ><span class="db-snapshot-diff-row-label"
+                >${t.compareBeforeBadge}</span
+              >${select(left.diffBefore, p.onDiffBefore)}</label
+            ><label class="db-snapshot-diff-row is-after"
+              ><span class="db-snapshot-diff-row-label"
+                >${t.compareAfterBadge}</span
+              >${select(left.diffAfter, p.onDiffAfter)}</label
+            ><button
+              type="button"
+              class="db-snapshot-diff-btn"
+              ?disabled=${left.diffBusy}
+              @click=${p.onDiff}
+            >${left.diffBusy ? t.comparing : t.diffManual}</button></div>`
+        : nothing
+    }</div
+    ><div class="db-snapshot-list-section"><h3 class="db-snapshot-section-title"
+        >${t.listTitle(left.snapshots.length)}</h3
+      >${left.snapshots.map((snap) => {
+        // プルダウンで選ばれた before/after を一覧の対応行にハイライトする
+        // (2 つ以上の done があるときだけ、プルダウンがある)。
+        const role =
+          done.length < 2
+            ? null
+            : snap.id === left.diffBefore
+              ? "before"
+              : snap.id === left.diffAfter
+                ? "after"
+                : null;
+        const armed = left.deleteArmed === snap.id;
+        return html`<div
+            class=${role === null ? "db-snapshot-item" : `db-snapshot-item is-${role}`}
+            data-snapshot-id=${snap.id}
+          ><div class="db-snapshot-info"><span class="db-snapshot-date"
+                >${new Date(snap.createdAt).toLocaleString()}</span
+              ><span class=${`db-snapshot-status ${snap.status}`}>${
+                snap.status === "running"
+                  ? t.statusRunning
+                  : snap.status === "error"
+                    ? t.statusError
+                    : t.statusDone
+              }</span><span
+                class="db-snapshot-tables-count"
+                title=${snap.tables.join(", ")}
+                >${t.tableCount(snap.tables.length)}</span
+              >${
+                snap.note
+                  ? html`<span class="db-snapshot-note">${snap.note}</span>`
+                  : nothing
+              }${
+                snap.status === "error" && snap.errorMessage
+                  ? html`<span
+                      class="db-snapshot-error-message"
+                      title=${snap.errorMessage}
+                      >${t.errorPrefix}: ${snap.errorMessage}</span
+                    >`
+                  : nothing
+              }${
+                role === null
+                  ? nothing
+                  : html`<span class="db-snapshot-compare-badge">${
+                      role === "before"
+                        ? t.compareBeforeBadge
+                        : t.compareAfterBadge
+                    }</span>`
+              }</div
+            ><div class="db-snapshot-actions"><button
+                type="button"
+                class="db-btn db-btn-sm"
+                @click=${() => p.onEditNote(snap)}
+              >${t.editNote}</button><button
+                type="button"
+                class="db-btn db-btn-sm"
+                data-confirm=${armed ? "1" : nothing}
+                @click=${() => p.onDelete(snap.id)}
+              >${armed ? t.deleteConfirm : t.delete}</button></div></div
+          >${dialog?.snapshotId === snap.id ? dialogTemplate : nothing}`;
+      })}</div>`;
+}
+
+function diffTemplate(p: SnapshotViewProps, diff: NonNullable<DiffPane>) {
+  const t = p.text;
+  if ("loading" in diff)
+    return html`<div class="db-snapshot-loading">${t.calculatingDiff}</div>`;
+  if ("failure" in diff) return failureTemplate(diff.failure);
+  const beforeMeta = p.left.snapshots.find((s) => s.id === diff.beforeId);
+  const afterMeta = p.left.snapshots.find((s) => s.id === diff.afterId);
+  const header =
+    beforeMeta && afterMeta
+      ? html`<div class="db-snapshot-diff-header">${t.diffShowing(
+          new Date(beforeMeta.createdAt).toLocaleString(),
+          new Date(afterMeta.createdAt).toLocaleString(),
+        )}</div>`
+      : nothing;
+  const changed = changedTablesOf(diff.tables);
+  if (changed.length === 0)
+    return html`${header}<div class="db-snapshot-diff-summary">${t.noChanges}</div>`;
+  // 変更テーブルが多い時、上から下までスクロールしないと目的の table に
+  // 辿り着けない。sticky な「目次」を出し、chip クリックで対応 section に
+  // ジャンプできるようにする。
+  return html`${header}<div class="db-snapshot-diff-summary">${t.diffSummary(
+    changed.length,
+    diff.tables.length - changed.length,
+  )}</div><div class="db-snapshot-diff-toc" ${ref(p.refs.toc)}>${changed.map(
+    (table) => {
+      const id = diffSectionId(table.tableName);
+      return html`<button
+          type="button"
+          class=${[
+            "db-snapshot-diff-toc-chip",
+            incomplete(table) ? "coverage-incomplete" : "",
+            p.activeChip === id ? "active" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          data-target-id=${id}
+          @click=${() => p.onChip(id)}
+        ><span class="db-snapshot-diff-toc-chip-name">${table.tableName}</span
+          ><span class="db-snapshot-diff-toc-chip-stats"
+            >${coverageOrStats(t, table)}</span
+          ></button>`;
+    },
+  )}</div>${changed.map((table) => {
+    const rows = p.diffRows.get(table.tableName);
+    const count = table.unsnapshottedRowCount ?? 0;
+    // scroll の停止位置補正は CSS の `.db-snapshot-right-pane
+    // { scroll-padding-top: 68px }` に一本化している。
+    return html`<div
+        class="db-snapshot-diff-table"
+        id=${diffSectionId(table.tableName)}
+      ><div
+          class="db-snapshot-diff-table-header"
+          style="cursor: pointer"
+          @click=${() => p.onToggleDiffTable(table.tableName)}
+        ><span class="db-snapshot-diff-table-name">${table.tableName}</span><span
+            class="db-snapshot-diff-table-stats"
+            >${coverageOrStats(t, table)}</span
+          ></div
+        ><div
+          class="db-snapshot-diff-rows-container"
+          ?hidden=${p.hiddenTables.has(table.tableName)}
+        >${
+          incomplete(table)
+            ? // 片側未取得は比較不能。説明文だけ出す。
+              html`<div class="db-snapshot-diff-coverage-note">${
+                table.coverage === "before-only"
+                  ? t.coverageNoteBeforeOnly(count)
+                  : t.coverageNoteAfterOnly(count)
+              }</div>`
+            : rows === undefined
+              ? nothing
+              : "loading" in rows
+                ? html`<div class="db-snapshot-loading">${t.loading}</div>`
+                : "failure" in rows
+                  ? failureTemplate(rows.failure)
+                  : rows.nodes
+        }</div></div>`;
+  })}`;
+}
+
+export const DEFAULT_VIEW: SnapshotViewView = (p) => {
+  const t = p.text;
+  return html`<div class="db-snapshot-view"><div class="db-snapshot-guide"><div
+        class="db-snapshot-guide-title"
+      >${t.guideTitle}</div><div class="db-snapshot-guide-body">${t.guideBody}</div></div
+    ><div class="db-snapshot-toolbar"><button
+        type="button"
+        class=${p.selector.visible ? "db-snapshot-create-btn is-active-dialog" : "db-snapshot-create-btn"}
+        ?disabled=${p.selector.visible}
+        @click=${p.onCreate}
+      >${t.create}</button><button
+        type="button"
+        class="db-snapshot-refresh-btn"
+        @click=${p.onRefresh}
+      >${t.refresh}</button></div
+    ><div class="db-snapshot-progress-area" ?hidden=${p.jobs.length === 0}>${progressTemplate(
+      p,
+    )}</div><div class="db-snapshot-table-selector" ?hidden=${!p.selector.visible}>${selectorTemplate(
+      p,
+    )}</div><div class="db-snapshot-main-area"><div class="db-snapshot-split"><div
+          class="db-snapshot-left-pane"
+        >${keyed(p.left.seq, leftTemplate(p))}</div><div
+          class="db-snapshot-right-pane"
+          ${ref(p.refs.right)}
+        >${
+          p.diff === null
+            ? nothing
+            : keyed(
+                p.diff.seq,
+                html`<div class="db-snapshot-diff-inline">${diffTemplate(
+                  p,
+                  p.diff,
+                )}</div>`,
+              )
+        }</div></div></div></div>`;
+};
+
+export function createSnapshotView(
+  deps: SnapshotViewDeps,
+  view: SnapshotViewView = DEFAULT_VIEW,
+): SnapshotView {
   const text = (): DbText => deps.getText?.() ?? dbText("en");
   const trackLoad = <T>(p: Promise<T>): Promise<T> =>
     deps.trackLoad ? deps.trackLoad(p) : p;
@@ -100,165 +606,18 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     );
   const getJson = (path: string, operation: string): Promise<Response> =>
     requestOk(operation, fetch(path));
-  /** 失敗を console に出し、画面に出す `.db-snapshot-error` を作る。 */
-  const failureElement = (operation: string, error: unknown): HTMLElement => {
-    const box = document.createElement("div");
-    box.className = "db-snapshot-error";
-    box.dataset.snapshotFailure = operation;
-    box.textContent = reportDatastoreFailure("SQL", operation, error);
-    return box;
+  /** 失敗を console に出し、画面に出す `.db-snapshot-error` の中身を作る。 */
+  const failureOf = (operation: string, error: unknown): Failure => ({
+    operation,
+    message: reportDatastoreFailure("SQL", operation, error),
+  });
+  const refs: SnapshotViewProps["refs"] = {
+    filter: createRef(),
+    note: createRef(),
+    noteDialog: createRef(),
+    right: createRef(),
+    toc: createRef(),
   };
-  /** 一覧・選択欄の先頭の失敗の表示を差し替える (無ければ足す)。 */
-  const showFailureIn = (
-    host: HTMLElement,
-    operation: string,
-    error: unknown,
-  ): void => {
-    host.querySelector(":scope > [data-snapshot-failure]")?.remove();
-    host.prepend(failureElement(operation, error));
-  };
-  const changeTypeLabel = (type: SnapshotDiffRow["changeType"]): string => {
-    if (type === "inserted") return "+";
-    return "−";
-  };
-  const snapshotLabel = (s: SnapshotMeta): string => {
-    const date = new Date(s.createdAt).toLocaleString();
-    const note = s.note ? ` — ${s.note}` : "";
-    return text().snapshot.label(date, s.tables.length, note);
-  };
-  const el = document.createElement("div");
-  el.className = "db-snapshot-view";
-
-  const guide = document.createElement("div");
-  guide.className = "db-snapshot-guide";
-  const guideTitle = document.createElement("div");
-  guideTitle.className = "db-snapshot-guide-title";
-  guideTitle.textContent = text().snapshot.guideTitle;
-  const guideBody = document.createElement("div");
-  guideBody.className = "db-snapshot-guide-body";
-  guideBody.textContent = text().snapshot.guideBody;
-  guide.append(guideTitle, guideBody);
-
-  const toolbar = document.createElement("div");
-  toolbar.className = "db-snapshot-toolbar";
-
-  const createBtn = document.createElement("button");
-  createBtn.type = "button";
-  createBtn.className = "db-snapshot-create-btn";
-  createBtn.textContent = text().snapshot.create;
-
-  const refreshBtn = document.createElement("button");
-  refreshBtn.type = "button";
-  refreshBtn.className = "db-snapshot-refresh-btn";
-  refreshBtn.textContent = text().snapshot.refresh;
-
-  toolbar.append(createBtn, refreshBtn);
-
-  // 取得中ジョブを表示する進捗エリア。`.db-global-search-progress` のスタイルを
-  // 流用し、複数ジョブを縦に並べる。各行は table 名 / 進捗 / cancel ボタンを持つ。
-  const progressArea = document.createElement("div");
-  progressArea.className = "db-snapshot-progress-area";
-  progressArea.hidden = true;
-
-  const tableSelector = document.createElement("div");
-  tableSelector.className = "db-snapshot-table-selector";
-  tableSelector.hidden = true;
-
-  // 「対象テーブル選択」ヘッダ。右側に「N / M tables selected」カウンタを置く。
-  const tableSelectorHeader = document.createElement("div");
-  tableSelectorHeader.className = "db-snapshot-table-selector-header";
-  const tableSelectorHeaderLabel = document.createElement("span");
-  tableSelectorHeaderLabel.textContent = text().snapshot.selectTablesHeader;
-  const tableSelectorCounter = document.createElement("span");
-  tableSelectorCounter.className = "db-snapshot-table-counter";
-  tableSelectorHeader.append(tableSelectorHeaderLabel, tableSelectorCounter);
-
-  // フィルタ入力 + clear ボタン (Esc でも clear)。
-  const filterRow = document.createElement("div");
-  filterRow.className = "db-snapshot-table-filter";
-  const filterInput = document.createElement("input");
-  filterInput.type = "search";
-  filterInput.className = "db-snapshot-table-filter-input";
-  filterInput.placeholder = text().snapshot.filterPlaceholder;
-  filterRow.appendChild(filterInput);
-
-  // 縦リスト本体。row 全体クリックでチェック ON/OFF (checkbox の keyboard 操作は壊さない)。
-  const tableCheckboxes = document.createElement("div");
-  tableCheckboxes.className = "db-snapshot-table-checkboxes";
-
-  // 選択アクション (全選択 / 解除)。
-  const selectActions = document.createElement("div");
-  selectActions.className = "db-snapshot-select-actions";
-
-  const selectAllBtn = document.createElement("button");
-  selectAllBtn.type = "button";
-  selectAllBtn.className = "db-btn db-btn-sm";
-  selectAllBtn.textContent = text().snapshot.selectAll;
-
-  const deselectAllBtn = document.createElement("button");
-  deselectAllBtn.type = "button";
-  deselectAllBtn.className = "db-btn db-btn-sm";
-  deselectAllBtn.textContent = text().snapshot.deselectAll;
-
-  selectActions.append(selectAllBtn, deselectAllBtn);
-
-  // メモ欄は独立 1 行 (full-width label + input)。ボタンと混ぜないことで
-  // 「メモ入れる場所が狭い」問題を解消する。
-  const noteRow = document.createElement("div");
-  noteRow.className = "db-snapshot-note-row";
-  const noteField = document.createElement("label");
-  noteField.className = "db-snapshot-note-field";
-  const noteLabel = document.createElement("span");
-  noteLabel.className = "db-snapshot-note-label";
-  noteLabel.textContent = text().snapshot.noteLabel;
-  const noteInput = document.createElement("input");
-  noteInput.type = "text";
-  noteInput.className = "db-snapshot-note-input";
-  noteInput.placeholder = text().snapshot.notePlaceholder;
-  noteField.append(noteLabel, noteInput);
-  noteRow.appendChild(noteField);
-
-  // 取得開始 / キャンセルを別行に。
-  const actionRow = document.createElement("div");
-  actionRow.className = "db-snapshot-action-row";
-  const confirmBtn = document.createElement("button");
-  confirmBtn.type = "button";
-  confirmBtn.className = "db-snapshot-confirm-btn";
-  confirmBtn.textContent = text().snapshot.confirm;
-  const cancelBtn = document.createElement("button");
-  cancelBtn.type = "button";
-  cancelBtn.className = "db-snapshot-cancel-btn";
-  cancelBtn.textContent = text().snapshot.cancel;
-  actionRow.append(confirmBtn, cancelBtn);
-
-  tableSelector.append(
-    tableSelectorHeader,
-    filterRow,
-    tableCheckboxes,
-    selectActions,
-    noteRow,
-    actionRow,
-  );
-
-  const mainArea = document.createElement("div");
-  mainArea.className = "db-snapshot-main-area";
-
-  // 左ペイン: diff 選択プルダウン(sticky) + 一覧
-  // 右ペイン: diff 結果。これにより一覧が何百件あってもプルダウンは常時上部
-  // に固定され、diff は左ペインの一覧スクロールとは独立してスクロールできる。
-  const splitContainer = document.createElement("div");
-  splitContainer.className = "db-snapshot-split";
-
-  const leftPane = document.createElement("div");
-  leftPane.className = "db-snapshot-left-pane";
-
-  const rightPane = document.createElement("div");
-  rightPane.className = "db-snapshot-right-pane";
-
-  splitContainer.append(leftPane, rightPane);
-  mainArea.appendChild(splitContainer);
-
-  el.append(guide, toolbar, progressArea, tableSelector, mainArea);
 
   let snapshots: SnapshotMeta[] = [];
   let currentDiff: { beforeId: string; afterId: string } | null = null;
@@ -275,28 +634,188 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   // 同じ id に終端 SSE が再着するケースを冪等に扱う。
   const jobClearTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+  // テーブル選択 UI state: フィルタ文字列 + 選択中テーブル集合。
+  // 表示は filter で絞り込まれた候補のみ、選択集合は filter 越しでも保持。
+  let selectorVisible = false;
+  let tableSelectorTables: DbTableInfo[] = [];
+  const selectedTableSet = new Set<string>();
+  let tableFilterValue = "";
+  let creating = false;
+  let selectorFailure: Failure | null = null;
+
+  // 左の一覧。描き直す (renderMain) たびに seq を進め、欄を作り直す。
+  let leftSeq = 0;
+  let leftFailure: Failure | null = null;
+  let diffBefore = "";
+  let diffAfter = "";
+  let diffBusy = false;
+  let deleteArmed: string | null = null;
+  let noteDialog: SnapshotViewProps["left"]["noteDialog"] = null;
+
+  // 右の差分。
+  let diffSeq = 0;
+  let diffPane: DiffPane = null;
+  let diffRows = new Map<string, DiffRowsState>();
+  const hiddenTables = new Set<string>();
+  let activeChip: string | null = null;
+  let tocObserver: IntersectionObserver | null = null;
+
+  function props(): SnapshotViewProps {
+    return {
+      text: text().snapshot,
+      jobs: [...activeJobs.values()].map((job) => ({
+        job,
+        cancelling: cancellingJobs.has(job.id),
+        onCancel: () => void cancelJob(job.id),
+      })),
+      selector: {
+        visible: selectorVisible,
+        tables: tableSelectorTables,
+        selected: selectedTableSet,
+        filter: tableFilterValue,
+        creating,
+        failure: selectorFailure,
+      },
+      left: {
+        seq: leftSeq,
+        snapshots,
+        failure: leftFailure,
+        diffBefore,
+        diffAfter,
+        diffBusy,
+        deleteArmed,
+        noteDialog,
+      },
+      diff: diffPane,
+      diffRows,
+      hiddenTables,
+      activeChip,
+      refs,
+      onCreate: showTableSelector,
+      onRefresh: () => void refresh(),
+      onFilter: (value) => {
+        tableFilterValue = value;
+        draw();
+      },
+      onFilterKeydown: (e) => {
+        if (e.key === "Escape" && tableFilterValue) {
+          e.preventDefault();
+          tableFilterValue = "";
+          draw();
+        }
+      },
+      onToggleTable: (name, checked) => {
+        if (checked) selectedTableSet.add(name);
+        else selectedTableSet.delete(name);
+        draw();
+        persistSelectedTables();
+      },
+      onSelectAll: () => {
+        // フィルタ中は表示中のものだけを対象に。フィルタ無い時は全テーブル対象。
+        for (const tbl of filteredTables()) selectedTableSet.add(tbl.name);
+        draw();
+        persistSelectedTables();
+      },
+      onDeselectAll: () => {
+        if (!tableFilterValue.trim()) selectedTableSet.clear();
+        else
+          for (const tbl of filteredTables()) selectedTableSet.delete(tbl.name);
+        draw();
+        persistSelectedTables();
+      },
+      onConfirm: () => void createSnapshot(),
+      onCancelSelector: () => {
+        selectorVisible = false;
+        draw();
+      },
+      onDiffBefore: (id) => {
+        diffBefore = id;
+        draw();
+      },
+      onDiffAfter: (id) => {
+        diffAfter = id;
+        draw();
+      },
+      onDiff: () => void runManualDiff(),
+      onEditNote: (snap) => editNote(snap.id, snap.note),
+      onDelete: (id) => {
+        if (deleteArmed !== id) {
+          deleteArmed = id;
+          draw();
+          window.setTimeout(() => {
+            if (deleteArmed !== id) return;
+            deleteArmed = null;
+            draw();
+          }, 3000);
+          return;
+        }
+        deleteArmed = null;
+        draw();
+        void deleteSnap(id);
+      },
+      onSaveNote: () => void saveNote(),
+      onCloseNote: closeNoteDialog,
+      onNoteKeydown: (e) => {
+        if (isImeComposing(e)) return;
+        if (e.key === "Enter") void saveNote();
+        if (e.key === "Escape") closeNoteDialog();
+      },
+      onToggleDiffTable: (name) => {
+        if (hiddenTables.has(name)) hiddenTables.delete(name);
+        else hiddenTables.add(name);
+        draw();
+      },
+      onChip: (sectionId) => {
+        const target = diffTableElement(sectionId);
+        scrollTarget = target;
+        target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      },
+    };
+  }
+
+  const box = detachedElement(() => view(props()));
+  const draw = () => {
+    if (!disposed) box.draw();
+  };
+  const rightPane = (): HTMLElement => {
+    const pane = refs.right.value;
+    if (!pane) throw new Error("snapshot view: the right pane was not drawn");
+    return pane;
+  };
+  // 目次のクリックで寄せた先。行を読み終えたら、高さが変わった分を寄せ直す。
+  let scrollTarget: HTMLElement | null = null;
+  const diffTableElement = (sectionId: string): HTMLElement | null =>
+    rightPane().querySelector<HTMLElement>(`#${CSS.escape(sectionId)}`);
+
+  function filteredTables(): DbTableInfo[] {
+    const needle = tableFilterValue.trim().toLowerCase();
+    return tableSelectorTables.filter(
+      (tbl) => !needle || tbl.name.toLowerCase().includes(needle),
+    );
+  }
+
   function upsertJob(id: string, patch: Partial<ActiveJob>): void {
     const prev = activeJobs.get(id) ?? { id, total: 0, done: false };
     activeJobs.set(id, { ...prev, ...patch, id });
-    renderProgress();
+    draw();
   }
 
   function scheduleJobRemove(id: string): void {
     const existing = jobClearTimers.get(id);
     if (existing) clearTimeout(existing);
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       jobClearTimers.delete(id);
       cancellingJobs.delete(id);
       activeJobs.delete(id);
-      renderProgress();
+      draw();
     }, 5000);
-    jobClearTimers.set(id, t);
+    jobClearTimers.set(id, timer);
   }
 
   async function cancelJob(id: string): Promise<void> {
     if (cancellingJobs.has(id)) return;
     cancellingJobs.add(id);
-    renderProgress();
+    draw();
     try {
       // 通れば SSE 側で aborted/error が届くまで row を維持する。
       await postJson(
@@ -307,85 +826,9 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     } catch (error) {
       // 取り消しが届いていないので SSE も来ない。「取り消し中」を外して理由を出す。
       cancellingJobs.delete(id);
-      renderProgress();
-      if (!disposed) showFailureIn(leftPane, "snapshot cancel", error);
+      if (!disposed) leftFailure = failureOf("snapshot cancel", error);
+      draw();
     }
-  }
-
-  function renderProgress(): void {
-    progressArea.innerHTML = "";
-    if (activeJobs.size === 0) {
-      progressArea.hidden = true;
-      return;
-    }
-    progressArea.hidden = false;
-    const t = text().snapshot;
-    for (const job of activeJobs.values()) {
-      const row = document.createElement("div");
-      row.className = "db-snapshot-progress-row";
-      row.dataset.snapshotId = job.id;
-
-      const label = document.createElement("span");
-      label.className = "db-snapshot-progress-label";
-      if (job.errorMessage) {
-        label.textContent = `${t.errorPrefix}: ${job.errorMessage}`;
-        label.title = job.errorMessage;
-        row.classList.add("error");
-      } else if (job.aborted) {
-        label.textContent = t.aborted;
-        row.classList.add("aborted");
-      } else if (job.done) {
-        label.textContent = t.statusDone;
-        row.classList.add("done");
-      } else if (job.total > 0 && job.table) {
-        // 実際に進行中の table が確定している時だけ「Snapshotting X (i/total)」
-        // を出す。`started` SSE 受信直後は total はあっても table がまだ無く、
-        // ここで `progressLabel("", 0, total)` を呼ぶと i18n の三項分岐が
-        // "Finalizing…" 側に倒れて、開始した瞬間に「仕上げ中」と表示される
-        // フリッカが出る。
-        label.textContent = t.progressLabel(
-          job.table,
-          job.index ?? 0,
-          job.total,
-        );
-        row.classList.add("running");
-      } else {
-        label.textContent = t.creating;
-        row.classList.add("running");
-      }
-      row.appendChild(label);
-
-      if (!job.done) {
-        const cancelRowBtn = document.createElement("button");
-        cancelRowBtn.type = "button";
-        cancelRowBtn.className = "db-snapshot-job-cancel-btn";
-        if (cancellingJobs.has(job.id)) {
-          cancelRowBtn.disabled = true;
-          cancelRowBtn.textContent = t.cancelling;
-        } else {
-          cancelRowBtn.textContent = t.cancel;
-          cancelRowBtn.addEventListener("click", () => {
-            void cancelJob(job.id);
-          });
-        }
-        row.appendChild(cancelRowBtn);
-      }
-      progressArea.appendChild(row);
-    }
-  }
-
-  // テーブル選択 UI state: フィルタ文字列 + 選択中テーブル集合。
-  // 表示は filterValue で絞り込まれた候補のみ、選択集合は filter 越しでも保持。
-  let tableSelectorTables: DbTableInfo[] = [];
-  const selectedTableSet = new Set<string>();
-  let tableFilterValue = "";
-
-  function setTableSelectorVisible(visible: boolean): void {
-    tableSelector.hidden = !visible;
-    // dialog 表示中は toolbar の「取得」ボタンを disabled に。重複押下や
-    // 「dialog を出したつもりが二重に開く」のような混乱を防ぐ。
-    createBtn.disabled = visible;
-    createBtn.classList.toggle("is-active-dialog", visible);
   }
 
   function showTableSelector() {
@@ -409,67 +852,17 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       for (const name of lastTables) selectedTableSet.add(name);
     }
     tableFilterValue = "";
-    filterInput.value = "";
-    renderTableList();
-    setTableSelectorVisible(true);
-    noteInput.value = "";
-    filterInput.focus();
+    // dialog 表示中は toolbar の「取得」ボタンを disabled に。重複押下や
+    // 「dialog を出したつもりが二重に開く」のような混乱を防ぐ。
+    selectorVisible = true;
+    draw();
+    const note = refs.note.value;
+    if (note) note.value = "";
+    refs.filter.value?.focus();
   }
 
   function persistSelectedTables(): void {
     deps.setStoredSelectedTables?.(Array.from(selectedTableSet).sort());
-  }
-
-  function renderTableList(): void {
-    const needle = tableFilterValue.trim().toLowerCase();
-    tableCheckboxes.innerHTML = "";
-    const t = text().snapshot;
-    let visible = 0;
-    for (const tbl of tableSelectorTables) {
-      if (needle && !tbl.name.toLowerCase().includes(needle)) continue;
-      visible++;
-      const row = document.createElement("label");
-      row.className = "db-snapshot-table-row";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.value = tbl.name;
-      cb.checked = selectedTableSet.has(tbl.name);
-      cb.addEventListener("change", () => {
-        if (cb.checked) selectedTableSet.add(tbl.name);
-        else selectedTableSet.delete(tbl.name);
-        updateSelectorState();
-        persistSelectedTables();
-      });
-      const name = document.createElement("span");
-      name.className = "db-snapshot-table-row-name";
-      name.textContent = tbl.name;
-      const count = document.createElement("span");
-      count.className = "db-snapshot-table-row-count";
-      count.textContent =
-        tbl.rowCount != null ? t.rowCount(tbl.rowCount).trim() : "";
-      row.append(cb, name, count);
-      tableCheckboxes.appendChild(row);
-    }
-    if (visible === 0 && needle) {
-      const empty = document.createElement("div");
-      empty.className = "db-snapshot-table-row-empty";
-      empty.textContent = t.empty;
-      tableCheckboxes.appendChild(empty);
-    }
-    updateSelectorState();
-  }
-
-  function updateSelectorState(): void {
-    // counter とボタン disable 状態のみ更新。永続化は実際に selection が
-    // 変わるパス (checkbox change / select-all / deselect-all) で別途呼ぶ。
-    // ここで毎回 persist を呼ぶと filter のキーストロークでも PATCH が飛んで
-    // burst になる (renderTableList が input event ごとに走るため)。
-    const t = text().snapshot;
-    tableSelectorCounter.textContent = t.tableCounter(
-      selectedTableSet.size,
-      tableSelectorTables.length,
-    );
-    confirmBtn.disabled = selectedTableSet.size === 0;
   }
 
   function getLastTables(): string[] {
@@ -479,63 +872,14 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     return done.length > 0 ? done[0].tables : [];
   }
 
-  function getSelectedTables(): string[] {
-    return Array.from(selectedTableSet);
-  }
-
-  filterInput.addEventListener("input", () => {
-    tableFilterValue = filterInput.value;
-    renderTableList();
-  });
-  filterInput.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && filterInput.value) {
-      e.preventDefault();
-      filterInput.value = "";
-      tableFilterValue = "";
-      renderTableList();
-    }
-  });
-
-  selectAllBtn.addEventListener("click", () => {
-    // フィルタ中は表示中のものだけを対象に。フィルタ無い時は全テーブル対象。
-    const needle = tableFilterValue.trim().toLowerCase();
-    for (const tbl of tableSelectorTables) {
-      if (needle && !tbl.name.toLowerCase().includes(needle)) continue;
-      selectedTableSet.add(tbl.name);
-    }
-    renderTableList();
-    persistSelectedTables();
-  });
-
-  deselectAllBtn.addEventListener("click", () => {
-    const needle = tableFilterValue.trim().toLowerCase();
-    if (!needle) {
-      selectedTableSet.clear();
-    } else {
-      for (const tbl of tableSelectorTables) {
-        if (tbl.name.toLowerCase().includes(needle)) {
-          selectedTableSet.delete(tbl.name);
-        }
-      }
-    }
-    renderTableList();
-    persistSelectedTables();
-  });
-
-  createBtn.addEventListener("click", showTableSelector);
-  cancelBtn.addEventListener("click", () => {
-    setTableSelectorVisible(false);
-  });
-  confirmBtn.addEventListener("click", async () => {
+  async function createSnapshot(): Promise<void> {
     const dbId = deps.getDbId();
     const schema = deps.getSchema();
     if (!dbId) return;
-    const tables = getSelectedTables();
+    const tables = Array.from(selectedTableSet);
     if (tables.length === 0) return;
-
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = text().snapshot.creating;
-
+    creating = true;
+    draw();
     try {
       await postJson(
         apiUrl("dbSnapshotCreate"),
@@ -543,23 +887,21 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
           db: dbId,
           ...(schema ? { schema } : {}),
           tables,
-          note: noteInput.value.trim(),
+          note: refs.note.value?.value.trim() ?? "",
         },
         text().failure.createSnapshot,
       );
-      tableSelector.querySelector(":scope > [data-snapshot-failure]")?.remove();
-      setTableSelectorVisible(false);
+      selectorFailure = null;
+      selectorVisible = false;
       scheduleAutoRefresh(dbId, schema);
     } catch (error) {
       // 選択欄は開いたままにして、押し直せるようにする。
-      if (!disposed) showFailureIn(tableSelector, "snapshot create", error);
+      if (!disposed) selectorFailure = failureOf("snapshot create", error);
     } finally {
-      if (!disposed) {
-        confirmBtn.disabled = false;
-        confirmBtn.textContent = text().snapshot.confirm;
-      }
+      creating = false;
+      draw();
     }
-  });
+  }
 
   function scheduleAutoRefresh(dbId: string, schema: string | null): void {
     const timer = setTimeout(() => {
@@ -571,8 +913,6 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     }, 3000);
     autoRefreshTimers.add(timer);
   }
-
-  refreshBtn.addEventListener("click", refresh);
 
   // refresh() の inflight 制御。tab 入場時の onClick / applySourceRouteToShell
   // / restoreDiffFromRoute からほぼ同時に複数回呼ばれることがあり、そのまま
@@ -593,6 +933,12 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     }
   }
 
+  function dropDiff(): void {
+    tocObserver?.disconnect();
+    tocObserver = null;
+    diffPane = null;
+  }
+
   async function doRefresh() {
     const dbId = deps.getDbId();
     const schema = deps.getSchema();
@@ -610,34 +956,25 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         return;
       }
       snapshots = data.snapshots;
-      if (disposed || deps.getDbId() !== dbId || deps.getSchema() !== schema)
-        return;
-      renderMain();
+      renderMain(false);
       // DB/schema 切替で currentDiff の指す snapshot が新しい一覧に存在しない
-      // なら、rightPane に残った旧 diff を破棄する (IntersectionObserver も
-      // disconnect)。 leftPane のみ clear する renderMain() だけだと、旧 DB の
-      // diff content が右に残り、observer が stale node を観察し続ける。
+      // なら、右に残った旧 diff を破棄する (IntersectionObserver も disconnect)。
       if (currentDiff) {
         const stillValid =
           snapshots.some((s) => s.id === currentDiff?.beforeId) &&
           snapshots.some((s) => s.id === currentDiff?.afterId);
         if (!stillValid) {
-          const existing = rightPane.querySelector(".db-snapshot-diff-inline");
-          if (existing) {
-            const prev = existing as HTMLElement & {
-              __tocObserver?: IntersectionObserver;
-            };
-            prev.__tocObserver?.disconnect();
-            existing.remove();
-          }
+          dropDiff();
           currentDiff = null;
         }
       }
+      draw();
     } catch (error) {
       if (disposed || deps.getDbId() !== dbId || deps.getSchema() !== schema)
         return;
       // 前の一覧は残し (古いかもしれない)、先頭に読めなかった理由を出す。
-      showFailureIn(leftPane, "snapshot list", error);
+      leftFailure = failureOf("snapshot list", error);
+      draw();
     }
   }
 
@@ -651,219 +988,42 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     const prev = done[1];
     if (!arraysEqual(newest.tables, prev.tables)) return;
 
-    showDiffInline(prev.id, newest.id);
+    void showDiffInline(prev.id, newest.id);
   }
 
-  function renderMain() {
-    leftPane.innerHTML = "";
-
-    const done = snapshots.filter((s) => s.status === "done");
-
-    if (snapshots.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "db-snapshot-empty";
-      empty.textContent = text().snapshot.empty;
-      leftPane.appendChild(empty);
-      return;
-    }
-
-    // 左ペイン上部の sticky エリア: diff 選択プルダウン + ボタン
-    // (一覧が何百件あろうとプルダウンに常時アクセスできる)
-    const stickyHeader = document.createElement("div");
-    stickyHeader.className = "db-snapshot-sticky-header";
-
-    const snapshotSection = document.createElement("div");
-    snapshotSection.className = "db-snapshot-list-section";
-
-    const snapTitle = document.createElement("h3");
-    snapTitle.className = "db-snapshot-section-title";
-    // タイトル件数は全 snapshot を含めた件数を出す。done だけに絞ると
-    // running / error の存在が見えなくなる。diff 選択肢は引き続き done のみ。
-    snapTitle.textContent = text().snapshot.listTitle(snapshots.length);
-    snapshotSection.appendChild(snapTitle);
-
-    const t = text().snapshot;
-    for (const snap of snapshots) {
-      const item = document.createElement("div");
-      item.className = "db-snapshot-item";
-      item.dataset.snapshotId = snap.id;
-
-      const info = document.createElement("div");
-      info.className = "db-snapshot-info";
-      const date = document.createElement("span");
-      date.className = "db-snapshot-date";
-      date.textContent = new Date(snap.createdAt).toLocaleString();
-
-      const status = document.createElement("span");
-      status.className = `db-snapshot-status ${snap.status}`;
-      status.textContent =
-        snap.status === "running"
-          ? t.statusRunning
-          : snap.status === "error"
-            ? t.statusError
-            : t.statusDone;
-
-      const tables = document.createElement("span");
-      tables.className = "db-snapshot-tables-count";
-      tables.title = snap.tables.join(", ");
-      tables.textContent = t.tableCount(snap.tables.length);
-      info.append(date, status, tables);
-      if (snap.note) {
-        const note = document.createElement("span");
-        note.className = "db-snapshot-note";
-        note.textContent = snap.note;
-        info.appendChild(note);
-      }
-      if (snap.status === "error" && snap.errorMessage) {
-        const errMsg = document.createElement("span");
-        errMsg.className = "db-snapshot-error-message";
-        errMsg.textContent = `${t.errorPrefix}: ${snap.errorMessage}`;
-        errMsg.title = snap.errorMessage;
-        info.appendChild(errMsg);
-      }
-
-      const actions = document.createElement("div");
-      actions.className = "db-snapshot-actions";
-      const noteBtn = document.createElement("button");
-      noteBtn.type = "button";
-      noteBtn.className = "db-btn db-btn-sm";
-      noteBtn.textContent = text().snapshot.editNote;
-      noteBtn.addEventListener("click", () => editNote(snap.id, snap.note));
-      const deleteBtn = document.createElement("button");
-      deleteBtn.type = "button";
-      deleteBtn.className = "db-btn db-btn-sm";
-      deleteBtn.textContent = text().snapshot.delete;
-      deleteBtn.addEventListener("click", () => {
-        if (deleteBtn.dataset.confirm !== "1") {
-          deleteBtn.dataset.confirm = "1";
-          deleteBtn.textContent = text().snapshot.deleteConfirm;
-          window.setTimeout(() => {
-            if (deleteBtn.dataset.confirm === "1") {
-              deleteBtn.dataset.confirm = "";
-              deleteBtn.textContent = text().snapshot.delete;
-            }
-          }, 3000);
-          return;
-        }
-        deleteBtn.dataset.confirm = "";
-        deleteBtn.textContent = text().snapshot.delete;
-        deleteSnap(snap.id);
-      });
-      actions.append(noteBtn, deleteBtn);
-
-      item.append(info, actions);
-      snapshotSection.appendChild(item);
-    }
-
-    if (done.length >= 2) {
-      const diffCreate = document.createElement("div");
-      diffCreate.className = "db-snapshot-diff-create";
-
-      const beforeSelect = document.createElement("select");
-      beforeSelect.className = "db-snapshot-diff-select";
-      const afterSelect = document.createElement("select");
-      afterSelect.className = "db-snapshot-diff-select";
-
-      // 新しい snapshot が上に来る並び順 (created_at desc)。
-      // 大量に snapshot が溜まった時、最新を探すのにスクロールしないで済む。
-      const sorted = [...done].sort(
+  // 左の一覧を作り直す。keepSelection でなければ、比較の before/after を
+  // 「1 つ前 / 最新」に戻す (前の版は一覧を作り直すたびに選び直していた)。
+  function renderMain(keepSelection: boolean) {
+    leftSeq++;
+    leftFailure = null;
+    deleteArmed = null;
+    noteDialog = null;
+    diffBusy = false;
+    if (keepSelection) return;
+    const sorted = snapshots
+      .filter((s) => s.status === "done")
+      .sort(
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       );
-      for (const s of sorted) {
-        const optB = document.createElement("option");
-        optB.value = s.id;
-        optB.textContent = snapshotLabel(s);
-        beforeSelect.appendChild(optB);
+    diffBefore = sorted[1]?.id ?? sorted[0]?.id ?? "";
+    diffAfter = sorted[0]?.id ?? "";
+  }
 
-        const optA = document.createElement("option");
-        optA.value = s.id;
-        optA.textContent = snapshotLabel(s);
-        afterSelect.appendChild(optA);
-      }
-      if (sorted.length >= 2) {
-        // before = 1 つ前 (index 1)、after = 最新 (index 0)。
-        beforeSelect.selectedIndex = 1;
-        afterSelect.selectedIndex = 0;
-      }
-
-      const diffBtn = document.createElement("button");
-      diffBtn.type = "button";
-      diffBtn.className = "db-snapshot-diff-btn";
-      diffBtn.textContent = text().snapshot.diffManual;
-      diffBtn.addEventListener("click", async () => {
-        diffBtn.disabled = true;
-        diffBtn.textContent = text().snapshot.comparing;
-        try {
-          await showDiffInline(beforeSelect.value, afterSelect.value);
-          scrollDiffIntoView();
-        } finally {
-          diffBtn.disabled = false;
-          diffBtn.textContent = text().snapshot.diffManual;
-        }
-      });
-
-      // プルダウンで選択された before/after を一覧の対応行にハイライト表示する。
-      // .is-before / .is-after クラスと badge を付け替える。
-      const applyDiffSelectionHighlight = () => {
-        const items =
-          snapshotSection.querySelectorAll<HTMLElement>(".db-snapshot-item");
-        const before = beforeSelect.value;
-        const after = afterSelect.value;
-        for (const it of items) {
-          it.classList.remove("is-before", "is-after");
-          const old = it.querySelector(".db-snapshot-compare-badge");
-          if (old) old.remove();
-        }
-        for (const it of items) {
-          const id = it.dataset.snapshotId ?? "";
-          let label: string | null = null;
-          if (id === before) {
-            it.classList.add("is-before");
-            label = t.compareBeforeBadge;
-          } else if (id === after) {
-            it.classList.add("is-after");
-            label = t.compareAfterBadge;
-          }
-          if (label) {
-            const badge = document.createElement("span");
-            badge.className = "db-snapshot-compare-badge";
-            badge.textContent = label;
-            const info = it.querySelector(".db-snapshot-info");
-            if (info) info.appendChild(badge);
-          }
-        }
-      };
-      beforeSelect.addEventListener("change", applyDiffSelectionHighlight);
-      afterSelect.addEventListener("change", applyDiffSelectionHighlight);
-      applyDiffSelectionHighlight();
-
-      // 左ペインは横幅が狭いので、各プルダウンを「ラベル + select」の
-      // 行構成にして縦に積む。ラベルは一覧 item の比較元/比較先 badge と
-      // 同じ文言を使い、視覚的にハイライトと結びつける。
-      const beforeRow = document.createElement("label");
-      beforeRow.className = "db-snapshot-diff-row is-before";
-      const beforeLabel = document.createElement("span");
-      beforeLabel.className = "db-snapshot-diff-row-label";
-      beforeLabel.textContent = t.compareBeforeBadge;
-      beforeRow.append(beforeLabel, beforeSelect);
-
-      const afterRow = document.createElement("label");
-      afterRow.className = "db-snapshot-diff-row is-after";
-      const afterLabel = document.createElement("span");
-      afterLabel.className = "db-snapshot-diff-row-label";
-      afterLabel.textContent = t.compareAfterBadge;
-      afterRow.append(afterLabel, afterSelect);
-
-      diffCreate.append(beforeRow, afterRow, diffBtn);
-      stickyHeader.appendChild(diffCreate);
+  async function runManualDiff(): Promise<void> {
+    diffBusy = true;
+    draw();
+    try {
+      await showDiffInline(diffBefore, diffAfter);
+      scrollDiffIntoView();
+    } finally {
+      diffBusy = false;
+      draw();
     }
-
-    leftPane.append(stickyHeader, snapshotSection);
   }
 
   function scrollDiffIntoView(): void {
-    const section = rightPane.querySelector<HTMLElement>(
+    const section = refs.right.value?.querySelector<HTMLElement>(
       ".db-snapshot-diff-inline",
     );
     if (!section) return;
@@ -874,23 +1034,10 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     currentDiff = { beforeId, afterId };
     // URL に before/after を反映してリロード復元に備える。
     deps.setRouteDiff?.({ before: beforeId, after: afterId });
-    const existing = rightPane.querySelector(".db-snapshot-diff-inline");
-    if (existing) {
-      const prev = existing as HTMLElement & {
-        __tocObserver?: IntersectionObserver;
-      };
-      prev.__tocObserver?.disconnect();
-      existing.remove();
-    }
-
-    const loading = document.createElement("div");
-    loading.className = "db-snapshot-diff-inline";
-    const loadingText = document.createElement("div");
-    loadingText.className = "db-snapshot-loading";
-    loadingText.textContent = text().snapshot.calculatingDiff;
-    loading.appendChild(loadingText);
-    rightPane.appendChild(loading);
-
+    dropDiff();
+    const seq = ++diffSeq;
+    diffPane = { seq, loading: true };
+    draw();
     try {
       const res = await getJson(
         `${apiUrl("dbSnapshotDiffTables")}?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}`,
@@ -899,221 +1046,53 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       const data = (await res.json()) as {
         tables: SnapshotDiffTableSummary[];
       };
-      loading.remove();
-      renderDiffInline(beforeId, afterId, data.tables);
+      showDiffTables(beforeId, afterId, data.tables);
     } catch (error) {
       // 失敗時は currentDiff を巻き戻して restoreDiffFromRoute の重複防止
       // ガード (同じ before/after では再 fetch しない) が再試行を block しない
       // ようにする。URL は残しておくとリロードで再試行できる。
       currentDiff = null;
-      loading.replaceChildren(failureElement("snapshot diff", error));
+      if (diffPane?.seq === seq)
+        diffPane = { seq, failure: failureOf("snapshot diff", error) };
+      draw();
     }
   }
 
-  function renderDiffInline(
+  function showDiffTables(
     beforeId: string,
     afterId: string,
     tables: SnapshotDiffTableSummary[],
   ) {
-    const existing = rightPane.querySelector(".db-snapshot-diff-inline");
-    if (existing) {
-      const prev = existing as HTMLElement & {
-        __tocObserver?: IntersectionObserver;
-      };
-      prev.__tocObserver?.disconnect();
-      existing.remove();
-    }
-
-    const section = document.createElement("div");
-    section.className = "db-snapshot-diff-inline";
-
-    // どの 2 件を比較しているかを diff セクション冒頭に明示する。
-    // before/after の SnapshotMeta は読み込み済みの snapshots から逆引きする。
-    const beforeMeta = snapshots.find((s) => s.id === beforeId);
-    const afterMeta = snapshots.find((s) => s.id === afterId);
-    if (beforeMeta && afterMeta) {
-      const header = document.createElement("div");
-      header.className = "db-snapshot-diff-header";
-      const beforeLabel = new Date(beforeMeta.createdAt).toLocaleString();
-      const afterLabel = new Date(afterMeta.createdAt).toLocaleString();
-      header.textContent = text().snapshot.diffShowing(beforeLabel, afterLabel);
-      section.appendChild(header);
-    }
-
-    // 差分セクションに出す対象:
-    //   (1) 行差分が 1 件以上ある (coverage:"both" で +/~/- が立っている)
-    //   (2) 片側 snapshot だけにあるテーブル (coverage:"before-only"/"after-only")
-    //       — レコードが消えた/増えたのではなく「比較不能」と知らせるため。
-    const changedTables = tables.filter(
-      (t) =>
-        t.insertedCount + t.updatedCount + t.deletedCount > 0 ||
-        (t.coverage && t.coverage !== "both"),
-    );
-    const unchangedCount = tables.length - changedTables.length;
-
-    const summary = document.createElement("div");
-    summary.className = "db-snapshot-diff-summary";
-    if (changedTables.length === 0) {
-      summary.textContent = text().snapshot.noChanges;
-      section.appendChild(summary);
-      rightPane.appendChild(section);
-      return;
-    }
-    summary.textContent = text().snapshot.diffSummary(
-      changedTables.length,
-      unchangedCount,
-    );
-    section.appendChild(summary);
-
-    // 変更テーブルが多い時、上から下までスクロールしないと目的の table に
-    // 辿り着けない。sticky な「目次」を出し、chip クリックで対応 section に
-    // ジャンプできるようにする。IntersectionObserver で現在表示中の section
-    // を active 化。
-    const toc = document.createElement("div");
-    toc.className = "db-snapshot-diff-toc";
-    const tocChips = new Map<string, HTMLElement>();
-    section.appendChild(toc);
-
-    // git diff 風の色付きカウント span を組み立てるヘルパ。
-    // +N: 緑 (add)、~N: 黄 (update)、-N: 赤 (delete)。
-    function buildStatSpans(
-      target: HTMLElement,
-      inserted: number,
-      updated: number,
-      deleted: number,
-    ): void {
-      const make = (cls: string, prefix: string, n: number) => {
-        if (n <= 0) return;
-        const s = document.createElement("span");
-        s.className = `db-snapshot-diff-stat ${cls}`;
-        s.textContent = `${prefix}${n}`;
-        target.appendChild(s);
-      };
-      make("add", "+", inserted);
-      make("upd", "~", updated);
-      make("del", "-", deleted);
-    }
-
-    // 1 テーブルぶんのカウント / 未取得 badge を target に詰める。
-    // `coverage === "both"` または未指定なら git diff 風カウント、片側未取得
-    // なら ニュートラル badge。テーブル header / toc chip の両方から呼ぶ。
-    function renderCoverageOrStats(
-      target: HTMLElement,
-      summary: SnapshotDiffTableSummary,
-    ): void {
-      const tx = text().snapshot;
-      if (summary.coverage === "before-only") {
-        const lbl = document.createElement("span");
-        lbl.className = "db-snapshot-diff-coverage-badge before-only";
-        lbl.textContent = tx.coverageBeforeOnly;
-        target.appendChild(lbl);
-      } else if (summary.coverage === "after-only") {
-        const lbl = document.createElement("span");
-        lbl.className = "db-snapshot-diff-coverage-badge after-only";
-        lbl.textContent = tx.coverageAfterOnly;
-        target.appendChild(lbl);
-      } else {
-        buildStatSpans(
-          target,
-          summary.insertedCount,
-          summary.updatedCount,
-          summary.deletedCount,
-        );
-      }
-    }
-
+    dropDiff();
+    diffPane = { seq: ++diffSeq, beforeId, afterId, tables };
+    diffRows = new Map();
+    hiddenTables.clear();
+    activeChip = null;
+    scrollTarget = null;
+    const changed = changedTablesOf(tables);
     // 各 table の rows 読み込み Promise を集めて、全部完了したら scroll-target
     // を再寄せする (load 中に table 高さが増えて click 時の scroll target が
     // 下にズレる「中途半端な位置で止まる」問題への対策)。
     const pendingLoads: Promise<void>[] = [];
-    let scrollTarget: HTMLElement | null = null;
-
-    for (const t of changedTables) {
-      const tableEl = document.createElement("div");
-      tableEl.className = "db-snapshot-diff-table";
-      const sectionId = `diff-table-${t.tableName.replace(/[^a-zA-Z0-9_]/g, "_")}`;
-      tableEl.id = sectionId;
-      // scroll の停止位置補正は CSS の `.db-snapshot-right-pane
-      // { scroll-padding-top: 68px }` に一本化。target 側にも
-      // scroll-margin-top を持たせると両方が加算されて「下に余白が広すぎる」
-      // 状態 (= 中途半端に止まる) になる。
-
-      const tableHeader = document.createElement("div");
-      tableHeader.className = "db-snapshot-diff-table-header";
-
-      const nameSpan = document.createElement("span");
-      nameSpan.className = "db-snapshot-diff-table-name";
-      nameSpan.textContent = t.tableName;
-
-      const statsSpan = document.createElement("span");
-      statsSpan.className = "db-snapshot-diff-table-stats";
-      renderCoverageOrStats(statsSpan, t);
-
-      tableHeader.append(nameSpan, statsSpan);
-      tableHeader.style.cursor = "pointer";
-
-      const rowsContainer = document.createElement("div");
-      rowsContainer.className = "db-snapshot-diff-rows-container";
-
-      if (t.coverage === "before-only" || t.coverage === "after-only") {
-        // 片側未取得は比較不能。説明文だけ出し、loadDiffRows は呼ばない。
-        const tx = text().snapshot;
-        const note = document.createElement("div");
-        note.className = "db-snapshot-diff-coverage-note";
-        const rows = t.unsnapshottedRowCount ?? 0;
-        note.textContent =
-          t.coverage === "before-only"
-            ? tx.coverageNoteBeforeOnly(rows)
-            : tx.coverageNoteAfterOnly(rows);
-        rowsContainer.appendChild(note);
-      } else {
-        pendingLoads.push(
-          loadDiffRows(beforeId, afterId, t.tableName, rowsContainer),
-        );
-      }
-
-      tableHeader.addEventListener("click", () => {
-        rowsContainer.hidden = !rowsContainer.hidden;
-      });
-
-      tableEl.append(tableHeader, rowsContainer);
-      section.appendChild(tableEl);
-
-      // 目次 chip を作る
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "db-snapshot-diff-toc-chip";
-      chip.dataset.targetId = sectionId;
-      const chipName = document.createElement("span");
-      chipName.className = "db-snapshot-diff-toc-chip-name";
-      chipName.textContent = t.tableName;
-      const chipStats = document.createElement("span");
-      chipStats.className = "db-snapshot-diff-toc-chip-stats";
-      renderCoverageOrStats(chipStats, t);
-      if (t.coverage === "before-only" || t.coverage === "after-only") {
-        chip.classList.add("coverage-incomplete");
-      }
-      chip.append(chipName, chipStats);
-      chip.addEventListener("click", () => {
-        scrollTarget = tableEl;
-        tableEl.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-      toc.appendChild(chip);
-      tocChips.set(sectionId, chip);
+    for (const table of changed) {
+      if (incomplete(table)) continue;
+      diffRows.set(table.tableName, { loading: true });
+      pendingLoads.push(loadDiffRows(beforeId, afterId, table.tableName));
     }
-
-    // 全 rows 読み込み完了後、もし click 中の target があれば再寄せして
-    // 「load で table 高さが変わって位置がズレた」分を補正する。
+    draw();
     void Promise.allSettled(pendingLoads).then(() => {
-      if (scrollTarget && rightPane.contains(scrollTarget)) {
+      if (scrollTarget && refs.right.value?.contains(scrollTarget)) {
         scrollTarget.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     });
+    if (changed.length > 0) watchToc();
+  }
 
-    // 現在表示中の table を toc 上で active 化する。
-    // root = rightPane (実際のスクロール container)。
-    // 上端から少し下の位置 (rootMargin: top -10%) で交差判定し、最初に当た
-    // ったものを active として扱う。
+  // 現在表示中の table を toc 上で active 化する。root = 右の欄 (実際の
+  // スクロール container)。上端から少し下の位置で交差判定し、最初に当たった
+  // ものを active として扱う。
+  function watchToc(): void {
+    const right = rightPane();
     const observer = new IntersectionObserver(
       (entries) => {
         // 一番上 (rootBounds 内で y が最小) の交差中 entry を active に。
@@ -1122,18 +1101,19 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         intersecting.sort(
           (a, b) => a.boundingClientRect.top - b.boundingClientRect.top,
         );
-        const activeId = intersecting[0].target.id;
-        for (const [id, chip] of tocChips) {
-          chip.classList.toggle("active", id === activeId);
-        }
-        const activeChip = tocChips.get(activeId);
+        activeChip = intersecting[0].target.id;
+        draw();
         // toc 内で active chip を可視範囲に寄せる。scrollIntoView を使うと
-        // ブラウザによっては親 scroll container (rightPane) も縦方向に動かして
+        // ブラウザによっては親 scroll container (右の欄) も縦方向に動かして
         // 直前の click scroll を打ち消す事故が起きる。toc 自体の scrollLeft
-        // のみ手動で動かして、rightPane の縦 scroll には触らない。
-        if (activeChip) {
+        // のみ手動で動かして、右の欄の縦 scroll には触らない。
+        const toc = refs.toc.value;
+        const chip = toc?.querySelector<HTMLElement>(
+          `[data-target-id="${CSS.escape(activeChip)}"]`,
+        );
+        if (toc && chip) {
           const tocBox = toc.getBoundingClientRect();
-          const chipBox = activeChip.getBoundingClientRect();
+          const chipBox = chip.getBoundingClientRect();
           const margin = 16;
           if (chipBox.left < tocBox.left + margin) {
             toc.scrollLeft += chipBox.left - tocBox.left - margin;
@@ -1143,34 +1123,22 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         }
       },
       {
-        root: rightPane,
+        root: right,
         rootMargin: "-48px 0px -60% 0px",
         threshold: 0,
       },
     );
-    for (const el of section.querySelectorAll(".db-snapshot-diff-table")) {
-      observer.observe(el);
-    }
-    // section が remove された時に observer を解放するため、後始末を section
-    // に紐付けておく (dispose / 再描画時に呼ばれる)。
-    (
-      section as HTMLElement & { __tocObserver?: IntersectionObserver }
-    ).__tocObserver = observer;
-
-    rightPane.appendChild(section);
+    for (const table of right.querySelectorAll(".db-snapshot-diff-table"))
+      observer.observe(table);
+    tocObserver = observer;
   }
 
   async function loadDiffRows(
     beforeId: string,
     afterId: string,
     table: string,
-    container: HTMLElement,
   ) {
-    container.innerHTML = "";
-    const loading = document.createElement("div");
-    loading.className = "db-snapshot-loading";
-    loading.textContent = text().snapshot.loading;
-    container.appendChild(loading);
+    const rows = diffRows;
     try {
       const res = await getJson(
         `${apiUrl("dbSnapshotDiffRows")}?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}&table=${encodeURIComponent(table)}&limit=200`,
@@ -1180,20 +1148,23 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         rows: SnapshotDiffRow[];
         total: number;
       };
-      renderDiffRows(container, data.rows, data.total);
+      if (rows !== diffRows) return;
+      rows.set(table, { nodes: diffRowsNodes(data.rows, data.total) });
     } catch (error) {
-      container.replaceChildren(failureElement("snapshot diff rows", error));
+      if (rows !== diffRows) return;
+      rows.set(table, { failure: failureOf("snapshot diff rows", error) });
     }
+    draw();
   }
 
-  function renderDiffRows(
-    container: HTMLElement,
-    rows: SnapshotDiffRow[],
-    total: number,
-  ) {
-    container.innerHTML = "";
-    if (rows.length === 0) return;
-
+  // 1 テーブル分の差分の表。列ヘッダと body を 2 つの <table> に分け、
+  // scrollLeft + 列幅を JS で同期する (table-grid.ts の headerWrap+viewport と
+  // 同じ形)。1 つの <table> で thead を position:sticky にすると、rows の箱を
+  // overflow-x:auto にした瞬間 sticky の scroll container が横スクロール側へ
+  // 吸われて縦 sticky が効かなくなり、長い差分でカラム名が画面外に消える。
+  // 1 度だけ作り、描き直しでは作り直さない (同期の結び付けがあるため)。
+  function diffRowsNodes(rows: SnapshotDiffRow[], total: number): Node[] {
+    if (rows.length === 0) return [];
     const allCols = new Set<string>();
     for (const row of rows) {
       if (row.beforeValues)
@@ -1202,203 +1173,148 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         for (const k of Object.keys(row.afterValues)) allCols.add(k);
     }
     const columns = [...allCols];
-
-    // 列ヘッダと body を 2 つの <table> に分け、scrollLeft + 列幅を JS で同期する
-    // 構造 (Codex 設計 / 既存 table-grid.ts の headerWrap+viewport パターンの reuse)。
-    // 1 つの <table> で thead を position:sticky にする旧構造は、内部の
-    // rows-container を overflow-x:auto にした瞬間 sticky の scroll container が
-    // 横スクロール側へ吸われて縦 sticky が殺される / 長い差分でカラム名が画面外に
-    // 消える、という構造的な破綻があった。
-    const colHeaderWrap = document.createElement("div");
-    colHeaderWrap.className = "db-snapshot-diff-col-header-wrap";
-    const colHeaderTable = document.createElement("table");
-    colHeaderTable.className = "db-snap-diff-grid";
-    const colHeaderColgroup = document.createElement("colgroup");
-    for (let i = 0; i < columns.length + 1; i++) {
-      colHeaderColgroup.appendChild(document.createElement("col"));
-    }
-    colHeaderTable.appendChild(colHeaderColgroup);
-    const thead = document.createElement("thead");
-    const headRow = document.createElement("tr");
-    const thType = document.createElement("th");
-    thType.className = "snap-diff-type-cell";
-    thType.textContent = "";
-    headRow.appendChild(thType);
-    for (const col of columns) {
-      const th = document.createElement("th");
-      th.textContent = col;
-      headRow.appendChild(th);
-    }
-    thead.appendChild(headRow);
-    colHeaderTable.appendChild(thead);
-    colHeaderWrap.appendChild(colHeaderTable);
-
-    const rowsViewport = document.createElement("div");
-    rowsViewport.className = "db-snapshot-diff-rows-viewport";
-    const bodyTable = document.createElement("table");
-    bodyTable.className = "db-snap-diff-grid";
-    const bodyColgroup = document.createElement("colgroup");
-    for (let i = 0; i < columns.length + 1; i++) {
-      bodyColgroup.appendChild(document.createElement("col"));
-    }
-    bodyTable.appendChild(bodyColgroup);
-
-    const tbody = document.createElement("tbody");
-    for (const row of rows) {
+    const shown = (value: unknown) => (value == null ? "NULL" : String(value));
+    const cols = () => columns.concat("").map(() => html`<col />`);
+    const headerWrap = createRef<HTMLElement>();
+    const headerCols = createRef<HTMLElement>();
+    const viewport = createRef<HTMLElement>();
+    const bodyTable = createRef<HTMLElement>();
+    const bodyCols = createRef<HTMLElement>();
+    const tbody = createRef<HTMLElement>();
+    const rowTemplate = (
+      cls: string,
+      mark: string,
+      cells: { value: string; changed: boolean }[],
+    ) =>
+      html`<tr class=${cls}><td class="snap-diff-type-cell">${mark}</td>${cells.map(
+        (cell) =>
+          html`<td class=${cell.changed ? "snap-diff-changed-cell" : nothing}
+            >${cell.value}</td
+          >`,
+      )}</tr>`;
+    const body = rows.map((row) => {
       if (row.changeType === "updated" && row.beforeValues && row.afterValues) {
-        const trBefore = document.createElement("tr");
-        trBefore.className = "snap-diff-del snap-diff-record-start";
-        const tdTypeBefore = document.createElement("td");
-        tdTypeBefore.className = "snap-diff-type-cell";
-        tdTypeBefore.textContent = "−";
-        trBefore.appendChild(tdTypeBefore);
-        for (const col of columns) {
-          const td = document.createElement("td");
-          const bs =
-            row.beforeValues[col] == null
-              ? "NULL"
-              : String(row.beforeValues[col]);
-          const as_ =
-            row.afterValues[col] == null
-              ? "NULL"
-              : String(row.afterValues[col]);
-          td.textContent = bs;
-          if (bs !== as_) td.classList.add("snap-diff-changed-cell");
-          trBefore.appendChild(td);
-        }
-        tbody.appendChild(trBefore);
-
-        const trAfter = document.createElement("tr");
-        trAfter.className = "snap-diff-add snap-diff-record-end";
-        const tdTypeAfter = document.createElement("td");
-        tdTypeAfter.className = "snap-diff-type-cell";
-        tdTypeAfter.textContent = "+";
-        trAfter.appendChild(tdTypeAfter);
-        for (const col of columns) {
-          const td = document.createElement("td");
-          const bs =
-            row.beforeValues[col] == null
-              ? "NULL"
-              : String(row.beforeValues[col]);
-          const as_ =
-            row.afterValues[col] == null
-              ? "NULL"
-              : String(row.afterValues[col]);
-          td.textContent = as_;
-          if (bs !== as_) td.classList.add("snap-diff-changed-cell");
-          trAfter.appendChild(td);
-        }
-        tbody.appendChild(trAfter);
-      } else {
-        const tr = document.createElement("tr");
-        const sideClass =
-          row.changeType === "inserted" ? "snap-diff-add" : "snap-diff-del";
-        tr.className = `${sideClass} snap-diff-record-start snap-diff-record-end`;
-        const tdType = document.createElement("td");
-        tdType.className = "snap-diff-type-cell";
-        tdType.textContent = changeTypeLabel(row.changeType);
-        tr.appendChild(tdType);
-        const values =
-          row.changeType === "inserted" ? row.afterValues : row.beforeValues;
-        for (const col of columns) {
-          const td = document.createElement("td");
-          td.classList.add("snap-diff-changed-cell");
-          const v = values?.[col];
-          td.textContent = v == null ? "NULL" : String(v);
-          tr.appendChild(td);
-        }
-        tbody.appendChild(tr);
+        const before = row.beforeValues;
+        const after = row.afterValues;
+        const pairs = columns.map((col) => ({
+          before: shown(before[col]),
+          after: shown(after[col]),
+        }));
+        return html`${rowTemplate(
+          "snap-diff-del snap-diff-record-start",
+          "−",
+          pairs.map((pair) => ({
+            value: pair.before,
+            changed: pair.before !== pair.after,
+          })),
+        )}${rowTemplate(
+          "snap-diff-add snap-diff-record-end",
+          "+",
+          pairs.map((pair) => ({
+            value: pair.after,
+            changed: pair.before !== pair.after,
+          })),
+        )}`;
       }
-    }
-    bodyTable.appendChild(tbody);
-    rowsViewport.appendChild(bodyTable);
-    container.append(colHeaderWrap, rowsViewport);
-
-    // 横スクロール時、body 側の scrollLeft を列ヘッダ側に伝搬。col-header-wrap は
-    // overflow:hidden で scrollbar を出さず、JS で scrollLeft だけを書き換える。
-    rowsViewport.addEventListener("scroll", () => {
-      colHeaderWrap.scrollLeft = rowsViewport.scrollLeft;
+      const sideClass =
+        row.changeType === "inserted" ? "snap-diff-add" : "snap-diff-del";
+      const values =
+        row.changeType === "inserted" ? row.afterValues : row.beforeValues;
+      return rowTemplate(
+        `${sideClass} snap-diff-record-start snap-diff-record-end`,
+        row.changeType === "inserted" ? "+" : "−",
+        columns.map((col) => ({ value: shown(values?.[col]), changed: true })),
+      );
     });
-
+    const nodes = templateElements(
+      html`<div class="db-snapshot-diff-col-header-wrap" ${ref(headerWrap)}><table
+            class="db-snap-diff-grid"
+          ><colgroup ${ref(headerCols)}>${cols()}</colgroup><thead><tr><th
+                  class="snap-diff-type-cell"
+                ></th>${columns.map((col) => html`<th>${col}</th>`)}</tr></thead
+            ></table
+          ></div
+        ><div
+          class="db-snapshot-diff-rows-viewport"
+          ${ref(viewport)}
+          @scroll=${() => {
+            // 横スクロール時、body 側の scrollLeft を列ヘッダ側に伝搬。
+            // col-header-wrap は overflow:hidden で scrollbar を出さない。
+            const header = headerWrap.value;
+            const rowsBox = viewport.value;
+            if (header && rowsBox) header.scrollLeft = rowsBox.scrollLeft;
+          }}
+        ><table class="db-snap-diff-grid" ${ref(bodyTable)}><colgroup
+              ${ref(bodyCols)}
+            >${cols()}</colgroup
+            ><tbody ${ref(tbody)}>${body}</tbody></table
+          ></div
+        >${
+          total > rows.length
+            ? html`<div class="db-snapshot-diff-more">${text().snapshot.showingRows(
+                rows.length,
+                total,
+              )}</div>`
+            : nothing
+        }`,
+    );
     // 列幅同期: body table の各セル実幅を測って、両 table の <col> width に反映。
     // border-collapse:separate + colgroup で 1px ズレなく列幅が揃う。
     const syncColumnWidths = () => {
       if (disposed) return;
-      const firstRow = tbody.querySelector("tr");
+      const firstRow = tbody.value?.querySelector("tr");
       if (!firstRow) return;
       const cells = firstRow.children;
-      const bodyCols = bodyColgroup.children;
-      const headerCols = colHeaderColgroup.children;
+      const bodyColEls = bodyCols.value?.children ?? [];
+      const headerColEls = headerCols.value?.children ?? [];
       for (let i = 0; i < cells.length; i++) {
         const w = (cells[i] as HTMLElement).offsetWidth;
-        if (bodyCols[i]) (bodyCols[i] as HTMLElement).style.width = `${w}px`;
-        if (headerCols[i])
-          (headerCols[i] as HTMLElement).style.width = `${w}px`;
+        const bodyCol = bodyColEls[i] as HTMLElement | undefined;
+        const headerCol = headerColEls[i] as HTMLElement | undefined;
+        if (bodyCol) bodyCol.style.width = `${w}px`;
+        if (headerCol) headerCol.style.width = `${w}px`;
       }
     };
     requestAnimationFrame(syncColumnWidths);
-    const ro = new ResizeObserver(syncColumnWidths);
-    ro.observe(bodyTable);
-
-    if (total > rows.length) {
-      const more = document.createElement("div");
-      more.className = "db-snapshot-diff-more";
-      more.textContent = text().snapshot.showingRows(rows.length, total);
-      container.appendChild(more);
-    }
+    const table = bodyTable.value;
+    if (!table) throw new Error("snapshot view: the diff table was not drawn");
+    new ResizeObserver(syncColumnWidths).observe(table);
+    return nodes;
   }
 
-  async function editNote(snapshotId: string, currentNote: string) {
-    const existing = el.querySelector(".db-snapshot-inline-dialog");
-    if (existing) existing.remove();
+  function editNote(snapshotId: string, currentNote: string) {
+    noteDialog = { snapshotId, note: currentNote || "" };
+    draw();
+    refs.noteDialog.value?.focus();
+  }
 
-    const dialog = document.createElement("div");
-    dialog.className = "db-snapshot-inline-dialog";
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "db-snapshot-note-input";
-    input.value = currentNote || "";
-    input.placeholder = text().snapshot.noteInputPlaceholder;
-    const saveBtn = document.createElement("button");
-    saveBtn.type = "button";
-    saveBtn.textContent = text().snapshot.saveNote;
-    saveBtn.className = "db-snapshot-confirm-btn";
-    const cancelDlgBtn = document.createElement("button");
-    cancelDlgBtn.type = "button";
-    cancelDlgBtn.textContent = text().snapshot.cancel;
-    cancelDlgBtn.addEventListener("click", () => dialog.remove());
-    saveBtn.addEventListener("click", async () => {
-      if (disposed) return;
-      try {
-        await postJson(
-          apiUrl("dbSnapshotUpdateNote"),
-          { id: snapshotId, note: input.value },
-          text().failure.updateSnapshotNote,
-        );
-      } catch (error) {
-        // 入力欄は残し、書いたメモを失わずに押し直せるようにする。
-        if (!disposed) showFailureIn(leftPane, "snapshot note update", error);
-        return;
+  function closeNoteDialog(): void {
+    noteDialog = null;
+    draw();
+  }
+
+  async function saveNote(): Promise<void> {
+    if (disposed || !noteDialog) return;
+    const snapshotId = noteDialog.snapshotId;
+    const note = refs.noteDialog.value?.value ?? noteDialog.note;
+    try {
+      await postJson(
+        apiUrl("dbSnapshotUpdateNote"),
+        { id: snapshotId, note },
+        text().failure.updateSnapshotNote,
+      );
+    } catch (error) {
+      // 入力欄は残し、書いたメモを失わずに押し直せるようにする。
+      if (!disposed) {
+        leftFailure = failureOf("snapshot note update", error);
+        draw();
       }
-      if (disposed) return;
-      dialog.remove();
-      refresh();
-    });
-    input.addEventListener("keydown", (e) => {
-      if (isImeComposing(e)) return;
-      if (e.key === "Enter") saveBtn.click();
-      if (e.key === "Escape") dialog.remove();
-    });
-    dialog.append(input, saveBtn, cancelDlgBtn);
-    const item = Array.from(
-      el.querySelectorAll<HTMLElement>(".db-snapshot-item"),
-    ).find((node) => node.dataset.snapshotId === snapshotId);
-    if (item) {
-      item.after(dialog);
-    } else {
-      leftPane.prepend(dialog);
+      return;
     }
-    input.focus();
+    if (disposed) return;
+    noteDialog = null;
+    draw();
+    void refresh();
   }
 
   async function deleteSnap(snapshotId: string) {
@@ -1410,11 +1326,14 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         text().failure.deleteSnapshot,
       );
     } catch (error) {
-      if (!disposed) showFailureIn(leftPane, "snapshot delete", error);
+      if (!disposed) {
+        leftFailure = failureOf("snapshot delete", error);
+        draw();
+      }
       return;
     }
     if (disposed) return;
-    refresh();
+    void refresh();
   }
 
   function handleSse(data: string) {
@@ -1485,58 +1404,15 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     jobClearTimers.clear();
     activeJobs.clear();
     cancellingJobs.clear();
-    const existing = rightPane.querySelector(".db-snapshot-diff-inline");
-    if (existing) {
-      const prev = existing as HTMLElement & {
-        __tocObserver?: IntersectionObserver;
-      };
-      prev.__tocObserver?.disconnect();
-    }
+    tocObserver?.disconnect();
   }
 
   function localize(): void {
-    const t = text().snapshot;
-    guideTitle.textContent = t.guideTitle;
-    guideBody.textContent = t.guideBody;
-    createBtn.textContent = t.create;
-    refreshBtn.textContent = t.refresh;
-    // 進捗 row は renderProgress() で再描画する。
-    renderProgress();
-    tableSelectorHeader.textContent = t.selectTablesHeader;
-    selectAllBtn.textContent = t.selectAll;
-    deselectAllBtn.textContent = t.deselectAll;
-    noteInput.placeholder = t.notePlaceholder;
-    noteLabel.textContent = t.noteLabel;
-    // 取得中(confirmBtn.disabled で creating 表示中)は上書きしない。
-    if (!confirmBtn.disabled) confirmBtn.textContent = t.confirm;
-    cancelBtn.textContent = t.cancel;
-
-    // renderMain() は leftPane を作り直すため、before/after の選択状態を退避して
-    // 再構築後に復元する。diff は rightPane にあるので renderMain では消えない。
-    const prevSelects = leftPane.querySelectorAll<HTMLSelectElement>(
-      ".db-snapshot-diff-select",
-    );
-    const prevBeforeVal = prevSelects[0]?.value;
-    const prevAfterVal = prevSelects[1]?.value;
-    const hadDiff = rightPane.querySelector(".db-snapshot-diff-inline") != null;
-
-    renderMain();
-
-    const newSelects = leftPane.querySelectorAll<HTMLSelectElement>(
-      ".db-snapshot-diff-select",
-    );
-    if (newSelects[0] && prevBeforeVal) {
-      newSelects[0].value = prevBeforeVal;
-      // .value= 代入では 'change' が発火しないので、ハイライト更新リスナを
-      // 明示的に発火させる (これがないと一覧の比較元/比較先ハイライトが
-      // 初期既定のままになって localize 後に diff と整合しなくなる)。
-      newSelects[0].dispatchEvent(new Event("change"));
-    }
-    if (newSelects[1] && prevAfterVal) {
-      newSelects[1].value = prevAfterVal;
-      newSelects[1].dispatchEvent(new Event("change"));
-    }
-    if (hadDiff && currentDiff) {
+    // 一覧を作り直すが、比較の before/after の選び方は残す。差分を出して
+    // いれば、今の言語で出し直す。
+    renderMain(true);
+    draw();
+    if (diffPane !== null && currentDiff) {
       void showDiffInline(currentDiff.beforeId, currentDiff.afterId);
     }
   }
@@ -1570,7 +1446,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   }
 
   return {
-    el,
+    el: box.element,
     refresh,
     handleSse,
     dispose,
