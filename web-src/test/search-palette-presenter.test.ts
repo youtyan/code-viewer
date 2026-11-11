@@ -7,8 +7,8 @@ import "./_dom";
 import { afterEach, describe, expect, test } from "vitest";
 import type { SearchPaletteDeps } from "../views/search-palette-ui";
 import {
+  DEFAULT_VIEW,
   type PaletteViewProps,
-  paletteTemplate,
 } from "../views/search-palette-view";
 import { q } from "./_test-helpers";
 
@@ -90,7 +90,7 @@ async function openPalette(mode: "file" | "grep") {
     applyGrepHideTests: () => undefined,
     view: (props) => {
       seen.push(props);
-      return paletteTemplate(props);
+      return DEFAULT_VIEW(props);
     },
   };
   const palette = createSearchPalette(deps);

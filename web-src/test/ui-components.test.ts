@@ -143,3 +143,53 @@ describe("declarative views", () => {
     expect(total).toBeLessThanOrEqual(IMPERATIVE_LIMIT);
   });
 });
+
+/**
+ * 書き直した所の presenter が view を差し替えられるかの見張り。描く presenter
+ * (create… / mount… を書き出し、状態か外とのやり取りを持ち、DOM を描く) は view を
+ * DEFAULT_VIEW を既定に受け取る。決まりは ui-components.md の「どこまでを presenter と
+ * view に分けるか」。
+ */
+const PRESENTER_EXEMPT: Record<string, string> = {
+  "web-src/views/ui/renderer.ts":
+    "描く係の土台 (createRenderer)。画面ではなく、presenter が使う道具",
+  "web-src/views/ui/layer.ts":
+    "重ね合わせの層の土台 (createLayer)。中身は呼び手の view が描く",
+  "web-src/views/projects/project-looks.ts":
+    "プロジェクトの色と名前の置き場 (描かない)。projectMark は値から札を作るだけ",
+  "web-src/views/sidebar.ts":
+    "左のファイル一覧。行はテンプレートで描くが、view の分け直しは段 4 (app.ts から受け取る描き方の口と一緒に直す)",
+};
+
+const EXPORTS_PRESENTER = /export function (create|mount)[A-Z]\w*\(/;
+const HOLDS_STATE =
+  /\bfetch\(|\.subscribe\(|^ {2}let \w|^ {2}const \w+ = new (Map|Set)</m;
+const DRAWS =
+  /\brenderOwned\(|\bcreateRenderer\(|\btemplateElement\(|\bdetachedElement\(/;
+const TAKES_VIEW = /(=|\?\?)\s*DEFAULT_VIEW\b/;
+
+describe("presenters", () => {
+  test("rewritten presenters take an injectable view (DEFAULT_VIEW)", () => {
+    const missing = VIEW_FILES.filter((file) =>
+      DECLARATIVE.some((prefix) => file.startsWith(prefix)),
+    ).filter((file) => {
+      if (file in PRESENTER_EXEMPT) return false;
+      const source = readFileSync(file, "utf8");
+      return (
+        EXPORTS_PRESENTER.test(source) &&
+        HOLDS_STATE.test(source) &&
+        DRAWS.test(source) &&
+        !TAKES_VIEW.test(source)
+      );
+    });
+    expect(missing).toEqual([]);
+  });
+
+  test("every exemption still names a file that exists", () => {
+    expect(
+      Object.keys(PRESENTER_EXEMPT).filter(
+        (file) => !VIEW_FILES.includes(file),
+      ),
+    ).toEqual([]);
+  });
+});

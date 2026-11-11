@@ -1,7 +1,9 @@
 import { apiUrl } from "../core/api-url";
+
 // Search palette (Ctrl+K file / Ctrl+G grep): overlay UI, ranked file
 // matching, repo-wide grep, and result navigation. Extracted from app.ts.
 
+import { html } from "lit/html.js";
 import { attachDragResizer } from "../core/drag-resizer";
 import { formatErrorDetail } from "../core/error-detail";
 import { isTestFilePath } from "../core/file-filter";
@@ -45,18 +47,17 @@ import type {
   FileSearchListResponse,
   GrepResponse,
 } from "../core/types";
-import { html } from "lit/html.js";
 import { type CodePreview, createCodePreview } from "./code-preview";
 import {
   type SearchPaletteLanguage,
   searchPaletteText,
 } from "./search-palette-i18n";
 import {
+  DEFAULT_VIEW,
   type PaletteListEntry,
   type PaletteRowProps,
   type PaletteToggle,
   type PaletteViewProps,
-  paletteTemplate,
 } from "./search-palette-view";
 import { createLayer } from "./ui/layer";
 
@@ -146,7 +147,7 @@ export type SearchPaletteDeps = {
   openSearchResults?(query: string): void;
   /** ファイルの検索に混ぜるプロジェクト・エージェント・セッション・操作。 */
   getPaletteCommands?(): PaletteCommand[];
-  /** 表示 (既定は search-palette-view.ts の paletteTemplate)。テストで差し替える。 */
+  /** 表示 (既定は search-palette-view.ts の DEFAULT_VIEW)。テストで差し替える。 */
   view?: (props: PaletteViewProps) => unknown;
   STATE: {
     route: AppRoute;
@@ -189,7 +190,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     openSearchResults,
     getPaletteCommands,
   } = deps;
-  const view = deps.view ?? paletteTemplate;
+  const view = deps.view ?? DEFAULT_VIEW;
 
   type PaletteMode = "file" | "grep";
   type PaletteFileItem = {

@@ -1,10 +1,10 @@
 // ファイル・文字の検索のパレットの表示。search-palette-ui.ts (presenter) が
 // 渡す値 (PaletteViewProps) だけから、重ね合わせの層に描く。
 
-import { html, nothing, type TemplateResult } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { live } from "lit/directives/live.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import type { FuzzyRange } from "../core/fuzzy-search";
 import { FILE_16_PATH, SEARCH_16_PATH } from "../core/icons";
 import { iconTemplate } from "./ui/icon";
@@ -167,7 +167,7 @@ function toggleTemplate(toggle: PaletteToggle): TemplateResult {
 }
 
 /** パレットの既定の表示。 */
-export function paletteTemplate(props: PaletteViewProps): TemplateResult {
+export function DEFAULT_VIEW(props: PaletteViewProps): TemplateResult {
   const style = [
     props.width === null ? "" : `width: ${props.width}px;`,
     props.height === null ? "" : `height: ${props.height}px;`,

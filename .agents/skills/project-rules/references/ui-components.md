@@ -27,6 +27,23 @@
   `new …()` で作って差し込まない。テンプレートの中で `<cv-… .prop=${…}>` と宣言する
 - 1 か所でしか使わないかたまりは部品にしない (view の中のテンプレート関数にする)
 
+### どこまでを presenter と view に分けるか
+
+- **状態を持つか、サーバや外 (取得の係・監視・クリップボード・ダイアログ) とやり取りする
+  画面・節・ダイアログ・小窓は、大きさに関係なく全部分ける。** 「1 つの節だけ」「状態が
+  その画面の中にある」「ダイアログの本文だけ」は分けない理由にならない。ファイルを分ける
+  かは問わないが、view は差し替えられること (`create…(deps, view = DEFAULT_VIEW)`。
+  ダイアログを開く係のように描くものが複数あれば、`DEFAULT_VIEW` を
+  `{ add(props), rename(props) }` のような関数の組にする)
+- **presenter にしなくてよいのは、状態を持たず、渡された値だけから描く小さなテンプレート
+  関数だけ** (例: `labeledTemplate`・`notesTemplate`・`resultLineTemplate`・
+  `usageMeterTemplate`・`fileViewTabsTemplate`・`help-blocks.ts` の部品)。中で取得したり、
+  クリックで状態を書き換えたりするなら、それは presenter と view に分ける
+- 押した後の一瞬の印 (コピーできた・失敗した) をボタンの class や title に付けるのは、
+  押した要素への見た目の合図で、状態の置き場ではない (`showCopyFailure` と同じ扱い)
+- 描いた後に寸法を測って位置や畳み方を決める係 (`breadcrumb-fit.ts` の `fitBreadcrumb`、
+  覗き窓・小窓の位置) は view に入れない。presenter が描いた後に測る
+
 ## 描き方
 
 - テンプレートは `lit/html.js` の `html` (絵は `svg`)。ディレクティブは `lit/directives/*.js`。
@@ -124,6 +141,11 @@ markdown-it・shiki・mermaid・xterm・diff2html などが作る DOM はその�
   数と理由を書く
 - まだ書き直していない所も含めた数が上限 (`IMPERATIVE_LIMIT`) を超えない。書き直したら
   上限を下げる
+- 書き直した所のうち、`create…` / `mount…` を書き出していて、状態 (関数の中の `let`・
+  `new Map` / `new Set`) か外とのやり取り (`fetch(`・`.subscribe(`) を持ち、DOM を描く
+  (`renderOwned(`・`createRenderer(`・`templateElement(`・`detachedElement(`) ファイルは、
+  view を `= DEFAULT_VIEW` か `?? DEFAULT_VIEW` で受け取る。描くための土台 (`renderer.ts`・
+  `layer.ts`) と、描かない値の置き場は `PRESENTER_EXEMPT` に理由を書く
 
 ## 完了チェックリスト
 
