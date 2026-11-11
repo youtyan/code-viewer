@@ -4,21 +4,22 @@
 // the same reference followed by a fenced code block carrying the actual
 // lines, so an AI can reason about the code without re-fetching.
 
+import { html, nothing, svg, type TemplateResult } from "lit/html.js";
 import { AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD } from "../core/ai-context-copy";
 import { showCopyFailure } from "../core/copy-failure";
 import {
   fileReferenceClipboardText,
   fileReferenceWithCodeClipboardText,
 } from "../core/file-path-copy";
-import { escapeHtml } from "../core/html-escape";
 import {
   COPY_16_PATHS,
   GIT_BRANCH_16_PATH,
-  iconSvg,
   MARK_GITHUB_16_PATH,
   OPEN_EXTERNAL_16_PATH,
 } from "../core/icons";
 import { EXT_TO_LANG } from "../core/source-meta";
+import { iconTemplate } from "./ui/icon";
+import { renderOwned, templateElement } from "./ui/renderer";
 
 export type LineRefPill = {
   /**
@@ -55,16 +56,19 @@ export type LineRefPillDeps = {
   openLineHistory?: (path: string, start: number, end: number) => void;
 };
 
-const COPY_ICON =
-  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor">' +
-  '<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/>' +
-  '<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/>' +
-  "</svg>";
+/** 札のコピーの絵 (14px。札の文字に合わせて小さく描く)。 */
+const PILL_CHECK_PATH =
+  "M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z";
 
-const CHECK_ICON =
-  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor">' +
-  '<path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/>' +
-  "</svg>";
+function pillIconTemplate(paths: readonly string[]): TemplateResult {
+  return html`<svg
+    viewBox="0 0 16 16"
+    width="14"
+    height="14"
+    aria-hidden="true"
+    fill="currentColor"
+  >${paths.map((path) => svg`<path d=${path}></path>`)}</svg>`;
+}
 
 export function langFromPath(path: string): string {
   const m = path.match(/\.([^./]+)$/);
@@ -138,51 +142,11 @@ export function readRenderedLines(
 
 // Root is a <div>, not a <button>: it now hosts two independent buttons
 // (copy + close), and a button can't validly nest another button.
+type CopyState = "ready" | "copied" | "copied-code" | "failed";
+
 export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
-  const pill = document.createElement("div");
-  pill.id = "line-ref-pill";
-  pill.hidden = true;
-
-  const copyButton = document.createElement("button");
-  copyButton.id = "line-ref-pill-copy";
-  copyButton.type = "button";
-
-  const closeButton = document.createElement("button");
-  closeButton.id = "line-ref-pill-close";
-  closeButton.type = "button";
-  closeButton.title = "選択を解除";
-  closeButton.setAttribute("aria-label", "選択を解除");
-  closeButton.textContent = "×";
-
-  const githubActions = document.createElement("div");
-  githubActions.id = "line-ref-pill-github-actions";
-  githubActions.hidden = true;
-
-  const githubOpen = document.createElement("a");
-  githubOpen.id = "line-ref-pill-github-open";
-  githubOpen.target = "_blank";
-  githubOpen.rel = "noopener";
-  githubOpen.innerHTML =
-    iconSvg("octicon-mark-github", MARK_GITHUB_16_PATH) +
-    '<span class="lrp-github-open-label"></span>' +
-    iconSvg("octicon-link-external", OPEN_EXTERNAL_16_PATH);
-
-  const githubCopy = document.createElement("button");
-  githubCopy.id = "line-ref-pill-github-copy";
-  githubCopy.type = "button";
-  githubCopy.innerHTML =
-    `<span class="lrp-github-copy-icon">${iconSvg("octicon-copy", COPY_16_PATHS)}</span>` +
-    '<span class="lrp-github-copy-label"></span>';
-
-  githubActions.append(githubOpen, githubCopy);
-  const historyButton = document.createElement("button");
-  historyButton.id = "line-ref-pill-history";
-  historyButton.type = "button";
-  historyButton.hidden = !deps.openLineHistory;
-  historyButton.innerHTML =
-    iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH) +
-    '<span class="lrp-history-label"></span>';
-  pill.append(copyButton, githubActions, historyButton, closeButton);
+  // 札の箱。body の末尾に 1 つ置き、中はここが描く。出す / 隠すと位置は箱に書く。
+  const pill = templateElement(html`<div id="line-ref-pill" hidden></div>`);
   document.body.appendChild(pill);
 
   let refText = "";
@@ -191,6 +155,8 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
   let currentEnd = 0;
   let currentScope: () => ParentNode | null = () => document;
   let githubUrl = "";
+  let copyState: CopyState = "ready";
+  let githubCopied = false;
   let feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   let githubFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -221,35 +187,6 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
     if (observed) scopeResize?.observe(observed);
   }
 
-  function renderHistoryAction() {
-    if (!deps.openLineHistory) return;
-    const title = deps.lineHistoryTitle?.() ?? "Line history";
-    historyButton.title = title;
-    historyButton.setAttribute("aria-label", title);
-    const label =
-      historyButton.querySelector<HTMLElement>(".lrp-history-label");
-    if (label) label.textContent = title;
-  }
-
-  function renderGithubActions() {
-    const openTitle = deps.githubOpenTitle();
-    const copyTitle = deps.githubCopyTitle();
-    githubOpen.title = openTitle;
-    githubOpen.setAttribute("aria-label", openTitle);
-    githubCopy.title = copyTitle;
-    githubCopy.setAttribute("aria-label", copyTitle);
-    const openLabel = githubOpen.querySelector<HTMLElement>(
-      ".lrp-github-open-label",
-    );
-    if (openLabel) openLabel.textContent = openTitle;
-    const copyLabel = githubCopy.querySelector<HTMLElement>(
-      ".lrp-github-copy-label",
-    );
-    if (copyLabel) copyLabel.textContent = copyTitle;
-    githubOpen.href = githubUrl || "#";
-    githubActions.hidden = !githubUrl;
-  }
-
   // Lines spanned by the active selection. Only meaningful once `show()` has
   // set currentStart/currentEnd; callers gate display on count > 1 so a
   // single-line selection (self-evident from "@path#42") stays uncluttered.
@@ -257,32 +194,18 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
     return currentEnd - currentStart + 1;
   }
 
-  function countBadgeHtml(): string {
+  function countBadgeTemplate(): unknown {
     const count = selectionLineCount();
-    if (count <= 1) return "";
+    if (count <= 1) return nothing;
     const warn = count >= AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD;
-    return `<span class="lrp-count${warn ? " lrp-count-warn" : ""}">${escapeHtml(deps.lineCountLabel(count))}</span>`;
+    return html`<span class=${warn ? "lrp-count lrp-count-warn" : "lrp-count"}
+      >${deps.lineCountLabel(count)}</span
+    >`;
   }
 
-  function render(state: "ready" | "copied" | "copied-code" | "failed") {
-    copyButton.classList.toggle(
-      "copied",
-      state === "copied" || state === "copied-code",
-    );
-    copyButton.classList.toggle("failed", state === "failed");
-    const icon =
-      state === "copied" || state === "copied-code" ? CHECK_ICON : COPY_ICON;
-    const label = deps.copyReferenceLabel();
-    copyButton.innerHTML =
-      `${icon}<span class="lrp-label">${escapeHtml(label)}</span>` +
-      `<span class="lrp-ref">${escapeHtml(refText)}</span>` +
-      countBadgeHtml();
-    copyButton.title = label;
-    copyButton.setAttribute("aria-label", label);
-  }
-
-  copyButton.addEventListener("click", async (event) => {
+  async function copyReference(event: MouseEvent) {
     if (!refText) return;
+    const copyButton = event.currentTarget as HTMLButtonElement;
     const withCode = event.shiftKey;
     let payload = refText;
     let copiedCode = false;
@@ -304,9 +227,11 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
     }
     try {
       await navigator.clipboard.writeText(payload);
-      render(copiedCode ? "copied-code" : "copied");
+      copyState = copiedCode ? "copied-code" : "copied";
+      draw();
     } catch (error) {
-      render("failed");
+      copyState = "failed";
+      draw();
       showCopyFailure(
         copyButton,
         "copying the line reference failed",
@@ -318,19 +243,19 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
     if (feedbackTimer) clearTimeout(feedbackTimer);
     feedbackTimer = setTimeout(() => {
       feedbackTimer = null;
-      if (!pill.hidden) render("ready");
+      if (pill.hidden) return;
+      copyState = "ready";
+      draw();
     }, 1200);
-  });
+  }
 
-  githubCopy.addEventListener("click", async () => {
+  async function copyGithubUrl(event: MouseEvent) {
     if (!githubUrl) return;
+    const githubCopy = event.currentTarget as HTMLButtonElement;
     try {
       await navigator.clipboard.writeText(githubUrl);
-      githubCopy.classList.add("copied");
-      const icon = githubCopy.querySelector<HTMLElement>(
-        ".lrp-github-copy-icon",
-      );
-      if (icon) icon.innerHTML = CHECK_ICON;
+      githubCopied = true;
+      draw();
     } catch (error) {
       showCopyFailure(
         githubCopy,
@@ -343,22 +268,88 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
     if (githubFeedbackTimer) clearTimeout(githubFeedbackTimer);
     githubFeedbackTimer = setTimeout(() => {
       githubFeedbackTimer = null;
-      githubCopy.classList.remove("copied", "failed");
-      const icon = githubCopy.querySelector<HTMLElement>(
-        ".lrp-github-copy-icon",
-      );
-      if (icon) icon.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+      githubCopy.classList.remove("failed");
+      githubCopied = false;
+      draw();
     }, 1200);
-  });
+  }
 
-  historyButton.addEventListener("click", () => {
-    if (!currentPath || !deps.openLineHistory) return;
-    deps.openLineHistory(currentPath, currentStart, currentEnd);
-  });
+  function pillTemplate(): TemplateResult {
+    const label = deps.copyReferenceLabel();
+    const copied = copyState === "copied" || copyState === "copied-code";
+    const openTitle = deps.githubOpenTitle();
+    const copyTitle = deps.githubCopyTitle();
+    const historyTitle = deps.lineHistoryTitle?.() ?? "Line history";
+    return html`<button
+        id="line-ref-pill-copy"
+        type="button"
+        class=${copied ? "copied" : copyState === "failed" ? "failed" : ""}
+        title=${label}
+        aria-label=${label}
+        @click=${copyReference}
+      >${pillIconTemplate(copied ? [PILL_CHECK_PATH] : COPY_16_PATHS)}<span
+          class="lrp-label"
+          >${label}</span
+        ><span class="lrp-ref">${refText}</span>${countBadgeTemplate()}</button
+      ><div id="line-ref-pill-github-actions" ?hidden=${!githubUrl}><a
+          id="line-ref-pill-github-open"
+          target="_blank"
+          rel="noopener"
+          href=${githubUrl || "#"}
+          title=${openTitle}
+          aria-label=${openTitle}
+        >${iconTemplate(MARK_GITHUB_16_PATH, "octicon-mark-github")}<span
+            class="lrp-github-open-label"
+            >${openTitle}</span
+          >${iconTemplate(OPEN_EXTERNAL_16_PATH, "octicon-link-external")}</a
+        ><button
+          id="line-ref-pill-github-copy"
+          type="button"
+          class=${githubCopied ? "copied" : ""}
+          title=${copyTitle}
+          aria-label=${copyTitle}
+          @click=${copyGithubUrl}
+        ><span class="lrp-github-copy-icon">${
+          githubCopied
+            ? pillIconTemplate([PILL_CHECK_PATH])
+            : iconTemplate(COPY_16_PATHS, "octicon-copy")
+        }</span><span class="lrp-github-copy-label">${copyTitle}</span></button></div
+      ><button
+        id="line-ref-pill-history"
+        type="button"
+        ?hidden=${!deps.openLineHistory}
+        title=${ifHistory(historyTitle)}
+        aria-label=${ifHistory(historyTitle)}
+        @click=${() => {
+          if (!currentPath || !deps.openLineHistory) return;
+          deps.openLineHistory(currentPath, currentStart, currentEnd);
+        }}
+      >${iconTemplate(GIT_BRANCH_16_PATH, "octicon-git-branch")}<span
+          class="lrp-history-label"
+          >${deps.openLineHistory ? historyTitle : ""}</span
+        ></button
+      ><button
+        id="line-ref-pill-close"
+        type="button"
+        title="選択を解除"
+        aria-label="選択を解除"
+        @click=${() => deps.onClose()}
+      >×</button>`;
+  }
 
-  closeButton.addEventListener("click", () => {
-    deps.onClose();
-  });
+  /** 行の履歴が無い画面では、見出しの文言を付けない (前と同じ)。 */
+  function ifHistory(title: string): string | typeof nothing {
+    return deps.openLineHistory ? title : nothing;
+  }
+
+  // 中身は初めて出すときに描く (文言を返す側は、札を作った時点ではまだ文言の
+  // 表を持っていないことがある)。
+  let drawn = false;
+
+  function draw(): void {
+    drawn = true;
+    renderOwned(pill, pillTemplate());
+  }
 
   return {
     show(path, start, end, scope = () => document) {
@@ -372,13 +363,12 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
       currentEnd = Math.max(1, Math.floor(Math.max(start, end)));
       githubUrl =
         deps.githubUrlForSelection(currentPath, currentStart, currentEnd) || "";
-      renderGithubActions();
-      renderHistoryAction();
       if (feedbackTimer) {
         clearTimeout(feedbackTimer);
         feedbackTimer = null;
       }
-      render("ready");
+      copyState = "ready";
+      draw();
       if (pill.hidden || changed) {
         // Replay the pop-in so updates to the selection are noticeable.
         pill.classList.remove("pop");
@@ -397,7 +387,7 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
       currentScope = () => document;
       watchScope(null);
       githubUrl = "";
-      githubActions.hidden = true;
+      if (drawn) draw();
       pill.hidden = true;
     },
   };

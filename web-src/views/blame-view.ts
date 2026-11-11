@@ -1,3 +1,6 @@
+import { ref } from "lit/directives/ref.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 import { showHighlightFailure } from "../core/copy-failure";
 import {
@@ -35,6 +38,7 @@ import {
   type SourceBlobTab,
 } from "./file-shell";
 import type { VirtualSourceGutter } from "./source-view";
+import { renderOwned, templateElement } from "./ui/renderer";
 
 type SourceShikiHighlighter = {
   codeToHtml: (
@@ -114,40 +118,26 @@ export function createBlameView(deps: BlameViewDeps) {
       });
   }
 
-  function colourBarFor(
+  function colourBarTemplate(
     commit: BlameCommit,
     bin: number,
     binCount: number,
-  ): HTMLElement {
-    const bar = document.createElement("span");
-    bar.className = "gdp-blame-bar";
-    bar.dataset.bin = String(commit.isUncommitted ? binCount - 1 : bin);
-    if (commit.isUncommitted) bar.classList.add("uncommitted");
-    return bar;
+  ): TemplateResult {
+    return html`<span
+      class=${commit.isUncommitted ? "gdp-blame-bar uncommitted" : "gdp-blame-bar"}
+      data-bin=${String(commit.isUncommitted ? binCount - 1 : bin)}
+    ></span>`;
   }
 
-  function buildLegend(): HTMLElement {
-    const wrap = document.createElement("div");
-    wrap.className = "gdp-blame-legend";
-    const older = document.createElement("span");
-    older.className = "gdp-blame-legend-label";
+  function legendTemplate(): TemplateResult {
     const text = SOURCE_READING_TEXT[pageLanguage()];
-    older.textContent = text.blameOlder;
-    wrap.appendChild(older);
-    const stops = document.createElement("span");
-    stops.className = "gdp-blame-legend-stops";
-    for (let i = 0; i < BLAME_TIME_BIN_COUNT; i++) {
-      const stop = document.createElement("span");
-      stop.className = "gdp-blame-legend-stop";
-      stop.dataset.bin = String(i);
-      stops.appendChild(stop);
-    }
-    wrap.appendChild(stops);
-    const newer = document.createElement("span");
-    newer.className = "gdp-blame-legend-label";
-    newer.textContent = text.blameNewer;
-    wrap.appendChild(newer);
-    return wrap;
+    return html`<div class="gdp-blame-legend"><span class="gdp-blame-legend-label"
+        >${text.blameOlder}</span
+      ><span class="gdp-blame-legend-stops">${Array.from(
+        { length: BLAME_TIME_BIN_COUNT },
+        (_, i) =>
+          html`<span class="gdp-blame-legend-stop" data-bin=${String(i)}></span>`,
+      )}</span><span class="gdp-blame-legend-label">${text.blameNewer}</span></div>`;
   }
 
   async function fetchBlame(
@@ -205,49 +195,46 @@ export function createBlameView(deps: BlameViewDeps) {
   }
 
   /** まとまり (同じコミットの続く行) の 1 段目: 時刻・作者・コミット (押すと履歴へ)。 */
-  function blameMeta(group: BlameGroup, target: SourceFileTarget): HTMLElement {
-    const meta = document.createElement("div");
-    meta.className = "gdp-blame-meta";
-    const time = document.createElement("span");
-    time.className = "gdp-blame-time";
-    time.textContent = group.commit.isUncommitted
-      ? SOURCE_READING_TEXT[pageLanguage()].blameUncommitted
-      : relativeTimeText(group.commit.authorTime, pageLanguage());
-    meta.appendChild(time);
-    const author = document.createElement("span");
-    author.className = "gdp-blame-author";
-    author.textContent = group.commit.author;
-    meta.appendChild(author);
-    const sha = document.createElement("span");
-    sha.className = "gdp-blame-sha";
-    sha.textContent = blameShortSha(group.sha);
-    if (!group.commit.isUncommitted) {
-      sha.dataset.sha = group.sha;
-      sha.title = SOURCE_READING_TEXT[pageLanguage()].blameOpenCommit;
-      sha.style.cursor = "pointer";
-      sha.addEventListener("click", () => {
-        const ref =
-          target.ref && target.ref !== "worktree" ? target.ref : "HEAD";
-        deps.setRoute({
-          screen: "history",
-          ref,
-          commit: group.sha,
-          range: deps.currentRange(),
-        });
-        deps.applyRouteFromLocation?.();
-      });
-    }
-    meta.appendChild(sha);
-    return meta;
+  function blameMetaTemplate(
+    group: BlameGroup,
+    target: SourceFileTarget,
+  ): TemplateResult {
+    const text = SOURCE_READING_TEXT[pageLanguage()];
+    const uncommitted = group.commit.isUncommitted;
+    return html`<div class="gdp-blame-meta"><span class="gdp-blame-time"
+        >${
+          uncommitted
+            ? text.blameUncommitted
+            : relativeTimeText(group.commit.authorTime, pageLanguage())
+        }</span
+      ><span class="gdp-blame-author">${group.commit.author}</span>${
+        uncommitted
+          ? html`<span class="gdp-blame-sha">${blameShortSha(group.sha)}</span>`
+          : html`<span
+              class="gdp-blame-sha"
+              data-sha=${group.sha}
+              title=${text.blameOpenCommit}
+              style="cursor: pointer;"
+              @click=${() => {
+                const ref =
+                  target.ref && target.ref !== "worktree" ? target.ref : "HEAD";
+                deps.setRoute({
+                  screen: "history",
+                  ref,
+                  commit: group.sha,
+                  range: deps.currentRange(),
+                });
+                deps.applyRouteFromLocation?.();
+              }}
+            >${blameShortSha(group.sha)}</span>`
+      }</div>`;
   }
 
   /** まとまりの 2 段目: コミットの件名。 */
-  function blameCommitSummary(group: BlameGroup): HTMLElement {
-    const summary = document.createElement("div");
-    summary.className = "gdp-blame-summary";
-    summary.textContent = group.commit.summary;
-    summary.title = group.commit.summary;
-    return summary;
+  function blameSummaryTemplate(group: BlameGroup): TemplateResult {
+    return html`<div class="gdp-blame-summary" title=${group.commit.summary}
+      >${group.commit.summary}</div
+    >`;
   }
 
   /**
@@ -269,37 +256,40 @@ export function createBlameView(deps: BlameViewDeps) {
       rowClass: "gdp-blame-virtual-row",
       fullView: () => deps.applyRouteFromLocation?.(),
       cell(line) {
-        const cell = document.createElement("span");
-        cell.className = "gdp-blame-cell";
         const group = groupOfLine[line];
-        if (!group) return cell;
-        cell.appendChild(
-          colourBarFor(
-            group.commit,
-            bins[group.sha] ?? 0,
-            BLAME_TIME_BIN_COUNT,
-          ),
+        if (!group)
+          return templateElement(html`<span class="gdp-blame-cell"></span>`);
+        const start = line === group.startLine;
+        return templateElement(
+          html`<span class=${start ? "gdp-blame-cell gdp-blame-cell-start" : "gdp-blame-cell"}
+            >${colourBarTemplate(
+              group.commit,
+              bins[group.sha] ?? 0,
+              BLAME_TIME_BIN_COUNT,
+            )}${
+              start
+                ? html`${blameMetaTemplate(group, target)}${
+                    group.endLine === group.startLine
+                      ? blameSummaryTemplate(group)
+                      : nothing
+                  }`
+                : line === group.startLine + 1
+                  ? blameSummaryTemplate(group)
+                  : nothing
+            }</span
+          >`,
         );
-        if (line === group.startLine) {
-          cell.classList.add("gdp-blame-cell-start");
-          cell.appendChild(blameMeta(group, target));
-          if (group.endLine === group.startLine)
-            cell.appendChild(blameCommitSummary(group));
-        } else if (line === group.startLine + 1) {
-          cell.appendChild(blameCommitSummary(group));
-        }
-        return cell;
       },
     };
   }
 
-  function buildBlameTable(
+  function blameTable(
     card: HTMLElement,
     target: SourceFileTarget,
     response: BlameResponse,
     sourceText: string,
     highlighter: SourceShikiHighlighter | null,
-  ): HTMLElement {
+  ): { template: TemplateResult; highlightError: unknown } {
     const groups = groupBlameLines(response.lines, response.commits);
     const bins = blameTimeBins(response.commits, BLAME_TIME_BIN_COUNT);
     const sourceLines = sourceText
@@ -327,62 +317,49 @@ export function createBlameView(deps: BlameViewDeps) {
     }
 
     const lineTarget = deps.currentSourceLineTarget(target);
-    const table = document.createElement("table");
-    table.className = "gdp-source-table gdp-blame-table";
-    const tbody = document.createElement("tbody");
-
+    const rows: TemplateResult[] = [];
     for (const group of groups) {
       for (let lineNo = group.startLine; lineNo <= group.endLine; lineNo++) {
-        const tr = document.createElement("tr");
-        tr.className = "gdp-blame-row";
-        tr.dataset.line = String(lineNo);
-        tr.dataset.sha = group.sha;
-        tr.classList.toggle(
-          "gdp-source-line-target",
-          deps.lineInSourceTarget(lineNo, lineTarget),
-        );
-        if (lineNo === group.startLine) {
-          const info = document.createElement("td");
-          info.className = "gdp-blame-info";
-          info.rowSpan = group.endLine - group.startLine + 1;
-          info.appendChild(
-            colourBarFor(
-              group.commit,
-              bins[group.sha] ?? 0,
-              BLAME_TIME_BIN_COUNT,
-            ),
-          );
-          info.append(blameMeta(group, target), blameCommitSummary(group));
-          tr.appendChild(info);
-        }
-        const num = document.createElement("td");
-        num.className = "gdp-source-line-number";
-        num.textContent = String(lineNo);
-        deps.bindSourceLineNumber(num, card, target, lineNo);
-        tr.appendChild(num);
-        const code = document.createElement("td");
-        code.className = "gdp-source-line-code";
+        const highlighted = shikiLines?.[lineNo - 1];
         const codeContent = sourceLines[lineNo - 1] ?? "";
-        const codeEl = document.createElement("code");
-        if (shikiLines && shikiLines[lineNo - 1] != null) {
-          code.classList.add("shiki");
-          codeEl.innerHTML = shikiLines[lineNo - 1] || " ";
-        } else {
-          codeEl.textContent = codeContent || " ";
-        }
-        code.appendChild(codeEl);
-        tr.appendChild(code);
-        tbody.appendChild(tr);
+        rows.push(html`<tr
+          class=${
+            deps.lineInSourceTarget(lineNo, lineTarget)
+              ? "gdp-blame-row gdp-source-line-target"
+              : "gdp-blame-row"
+          }
+          data-line=${String(lineNo)}
+          data-sha=${group.sha}
+        >${
+          lineNo === group.startLine
+            ? html`<td
+                class="gdp-blame-info"
+                rowspan=${group.endLine - group.startLine + 1}
+              >${colourBarTemplate(
+                group.commit,
+                bins[group.sha] ?? 0,
+                BLAME_TIME_BIN_COUNT,
+              )}${blameMetaTemplate(group, target)}${blameSummaryTemplate(group)}</td>`
+            : nothing
+        }<td
+          class="gdp-source-line-number"
+          ${ref((num) => {
+            if (num instanceof HTMLElement)
+              deps.bindSourceLineNumber(num, card, target, lineNo);
+          })}
+        >${String(lineNo)}</td>${
+          highlighted != null
+            ? html`<td class="gdp-source-line-code shiki"><code
+                >${unsafeHTML(highlighted || " ")}</code
+              ></td>`
+            : html`<td class="gdp-source-line-code"><code>${codeContent || " "}</code></td>`
+        }</tr>`);
       }
     }
-    table.appendChild(tbody);
-    if (highlightError !== null)
-      showHighlightFailure(
-        table,
-        `syntax highlighting failed for ${target.path}`,
-        highlightError,
-      );
-    return table;
+    return {
+      template: html`<table class="gdp-source-table gdp-blame-table"><tbody>${rows}</tbody></table>`,
+      highlightError,
+    };
   }
 
   async function renderBlamePage(target: SourceFileTarget) {
@@ -394,12 +371,6 @@ export function createBlameView(deps: BlameViewDeps) {
     deps.setPageMode();
     deps.removeStandaloneSource();
     cleanup();
-    const card = document.createElement("article");
-    card.className =
-      "gdp-file-shell loaded gdp-standalone-blame gdp-blame-mode";
-    card.dataset.path = target.path;
-    const wrapper = document.createElement("div");
-    wrapper.className = "gdp-file-detail-wrapper";
     const { sticky } = createFileShellSticky(
       {
         currentRange: deps.currentRange,
@@ -412,13 +383,23 @@ export function createBlameView(deps: BlameViewDeps) {
       target,
       "blame",
     );
-    sticky.appendChild(buildLegend());
-    wrapper.appendChild(sticky);
-    const body = document.createElement("div");
-    body.className = "gdp-file-detail-body gdp-blame-body";
-    body.appendChild(buildLoading());
-    wrapper.appendChild(body);
-    card.appendChild(wrapper);
+    sticky.append(templateElement(legendTemplate()));
+    const card = templateElement(
+      html`<article
+        class="gdp-file-shell loaded gdp-standalone-blame gdp-blame-mode"
+        data-path=${target.path}
+      ><div class="gdp-file-detail-wrapper">${sticky}<div
+            class="gdp-file-detail-body gdp-blame-body"
+          ></div></div></article>`,
+    );
+    const body = card.querySelector<HTMLElement>(".gdp-blame-body");
+    if (!body) throw new Error("blame: the card body was not drawn");
+    renderOwned(
+      body,
+      html`<div class="gdp-blame-loading">${
+        SOURCE_READING_TEXT[pageLanguage()].blameLoading
+      }</div>`,
+    );
     mountFileShellCard(deps, target, card);
 
     const sourceShikiLang = normalizeSourceShikiLang(
@@ -440,13 +421,13 @@ export function createBlameView(deps: BlameViewDeps) {
         error,
       );
       console.error(failure);
-      body.replaceChildren(blameError(formatErrorDetail(failure)));
+      renderOwned(body, blameErrorTemplate(formatErrorDetail(failure)));
       return;
     }
     const [blameResp, srcText, highlighter] = loaded;
     if (generation !== activeGeneration || !blameResp) return;
     if (!blameResp.lines.length && blameResp.error) {
-      body.replaceChildren(blameError(blameResp.error));
+      renderOwned(body, blameErrorTemplate(blameResp.error));
       return;
     }
     const virtual = await deps.renderVirtualSourceWithGutter(
@@ -455,23 +436,24 @@ export function createBlameView(deps: BlameViewDeps) {
       virtualBlameGutter(target, blameResp),
     );
     if (generation !== activeGeneration) return;
-    body.replaceChildren(
-      virtual ?? buildBlameTable(card, target, blameResp, srcText, highlighter),
-    );
+    if (virtual) {
+      renderOwned(body, virtual);
+      return;
+    }
+    const table = blameTable(card, target, blameResp, srcText, highlighter);
+    renderOwned(body, table.template);
+    // 強調に失敗したら原文のまま、表に失敗の印と理由を付ける。
+    const drawn = body.querySelector<HTMLElement>(".gdp-blame-table");
+    if (table.highlightError !== null && drawn)
+      showHighlightFailure(
+        drawn,
+        `syntax highlighting failed for ${target.path}`,
+        table.highlightError,
+      );
   }
 
-  function blameError(detail: string): HTMLElement {
-    const err = document.createElement("div");
-    err.className = "gdp-blame-error";
-    err.textContent = detail;
-    return err;
-  }
-
-  function buildLoading(): HTMLElement {
-    const wrap = document.createElement("div");
-    wrap.className = "gdp-blame-loading";
-    wrap.textContent = SOURCE_READING_TEXT[pageLanguage()].blameLoading;
-    return wrap;
+  function blameErrorTemplate(detail: string): TemplateResult {
+    return html`<div class="gdp-blame-error">${detail}</div>`;
   }
 
   function removeBlamePage() {

@@ -11,8 +11,10 @@
 // 開き、選ぶとその段を押したのと同じ。隠した段はキーでも読み上げでも届かない
 // ので、ここが畳んだ段への唯一の入口になる。読み上げの名前は全体のパス。
 
+import { html } from "lit/html.js";
 import { collapsedBreadcrumbRange } from "../core/breadcrumb-fit";
 import { showContextMenu } from "./context-menu";
+import { templateElement } from "./ui/renderer";
 
 const CRUMB_SELECTOR =
   ":scope > .gdp-file-breadcrumb-part, :scope > .gdp-file-breadcrumb-current";
@@ -33,14 +35,23 @@ function outerWidth(element: HTMLElement): number {
  * 箱が付いたときに測る)。fullPath は「…」の title に出す全体のパス。
  */
 export function fitBreadcrumb(nav: HTMLElement, fullPath: string): void {
-  const ellipsis = document.createElement("span");
-  ellipsis.className = "gdp-file-breadcrumb-ellipsis";
-  ellipsis.textContent = "…";
-  ellipsis.title = fullPath;
-  ellipsis.tabIndex = 0;
-  ellipsis.setAttribute("role", "button");
-  ellipsis.setAttribute("aria-haspopup", "menu");
-  ellipsis.setAttribute("aria-label", fullPath);
+  // 「…」は畳んだときだけ並びに差し込む (測り直すたびに外して付け直す)。
+  const ellipsis = templateElement(
+    html`<span
+      class="gdp-file-breadcrumb-ellipsis"
+      title=${fullPath}
+      tabindex="0"
+      role="button"
+      aria-haspopup="menu"
+      aria-label=${fullPath}
+      @click=${() => openHidden()}
+      @keydown=${(event: KeyboardEvent) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        openHidden();
+      }}
+    >…</span>`,
+  );
   const openHidden = () => {
     const hidden = Array.from(
       nav.querySelectorAll<HTMLElement>(CRUMB_SELECTOR),
@@ -53,12 +64,6 @@ export function fitBreadcrumb(nav: HTMLElement, fullPath: string): void {
       })),
     );
   };
-  ellipsis.addEventListener("click", openHidden);
-  ellipsis.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    openHidden();
-  });
 
   const refit = () => {
     const crumbs = Array.from(

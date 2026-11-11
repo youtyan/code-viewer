@@ -1,3 +1,4 @@
+import { html } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 // Definition lookup is limited to standalone source code and the main diff in
 // v1. Blame, markdown code blocks, worktree diffs, and embedded history diffs
@@ -29,6 +30,7 @@ import {
   type DefinitionJumpLanguage,
   definitionJumpText,
 } from "./definition-jump-i18n";
+import { templateElement } from "./ui/renderer";
 
 export type DefinitionCellContext = {
   path: string;
@@ -384,10 +386,10 @@ function openSearchMenu(
     });
   }
 
-  const flyout = document.createElement("div");
-  flyout.className = "gdp-definition-preview-flyout";
-  flyout.hidden = true;
-  flyout.setAttribute("aria-hidden", "true");
+  // 見本の小窓の箱。body の末尾に 1 つ置き、中は見本 (code-preview.ts) が描く。
+  const flyout = templateElement(
+    html`<div class="gdp-definition-preview-flyout" hidden aria-hidden="true"></div>`,
+  );
   document.body.appendChild(flyout);
   const codePreview = createCodePreview(flyout, {
     trackLoad: preview.deps.trackLoad,
@@ -682,9 +684,9 @@ export function createDefinitionJump(deps: DefinitionJumpDeps): {
       return;
     }
     if (!underline) {
-      underline = document.createElement("div");
-      underline.className = "gdp-def-underline";
-      underline.setAttribute("aria-hidden", "true");
+      underline = templateElement(
+        html`<div class="gdp-def-underline" aria-hidden="true"></div>`,
+      );
     }
     if (!underline.isConnected) document.body.appendChild(underline);
     underline.style.left = `${rect.left}px`;

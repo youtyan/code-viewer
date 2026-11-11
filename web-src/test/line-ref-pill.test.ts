@@ -104,7 +104,7 @@ describe("line reference pill line history action", () => {
   });
 
   test("stays hidden when the host does not provide line history", () => {
-    createLineRefPill({
+    const pill = createLineRefPill({
       onClose() {
         /* noop */
       },
@@ -114,6 +114,7 @@ describe("line reference pill line history action", () => {
       githubOpenTitle: () => "Open on GitHub",
       githubCopyTitle: () => "Copy GitHub link",
     });
+    pill.show("src/index.ts", 10, 12);
     expect(
       document.querySelector<HTMLButtonElement>("#line-ref-pill-history")
         ?.hidden,

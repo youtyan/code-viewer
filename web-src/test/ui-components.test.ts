@@ -93,6 +93,17 @@ const DECLARATIVE = [
   "web-src/views/quick-help.ts",
   "web-src/views/install-help.ts",
   "web-src/views/doctor-view.ts",
+  "web-src/views/file-shell.ts",
+  "web-src/views/file-history-shell.ts",
+  "web-src/views/code-preview.ts",
+  "web-src/views/blame-view.ts",
+  "web-src/views/line-ref-pill.ts",
+  "web-src/views/source-preview-elements.ts",
+  "web-src/views/repo-view.ts",
+  "web-src/views/source-view.ts",
+  "web-src/views/repository-web-link.ts",
+  "web-src/views/definition-jump.ts",
+  "web-src/views/breadcrumb-fit.ts",
 ];
 
 /**
@@ -108,7 +119,7 @@ const EXCEPTIONS: Record<string, { count: number; reason: string }> = {
 };
 
 /** まだ書き直していない所も含めた、命令的な組み立ての数の上限。書き直したら下げる。 */
-const IMPERATIVE_LIMIT = 1740;
+const IMPERATIVE_LIMIT = 1480;
 
 function imperativeCount(file: string): number {
   return [...readFileSync(file, "utf8").matchAll(IMPERATIVE_DOM)].length;

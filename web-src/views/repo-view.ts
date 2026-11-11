@@ -1,3 +1,6 @@
+import { live } from "lit/directives/live.js";
+import { ref } from "lit/directives/ref.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 // Repository browsing view: tree listing, breadcrumbs, context menu,
 // new-folder / move-to-trash actions, upload panel, and the repo blob
@@ -49,6 +52,8 @@ import {
 import { type RepoViewLanguage, repoViewText } from "./repo-view-i18n";
 import { createRepositoryWebLink as renderRepositoryWebLink } from "./repository-web-link";
 import { sidebarAncestorDirs } from "./sidebar";
+import { iconTemplate } from "./ui/icon";
+import { renderOwned, templateElement } from "./ui/renderer";
 import {
   showAlertDialog,
   showConfirmDialog,
@@ -278,37 +283,37 @@ export function createRepoView(deps: RepoViewDeps) {
     return iconSvg("octicon-file", FILE_16_PATH);
   }
 
-  function commitEntryIcon(): string {
-    return iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
-  }
-
-  function symlinkEntryIcon(): string {
-    return iconSvg("octicon-link", LINK_16_PATH);
-  }
-
   function isWorktreeRef(ref: string): boolean {
     return canTrashWorktreeRef(ref);
   }
 
-  function repoEntryTypeIcon(
+  /** フォルダの絵を描く ref (絵は左のファイル一覧と同じものをそこが描く)。 */
+  function folderIconRef(collapsed: boolean) {
+    return ref((element) => {
+      if (element instanceof HTMLElement) setFolderIcon(element, collapsed);
+    });
+  }
+
+  function repoEntryTypeIconTemplate(
     entry: RepoTreeEntry,
     browsable: boolean,
     nonBrowsableCommit: boolean,
-  ): HTMLElement {
-    const icon = document.createElement("span");
-    icon.className = browsable
-      ? "dir-icon"
-      : nonBrowsableCommit
-        ? "d2h-icon-wrapper gdp-repo-row-gitlink-icon"
-        : "d2h-icon-wrapper";
-    if (browsable) setFolderIcon(icon, true);
-    else
-      icon.innerHTML = entry.is_symlink
-        ? symlinkEntryIcon()
+  ): TemplateResult {
+    if (browsable)
+      return html`<span class="dir-icon" ${folderIconRef(true)}></span>`;
+    return html`<span
+      class=${
+        nonBrowsableCommit
+          ? "d2h-icon-wrapper gdp-repo-row-gitlink-icon"
+          : "d2h-icon-wrapper"
+      }
+    >${
+      entry.is_symlink
+        ? iconTemplate(LINK_16_PATH, "octicon-link")
         : entry.type === "commit"
-          ? commitEntryIcon()
-          : fileEntryIcon();
-    return icon;
+          ? iconTemplate(GIT_BRANCH_16_PATH, "octicon-git-branch")
+          : iconTemplate(FILE_16_PATH, "octicon-file")
+    }</span>`;
   }
 
   function canBrowseRepoEntry(
@@ -408,37 +413,37 @@ export function createRepoView(deps: RepoViewDeps) {
     await navigator.clipboard.writeText(text);
   }
 
-  function createCopyPathButton(path: string): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gdp-file-header-icon gdp-copy-path";
+  function copyPathButtonTemplate(path: string): TemplateResult {
     const label = repoViewText(STATE.language).copyFolderPath;
-    button.title = label;
-    button.setAttribute("aria-label", label);
-    button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-    button.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      try {
-        await navigator.clipboard.writeText(filePathClipboardText(path));
-        button.classList.add("copied");
-        setTimeout(() => {
-          button.classList.remove("copied");
-        }, 1200);
-      } catch (error) {
-        console.error("[code-viewer] copy folder path failed", path, error);
-        // 理由は押した場所の title に出す (箱の寸法は変えない)。
-        const idleTitle = button.title;
-        button.title = repoViewText(STATE.language).copyPathFailed(
-          formatErrorDetail(error),
-        );
-        button.classList.add("failed");
-        setTimeout(() => {
-          button.classList.remove("failed");
-          button.title = idleTitle;
-        }, 1200);
-      }
-    });
-    return button;
+    return html`<button
+      type="button"
+      class="gdp-file-header-icon gdp-copy-path"
+      title=${label}
+      aria-label=${label}
+      @click=${async (event: MouseEvent) => {
+        event.stopPropagation();
+        const button = event.currentTarget as HTMLButtonElement;
+        try {
+          await navigator.clipboard.writeText(filePathClipboardText(path));
+          button.classList.add("copied");
+          setTimeout(() => {
+            button.classList.remove("copied");
+          }, 1200);
+        } catch (error) {
+          console.error("[code-viewer] copy folder path failed", path, error);
+          // 理由は押した場所の title に出す (箱の寸法は変えない)。
+          const idleTitle = button.title;
+          button.title = repoViewText(STATE.language).copyPathFailed(
+            formatErrorDetail(error),
+          );
+          button.classList.add("failed");
+          setTimeout(() => {
+            button.classList.remove("failed");
+            button.title = idleTitle;
+          }, 1200);
+        }
+      }}
+    >${iconTemplate(COPY_16_PATHS, "octicon-copy")}</button>`;
   }
 
   function createRepositoryWebLink(
@@ -566,107 +571,133 @@ export function createRepoView(deps: RepoViewDeps) {
       markActive(entry.path);
   }
 
+  function moveToTrashButtonTemplate(
+    path: string,
+    kind: "file" | "folder",
+    onDeleted: () => void,
+  ): TemplateResult {
+    const trashTitle = moveToTrashTitle(kind);
+    return html`<button
+      type="button"
+      class="gdp-file-header-icon gdp-trash-path"
+      title=${trashTitle}
+      aria-label=${trashTitle}
+      @click=${async (event: MouseEvent) => {
+        event.stopPropagation();
+        await requestMoveToTrash(path, onDeleted, {
+          focusReturnTarget: event.currentTarget as HTMLElement,
+        });
+      }}
+    >${iconTemplate(TRASH_16_PATH, "octicon-trash")}</button>`;
+  }
+
+  /** まだ命令的に組む呼び手 (ファイルの見出し) へ渡す形。 */
   function createMoveToTrashButton(
     path: string,
     kind: "file" | "folder",
     onDeleted: () => void,
-  ) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gdp-file-header-icon gdp-trash-path";
-    const trashTitle = moveToTrashTitle(kind);
-    button.title = trashTitle;
-    button.setAttribute("aria-label", trashTitle);
-    button.innerHTML = iconSvg("octicon-trash", TRASH_16_PATH);
-    button.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      await requestMoveToTrash(path, onDeleted, { focusReturnTarget: button });
-    });
-    return button;
+  ): HTMLButtonElement {
+    return templateElement<HTMLButtonElement>(
+      moveToTrashButtonTemplate(path, kind, onDeleted),
+    );
   }
 
-  function createNewFolderButton(
+  function newFolderButtonTemplate(
     path: string,
     onCreated: (createdPath: string) => void,
-  ) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gdp-file-header-icon gdp-create-dir";
+  ): TemplateResult {
     const newFolderTitle = newFolderButtonTitle();
-    button.title = newFolderTitle;
-    button.setAttribute("aria-label", newFolderTitle);
-    button.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
-    button.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      await requestCreateDirectory(path, onCreated, {
-        focusReturnTarget: button,
-      });
-    });
-    return button;
+    return html`<button
+      type="button"
+      class="gdp-file-header-icon gdp-create-dir"
+      title=${newFolderTitle}
+      aria-label=${newFolderTitle}
+      @click=${async (event: MouseEvent) => {
+        event.stopPropagation();
+        await requestCreateDirectory(path, onCreated, {
+          focusReturnTarget: event.currentTarget as HTMLElement,
+        });
+      }}
+    >${iconTemplate(PLUS_16_PATH, "octicon-plus")}</button>`;
   }
 
-  function createRepoUploadPanel(path: string): HTMLElement {
-    const dropPanel = document.createElement("div");
-    dropPanel.className = "gdp-upload-panel";
-
-    const copy = document.createElement("div");
-    copy.className = "gdp-upload-copy";
-    copy.textContent = dropFilesIntoCopy(
-      path || getProjectName() || repositoryFallback(),
-    );
-
-    const input = document.createElement("input");
-    input.type = "file";
-    input.multiple = true;
-    input.hidden = true;
-
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gdp-btn gdp-btn-sm";
-    button.textContent = uploadButtonLabel();
-    button.addEventListener("click", () => input.click());
-    const error = document.createElement("div");
-    error.className = "gdp-upload-error";
-
+  /**
+   * 落とす・選ぶでファイルを足す枠。状態 (落とそうとしている・失敗した) は
+   * 枠ごとに持ち、変わったら draw で描き直す。
+   */
+  function uploadPanelTemplate(
+    path: string,
+    panel: { dragging: boolean; failed: boolean; error: string },
+    draw: () => void,
+  ): TemplateResult {
     const fail = (uploadError: unknown) => {
       console.error("[code-viewer] uploading files failed", path, uploadError);
-      error.textContent = `${uploadFailedMessage()}\n${formatErrorDetail(uploadError)}`;
-      dropPanel.classList.add("failed");
-      setTimeout(() => dropPanel.classList.remove("failed"), 1600);
+      panel.error = `${uploadFailedMessage()}\n${formatErrorDetail(uploadError)}`;
+      panel.failed = true;
+      draw();
+      setTimeout(() => {
+        panel.failed = false;
+        draw();
+      }, 1600);
     };
-
-    input.addEventListener("change", async () => {
-      try {
-        if (input.files?.length) await uploadFiles(path, input.files);
-        error.textContent = "";
-      } catch (uploadError) {
-        fail(uploadError);
-      } finally {
-        input.value = "";
-      }
-    });
-
-    dropPanel.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      dropPanel.classList.add("dragging");
-    });
-    dropPanel.addEventListener("dragleave", () =>
-      dropPanel.classList.remove("dragging"),
-    );
-    dropPanel.addEventListener("drop", async (event) => {
-      event.preventDefault();
-      dropPanel.classList.remove("dragging");
-      try {
-        const files = event.dataTransfer?.files;
-        if (files?.length) await uploadFiles(path, files);
-        error.textContent = "";
-      } catch (uploadError) {
-        fail(uploadError);
-      }
-    });
-
-    dropPanel.append(copy, button, input, error);
-    return dropPanel;
+    const cls = [
+      "gdp-upload-panel",
+      panel.dragging ? "dragging" : "",
+      panel.failed ? "failed" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return html`<div
+      class=${cls}
+      @dragover=${(event: DragEvent) => {
+        event.preventDefault();
+        if (panel.dragging) return;
+        panel.dragging = true;
+        draw();
+      }}
+      @dragleave=${() => {
+        panel.dragging = false;
+        draw();
+      }}
+      @drop=${async (event: DragEvent) => {
+        event.preventDefault();
+        panel.dragging = false;
+        draw();
+        try {
+          const files = event.dataTransfer?.files;
+          if (files?.length) await uploadFiles(path, files);
+          panel.error = "";
+          draw();
+        } catch (uploadError) {
+          fail(uploadError);
+        }
+      }}
+    ><div class="gdp-upload-copy">${dropFilesIntoCopy(
+      path || getProjectName() || repositoryFallback(),
+    )}</div><button
+      type="button"
+      class="gdp-btn gdp-btn-sm"
+      @click=${(event: MouseEvent) =>
+        (event.currentTarget as HTMLElement).parentElement
+          ?.querySelector<HTMLInputElement>("input[type=file]")
+          ?.click()}
+    >${uploadButtonLabel()}</button><input
+      type="file"
+      multiple
+      hidden
+      @change=${async (event: Event) => {
+        const input = event.currentTarget as HTMLInputElement;
+        try {
+          if (input.files?.length) await uploadFiles(path, input.files);
+          panel.error = "";
+          draw();
+        } catch (uploadError) {
+          fail(uploadError);
+        } finally {
+          input.value = "";
+        }
+      }}
+    /><div class="gdp-upload-error">${panel.error}</div></div>`;
   }
 
   function repoRoute(ref: string, path: string): AppRoute {
@@ -690,47 +721,37 @@ export function createRepoView(deps: RepoViewDeps) {
     };
   }
 
-  function createRepoBreadcrumb(target: string, path: string): HTMLElement {
-    const nav = document.createElement("nav");
-    nav.className = "gdp-file-breadcrumb gdp-repo-breadcrumb";
-    const root = document.createElement("button");
-    root.type = "button";
-    root.className = path
-      ? "gdp-file-breadcrumb-part"
-      : "gdp-file-breadcrumb-current";
-    root.textContent = getProjectName() || repositoryFallback();
-    root.addEventListener("click", () => {
-      setRoute(repoRoute(target, ""));
-      loadRepo();
-    });
-    nav.appendChild(root);
+  function repoBreadcrumbTemplate(
+    target: string,
+    path: string,
+  ): TemplateResult {
+    const rootName = getProjectName() || repositoryFallback();
     const parts = path ? path.split("/") : [];
-    parts.forEach((part, index) => {
-      const sep = document.createElement("span");
-      sep.className = "gdp-file-breadcrumb-sep";
-      sep.textContent = "/";
-      nav.appendChild(sep);
+    const open = (to: string) => {
+      setRoute(repoRoute(target, to));
+      loadRepo();
+    };
+    return html`<nav
+      class="gdp-file-breadcrumb gdp-repo-breadcrumb"
+      ${ref((nav) => {
+        // 深いフォルダで入りきらないときは真ん中の段を「…」に畳む。
+        if (nav instanceof HTMLElement)
+          fitBreadcrumb(nav, [rootName, ...parts].filter(Boolean).join("/"));
+      })}
+    ><button
+      type="button"
+      class=${path ? "gdp-file-breadcrumb-part" : "gdp-file-breadcrumb-current"}
+      @click=${() => open("")}
+    >${rootName}</button>${parts.map((part, index) => {
+      const last = index === parts.length - 1;
       const currentPath = parts.slice(0, index + 1).join("/");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className =
-        index === parts.length - 1
-          ? "gdp-file-breadcrumb-current"
-          : "gdp-file-breadcrumb-part";
-      button.textContent = part;
-      button.disabled = index === parts.length - 1;
-      button.addEventListener("click", () => {
-        setRoute(repoRoute(target, currentPath));
-        loadRepo();
-      });
-      nav.appendChild(button);
-    });
-    // 深いフォルダで入りきらないときは真ん中の段を「…」に畳む。
-    fitBreadcrumb(
-      nav,
-      [root.textContent ?? "", ...parts].filter(Boolean).join("/"),
-    );
-    return nav;
+      return html`<span class="gdp-file-breadcrumb-sep">/</span><button
+          type="button"
+          class=${last ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part"}
+          ?disabled=${last}
+          @click=${() => open(currentPath)}
+        >${part}</button>`;
+    })}</nav>`;
   }
 
   let projectGeneration = 0;
@@ -761,258 +782,208 @@ export function createRepoView(deps: RepoViewDeps) {
       placeSidebarToggle();
       return;
     }
-    const shell = document.createElement("section");
-    shell.className = "gdp-repo-shell";
-
-    const toolbar = document.createElement("div");
-    toolbar.className = "gdp-file-detail-header gdp-repo-toolbar";
-    const pathHeader = document.createElement("div");
-    pathHeader.className = "gdp-file-detail-path";
-    pathHeader.appendChild(createRepoBreadcrumb(meta.ref, meta.path || ""));
-    if (meta.path) pathHeader.appendChild(createCopyPathButton(meta.path));
-    pathHeader.appendChild(
-      createOpenPathButton(
-        meta.path || "",
-        "directory",
-        openDirectoryInOsTitle(),
-      ),
-    );
-    toolbar.appendChild(pathHeader);
-    const repositoryWebLink = createRepositoryWebLink(
-      meta.path || "",
-      meta.ref,
-    );
-    if (repositoryWebLink) toolbar.appendChild(repositoryWebLink);
-    const historyButton = document.createElement("button");
-    historyButton.type = "button";
-    historyButton.className = "gdp-btn gdp-btn-sm gdp-repo-history-btn";
-    historyButton.textContent = folderHistoryLabel();
-    historyButton.title = folderHistoryTitle();
-    historyButton.addEventListener("click", () => {
-      openFolderHistory(meta.ref, meta.path || "");
-    });
-    toolbar.appendChild(historyButton);
-    if (canTrashWorktreeRef(meta.ref)) {
-      toolbar.appendChild(
-        createNewFolderButton(meta.path || "", () => loadRepo()),
-      );
-      if (meta.path) {
-        toolbar.appendChild(
-          createMoveToTrashButton(meta.path, "folder", () => {
-            const parent = meta.path.split("/").slice(0, -1).join("/");
-            setRoute(repoRoute(meta.ref, parent));
-            loadRepo();
-          }),
-        );
-      }
-    }
-    shell.appendChild(toolbar);
-
-    const listCard = document.createElement("section");
-    listCard.className = "gdp-file-shell loaded gdp-repo-list-shell";
-    const listWrapper = document.createElement("div");
-    listWrapper.className = "d2h-file-wrapper";
-    const sortHost = document.createElement("div");
-    sortHost.className = "gdp-repo-sort-host";
-    const list = document.createElement("div");
-    list.className = "gdp-source-viewer gdp-repo-file-list";
     const location = `${meta.ref || "worktree"}\0${meta.path || ""}`;
-    const previousFilter =
+    let query =
       location === REPO_RENDER_LOCATION
         ? target.querySelector<HTMLInputElement>(".gdp-repo-filter")?.value ||
           ""
         : "";
-    const filter = createRepoFilter(
-      previousFilter,
-      () => renderRepoRows(),
-      list,
-    );
-    if (meta.ref === "worktree" || meta.ref === "") {
-      filter.el.appendChild(createRepoUploadPanel(meta.path || ""));
-    }
-    const renderRepoRows = (focusSortKey?: RepoSortKey) => {
-      sortHost.replaceChildren(createRepoSortHeader(renderRepoRows));
-      if (focusSortKey) {
-        sortHost
-          .querySelector<HTMLButtonElement>(
-            `[data-repo-sort="${focusSortKey}"]`,
-          )
-          ?.focus();
-      }
-      list.replaceChildren();
-      if (meta.path) {
-        const parent = meta.path.split("/").slice(0, -1).join("/");
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = "gdp-repo-row parent";
-        const parentIcon = document.createElement("span");
-        parentIcon.className = "dir-icon";
-        setFolderIcon(parentIcon, false);
-        const parentName = document.createElement("span");
-        parentName.className = "name";
-        parentName.textContent = "..";
-        const parentKind = document.createElement("span");
-        parentKind.className = "meta";
-        parentKind.textContent = "";
-        const parentSize = document.createElement("span");
-        parentSize.className = "size";
-        row.append(
-          parentIcon,
-          parentName,
-          document.createElement("span"),
-          parentKind,
-          parentSize,
-        );
-        row.addEventListener("click", () => {
-          setRoute(repoRoute(meta.ref, parent));
-          loadRepo();
+    const upload = { dragging: false, failed: false, error: "" };
+    let listHost: HTMLElement | null = null;
+    const drawList = () => {
+      if (listHost) renderOwned(listHost, listAreaTemplate());
+    };
+    const openEntry = (entry: RepoTreeEntry, browsable: boolean) => {
+      if (browsable) {
+        // A committed-ref directory symlink cannot be browsed at its
+        // own path (git ls-tree does not resolve it) - resolved_path
+        // is the real repo-relative path to navigate to instead.
+        setRoute(repoRoute(meta.ref, entry.resolved_path ?? entry.path));
+        loadRepo();
+      } else if (entry.type === "blob") {
+        setRoute({
+          screen: "file",
+          path: entry.path,
+          ref: meta.ref,
+          view: "blob",
+          range: currentRange(),
         });
-        list.appendChild(row);
-      }
-      const query = filter.input.value.trim().toLowerCase();
-      const entries = meta.entries.filter((entry) =>
-        entry.name.toLowerCase().includes(query),
-      );
-      filter.count.textContent = sortColumnLabels().entryCount(
-        entries.length,
-        meta.entries.length,
-      );
-      filter.clear.disabled = !filter.input.value;
-      sortedRepoEntries(entries, meta.ref).forEach((entry) => {
-        const browsable = canBrowseRepoEntry(entry, meta.ref);
-        // commit 型で非 browsable (submodule または非 worktree ref) は、見た目は
-        // フォルダ/ファイルに近いが実際には開けない。通常行と混同されないよう
-        // 専用クラスで区別する (cursor/アイコン色/meta chip 化はCSS側)。
-        const nonBrowsableCommit = entry.type === "commit" && !browsable;
-        // A symlink whose target is missing/outside the repo still resolves
-        // to type "blob" server-side (see attachTreeEntryMetadata) - not
-        // browsable, and opening it would just 404, so this is disabled the
-        // same way a non-browsable commit entry is.
-        const brokenSymlink =
-          !!entry.is_symlink && entry.symlink_target_type === "missing";
-        // A "D" (deleted) entry is synthesized from git status - it has no
-        // filesystem content left to open (see deletedTreeEntriesForPath in
-        // preview.ts), so it is shown badged but disabled, same as a broken
-        // symlink.
-        const deletedEntry = entry.status === "D";
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = nonBrowsableCommit
-          ? `gdp-repo-row ${entry.type} gdp-repo-row-gitlink`
-          : entry.is_symlink
-            ? `gdp-repo-row ${entry.type} symlink-row${brokenSymlink ? " symlink-broken-row gdp-row-disabled" : ""}`
-            : `gdp-repo-row ${entry.type}`;
-        if (deletedEntry) row.classList.add("gdp-row-disabled");
-        // A directory keeps its folder icon and carries the badge beside the
-        // name instead - a whole-directory status (untracked/ignored) must
-        // not cost the one cue that tells a folder from a file. For files the
-        // badge replaces the type icon, same precedence as sidebar.ts
-        // createTreeFileRow uses for the diff view.
-        const directoryRow = entry.type === "tree";
-        const icon =
-          entry.status && !directoryRow
-            ? fileBadge(entry.status)
-            : repoEntryTypeIcon(entry, browsable, nonBrowsableCommit);
-        const name = document.createElement("span");
-        name.className = "name";
-        name.textContent = entry.name;
-        name.title = entry.path;
-        // Keep status badges beside the name so date columns stay aligned.
-        let nameCell: HTMLElement = name;
-        if (directoryRow && entry.status) {
-          nameCell = document.createElement("span");
-          nameCell.className = "name-cell";
-          nameCell.append(name, fileBadge(entry.status));
-        }
-        if (nonBrowsableCommit) {
-          row.title = commitEntryMeta(entry.submodule).title;
-          row.setAttribute("aria-disabled", "true");
-        } else if (brokenSymlink || deletedEntry) {
-          row.setAttribute("aria-disabled", "true");
-        }
-        const metaBlock = createRepoEntryMeta(entry, browsable, meta.ref);
-        const committed = document.createElement("time");
-        committed.className = "commit-date";
-        const labels = sortColumnLabels();
-        committed.textContent =
-          formatFileDate(entry.commit_updated_at, STATE.language) ||
-          labels.noCommit;
-        committed.title = labels.committedHint;
-        if (entry.commit_updated_at) {
-          committed.dateTime = entry.commit_updated_at;
-          committed.title += `\n${entry.commit_updated_at}`;
-        }
-        const size = createRepoEntrySize(entry);
-        row.append(icon, nameCell, committed, metaBlock, size);
-        row.addEventListener("click", () => {
-          if (brokenSymlink || deletedEntry) return;
-          if (browsable) {
-            // A committed-ref directory symlink cannot be browsed at its
-            // own path (git ls-tree does not resolve it) - resolved_path
-            // is the real repo-relative path to navigate to instead.
-            setRoute(repoRoute(meta.ref, entry.resolved_path ?? entry.path));
-            loadRepo();
-          } else if (entry.type === "blob") {
-            setRoute({
-              screen: "file",
-              path: entry.path,
-              ref: meta.ref,
-              view: "blob",
-              range: currentRange(),
-            });
-            renderStandaloneSource({ path: entry.path, ref: meta.ref });
-          }
-        });
-        row.addEventListener("contextmenu", (event) =>
-          showRepoContextMenu(event, entry, meta.ref, () => loadRepo()),
-        );
-        list.appendChild(row);
-      });
-      if (!entries.length) {
-        const empty = document.createElement("div");
-        empty.className = "gdp-repo-empty";
-        empty.textContent = query
-          ? sortColumnLabels().noMatches
-          : emptyDirectoryLabel();
-        list.appendChild(empty);
+        renderStandaloneSource({ path: entry.path, ref: meta.ref });
       }
     };
-    listWrapper.appendChild(filter.el);
-    listWrapper.appendChild(sortHost);
-    renderRepoRows();
-    listWrapper.appendChild(list);
-    listCard.appendChild(listWrapper);
-    shell.appendChild(listCard);
+    const rowTemplate = (entry: RepoTreeEntry): TemplateResult => {
+      const browsable = canBrowseRepoEntry(entry, meta.ref);
+      // commit 型で非 browsable (submodule または非 worktree ref) は、見た目は
+      // フォルダ/ファイルに近いが実際には開けない。通常行と混同されないよう
+      // 専用クラスで区別する (cursor/アイコン色/meta chip 化はCSS側)。
+      const nonBrowsableCommit = entry.type === "commit" && !browsable;
+      // A symlink whose target is missing/outside the repo still resolves
+      // to type "blob" server-side (see attachTreeEntryMetadata) - not
+      // browsable, and opening it would just 404, so this is disabled the
+      // same way a non-browsable commit entry is.
+      const brokenSymlink =
+        !!entry.is_symlink && entry.symlink_target_type === "missing";
+      // A "D" (deleted) entry is synthesized from git status - it has no
+      // filesystem content left to open (see deletedTreeEntriesForPath in
+      // preview.ts), so it is shown badged but disabled, same as a broken
+      // symlink.
+      const deletedEntry = entry.status === "D";
+      const base = nonBrowsableCommit
+        ? `gdp-repo-row ${entry.type} gdp-repo-row-gitlink`
+        : entry.is_symlink
+          ? `gdp-repo-row ${entry.type} symlink-row${brokenSymlink ? " symlink-broken-row gdp-row-disabled" : ""}`
+          : `gdp-repo-row ${entry.type}`;
+      const cls =
+        deletedEntry && !base.includes("gdp-row-disabled")
+          ? `${base} gdp-row-disabled`
+          : base;
+      // A directory keeps its folder icon and carries the badge beside the
+      // name instead - a whole-directory status (untracked/ignored) must
+      // not cost the one cue that tells a folder from a file. For files the
+      // badge replaces the type icon, same precedence as sidebar.ts
+      // createTreeFileRow uses for the diff view.
+      const directoryRow = entry.type === "tree";
+      const name = html`<span class="name" title=${entry.path}>${entry.name}</span>`;
+      const labels = sortColumnLabels();
+      const committedText =
+        formatFileDate(entry.commit_updated_at, STATE.language) ||
+        labels.noCommit;
+      return html`<button
+        type="button"
+        class=${cls}
+        title=${nonBrowsableCommit ? commitEntryMeta(entry.submodule).title : nothing}
+        aria-disabled=${
+          nonBrowsableCommit || brokenSymlink || deletedEntry ? "true" : nothing
+        }
+        @click=${() => {
+          if (brokenSymlink || deletedEntry) return;
+          openEntry(entry, browsable);
+        }}
+        @contextmenu=${(event: MouseEvent) =>
+          showRepoContextMenu(event, entry, meta.ref, () => loadRepo())}
+      >${
+        entry.status && !directoryRow
+          ? fileBadge(entry.status)
+          : repoEntryTypeIconTemplate(entry, browsable, nonBrowsableCommit)
+      }${
+        // Keep status badges beside the name so date columns stay aligned.
+        directoryRow && entry.status
+          ? html`<span class="name-cell">${name}${fileBadge(entry.status)}</span>`
+          : name
+      }<time
+        class="commit-date"
+        datetime=${entry.commit_updated_at || nothing}
+        title=${
+          entry.commit_updated_at
+            ? `${labels.committedHint}\n${entry.commit_updated_at}`
+            : labels.committedHint
+        }
+      >${committedText}</time>${repoEntryMetaTemplate(entry, browsable, meta.ref)}<span
+        class="size"
+      >${
+        entry.type === "blob" && entry.size != null
+          ? formatBytes(entry.size)
+          : ""
+      }</span></button>`;
+    };
+    const listAreaTemplate = (): TemplateResult => {
+      const labels = sortColumnLabels();
+      const needle = query.trim().toLowerCase();
+      const entries = meta.entries.filter((entry) =>
+        entry.name.toLowerCase().includes(needle),
+      );
+      const parent = meta.path
+        ? meta.path.split("/").slice(0, -1).join("/")
+        : null;
+      const reset = (event: Event) => {
+        query = "";
+        drawList();
+        (event.currentTarget as HTMLElement)
+          .closest(".gdp-repo-search-bar")
+          ?.querySelector<HTMLInputElement>(".gdp-repo-filter")
+          ?.focus();
+      };
+      return html`<div class="gdp-repo-search-bar"><input
+          type="search"
+          class="gdp-repo-filter"
+          placeholder=${labels.filterPlaceholder}
+          aria-label=${labels.filterPlaceholder}
+          .value=${live(query)}
+          @input=${(event: Event) => {
+            query = (event.currentTarget as HTMLInputElement).value;
+            drawList();
+          }}
+          @keydown=${(event: KeyboardEvent) => {
+            if (isImeComposing(event)) return;
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              reset(event);
+            } else if (event.key === "ArrowDown" || event.key === "Enter") {
+              const first = listHost?.querySelector<HTMLButtonElement>(
+                ".gdp-repo-file-list .gdp-repo-row:not(.parent):not([aria-disabled='true'])",
+              );
+              if (!first) return;
+              event.preventDefault();
+              event.stopPropagation();
+              if (event.key === "Enter") first.click();
+              else first.focus();
+            }
+          }}
+        /><span class="gdp-repo-result-count" aria-live="polite"
+          >${labels.entryCount(entries.length, meta.entries.length)}</span
+        ><button
+          type="button"
+          class="gdp-btn gdp-btn-sm gdp-repo-filter-clear"
+          ?disabled=${!query}
+          @click=${reset}
+        >${labels.clearFilter}</button>${
+          meta.ref === "worktree" || meta.ref === ""
+            ? uploadPanelTemplate(meta.path || "", upload, drawList)
+            : nothing
+        }</div><div class="gdp-repo-sort-host">${repoSortHeaderTemplate(
+          (key) => {
+            drawList();
+            listHost
+              ?.querySelector<HTMLButtonElement>(`[data-repo-sort="${key}"]`)
+              ?.focus();
+          },
+        )}</div><div
+          class="gdp-source-viewer gdp-repo-file-list"
+        >${
+          parent === null
+            ? nothing
+            : html`<button
+                type="button"
+                class="gdp-repo-row parent"
+                @click=${() => {
+                  setRoute(repoRoute(meta.ref, parent));
+                  loadRepo();
+                }}
+              ><span class="dir-icon" ${folderIconRef(false)}></span><span class="name"
+                  >..</span
+                ><span></span><span class="meta"></span><span class="size"></span></button>`
+        }${sortedRepoEntries(entries, meta.ref).map(rowTemplate)}${
+          entries.length
+            ? nothing
+            : html`<div class="gdp-repo-empty">${
+                needle ? labels.noMatches : emptyDirectoryLabel()
+              }</div>`
+        }</div>`;
+    };
 
+    let readme: unknown = nothing;
     if (meta.readme?.text) {
-      const readme = document.createElement("section");
-      readme.className = "gdp-file-shell loaded gdp-repo-readme";
-      const wrapper = document.createElement("div");
-      wrapper.className = "d2h-file-wrapper";
-      const readmeHeader = document.createElement("div");
-      readmeHeader.className = "d2h-file-header";
-      const nameWrapper = document.createElement("div");
-      nameWrapper.className = "d2h-file-name-wrapper";
-      const icon = document.createElement("span");
-      icon.className = "d2h-icon-wrapper";
-      icon.innerHTML = iconSvg("octicon-file", FILE_16_PATH);
-      const name = document.createElement("span");
-      name.className = "d2h-file-name";
-      name.textContent = meta.readme.path;
-      nameWrapper.append(icon, name);
-      readmeHeader.appendChild(nameWrapper);
-      wrapper.appendChild(readmeHeader);
+      let body: unknown;
       try {
-        wrapper.appendChild(
-          await renderMarkdownPreview(
-            meta.readme.text,
-            { path: meta.readme.path, ref: meta.ref },
-            {
-              syntaxHighlight: STATE.syntaxHighlight,
-              onNavigateMarkdown: (link) =>
-                void openMarkdownLink(link, markdownLinkNavigationDeps()),
-            },
-          ),
+        body = await renderMarkdownPreview(
+          meta.readme.text,
+          { path: meta.readme.path, ref: meta.ref },
+          {
+            syntaxHighlight: STATE.syntaxHighlight,
+            onNavigateMarkdown: (link) =>
+              void openMarkdownLink(link, markdownLinkNavigationDeps()),
+          },
         );
       } catch (error) {
         console.error(
@@ -1021,21 +992,57 @@ export function createRepoView(deps: RepoViewDeps) {
           error,
         );
         // 生の文字に落として読めるようにするが、落ちた理由も並べて残す。
-        const reason = document.createElement("div");
-        reason.className = "gdp-markdown-fallback-reason";
-        const lead = document.createElement("p");
-        lead.textContent = repoViewText(STATE.language).readmeRenderFailed;
-        const detail = document.createElement("pre");
-        detail.textContent = formatErrorDetail(error);
-        reason.append(lead, detail);
-        const fallback = document.createElement("pre");
-        fallback.className = "gdp-markdown-fallback";
-        fallback.textContent = meta.readme.text;
-        wrapper.append(reason, fallback);
+        body = html`<div class="gdp-markdown-fallback-reason"><p>${
+          repoViewText(STATE.language).readmeRenderFailed
+        }</p><pre>${formatErrorDetail(error)}</pre></div><pre
+            class="gdp-markdown-fallback"
+          >${meta.readme.text}</pre>`;
       }
-      readme.appendChild(wrapper);
-      shell.appendChild(readme);
+      readme = html`<section class="gdp-file-shell loaded gdp-repo-readme"><div
+          class="d2h-file-wrapper"
+        ><div class="d2h-file-header"><div class="d2h-file-name-wrapper"><span
+                class="d2h-icon-wrapper"
+              >${iconTemplate(FILE_16_PATH, "octicon-file")}</span><span
+                class="d2h-file-name"
+              >${meta.readme.path}</span></div></div>${body}</div></section>`;
     }
+
+    const trashable = canTrashWorktreeRef(meta.ref);
+    const shell = templateElement(
+      html`<section class="gdp-repo-shell"><div
+          class="gdp-file-detail-header gdp-repo-toolbar"
+        ><div class="gdp-file-detail-path">${repoBreadcrumbTemplate(
+          meta.ref,
+          meta.path || "",
+        )}${meta.path ? copyPathButtonTemplate(meta.path) : nothing}${createOpenPathButton(
+          meta.path || "",
+          "directory",
+          openDirectoryInOsTitle(),
+        )}</div>${createRepositoryWebLink(meta.path || "", meta.ref) ?? nothing}<button
+          type="button"
+          class="gdp-btn gdp-btn-sm gdp-repo-history-btn"
+          title=${folderHistoryTitle()}
+          @click=${() => openFolderHistory(meta.ref, meta.path || "")}
+        >${folderHistoryLabel()}</button>${
+          trashable
+            ? newFolderButtonTemplate(meta.path || "", () => loadRepo())
+            : nothing
+        }${
+          trashable && meta.path
+            ? moveToTrashButtonTemplate(meta.path, "folder", () => {
+                const parent = meta.path.split("/").slice(0, -1).join("/");
+                setRoute(repoRoute(meta.ref, parent));
+                loadRepo();
+              })
+            : nothing
+        }</div><section class="gdp-file-shell loaded gdp-repo-list-shell"><div
+            class="d2h-file-wrapper"
+          ></div></section>${readme}</section>`,
+    );
+    listHost = shell.querySelector<HTMLElement>(
+      ".gdp-repo-list-shell > .d2h-file-wrapper",
+    );
+    drawList();
 
     // README の markdown レンダ (await) 中に別ビューへ移動したか、より新しい
     // renderRepo が始まっていたら、この応答は破棄する。古い応答が後から
@@ -1236,61 +1243,43 @@ export function createRepoView(deps: RepoViewDeps) {
       });
   }
 
-  function createRepoEntryMeta(
+  function repoEntryMetaTemplate(
     entry: RepoTreeEntry,
     browsable: boolean,
     ref: string,
-  ): HTMLElement {
-    const meta = document.createElement("span");
-    meta.className = "meta";
+  ): TemplateResult {
     if (entry.type === "commit" && !browsable) {
-      meta.classList.add("gdp-repo-row-gitlink-badge");
       const badge = commitEntryMeta(entry.submodule);
-      meta.textContent = badge.label;
-      meta.title = badge.title;
-      return meta;
+      return html`<span class="meta gdp-repo-row-gitlink-badge" title=${badge.title}
+        >${badge.label}</span
+      >`;
     }
     // A symlink destination is more useful at a glance than its mtime -
     // show it in place of the usual updated/created date.
     if (entry.is_symlink) {
       const broken = entry.symlink_target_type === "missing";
-      meta.classList.add("symlink-target");
-      if (broken) meta.classList.add("broken");
-      meta.textContent = `→ ${entry.symlink_target || "?"}`;
       const text = repoViewText(STATE.language);
-      meta.title = broken
-        ? text.brokenSymlink(entry.symlink_target || "")
-        : text.symlink(entry.symlink_target || "");
-      return meta;
+      return html`<span
+        class=${broken ? "meta symlink-target broken" : "meta symlink-target"}
+        title=${
+          broken
+            ? text.brokenSymlink(entry.symlink_target || "")
+            : text.symlink(entry.symlink_target || "")
+        }
+      >${`→ ${entry.symlink_target || "?"}`}</span>`;
     }
     const updated = formatFileDate(
       ref === "worktree" || ref === "" ? entry.updated_at : undefined,
       STATE.language,
     );
     const created = formatFileDate(entry.created_at, STATE.language);
-    meta.title = sortColumnLabels().updatedHint;
-    if (browsable && updated) {
-      meta.textContent = updated;
-      if (created) meta.title += `\nCreated ${created}`;
-      return meta;
-    }
-    if (entry.type !== "blob") {
-      meta.textContent = "-";
-      return meta;
-    }
-    meta.textContent = updated || "-";
-    if (created) meta.title += `\nCreated ${created}`;
-    return meta;
-  }
-
-  function createRepoEntrySize(entry: RepoTreeEntry): HTMLElement {
-    const size = document.createElement("span");
-    size.className = "size";
-    size.textContent =
-      entry.type === "blob" && entry.size != null
-        ? formatBytes(entry.size)
-        : "";
-    return size;
+    const hint = sortColumnLabels().updatedHint;
+    const withCreated = created ? `${hint}\nCreated ${created}` : hint;
+    if (browsable && updated)
+      return html`<span class="meta" title=${withCreated}>${updated}</span>`;
+    if (entry.type !== "blob")
+      return html`<span class="meta" title=${hint}>-</span>`;
+    return html`<span class="meta" title=${withCreated}>${updated || "-"}</span>`;
   }
 
   function repoEntryDateTime(entry: RepoTreeEntry, ref: string): number {
@@ -1336,98 +1325,51 @@ export function createRepoView(deps: RepoViewDeps) {
     });
   }
 
-  function createRepoFilter(
-    value: string,
-    onChange: () => void,
-    list: HTMLElement,
-  ) {
-    const labels = sortColumnLabels();
-    const el = document.createElement("div");
-    el.className = "gdp-repo-search-bar";
-    const input = document.createElement("input");
-    input.type = "search";
-    input.className = "gdp-repo-filter";
-    input.placeholder = labels.filterPlaceholder;
-    input.setAttribute("aria-label", labels.filterPlaceholder);
-    input.value = value;
-    const count = document.createElement("span");
-    count.className = "gdp-repo-result-count";
-    count.setAttribute("aria-live", "polite");
-    const clear = document.createElement("button");
-    clear.type = "button";
-    clear.className = "gdp-btn gdp-btn-sm gdp-repo-filter-clear";
-    clear.textContent = labels.clearFilter;
-    const reset = () => {
-      input.value = "";
-      onChange();
-      input.focus();
-    };
-    clear.addEventListener("click", reset);
-    input.addEventListener("input", onChange);
-    input.addEventListener("keydown", (event) => {
-      if (isImeComposing(event)) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        reset();
-      } else if (event.key === "ArrowDown" || event.key === "Enter") {
-        const first = list.querySelector<HTMLButtonElement>(
-          ".gdp-repo-row:not(.parent):not([aria-disabled='true'])",
-        );
-        if (!first) return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (event.key === "Enter") first.click();
-        else first.focus();
-      }
-    });
-    el.append(input, count, clear);
-    return { el, input, count, clear };
-  }
-
-  function createRepoSortHeader(
-    onSortChange: (focusSortKey?: RepoSortKey) => void,
-  ): HTMLElement {
-    const header = document.createElement("div");
-    header.className = "gdp-repo-sort-header";
-    const spacer = document.createElement("span");
-    spacer.className = "gdp-repo-sort-spacer";
-    header.appendChild(spacer);
+  function repoSortHeaderTemplate(
+    onSortChange: (focusSortKey: RepoSortKey) => void,
+  ): TemplateResult {
     const sortLabels = sortColumnLabels();
-    const columns: Array<{ key: RepoSortKey; label: string }> = [
-      { key: "name", label: sortLabels.name },
-      { key: "committed", label: sortLabels.committed },
-      { key: "updated", label: sortLabels.updated },
-      { key: "size", label: sortLabels.size },
-    ];
-    columns.forEach((column) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.dataset.repoSort = column.key;
-      if (column.key === "committed") button.title = sortLabels.committedHint;
-      if (column.key === "updated") button.title = sortLabels.updatedHint;
-      button.textContent =
-        column.label +
-        (REPO_SORT.key === column.key
-          ? REPO_SORT.direction === "asc"
-            ? " ↑"
-            : " ↓"
-          : "");
-      button.className = REPO_SORT.key === column.key ? "active" : "";
-      button.addEventListener("click", () => {
-        if (REPO_SORT.key === column.key) {
-          REPO_SORT.direction = REPO_SORT.direction === "asc" ? "desc" : "asc";
-        } else {
-          REPO_SORT = {
-            key: column.key,
-            direction: column.key === "name" ? "asc" : "desc",
-          };
-        }
-        onSortChange(column.key);
-      });
-      header.appendChild(button);
-    });
-    return header;
+    const columns: Array<{ key: RepoSortKey; label: string; title?: string }> =
+      [
+        { key: "name", label: sortLabels.name },
+        {
+          key: "committed",
+          label: sortLabels.committed,
+          title: sortLabels.committedHint,
+        },
+        {
+          key: "updated",
+          label: sortLabels.updated,
+          title: sortLabels.updatedHint,
+        },
+        { key: "size", label: sortLabels.size },
+      ];
+    return html`<div class="gdp-repo-sort-header"><span
+        class="gdp-repo-sort-spacer"
+      ></span>${columns.map((column) => {
+        const active = REPO_SORT.key === column.key;
+        return html`<button
+          type="button"
+          data-repo-sort=${column.key}
+          title=${column.title ?? nothing}
+          class=${active ? "active" : ""}
+          @click=${() => {
+            if (REPO_SORT.key === column.key) {
+              REPO_SORT.direction =
+                REPO_SORT.direction === "asc" ? "desc" : "asc";
+            } else {
+              REPO_SORT = {
+                key: column.key,
+                direction: column.key === "name" ? "asc" : "desc",
+              };
+            }
+            onSortChange(column.key);
+          }}
+        >${
+          column.label +
+          (active ? (REPO_SORT.direction === "asc" ? " ↑" : " ↓") : "")
+        }</button>`;
+      })}</div>`;
   }
 
   /**
@@ -1495,47 +1437,40 @@ export function createRepoView(deps: RepoViewDeps) {
     // 大きさ・日時は補助の情報なので行としては出さず、パンくずの横の小さな
     // 情報のボタンに入れる (hover かフォーカスで一覧が出る。style.css の
     // 文書の面の節)。
-    const wrap = document.createElement("div");
-    wrap.className = "gdp-file-detail-meta";
-    wrap.tabIndex = 0;
     const text = repoViewText(STATE.language);
-    wrap.setAttribute("aria-label", text.fileDetails);
-    const icon = document.createElement("span");
-    icon.className = "gdp-file-detail-meta-icon";
-    icon.textContent = "i";
-    icon.setAttribute("aria-hidden", "true");
-    const list = document.createElement("span");
-    list.className = "gdp-file-detail-meta-list";
-    wrap.append(icon, list);
-    const addItem = (label: string, value: string) => {
-      if (!value) return;
-      const item = document.createElement("span");
-      item.className = "gdp-file-detail-meta-item";
-      const labelEl = document.createElement("span");
-      labelEl.className = "label";
-      labelEl.textContent = label;
-      const valueEl = document.createElement("span");
-      valueEl.className = "value";
-      valueEl.textContent = value;
-      item.append(labelEl, valueEl);
-      list.appendChild(item);
-    };
-    addItem(text.size, meta.size == null ? "" : formatBytes(meta.size));
-    addItem(
-      text.updated,
-      formatFileDate(meta.updated_at || meta.commit_updated_at, STATE.language),
-    );
-    addItem(text.created, formatFileDate(meta.created_at, STATE.language));
+    const items: Array<[string, string]> = [
+      [text.size, meta.size == null ? "" : formatBytes(meta.size)],
+      [
+        text.updated,
+        formatFileDate(
+          meta.updated_at || meta.commit_updated_at,
+          STATE.language,
+        ),
+      ],
+      [text.created, formatFileDate(meta.created_at, STATE.language)],
+    ];
     // 取れなかったことは「情報が無い」と区別して、ボタンの中に理由つきで出す。
-    if (meta.error) {
-      wrap.classList.add("failed");
-      addItem(text.detailsFailed, meta.error);
-    }
-    if (!list.childElementCount) {
-      wrap.hidden = true;
-      wrap.dataset.path = target.path;
-    }
-    return wrap;
+    if (meta.error) items.push([text.detailsFailed, meta.error]);
+    const shown = items.filter(([, value]) => value);
+    return templateElement(
+      html`<div
+        class=${meta.error ? "gdp-file-detail-meta failed" : "gdp-file-detail-meta"}
+        tabindex="0"
+        aria-label=${text.fileDetails}
+        ?hidden=${shown.length === 0}
+        data-path=${shown.length === 0 ? target.path : nothing}
+      ><span class="gdp-file-detail-meta-icon" aria-hidden="true">i</span><span
+          class="gdp-file-detail-meta-list"
+          >${shown.map(
+            ([label, value]) =>
+              html`<span class="gdp-file-detail-meta-item"><span class="label"
+                  >${label}</span
+                ><span class="value">${value}</span></span
+              >`,
+          )}</span
+        ></div
+      >`,
+    );
   }
 
   let repoLoadSequence = 0;
@@ -1581,12 +1516,12 @@ export function createRepoView(deps: RepoViewDeps) {
         }
         setStatus("error");
         console.error(error);
-        const detail = document.createElement("pre");
-        detail.className = "gdp-repo-error";
-        detail.setAttribute("role", "alert");
-        detail.textContent = formatErrorDetail(error);
         $("#diff").querySelector(".gdp-repo-error")?.remove();
-        $("#diff").prepend(detail);
+        $("#diff").prepend(
+          templateElement(
+            html`<pre class="gdp-repo-error" role="alert">${formatErrorDetail(error)}</pre>`,
+          ),
+        );
       });
   }
 
