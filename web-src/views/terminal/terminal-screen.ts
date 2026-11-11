@@ -200,6 +200,13 @@ export type TerminalScreenDeps = {
    * 相対パス、line は行)。kept なら固定のタブ。
    */
   onOpenFile?(path: string, line: number | undefined, kept: boolean): void;
+  /**
+   * 画面の文字のペイン ID (`%12`) が、今 tmux に居るペインか (エージェントの
+   * 一覧に載っているか)。無ければペイン ID をリンクにしない。
+   */
+  isLivePane?(pane: string): boolean;
+  /** 画面のペイン ID を押した。そのペインを開く (エージェントの行を押したのと同じ)。 */
+  onOpenPane?(pane: string): void;
   /** 棚の置き場所か大きさを変えた。保存とほかの棚への当て直しは呼び出し側。 */
   setImageShelfLayout?(patch: Partial<ImageShelfLayout>): void;
   /** 棚の画像を画像のタブで開く。無ければ覆いで開く。 */
@@ -1069,6 +1076,15 @@ export function createTerminalScreen(
           add({ kind: "url", text: found.candidate, url: found.path }, found);
           continue;
         }
+        if (found.kind === "pane") {
+          // 今 tmux に居るペインだけ (終わったペインや、たまたま同じ形の字は拾わない)。
+          if (deps.isLivePane?.(found.path))
+            add(
+              { kind: "pane", text: found.candidate, pane: found.path },
+              found,
+            );
+          continue;
+        }
         const hit = pathCache.get(found.path);
         if (hit === undefined) unknownPaths.add(found.path);
         if (!hit) continue;
@@ -1184,6 +1200,10 @@ export function createTerminalScreen(
     }
     if (link.kind === "file" && link.file) {
       deps.onOpenFile?.(link.file.path, link.file.line, mode === "kept-tab");
+      return;
+    }
+    if (link.kind === "pane" && link.pane) {
+      deps.onOpenPane?.(link.pane);
       return;
     }
     const entry = shelfEntryByCandidate(shelfEntries, link.text);

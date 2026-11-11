@@ -49,7 +49,7 @@ const BAR_EDGE = 8;
 /** 画面の 1 行の中の、リンクが占める桁 (バッファの行と桁、x1 は含む)。 */
 export type LinkSegment = { y: number; x0: number; x1: number };
 
-export type ScreenLinkKind = "image" | "url" | "file";
+export type ScreenLinkKind = "image" | "url" | "file" | "pane";
 
 /** 画面に見えているリンク 1 つ。 */
 export type ScreenLink = {
@@ -65,6 +65,8 @@ export type ScreenLink = {
   url?: string;
   /** ファイルなら、プロジェクトの中の相対パス・絶対パス・行と桁。 */
   file?: { path: string; absolute: string; line?: number; column?: number };
+  /** tmux のペイン ID (`%12`) なら、そのペイン。今 tmux に居るものだけ。 */
+  pane?: string;
 };
 
 /** リンクの鍵 (綴りと始まりの位置)。 */

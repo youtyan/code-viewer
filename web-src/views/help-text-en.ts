@@ -1390,6 +1390,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 ],
                 "Move the shelf to the right, left, bottom, or top with the ⋯ on its header, and drag its inner edge to resize it.",
                 "Hover a URL, file path, or image path on the screen for Open and Copy buttons, or click it to open. When tmux handles the mouse, hold ⌘/Ctrl while clicking.",
+                "A tmux pane ID on the screen (such as %12, when an agent names a worker) opens that pane when clicked, as long as the pane still exists.",
                 [
                   "The terminal is drawn dark even when the page is light. To change this, pick ",
                   ui(l.settings.terminalTone),

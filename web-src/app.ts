@@ -7492,6 +7492,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     // 棚の置き場所と大きさも人に付く設定 (全部の窓で同じ)。
     getImageShelfLayout: imageShelfLayout,
+    // 画面の文字の tmux のペイン ID (%12): 一覧に居るペインだけをリンクにし、
+    // 押すとエージェントの行を押したのと同じく開く。
+    isLivePane: (pane) =>
+      AGENT_MONITOR.snapshot().overview?.panes.some(
+        (item) => item.id === pane,
+      ) ?? false,
+    onOpenPane: (pane) => openAgentPane(pane),
     // 画面のファイルのパス: 端末を隠さないよう反対の面で開く (⌘/Ctrl は固定の
     // タブ)。行があればその行へ。
     onOpenFile: (path, line, kept) => {

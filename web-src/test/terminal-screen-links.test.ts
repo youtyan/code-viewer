@@ -162,12 +162,14 @@ const LINES = [
   "changed src/greeting.ts:3 today",
   "missing src/missing.ts here",
   "wrote out/chart.png",
+  "ask %7 or %99 here",
 ];
 
 let emitOutput: (data: string) => void;
 let requests: string[];
 let statuses: Array<string | null>;
 let openedFiles: Array<{ path: string; line?: number; kept: boolean }>;
+let openedPanes: string[];
 let openedImages: Array<{ kept: boolean }>;
 let windowOpens: unknown[][];
 let copied: string[];
@@ -260,6 +262,7 @@ beforeEach(async () => {
   requests = [];
   statuses = [];
   openedFiles = [];
+  openedPanes = [];
   openedImages = [];
   windowOpens = [];
   copied = [];
@@ -280,6 +283,9 @@ beforeEach(async () => {
     onOpenImage: (_image, _gallery, kept) => openedImages.push({ kept }),
     onOpenFile: (path, line, kept) =>
       openedFiles.push({ path, ...(line !== undefined ? { line } : {}), kept }),
+    // %7 だけが今 tmux に居るペイン。
+    isLivePane: (pane) => pane === "%7",
+    onOpenPane: (pane) => openedPanes.push(pane),
   });
   document.body.append(handle.el);
   await handle.attach(SHELL);
@@ -462,6 +468,18 @@ describe("押下", () => {
   ])("ファイルのパス: $name → その行を開く", ({ init, kept }) => {
     mouseAt("click", 1, 12, init);
     expect(openedFiles).toEqual([{ path: "src/greeting.ts", line: 3, kept }]);
+  });
+
+  test("今 tmux に居るペインの ID を押すと、そのペインを開く", () => {
+    mouseAt("click", 4, 5);
+    expect(openedPanes).toEqual(["%7"]);
+  });
+
+  test("一覧に居ないペインの ID はリンクにしない", () => {
+    mouseAt("mousemove", 4, 12);
+    expect(strong()).toEqual([]);
+    mouseAt("click", 4, 12);
+    expect(openedPanes).toEqual([]);
   });
 
   test("Shift は選択に任せて開かない", () => {

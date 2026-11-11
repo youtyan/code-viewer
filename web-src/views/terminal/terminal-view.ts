@@ -60,6 +60,10 @@ export type TerminalViewDeps = {
   paneName?(paneId: string): string | null;
   /** 画面のファイルのパスを開く (プロジェクトの根からの相対パスと行)。 */
   onOpenFile?(path: string, line: number | undefined, kept: boolean): void;
+  /** 画面の文字のペイン ID が今 tmux に居るペインか。 */
+  isLivePane?(pane: string): boolean;
+  /** 画面のペイン ID を押した。そのペインを開く。 */
+  onOpenPane?(pane: string): void;
   /** 棚の置き場所か大きさを変えた。保存は呼び出し側 (app.ts) が持つ。 */
   onImageShelfLayoutChange?(patch: Partial<ImageShelfLayout>): void;
   /**
@@ -276,6 +280,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       getImageShelfLayout: deps.getImageShelfLayout,
       paneName: deps.paneName,
       onOpenFile: deps.onOpenFile,
+      isLivePane: deps.isLivePane,
+      onOpenPane: deps.onOpenPane,
       // 棚で変えたら、保存してから両方の面の棚に当て直す。
       setImageShelfLayout: (patch) => {
         deps.onImageShelfLayoutChange?.(patch);
