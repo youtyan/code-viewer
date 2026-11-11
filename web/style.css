@@ -1552,6 +1552,12 @@ html, body {
   --listcol-shown: calc(var(--files-shown) + var(--list-shown) + var(--list-tree-w));
   --page-left: calc(var(--chrome-left) + var(--listcol-shown));
   --page-right: var(--chrome-right);
+  /* 一覧の列の頭が一覧の列より右へはみ出している間の、タブ列の下に出ている頭の
+     高さ。はみ出していなければ 0。頭の幅は密度で広がり (--listcol-head-w)、ファイル
+     一覧の幅は広がらないので、大きい密度では頭の 2 段目が本文の上に重なる。上に
+     余白を持たない本文 (フォルダ表示・ファイル表示) は、この分だけ下げる。
+     はみ出しの幅を大きく掛けて、1px でもはみ出せば上限 (頭の高さ) に張り付かせる。 */
+  --head-overhang-h: clamp(calc(var(--view-head-h) * 0), calc((var(--column-head-w) - var(--listcol-shown)) * 1000), calc(var(--panel-body-top) - var(--main-tabs-h)));
 
 
   --code-font-size: 13px;
@@ -7090,12 +7096,16 @@ body.gdp-file-detail-page #topbar {
 body.gdp-repo-page #topbar {
   display: none;
 }
-body.gdp-repo-page #content {
-  --content-top-gap: 24px;
+/* フォルダ表示とファイル表示は、面を本文の箱の端まで敷く (浮いたカードにしない)。
+   余白は面の中 (--pad-doc) が持ち、箱は余白を持たない (上は一覧の列の頭が本文の
+   上にはみ出している間だけ、その高さを空ける)。 */
+body.gdp-repo-page #content,
+body.gdp-file-detail-page #content {
+  --content-top-gap: var(--head-overhang-h);
+  --content-pad-x: 0px;
+  --content-pad-bottom: 0px;
   margin-left: 0;
-  /* 左右はファイル表示と同じ本文の余白 (--content-pad-x)。32px にしていたので
-     フォルダ表示とファイル表示で本文の左端が 8px ずれていた。 */
-  padding: var(--content-top-gap) var(--content-pad-x) 48px;
+  padding: var(--content-top-gap) 0 0;
 }
 /* ファイル一覧を畳んだ (手・幅が足りないときの自動) 間は隠す。頭の行は残る。 */
 body.gdp-sidebar-hidden #file-list,
@@ -23084,10 +23094,11 @@ button.agents-account-name:hover {
    文書の面 (ファイルの表示) と同じ決まり: 1 枚の面 (--color-doc) の中に、
    パンくずの行・絞り込みの行・一覧・README を縦に並べる。文字の線は --pad-doc、
    行の hover・フォーカスの面はそこから --pad-face だけ外へ描く。一覧は枠線を
-   引かず、行の高さは --ui-row-h。README の目次は本文の右の細い列 (上の節)。 */
+   引かず、行の高さは --ui-row-h。README の目次は本文の右の細い列 (上の節)。
+   面は本文の箱の端まで敷き、箱の高さより短くても下まで同じ面にする。 */
 .gdp-repo-shell {
+  min-height: calc(var(--content-h) - var(--content-top-gap));
   padding: var(--space-4) 0 var(--space-6);
-  border-radius: var(--radius-lg);
   background: var(--color-doc);
 }
 .gdp-repo-shell > .gdp-repo-toolbar {
@@ -23320,41 +23331,48 @@ button.agents-account-name:hover {
 }
 
 /* ---- B-1: ソース表示 (Code / Blame / History。views/source-view.ts・blame-view.ts・file-history-shell.ts) ----
-   絵 (round3/code.png): コードの面は本文の箱の端まで敷く (浮いた面にしない)。
-   文書 (Markdown の表示) は浮いた面のまま。パンくずの行は同じ面の上に置き、
-   下に細い線を 1 本。行番号の列は右寄せで補助の色、列の右に細い線。
+   コードの面も文書 (Markdown の表示) の面も、本文の箱の端まで敷く (浮いた面に
+   しない)。フォルダの中のファイル (.gdp-repo-blob-layout) もファイルの表示
+   (body.gdp-file-detail-page の #diff) も同じ。パンくずの行は同じ面の上に置き、
+   下に細い線を 1 本 (文書の面には引かない)。行番号の列は右寄せで補助の色、列の右に細い線。
    今いる行は選択の面を行の端まで薄く敷く。構文の色は名前の層 (--syntax-*)。 */
-.gdp-repo-blob-layout > .gdp-standalone-blame,
-.gdp-repo-blob-layout > .gdp-standalone-file-history,
-.gdp-repo-blob-layout > .gdp-standalone-source:not(:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden]))) {
-  margin: calc(var(--content-top-gap) * -1) calc(var(--content-pad-x) * -1) 0;
-  min-height: var(--content-h);
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-blame,
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-file-history,
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source:not(:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden]))) {
+  min-height: calc(var(--content-h) - var(--content-top-gap));
   background: var(--color-code);
 }
-.gdp-repo-blob-layout > .gdp-standalone-blame .gdp-file-detail-sticky,
-  .gdp-repo-blob-layout > .gdp-standalone-file-history .gdp-file-detail-sticky,
-  .gdp-repo-blob-layout > .gdp-standalone-source .gdp-file-detail-sticky {
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-blame .gdp-file-detail-sticky,
+  :is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-file-history .gdp-file-detail-sticky,
+  :is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source .gdp-file-detail-sticky {
   background: var(--color-code);
 }
-.gdp-repo-blob-layout > .gdp-standalone-blame > .gdp-file-detail-wrapper > .gdp-file-detail-sticky,
-  .gdp-repo-blob-layout > .gdp-standalone-file-history > .gdp-file-detail-wrapper > .gdp-file-detail-sticky,
-  .gdp-repo-blob-layout > .gdp-standalone-source > .gdp-file-detail-wrapper > .gdp-file-detail-sticky {
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-blame > .gdp-file-detail-wrapper > .gdp-file-detail-sticky,
+  :is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-file-history > .gdp-file-detail-wrapper > .gdp-file-detail-sticky,
+  :is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source > .gdp-file-detail-wrapper > .gdp-file-detail-sticky {
   /* 下の線は内側の影で描く (線で箱を 1px 伸ばすと、見出しの高さを引いて
      決めている箱 (--file-detail-head-h の消費側) がずれる)。 */
   border-bottom: 0;
   border-radius: 0;
   box-shadow: inset 0 -1px 0 var(--color-line-soft);
 }
-/* 文書の面 (Markdown) は今までどおり浮いた面。パンくずの下の線は引かない。 */
-.gdp-repo-blob-layout > .gdp-standalone-source:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden]))
+/* 文書の面 (Markdown) はパンくずの下の線を引かない。 */
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden]))
   > .gdp-file-detail-wrapper > .gdp-file-detail-sticky {
   border-bottom: 0;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-radius: 0;
   background: var(--color-doc);
 }
-.gdp-repo-blob-layout > .gdp-standalone-blame .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))),
-  .gdp-repo-blob-layout > .gdp-standalone-file-history .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))),
-  .gdp-repo-blob-layout > .gdp-standalone-source .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))) {
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden])) {
+  min-height: calc(var(--content-h) - var(--content-top-gap));
+  background: var(--color-doc);
+}
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source .gdp-source-viewer:has(> .gdp-markdown-layout:not([hidden])) {
+  border-radius: 0;
+}
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-blame .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))),
+  :is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-file-history .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))),
+  :is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))) {
   border-radius: 0;
   background: var(--color-code);
 }
