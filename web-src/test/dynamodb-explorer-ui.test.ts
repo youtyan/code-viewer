@@ -2,9 +2,10 @@ import "./_dom";
 import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { waitFor } from "./_test-helpers";
 
-const { createDynamoDbExplorer } = await import(
+const { createDynamoDbExplorer, DEFAULT_VIEW } = await import(
   "../views/database/dynamodb-explorer"
 );
+type DynamoDbLook = typeof DEFAULT_VIEW;
 const { dbText } = await import("../views/database/i18n");
 
 function json(body: unknown): Response {
@@ -506,5 +507,71 @@ describe("DynamoDB explorer UI", () => {
     expect(signal?.aborted).toBe(true);
     resolveResponse?.(json({ dbId: "mock", tableNames: [] }));
     await loading;
+  });
+});
+
+describe("the DynamoDB explorer presenter", () => {
+  test("passes tables, items, the structure and the selected item to the view", async () => {
+    installFetchMock();
+    const sidebars: Parameters<DynamoDbLook["sidebar"]>[0][] = [];
+    const mains: Parameters<DynamoDbLook["main"]>[0][] = [];
+    const structures: Parameters<DynamoDbLook["structure"]>[0][] = [];
+    const items: Parameters<DynamoDbLook["item"]>[0][] = [];
+    const view = createDynamoDbExplorer(
+      {},
+      {
+        sidebar: (props) => {
+          sidebars.push(props);
+          return DEFAULT_VIEW.sidebar(props);
+        },
+        main: (props) => {
+          mains.push(props);
+          return DEFAULT_VIEW.main(props);
+        },
+        structure: (props) => {
+          structures.push(props);
+          return DEFAULT_VIEW.structure(props);
+        },
+        item: (props) => {
+          items.push(props);
+          return DEFAULT_VIEW.item(props);
+        },
+      },
+    );
+    explorer = view;
+    document.body.append(view.sidebarSlot, view.el);
+    const last = <T>(list: T[]) => list[list.length - 1] as T;
+    await view.load("mock");
+    await waitFor(() => {
+      const pane = last(mains).items;
+      return pane !== null && "rows" in pane;
+    });
+    const structure = last(structures).pane;
+    expect([
+      last(sidebars).activeTable,
+      last(sidebars).more.shown,
+      last(mains).itemStatus,
+      typeof structure === "object" && "rows" in structure
+        ? structure.rows
+        : structure,
+    ]).toEqual([
+      "sample_table_1",
+      true,
+      "1 shown / 1 scanned",
+      // AttributeDefinitions の無い表なので、どちらも読み込んだアイテムから推測する。
+      [
+        ["id", "S", ""],
+        ["title", "S", ""],
+      ],
+    ]);
+
+    const rows = last(mains).items;
+    if (rows === null || !("rows" in rows)) throw new Error("no item rows");
+    last(mains).onSelectItem(rows.rows[0]?.token ?? "");
+    const item = last(items).pane;
+    expect([
+      last(mains).activeToken,
+      typeof item === "object" ? item.table : item,
+    ]).toEqual([rows.rows[0]?.token, "sample_table_1"]);
   });
 });
