@@ -3804,6 +3804,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     "codeFontSize",
     "agentNotifyWaiting",
     "agentNotifyDone",
+    "agentNotifySound",
     "terminalClipboardWrite",
   ] as const;
 
@@ -4156,6 +4157,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       "uploadEnabled",
       "agentNotifyWaiting",
       "agentNotifyDone",
+      "agentNotifySound",
       "terminalClipboardWrite",
     ] as const)
       if (choice[key] !== undefined) appPatch[key] = choice[key];
@@ -5455,6 +5457,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       uploadEnabled: APP_SETTINGS.uploadEnabled !== false,
       agentNotifyWaiting: APP_SETTINGS.agentNotifyWaiting !== false,
       agentNotifyDone: APP_SETTINGS.agentNotifyDone !== false,
+      agentNotifySound: APP_SETTINGS.agentNotifySound === true,
       terminalClipboardWrite: APP_SETTINGS.terminalClipboardWrite !== false,
       inferFkRails: DATABASE_VIEW.getDbUiPref("inferFkRails", false),
       s3TooltipEnabled: DATABASE_VIEW.getDbUiPref("s3TooltipEnabled", true),
@@ -9796,6 +9799,7 @@ window.GdpExpandLogic = GdpExpandLogic;
             finished: APP_SETTINGS.agentNotifyDone !== false,
           },
     isViewing: isViewingAgentPane,
+    getSoundEnabled: () => APP_SETTINGS.agentNotifySound === true,
     onUnreadCountChange: (count) => {
       if (count === AGENT_UNREAD_COUNT) return;
       AGENT_UNREAD_COUNT = count;

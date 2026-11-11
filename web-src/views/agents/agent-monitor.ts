@@ -36,6 +36,7 @@ import {
 import { BACKGROUND_REQUEST_HEADER } from "../../core/network-activity";
 import { projectInitials } from "../../core/project-colors";
 import type { TmuxPaneId } from "../../core/tmux";
+import { playAttentionSound } from "./attention-sound";
 import type { AgentsText } from "./i18n";
 import { paneText } from "./pane-text";
 
@@ -68,6 +69,10 @@ export type AgentMonitorSnapshot = {
 export type AgentMonitorDeps = {
   getText(): AgentsText;
   getNotifySettings(): AgentNotifySettings;
+  /** 入力待ち・完了で短い音を鳴らすか (設定の「短い音も鳴らす」)。無ければ鳴らさない。 */
+  getSoundEnabled?(): boolean;
+  /** 音を鳴らす (テスト用の差し替え。既定は attention-sound.ts)。 */
+  playSound?(transition: AgentTransition): Promise<void>;
   /** タブが前面で、そのペインをいまターミナルで見ているか。 */
   isViewing(pane: AgentPane): boolean;
   onUnreadCountChange(count: number): void;
@@ -190,6 +195,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     }
     const update = nextAgentUnread(unread, previous, next.panes, viewing);
     const failures: string[] = [];
+    let sound: AgentTransition | null = null;
     const context = {
       settings: deps.getNotifySettings(),
       permission: permission(),
@@ -199,6 +205,16 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       ...serverOnlyTransitions(next, update.transitions),
     ]) {
       if (transition === "waiting") sawWaiting = true;
+      // 音は通知の許可に関係なく、見ていないものの変化で鳴らす (1 回の取得で 1 回、
+      // 入力待ちを優先)。種類ごとの通知の設定 (入力待ち・完了) に従う。
+      if (
+        !deps.isViewing(pane) &&
+        (transition === "waiting"
+          ? context.settings.waiting
+          : context.settings.finished) &&
+        sound !== "waiting"
+      )
+        sound = transition;
       if (
         !shouldNotifyAgent(transition, {
           ...context,
@@ -213,6 +229,13 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
         console.error("[code-viewer] agent notification failed", cause);
         failures.push(`${pane.label}: ${formatErrorDetail(cause)}`);
       }
+    }
+    if (sound && deps.getSoundEnabled?.() === true) {
+      const play = deps.playSound ?? playAttentionSound;
+      const kind = sound;
+      play(kind).catch((cause: unknown) => {
+        console.error(`[code-viewer] could not play the ${kind} sound`, cause);
+      });
     }
     notifyError = failures.join("\n");
     unread = next.unread ? serverUnread(next) : update.unread;

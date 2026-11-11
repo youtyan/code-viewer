@@ -256,6 +256,8 @@ export type AppSettingsState = {
    * クリップボードに書くか。未設定なら書く。読み出しはいつも断る。
    */
   terminalClipboardWrite?: boolean;
+  /** 入力待ち・完了のときに短い音を鳴らすか (ブラウザの通知とは別)。未設定なら鳴らさない。 */
+  agentNotifySound?: boolean;
   /** エージェント一覧の「フックを入れられます」の案内を閉じた。 */
   agentHookHintDismissed?: boolean;
   /** 最初の入力待ちで出す「通知を許可すると…」の案内を閉じた (許可を訊いた後も)。 */

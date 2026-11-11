@@ -29,6 +29,7 @@ export const USER_SETTING_KEYS = [
   "keybindings",
   "agentNotifyWaiting",
   "agentNotifyDone",
+  "agentNotifySound",
   "agentHookHintDismissed",
   "agentNotifyHintDismissed",
   "agentAccountsCollapsed",

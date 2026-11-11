@@ -318,6 +318,8 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     out.agentNotifyWaiting = agentNotifyWaiting;
   const agentNotifyDone = optionalBoolean(raw.agentNotifyDone);
   if (agentNotifyDone !== undefined) out.agentNotifyDone = agentNotifyDone;
+  const agentNotifySound = optionalBoolean(raw.agentNotifySound);
+  if (agentNotifySound !== undefined) out.agentNotifySound = agentNotifySound;
   const terminalClipboardWrite = optionalBoolean(raw.terminalClipboardWrite);
   if (terminalClipboardWrite !== undefined)
     out.terminalClipboardWrite = terminalClipboardWrite;

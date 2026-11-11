@@ -921,6 +921,10 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   " で、入力待ちと作業の終わりのそれぞれについて、通知するかを選べます。",
                 ],
                 "いま前面のタブで見ているエージェントは、通知しません。",
+                [
+                  ui(l.settings.agentNotifySoundLabel),
+                  " を入れると、通知の許可に関係なく短い音でも知らせます（既定は鳴らしません）。",
+                ],
               ],
             },
           ],

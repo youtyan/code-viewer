@@ -86,6 +86,7 @@ export type ViewerSettingsText = {
   agentNotifyTitle: string;
   agentNotifyWaitingLabel: string;
   agentNotifyDoneLabel: string;
+  agentNotifySoundLabel: string;
   agentNotifyHelp: string;
   datastoreTitle: string;
   datastoreInferFkLabel: string;
@@ -143,6 +144,7 @@ export type ViewerSettingsChoices = {
   uploadEnabled: boolean;
   agentNotifyWaiting: boolean;
   agentNotifyDone: boolean;
+  agentNotifySound: boolean;
   terminalClipboardWrite: boolean;
   inferFkRails: boolean;
   s3TooltipEnabled: boolean;
@@ -318,6 +320,7 @@ const TOGGLES = {
   uploadEnabled: "upload-enabled",
   agentNotifyWaiting: "agent-notify-waiting",
   agentNotifyDone: "agent-notify-done",
+  agentNotifySound: "agent-notify-sound",
   terminalClipboardWrite: "terminal-clipboard-write",
   inferFkRails: "datastore-infer-fk",
   s3TooltipEnabled: "datastore-s3-tooltip",
@@ -408,6 +411,7 @@ export type ViewerSettingsSectionProps =
       help: string;
       waiting: ToggleProps;
       done: ToggleProps;
+      sound: ToggleProps;
     }
   | {
       key: "excluded";
@@ -651,7 +655,9 @@ function sectionTemplate(section: ViewerSettingsSectionProps): unknown {
       >${titleTemplate("agent-notify-section-title", section.title, section.shared)}${help(
         "agent-notify-help",
         section.help,
-      )}${toggleTemplate(section.waiting)}${toggleTemplate(section.done)}</div>`;
+      )}${toggleTemplate(section.waiting)}${toggleTemplate(section.done)}${toggleTemplate(
+        section.sound,
+      )}</div>`;
     case "excluded":
       return html`<div
         class=${sectionClass(section.box)}
@@ -1182,6 +1188,11 @@ export function createViewerSettings(
           text.agentNotifyDoneLabel,
           c.agentNotifyDone,
         ),
+        sound: toggleProps(
+          "agentNotifySound",
+          text.agentNotifySoundLabel,
+          c.agentNotifySound,
+        ),
       },
       excluded: {
         key: "excluded",
@@ -1360,6 +1371,7 @@ export function createViewerSettings(
       uploadEnabled: next.uploadEnabled,
       agentNotifyWaiting: next.agentNotifyWaiting,
       agentNotifyDone: next.agentNotifyDone,
+      agentNotifySound: next.agentNotifySound,
       terminalClipboardWrite: next.terminalClipboardWrite,
       inferFkRails: next.inferFkRails,
       s3TooltipEnabled: next.s3TooltipEnabled,

@@ -104,6 +104,7 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
     agentNotifyTitle: "Agent notifications",
     agentNotifyWaitingLabel: "Notify when an agent starts waiting for input",
     agentNotifyDoneLabel: "Notify when an agent finishes working",
+    agentNotifySoundLabel: "Also play a short sound",
     agentNotifyHelp:
       "Shows a desktop notification. The first time, allow it in the browser with Enable notifications on the Agents screen. A pane you are looking at is not notified.",
     datastoreTitle: "Datastores",
@@ -253,6 +254,7 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
     agentNotifyTitle: "エージェントの通知",
     agentNotifyWaitingLabel: "エージェントが入力待ちになったら通知する",
     agentNotifyDoneLabel: "エージェントの作業が終わったら通知する",
+    agentNotifySoundLabel: "短い音も鳴らす",
     agentNotifyHelp:
       "デスクトップに通知を出します。初めは、エージェントの画面の「通知を有効にする」でブラウザに許可します。いま見ているペインは通知しません。",
     datastoreTitle: "データストア",

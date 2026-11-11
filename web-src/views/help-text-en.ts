@@ -937,6 +937,10 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ", choose whether to be notified when an agent needs input and when it finishes.",
                 ],
                 "An agent you are looking at in the front tab does not notify you.",
+                [
+                  ui(l.settings.agentNotifySoundLabel),
+                  " also plays a short sound, whether or not notifications are allowed (off by default).",
+                ],
               ],
             },
           ],

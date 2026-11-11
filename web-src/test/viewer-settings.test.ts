@@ -80,6 +80,7 @@ const EN_TEXT: ViewerSettingsText = {
   imageShelfPlacement: "Image shelf",
   imageShelfPlacementHelp: "Where the image shelf sits.",
   terminalClipboardWriteLabel: "Let terminal programs copy",
+  agentNotifySoundLabel: "Also play a sound",
   terminalClipboardWriteHelp: "OSC 52 copies.",
   imageShelfPlacementNames: {
     right: "Right of the terminal",
@@ -200,6 +201,7 @@ function defaultValues(): ViewerSettingsValues {
     watchLimitApplies: true,
     uploadEnabled: true,
     terminalClipboardWrite: true,
+    agentNotifySound: false,
     agentNotifyWaiting: true,
     agentNotifyDone: true,
     inferFkRails: false,
