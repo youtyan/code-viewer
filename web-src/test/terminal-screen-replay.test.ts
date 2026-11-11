@@ -70,6 +70,7 @@ vi.mock("../core/xterm-loader", async () => {
     };
     private dataListeners: Array<(data: string) => void> = [];
     registerLinkProvider = () => ({ dispose: noop });
+    parser = { registerOscHandler: () => ({ dispose: () => undefined }) };
     open = (parent: HTMLElement) => {
       const root = document.createElement("div");
       parent.appendChild(root);

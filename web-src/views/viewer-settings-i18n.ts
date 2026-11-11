@@ -60,6 +60,9 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
     imageShelfPlacementHelp:
       "Where the terminal's image shelf sits. You can also move it from the ⋯ on the shelf. Applies as soon as you pick it, in every window.",
     imageShelfPlacementNames: terminalText("en").imageShelfPlacementNames,
+    terminalClipboardWriteLabel: "Let terminal programs copy to the clipboard",
+    terminalClipboardWriteHelp:
+      "Copies sent from inside the terminal (OSC 52), such as tmux copy mode. They can only write; reading the clipboard is always refused.",
     language: "Language",
     fileListFontSize: "UI font size",
     fileListFontSizeHelp: "Applies to everything except code.",
@@ -206,6 +209,10 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
     imageShelfPlacementHelp:
       "ターミナルの画像の棚を置く場所です。棚の ⋯ からも移せます。選ぶとすぐ効きます (ほかの窓にも)。",
     imageShelfPlacementNames: terminalText("ja").imageShelfPlacementNames,
+    terminalClipboardWriteLabel:
+      "ターミナルのプログラムにクリップボードへコピーさせる",
+    terminalClipboardWriteHelp:
+      "端末の中から送られたコピー (OSC 52。tmux のコピーモードなど) をクリップボードに書きます。書くだけで、クリップボードを読ませることはしません。",
     language: "言語",
     fileListFontSize: "UIの文字サイズ",
     fileListFontSizeHelp: "コードの本文以外のすべてに効きます。",

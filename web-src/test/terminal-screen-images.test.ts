@@ -122,6 +122,7 @@ vi.mock("../core/xterm-loader", async () => {
       state.linkProvider = provider;
       return { dispose: noop };
     };
+    parser = { registerOscHandler: () => ({ dispose: () => undefined }) };
     /** 本物と同じく、書き込むたびに描画を知らせる。 */
     private renderHandlers: Array<() => void> = [];
     onRender = (handler: () => void) => {

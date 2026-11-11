@@ -3804,6 +3804,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     "codeFontSize",
     "agentNotifyWaiting",
     "agentNotifyDone",
+    "terminalClipboardWrite",
   ] as const;
 
   /**
@@ -4155,6 +4156,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       "uploadEnabled",
       "agentNotifyWaiting",
       "agentNotifyDone",
+      "terminalClipboardWrite",
     ] as const)
       if (choice[key] !== undefined) appPatch[key] = choice[key];
     if (Object.keys(appPatch).length > 0) patchSettings(appPatch);
@@ -5453,6 +5455,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       uploadEnabled: APP_SETTINGS.uploadEnabled !== false,
       agentNotifyWaiting: APP_SETTINGS.agentNotifyWaiting !== false,
       agentNotifyDone: APP_SETTINGS.agentNotifyDone !== false,
+      terminalClipboardWrite: APP_SETTINGS.terminalClipboardWrite !== false,
       inferFkRails: DATABASE_VIEW.getDbUiPref("inferFkRails", false),
       s3TooltipEnabled: DATABASE_VIEW.getDbUiPref("s3TooltipEnabled", true),
       scopeSource: uiText().settings.scopeSource(
@@ -7444,6 +7447,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     // 文字サイズは他の表示設定と同じ置き場 (app settings) に持たせる。
     // 保存の経路も codeFontSize などと同じ patchSettings に乗せる。
     getFontSize: terminalFontSize,
+    allowClipboardWrite: () => APP_SETTINGS.terminalClipboardWrite !== false,
     onFontSizeChange: (size) => {
       const next = clampTerminalFontSize(size);
       if (PHONE_QUERY.matches) {

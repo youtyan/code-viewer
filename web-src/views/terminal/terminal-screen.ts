@@ -28,6 +28,7 @@ import {
   type ShellSession,
   type ShellSessionId,
 } from "../../core/shell";
+import { parseOsc52 } from "../../core/terminal-clipboard";
 import {
   findImagePathLinks,
   findImagePathsNewestFirst,
@@ -179,6 +180,8 @@ export type TerminalScreenDeps = {
   onTmuxWindowStale(): void;
   /** 人が選んだ文字サイズ (px)。 */
   getFontSize(): number;
+  /** 端末のプログラムが送ったコピー (OSC 52) をクリップボードに書くか。無ければ書く。 */
+  allowClipboardWrite?(): boolean;
   /** 画像の棚を畳んでいるか (ユーザー単位の設定)。 */
   isImageShelfCollapsed(): boolean;
   /** 棚を畳んだ・開いた。保存は呼び出し側。 */
@@ -1654,6 +1657,38 @@ export function createTerminalScreen(
     cover.hidden = false;
   }
 
+  /**
+   * 端末のプログラムが送った OSC 52 (core/terminal-clipboard.ts)。設定で切って
+   * いれば書かない。読み出しの求めと解けない中身は書かず、理由を console に出す。
+   */
+  function receiveClipboardRequest(data: string): void {
+    const request = parseOsc52(data);
+    if (request.kind === "read") {
+      console.warn(
+        "[code-viewer] a terminal program asked to read the clipboard; refused",
+      );
+      return;
+    }
+    if (request.kind === "invalid") {
+      console.warn(
+        `[code-viewer] ignored a clipboard write from the terminal: ${request.reason}`,
+      );
+      return;
+    }
+    if (deps.allowClipboardWrite?.() === false) return;
+    const text = deps.getText();
+    navigator.clipboard.writeText(request.text).then(
+      () => deps.onStatus(text.clipboardCopied([...request.text].length), true),
+      (error: unknown) => {
+        console.error(
+          "[code-viewer] could not write the terminal's copy to the clipboard",
+          error,
+        );
+        deps.onStatus(text.clipboardCopyFailed(formatErrorDetail(error)), true);
+      },
+    );
+  }
+
   function destroyTerminal(): void {
     term?.dispose();
     term = null;
@@ -1684,6 +1719,12 @@ export function createTerminalScreen(
     themeObserver.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["data-theme", "data-color-theme", "data-terminal-tone"],
+    });
+    // 端末のプログラムが送るコピー (OSC 52)。書くだけで、読み出しは断る。
+    // xterm は既定で何もしないので、ここで受けないと tmux のコピーモードの写しが消える。
+    created.parser.registerOscHandler(52, (data) => {
+      receiveClipboardRequest(data);
+      return true;
     });
     const fit = new api.FitAddon();
     created.loadAddon(fit);

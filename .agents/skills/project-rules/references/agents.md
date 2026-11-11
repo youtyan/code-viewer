@@ -28,6 +28,7 @@
 | 「なぜ〜しないのか」と聞かれた | 11 |
 | ターミナルに出た画像パス（右の画像の棚・`/_agent/images`・`/_agent/image`）を触る | 12 |
 | ターミナルのタブがいつ閉じるか（シェル・tmux のペインの終わり）・tmux のウインドウの外側の覆いを触る | 13 |
+| 端末の中のプログラムが送るコピー（OSC 52）を触る | 14 |
 
 ---
 
@@ -1335,6 +1336,23 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 | SP（幅 640px 以下） | 知らせは最下段の操作の塊の吹き出しなので、その塊を隠す SP では見えない（タブは閉じる） |
 
 ---
+
+## 14. 端末からのコピー（OSC 52）
+
+置き場所: `core/terminal-clipboard.ts`（`parseOsc52`）・`views/terminal/terminal-screen.ts` の
+`receiveClipboardRequest`（xterm の `parser.registerOscHandler(52, …)`）。設定はユーザー単位の
+`terminalClipboardWrite`（未設定なら書く。設定 → 表示）。
+
+- **書くだけ。読み出し（`?`）はいつも断る**（端末のプログラムに、利用者が別の所でコピーした
+  ものを読ませない）。選択の文字（c・p・s・0〜7・空）は全部ブラウザのクリップボード 1 つに書く。
+  解いて 1 MiB（`MAX_TERMINAL_CLIPBOARD_BYTES`）を超える・base64 でない・UTF-8 でないものは書かず、
+  理由を console に出す。書けた・書けなかった（理由つき）は端末の下端に短く出す
+- xterm は OSC 52 を既定で何もしない。受けないと、tmux のマウスで選んでコピーモードで写したものが
+  黙って消えていた
+- **届く条件（tmux 3.8 で観測。端末の `TERM` は xterm-256color）**: tmux のコピーモードの写しは
+  既定の `set-clipboard external` でも外へ届く。tmux の中のプログラム（claude など）が送る OSC 52 は
+  `set-clipboard on` のときだけ届く。ヘルプのターミナルの節に書いてある。code-viewer から利用者の
+  tmux の設定は変えない
 
 ## 既存の違反をどう扱うか
 

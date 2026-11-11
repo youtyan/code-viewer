@@ -1348,6 +1348,17 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 ],
                 "Move the shelf to the right, left, bottom, or top with the ⋯ on its header, and drag its inner edge to resize it.",
                 "Hover a URL, file path, or image path on the screen for Open and Copy buttons, or click it to open. When tmux handles the mouse, hold ⌘/Ctrl while clicking.",
+                "Text you copy in tmux copy mode goes straight to the clipboard.",
+                "To also take copies from programs inside tmux (such as claude), add set -g set-clipboard on to your tmux configuration.",
+                [
+                  "To stop it, clear ",
+                  ui(l.settings.terminalClipboardWriteLabel),
+                  " in ",
+                  settings,
+                  " → ",
+                  ui(cat.appearance.label),
+                  ". Programs are never allowed to read the clipboard.",
+                ],
                 [
                   "The terminal is drawn dark even when the page is light. To change this, pick ",
                   ui(l.settings.terminalTone),

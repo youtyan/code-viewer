@@ -191,6 +191,14 @@ export type XtermTerminal = {
    * ずれない)。
    */
   registerLinkProvider(provider: XtermLinkProvider): XtermDisposable;
+  /** 端末の制御の列の受け口 (OSC 52 のクリップボードなど)。 */
+  readonly parser: {
+    /** true を返すと xterm は既定の扱いをしない。 */
+    registerOscHandler(
+      ident: number,
+      callback: (data: string) => boolean | Promise<boolean>,
+    ): XtermDisposable;
+  };
   /** 描画のたびに呼ばれる。重ねている DOM の置き直しはここで判断する。 */
   onRender(
     handler: (range: { start: number; end: number }) => void,

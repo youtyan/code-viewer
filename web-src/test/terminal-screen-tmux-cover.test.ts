@@ -55,6 +55,7 @@ vi.mock("../core/xterm-loader", async () => {
     modes = { applicationCursorKeysMode: false };
     resizeListeners: Array<() => void> = [];
     registerLinkProvider = () => ({ dispose: noop });
+    parser = { registerOscHandler: () => ({ dispose: () => undefined }) };
     open = (parent: HTMLElement) => {
       const root = document.createElement("div");
       root.className = "xterm";

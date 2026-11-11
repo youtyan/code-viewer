@@ -47,6 +47,8 @@ export type ViewerSettingsText = {
   /** ターミナルの画像の棚の置き場所。 */
   imageShelfPlacement: string;
   imageShelfPlacementHelp: string;
+  terminalClipboardWriteLabel: string;
+  terminalClipboardWriteHelp: string;
   imageShelfPlacementNames: Record<TerminalImageShelfPlacement, string>;
   language: string;
   fileListFontSize: string;
@@ -141,6 +143,7 @@ export type ViewerSettingsChoices = {
   uploadEnabled: boolean;
   agentNotifyWaiting: boolean;
   agentNotifyDone: boolean;
+  terminalClipboardWrite: boolean;
   inferFkRails: boolean;
   s3TooltipEnabled: boolean;
 };
@@ -315,6 +318,7 @@ const TOGGLES = {
   uploadEnabled: "upload-enabled",
   agentNotifyWaiting: "agent-notify-waiting",
   agentNotifyDone: "agent-notify-done",
+  terminalClipboardWrite: "terminal-clipboard-write",
   inferFkRails: "datastore-infer-fk",
   s3TooltipEnabled: "datastore-s3-tooltip",
 } as const;
@@ -383,6 +387,7 @@ export type ViewerSettingsSectionProps =
       };
       terminalTone: { label: string; select: SelectProps; help: string };
       shelfPlacement: { label: string; select: SelectProps; help: string };
+      clipboardWrite: { toggle: ToggleProps; help: string };
       language: { label: string; select: SelectProps };
       sidebarFontSize: { label: string; select: SelectProps; help: string };
       codeFontSize: { label: string; select: SelectProps };
@@ -615,7 +620,9 @@ function sectionTemplate(section: ViewerSettingsSectionProps): unknown {
           for="viewer-image-shelf-placement"
         >${section.shelfPlacement.label}</label>${selectTemplate(
           section.shelfPlacement.select,
-        )}${help("viewer-image-shelf-placement-help", section.shelfPlacement.help)}<label
+        )}${help("viewer-image-shelf-placement-help", section.shelfPlacement.help)}${toggleTemplate(
+          section.clipboardWrite.toggle,
+        )}${help("viewer-clipboard-write-help", section.clipboardWrite.help)}<label
           for="viewer-language"
         >${section.language.label}</label>${selectTemplate(section.language.select)}<label
           for="sidebar-font-size"
@@ -1013,6 +1020,14 @@ export function createViewerSettings(
         ),
         help: text.imageShelfPlacementHelp,
       },
+      clipboardWrite: {
+        toggle: toggleProps(
+          "terminalClipboardWrite",
+          text.terminalClipboardWriteLabel,
+          c.terminalClipboardWrite,
+        ),
+        help: text.terminalClipboardWriteHelp,
+      },
       language: {
         label: text.language,
         select: choiceSelect(
@@ -1345,6 +1360,7 @@ export function createViewerSettings(
       uploadEnabled: next.uploadEnabled,
       agentNotifyWaiting: next.agentNotifyWaiting,
       agentNotifyDone: next.agentNotifyDone,
+      terminalClipboardWrite: next.terminalClipboardWrite,
       inferFkRails: next.inferFkRails,
       s3TooltipEnabled: next.s3TooltipEnabled,
     };

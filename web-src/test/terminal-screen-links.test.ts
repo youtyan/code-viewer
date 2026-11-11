@@ -109,6 +109,7 @@ vi.mock("../core/xterm-loader", async () => {
     select = noop;
     scrollToLine = noop;
     loadAddon = noop;
+    parser = { registerOscHandler: () => ({ dispose: () => undefined }) };
     onScroll = disposable;
     onResize = disposable;
     onData = disposable;

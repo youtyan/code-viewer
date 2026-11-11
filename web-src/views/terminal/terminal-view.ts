@@ -44,6 +44,8 @@ export type TerminalViewDeps = {
   getLanguage(): TerminalLang;
   /** 保存してある文字サイズ (px)。 */
   getFontSize(): number;
+  /** 端末のプログラムが送ったコピー (OSC 52) をクリップボードに書くか。無ければ書く。 */
+  allowClipboardWrite?(): boolean;
   /** 文字サイズが変わった。保存は呼び出し側 (app.ts) が持つ。 */
   onFontSizeChange(size: number): void;
   /** 画像の棚を畳んでいるか (ユーザー単位の設定)。 */
@@ -253,6 +255,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       actionHeaders: deps.actionHeaders,
       getText: text,
       getFontSize: () => clampTerminalFontSize(deps.getFontSize()),
+      allowClipboardWrite: () => deps.allowClipboardWrite?.() ?? true,
       // 状態の行は枠の中にあるので、付け替えても映しているシェルの状態が付いて行く。
       onStatus: (message, overlay) =>
         writeStatus({ status, hint }, message, overlay),

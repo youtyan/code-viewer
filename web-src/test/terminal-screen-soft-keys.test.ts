@@ -31,6 +31,7 @@ vi.mock("../core/xterm-loader", async () => {
       active: { viewportY: 0, baseY: 0, cursorY: 0, getLine: () => undefined },
     };
     registerLinkProvider = () => ({ dispose: noop });
+    parser = { registerOscHandler: () => ({ dispose: () => undefined }) };
     open = (parent: HTMLElement) => {
       const root = document.createElement("div");
       parent.appendChild(root);

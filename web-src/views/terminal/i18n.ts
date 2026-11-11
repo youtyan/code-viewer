@@ -159,6 +159,9 @@ export type TerminalText = {
   imageShelfMove: string;
   /** 棚の置き場所の名前 (メニューと設定の欄)。 */
   imageShelfPlacementNames: Record<TerminalImageShelfPlacement, string>;
+  /** 端末のプログラムが送ったコピー (OSC 52) をクリップボードに書いた・書けなかった。 */
+  clipboardCopied: (characters: number) => string;
+  clipboardCopyFailed: (detail: string) => string;
   /** 棚の内側の縁の掴み (大きさを変える)。 */
   imageShelfResize: string;
   imageShelfExpand: (count: number) => string;
@@ -312,6 +315,10 @@ const EN: TerminalText = {
   imageRevealNotFound: "The path is no longer in the terminal.",
   imageShelfCollapse: "collapse images",
   imageShelfMove: "Move the image shelf",
+  clipboardCopied: (characters) =>
+    `Copied ${characters} character${characters === 1 ? "" : "s"} from the terminal`,
+  clipboardCopyFailed: (detail) =>
+    `Could not copy what the terminal sent: ${detail}`,
   imageShelfPlacementNames: {
     right: "Right of the terminal",
     left: "Left of the terminal",
@@ -458,6 +465,10 @@ const JA: TerminalText = {
   imageRevealNotFound: "そのパスはもうターミナルにありません。",
   imageShelfCollapse: "画像の棚を畳む",
   imageShelfMove: "画像の棚の場所を移す",
+  clipboardCopied: (characters) =>
+    `ターミナルから ${characters} 文字をコピーしました`,
+  clipboardCopyFailed: (detail) =>
+    `ターミナルが送ったものをコピーできませんでした: ${detail}`,
   imageShelfPlacementNames: {
     right: "ターミナルの右",
     left: "ターミナルの左",

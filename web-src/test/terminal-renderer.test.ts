@@ -102,6 +102,7 @@ vi.mock("../core/xterm-loader", () => {
       this.element = root;
     };
     registerLinkProvider = disposable;
+    parser = { registerOscHandler: () => ({ dispose: () => undefined }) };
     onResize = disposable;
     onRender = disposable;
     onScroll = disposable;

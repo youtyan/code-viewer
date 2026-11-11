@@ -251,6 +251,11 @@ export type AppSettingsState = {
   agentNotifyWaiting?: boolean;
   /** エージェントが作業中から止まった (終わった) とき通知を出すか。未設定なら出す。 */
   agentNotifyDone?: boolean;
+  /**
+   * 端末の中のプログラム (tmux のコピーモードなど) が OSC 52 で送ったコピーを
+   * クリップボードに書くか。未設定なら書く。読み出しはいつも断る。
+   */
+  terminalClipboardWrite?: boolean;
   /** エージェント一覧の「フックを入れられます」の案内を閉じた。 */
   agentHookHintDismissed?: boolean;
   /** 最初の入力待ちで出す「通知を許可すると…」の案内を閉じた (許可を訊いた後も)。 */

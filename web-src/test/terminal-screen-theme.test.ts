@@ -46,6 +46,7 @@ vi.mock("../core/xterm-loader", async () => {
       (globalThis as Record<string, unknown>).__themeTestTerminal = this;
     }
     registerLinkProvider = () => ({ dispose: noop });
+    parser = { registerOscHandler: () => ({ dispose: () => undefined }) };
     open = (parent: HTMLElement) => {
       const root = document.createElement("div");
       parent.appendChild(root);
