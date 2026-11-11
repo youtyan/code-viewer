@@ -89,6 +89,10 @@ export type ViewerSettingsText = {
   agentNotifyWaitingLabel: string;
   agentNotifyDoneLabel: string;
   agentNotifySoundLabel: string;
+  /** 「試しに鳴らす」のボタン (入力待ちの音・完了の音)。 */
+  agentNotifySoundTest: { waiting: string; finished: string };
+  /** 鳴らせなかったときの頭。 */
+  agentNotifySoundTestFailed: string;
   agentNotifyHelp: string;
   datastoreTitle: string;
   datastoreInferFkLabel: string;
@@ -234,6 +238,11 @@ export type ViewerSettingsDeps = {
     },
   ): Promise<void>;
   onAgentRulesSave(value: string): Promise<void>;
+  /**
+   * 「短い音も鳴らす」の横の「試しに鳴らす」。鳴らせなければ理由つきで投げる
+   * (節の下に出す)。無ければボタンを出さない。
+   */
+  onTestSound?(kind: "waiting" | "finished"): Promise<void>;
   onAgentRulesReset(): Promise<void>;
   /**
    * 通知の節の次に置く節 (エージェント連携)。中身と取得・文言の切り替えは
@@ -417,6 +426,9 @@ export type ViewerSettingsSectionProps =
       waiting: ToggleProps;
       done: ToggleProps;
       sound: ToggleProps;
+      /** 試しに鳴らすボタン (入力待ち・完了)。onTestSound が無ければ空。 */
+      soundTests: { label: string; onPlay(): void }[];
+      soundTestError: string;
     }
   | {
       key: "excluded";
@@ -664,7 +676,14 @@ function sectionTemplate(section: ViewerSettingsSectionProps): unknown {
         section.help,
       )}${toggleTemplate(section.waiting)}${toggleTemplate(section.done)}${toggleTemplate(
         section.sound,
-      )}</div>`;
+      )}${
+        section.soundTests.length > 0
+          ? html`<div class="scope-settings-actions">${section.soundTests.map(
+              (test) =>
+                html`<button type="button" class="gdp-btn gdp-btn-sm" @click=${test.onPlay}>${test.label}</button>`,
+            )}</div>`
+          : nothing
+      }${errorLine("agent-notify-sound-error", section.soundTestError)}</div>`;
     case "excluded":
       return html`<div
         class=${sectionClass(section.box)}
@@ -875,6 +894,7 @@ export function createViewerSettings(
   let highlighted: { source: string; html: string; by: unknown } | null = null;
   let saveError = "";
   let refreshError = "";
+  let soundTestError = "";
   let refreshGeneration = 0;
 
   function sectionElement(key: SectionKey): HTMLElement | null {
@@ -1208,6 +1228,13 @@ export function createViewerSettings(
           text.agentNotifySoundLabel,
           c.agentNotifySound,
         ),
+        soundTests: deps.onTestSound
+          ? (["waiting", "finished"] as const).map((kind) => ({
+              label: text.agentNotifySoundTest[kind],
+              onPlay: () => void testSound(kind),
+            }))
+          : [],
+        soundTestError,
       },
       excluded: {
         key: "excluded",
@@ -1321,6 +1348,19 @@ export function createViewerSettings(
         },
       }),
     );
+  }
+
+  /** 「試しに鳴らす」。鳴らせなければ理由を節の下と console に出す。 */
+  async function testSound(kind: "waiting" | "finished"): Promise<void> {
+    soundTestError = "";
+    draw();
+    try {
+      await deps.onTestSound?.(kind);
+    } catch (error) {
+      console.error(`[code-viewer] could not play the ${kind} sound`, error);
+      soundTestError = `${deps.getText().agentNotifySoundTestFailed}\n${formatErrorDetail(error)}`;
+    }
+    draw();
   }
 
   function draw(): void {

@@ -81,6 +81,8 @@ const EN_TEXT: ViewerSettingsText = {
   imageShelfPlacementHelp: "Where the image shelf sits.",
   terminalClipboardWriteLabel: "Let terminal programs copy",
   agentNotifySoundLabel: "Also play a sound",
+  agentNotifySoundTest: { waiting: "Try waiting", finished: "Try finished" },
+  agentNotifySoundTestFailed: "Could not play.",
   terminalClipboardWriteHelp: "OSC 52 copies.",
   terminalOptionAsAltLabel: "Use Option as Alt",
   terminalOptionAsAltHelp: "Option shortcuts.",
@@ -241,6 +243,7 @@ function setup(
     ) => Promise<void>;
     saveRules?: (value: string) => Promise<void>;
     resetRules?: () => Promise<void>;
+    testSound?: (kind: "waiting" | "finished") => Promise<void>;
     draft?: SettingsDraft;
     view?: ViewerSettingsView;
   } = {},
@@ -316,6 +319,7 @@ function setup(
         (async (value) => {
           calls.agentRulesSave.push(value);
         }),
+      onTestSound: options.testSound,
       onAgentRulesReset:
         options.resetRules ??
         (async () => {
@@ -1707,5 +1711,53 @@ describe("the viewer settings presenter", () => {
     expect([last()?.footer.status.state, last()?.footer.save.disabled]).toEqual(
       ["unsaved", false],
     );
+  });
+});
+
+describe("trying the attention sounds", () => {
+  test("each button plays its sound, and a sound that cannot play says why", async () => {
+    const played: string[] = [];
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { settings, host } = setup({
+      testSound: async (kind) => {
+        played.push(kind);
+        if (kind === "finished") throw new Error("no audio device");
+      },
+    });
+    settings.mount(host);
+
+    const buttons = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '[data-settings-section="agentNotify"] .scope-settings-actions button',
+      ),
+    ];
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      "Try waiting",
+      "Try finished",
+    ]);
+    buttons[0]?.click();
+    await vi.waitFor(() => expect(played).toEqual(["waiting"]));
+    expect(q<HTMLElement>(document, "#agent-notify-sound-error").hidden).toBe(
+      true,
+    );
+
+    buttons[1]?.click();
+    await vi.waitFor(() =>
+      expect(
+        q<HTMLElement>(document, "#agent-notify-sound-error").textContent,
+      ).toBe("Could not play.\nError: no audio device"),
+    );
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  test("without a player, no buttons are shown", () => {
+    const { settings, host } = setup();
+    settings.mount(host);
+    expect(
+      document.querySelectorAll(
+        '[data-settings-section="agentNotify"] .scope-settings-actions button',
+      ),
+    ).toHaveLength(0);
   });
 });

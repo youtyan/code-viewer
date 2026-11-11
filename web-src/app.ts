@@ -268,6 +268,7 @@ import {
   type AgentsSidebar,
   createAgentsSidebarPresenter,
 } from "./views/agents/agents-sidebar-presenter";
+import { playAttentionSound } from "./views/agents/attention-sound";
 import {
   type HandoffMenuActions,
   handoffMenuItems,
@@ -5491,6 +5492,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     onSave: saveViewerSettings,
     onAgentRulesSave: saveAgentScreenRules,
+    onTestSound: (kind) => playAttentionSound(kind),
     onAgentRulesReset: resetAgentScreenRuleSettings,
     agentHooksSection: AGENT_HOOKS_SETTINGS.element,
     agentAccountsSection: ACCOUNTS_SETTINGS.element,
