@@ -9,13 +9,14 @@
 // ここだけで確かめられる。
 
 import type { PaneAccount } from "./agent-accounts";
-import type {
-  AgentAttention,
-  AgentConversation,
-  AgentState,
-  AgentStateObservationError,
-  AgentStateRecord,
-  AgentStateSource,
+import {
+  type AgentAttention,
+  type AgentConversation,
+  type AgentState,
+  type AgentStateObservationError,
+  type AgentStateRecord,
+  type AgentStateSource,
+  needsAttention,
 } from "./agent-state";
 import type {
   ProjectRegistrySnapshot,
@@ -455,6 +456,37 @@ export function groupAgentPanesByPlace(
     options.includeEmptyRegistered === true,
     comparePanePlace,
   ).sort(compareGroupsByRegistry);
+}
+
+/**
+ * 手が要るエージェント (入力待ち → 完了・未読) を回る順。キーで次・前へ移る
+ * ときに使う。同じ段の中は tmux の場所の順にして、回っている間に順が入れ
+ * 替わらないようにする。渡す一覧は未読の完了を done にした後のもの
+ * (withFinishedAsDone)。
+ */
+export function attentionPanes(panes: AgentPane[]): AgentPane[] {
+  const rank = (pane: AgentPane) => (pane.state === "waiting" ? 0 : 1);
+  return panes
+    .filter((pane) => pane.kind !== null && needsAttention(pane.state))
+    .sort((a, b) => rank(a) - rank(b) || comparePanePlace(a, b));
+}
+
+/**
+ * current (いま見ているペイン。無ければ null) から direction の向きに次の
+ * 手が要るエージェント。current が回る順に無ければ (読んで待機に戻った・
+ * 見ていない)、次は先頭・前は末尾。回るものが無ければ null。current しか
+ * 無ければ current を返す。
+ */
+export function nextAttentionPane(
+  panes: AgentPane[],
+  current: TmuxPaneId | null,
+  direction: 1 | -1,
+): AgentPane | null {
+  const order = attentionPanes(panes);
+  if (order.length === 0) return null;
+  const index = order.findIndex((pane) => pane.id === current);
+  if (index < 0) return order[direction === 1 ? 0 : order.length - 1] ?? null;
+  return order[(index + direction + order.length) % order.length] ?? null;
 }
 
 /** ヘッダの件数表示に出す数。エージェントのペインだけを数える。 */

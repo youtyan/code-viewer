@@ -2,6 +2,7 @@ import type { AgentHooksResponse } from "./core/agent-hooks";
 import {
   type AgentPane,
   headerAgentCounts,
+  nextAttentionPane,
   titleWithUnread,
 } from "./core/agent-overview";
 import {
@@ -6469,6 +6470,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       navigateToPageTab({ screen: "agents", range: currentRange() });
       return true;
     }
+    if (
+      action === "agent-next-attention" ||
+      action === "agent-previous-attention"
+    ) {
+      openNextAttentionAgent(action === "agent-next-attention" ? 1 : -1);
+      return true;
+    }
     if (action === "goto-worktrees") {
       navigateToRoute({ screen: "worktree", range: currentRange() });
       return true;
@@ -9392,6 +9400,28 @@ window.GdpExpandLogic = GdpExpandLogic;
       .filter((id): id is string => id !== null);
   }
 
+  /**
+   * 手が要るエージェント (入力待ち → 完了・未読) を順に開く (キー・パレット)。
+   * 起点はいま見ているペイン。1 つも無ければ最下段の吹き出しで知らせる。
+   */
+  function openNextAttentionAgent(direction: 1 | -1): void {
+    const panes = AGENT_MONITOR.snapshot().overview?.panes ?? [];
+    const shells = viewedShells();
+    const current =
+      PANE_VIEW.currentPane() ??
+      panes.find(
+        (pane) =>
+          pane.shownInShell !== "" && shells.includes(pane.shownInShell),
+      )?.id ??
+      null;
+    const target = nextAttentionPane(panes, current, direction);
+    if (!target) {
+      TERMINAL_NOTICE.show(agentsText(STATE.language).noAttentionAgents);
+      return;
+    }
+    openAgentPane(target.id);
+  }
+
   function isViewingAgentPane(pane: AgentPane): boolean {
     return (
       document.visibilityState === "visible" &&
@@ -9472,6 +9502,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     {
       id: "goto-agents",
       keymap: "goto-agents",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "agent-next-attention",
+      keymap: "agent-next-attention",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "agent-previous-attention",
+      keymap: "agent-previous-attention",
       icon: ARROW_RIGHT_16_PATH,
       suggested: false,
     },

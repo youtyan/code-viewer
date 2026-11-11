@@ -123,6 +123,8 @@ export type AgentsText = {
   notifyWaitingTitle: (project: string) => string;
   /** 入力待ちの理由が分かるときの通知の題 (reason は attention の文言)。 */
   notifyAttentionTitle: (reason: string, project: string) => string;
+  /** 手が要るエージェントへ移るキーを押したが、1 つも無いとき (最下段の吹き出し)。 */
+  noAttentionAgents: string;
   notifyFinishedTitle: (project: string) => string;
   /** ヘッダの件数表示。 */
   headerWaiting: string;
@@ -593,6 +595,7 @@ const EN: AgentsText = {
   notifyRequestFailed: "Could not ask for notification permission",
   notifyWaitingTitle: (project) => `Needs input · ${project}`,
   notifyAttentionTitle: (reason, project) => `${reason} · ${project}`,
+  noAttentionAgents: "No agent needs you right now",
   notifyFinishedTitle: (project) => `Finished · ${project}`,
   headerWaiting: "Needs input",
   headerWorking: "Working",
@@ -757,6 +760,7 @@ const JA: AgentsText = {
   notifyRequestFailed: "通知の許可を求められませんでした",
   notifyWaitingTitle: (project) => `入力待ち · ${project}`,
   notifyAttentionTitle: (reason, project) => `${reason} · ${project}`,
+  noAttentionAgents: "いま手が要るエージェントはありません",
   notifyFinishedTitle: (project) => `完了 · ${project}`,
   headerWaiting: "入力待ち",
   headerWorking: "作業中",

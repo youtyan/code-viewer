@@ -198,6 +198,20 @@ export const KEYMAP_ACTION_INFO: Record<KeymapAction, KeymapActionInfo> = {
     group: "global",
     label: { en: "Start a new agent", ja: "新しいエージェントを起動" },
   },
+  "agent-next-attention": {
+    group: "global",
+    label: {
+      en: "Open the next agent that needs you (waiting, then done)",
+      ja: "次の手が要るエージェントを開く (入力待ち → 完了)",
+    },
+  },
+  "agent-previous-attention": {
+    group: "global",
+    label: {
+      en: "Open the previous agent that needs you",
+      ja: "前の手が要るエージェントを開く",
+    },
+  },
   "start-g-sequence": {
     group: "global",
     label: {
