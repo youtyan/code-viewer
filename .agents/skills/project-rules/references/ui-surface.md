@@ -67,6 +67,31 @@
 - happy-dom は `:is(` の中の改行と `color-mix()` を読めない。節の並びは 1 行に書き、薄塗りの検査は
   `button-variants.test.ts` が名前を計算できる色に差し替えて見る
 
+### 部品の節 (チェックボックス・入力欄・メニュー・カード・リンク)
+
+ボタンと同じく、部品の見た目は `web/style.css` の「ボタンの種類」の後ろの部品ごとの節だけが決め、
+部品の規則に残すのは状態の印と置き場所ごとの寸法だけ。`form-controls.test.ts` が、実際の置き場所
+(親の規則が効く所) でも節の見た目になることを見る。新しい置き場所を作ったら、そのテストの表に足す。
+
+| 部品 | 使うもの | 節が決めること |
+|---|---|---|
+| チェックボックス・ラジオ・スライダー | 標準の `<input type="checkbox\|radio\|range">`。ラベルは `<label>` の直下に置く | 色 (`accent-color: --color-accent`)・大きさ (`--icon-md`)・ラベルとの間 (`column-gap: --space-2`。並べ方の flex / grid は置き場所)・フォーカスの輪 (`--focus-ring`)・無効 (`--color-disabled`。ラベルの文字も)。**設定のトグルもチェックボックス** (`appearance: none` で描くスイッチの形にしない) |
+| 入力欄・選ぶ欄 | 標準の `<input>` (1 行・search・date など)・`<textarea>`・`<select>` (`<option>` / `<optgroup>`) | 地 `--color-inset`・縁 `--color-line`・角丸 `--radius-md`・文字・プレースホルダ (`--color-text-3`)・フォーカス (縁と内側の 1px を強調色)・誤り (`aria-invalid="true"` で縁を `--color-error-line`。縁の色は `--field-edge` で受ける)・無効 (`--color-disabled` と面 `--color-disabled-surface`)・選ぶ欄の矢印。高さ (`--ui-control-sm`) と余白の既定は `:where()` で詳細度 0、置き場所が `--ui-control-md` などに上書きしてよい。**1 行の欄に縦の余白を書かない** (高さの中で文字が切れた) |
+| 右クリックのメニュー | `views/context-menu.ts` の `showContextMenu` (`.gdp-context-menu`)。同じ形の浮くメニューは節の並びに足す (Data の書き出し `.db-grid-export-menu`) | 面 (`--color-overlay`・`--color-line-strong` の縁・`--shadow-context-menu`)・項目 (行の高さ `--ui-row-h`・hover とフォーカスは `--color-select`)・区切り (`--color-line-row`)・見出し・無効 (`--color-disabled`)・危険 (`.danger` は `--color-failed`)・チェックつき (`aria-checked`) |
+| カード | 同じ形の物が並ぶ一覧の 1 件だけ (差分のファイル・全体ボードのアカウント・一覧だけの作業ツリーの行・作業記録のかんばんの列) | 面 `--color-doc`・縁 `--color-line-row`・角丸 `--radius-md`・中の余白 `--card-pad`・見出しの行 (名前が左、操作が右端。高さ `--ui-control-md`、下に `--color-line-row`)。状態の印 (選んでいる・いまのフォルダ・衝突・落とせる所) は部品の規則 |
+| リンク | 文の中のリンクは class の無い `<a>` | 強調色で下線つき。並びの多い所 (目次・一覧の足元) は hover だけ下線。class のある `<a>` (画面の入口・行・ボタン) には下線を付けない。押せるものは指の形のカーソル |
+
+- **文字を打って絞り込む部品は選ぶ欄にしない** (ブランチの選択・プロジェクトの切替・パレット・Data の
+  タイムゾーン)。これらの検索の欄と、表のセルや見出しの中の欄・全面の編集の欄・端末の裏の欄は、入力欄の
+  節の並びの外 (`:not(:where(…))` の一覧)。足すときは理由をその一覧の上のコメントに書く
+- **右クリックのメニューにキーの割り当てを出さない** (OS や環境でキーが違い、OS の決まりともぶつかる)。
+  キーはパレット・ヘルプのキーの一覧・title が示す。`context-menu.ts` の項目はキーを受け取らない
+  (`context-menu.test.ts` が項目に kbd が無いことを見る)
+- 決まった選択肢から 1 つ選ぶだけの部品は `<select>`。独自の一覧の窓を作らない。排他の切替を横に並べて
+  見せる所は `.seg` (選ぶ欄ではない)
+- happy-dom は `:is(a, b)` の後ろに続く `:disabled`・`:not()` を読み違えて (当たらない要素にも当てる)、
+  検査が素通りする。状態の条件は `:is(input:disabled, …)` のように `:is()` の中に書く
+
 `alert` / `confirm` / `prompt` は `biome.jsonc` が **error で落とす**ので、そもそも書けない。
 `views/ui-dialog.ts` を使う。
 

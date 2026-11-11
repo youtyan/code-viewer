@@ -193,11 +193,6 @@ export type MainTabsDeps = {
   getLanguage(): MainTabsLang;
   /** page のタブの名前 (画面の入口と同じ文言)。repo はフォルダ表示の入口の名前。 */
   pageLabel(page: PageKind | "repo"): string;
-  /**
-   * その画面へ移るキーの表記 (画面の入口の title と同じ。割り当てが無ければ "")。
-   * グループの ▾ の画面の行の右端に出す。無ければ出さない。
-   */
-  screenKey?(screen: ViewScreen): string;
   /** その route を開く (replace なら履歴を積まない)。 */
   navigate(route: AppRoute, replace?: boolean): void;
   /**
@@ -2634,11 +2629,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         "gdp-context-menu-icon-svg",
         pageIconPaths(screen),
       );
-      const hint = deps.screenKey?.(screen) ?? "";
       return {
         label: deps.pageLabel(screen),
         leading: icon,
-        ...(hint ? { hint } : {}),
         checked: screen === shown,
         disabled: !here && !deps.switchProject,
         ...(here ? {} : { title: current.openScreenInTitle(look.name) }),

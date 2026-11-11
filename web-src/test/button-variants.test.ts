@@ -6,26 +6,13 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { themeVariants } from "./_color-themes";
 import { baseRules, loadStyleSheet, resolveVar } from "./_css-fixture";
+import { withoutHover } from "./_css-without-hover";
 
 const dark = themeVariants(baseRules(loadStyleSheet())).find(
   (variant) => variant.name === "default dark",
 );
 if (!dark) throw new Error("button variants test: no default dark theme");
 const token = (name: string) => resolveVar(`var(${name})`, dark.vars);
-
-// happy-dom は :hover を常に当たるものとして扱うので、hover の選択子を外した CSS で
-// 休んでいるときの色を見る (選択子の並びのうち :hover を含むものだけを外す)。
-function withoutHover(css: string): string {
-  return css
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/([^{}]+)\{/g, (whole, head: string) => {
-      if (head.trim().startsWith("@")) return whole;
-      const kept = head
-        .split(/,(?![^(]*\))/)
-        .filter((part) => !part.includes(":hover"));
-      return `${kept.length > 0 ? kept.join(",") : ":not(*)"}{`;
-    });
-}
 
 // 薄塗りの面と文字は color-mix() で、happy-dom は計算できない (宣言ごと落とす)。
 // その 2 つの名前だけを計算できる色に差し替えて、薄塗りの名前を読んでいることを見る。

@@ -959,15 +959,6 @@ describe("main tabs view: プロジェクトのグループ", () => {
   });
 
   describe("▾ のメニューの画面の行", () => {
-    /** 画面の入口と同じキー (worktree は割り当てが無い)。 */
-    const KEYS = {
-      repo: "gf",
-      diff: "gd",
-      history: "gh",
-      worktree: "",
-      database: "gb",
-      journal: "gj",
-    } as const;
     const setupScreens = async (
       initial: AppRoute = fileRoute("src/app.ts"),
       extra: Partial<MainTabsDeps> = {},
@@ -979,7 +970,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
         undefined,
         initial,
         APP,
-        groupDeps(calls, { screenKey: (screen) => KEYS[screen], ...extra }),
+        groupDeps(calls, { ...extra }),
       );
       await ctx.handle.restore();
       return { ...ctx, calls };
@@ -997,7 +988,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
       ];
     };
     /**
-     * 画面の行 (menuitemradio) を短く書く: 絵があれば ◆、名前、[キー]、選択の印 ✓、
+     * 画面の行 (menuitemradio) を短く書く: 絵があれば ◆、名前、選択の印 ✓ (キーは出さない)、
      * 押せなければ (disabled)、title があれば {title}。
      */
     const screenRows = (mount: HTMLElement, root: string) => {
@@ -1008,11 +999,9 @@ describe("main tabs view: プロジェクトのグループ", () => {
             .filter((node) => node.nodeType === Node.TEXT_NODE)
             .map((node) => node.textContent)
             .join("");
-          const key = item.querySelector(".gdp-context-menu-key")?.textContent;
           return [
             item.querySelector(".gdp-context-menu-icon svg") ? "◆ " : "",
             label,
-            key ? ` [${key}]` : "",
             item.getAttribute("aria-checked") === "true" ? " ✓" : "",
             item.disabled ? " (disabled)" : "",
             item.title ? ` {${item.title}}` : "",
@@ -1052,24 +1041,24 @@ describe("main tabs view: プロジェクトのグループ", () => {
         name: "いま見ているプロジェクト (ファイルを開いている)",
         root: APP,
         expected: [
-          "◆ repo [gf] ✓",
-          "◆ diff [gd]",
-          "◆ history [gh]",
+          "◆ repo ✓",
+          "◆ diff",
+          "◆ history",
           "◆ worktree",
-          "◆ database [gb]",
-          "◆ journal [gj]",
+          "◆ database",
+          "◆ journal",
         ],
       },
       {
         name: "別のプロジェクト (印は無く、移ってから開くと title で知らせる)",
         root: LIB,
         expected: [
-          "◆ repo [gf] {Switch to sample-lib and open this screen}",
-          "◆ diff [gd] {Switch to sample-lib and open this screen}",
-          "◆ history [gh] {Switch to sample-lib and open this screen}",
+          "◆ repo {Switch to sample-lib and open this screen}",
+          "◆ diff {Switch to sample-lib and open this screen}",
+          "◆ history {Switch to sample-lib and open this screen}",
           "◆ worktree {Switch to sample-lib and open this screen}",
-          "◆ database [gb] {Switch to sample-lib and open this screen}",
-          "◆ journal [gj] {Switch to sample-lib and open this screen}",
+          "◆ database {Switch to sample-lib and open this screen}",
+          "◆ journal {Switch to sample-lib and open this screen}",
         ],
       },
     ])("$name: 絵・名前・キー・選択の印", async ({ root, expected }) => {

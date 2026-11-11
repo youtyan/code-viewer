@@ -21,8 +21,6 @@ export type ContextMenuItem =
       disabled?: boolean;
       /** 文字の前に置く絵 (プロジェクトの色の四角など)。 */
       leading?: HTMLElement;
-      /** 右端に出すキー (割り当ての表記。絵のある項目だけ)。 */
-      hint?: string;
       /**
        * 選び方の一覧 (色など) の今の値か。持つ項目は role=menuitemradio に
        * なり、aria-checked で今の値を伝える。
@@ -96,12 +94,8 @@ export function showContextMenu(
     } else {
       button.textContent = item.label;
     }
-    if (item.hint) {
-      const key = document.createElement("kbd");
-      key.className = "gdp-context-menu-key";
-      key.textContent = item.hint;
-      button.append(key);
-    }
+    // キーの割り当ては出さない (OS や環境でキーが違い、OS の決まりともぶつかる。
+    // キーはパレット・ヘルプのキーの一覧・title が示す)。
     if (item.title) button.title = item.title;
     if (item.danger) button.classList.add("danger");
     button.disabled = !!item.disabled;

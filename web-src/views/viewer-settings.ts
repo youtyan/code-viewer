@@ -547,7 +547,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     // エージェント一覧の「通知は有効です」から、この見出しへ飛んでくる。
     agentNotifyTitle.id = "agent-notify-section-title";
     const agentNotify = section();
-    // 節は見出し → 何のための設定かの 1 文 → 操作 (この説明は 2 つのスイッチの両方に掛かる)。
+    // 節は見出し → 何のための設定かの 1 文 → 操作 (この説明は 2 つのチェックボックスの両方に掛かる)。
     agentNotify.append(
       titleRow(agentNotifyTitle, agentNotifyShared),
       agentNotifyHelp,

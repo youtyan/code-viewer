@@ -1878,7 +1878,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     splitListColumnWidth: () => splitListColumnWidth(),
     getLanguage: () => STATE.language,
     pageLabel: (page) => uiText().nav[page],
-    screenKey: (screen) => viewScreenKey(screen),
     navigate: (route, replace) => {
       if (replace) replaceWithRoute(route);
       else navigateToRoute(route);
