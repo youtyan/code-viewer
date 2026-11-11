@@ -50,6 +50,7 @@ import {
   statusLineFailureLog,
   statusLineWrapperPath,
 } from "../terminal/statusline";
+import { codexDaemonArgs } from "./codex-daemon";
 import {
   accountWindowName,
   agentCommandArgv,
@@ -377,6 +378,9 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
       folder: cwd,
       home: service.paths.home,
     });
+    // codex は共有の裏のサーバを使わせない (フックが別のペインを指す。codex-daemon.ts)。
+    const daemon =
+      account.agent === "codex" ? await codexDaemonArgs(command, cwd) : [];
     const pane = await openAccountWindow({
       agent: account.agent,
       account,
@@ -384,6 +388,7 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
       session: sessionName,
       windowName: accountWindowName(account.agent, account),
       argv: agentCommandArgv(command, [
+        ...daemon,
         ...statusLine.args,
         ...handoffLaunch.args,
       ]),

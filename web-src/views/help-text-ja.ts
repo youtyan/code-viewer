@@ -1004,6 +1004,13 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 },
                 {
                   text: [
+                    "自分で起こす codex には ",
+                    code("--no-daemon"),
+                    " を付けます。付けないと共有の裏のサーバの中でフックが走り、状態が最初に起こした codex のペインに付きます (code-viewer から起こす codex には自動で付けます)。",
+                  ],
+                },
+                {
+                  text: [
                     "opencode には、プラグインのファイル ",
                     code(
                       "~/.config/opencode/plugins/code-viewer-agent-hook.js",

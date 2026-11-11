@@ -1021,6 +1021,13 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 },
                 {
                   text: [
+                    "Start the codex you run yourself with ",
+                    code("--no-daemon"),
+                    ". Without it the hooks run inside the shared background server and report the pane of the codex that started it (codex started from code-viewer gets it automatically).",
+                  ],
+                },
+                {
+                  text: [
                     "For opencode, it writes one plugin file, ",
                     code(
                       "~/.config/opencode/plugins/code-viewer-agent-hook.js",
