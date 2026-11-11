@@ -285,6 +285,7 @@ describe("the board row context menu", () => {
       },
       labels: [
         "Open in a tab",
+        "Pin to the top",
         "Mark as unread",
         "Continue with another account…",
       ],
@@ -296,6 +297,7 @@ describe("the board row context menu", () => {
       conversation: undefined,
       labels: [
         "Open in a tab",
+        "Pin to the top",
         "Mark as unread",
         "Continue with another account…",
         "Needs the agent hooks — show how to install",
@@ -424,6 +426,67 @@ describe("agents board presenter", () => {
     const { last, calls } = await mountWithView(panes());
     last().onLaunch();
     expect(calls).toEqual(["launch"]);
+  });
+
+  test("Pin to the top puts the row in a Pinned section first, in either order, until unpinned", async () => {
+    const { last } = await mountWithView([
+      agentPane({
+        id: "%1",
+        label: "work:0.1",
+        state: "waiting",
+        project: "/work/sample-app",
+        kind: "claude",
+      }),
+      agentPane({
+        id: "%2",
+        label: "work:0.2",
+        state: "idle",
+        project: "/work/sample-lib",
+        kind: "claude",
+      }),
+    ]);
+    const menu = (id: string) => {
+      document
+        .querySelector<HTMLElement>(`[data-agent-nav="pane:${id}"]`)
+        ?.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+        );
+      return [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          ".gdp-context-menu button",
+        ),
+      ];
+    };
+    const sections = () =>
+      last().list.flatMap((entry) =>
+        entry.kind === "section"
+          ? [[entry.state, entry.rows.map((row) => row.id)]]
+          : entry.kind === "project"
+            ? [[entry.project.name, entry.project.rows.map((row) => row.id)]]
+            : [],
+      );
+    menu("%2")
+      .find((item) => item.textContent === "Pin to the top")
+      ?.click();
+    await flushRenders();
+    expect(sections()).toEqual([
+      [null, ["%2"]],
+      ["sample-app", ["%1"]],
+    ]);
+    last().onOrder("urgency");
+    await flushRenders();
+    expect(sections()).toEqual([
+      [null, ["%2"]],
+      ["waiting", ["%1"]],
+    ]);
+    menu("%2")
+      .find((item) => item.textContent === "Unpin")
+      ?.click();
+    await flushRenders();
+    expect(sections()).toEqual([
+      ["waiting", ["%1"]],
+      ["idle", ["%2"]],
+    ]);
   });
 
   test("Needs you first lists every project together, by state, with the project on each row", async () => {

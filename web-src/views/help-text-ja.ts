@@ -846,6 +846,11 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   ui(l.agents.board.orderByUrgency),
                   " に切り替えると、全プロジェクトをまとめて入力待ち・完了・作業中・待機の順に並べます。",
                 ],
+                [
+                  "見張りたいものは、行の右クリックの ",
+                  ui(l.agents.board.pin),
+                  " で一番上に置けます。",
+                ],
               ],
             },
             {

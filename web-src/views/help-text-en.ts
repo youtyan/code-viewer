@@ -863,6 +863,11 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ui(l.agents.board.orderByUrgency),
                   " lists every project together: needs input, then done, then working, then idle.",
                 ],
+                [
+                  "To keep an eye on one, right-click it and choose ",
+                  ui(l.agents.board.pin),
+                  ".",
+                ],
               ],
             },
             {

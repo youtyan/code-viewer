@@ -30,7 +30,6 @@ import {
   AGENT_STATE_FILTERS,
   type AgentPane,
   type AgentProjectGroup,
-  type AgentProjectInfo,
   type AgentStateFilter,
   filterAgentPanes,
   groupAgentPanes,
@@ -127,6 +126,11 @@ export function createAgentsPresenter(
   let allPanes = false;
   /** 並び (プロジェクトの畳みと同じくメモリだけ)。 */
   let order: BoardOrder = "project";
+  /**
+   * 上に留めたペイン (全体ボードだけ。左のサイドバーは行を動かさない)。メモリだけで、
+   * ペインが一覧から消えたら外す。
+   */
+  const pinned = new Set<string>();
   let selected: string | null = null;
   /** 畳んだプロジェクト (root)。取り直しを跨いで保つ。 */
   const collapsed = new Set<string>();
@@ -535,15 +539,31 @@ export function createAgentsPresenter(
       );
       return entries;
     }
+    // 留めたものは並びに関係なく先頭の段へ (その段の中は急ぐ順と同じ並び)。
+    for (const id of [...pinned]) {
+      if (!panes.some((pane) => pane.id === id)) pinned.delete(id);
+    }
+    const pinnedPanes = visible.filter((pane) => pinned.has(pane.id));
+    if (pinnedPanes.length > 0) {
+      entries.push({
+        kind: "section",
+        state: null,
+        label: current.board.pinned,
+        rows: groupAgentPanesByUrgency(pinnedPanes).flatMap((group) =>
+          group.panes.map((pane) => rowProps(pane, projectLabel(pane))),
+        ),
+      });
+    }
+    const rest = visible.filter((pane) => !pinned.has(pane.id));
     if (order === "urgency") {
-      entries.push(...urgencyEntries(visible, overview.projects));
+      entries.push(...urgencyEntries(rest));
       return entries;
     }
     // 絞り込み中は、エージェントの居ない登録プロジェクトを出さない
     // (「入力待ちだけ」を見たいときに、関係の無い見出しが並ばないように)。
     entries.push(
       ...groupEntries(
-        groupAgentPanes(visible, overview.projects, {
+        groupAgentPanes(rest, overview.projects, {
           includeEmptyRegistered: stateFilter === "all",
         }),
       ),
@@ -555,23 +575,22 @@ export function createAgentsPresenter(
    * 急ぐ順: プロジェクトをまたいで状態ごとの段に並べる (groupAgentPanesByUrgency)。
    * 行の補足にプロジェクトの名前を足す (見出しがプロジェクトでないので)。
    */
-  function urgencyEntries(
-    panes: AgentPane[],
-    projects: readonly AgentProjectInfo[],
-  ): BoardListEntry[] {
+  function urgencyEntries(panes: AgentPane[]): BoardListEntry[] {
     const current = text();
-    const names = new Map(projects.map((info) => [info.root, info.name]));
     return groupAgentPanesByUrgency(panes).map((group) => ({
       kind: "section",
       state: group.state,
       label: current.state[group.state],
-      rows: group.panes.map((pane) =>
-        rowProps(pane, {
-          cls: "agents-project-label",
-          text: names.get(pane.project) ?? pane.project,
-        }),
-      ),
+      rows: group.panes.map((pane) => rowProps(pane, projectLabel(pane))),
     }));
+  }
+
+  /** 行の補足に足すプロジェクトの名前 (見出しがプロジェクトでない段)。 */
+  function projectLabel(pane: AgentPane): AgentCardExtra {
+    const info = deps.monitor
+      .snapshot()
+      .overview?.projects.find((item) => item.root === pane.project);
+    return { cls: "agents-project-label", text: info?.name ?? pane.project };
   }
 
   /**
@@ -718,6 +737,16 @@ export function createAgentsPresenter(
           event.currentTarget as HTMLElement,
           [
             { label: current.openPane, onSelect: () => select(pane) },
+            {
+              label: pinned.has(pane.id)
+                ? current.board.unpin
+                : current.board.pin,
+              onSelect: () => {
+                if (pinned.has(pane.id)) pinned.delete(pane.id);
+                else pinned.add(pane.id);
+                render(true);
+              },
+            },
             ...markUnreadMenuItems(pane, current, deps.monitor),
             ...handoffMenuItems(pane, current, deps.handoff),
           ],

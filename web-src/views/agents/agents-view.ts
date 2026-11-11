@@ -132,7 +132,8 @@ export type BoardListEntry =
   | {
       /** 急ぐ順の 1 段 (状態ごと。プロジェクトをまたぐ)。 */
       kind: "section";
-      state: AgentPane["state"];
+      /** 状態の段。留めた段は null。 */
+      state: AgentPane["state"] | null;
       label: string;
       rows: BoardRowProps[];
     }

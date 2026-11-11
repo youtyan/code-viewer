@@ -166,6 +166,10 @@ export type AgentsBoardText = {
   orderByProject: string;
   orderByUrgency: string;
   orderByUrgencyTitle: string;
+  /** 上に留めた段の見出しと、行の右クリックの項目。 */
+  pinned: string;
+  pin: string;
+  unpin: string;
 };
 
 export type AgentsSidebarText = {
@@ -654,6 +658,9 @@ const EN: AgentsText = {
     orderByUrgency: "Needs you first",
     orderByUrgencyTitle:
       "Every project together: needs input, then done, then working, then idle. Newest change first in each.",
+    pinned: "Pinned",
+    pin: "Pin to the top",
+    unpin: "Unpin",
   },
   hookHint: (agents) =>
     `Finish detection is off for ${agents}. Hooks make it reliable.`,
@@ -833,6 +840,9 @@ const JA: AgentsText = {
     orderByUrgency: "急ぐ順",
     orderByUrgencyTitle:
       "全プロジェクトをまとめて、入力待ち → 完了 → 作業中 → 待機。それぞれ変わったのが新しい順。",
+    pinned: "ピン留め",
+    pin: "上に留める",
+    unpin: "留めを外す",
   },
   hookHint: (agents) =>
     `${agents} の完了の検知を有効にできます (フックが未設定です)。`,
