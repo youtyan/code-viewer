@@ -4,9 +4,10 @@ import "./_dom";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { q, waitFor } from "./_test-helpers";
 
-const { createGlobalSearchView } = await import(
+const { createGlobalSearchView, DEFAULT_VIEW } = await import(
   "../views/database/global-search-view"
 );
+type GlobalSearchProps = Parameters<typeof DEFAULT_VIEW>[0];
 
 const originalFetch = globalThis.fetch;
 
@@ -166,6 +167,57 @@ describe("global search view", () => {
     expect(statusCalls).toBe(2);
     expect(logs("search status").length).toBe(1);
     expect(logs("search status")[0]?.slice(-1)[0]).toBe(failure);
+    view.dispose();
+  });
+
+  test("passes running state and hits grouped by table to the view", async () => {
+    const shown: GlobalSearchProps[] = [];
+    const hit = (table: string, column: string) => ({
+      table,
+      column,
+      valuePreview: "sample value",
+      rowPreview: [],
+    });
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/_db/search/start")) return json({ jobId: "job" });
+      // 終わった後に閉じても、前と同じく中止を送る。
+      if (url.startsWith("/_db/search/cancel")) return json({});
+      if (url.startsWith("/_db/search/status"))
+        return json({
+          scannedTables: 2,
+          totalTables: 2,
+          hits: [
+            hit("sample_table", "sample_column"),
+            hit("other_table", "sample_column"),
+            hit("sample_table", "other_column"),
+          ],
+          done: true,
+        });
+      throw new Error(`unexpected request: ${url}`);
+    }) as typeof fetch;
+    const view = createGlobalSearchView(
+      { getDbId: () => "sample.db", getSchema: () => null },
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    const last = () => shown[shown.length - 1] as GlobalSearchProps;
+    expect([last().running, last().progress]).toEqual([false, null]);
+
+    view.setSearch("sample", { autoRun: true });
+    expect(last().running).toBe(true);
+    await waitFor(() => !last().running);
+    expect(
+      last().tables.map((table) => [
+        table.label,
+        table.hits.map((h) => h.column),
+      ]),
+    ).toEqual([
+      ["sample_table (2)", ["sample_column", "other_column"]],
+      ["other_table (1)", ["sample_column"]],
+    ]);
     view.dispose();
   });
 });

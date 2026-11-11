@@ -1,6 +1,9 @@
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../../core/api-url";
 import type { DbKind } from "../../core/database/types";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
+import { detachedElement } from "../ui/renderer";
 import {
   showAlertDialog,
   showConfirmDialog,
@@ -143,36 +146,253 @@ function text(language: "en" | "ja") {
       };
 }
 
-function field(
-  labelText: string,
-  input: HTMLInputElement | HTMLSelectElement,
-  required = false,
-  requiredLabel = "Required",
-): HTMLLabelElement {
-  const label = document.createElement("label");
-  label.className = "db-connection-field";
-  const caption = document.createElement("span");
-  caption.textContent = labelText;
-  if (required) {
-    const mark = document.createElement("span");
-    mark.className = "db-connection-required";
-    mark.textContent = "*";
-    mark.title = requiredLabel;
-    mark.setAttribute("aria-hidden", "true");
-    caption.append(" ", mark);
-    input.required = true;
-    input.setAttribute("aria-required", "true");
-  }
-  input.classList.add("gdp-dialog-input");
-  label.append(caption, input);
-  return label;
+type ConnectionLabels = ReturnType<typeof text>;
+type ConnectionKind = Exclude<DbKind, "sqlite">;
+type S3Provider = (typeof S3_PROVIDERS)[number];
+
+/** 文字を入れる欄 (並びは画面の上から)。種類とプロバイダは選ぶ欄。 */
+const INPUTS = [
+  "name",
+  "host",
+  "port",
+  "user",
+  "username",
+  "password",
+  "database",
+  "schema",
+  "accountId",
+  "databaseId",
+  "apiToken",
+  "endpoint",
+  "region",
+  "accessKeyId",
+  "secretAccessKey",
+  "sessionToken",
+  "tls",
+] as const;
+type InputKey = (typeof INPUTS)[number];
+type RowKey = InputKey | "kind" | "provider";
+
+const ROWS: readonly RowKey[] = [
+  "name",
+  "kind",
+  "host",
+  "port",
+  "user",
+  "username",
+  "password",
+  "database",
+  "schema",
+  "provider",
+  "accountId",
+  "databaseId",
+  "apiToken",
+  "endpoint",
+  "region",
+  "accessKeyId",
+  "secretAccessKey",
+  "sessionToken",
+  "tls",
+];
+
+const REQUIRED: ReadonlySet<RowKey> = new Set<RowKey>([
+  "name",
+  "kind",
+  "host",
+  "port",
+  "user",
+  "database",
+  "accountId",
+  "databaseId",
+  "apiToken",
+  "endpoint",
+  "region",
+  "accessKeyId",
+]);
+
+const INPUT_TYPE: Partial<Record<InputKey, string>> = {
+  port: "number",
+  password: "password",
+  apiToken: "password",
+  endpoint: "url",
+  secretAccessKey: "password",
+  sessionToken: "password",
+  tls: "checkbox",
+};
+
+const ROW_LABEL: Record<RowKey, keyof ConnectionLabels> = {
+  name: "name",
+  kind: "kind",
+  host: "host",
+  port: "port",
+  user: "user",
+  username: "username",
+  password: "password",
+  database: "database",
+  schema: "schema",
+  provider: "provider",
+  accountId: "accountId",
+  databaseId: "databaseId",
+  apiToken: "apiToken",
+  endpoint: "endpoint",
+  region: "region",
+  accessKeyId: "accessKeyId",
+  secretAccessKey: "secretAccessKey",
+  sessionToken: "sessionToken",
+  tls: "tls",
+};
+
+/** 種類ごとに隠す行。R2 はアカウント ID からエンドポイントを組み立て、
+ * リージョンは "auto" に固定するので、その 2 行は隠す。 */
+function hiddenRows(
+  value: ConnectionKind,
+  r2: boolean,
+): Record<RowKey, boolean> {
+  const sql = value === "postgresql" || value === "mysql";
+  const redis = value === "redis";
+  const http = value === "elasticsearch";
+  const aws = value === "s3" || value === "dynamodb";
+  const d1 = value === "d1";
+  return {
+    name: false,
+    kind: false,
+    host: !sql && !redis,
+    port: !sql && !redis,
+    user: !sql,
+    username: !redis && !http,
+    password: aws || d1,
+    database: !sql,
+    schema: value !== "postgresql",
+    provider: value !== "s3",
+    accountId: !d1 && !r2,
+    databaseId: !d1,
+    apiToken: !d1,
+    endpoint: (!http && !aws) || r2,
+    region: !aws || r2,
+    accessKeyId: !aws,
+    secretAccessKey: !aws,
+    sessionToken: !aws,
+    tls: !sql && !redis,
+  };
 }
 
-function input(type = "text"): HTMLInputElement {
-  const element = document.createElement("input");
-  element.type = type;
-  return element;
+/** 新しい接続で種類 (とプロバイダ) を選んだときに入れ直す既定の値。 */
+function defaultsFor(
+  value: ConnectionKind,
+  r2: boolean,
+): Partial<Record<"port" | "endpoint" | "region", string>> {
+  const ports: Partial<Record<ConnectionKind, number>> = {
+    postgresql: 5432,
+    mysql: 3306,
+    redis: 6379,
+  };
+  const http = value === "elasticsearch";
+  const aws = value === "s3" || value === "dynamodb";
+  return {
+    ...(ports[value] ? { port: String(ports[value]) } : {}),
+    ...(http || aws
+      ? {
+          endpoint: http ? "http://127.0.0.1:9200" : "http://127.0.0.1:4566",
+        }
+      : {}),
+    ...(aws ? { region: r2 ? R2_REGION : "us-east-1" } : {}),
+  };
 }
+
+type TestState = "error" | "loading" | "success";
+
+export type ConnectionFormProps = {
+  labels: ConnectionLabels;
+  kind: ConnectionKind;
+  provider: S3Provider;
+  /** 保存済みの接続を直すときは種類を変えられない。 */
+  kindLocked: boolean;
+  hidden: Record<RowKey, boolean>;
+  /** 欄の最初の値。欄の中身は欄が持つ (描き直しでは入れ直さない)。 */
+  initial: Record<Exclude<InputKey, "tls">, string> & { tls: boolean };
+  refs: Record<InputKey, Ref<HTMLInputElement>>;
+  test: { state: TestState | null; text: string; busy: boolean };
+  onKind: (value: string) => void;
+  onProvider: (value: string) => void;
+  /** 欄を変えた (前の接続テストの結果を消す)。 */
+  onEdited: () => void;
+  onTest: () => void;
+};
+
+export type ConnectionFormView = (props: ConnectionFormProps) => unknown;
+
+function connectionControl(p: ConnectionFormProps, key: RowKey): unknown {
+  const required = REQUIRED.has(key);
+  if (key === "kind")
+    return html`<select
+      class="gdp-dialog-input"
+      ?required=${required}
+      aria-required=${required ? "true" : nothing}
+      ?disabled=${p.kindLocked}
+      @change=${(event: Event) =>
+        p.onKind((event.currentTarget as HTMLSelectElement).value)}
+    >${KINDS.map(
+      (value) =>
+        html`<option value=${value} ?selected=${value === p.kind}>${value}</option>`,
+    )}</select>`;
+  if (key === "provider")
+    return html`<select
+      class="gdp-dialog-input"
+      @change=${(event: Event) =>
+        p.onProvider((event.currentTarget as HTMLSelectElement).value)}
+    >${S3_PROVIDERS.map(
+      (value) =>
+        html`<option value=${value} ?selected=${value === p.provider}>${
+          value === "r2" ? p.labels.providerR2 : p.labels.providerCustom
+        }</option>`,
+    )}</select>`;
+  const type = INPUT_TYPE[key] ?? "text";
+  return html`<input
+    class="gdp-dialog-input"
+    type=${type}
+    autocomplete=${type === "password" ? "new-password" : nothing}
+    ?required=${required}
+    aria-required=${required ? "true" : nothing}
+    .value=${key === "tls" ? nothing : p.initial[key]}
+    .checked=${key === "tls" ? p.initial.tls : nothing}
+    ${ref(p.refs[key])}
+  />`;
+}
+
+export const DEFAULT_VIEW: ConnectionFormView = (p) =>
+  html`<div
+    class="db-connection-form"
+    @input=${p.onEdited}
+    @change=${p.onEdited}
+  >${ROWS.map(
+    (key) =>
+      html`<label class="db-connection-field" ?hidden=${p.hidden[key]}
+        ><span>${p.labels[ROW_LABEL[key]]}${
+          REQUIRED.has(key)
+            ? html` <span
+                  class="db-connection-required"
+                  title=${p.labels.requiredField}
+                  aria-hidden="true"
+                  >*</span
+                >`
+            : nothing
+        }</span
+        >${connectionControl(p, key)}</label
+      >`,
+  )}<div class="db-connection-test-row"><button
+        type="button"
+        class="gdp-btn gdp-btn-sm db-connection-test-button"
+        ?disabled=${p.test.busy}
+        aria-busy=${p.test.busy ? "true" : nothing}
+        @click=${p.onTest}
+      >${p.labels.test}</button><span
+        class="db-connection-test-status"
+        aria-live="polite"
+        data-state=${p.test.state ?? nothing}
+        >${p.test.text}</span
+      ></div
+    ></div
+  >`;
 
 async function loadConnection(
   deps: ConnectionDialogDeps,
@@ -187,157 +407,102 @@ async function loadConnection(
 export async function showDatastoreConnectionDialog(
   deps: ConnectionDialogDeps,
   id?: string,
+  view: ConnectionFormView = DEFAULT_VIEW,
 ): Promise<string | null> {
   const labels = text(deps.language);
   const current = id ? await loadConnection(deps, id) : null;
   if (id && !current) throw new Error(labels.requestFailed);
 
-  const form = document.createElement("div");
-  form.className = "db-connection-form";
-  const name = input();
-  name.value = current?.name ?? "";
-  const kind = document.createElement("select");
-  for (const value of KINDS) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = value;
-    kind.appendChild(option);
-  }
-  kind.value = current?.kind ?? "postgresql";
-  kind.disabled = !!current;
-  const host = input();
-  host.value = current?.host ?? "127.0.0.1";
-  const port = input("number");
-  port.value = current?.port ? String(current.port) : "";
-  const user = input();
-  const username = input();
-  const password = input("password");
-  password.autocomplete = "new-password";
-  const database = input();
-  database.value = current?.database ?? "";
-  const schema = input();
-  schema.value = current?.schema ?? "";
-  const provider = document.createElement("select");
-  for (const value of S3_PROVIDERS) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent =
-      value === "r2" ? labels.providerR2 : labels.providerCustom;
-    provider.appendChild(option);
-  }
+  let kind: ConnectionKind = current?.kind ?? "postgresql";
   const currentR2AccountId = r2AccountIdFromEndpoint(current?.endpoint);
-  provider.value = currentR2AccountId ? "r2" : "custom";
-  const accountId = input();
-  accountId.value = current?.accountId ?? currentR2AccountId ?? "";
-  const databaseId = input();
-  databaseId.value = current?.databaseId ?? "";
-  const apiToken = input("password");
-  apiToken.autocomplete = "new-password";
-  const endpoint = input("url");
-  endpoint.value = current?.endpoint ?? "http://127.0.0.1:9200";
-  const region = input();
-  region.value = current?.region ?? "us-east-1";
-  const accessKeyId = input();
-  const secretAccessKey = input("password");
-  secretAccessKey.autocomplete = "new-password";
-  const sessionToken = input("password");
-  sessionToken.autocomplete = "new-password";
-  const tls = input("checkbox");
-  tls.checked = current?.tls ?? false;
-
-  const rows = {
-    name: field(labels.name, name, true, labels.requiredField),
-    kind: field(labels.kind, kind, true, labels.requiredField),
-    host: field(labels.host, host, true, labels.requiredField),
-    port: field(labels.port, port, true, labels.requiredField),
-    user: field(labels.user, user, true, labels.requiredField),
-    username: field(labels.username, username),
-    password: field(labels.password, password),
-    database: field(labels.database, database, true, labels.requiredField),
-    schema: field(labels.schema, schema),
-    provider: field(labels.provider, provider),
-    accountId: field(labels.accountId, accountId, true, labels.requiredField),
-    databaseId: field(
-      labels.databaseId,
-      databaseId,
-      true,
-      labels.requiredField,
-    ),
-    apiToken: field(labels.apiToken, apiToken, true, labels.requiredField),
-    endpoint: field(labels.endpoint, endpoint, true, labels.requiredField),
-    region: field(labels.region, region, true, labels.requiredField),
-    accessKeyId: field(
-      labels.accessKeyId,
-      accessKeyId,
-      true,
-      labels.requiredField,
-    ),
-    secretAccessKey: field(labels.secretAccessKey, secretAccessKey),
-    sessionToken: field(labels.sessionToken, sessionToken),
-    tls: field(labels.tls, tls),
+  let provider: S3Provider = currentR2AccountId ? "r2" : "custom";
+  const isR2 = () => kind === "s3" && provider === "r2";
+  const initial: ConnectionFormProps["initial"] = {
+    name: current?.name ?? "",
+    host: current?.host ?? "127.0.0.1",
+    port: current?.port ? String(current.port) : "",
+    user: "",
+    username: "",
+    password: "",
+    database: current?.database ?? "",
+    schema: current?.schema ?? "",
+    accountId: current?.accountId ?? currentR2AccountId ?? "",
+    databaseId: current?.databaseId ?? "",
+    apiToken: "",
+    endpoint: current?.endpoint ?? "http://127.0.0.1:9200",
+    region: current?.region ?? "us-east-1",
+    accessKeyId: "",
+    secretAccessKey: "",
+    sessionToken: "",
+    tls: current?.tls ?? false,
+    ...(current ? {} : defaultsFor(kind, isR2())),
   };
-  form.append(...Object.values(rows));
-
-  const isR2 = () => kind.value === "s3" && provider.value === "r2";
-
-  const syncKind = () => {
-    const value = kind.value;
-    const sql = value === "postgresql" || value === "mysql";
-    const redis = value === "redis";
-    const http = value === "elasticsearch";
-    const aws = value === "s3" || value === "dynamodb";
-    const d1 = value === "d1";
-    // R2 はアカウント ID からエンドポイントを組み立て、リージョンは "auto" に
-    // 固定するので、その 2 行は隠す。
-    const r2 = isR2();
-    rows.host.hidden = !sql && !redis;
-    rows.port.hidden = !sql && !redis;
-    rows.user.hidden = !sql;
-    rows.username.hidden = !redis && !http;
-    rows.password.hidden = aws || d1;
-    rows.database.hidden = !sql;
-    rows.schema.hidden = value !== "postgresql";
-    rows.provider.hidden = value !== "s3";
-    rows.accountId.hidden = !d1 && !r2;
-    rows.databaseId.hidden = !d1;
-    rows.apiToken.hidden = !d1;
-    rows.endpoint.hidden = (!http && !aws) || r2;
-    rows.region.hidden = !aws || r2;
-    rows.accessKeyId.hidden = !aws;
-    rows.secretAccessKey.hidden = !aws;
-    rows.sessionToken.hidden = !aws;
-    rows.tls.hidden = !sql && !redis;
-    const defaults: Record<string, number> = {
-      postgresql: 5432,
-      mysql: 3306,
-      redis: 6379,
-    };
-    if (!current && defaults[value]) port.value = String(defaults[value]);
-    if (!current && (http || aws)) {
-      endpoint.value =
-        value === "elasticsearch"
-          ? "http://127.0.0.1:9200"
-          : "http://127.0.0.1:4566";
-    }
-    if (!current && aws) region.value = r2 ? R2_REGION : "us-east-1";
+  const refs = Object.fromEntries(
+    INPUTS.map((key) => [key, createRef<HTMLInputElement>()]),
+  ) as Record<InputKey, Ref<HTMLInputElement>>;
+  const control = (key: InputKey): HTMLInputElement => {
+    const element = refs[key].value;
+    if (!element)
+      throw new Error(`connection dialog: the ${key} field was not drawn`);
+    return element;
   };
-  kind.addEventListener("change", syncKind);
-  provider.addEventListener("change", syncKind);
-  syncKind();
+  const fieldValue = (key: InputKey) => control(key).value;
+
+  let test: ConnectionFormProps["test"] = {
+    state: null,
+    text: "",
+    busy: false,
+  };
+  let testGeneration = 0;
+
+  // 種類・プロバイダを選び直したら、新しい接続ではその種類の既定の値を欄へ入れる。
+  const kindChanged = () => {
+    box.draw();
+    if (current) return;
+    for (const [key, value] of Object.entries(defaultsFor(kind, isR2())))
+      control(key as InputKey).value = value;
+  };
+
+  const box = detachedElement(() =>
+    view({
+      labels,
+      kind,
+      provider,
+      kindLocked: !!current,
+      hidden: hiddenRows(kind, isR2()),
+      initial,
+      refs,
+      test,
+      onKind: (value) => {
+        kind = value as ConnectionKind;
+        kindChanged();
+      },
+      onProvider: (value) => {
+        provider = value as S3Provider;
+        kindChanged();
+      },
+      onEdited: () => {
+        testGeneration++;
+        test = { ...test, state: null, text: "" };
+        box.draw();
+      },
+      onTest: runTest,
+    }),
+  );
 
   const validateConnection = (): string | null => {
-    const value = kind.value;
-    if (!name.value.trim()) return labels.required;
+    const value = kind;
+    if (!fieldValue("name").trim()) return labels.required;
     if (value === "postgresql" || value === "mysql" || value === "redis") {
-      const portValue = Number(port.value);
-      if (!host.value.trim()) return labels.required;
+      const portValue = Number(fieldValue("port"));
+      if (!fieldValue("host").trim()) return labels.required;
       if (!Number.isInteger(portValue) || portValue < 1 || portValue > 65535) {
         return labels.invalidPort;
       }
     }
     if (
       (value === "postgresql" || value === "mysql") &&
-      (!user.value.trim() || !database.value.trim())
+      (!fieldValue("user").trim() || !fieldValue("database").trim())
     ) {
       return labels.required;
     }
@@ -345,24 +510,27 @@ export async function showDatastoreConnectionDialog(
     // 同じく編集時も API トークンを入れ直してもらう。
     if (
       value === "d1" &&
-      (!accountId.value.trim() || !databaseId.value.trim() || !apiToken.value)
+      (!fieldValue("accountId").trim() ||
+        !fieldValue("databaseId").trim() ||
+        !fieldValue("apiToken"))
     ) {
       return labels.required;
     }
-    if (isR2() && !accountId.value.trim()) {
+    if (isR2() && !fieldValue("accountId").trim()) {
       return labels.required;
     }
     if (
       (value === "elasticsearch" ||
         (value === "s3" && !isR2()) ||
         value === "dynamodb") &&
-      !endpoint.value.trim()
+      !fieldValue("endpoint").trim()
     ) {
       return labels.required;
     }
     if (
       (value === "s3" || value === "dynamodb") &&
-      ((!isR2() && !region.value.trim()) || !accessKeyId.value.trim())
+      ((!isR2() && !fieldValue("region").trim()) ||
+        !fieldValue("accessKeyId").trim())
     ) {
       return labels.required;
     }
@@ -370,96 +538,73 @@ export async function showDatastoreConnectionDialog(
   };
 
   const buildPayload = (): Record<string, unknown> => {
-    const value = kind.value as Exclude<DbKind, "sqlite">;
+    const value = kind;
     const payload: Record<string, unknown> = {
       ...(current ? { id: current.id } : {}),
-      name: name.value.trim(),
+      name: fieldValue("name").trim(),
       kind: value,
     };
+    const password = fieldValue("password");
+    const username = fieldValue("username").trim();
     if (value === "postgresql" || value === "mysql") {
+      const user = fieldValue("user").trim();
       Object.assign(payload, {
-        host: host.value.trim(),
-        port: Number(port.value),
-        ...(user.value.trim() || !current ? { user: user.value.trim() } : {}),
-        database: database.value.trim(),
-        schema: schema.value.trim() || undefined,
-        tls: tls.checked,
-        ...(password.value || !current ? { password: password.value } : {}),
+        host: fieldValue("host").trim(),
+        port: Number(fieldValue("port")),
+        ...(user || !current ? { user } : {}),
+        database: fieldValue("database").trim(),
+        schema: fieldValue("schema").trim() || undefined,
+        tls: control("tls").checked,
+        ...(password || !current ? { password } : {}),
       });
     } else if (value === "redis") {
       Object.assign(payload, {
-        host: host.value.trim(),
-        port: Number(port.value),
-        ...(username.value.trim() || !current
-          ? { username: username.value.trim() || undefined }
-          : {}),
-        tls: tls.checked,
-        ...(password.value || !current ? { password: password.value } : {}),
+        host: fieldValue("host").trim(),
+        port: Number(fieldValue("port")),
+        ...(username || !current ? { username: username || undefined } : {}),
+        tls: control("tls").checked,
+        ...(password || !current ? { password } : {}),
       });
     } else if (value === "elasticsearch") {
       Object.assign(payload, {
-        endpoint: endpoint.value.trim(),
-        ...(username.value.trim() || !current
-          ? { username: username.value.trim() || undefined }
-          : {}),
-        ...(password.value || !current ? { password: password.value } : {}),
+        endpoint: fieldValue("endpoint").trim(),
+        ...(username || !current ? { username: username || undefined } : {}),
+        ...(password || !current ? { password } : {}),
       });
     } else if (value === "d1") {
       Object.assign(payload, {
-        accountId: accountId.value.trim(),
-        databaseId: databaseId.value.trim(),
-        apiToken: apiToken.value,
+        accountId: fieldValue("accountId").trim(),
+        databaseId: fieldValue("databaseId").trim(),
+        apiToken: fieldValue("apiToken"),
       });
     } else {
+      const accessKeyId = fieldValue("accessKeyId").trim();
+      const secretAccessKey = fieldValue("secretAccessKey");
+      const sessionToken = fieldValue("sessionToken");
       Object.assign(payload, {
         // R2 は kind "s3" のまま保存し、アカウント ID から組み立てた
         // エンドポイントと固定リージョンを入れる。
         endpoint: isR2()
-          ? r2EndpointFor(accountId.value.trim())
-          : endpoint.value.trim(),
-        region: isR2() ? R2_REGION : region.value.trim(),
-        ...(accessKeyId.value.trim() || !current
-          ? { accessKeyId: accessKeyId.value.trim() }
-          : {}),
-        ...(secretAccessKey.value || !current
-          ? { secretAccessKey: secretAccessKey.value }
-          : {}),
-        ...(sessionToken.value ? { sessionToken: sessionToken.value } : {}),
+          ? r2EndpointFor(fieldValue("accountId").trim())
+          : fieldValue("endpoint").trim(),
+        region: isR2() ? R2_REGION : fieldValue("region").trim(),
+        ...(accessKeyId || !current ? { accessKeyId } : {}),
+        ...(secretAccessKey || !current ? { secretAccessKey } : {}),
+        ...(sessionToken ? { sessionToken } : {}),
       });
     }
     return payload;
   };
 
-  const testRow = document.createElement("div");
-  testRow.className = "db-connection-test-row";
-  const testButton = document.createElement("button");
-  testButton.type = "button";
-  testButton.className = "gdp-btn gdp-btn-sm db-connection-test-button";
-  testButton.textContent = labels.test;
-  const testStatus = document.createElement("span");
-  testStatus.className = "db-connection-test-status";
-  testStatus.setAttribute("aria-live", "polite");
-  testRow.append(testButton, testStatus);
-  form.appendChild(testRow);
-  let testGeneration = 0;
-  const invalidateTestResult = () => {
-    testGeneration++;
-    testStatus.textContent = "";
-    delete testStatus.dataset.state;
-  };
-  form.addEventListener("input", invalidateTestResult);
-  form.addEventListener("change", invalidateTestResult);
-  testButton.addEventListener("click", () => {
+  function runTest(): void {
     const validationError = validateConnection();
     if (validationError) {
-      testStatus.dataset.state = "error";
-      testStatus.textContent = validationError;
+      test = { ...test, state: "error", text: validationError };
+      box.draw();
       return;
     }
-    testButton.disabled = true;
-    testButton.setAttribute("aria-busy", "true");
-    testStatus.dataset.state = "loading";
-    testStatus.textContent = labels.testing;
+    test = { state: "loading", text: labels.testing, busy: true };
+    box.draw();
     const generation = ++testGeneration;
     void deps
       .trackLoad(
@@ -475,30 +620,28 @@ export async function showDatastoreConnectionDialog(
       .then(async (response) => {
         if (generation !== testGeneration) return;
         await requireOkResponse(response, labels.testFailed);
-        testStatus.dataset.state = "success";
-        testStatus.textContent = labels.testSucceeded;
+        test = { ...test, state: "success", text: labels.testSucceeded };
       })
       .catch((err) => {
         if (generation !== testGeneration) return;
         // 入力の中身 (資格情報を含む) は console に出さない。種類だけを添える。
         console.error(
           "[code-viewer] datastore connection test failed",
-          kind.value,
+          kind,
           err,
         );
-        testStatus.dataset.state = "error";
-        testStatus.textContent = formatErrorDetail(err);
+        test = { ...test, state: "error", text: formatErrorDetail(err) };
       })
       .finally(() => {
-        testButton.disabled = false;
-        testButton.removeAttribute("aria-busy");
+        test = { ...test, busy: false };
+        box.draw();
       });
-  });
+  }
 
   return showFormDialog({
     title: current ? labels.titleEdit : labels.titleAdd,
-    body: form,
-    focusTarget: name,
+    body: box.element,
+    focusTarget: control("name"),
     submitLabel: labels.save,
     cancelLabel: labels.cancel,
     validate: validateConnection,
