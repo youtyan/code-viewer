@@ -7,9 +7,10 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { clickDialogConfirm, closeOpenDialog } from "./_dialog-helpers";
 import { q, waitFor } from "./_test-helpers";
 
-const { createElasticsearchExplorer } = await import(
+const { createElasticsearchExplorer, DEFAULT_VIEW } = await import(
   "../views/database/elasticsearch-explorer"
 );
+type EsLook = typeof DEFAULT_VIEW;
 const { dbText } = await import("../views/database/i18n");
 
 const tick = () => new Promise((r) => setTimeout(r, 20));
@@ -439,6 +440,60 @@ describe("elasticsearch explorer edit UI", () => {
     expect(create?.seqNo).toBeUndefined();
     // 新規作成は op:"create" を送り、サーバ側で _create により既存 id を弾く。
     expect(create?.op).toBe("create");
+    view.dispose();
+  });
+});
+
+describe("the Elasticsearch explorer presenter", () => {
+  test("passes indices, docs and the selected document to the view", async () => {
+    installFetch();
+    const sidebars: Parameters<EsLook["sidebar"]>[0][] = [];
+    const mains: Parameters<EsLook["main"]>[0][] = [];
+    const docs: Parameters<EsLook["doc"]>[0][] = [];
+    const view = createElasticsearchExplorer(
+      { getText: () => dbText("en") },
+      {
+        ...DEFAULT_VIEW,
+        sidebar: (props) => {
+          sidebars.push(props);
+          return DEFAULT_VIEW.sidebar(props);
+        },
+        main: (props) => {
+          mains.push(props);
+          return DEFAULT_VIEW.main(props);
+        },
+        doc: (props) => {
+          docs.push(props);
+          return DEFAULT_VIEW.doc(props);
+        },
+      },
+    );
+    document.body.append(view.sidebarSlot, view.el);
+    const last = <T>(list: T[]) => list[list.length - 1] as T;
+    await view.load("docker:es", { index: "my-index" });
+    await waitFor(() => {
+      const pane = last(mains).docs;
+      return pane !== null && "hits" in pane;
+    });
+    expect([
+      last(sidebars).activeIndex,
+      last(mains).newDocShown,
+      last(docs).pane,
+    ]).toEqual(["my-index", true, "empty"]);
+
+    last(mains).onSelectDoc("d1");
+    await waitFor(() => {
+      const pane = last(docs).pane;
+      return typeof pane === "object" && "doc" in pane;
+    });
+    expect([last(mains).activeDoc, last(docs).sourceText]).toEqual([
+      "d1",
+      JSON.stringify({ a: 1 }, null, 2),
+    ]);
+
+    last(docs).onEdit();
+    const editing = last(docs).pane;
+    expect(typeof editing === "object" && "edit" in editing).toBe(true);
     view.dispose();
   });
 });

@@ -141,6 +141,7 @@ const DECLARATIVE = [
   "web-src/views/database/er-diagram.ts",
   "web-src/views/database/query-history-view.ts",
   "web-src/views/database/schema-view.ts",
+  "web-src/views/database/elasticsearch-explorer.ts",
 ];
 
 /**
@@ -161,7 +162,7 @@ const EXCEPTIONS: Record<string, { count: number; reason: string }> = {
 };
 
 /** まだ書き直していない所も含めた、命令的な組み立ての数の上限。書き直したら下げる。 */
-const IMPERATIVE_LIMIT = 791;
+const IMPERATIVE_LIMIT = 742;
 
 function imperativeCount(file: string): number {
   return [...readFileSync(file, "utf8").matchAll(IMPERATIVE_DOM)].length;
