@@ -2,7 +2,12 @@ import "./_dom";
 import { afterEach, describe, expect, test } from "vitest";
 import type { GrepResponse } from "../core/types";
 import { searchPaletteText } from "../views/search-palette-i18n";
-import { createSearchResultsView } from "../views/search-results-view";
+import {
+  createSearchResultsView,
+  DEFAULT_VIEW,
+  type SearchResultsProps,
+  type SearchResultsView,
+} from "../views/search-results-view";
 import { q, waitFor } from "./_test-helpers";
 
 afterEach(() => {
@@ -16,6 +21,8 @@ function setup(
     language?: () => "en" | "ja";
     /** 今のサーバの世代 (応答は 1)。1 より大きいと、応答は古い。 */
     serverGeneration?: () => number;
+    /** 描き方を差し替える (presenter のテスト)。 */
+    view?: SearchResultsView;
   } = {},
 ) {
   document.body.innerHTML =
@@ -56,30 +63,33 @@ function setup(
       );
     },
   });
-  const view = createSearchResultsView({
-    $: (sel) => document.querySelector(sel),
-    trackLoad: (promise) => promise,
-    getLanguage: options.language ?? (() => "en"),
-    appendScopeParams: () => undefined,
-    getRef: () => "worktree",
-    getServerGeneration: options.serverGeneration ?? (() => 1),
-    isAbortError: () => false,
-    getGrepRegex: () => regex,
-    getGrepCaseSensitive: () => false,
-    getGrepWholeWord: () => false,
-    getGrepHideTests: () => false,
-    persistGrepSettings: async (patch) => {
-      patches.push(patch);
-      if (patch.grepRegex !== undefined) regex = patch.grepRegex;
+  const view = createSearchResultsView(
+    {
+      $: (sel) => document.querySelector(sel),
+      trackLoad: (promise) => promise,
+      getLanguage: options.language ?? (() => "en"),
+      appendScopeParams: () => undefined,
+      getRef: () => "worktree",
+      getServerGeneration: options.serverGeneration ?? (() => 1),
+      isAbortError: () => false,
+      getGrepRegex: () => regex,
+      getGrepCaseSensitive: () => false,
+      getGrepWholeWord: () => false,
+      getGrepHideTests: () => false,
+      persistGrepSettings: async (patch) => {
+        patches.push(patch);
+        if (patch.grepRegex !== undefined) regex = patch.grepRegex;
+      },
+      openMatch: (match, intent) => {
+        opened.push(match);
+        intents.push(intent);
+      },
+      onQueryChange: (query) => {
+        queries.push(query);
+      },
     },
-    openMatch: (match, intent) => {
-      opened.push(match);
-      intents.push(intent);
-    },
-    onQueryChange: (query) => {
-      queries.push(query);
-    },
-  });
+    options.view,
+  );
   return { view, urls, opened, intents, patches, queries };
 }
 
@@ -315,5 +325,36 @@ describe("when the repository changes while searching", () => {
           searchPaletteText("en").repositoryChanged,
         ),
     );
+  });
+});
+
+// 検索の結果の画面 (views/search-results-view.ts) の presenter。描き方を記録する
+// view に差し替え、view に渡す値と、行と切り替えを押したときの呼び出しを見る。
+describe("the search results presenter", () => {
+  test("gives the view the hits grouped by file, and pressing a row opens it", async () => {
+    const shown: SearchResultsProps[] = [];
+    const { view, opened, patches } = setup({
+      view: (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    });
+    view.open("needle");
+    await waitFor(() => (shown[shown.length - 1]?.groups.length ?? 0) === 2);
+    const last = () => shown[shown.length - 1];
+    expect(
+      last()?.groups.map((group) => [group.path, group.rows.length]),
+    ).toEqual([
+      ["src/a.ts", 2],
+      ["lib/b.ts", 1],
+    ]);
+    last()?.groups[0]?.rows[0]?.onOpen(new MouseEvent("click", { button: 0 }));
+    expect([opened, last()?.groups[0]?.rows[0]?.selected]).toEqual([
+      [{ path: "src/a.ts", line: 3, hl: "needle" }],
+      true,
+    ]);
+    last()?.toggles[1]?.onToggle();
+    await waitFor(() => patches.length === 1);
+    expect(patches).toEqual([{ grepRegex: true }]);
   });
 });

@@ -1,7 +1,13 @@
 import "./_dom";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { TerminalImageRef } from "../core/terminal-images";
-import { createImageTabView, type ImageTabHandle } from "../views/image-tab";
+import {
+  createImageTabView,
+  DEFAULT_VIEW,
+  type ImageTabHandle,
+  type ImageTabProps,
+  type ImageTabView,
+} from "../views/image-tab";
 import { contrastRatio } from "./_color-contrast";
 import { themeVariants } from "./_color-themes";
 import {
@@ -61,16 +67,21 @@ function createView(options?: {
   openPath?: (path: string) => Promise<void>;
   close?: () => void;
   language?: "en" | "ja";
+  /** 描き方を差し替える (presenter のテスト)。 */
+  view?: ImageTabView;
 }): ImageTabHandle {
-  const view = createImageTabView({
-    image: options?.image ?? FIRST,
-    images: options?.images,
-    imageUrlFor: (image) => image.url,
-    copyPath: options?.copyPath ?? (() => Promise.resolve()),
-    openPath: options?.openPath ?? (() => Promise.resolve()),
-    close: options?.close ?? (() => undefined),
-    language: options?.language ?? "en",
-  });
+  const view = createImageTabView(
+    {
+      image: options?.image ?? FIRST,
+      images: options?.images,
+      imageUrlFor: (image) => image.url,
+      copyPath: options?.copyPath ?? (() => Promise.resolve()),
+      openPath: options?.openPath ?? (() => Promise.resolve()),
+      close: options?.close ?? (() => undefined),
+      language: options?.language ?? "en",
+    },
+    options?.view,
+  );
   handles.push(view);
   document.body.append(view.el);
   return view;
@@ -601,4 +612,39 @@ describe("image tab close look", () => {
       );
     },
   );
+});
+
+// 画像のタブ (views/image-tab.ts) の presenter。描き方を記録する view に差し替え、
+// 読み込みの前後に view に渡す値と、前後へ送る・閉じるの呼び出しを見る。
+describe("the image tab presenter", () => {
+  test("gives the view the loading state, then the size, and moves through the gallery", () => {
+    const shown: ImageTabProps[] = [];
+    const closed: string[] = [];
+    const tab = createView({
+      images: [FIRST, SECOND],
+      close: () => closed.push("close"),
+      view: (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    });
+    const last = () => shown[shown.length - 1];
+    expect([
+      last()?.status?.kind,
+      last()?.dimensions,
+      last()?.zoom.in.disabled,
+      last()?.previous.disabled,
+    ]).toEqual(["loading", "—×—", true, false]);
+    loadImage(tab);
+    expect([
+      last()?.status,
+      last()?.dimensions,
+      last()?.zoom.in.disabled,
+      last()?.fit.pressed,
+    ]).toEqual([null, "1600×1000", false, true]);
+    last()?.next.onClick();
+    expect(last()?.path).toBe(SECOND.path);
+    last()?.close.onClick();
+    expect(closed).toEqual(["close"]);
+  });
 });
