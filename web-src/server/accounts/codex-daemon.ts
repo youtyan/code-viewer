@@ -18,6 +18,11 @@ import { agentCommandArgv } from "./launch";
 export const CODEX_NO_DAEMON_ARG = "--no-daemon";
 /** --help の答えを覚えておく間。 */
 export const CODEX_HELP_CACHE_MS = 10 * 60_000;
+/**
+ * --help を待つ上限。起動コマンドがラッパーで、--help で終わらない (そのまま
+ * 対話を始める) と、起動の要求ごと止まる (砂場の偽の codex で実際に止まった)。
+ */
+export const CODEX_HELP_TIMEOUT_MS = 5_000;
 
 /** codex の --help の文字から、--no-daemon を知っている版か。 */
 export function codexKnowsNoDaemon(help: string): boolean {
@@ -39,7 +44,7 @@ export async function codexDaemonArgs(
   command: string,
   cwd: string,
   deps: CodexDaemonDeps = {
-    run: (argv, at) => runAsync(argv, at),
+    run: (argv, at) => runAsync(argv, at, { timeout: CODEX_HELP_TIMEOUT_MS }),
     now: Date.now,
   },
 ): Promise<string[]> {
@@ -60,6 +65,8 @@ export async function codexDaemonArgs(
     console.error(
       `[code-viewer] ${command} --help failed (exit ${result.code}); starting it without ${CODEX_NO_DAEMON_ARG}\n${formatErrorDetail(result.failure ?? result.stderr)}`,
     );
+    // 答えない・失敗するコマンドを起動のたびに待たない (覚えておく間だけ)。
+    known.set(command, { knows: false, at: deps.now() });
     return [];
   }
   const knows = codexKnowsNoDaemon(result.stdout);

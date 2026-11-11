@@ -84,4 +84,12 @@ describe("codexDaemonArgs", () => {
       "--help failed (exit 2)",
     );
   });
+
+  test("a --help that never answers is not waited for again on the next launch", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { runs, deps: d } = deps(HELP_WITH, 1);
+    await codexDaemonArgs("codex", "/repo", d);
+    expect(await codexDaemonArgs("codex", "/repo", d)).toEqual([]);
+    expect(runs).toHaveLength(1);
+  });
 });
