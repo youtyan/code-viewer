@@ -229,13 +229,50 @@ export const DEFAULT_WORKTREE_OMIT_DIR_NAMES = [
 // 巻き込んで無期限に固まらないよう上限を設ける。
 const GIT_COMMAND_TIMEOUT_MS = 20_000;
 
+// 読むだけの git に .git/index を書かせない。書き直しの間 git は index.lock を
+// 持つので、数秒おきの読み取りが、同じ作業ツリーでエージェントや利用者が打つ
+// git add / git commit と鉢合わせると、向こうが「index.lock がある」で失敗する。
+// - GIT_OPTIONAL_LOCKS=0 は status の index の書き直しを止める
+// - diff の書き直し (diff.autoRefreshIndex) は上の変数では止まらない
+//   (git 2.56 で確かめた) ので設定でも切る
+// - fsmonitor の応答も index に書かれるので切る
+// 書く git (worktree の追加・削除など) にはこの形を当てない。
+const READ_ONLY_GIT_CONFIG = [
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "diff.autoRefreshIndex=false",
+];
+const WRITING_WORKTREE_COMMANDS = new Set(["add", "remove", "unlock", "prune"]);
+
+function writesRepository(args: string[]): boolean {
+  return args[1] === "worktree" && WRITING_WORKTREE_COMMANDS.has(args[2] ?? "");
+}
+
+/** git を起こす引数と環境。読むだけの git には index を書かせない形にする。 */
+export function gitInvocation(
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+): { args: string[]; env?: NodeJS.ProcessEnv } {
+  const resolved = resolveGitArgs(args);
+  if (args[0] !== "git" || writesRepository(args)) {
+    return env ? { args: resolved, env } : { args: resolved };
+  }
+  return {
+    args: [resolved[0] ?? "git", ...READ_ONLY_GIT_CONFIG, ...resolved.slice(1)],
+    env: { ...(env ?? process.env), GIT_OPTIONAL_LOCKS: "0" },
+  };
+}
+
 function run(
   args: string[],
   cwd: string,
   options: Pick<RunOptions, "env"> = {},
 ): { code: number; stdout: string; stderr: string } {
-  return runSync(resolveGitArgs(args), cwd, {
+  const invocation = gitInvocation(args, options.env);
+  return runSync(invocation.args, cwd, {
     ...options,
+    env: invocation.env,
     timeout: GIT_COMMAND_TIMEOUT_MS,
   });
 }
@@ -245,8 +282,10 @@ function runGitAsync(
   cwd: string,
   options: Pick<RunAsyncOptions, "env" | "signal" | "stdin" | "timeout"> = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
-  return runAsync(resolveGitArgs(args), cwd, {
+  const invocation = gitInvocation(args, options.env);
+  return runAsync(invocation.args, cwd, {
     ...options,
+    env: invocation.env,
     timeout: options.timeout ?? GIT_COMMAND_TIMEOUT_MS,
   });
 }
@@ -255,7 +294,9 @@ function runGitBytesAsync(
   args: string[],
   cwd: string,
 ): Promise<{ code: number; stdout: Uint8Array; stderr: string }> {
-  return runBytesAsync(resolveGitArgs(args), cwd, {
+  const invocation = gitInvocation(args);
+  return runBytesAsync(invocation.args, cwd, {
+    env: invocation.env,
     timeout: GIT_COMMAND_TIMEOUT_MS,
   });
 }
@@ -1017,6 +1058,7 @@ export async function headCommitAsync(
 }
 
 /** 空の木。ハッシュの形 (sha1 / sha256) はリポジトリに合わせて git に作らせる。 */
+// ai-dup-check: allow -- fp:git を 1 回呼んで結果を返す形が似ているだけで、コマンドも失敗の意味も別
 export async function emptyTreeAsync(
   cwd: string,
 ): Promise<{ ok: true; tree: string } | { ok: false; error: string }> {

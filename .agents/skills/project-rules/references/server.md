@@ -252,6 +252,12 @@ grep -rlnP '[\x00-\x08\x0b\x0c\x0e-\x1f]' web-src/ --include=*.ts
 - 戻り値は状態型（`ok` / `missing` / `no-server` / `no-target` / `error`）。
   **握り潰さず、状態ごとに UI の出し分けを決める**
 - git は `server/git.ts` の関数経由。docker は `server/database/adapters/docker*.ts` 経由
+- **読むだけの git に `.git/index` を書かせない。** `git.ts` の `gitInvocation` が読み取りに
+  `GIT_OPTIONAL_LOCKS=0` と `-c core.fsmonitor=false -c diff.autoRefreshIndex=false` を足す
+  (書き直しの間 git は `index.lock` を持ち、数秒おきの読み取りがエージェントの
+  `git add` / `git commit` を失敗させうる。`GIT_OPTIONAL_LOCKS` だけでは diff の書き直しが
+  止まらない)。書く git を足すなら `writesRepository` に載せる。テストは
+  `git-read-only-index.test.ts`
 - **子プロセスは `server/runtime.ts` の `spawnProcess` / `runSync` / `runAsync` / `spawnStream` だけで
   起こす**（`biome.jsonc` の `noRestrictedImports` が `node:child_process` を塞ぐ）。ここで detached に
   して端末を持たせない。持たせると対話シェル（`$SHELL -i -c`）が端末の前面を奪ったまま終わり、
