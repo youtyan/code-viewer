@@ -1406,11 +1406,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         void refresh();
       }),
     );
-    head.appendChild(
-      headButton(t.add, t.addTitle, () => {
-        void addWorktree();
-      }),
-    );
+    // 作業ツリーを足すのはこの画面の主の操作 (ボタンの種類の主)。
+    const add = headButton(t.add, t.addTitle, () => {
+      void addWorktree();
+    });
+    add.classList.add("worktree-head-add");
+    head.appendChild(add);
     listPanel.appendChild(head);
 
     worktreeFilterInput.placeholder = t.panes.filterWorktrees;

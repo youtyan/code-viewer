@@ -623,6 +623,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       agentRulesGuideExample,
     );
     agentRulesReset.type = "button";
+    agentRulesReset.className = "gdp-btn";
     agentRulesReset.id = "agent-screen-rules-reset";
     const agentRuleActions = document.createElement("div");
     agentRuleActions.className = "scope-settings-actions";
@@ -649,6 +650,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
 
     resetButton.id = "scope-omit-reset";
     resetButton.type = "button";
+    resetButton.className = "gdp-btn";
     saveButton.id = "scope-settings-save";
     saveButton.type = "button";
     saveButton.className = "scope-settings-primary-action";

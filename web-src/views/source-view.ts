@@ -1753,12 +1753,15 @@ export function createSourceView(deps: SourceViewDeps) {
     count.className = "gdp-source-virtual-search-count";
     const previous = document.createElement("button");
     previous.type = "button";
+    previous.className = "gdp-btn gdp-btn-sm";
     previous.textContent = text.findPrev;
     const next = document.createElement("button");
     next.type = "button";
+    next.className = "gdp-btn gdp-btn-sm";
     next.textContent = text.findNext;
     const close = document.createElement("button");
     close.type = "button";
+    close.className = "gdp-btn gdp-btn-sm";
     close.textContent = text.findClose;
     bar.append(input, count, previous, next, close);
     wrap.querySelector(".gdp-source-virtual-info")?.appendChild(bar);

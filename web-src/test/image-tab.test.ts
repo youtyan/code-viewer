@@ -582,31 +582,38 @@ describe("image tab close", () => {
 });
 
 describe("image tab close look", () => {
+  // 色はボタンの種類の節が決める (style.css の「ボタンの種類」)。閉じるは枠線、
+  // ほかの道具のボタンはアイコン。それぞれの種類の休んでいるときの規則を読む
+  // (hover・押されている間・無効の規則は除く)。
   const rules = baseRules(loadStyleSheet());
-  const plain = cascadedDeclarations(rules, (s) => s === ".image-tab-button");
-  const close = cascadedDeclarations(
-    rules,
-    (s) => s === ".image-tab-button.image-tab-close",
-  );
+  const restingKind = (member: string) =>
+    cascadedDeclarations(
+      rules,
+      (s) =>
+        s.startsWith(":is(button, a):is(") &&
+        s.includes(member) &&
+        !/:hover|:disabled|aria-pressed|\.active\)/.test(s),
+    );
+  const plain = restingKind(".image-tab-button:not(:where(.image-tab-close))");
+  const close = restingKind(".image-tab-close,");
   const toolbar = cascadedDeclarations(
     rules,
     (s) => s === ".image-tab-toolbar",
   );
 
-  // 枠の色だけを比べる (ほかのボタンの枠は border の一括指定の最後の語)。
+  // 枠の色だけを比べる (枠は border の一括指定の最後の語。透明の枠は地と同じ)。
   // 全部のテーマ × 明暗。
   test.each(themeVariants(rules))(
     "the close border stands out more than the other buttons' ($name)",
     ({ vars }) => {
       const ground = resolveVar(toolbar.get("background") ?? "", vars);
-      const plainBorder = resolveVar(
-        (plain.get("border") ?? "").split(" ").pop() ?? "",
-        vars,
-      );
-      const closeBorder = resolveVar(close.get("border-color") ?? "", vars);
+      const edge = (declarations: Map<string, string>) => {
+        const last = (declarations.get("border") ?? "").split(" ").pop() ?? "";
+        return last === "transparent" ? ground : resolveVar(last, vars);
+      };
 
-      expect(contrastRatio(closeBorder, ground)).toBeGreaterThan(
-        contrastRatio(plainBorder, ground),
+      expect(contrastRatio(edge(close), ground)).toBeGreaterThan(
+        contrastRatio(edge(plain), ground),
       );
     },
   );

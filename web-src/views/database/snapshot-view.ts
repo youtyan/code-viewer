@@ -192,10 +192,12 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
   const selectAllBtn = document.createElement("button");
   selectAllBtn.type = "button";
+  selectAllBtn.className = "db-btn db-btn-sm";
   selectAllBtn.textContent = text().snapshot.selectAll;
 
   const deselectAllBtn = document.createElement("button");
   deselectAllBtn.type = "button";
+  deselectAllBtn.className = "db-btn db-btn-sm";
   deselectAllBtn.textContent = text().snapshot.deselectAll;
 
   selectActions.append(selectAllBtn, deselectAllBtn);
@@ -724,10 +726,12 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       actions.className = "db-snapshot-actions";
       const noteBtn = document.createElement("button");
       noteBtn.type = "button";
+      noteBtn.className = "db-btn db-btn-sm";
       noteBtn.textContent = text().snapshot.editNote;
       noteBtn.addEventListener("click", () => editNote(snap.id, snap.note));
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
+      deleteBtn.className = "db-btn db-btn-sm";
       deleteBtn.textContent = text().snapshot.delete;
       deleteBtn.addEventListener("click", () => {
         if (deleteBtn.dataset.confirm !== "1") {

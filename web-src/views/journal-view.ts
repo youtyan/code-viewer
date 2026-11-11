@@ -830,6 +830,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     });
     const newButton = document.createElement("button");
     newButton.type = "button";
+    newButton.className = "gdp-btn gdp-btn-sm";
     newButton.innerHTML = `${iconSvg("octicon-plus", PLUS_16_PATH)}<span>${text().new}</span>`;
     newButton.addEventListener("click", () => {
       selectedEntryId = "";
@@ -2012,6 +2013,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     titleText.textContent = task ? text().taskHeading : text().newTaskHeading;
     const newTask = document.createElement("button");
     newTask.type = "button";
+    newTask.className = "gdp-btn gdp-btn-sm";
     newTask.innerHTML = `${iconSvg("octicon-plus", PLUS_16_PATH)}<span>${text().new}</span>`;
     newTask.addEventListener("click", () => {
       selectedTaskId = "";
@@ -2086,6 +2088,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     ] as const) {
       const button = document.createElement("button");
       button.type = "button";
+      button.className = "journal-toolbar-action";
       button.textContent = spec[0];
       button.addEventListener("click", () =>
         insertMarkdown(body, spec[1], spec[2]),

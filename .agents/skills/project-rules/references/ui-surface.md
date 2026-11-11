@@ -45,12 +45,27 @@
 
 | 種類 | 使う所 | 見た目 |
 |---|---|---|
-| 主 | その画面でいちばん勧める操作 1 つ (起動・ダイアログの確定・保存)。1 画面に 1 つ | 強調色の面に `--color-on-accent`。危険な確定だけは `gdp-dialog-danger` で状態の色 |
-| 枠線 | 既定。ふつうの操作と、ダイアログの取り消し | 地なし・`--color-line-strong` の縁・強調色の文字 |
-| 文字だけ | 枠線では騒がしい所 (見出しの横の「すべて更新」など) | 地も縁もなし・強調色の文字 |
-| アイコン | 帯の上の、場所を取らない操作 | 地なし・絵は `--color-text-2`、hover で `--color-raised` の面と本文の色。状態の印 (`.copied` `.failed` `.warn`) の色は hover でも残す |
+| 主 | その画面でいちばん勧める操作 1 つ (起動・ダイアログの確定・保存・問い合わせの実行・作業ツリーの追加)。1 画面に 1 つ | 強調色の面に `--color-on-accent`。危険な確定だけは `gdp-dialog-danger` で状態の色 |
+| 薄塗り | 主の次に勧める、取り消しでない操作 (差分の行を広げる `gdp-expand-btn`・注釈の次へ `gdp-annotation-step`) と、押されている間の枠線・アイコン (`[aria-pressed="true"]`・`.active`) | 面 `--color-info-surface`・文字 `--color-on-info-surface`・縁は透明。hover は面を一段濃く |
+| 枠線 | 既定。ふつうの操作と、ダイアログの取り消し | 地なし・`--color-line-strong` の縁・強調色の文字。消す操作は文字だけ `--color-failed` (`journal-danger-action` など、節の「危険な操作」の並び) |
+| 小 | 行の中・帯の中に置く小さな操作 (`gdp-btn-sm`・`db-btn-sm`・Data の履歴の行の操作) | 色は枠線と同じ。文字は `--ui-font-sm`、高さと余白は部品の規則が T0 の名前 (`--ui-control-sm`・`--space-*`) で持つ |
+| 文字だけ | 枠線では騒がしい所 (見出しの横の「すべて更新」・一覧の末尾の「続きを読む」・次の未読へ) | 地も縁もなし・強調色の文字 |
+| アイコン | 帯の上の、場所を取らない操作 (閉じる・コピー・再読み込み・道具の列) | 地なし・絵は `--color-text-2`、hover で `--color-raised` の面と本文の色。状態の印 (`.copied` `.failed` `.warn` `.opened` `[data-copied]`) の色は hover でも残す |
 
-主と枠線と文字だけの hover は案内の面 (`--color-info-surface`)。無効は `--color-disabled` (主は面も)。
+主・枠線・文字だけの hover は案内の面 (`--color-info-surface`)。無効は `--color-disabled` (主と薄塗りは面も
+`--color-disabled-surface`)。`opacity` で薄めない。
+
+- **2 つの種類のクラスを持つボタンは、節の後ろの種類になる** (並びは 枠線・小 → 文字だけ → アイコン → 薄塗り → 主)。
+  `.gdp-btn.gdp-view-file` はアイコン、`.db-btn.db-btn-icon` はアイコン、`.gdp-btn-sm.worktree-head-add` は主
+- **クラスの無い `<button>` を親の規則 (`.x button`) で塗らない。** 種類のクラスを TS で付ける
+  (作業記録の「新規」・スナップショットの操作・ソースの検索の帯は `gdp-btn gdp-btn-sm` / `db-btn db-btn-sm`)。
+  親の規則のボタン向けの色は、同じ親の中の別の種類のボタン (保存の主など) にも当たっていた
+- **タブ・切替の規則は、そのタブのボタンだけに当てる** (`.gdp-source-tabs button:where([data-source-tab])`)。
+  `.x button` で書くと、同じ列に置いた「Go」やコピーのボタンがタブの色と寸法になっていた
+- タブ・切替 (`.seg`)・絞り込みの札・ツリーやメニューの行・パンくず・選ぶ欄・電話の節の部品は種類に
+  しない (行や札の面で選択を示す)
+- happy-dom は `:is(` の中の改行と `color-mix()` を読めない。節の並びは 1 行に書き、薄塗りの検査は
+  `button-variants.test.ts` が名前を計算できる色に差し替えて見る
 
 `alert` / `confirm` / `prompt` は `biome.jsonc` が **error で落とす**ので、そもそも書けない。
 `views/ui-dialog.ts` を使う。
