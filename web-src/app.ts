@@ -10322,6 +10322,10 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   AGENTS_VIEW = createAgentsPresenter({
     projects: PROJECT_ACTIONS,
+    boardOrder: {
+      get: () => APP_SETTINGS.agentsBoardOrder ?? null,
+      set: (order) => void patchSettings({ agentsBoardOrder: order }),
+    },
     monitor: AGENT_MONITOR,
     getText: () => agentsText(STATE.language),
     setPageMode,

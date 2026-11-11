@@ -111,6 +111,11 @@ export type AgentsViewDeps = {
   projects: ProjectActions;
   /** 行に載せたときの覗き窓 (既定は左のサイドバーと共有の 1 つ)。 */
   preview?: PanePreview;
+  /**
+   * 選んだ並びを覚える所 (ユーザー単位の設定 `agentsBoardOrder`)。無ければ
+   * この画面のメモリだけ。
+   */
+  boardOrder?: { get(): BoardOrder | null; set(order: BoardOrder): void };
 };
 
 export type AgentsView = PageView;
@@ -125,8 +130,13 @@ export function createAgentsPresenter(
   let mounted = false;
   let stateFilter: AgentStateFilter = "all";
   let allPanes = false;
-  /** 並び (プロジェクトの畳みと同じくメモリだけ)。 */
-  let order: BoardOrder = "project";
+  /**
+   * この画面で選んだ並び。選ぶまでは覚えた並び (deps.boardOrder)、それも無ければ
+   * プロジェクトごと。設定は読み込みが後から届くので、選ぶまでは毎回読む。
+   */
+  let chosenOrder: BoardOrder | null = null;
+  const currentOrder = (): BoardOrder =>
+    chosenOrder ?? deps.boardOrder?.get() ?? "project";
   /**
    * 上に留めたペイン (全体ボードだけ。左のサイドバーは行を動かさない)。メモリだけで、
    * ペインが一覧から消えたら外す。
@@ -560,7 +570,7 @@ export function createAgentsPresenter(
       });
     }
     const rest = visible.filter((pane) => !pinned.has(pane.id));
-    if (order === "urgency") {
+    if (currentOrder() === "urgency") {
       entries.push(...urgencyEntries(rest));
       return entries;
     }
@@ -679,7 +689,7 @@ export function createAgentsPresenter(
                 ? current.board.orderByProject
                 : current.board.orderByUrgency,
             title: item === "urgency" ? current.board.orderByUrgencyTitle : "",
-            active: order === item,
+            active: currentOrder() === item,
           })),
         },
         // 狭いと末尾を省くので、全文はカーソルを置いたときに出す。
@@ -721,7 +731,8 @@ export function createAgentsPresenter(
         render(true);
       },
       onOrder(next) {
-        order = next;
+        chosenOrder = next;
+        deps.boardOrder?.set(next);
         render(true);
       },
       onListKeydown,

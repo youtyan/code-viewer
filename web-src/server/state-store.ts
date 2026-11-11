@@ -337,6 +337,8 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   const agentAccountsCollapsed = optionalBoolean(raw.agentAccountsCollapsed);
   if (agentAccountsCollapsed !== undefined)
     out.agentAccountsCollapsed = agentAccountsCollapsed;
+  if (raw.agentsBoardOrder === "project" || raw.agentsBoardOrder === "urgency")
+    out.agentsBoardOrder = raw.agentsBoardOrder;
   const terminalImageShelfCollapsed = optionalBoolean(
     raw.terminalImageShelfCollapsed,
   );

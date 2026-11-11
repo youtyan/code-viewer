@@ -17,6 +17,7 @@ import {
   type AgentsBoardView,
   type AgentsBoardViewProps,
   DEFAULT_VIEW as BOARD_DEFAULT_VIEW,
+  type BoardOrder,
 } from "../views/agents/agents-view";
 import { agentsText } from "../views/agents/i18n";
 import type { PanePreview } from "../views/agents/pane-preview";
@@ -47,6 +48,8 @@ async function mountBoard(
     tmux?: AgentOverviewResponse["tmux"];
     /** 表示を差し替える (presenter のテスト)。 */
     view?: AgentsBoardView;
+    /** 並びを覚える所 (ユーザー単位の設定の代わり)。 */
+    boardOrder?: { get(): BoardOrder | null; set(order: BoardOrder): void };
   } = {},
 ) {
   document.body.innerHTML = '<main id="content"></main>';
@@ -133,6 +136,7 @@ async function mountBoard(
       onVisibilityChange: () => undefined,
       projects: actions,
       preview,
+      boardOrder: extra.boardOrder,
     },
     extra.view,
   );
@@ -363,9 +367,13 @@ describe("entries next to the words", () => {
 // 戻し先と一覧の箱を読むので、差し替える view は渡された値を記録してから既定の表示に
 // 渡す。見るのは view に渡す値と、絞り込み・起動 (モデルの呼び出し)。
 describe("agents board presenter", () => {
-  async function mountWithView(panes: AgentPane[]) {
+  async function mountWithView(
+    panes: AgentPane[],
+    boardOrder?: { get(): BoardOrder | null; set(order: BoardOrder): void },
+  ) {
     const seen: AgentsBoardViewProps[] = [];
     const mounted = await mountBoard(panes, "en", undefined, undefined, {
+      boardOrder,
       view: (props) => {
         seen.push(props);
         return BOARD_DEFAULT_VIEW(props);
@@ -487,6 +495,28 @@ describe("agents board presenter", () => {
       ["waiting", ["%1"]],
       ["idle", ["%2"]],
     ]);
+  });
+
+  test("the chosen order is remembered, and a board opened later starts in it", async () => {
+    let stored: BoardOrder | null = null;
+    const memory = {
+      get: () => stored,
+      set: (order: BoardOrder) => {
+        stored = order;
+      },
+    };
+    const first = await mountWithView(panes(), memory);
+    first.last().onOrder("urgency");
+    expect(stored).toBe("urgency");
+
+    const again = await mountWithView(panes(), memory);
+    expect(
+      again.last().board.order.options.map((item) => [item.order, item.active]),
+    ).toEqual([
+      ["project", false],
+      ["urgency", true],
+    ]);
+    expect(again.last().list.map((entry) => entry.kind)).toEqual(["section"]);
   });
 
   test("Needs you first lists every project together, by state, with the project on each row", async () => {

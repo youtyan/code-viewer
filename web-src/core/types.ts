@@ -269,6 +269,8 @@ export type AppSettingsState = {
   agentNotifyHintDismissed?: boolean;
   /** エージェント一覧のアカウントの帯を畳んだ。 */
   agentAccountsCollapsed?: boolean;
+  /** エージェントの全体ボードの並び (プロジェクトごと / 急ぐ順)。未設定ならプロジェクトごと。 */
+  agentsBoardOrder?: "project" | "urgency";
   /** ターミナルの画像の棚を畳んだ。 */
   terminalImageShelfCollapsed?: boolean;
   /** 画像の棚の置き場所 (右・左・下・上)。 */

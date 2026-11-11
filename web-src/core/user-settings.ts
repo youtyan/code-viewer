@@ -33,6 +33,7 @@ export const USER_SETTING_KEYS = [
   "agentHookHintDismissed",
   "agentNotifyHintDismissed",
   "agentAccountsCollapsed",
+  "agentsBoardOrder",
   "terminalImageShelfCollapsed",
   "terminalImageShelfPlacement",
   "terminalImageShelfWidth",
