@@ -103,6 +103,9 @@ markdown-it・shiki・mermaid・xterm・diff2html などが作る DOM はその�
   値を記録するだけの view (`(props) => { seen.push(props); return null; }`) を注入し、
   `flushRenders()` の後の最後の props と、fetch の呼ばれ方 (モデルの呼び出し) を見る。
   操作は props の関数を呼んで起こす (`last().onSelectTool("mermaid")`)
+- 描いた DOM を読む presenter (入力の欄の値・列の寸法・フォーカスの戻し先) は、値を記録
+  してから既定の表示に渡す view で差し替える (`(props) => { seen.push(props); return DEFAULT_VIEW(props); }`)。
+  例: `search-palette-presenter.test.ts`・`main-tabs-view.test.ts` の「main tabs presenter」
 - `DEFAULT_VIEW` の形は、既存の画面のテスト (DOM を読むもの) と画面の撮影で確かめる。
   DOM を読む前に `flushRenders()` を呼ぶ (描き直しは次の描画の機会まで待つので)
 - **lit で描くものを読むテストは、import の先頭で `./_dom` を読む** (`beforeAll` で DOM を

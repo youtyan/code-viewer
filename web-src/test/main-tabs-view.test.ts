@@ -18,6 +18,11 @@ import {
   SPLIT_DIVIDER_WIDTH,
   VIEW_SCREENS,
 } from "../views/main-tabs/main-tabs-presenter";
+import {
+  DEFAULT_VIEW as MAIN_TABS_DEFAULT_VIEW,
+  type MainTabsView,
+  type MainTabsViewProps,
+} from "../views/main-tabs/main-tabs-view";
 import { pageIconPaths } from "../views/main-tabs/tab-icons";
 
 // body はテストごとに新しい要素に替える。画面の部品は片付けの口を持たず、
@@ -53,6 +58,8 @@ function setup(
   /** このページのプロジェクトの根 (読み戻しの応答の root)。 */
   root: string | null = null,
   extra: Partial<MainTabsDeps> = {},
+  /** 表示を差し替える (presenter のテスト)。 */
+  view?: MainTabsView,
 ) {
   const mount = document.createElement("nav");
   document.body.append(mount);
@@ -66,62 +73,65 @@ function setup(
   /** 本文を移した先と、履歴を積まない (replace) か。 */
   const navigations: Array<{ to: string; replace: boolean }> = [];
   let current: AppRoute = initial;
-  const handle: MainTabsHandle = createMainTabsPresenter({
-    mount,
-    ...(listColumnWidth ? { listColumnWidth } : {}),
-    getLanguage: () => "en",
-    pageLabel: (page) => page,
-    navigate: (route, replace) => {
-      navigations.push({
-        to: route.screen === "file" ? route.path : route.screen,
-        replace: replace === true,
-      });
-      current = route;
-      handle.syncRoute(route);
+  const handle: MainTabsHandle = createMainTabsPresenter(
+    {
+      mount,
+      ...(listColumnWidth ? { listColumnWidth } : {}),
+      getLanguage: () => "en",
+      pageLabel: (page) => page,
+      navigate: (route, replace) => {
+        navigations.push({
+          to: route.screen === "file" ? route.path : route.screen,
+          replace: replace === true,
+        });
+        current = route;
+        handle.syncRoute(route);
+      },
+      currentRoute: () => current,
+      defaultRoute: (target: TabTarget): AppRoute =>
+        target.kind === "file"
+          ? fileRoute(target.path)
+          : target.kind === "page"
+            ? ({ screen: target.page, range } as AppRoute)
+            : { screen: "diff", range },
+      homeRoute: () => ({ screen: "repo", ref: "worktree", path: "", range }),
+      copyPath: () => undefined,
+      onNewTab: (side, anchor) =>
+        calls.push(`new:${side}:${anchor.getAttribute("aria-label")}`),
+      stopTerminal: (session) => calls.push(`stop:${session}`),
+      // session: そのタブのシェル (映しているエージェントの項目を足すため)。
+      terminalMenuItems: (session) => {
+        calls.push(`menu:${session}`);
+        return [
+          { label: "Larger text (13)", onSelect: () => calls.push("larger") },
+        ];
+      },
+      loadSaved: async () => ({
+        layout: await loadSaved(),
+        root,
+      }),
+      save: async (layout) => {
+        saves.push(layout);
+      },
+      backupSaved: async () => {
+        backups.push("backup");
+        return backupSaved();
+      },
+      terminalInfo: (session) =>
+        session === "shell-a1"
+          ? { label: "claude · Working", state: "working" }
+          : { label: `Shell ${session}`, state: null },
+      onPanes: (view, how) => {
+        const tab = view.fronts[view.focused];
+        fronts.push(`${tab?.target.kind ?? "none"}:${how}`);
+      },
+      onTerminals: (open, closed) => {
+        terminals.push({ open: [...open], closed });
+      },
+      ...extra,
     },
-    currentRoute: () => current,
-    defaultRoute: (target: TabTarget): AppRoute =>
-      target.kind === "file"
-        ? fileRoute(target.path)
-        : target.kind === "page"
-          ? ({ screen: target.page, range } as AppRoute)
-          : { screen: "diff", range },
-    homeRoute: () => ({ screen: "repo", ref: "worktree", path: "", range }),
-    copyPath: () => undefined,
-    onNewTab: (side, anchor) =>
-      calls.push(`new:${side}:${anchor.getAttribute("aria-label")}`),
-    stopTerminal: (session) => calls.push(`stop:${session}`),
-    // session: そのタブのシェル (映しているエージェントの項目を足すため)。
-    terminalMenuItems: (session) => {
-      calls.push(`menu:${session}`);
-      return [
-        { label: "Larger text (13)", onSelect: () => calls.push("larger") },
-      ];
-    },
-    loadSaved: async () => ({
-      layout: await loadSaved(),
-      root,
-    }),
-    save: async (layout) => {
-      saves.push(layout);
-    },
-    backupSaved: async () => {
-      backups.push("backup");
-      return backupSaved();
-    },
-    terminalInfo: (session) =>
-      session === "shell-a1"
-        ? { label: "claude · Working", state: "working" }
-        : { label: `Shell ${session}`, state: null },
-    onPanes: (view, how) => {
-      const tab = view.fronts[view.focused];
-      fronts.push(`${tab?.target.kind ?? "none"}:${how}`);
-    },
-    onTerminals: (open, closed) => {
-      terminals.push({ open: [...open], closed });
-    },
-    ...extra,
-  });
+    view,
+  );
   handle.syncRoute(current);
   return {
     mount,
@@ -3476,5 +3486,60 @@ describe("main tabs view: 左右 2 面", () => {
       kind: "image",
       path: "docs/images/dunes.png",
     });
+  });
+});
+
+// presenter (main-tabs-presenter.ts) を、表示を差し替えて確かめる。presenter は
+// 描いた後に列とタブを測るので、差し替える view は渡された値を記録してから既定の
+// 表示に渡す。見るのは view に渡す値と、本文の移り先・保存 (モデルの呼び出し)。
+describe("main tabs presenter", () => {
+  function setupWithView() {
+    const seen: MainTabsViewProps[] = [];
+    const ctx = setup(
+      async () => savedLayout,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      null,
+      {},
+      (props) => {
+        seen.push(props);
+        return MAIN_TABS_DEFAULT_VIEW(props);
+      },
+    );
+    const last = () => seen[seen.length - 1];
+    const tabs = () =>
+      last().sections.map((section) =>
+        section.loose.map((tab) => `${tab.active ? ">" : ""}${tab.name}`),
+      );
+    return { ...ctx, last, tabs };
+  }
+
+  test("the restored tabs reach the view with the front tab marked", async () => {
+    const { handle, tabs } = setupWithView();
+    await handle.restore();
+    // 保存のタブに、URL (src/app.ts) のタブが前面で加わる。
+    expect(tabs()).toEqual([
+      ["README.md", ">app.ts", "diff", "shot.png", "Shell shell-ab12"],
+    ]);
+  });
+
+  test("a tab clicked in the view becomes the front and the body follows", async () => {
+    const { handle, last, tabs, navigations } = setupWithView();
+    await handle.restore();
+    last().onTabClick("t2");
+    expect([tabs(), navigations.map((item) => item.to)]).toEqual([
+      [["README.md", "app.ts", ">diff", "shot.png", "Shell shell-ab12"]],
+      ["diff"],
+    ]);
+  });
+
+  test("a tab closed in the view leaves the strip", async () => {
+    const { handle, last, tabs } = setupWithView();
+    await handle.restore();
+    last().onTabClose("t4", new MouseEvent("click"));
+    expect(tabs()).toEqual([
+      ["README.md", ">app.ts", "diff", "Shell shell-ab12"],
+    ]);
   });
 });

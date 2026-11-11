@@ -20,6 +20,11 @@ import {
   type AgentsSidebarDeps,
   createAgentsSidebarPresenter,
 } from "../views/agents/agents-sidebar-presenter";
+import {
+  type AgentsSidebarView,
+  type AgentsSidebarViewProps,
+  DEFAULT_VIEW as SIDEBAR_DEFAULT_VIEW,
+} from "../views/agents/agents-sidebar-view";
 import { agentsText } from "../views/agents/i18n";
 import { PANE_PREVIEW } from "../views/agents/pane-preview";
 import { closeContextMenu } from "../views/context-menu";
@@ -121,6 +126,8 @@ function mount(
     hookStates?: Partial<Record<HookAgent, AgentHookState>>;
     /** 外側のページの左の一覧 (面を分けて開ける)。 */
     splitProject?: AgentsSidebarDeps["splitProject"];
+    /** 表示を差し替える (presenter のテスト)。 */
+    view?: AgentsSidebarView;
   } = {},
 ) {
   document.body.innerHTML =
@@ -134,33 +141,36 @@ function mount(
   const projectMenus: { root: string; anchor: HTMLElement }[] = [];
   let dismissed = notify.dismissed ?? false;
   let stoppedOpen = false;
-  createAgentsSidebarPresenter({
-    root,
-    monitor,
-    projects: actions,
-    getText: () => agentsText("en"),
-    openPane,
-    ...(notify.splitProject ? { splitProject: notify.splitProject } : {}),
-    viewingPane: () => null,
-    openProjectMenu: (root, anchor) => projectMenus.push({ root, anchor }),
-    handoff: {
-      handoff: (target) => handoffs.push(`handoff:${target.id}`),
-      openHookHelp: () => handoffs.push("hook-help"),
-      hookState: (agent) => notify.hookStates?.[agent] ?? null,
+  createAgentsSidebarPresenter(
+    {
+      root,
+      monitor,
+      projects: actions,
+      getText: () => agentsText("en"),
+      openPane,
+      ...(notify.splitProject ? { splitProject: notify.splitProject } : {}),
+      viewingPane: () => null,
+      openProjectMenu: (root, anchor) => projectMenus.push({ root, anchor }),
+      handoff: {
+        handoff: (target) => handoffs.push(`handoff:${target.id}`),
+        openHookHelp: () => handoffs.push("hook-help"),
+        hookState: (agent) => notify.hookStates?.[agent] ?? null,
+      },
+      openBoard: () => undefined,
+      getCollapsed: () => [],
+      currentName: () => "sample-app",
+      saveCollapsed: (roots) => saved.push(roots),
+      isStoppedOpen: () => stoppedOpen,
+      setStoppedOpen: (open) => {
+        stoppedOpen = open;
+      },
+      notifyHintDismissed: () => dismissed,
+      dismissNotifyHint: () => {
+        dismissed = true;
+      },
     },
-    openBoard: () => undefined,
-    getCollapsed: () => [],
-    currentName: () => "sample-app",
-    saveCollapsed: (roots) => saved.push(roots),
-    isStoppedOpen: () => stoppedOpen,
-    setStoppedOpen: (open) => {
-      stoppedOpen = open;
-    },
-    notifyHintDismissed: () => dismissed,
-    dismissNotifyHint: () => {
-      dismissed = true;
-    },
-  });
+    notify.view,
+  );
   return {
     root,
     projectMenus,
@@ -1304,5 +1314,62 @@ describe("agents sidebar screen preview", () => {
     );
     row.click();
     expect([opened, box?.hidden]).toEqual([["%1"], true]);
+  });
+});
+
+// presenter (agents-sidebar-presenter.ts) を、表示を差し替えて確かめる。presenter は
+// 描いた後にフォーカスの戻し先を読むので、差し替える view は渡された値を記録して
+// から既定の表示に渡す。見るのは view に渡す値と、畳む・開く・移るの呼び出し。
+describe("agents sidebar presenter", () => {
+  function mountWithView() {
+    const seen: AgentsSidebarViewProps[] = [];
+    const mounted = mount(
+      overview(
+        [pane("%1", "claude", "/work/sample-lib", "waiting")],
+        REGISTERED,
+      ),
+      fakeActions(),
+      () => undefined,
+      {
+        view: (props) => {
+          seen.push(props);
+          return SIDEBAR_DEFAULT_VIEW(props);
+        },
+      },
+    );
+    return { ...mounted, last: () => seen[seen.length - 1] };
+  }
+
+  test("passes the running projects with their agents to the view", () => {
+    const { last } = mountWithView();
+    expect(
+      last().running.map((project) => [
+        project.name,
+        project.here,
+        project.rows.map((row) => [row.id, row.state]),
+      ]),
+    ).toEqual([
+      ["sample-app", true, []],
+      ["sample-lib", false, [["%1", "waiting"]]],
+      ["sample-docs", false, []],
+    ]);
+  });
+
+  test("collapsing from the view saves the collapsed project and redraws it collapsed", () => {
+    const { last, saved } = mountWithView();
+    last().onToggleCollapsed("/work/sample-lib");
+    expect({
+      saved,
+      collapsed: last().running.find((p) => p.root === "/work/sample-lib")
+        ?.collapsed,
+    }).toEqual({ saved: [["/work/sample-lib"]], collapsed: true });
+  });
+
+  test("picking another project in the view opens it", () => {
+    const { last, actions } = mountWithView();
+    last().onSwitchProject("/work/sample-lib");
+    expect(actions.opened.map((item) => item.root)).toEqual([
+      "/work/sample-lib",
+    ]);
   });
 });
