@@ -36,6 +36,22 @@
 | アイコン SVG | `core/icons.ts` の path 定数 + `iconSvg(className, paths)` |
 | ホバーで出る説明 (ツールチップ) | 要素に `title` を書くだけ。`views/title-tooltip.ts` の `installTitleTooltips` (`app.ts` が 1 回だけ取り付ける) が、マウスとペンで約 300ms 後に title の値をそのまま `.title-tooltip` に出す (指では出さない。出している間は title を外して既定の吹き出しと重ねない)。部品ごとに吹き出しを作らない。title に置いた文言がそのまま吹き出しの文言 |
 
+### ボタンの種類
+
+ボタンは種類で選ぶ。色と状態 (地・文字・枠・hover・無効) は `web/style.css` の「ボタンの種類」の節
+だけが決め、部品の規則は寸法 (高さ・余白・角丸) だけを持つ。新しいボタンのクラスはその節の種類の
+並びに足す (並びに無いボタンは種類の色にならない)。`button-variants.test.ts` が、実際に置かれる
+場所 (親の `.x button` の規則が効く所) でも種類の色になることを見る。
+
+| 種類 | 使う所 | 見た目 |
+|---|---|---|
+| 主 | その画面でいちばん勧める操作 1 つ (起動・ダイアログの確定・保存)。1 画面に 1 つ | 強調色の面に `--color-on-accent`。危険な確定だけは `gdp-dialog-danger` で状態の色 |
+| 枠線 | 既定。ふつうの操作と、ダイアログの取り消し | 地なし・`--color-line-strong` の縁・強調色の文字 |
+| 文字だけ | 枠線では騒がしい所 (見出しの横の「すべて更新」など) | 地も縁もなし・強調色の文字 |
+| アイコン | 帯の上の、場所を取らない操作 | 地なし・絵は `--color-text-2`、hover で `--color-raised` の面と本文の色。状態の印 (`.copied` `.failed` `.warn`) の色は hover でも残す |
+
+主と枠線と文字だけの hover は案内の面 (`--color-info-surface`)。無効は `--color-disabled` (主は面も)。
+
 `alert` / `confirm` / `prompt` は `biome.jsonc` が **error で落とす**ので、そもそも書けない。
 `views/ui-dialog.ts` を使う。
 
@@ -222,6 +238,11 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
 | 文字の段階 | `--color-text` / `--color-text-2` / `--color-text-3` / `--color-on-accent` |
 | 線 | `--color-line` / `--color-line-soft` / `--color-line-strong`。**線は最後の手段。** 面の明るさの差で分けられるなら線を引かない。表の行の区切りだけは `--color-line-row` (上の「表」) |
 | アクセントと状態 | `--color-accent` / `--color-accent-strong`、`--color-waiting` `--color-working` `--color-done` `--color-failed` `--color-idle` |
+| 状態の面と線と文字 | 警告・エラー・成功・完了・案内の帯や札は `--color-<warning\|error\|success\|done\|info>-surface` (面)・`-line` (縁)・`--color-on-<…>-surface` (面の上の文字。状態の色そのものは面の上で 4.5:1 に届かない)。部品で状態の色を `color-mix` で薄めない。下限は `color-themes-contrast.test.ts` |
+| 選択・無効 | 窓にフォーカスがある間の選択は `--color-select`、無い間は `--color-select-inactive` (`html[data-window-inactive]` が `--color-select` を差し替える。付けるのは `views/shell/window-active.ts`)。無効は文字と絵が `--color-disabled`、面が `--color-disabled-surface`。`opacity` で薄めない |
+| 部品だけの色 | `--app-*` (写真・動画の暗い幕とその上の操作、利用者の HTML を描く白い紙)、Blame の段階 `--blame-*`。テーマで変えない色も名前の層に置く |
+| 影 | `--shadow-sm` / `--shadow-md` (小さく浮く札) / `--shadow-context-menu` (メニュー・ポップオーバー) / `--shadow-pop` (ダイアログ・パレット・横から出る面) |
+| 絵の大きさ | `--icon-sm` 12 / `--icon-md` 14 / `--icon-lg` 16 / `--icon-xl` 18 / `--icon-2xl` 20 の 5 段だけ (既定の密度の値)。空の状態の大きな絵は挿し絵で段の外 (`icon-sizes.test.ts`) |
 | プロジェクトの色 | `--project-<色>` (`core/project-colors.ts` の `PROJECT_COLORS` と `none`)・頭文字の `--project-ink`。部品は `data-project-color` の下で `--project-color` を読む。どのテーマでもライト・ダークの 1 組ずつ (テーマで変えない) |
 | 選んでいる行の光 | `--glow-select` (内側の box-shadow。箱の寸法を変えない) |
 | 余白 / 角丸 | `--space-1`〜`--space-6` (4〜32px) / `--radius-sm` `--radius-md` `--radius-lg` |
@@ -233,6 +254,9 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
   テーマの塊は 16 進で持つ色の名前を全部書き、下限は全部のテーマ × 明暗で確かめる
   (`web-src/test/_color-themes.ts` を回すテスト。新しい色の下限のテストもこれで回す)
   古い `[data-theme="dark"] .x { color: #... }` を見つけたら、名前へ寄せる (触ったら直す)
+- **生の色を書いてよいのは色の名前を決める塊 (`:root`・明暗・テーマ・ターミナルの明暗) だけ**
+  (`color-literal-scope.test.ts`)。`var(--x, #fff)` の予備の色も書かない: 以前は定義の無い名前
+  (`--warning` `--error` `--link` `--accent-fg`) の予備の色が全テーマで出ていた
 - 古い名前 (`--bg` `--fg` `--accent` `--border` …) は互換の層で、中身は名前の層への参照だけ。
   新しい部品は名前の層を読む。互換の層に 16 進を書き戻さない
 - 差分の色 (`--diff-*`) は追加 = 緑・削除 = 赤の色相をどのテーマでも保つ (意味を保つ)
@@ -340,6 +364,9 @@ disabled / updated のすべてで箱の寸法を保つ。**
 - 言語切替時のライブ反映は各 view の `localize()` が担当する。**テーブルに足したら
   `localize()` で反映されるか確認する**（足しただけでは切替時に古い文言が残ることがある）
 - 新しい画面を足すなら、同じ形で `i18n.ts` を作る
+- **見出しと部品の名前は文頭だけ大文字** (`Changed files`・`Not running`。Title Case にしない)。
+  CSS の `text-transform: uppercase` で見出しを全部大文字にしない (字間も広げない)。全部大文字で
+  よいのは、型や種類を示す短い札 (`.d2h-tag`・`.redis-type-badge` など) だけ
 
 ## Help ページと README への反映
 

@@ -387,6 +387,7 @@ import {
   rememberEarlyProject,
 } from "./views/shell/early-look";
 import { type LiveSource, openLiveSource } from "./views/shell/live-hub";
+import { installWindowActive } from "./views/shell/window-active";
 import { phoneMediaQuery, workspaceRole } from "./views/shell/workspace";
 import {
   CHANGES_LIST_DOM,
@@ -8184,6 +8185,9 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // title を持つ要素に速く出る吹き出し (アプリ全体で 1 つ)。
   installTitleTooltips();
+
+  // 窓にフォーカスが無い間は、選んでいる行を中立の色にする。
+  installWindowActive();
 
   // 電話の幅の骨格 (引き出し・下からの面・下端の帯・端末の操作札)。2 面は
   // 無いので、端末は左の面のものに送る。

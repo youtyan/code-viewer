@@ -93,6 +93,74 @@ const PAIRS = [
   { fg: "--color-select", bg: "--color-doc", min: 1.15 },
 ];
 
+// 状態の面 (--color-warning-surface など) は `color-mix(in srgb, <色> P%, transparent)`
+// の半透明なので、置かれる面に重ねた色で測る。srgb の color-mix と透明の重ね合わせは、
+// どちらも符号化した srgb の値の線形な混ぜ合わせ。
+function over(face: string, ground: string): string {
+  const mix =
+    /^color-mix\(in srgb, (#[0-9a-f]{6}) (\d+(?:\.\d+)?)%, (transparent|#[0-9a-f]{6})\)$/i.exec(
+      face,
+    );
+  if (!mix) return face;
+  const [, color, percent, rest] = mix;
+  const base = rest === "transparent" ? ground : rest;
+  const channel = (hex: string, i: number) =>
+    Number.parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
+  const p = Number(percent) / 100;
+  return `#${[0, 1, 2]
+    .map((i) =>
+      Math.round(channel(color, i) * p + channel(base, i) * (1 - p))
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
+
+// 状態の面の上の文字 (--color-on-*-surface) は、その面に重ねても 4.5:1 以上 (警告・エラーの帯・札)。面は本文の
+// 面と浮く面 (ダイアログ・ポップオーバー) の上に置く。選んでいる行 (窓にフォーカスが
+// 無い間) も本文の文字が読め、本文の面から見分けられる。
+const STATE_SURFACES = [
+  { fg: "--color-on-warning-surface", face: "--color-warning-surface" },
+  { fg: "--color-on-error-surface", face: "--color-error-surface" },
+  { fg: "--color-on-success-surface", face: "--color-success-surface" },
+  { fg: "--color-on-done-surface", face: "--color-done-surface" },
+  { fg: "--color-on-info-surface", face: "--color-info-surface" },
+];
+
+describe("state faces keep their text readable", () => {
+  test.each(
+    VARIANTS.flatMap((variant) =>
+      STATE_SURFACES.flatMap((pair) =>
+        ["--color-doc", "--color-overlay"].map((ground) => ({
+          ...variant,
+          ...pair,
+          ground,
+        })),
+      ),
+    ),
+  )(
+    "$name: $fg on $face over $ground is 4.5:1 or more",
+    ({ fg, face, ground, vars }) => {
+      const groundColor = token(ground, vars);
+      expect(
+        contrastRatio(
+          over(token(fg, vars), groundColor),
+          over(token(face, vars), groundColor),
+        ),
+      ).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+
+  test.each(VARIANTS)("$name: the inactive selection", ({ vars }) => {
+    const doc = token("--color-doc", vars);
+    const face = over(token("--color-select-inactive", vars), doc);
+    expect({
+      text: contrastRatio(token("--color-text", vars), face) >= 7,
+      apart: contrastRatio(face, doc) >= 1.1,
+    }).toEqual({ text: true, apart: true });
+  });
+});
+
 describe("text and marks read on every theme", () => {
   test.each(
     VARIANTS.flatMap((variant) =>
