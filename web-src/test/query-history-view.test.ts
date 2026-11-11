@@ -5,9 +5,10 @@ import "./_dom";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { q } from "./_test-helpers";
 
-const { createQueryHistoryView } = await import(
+const { createQueryHistoryView, DEFAULT_VIEW } = await import(
   "../views/database/query-history-view"
 );
+type QueryHistoryProps = Parameters<typeof DEFAULT_VIEW>[0];
 const { dbText } = await import("../views/database/i18n");
 
 const originalFetch = globalThis.fetch;
@@ -475,4 +476,77 @@ describe("query history view", () => {
       );
     },
   );
+});
+
+describe("the query history presenter", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+    globalThis.fetch = originalFetch;
+  });
+
+  test("selects an entry, marks NULL and empty preview values, and arms delete before sending", async () => {
+    const requests: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            entries: [
+              {
+                id: "sample-entry",
+                dbId: "sample.db",
+                sql: "SELECT sample_column FROM sample_table",
+                columns: ["sample_column"],
+                rowsPreview: [[null], [""], ["value"]],
+                rowCount: 3,
+                savedRows: 3,
+                truncated: false,
+                elapsedMs: 5,
+                executedAt: "2026-01-02T03:04:05",
+                executedBy: "user",
+                source: "browser",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }) as typeof fetch;
+    const shown: QueryHistoryProps[] = [];
+    const view = createQueryHistoryView(
+      {
+        getDbId: () => "sample.db",
+        getSchema: () => null,
+        copySqlToQuery: () => undefined,
+        getText: () => dbText("en"),
+      },
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    const last = () => shown[shown.length - 1] as QueryHistoryProps;
+    await view.refresh({ force: true });
+    expect([last().entries.length, last().detail]).toEqual([1, null]);
+
+    last().entries[0]?.onSelect();
+    const detail = last().detail;
+    expect([
+      last().entries[0]?.selected,
+      detail?.preview?.rows.map((row) => [row[0]?.cellClass, row[0]?.text]),
+      detail?.deleteArmed,
+    ]).toEqual([
+      true,
+      [
+        ["is-null", ""],
+        ["is-empty", ""],
+        [null, "value"],
+      ],
+      false,
+    ]);
+
+    detail?.onDelete();
+    expect([last().detail?.deleteArmed, requests.length]).toEqual([true, 1]);
+    view.clear();
+  });
 });
