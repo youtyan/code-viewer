@@ -2612,6 +2612,10 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   " runs read-only queries, searches across tables and compares snapshots.",
                 ],
                 "Results also land in the query history, so you can look at them again in the browser.",
+                [
+                  code("code-viewer show <path>[:line]"),
+                  " lets an AI open a file (or its diff with --diff) in a new tab of your viewer. It is meant to be used only when you ask.",
+                ],
                 "These commands print everything each CLI can do.",
               ],
             },

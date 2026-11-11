@@ -368,6 +368,7 @@ Open **Data** (`g b`).
 | `search` | Search code (`code`) and file names (`files`) | Yes |
 | `query` | Read-only datastore queries, cross-table search, snapshots and diffs | Yes |
 | `annotate` | Post notes on code lines for the viewer | Yes |
+| `show` | Open a file (and line) or its diff in a new tab of the open viewer — only when the user asks | Yes |
 | `journal` | Work log entries and the task queue | Yes (except `github-issues` and `--dry-run`) |
 | `terminal` | List terminals and their states, read a pane's text, report state | Yes |
 | `accounts` | Add and sign in claude / codex accounts | Yes |

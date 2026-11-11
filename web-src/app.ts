@@ -208,6 +208,7 @@ import {
   type ShellListResponse,
   type ShellSessionId,
 } from "./core/shell";
+import { isShowEvent, type ShowEvent } from "./core/show";
 import { sourceInternalPathKind } from "./core/source-meta";
 import {
   readStoredSize,
@@ -400,6 +401,7 @@ import {
 import { type LiveSource, openLiveSource } from "./views/shell/live-hub";
 import { installWindowActive } from "./views/shell/window-active";
 import { phoneMediaQuery, workspaceRole } from "./views/shell/workspace";
+import { claimShow } from "./views/show-claim";
 import {
   CHANGES_LIST_DOM,
   createSidebar,
@@ -4781,6 +4783,23 @@ window.GdpExpandLogic = GdpExpandLogic;
       case null:
         return;
     }
+  }
+
+  /** `code-viewer show` の出来事を新しいタブで開く (固定のタブ)。 */
+  function openShown(shown: ShowEvent): void {
+    const range = currentRange();
+    const route: AppRoute =
+      shown.view === "diff"
+        ? { screen: "diff", range, path: shown.path }
+        : {
+            screen: "file",
+            path: shown.path,
+            ref: "worktree",
+            range,
+            view: "blob",
+            ...(shown.line !== undefined ? { line: shown.line } : {}),
+          };
+    MAIN_TABS.openingNewTab(() => setRoute(route));
   }
 
   function setRoute(route: AppRoute, replace = false) {
@@ -11312,6 +11331,32 @@ window.GdpExpandLogic = GdpExpandLogic;
     es.addEventListener("reload", () => location.reload());
     es.addEventListener("annotation", (event) => {
       ANNOTATIONS_UI?.handleSse((event as MessageEvent).data);
+    });
+    // `code-viewer show`: AI が頼まれて見せるファイル・差分を新しいタブで開く
+    // (いま見ているタブは変えない)。開くのは最初に受け取った 1 つの画面だけ。
+    es.addEventListener("show", (event) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse((event as MessageEvent).data);
+      } catch (error) {
+        console.error("[code-viewer] show: the event is not JSON", error);
+        return;
+      }
+      if (!isShowEvent(parsed)) {
+        console.error("[code-viewer] show: unexpected event", parsed);
+        return;
+      }
+      const shown = parsed;
+      claimShow(shown.id).then(
+        (mine) => {
+          if (mine) openShown(shown);
+        },
+        (error: unknown) =>
+          console.error(
+            `[code-viewer] show: could not decide which window opens ${shown.path}`,
+            error,
+          ),
+      );
     });
     es.addEventListener("journal", () => {
       JOURNAL_VIEW?.handleSse();

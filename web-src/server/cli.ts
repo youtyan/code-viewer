@@ -45,6 +45,11 @@ if (process.argv[2] === "agent-help") {
 } else if (process.argv[2] === "annotate") {
   const { runAnnotateCli } = await import("./annotate-cli");
   await runAnnotateCli(process.argv.slice(3));
+} else if (process.argv[2] === "show") {
+  // `show` asks the running code-viewer to open a file or its diff in a new
+  // tab of the user's window. No SQLite of its own, so no preflight.
+  const { runShowCli } = await import("./show-cli");
+  await runShowCli(process.argv.slice(3));
 } else if (process.argv[2] === "journal") {
   const { runJournalCli } = await import("./journal-cli");
   await runJournalCli(process.argv.slice(3));

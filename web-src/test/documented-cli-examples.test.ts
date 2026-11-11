@@ -13,6 +13,7 @@ import { parseFileArgs } from "../server/file-cli";
 import { parseJournalArgs } from "../server/journal-cli";
 import { parseQueryArgs } from "../server/query-cli";
 import { parseSearchArgs } from "../server/search-cli";
+import { parseShowArgs } from "../server/show-cli";
 import { parseSkillArgs } from "../server/skill-cli";
 import { parseStatusArgs } from "../server/status-cli";
 import { parseTerminalArgs } from "../server/terminal-cli";
@@ -29,6 +30,7 @@ const PARSERS: Record<string, (argv: string[]) => { ok: boolean }> = {
   journal: parseJournalArgs,
   query: parseQueryArgs,
   search: parseSearchArgs,
+  show: parseShowArgs,
   skill: parseSkillArgs,
   status: parseStatusArgs,
   terminal: parseTerminalArgs,

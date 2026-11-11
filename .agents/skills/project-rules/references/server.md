@@ -288,6 +288,10 @@ docker コンテナ、OS の設定）を変える機能は、次の 3 つが揃�
 - 実体は `server/*-cli.ts`。入口は `server/cli.ts`
 - ドキュメントとの整合はテストが見る（`web-src/test/_documented-cli-fixture.ts`）。
   README / Help に書いた呼び出し方と実装がずれると落ちる
+- 利用者の画面を動かす CLI は `show` だけ（`server/show-cli.ts` → `POST /_show` → プロジェクトの
+  通知の `show` → 画面は Web Locks で 1 つの窓だけが新しいタブで開く。`views/show-claim.ts`）。
+  映している画面が無ければ 409 で理由を返す。使うのは利用者に頼まれたときだけ（配布スキル・help に書く）。
+  画面を動かす口を足すときもこの形にし、いま見ているタブを変えない
 - CLI からサーバを叩くときは `server/cli-helpers.ts` の `requestJson`
   （Origin と `X-Code-Viewer-Action` を付ける）
 - サーバが居るかの確認は `probeServer`。「繋がらない」(`unreachable`) と「繋がったが

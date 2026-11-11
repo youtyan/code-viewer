@@ -838,6 +838,61 @@ describe("preview CLI", () => {
     }
   });
 
+  // `code-viewer show`: 映している画面 (/events の購読) が無ければ理由つきで 409、あれば
+  // その画面へ `show` を流す。リポジトリに無いファイルは 404。
+  test("/_show refuses without a window, and streams show to a window that is open", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-show-"));
+    tmpRoots.push(root);
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "a.ts"), "export const a = 1;\n");
+    const preview = await startTestPreview(root, makeFakeMissingGitCommand());
+    const origin = new URL(preview.url).origin;
+    const show = (body: unknown) =>
+      fetch(new URL("/_show", preview.url), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: origin,
+          "X-Code-Viewer-Action": "1",
+        },
+        body: JSON.stringify(body),
+      });
+    const events = new AbortController();
+    try {
+      const alone = await show({ path: "src/a.ts", line: 1, view: "file" });
+      expect([alone.status, await alone.text()]).toEqual([
+        409,
+        "no code-viewer window is showing this project: open it in the browser first",
+      ]);
+      const missing = await show({ path: "src/missing.ts", view: "file" });
+      expect(missing.status).toBe(404);
+
+      const stream = await fetch(new URL("/events", preview.url), {
+        signal: events.signal,
+      });
+      const reader = stream.body?.getReader();
+      if (!reader) throw new Error("no events body");
+      const opened = await show({ path: "src/a.ts", line: 1, view: "file" });
+      expect(await opened.json()).toEqual({ ok: true, windows: 1 });
+      let text = "";
+      while (!text.includes("event: show")) {
+        const chunk = await reader.read();
+        if (chunk.done) throw new Error(`events ended: ${text}`);
+        text += new TextDecoder().decode(chunk.value);
+      }
+      const data = /event: show\ndata: (.*)\n/.exec(text)?.[1] ?? "";
+      expect(JSON.parse(data)).toEqual({
+        id: expect.stringMatching(/^[0-9a-f]{16}$/),
+        path: "src/a.ts",
+        line: 1,
+        view: "file",
+      });
+    } finally {
+      events.abort();
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
+
   // 失敗した要求は、固定の 1 文 (invalid json・not in ref・空の一覧) でなく理由を返す。
   test("failed requests answer with the reason", async () => {
     const root = mkdtempSync(join(tmpdir(), "code-viewer-preview-reasons-"));

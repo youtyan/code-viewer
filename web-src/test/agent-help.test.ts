@@ -15,6 +15,7 @@ import { FILE_AGENT_HELP } from "../server/file-cli";
 import { JOURNAL_AGENT_HELP } from "../server/journal-cli";
 import { QUERY_AGENT_HELP } from "../server/query-cli";
 import { SEARCH_AGENT_HELP } from "../server/search-cli";
+import { SHOW_AGENT_HELP } from "../server/show-cli";
 import { SKILL_AGENT_HELP } from "../server/skill-cli";
 import { STATUS_AGENT_HELP } from "../server/status-cli";
 
@@ -31,6 +32,7 @@ const SUBCOMMANDS = [
   "status",
   "query",
   "annotate",
+  "show",
   "journal",
   "search",
   "file",
@@ -84,6 +86,7 @@ describe("buildAgentHelpIndex", () => {
     expect(text.includes(signatureOf(STATUS_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(QUERY_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(ANNOTATE_AGENT_HELP))).toBe(true);
+    expect(text.includes(signatureOf(SHOW_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(JOURNAL_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(SEARCH_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(FILE_AGENT_HELP))).toBe(true);
@@ -102,7 +105,7 @@ describe("buildAgentHelpIndex", () => {
 });
 
 describe("AGENT_GUIDES order is stable", () => {
-  test("matches the documented status / query / annotate / journal / search / file / terminal / accounts / skill / doctor sequence", () => {
+  test("matches the documented status / query / annotate / show / journal / search / file / terminal / accounts / skill / doctor sequence", () => {
     expect(AGENT_GUIDES.map((g) => g.name)).toEqual([...SUBCOMMANDS]);
   });
 });
