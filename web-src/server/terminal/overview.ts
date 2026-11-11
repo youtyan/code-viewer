@@ -206,18 +206,42 @@ export async function buildAgentOverview(
         placeOf.set(pane.id, { session: session.name, window: window.index });
     }
   }
+  // git の外で動くペイン (作業役を一時フォルダで起こしたものなど) は、同じ
+  // ウインドウのリポジトリのペインがみな同じプロジェクトなら、そのプロジェクトに
+  // 入れる。作業場所のフォルダを 1 つのプロジェクトにすると、登録していない
+  // 別のプロジェクトとして「tmux で検出」に出ていた。リポジトリが無い・2 つ
+  // 以上あるウインドウでは決めず、作業場所のままにする。
+  const windowKey = (place: { session: string; window: number }) =>
+    `${place.session}\u0000${place.window}`;
+  const windowRoots = new Map<string, Set<string>>();
+  for (const pane of tmuxPanes) {
+    const resolution = resolved.get(pane.path);
+    const place = placeOf.get(pane.id);
+    if (resolution?.kind !== "root" || !place) continue;
+    const roots = windowRoots.get(windowKey(place)) ?? new Set<string>();
+    roots.add(resolution.root);
+    windowRoots.set(windowKey(place), roots);
+  }
+  const windowRootOf = (paneId: string): string | null => {
+    const place = placeOf.get(paneId);
+    const roots = place ? windowRoots.get(windowKey(place)) : undefined;
+    return roots?.size === 1 ? ([...roots][0] ?? null) : null;
+  };
   for (const pane of tmuxPanes) {
     const resolution = resolved.get(pane.path) ?? {
       kind: "error" as const,
       error: `project for ${pane.path} was not resolved`,
     };
-    const root = resolution.kind === "root" ? resolution.root : pane.path;
+    const borrowed =
+      resolution.kind === "outside" ? windowRootOf(pane.id) : null;
+    const root =
+      resolution.kind === "root" ? resolution.root : (borrowed ?? pane.path);
     if (!projects.has(root)) {
       projects.set(root, {
         root,
         name: basenameOf(root) || root,
         displayRoot: abbreviateHome(root, deps.home),
-        git: resolution.kind === "root",
+        git: resolution.kind === "root" || borrowed !== null,
         error: resolution.kind === "error" ? resolution.error : "",
         server: { status: "none" },
         registered: null,
