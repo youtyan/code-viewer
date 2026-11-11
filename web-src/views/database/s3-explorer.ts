@@ -1,3 +1,6 @@
+import { keyed } from "lit/directives/keyed.js";
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../../core/api-url";
 import { showCopyFailure } from "../../core/copy-failure";
 import { s3ObjectName } from "../../core/database/s3-keys";
@@ -14,11 +17,7 @@ import type {
   S3SortMode,
   S3ViewMode,
 } from "../../core/database/types";
-import {
-  CHEVRON_DOWN_12_PATH,
-  FOLDER_ICON_PATHS,
-  iconSvg,
-} from "../../core/icons";
+import { CHEVRON_DOWN_12_PATH, FOLDER_ICON_PATHS } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
 import { renderMarkdownPreview } from "../../core/markdown-preview";
 import {
@@ -35,10 +34,12 @@ import {
   renderHtmlPreviewFrame,
   renderUnsupportedPreview,
 } from "../source-preview-elements";
+import { iconTemplate } from "../ui/icon";
+import { renderOwned, templateElement } from "../ui/renderer";
 import { showConfirmDialog } from "../ui-dialog";
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
-import { setPaneEmpty, setPaneStatus } from "./pane-status";
+import { paneEmptyTemplate, paneStatusTemplate } from "./pane-status";
 import { reportDatastoreFailure, requireOkResponse } from "./report-failure";
 
 export type S3ExplorerCallbacks = {
@@ -95,17 +96,17 @@ const KIND_CLASSES: Record<ReturnType<typeof sourceDisplayKind>, string> = {
   unsupported: "kind-binary",
 };
 
-function createKindBadge(
+function kindBadge(
   key: string,
   contentType: string | undefined,
   labels: DbText["explorer"]["s3"]["kind"],
-): HTMLElement {
+): unknown {
   const kind = sourceDisplayKind(key);
-  const badge = document.createElement("span");
-  badge.className = `s3-kind-badge ${KIND_CLASSES[kind]}`;
-  badge.textContent = labels[kind];
-  badge.title = objectTypeLabel(key, contentType);
-  return badge;
+  return html`<span
+    class=${`s3-kind-badge ${KIND_CLASSES[kind]}`}
+    title=${objectTypeLabel(key, contentType)}
+    >${labels[kind]}</span
+  >`;
 }
 
 // folderPrefix は末尾 "/" を含むフルパス ("a/b/")。表示名は末尾セグメント。
@@ -119,135 +120,472 @@ function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === "AbortError";
 }
 
-function setExplorerFolderIcon(el: HTMLElement, collapsed: boolean): void {
-  el.innerHTML = iconSvg(
+function folderIcon(collapsed: boolean): unknown {
+  return iconTemplate(
+    collapsed ? FOLDER_ICON_PATHS.closed : FOLDER_ICON_PATHS.open,
     collapsed
       ? "octicon-file-directory-fill"
       : "octicon-file-directory-open-fill",
-    collapsed ? FOLDER_ICON_PATHS.closed : FOLDER_ICON_PATHS.open,
   );
 }
 
+function indentPad(depth: number): string {
+  return `--lvl-pad: ${12 + depth * 14}px`;
+}
+
+type PaneStatus = { status: string; error: boolean };
+const isStatus = (pane: unknown): pane is PaneStatus =>
+  typeof pane === "object" && pane !== null && "status" in pane;
+
+/** Explorer の 1 階層 (フォルダの中身、または根)。続きはページで読む。 */
+export type S3Level = {
+  depth: number;
+  entries: ({ folder: S3Folder } | { object: S3ObjectInfo })[];
+  /** 最初のページにフォルダもファイルも無い。 */
+  empty: boolean;
+  more: {
+    disabled: boolean;
+    /** 続きを読めなかった理由 (次の試行で消す)。 */
+    failure: string | null;
+    load: () => Promise<boolean>;
+  } | null;
+};
+
+export type S3Folder = {
+  prefix: string;
+  depth: number;
+  collapsed: boolean;
+  /** 中身。読む前は null、読んでいる間と失敗は札。 */
+  children: null | { loading: true } | { error: string } | S3Level;
+};
+
+/** 右のプレビューの欄。 */
+type PreviewPane =
+  | "empty"
+  | PaneStatus
+  | {
+      object: S3ObjectInfo;
+      body:
+        | PaneStatus
+        | { node: HTMLElement | null }
+        | { edit: { current: string; message: string; busy: boolean } };
+    }
+  | { create: true; message: string; busy: boolean };
+
+export type S3SidebarProps = {
+  text: DbText["explorer"];
+  view: S3ViewMode;
+  mode: S3SearchMode;
+  sort: S3SortMode;
+  buckets: S3BucketInfo[];
+  bucketsDisabled: boolean;
+  newObjectShown: boolean;
+  status: { text: string; warn: boolean };
+  list: null | PaneStatus | { objects: S3ObjectInfo[] };
+  more: { shown: boolean; disabled: boolean };
+  tree: null | PaneStatus | S3Level;
+  activeKey: string | null;
+  bucketRef: Ref<HTMLSelectElement>;
+  searchRef: Ref<HTMLInputElement>;
+  onBucket: (bucket: string) => void;
+  onView: (view: S3ViewMode) => void;
+  onSearch: (event: Event) => void;
+  onSearchKeydown: (event: KeyboardEvent) => void;
+  onMode: (mode: S3SearchMode) => void;
+  onSort: (sort: string) => void;
+  onNewObject: () => void;
+  onMore: () => void;
+  onSelectObject: (object: S3ObjectInfo) => void;
+  onToggleFolder: (folder: S3Folder) => void;
+  onHoverObject: (row: HTMLElement, object: S3ObjectInfo) => void;
+  onLeaveObject: () => void;
+};
+
+export type S3PreviewProps = {
+  text: DbText["explorer"];
+  pane: PreviewPane;
+  /** 生の中身の URL (開く・保存)。接続とバケットが無ければ null。 */
+  rawUrl: string | null;
+  copyLabel: "copied" | "failed" | null;
+  refs: {
+    edit: Ref<HTMLTextAreaElement>;
+    newKey: Ref<HTMLInputElement>;
+    newContent: Ref<HTMLTextAreaElement>;
+  };
+  onCopyUri: (event: Event) => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onSave: () => void;
+  onCancelEdit: () => void;
+  onCreate: (event: Event) => void;
+  onCancelCreate: () => void;
+};
+
+export type S3TooltipProps = {
+  object: S3ObjectInfo;
+  /** 画像のサムネイルの URL。画像でない・読めなかったときは null。 */
+  imageUrl: string | null;
+  meta: string;
+  onImageLoad: () => void;
+  onImageError: () => void;
+};
+
+export type S3ExplorerLook = {
+  sidebar: (props: S3SidebarProps) => unknown;
+  preview: (props: S3PreviewProps) => unknown;
+  tooltip: (props: S3TooltipProps) => unknown;
+};
+
+function objectMeta(object: S3ObjectInfo): string {
+  return [
+    objectTypeLabel(object.key, object.contentType),
+    formatBytes(object.sizeBytes),
+    formatFileDate(object.updatedAt, pageLanguage()),
+  ]
+    .filter(Boolean)
+    .join(" / ");
+}
+
+function splitKey(key: string): { parent: string; name: string } {
+  const lastSlash = key.lastIndexOf("/");
+  return lastSlash >= 0
+    ? { parent: key.slice(0, lastSlash + 1), name: key.slice(lastSlash + 1) }
+    : { parent: "", name: key };
+}
+
+const treeMessage = (cls: string, depth: number, message: string) =>
+  html`<div class=${cls} style=${indentPad(depth)}>${message}</div>`;
+
+function levelTemplate(p: S3SidebarProps, level: S3Level): unknown {
+  const t = p.text;
+  if (level.empty)
+    return treeMessage("s3-tree-empty", level.depth, t.s3.emptyFolder);
+  const hover = (object: S3ObjectInfo) => (event: Event) =>
+    p.onHoverObject(event.currentTarget as HTMLElement, object);
+  return html`${level.entries.map((entry) => {
+    if ("object" in entry) {
+      const object = entry.object;
+      return html`<div
+        class=${p.view === "explorer" && object.key === p.activeKey ? "tree-file active" : "tree-file"}
+        data-key=${object.key}
+        style=${indentPad(level.depth)}
+        @click=${() => p.onSelectObject(object)}
+        @mouseenter=${hover(object)}
+        @mouseleave=${p.onLeaveObject}
+      ><span class="chev-spacer"></span>${kindBadge(
+        object.key,
+        object.contentType,
+        t.s3.kind,
+      )}<span class="name" title=${object.key}
+          >${s3ObjectName(object.key) || object.key}</span
+        ></div>`;
+    }
+    const folder = entry.folder;
+    const children = folder.children;
+    return html`<div class="s3-tree-node"><div
+        class=${folder.collapsed ? "tree-dir collapsed" : "tree-dir"}
+        data-dirpath=${folder.prefix}
+        style=${indentPad(folder.depth)}
+        @click=${() => p.onToggleFolder(folder)}
+      ><span class="chev">${iconTemplate(
+        CHEVRON_DOWN_12_PATH,
+        "octicon-chevron-down",
+        12,
+      )}</span><span class="dir-icon">${folderIcon(folder.collapsed)}</span><span
+          class="dir-label"
+          ><span class="dir-name" title=${folder.prefix}
+            >${folderDisplayName(folder.prefix)}</span
+          ></span
+        ></div
+      ><div class="tree-children">${
+        children === null
+          ? nothing
+          : "loading" in children
+            ? treeMessage(
+                "s3-tree-loading",
+                folder.depth + 1,
+                t.s3.loadingFolder,
+              )
+            : "error" in children
+              ? treeMessage("s3-tree-error", folder.depth + 1, children.error)
+              : levelTemplate(p, children)
+      }</div></div>`;
+  })}${
+    level.more
+      ? // 続きのページごとにボタンを作り直す (前のページのボタンは外れる)。
+        keyed(
+          level.more,
+          html`<button
+          type="button"
+          class="s3-tree-more"
+          style=${indentPad(level.depth)}
+          ?disabled=${level.more.disabled}
+          @click=${level.more.load}
+        >${t.common.loadMore}</button>${
+          level.more.failure === null
+            ? nothing
+            : treeMessage("s3-tree-error", level.depth, level.more.failure)
+        }`,
+        )
+      : nothing
+  }`;
+}
+
+function previewHeader(p: S3PreviewProps, object: S3ObjectInfo): unknown {
+  const t = p.text;
+  return html`<div class="s3-preview-header"><div
+      class="s3-preview-title"
+      title=${object.key}
+    >${object.key}</div><div class="s3-preview-meta">${objectMeta(object)}</div><div
+      class="s3-preview-actions"
+    >${
+      p.rawUrl === null
+        ? nothing
+        : html`<a
+              class="db-btn db-btn-sm"
+              href=${p.rawUrl}
+              target="_blank"
+              rel="noreferrer"
+              >${t.s3.openRaw}</a
+            ><a
+              class="db-btn db-btn-sm"
+              href=${p.rawUrl}
+              download=${s3ObjectName(object.key)}
+              >${t.s3.download}</a
+            ><button type="button" class="db-btn db-btn-sm" @click=${p.onCopyUri}
+              >${
+                p.copyLabel === "copied"
+                  ? t.s3.copied
+                  : p.copyLabel === "failed"
+                    ? t.s3.copyFailed
+                    : t.s3.copyUri
+              }</button
+            >${
+              // テキストオブジェクトのみ編集可。削除は種類を問わず可。
+              sourceDisplayKind(object.key) === "text"
+                ? html`<button
+                    type="button"
+                    class="db-btn db-btn-sm"
+                    @click=${p.onEdit}
+                  >${t.common.edit}</button>`
+                : nothing
+            }<button type="button" class="db-btn db-btn-sm" @click=${p.onDelete}
+              >${t.common.delete}</button
+            >`
+    }</div></div>`;
+}
+
+export const DEFAULT_VIEW: S3ExplorerLook = {
+  sidebar: (p) => {
+    const t = p.text;
+    const explorer = p.view === "explorer";
+    return html`<div class="s3-bucket-row"><label class="s3-field-label"
+          >${t.s3.bucket}<select
+            class="s3-bucket-select"
+            ?disabled=${p.bucketsDisabled}
+            ${ref(p.bucketRef)}
+            @change=${(event: Event) =>
+              p.onBucket((event.currentTarget as HTMLSelectElement).value)}
+          >${p.buckets.map(
+            (bucket) =>
+              html`<option value=${bucket.name}>${bucket.name}</option>`,
+          )}</select></label
+        ><div class="seg s3-view-seg"><button
+            type="button"
+            class=${p.view === "list" ? "active" : ""}
+            @click=${() => p.onView("list")}
+          >${t.s3.listView}</button><button
+            type="button"
+            class=${explorer ? "active" : ""}
+            @click=${() => p.onView("explorer")}
+          >${t.s3.explorerView}</button></div></div
+      ><form class="s3-search-row" ?hidden=${explorer} @submit=${p.onSearch}><input
+          type="search"
+          class="s3-search-input"
+          placeholder=${p.mode === "prefix" ? t.s3.prefixPlaceholder : t.s3.containsPlaceholder}
+          autocomplete="off"
+          ${ref(p.searchRef)}
+          @keydown=${p.onSearchKeydown}
+        /><button type="submit" class="db-btn db-btn-primary s3-search-btn"
+          >${t.common.search}</button
+        ></form
+      ><div class="s3-options-row" ?hidden=${explorer}><div class="seg s3-mode-seg"
+          ><button
+            type="button"
+            class=${p.mode === "prefix" ? "active" : ""}
+            @click=${() => p.onMode("prefix")}
+          >${t.s3.prefixMode}</button><button
+            type="button"
+            class=${p.mode === "contains" ? "active" : ""}
+            @click=${() => p.onMode("contains")}
+          >${t.s3.containsMode}</button></div
+        ><select
+          class="s3-sort-select"
+          .value=${p.sort}
+          @change=${(event: Event) =>
+            p.onSort((event.currentTarget as HTMLSelectElement).value)}
+        ><option value="updated-desc">${t.s3.sortUpdated}</option><option
+            value="key-asc"
+          >${t.s3.sortKey}</option></select
+        ><button
+          type="button"
+          class="db-btn db-btn-sm s3-new-object-btn"
+          title=${t.s3.newObject}
+          ?hidden=${!p.newObjectShown}
+          @click=${p.onNewObject}
+        >＋ ${t.s3.newObject}</button></div
+      ><div
+        class=${p.status.warn ? "s3-object-status warn" : "s3-object-status"}
+        ?hidden=${explorer}
+      >${p.status.text}</div><div class="s3-object-list" ?hidden=${explorer}>${
+        p.list === null
+          ? nothing
+          : isStatus(p.list)
+            ? paneStatusTemplate(p.list.status, p.list.error)
+            : p.list.objects.map((object) => {
+                const { parent, name } = splitKey(object.key);
+                return html`<div
+                  class=${!explorer && object.key === p.activeKey ? "s3-object-item active" : "s3-object-item"}
+                  data-key=${object.key}
+                  @click=${() => p.onSelectObject(object)}
+                  @mouseenter=${(event: Event) =>
+                    p.onHoverObject(event.currentTarget as HTMLElement, object)}
+                  @mouseleave=${p.onLeaveObject}
+                >${
+                  // 1 行目: 親パス (薄)。サイドバー狭幅でも判別できるよう、末尾を省略。
+                  parent
+                    ? html`<div class="s3-object-parent">${parent}</div>`
+                    : nothing
+                }<div class="s3-object-head">${kindBadge(
+                  object.key,
+                  object.contentType,
+                  t.s3.kind,
+                )}<span class="s3-object-name">${name}</span></div><span
+                    class="s3-object-meta"
+                    >${objectMeta(object)}</span
+                  ></div>`;
+              })
+      }</div><button
+        type="button"
+        class="s3-object-more-btn"
+        ?hidden=${!p.more.shown}
+        ?disabled=${p.more.disabled}
+        @click=${p.onMore}
+      >${t.common.loadMore}</button><div
+        class="s3-object-list s3-tree tree"
+        ?hidden=${!explorer}
+      >${
+        p.tree === null
+          ? nothing
+          : isStatus(p.tree)
+            ? paneStatusTemplate(p.tree.status, p.tree.error)
+            : levelTemplate(p, p.tree)
+      }</div>`;
+  },
+  preview: (p) => {
+    const t = p.text;
+    const pane = p.pane;
+    if (pane === "empty") return paneEmptyTemplate(t.s3.selectObject);
+    if (isStatus(pane)) return paneStatusTemplate(pane.status, pane.error);
+    const status = (message: string) =>
+      html`<span class="s3-edit-status">${message}</span>`;
+    if ("create" in pane)
+      return html`<form class="s3-new-object-form" @submit=${p.onCreate}><div
+          class="s3-edit-bar"
+        ><button
+            type="submit"
+            class="db-btn db-btn-primary db-btn-sm"
+            ?disabled=${pane.busy}
+          >${t.s3.create}</button><button
+            type="button"
+            class="db-btn db-btn-sm"
+            @click=${p.onCancelCreate}
+          >${t.common.cancel}</button>${status(pane.message)}</div
+        ><input
+          type="text"
+          class="s3-new-object-key"
+          placeholder=${t.s3.newObjectKeyPlaceholder}
+          autocomplete="off"
+          ${ref(p.refs.newKey)}
+        /><textarea
+          class="s3-edit-textarea"
+          placeholder=${t.s3.contentPlaceholder}
+          ${ref(p.refs.newContent)}
+        ></textarea></form>`;
+    const body = pane.body;
+    return html`${previewHeader(p, pane.object)}<div class="s3-preview-body">${
+      isStatus(body)
+        ? paneStatusTemplate(body.status, body.error)
+        : "edit" in body
+          ? html`<div class="s3-edit-bar"><button
+                  type="button"
+                  class="db-btn db-btn-primary db-btn-sm"
+                  ?disabled=${body.edit.busy}
+                  @click=${p.onSave}
+                >${t.common.save}</button><button
+                  type="button"
+                  class="db-btn db-btn-sm"
+                  ?disabled=${body.edit.busy}
+                  @click=${p.onCancelEdit}
+                >${t.common.cancel}</button>${status(body.edit.message)}</div
+              ><textarea
+                class="s3-edit-textarea"
+                .value=${body.edit.current}
+                ${ref(p.refs.edit)}
+              ></textarea>`
+          : (body.node ?? nothing)
+    }</div>`;
+  },
+  tooltip: (p) =>
+    html`${
+      p.imageUrl === null
+        ? nothing
+        : html`<img
+            class="s3-key-tooltip-image"
+            src=${p.imageUrl}
+            alt=""
+            decoding="async"
+            loading="lazy"
+            @load=${p.onImageLoad}
+            @error=${p.onImageError}
+          />`
+    }<div class="s3-key-tooltip-path">${p.object.key}</div>${
+      p.meta ? html`<div class="s3-key-tooltip-meta">${p.meta}</div>` : nothing
+    }`,
+};
+
+/** 一覧の 1 ページの数 (新しい順は走査で並べ替えるので多めに取る)。 */
+const UPDATED_PAGE_SIZE = 1000;
+const KEY_PAGE_SIZE = 200;
+// 行の高速スイープでも `<img src>` が連発しないよう、表示を 150ms 遅らせる。
+// 途中で mouseleave が来たら timer をクリアして画像取得自体を起こさない。
+const TOOLTIP_SHOW_DELAY_MS = 150;
+/** 「コピーしました」「コピーできませんでした」を出しておく時間。 */
+const COPY_MARK_MS = 1200;
+
 export function createS3Explorer(
   callbacks: S3ExplorerCallbacks = {},
+  view: S3ExplorerLook = DEFAULT_VIEW,
 ): S3ExplorerView {
-  const text = (): DbText["explorer"]["s3"] =>
-    (callbacks.getText?.() ?? dbText("en")).explorer.s3;
-  const tCommon = (): DbText["explorer"]["common"] =>
-    (callbacks.getText?.() ?? dbText("en")).explorer.common;
+  const allText = (): DbText["explorer"] =>
+    (callbacks.getText?.() ?? dbText("en")).explorer;
+  const text = (): DbText["explorer"]["s3"] => allText().s3;
+  const tCommon = (): DbText["explorer"]["common"] => allText().common;
   const tFailure = (): DbText["failure"] =>
     (callbacks.getText?.() ?? dbText("en")).failure;
-  const container = document.createElement("div");
-  container.className = "s3-explorer";
-
-  // 左サイドバー (db-sidebar) の dbToolbar 直下にぶら下がる、Bucket セレクタ +
-  // List/Explorer セグメント。container には append しない。
-  const sidebarSlot = document.createElement("div");
-  sidebarSlot.className = "db-explorer-sidebar-slot s3-sidebar-slot";
-
-  const bucketRow = document.createElement("div");
-  bucketRow.className = "s3-bucket-row";
-  const bucketLabel = document.createElement("label");
-  bucketLabel.className = "s3-field-label";
-  bucketLabel.textContent = text().bucket;
-  const bucketSelect = document.createElement("select");
-  bucketSelect.className = "s3-bucket-select";
-  bucketLabel.appendChild(bucketSelect);
-  bucketRow.appendChild(bucketLabel);
-
-  // List (フラット一覧) と Explorer (フォルダツリー) の切替。既存の .seg
-  // パターンを踏襲。
-  const viewSeg = document.createElement("div");
-  viewSeg.className = "seg s3-view-seg";
-  const listViewBtn = document.createElement("button");
-  listViewBtn.type = "button";
-  listViewBtn.textContent = text().listView;
-  const explorerViewBtn = document.createElement("button");
-  explorerViewBtn.type = "button";
-  explorerViewBtn.textContent = text().explorerView;
-  viewSeg.append(listViewBtn, explorerViewBtn);
-  bucketRow.appendChild(viewSeg);
-
-  // ホバー tooltip ON/OFF はビューア設定パネル (#datastore-s3-tooltip) に
-  // 集約済み。pref 値の変動は callbacks.getTooltipEnabled() で読み取る
-  // (設定保存後、onDbUiPrefChange 経由でこの explorer に届く)。
-  sidebarSlot.appendChild(bucketRow);
-
-  // List/Explorer 共通: 検索バー / モード / sort / オブジェクトリスト /
-  // ツリーは全部 sidebarSlot に積む。右側はプレビューだけが残る。
-  const searchRow = document.createElement("form");
-  searchRow.className = "s3-search-row";
-  const searchInput = document.createElement("input");
-  searchInput.type = "search";
-  searchInput.className = "s3-search-input";
-  searchInput.placeholder = text().searchPlaceholder;
-  searchInput.autocomplete = "off";
-  const searchBtn = document.createElement("button");
-  searchBtn.type = "submit";
-  searchBtn.className = "db-btn db-btn-primary s3-search-btn";
-  searchBtn.textContent = tCommon().search;
-  searchRow.append(searchInput, searchBtn);
-  sidebarSlot.appendChild(searchRow);
-
-  const optionRow = document.createElement("div");
-  optionRow.className = "s3-options-row";
-  const modeSeg = document.createElement("div");
-  modeSeg.className = "seg s3-mode-seg";
-  const prefixModeBtn = document.createElement("button");
-  prefixModeBtn.type = "button";
-  prefixModeBtn.textContent = text().prefixMode;
-  const containsModeBtn = document.createElement("button");
-  containsModeBtn.type = "button";
-  containsModeBtn.textContent = text().containsMode;
-  modeSeg.append(prefixModeBtn, containsModeBtn);
-
-  const sortSelect = document.createElement("select");
-  sortSelect.className = "s3-sort-select";
-  const sortUpdated = document.createElement("option");
-  sortUpdated.value = "updated-desc";
-  sortUpdated.textContent = text().sortUpdated;
-  const sortKey = document.createElement("option");
-  sortKey.value = "key-asc";
-  sortKey.textContent = text().sortKey;
-  sortSelect.append(sortUpdated, sortKey);
-  const newObjectBtn = document.createElement("button");
-  newObjectBtn.type = "button";
-  newObjectBtn.className = "db-btn db-btn-sm s3-new-object-btn";
-  newObjectBtn.textContent = `＋ ${text().newObject}`;
-  newObjectBtn.title = text().newObject;
-  newObjectBtn.hidden = true;
-  optionRow.append(modeSeg, sortSelect, newObjectBtn);
-  sidebarSlot.appendChild(optionRow);
-
-  const objectStatus = document.createElement("div");
-  objectStatus.className = "s3-object-status";
-  sidebarSlot.appendChild(objectStatus);
-
-  const objectList = document.createElement("div");
-  objectList.className = "s3-object-list";
-  sidebarSlot.appendChild(objectList);
-
-  const moreBtn = document.createElement("button");
-  moreBtn.type = "button";
-  moreBtn.className = "s3-object-more-btn";
-  moreBtn.textContent = tCommon().loadMore;
-  moreBtn.hidden = true;
-  sidebarSlot.appendChild(moreBtn);
-
-  // Explorer 表示: 既存ツリーと同じ DOM/クラス (.tree, .tree-dir, .tree-file,
-  // .chev, .dir-icon ...) を使い、データは delimiter ベースの遅延ロードで賄う。
-  // sidebarSlot 内で List のオブジェクトリストと同じ位置に置き、表示は
-  // applyViewVisibility で排他切替する。
-  const explorerTree = document.createElement("div");
-  explorerTree.className = "s3-object-list s3-tree tree";
-  explorerTree.hidden = true;
-  sidebarSlot.appendChild(explorerTree);
-
-  const previewPane = document.createElement("div");
-  previewPane.className = "s3-preview-pane";
-  setPaneEmpty(previewPane, text().selectObject);
-
-  container.append(previewPane);
+  const bucketRef = createRef<HTMLSelectElement>();
+  const searchRef = createRef<HTMLInputElement>();
+  const refs = {
+    edit: createRef<HTMLTextAreaElement>(),
+    newKey: createRef<HTMLInputElement>(),
+    newContent: createRef<HTMLTextAreaElement>(),
+  };
+  const drawn = <T extends Element>(target: Ref<T>, name: string): T => {
+    const element = target.value;
+    if (!element) throw new Error(`S3 explorer: the ${name} was not drawn`);
+    return element;
+  };
+  const searchInput = () => drawn(searchRef, "search field");
 
   let currentDbId: string | null = null;
   let currentBucket: string | null = null;
@@ -258,13 +596,12 @@ export function createS3Explorer(
   let currentView: S3ViewMode = "list";
   let currentNextToken: string | undefined;
   const objectsByKey = new Map<string, S3ObjectInfo>();
-  const objectRowsByKey = new Map<string, HTMLElement>();
   // Explorer 表示の状態。folder prefix ("a/b/") 単位でロード済み/ロード中を管理。
-  const explorerRowsByKey = new Map<string, HTMLElement>();
   const explorerLoadedFolders = new Set<string>();
   const explorerLoadingFolders = new Map<string, Promise<void>>();
   // 各階層 (container prefix) の追加ページ取得関数。1 ページ追加できれば true。
   const explorerPagerByPrefix = new Map<string, () => Promise<boolean>>();
+  const explorerDirByPath = new Map<string, S3Folder>();
   // バケット/DB 切替・dispose 時に進行中の folder fetch をまとめて中断する。
   let explorerAbort: AbortController | null = null;
   let explorerRootLoaded = false;
@@ -273,30 +610,178 @@ export function createS3Explorer(
   let loadRunId = 0;
   let objectRunId = 0;
   let suppressNotify = false;
-  let activeObjectRow: HTMLElement | null = null;
+  let buckets: S3BucketInfo[] = [];
+  let bucketsDisabled = false;
+  let newObjectShown = false;
+  // 言語を切り替えたときに状態の行を描き直すため、最後に描いた応答を持つ。
+  let lastStatusResponse: S3ObjectsResponse | null = null;
+  let statusShown = false;
+  let listPane: S3SidebarProps["list"] = null;
+  let moreDisabled = false;
+  let treePane: S3SidebarProps["tree"] = null;
+  let previewPane: PreviewPane = "empty";
+  let copyLabel: S3PreviewProps["copyLabel"] = null;
   const bucketGuard = createAbortGuard();
   const objectGuard = createAbortGuard();
   const previewGuard = createAbortGuard();
   const explorerGuard = createAbortGuard();
+
+  // 左サイドバー (db-sidebar) の dbToolbar 直下にぶら下がる、Bucket セレクタ +
+  // List/Explorer セグメント・検索・一覧・ツリー。右側はプレビューだけが残る。
+  const sidebarSlot = templateElement(
+    html`<div class="db-explorer-sidebar-slot s3-sidebar-slot"></div>`,
+  );
+  const container = templateElement(
+    html`<div class="s3-explorer"><div class="s3-preview-pane"></div></div>`,
+  );
+  const previewEl = container.firstElementChild;
+  if (!(previewEl instanceof HTMLElement))
+    throw new Error("S3 explorer: the preview pane was not drawn");
+
+  // ----- ホバーで全パスを表示する floating tooltip -----
+  // sidebar 内では key 末尾しか見えないので、行ホバーで全 key + メタを別の
+  // 要素に展開する。preview pane 側へはみ出して読めるよう document.body に置く。
+  // ON/OFF は db-ui.json の prefs.s3TooltipEnabled (設定パネルから操作)。
+  // callback 未提供時は ON 固定。判定はホバー時に毎回読む (反映ラグ無し)。
+  const keyTooltip = templateElement(
+    html`<div class="s3-key-tooltip" hidden></div>`,
+  );
+  document.body.appendChild(keyTooltip);
+  let tooltipShowTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function draw(): void {
+    const t = allText();
+    renderOwned(
+      sidebarSlot,
+      view.sidebar({
+        text: t,
+        view: currentView,
+        mode: currentMode,
+        sort: currentSort,
+        buckets,
+        bucketsDisabled,
+        newObjectShown,
+        status: {
+          text:
+            statusShown && lastStatusResponse
+              ? statusText(lastStatusResponse)
+              : "",
+          warn: !!lastStatusResponse?.scanLimitReached,
+        },
+        list: listPane,
+        more: {
+          shown: currentView === "list" && !!currentNextToken,
+          disabled: moreDisabled,
+        },
+        tree: treePane,
+        activeKey: currentKey,
+        bucketRef,
+        searchRef,
+        onBucket: (bucket) => {
+          if (bucket) void selectBucket(bucket);
+        },
+        onView: (next) => {
+          if (currentView === next) return;
+          setView(next);
+          notifySelectionChange();
+        },
+        onSearch: (event) => {
+          event.preventDefault();
+          currentSearch = searchInput().value.trim();
+          notifySelectionChange();
+          void loadObjects(false);
+        },
+        onSearchKeydown: (event) => {
+          if (isImeComposing(event)) return;
+          if (event.key === "Escape") {
+            searchInput().value = "";
+            currentSearch = "";
+            notifySelectionChange();
+            void loadObjects(false);
+          }
+        },
+        onMode: (mode) => {
+          currentMode = mode;
+          notifySelectionChange();
+          void loadObjects(false);
+        },
+        onSort: (sort) => {
+          currentSort = sort === "key-asc" ? "key-asc" : "updated-desc";
+          notifySelectionChange();
+          void loadObjects(false);
+        },
+        onNewObject: showNewObjectForm,
+        onMore: () => void loadObjects(true),
+        onSelectObject: (object) => void selectObject(object),
+        onToggleFolder: (folder) => {
+          if (folder.collapsed) void expandFolder(folder);
+          else {
+            folder.collapsed = true;
+            draw();
+          }
+        },
+        onHoverObject: (row, object) => {
+          if (tooltipShowTimer !== null) clearTimeout(tooltipShowTimer);
+          tooltipShowTimer = setTimeout(() => {
+            tooltipShowTimer = null;
+            showKeyTooltip(row, object);
+          }, TOOLTIP_SHOW_DELAY_MS);
+        },
+        onLeaveObject: hideKeyTooltip,
+      }),
+    );
+    const object =
+      typeof previewPane === "object" && "object" in previewPane
+        ? previewPane.object
+        : null;
+    renderOwned(
+      previewEl as HTMLElement,
+      view.preview({
+        text: t,
+        pane: previewPane,
+        rawUrl:
+          object && currentDbId && currentBucket
+            ? buildS3RawUrl(currentDbId, currentBucket, object.key)
+            : null,
+        copyLabel,
+        refs,
+        onCopyUri: (event) => {
+          if (object) void copyUri(event.currentTarget as HTMLElement, object);
+        },
+        onEdit: () => {
+          if (object) void startObjectEdit(object);
+        },
+        onDelete: () => {
+          if (object) void deleteObject(object);
+        },
+        onSave: () => {
+          if (object) void saveObject(object);
+        },
+        onCancelEdit: () => {
+          if (object) void selectObject(object);
+        },
+        onCreate: (event) => {
+          event.preventDefault();
+          void createObject();
+        },
+        onCancelCreate: () => showPreview("empty"),
+      }),
+    );
+  }
+
+  function showPreview(pane: PreviewPane): void {
+    previewPane = pane;
+    draw();
+  }
 
   function notifySelectionChange(): void {
     if (suppressNotify) return;
     callbacks.onSelectionChange?.(getSelection());
   }
 
-  // ----- ホバーで全パスを表示する floating tooltip -----
-  // sidebar 内では key 末尾しか見えないので、行ホバーで全 key + メタを別 DOM
-  // に展開する。preview pane 側へはみ出して読めるよう document.body に attach。
-  // ON/OFF は db-ui.json の prefs.s3TooltipEnabled (設定パネルから操作)。
-  // callback 未提供時は ON 固定。判定はホバー時に毎回読む (反映ラグ無し)。
   function tooltipEnabled(): boolean {
     return callbacks.getTooltipEnabled?.() ?? true;
   }
-
-  const keyTooltip = document.createElement("div");
-  keyTooltip.className = "s3-key-tooltip";
-  keyTooltip.hidden = true;
-  document.body.appendChild(keyTooltip);
 
   function positionKeyTooltip(row: HTMLElement): void {
     // 画像など中身の load 完了でサイズが伸びることがあるので、表示直後と
@@ -316,45 +801,25 @@ export function createS3Explorer(
 
   function showKeyTooltip(row: HTMLElement, object: S3ObjectInfo): void {
     if (!tooltipEnabled()) return;
-    keyTooltip.innerHTML = "";
-
     // 画像オブジェクトのときはサムネイルを上に挟む。s3-preview の raw URL
     // をそのまま <img> に渡すだけ。max-width / max-height で抑える。
-    if (currentDbId && currentBucket) {
-      const displayKind = sourceDisplayKind(object.key);
-      if (displayKind === "image") {
-        const img = document.createElement("img");
-        img.className = "s3-key-tooltip-image";
-        img.src = buildS3RawUrl(currentDbId, currentBucket, object.key);
-        img.alt = "";
-        img.decoding = "async";
-        img.loading = "lazy";
-        // load 完了で実サイズが反映された後に再 position する (はみ出し回避)。
-        img.addEventListener("load", () => positionKeyTooltip(row), {
-          once: true,
-        });
-        img.addEventListener("error", () => img.remove(), { once: true });
-        keyTooltip.appendChild(img);
-      }
-    }
-
-    const path = document.createElement("div");
-    path.className = "s3-key-tooltip-path";
-    path.textContent = object.key;
-    keyTooltip.appendChild(path);
-    const metaText = [
-      objectTypeLabel(object.key, object.contentType),
-      formatBytes(object.sizeBytes),
-      formatFileDate(object.updatedAt, pageLanguage()),
-    ]
-      .filter(Boolean)
-      .join(" / ");
-    if (metaText) {
-      const meta = document.createElement("div");
-      meta.className = "s3-key-tooltip-meta";
-      meta.textContent = metaText;
-      keyTooltip.appendChild(meta);
-    }
+    const imageUrl =
+      currentDbId && currentBucket && sourceDisplayKind(object.key) === "image"
+        ? buildS3RawUrl(currentDbId, currentBucket, object.key)
+        : null;
+    const drawTooltip = (url: string | null) =>
+      renderOwned(
+        keyTooltip,
+        view.tooltip({
+          object,
+          imageUrl: url,
+          meta: objectMeta(object),
+          // load 完了で実サイズが反映された後に再 position する (はみ出し回避)。
+          onImageLoad: () => positionKeyTooltip(row),
+          onImageError: () => drawTooltip(null),
+        }),
+      );
+    drawTooltip(imageUrl);
     // position 計算前に offset を取りたいので一旦表示する。
     keyTooltip.hidden = false;
     keyTooltip.style.left = "0px";
@@ -370,46 +835,7 @@ export function createS3Explorer(
     keyTooltip.hidden = true;
   }
 
-  // 行の高速スイープでも `<img src>` が連発しないよう、表示を 150ms 遅らせる。
-  // 途中で mouseleave が来たら timer をクリアして画像取得自体を起こさない。
-  const TOOLTIP_SHOW_DELAY_MS = 150;
-  let tooltipShowTimer: ReturnType<typeof setTimeout> | null = null;
-
-  function attachKeyTooltip(row: HTMLElement, object: S3ObjectInfo): void {
-    row.addEventListener("mouseenter", () => {
-      if (tooltipShowTimer !== null) clearTimeout(tooltipShowTimer);
-      tooltipShowTimer = setTimeout(() => {
-        tooltipShowTimer = null;
-        showKeyTooltip(row, object);
-      }, TOOLTIP_SHOW_DELAY_MS);
-    });
-    row.addEventListener("mouseleave", hideKeyTooltip);
-  }
-
-  function setMode(mode: S3SearchMode): void {
-    currentMode = mode;
-    prefixModeBtn.classList.toggle("active", mode === "prefix");
-    containsModeBtn.classList.toggle("active", mode === "contains");
-    searchInput.placeholder =
-      mode === "prefix" ? text().prefixPlaceholder : text().containsPlaceholder;
-  }
-
-  function renderBuckets(buckets: S3BucketInfo[]): void {
-    bucketSelect.innerHTML = "";
-    for (const bucket of buckets) {
-      const opt = document.createElement("option");
-      opt.value = bucket.name;
-      opt.textContent = bucket.name;
-      bucketSelect.appendChild(opt);
-    }
-    bucketSelect.disabled = buckets.length === 0;
-  }
-
-  // 言語を切り替えたときに状態の行を描き直すため、最後に描いた応答を持つ。
-  let lastStatusResponse: S3ObjectsResponse | null = null;
-  function setObjectStatusFromResponse(resp: S3ObjectsResponse): void {
-    lastStatusResponse = resp;
-    objectStatus.textContent = "";
+  function statusText(resp: S3ObjectsResponse): string {
     const t = text();
     const parts = [
       tCommon().shownCount(resp.objects.length.toLocaleString()),
@@ -417,20 +843,7 @@ export function createS3Explorer(
       resp.sort === "updated-desc" ? t.newestFirstInScan : t.sortedByKey,
     ];
     if (resp.scanLimitReached) parts.push(t.scanCapReached);
-    objectStatus.textContent = parts.join(" / ");
-    objectStatus.classList.toggle("warn", !!resp.scanLimitReached);
-  }
-
-  function highlightActiveObject(key: string | null): void {
-    const rows =
-      currentView === "explorer" ? explorerRowsByKey : objectRowsByKey;
-    // ノード同一性で比較する。キー一致だけで早期 return すると、再描画で
-    // 行が差し替わったときに古い (detached な) 行を指したままになる。
-    const target = key ? (rows.get(key) ?? null) : null;
-    if (target === activeObjectRow) return;
-    activeObjectRow?.classList.remove("active");
-    activeObjectRow = target;
-    activeObjectRow?.classList.add("active");
+    return parts.join(" / ");
   }
 
   async function fetchObjectHeadForSelection(
@@ -455,57 +868,6 @@ export function createS3Explorer(
     };
   }
 
-  function splitKey(key: string): { parent: string; name: string } {
-    const lastSlash = key.lastIndexOf("/");
-    return lastSlash >= 0
-      ? { parent: key.slice(0, lastSlash + 1), name: key.slice(lastSlash + 1) }
-      : { parent: "", name: key };
-  }
-
-  function appendObjects(objects: S3ObjectInfo[]): void {
-    const fragment = document.createDocumentFragment();
-    for (const object of objects) {
-      objectsByKey.set(object.key, object);
-      const row = document.createElement("div");
-      row.className = "s3-object-item";
-      row.dataset.key = object.key;
-      objectRowsByKey.set(object.key, row);
-
-      const { parent, name: fileName } = splitKey(object.key);
-      // 1 行目: 親パス (薄)。サイドバー狭幅でも判別できるよう、末尾を省略。
-      if (parent) {
-        const parentEl = document.createElement("div");
-        parentEl.className = "s3-object-parent";
-        parentEl.textContent = parent;
-        row.appendChild(parentEl);
-      }
-      // 2 行目: kindBadge + ファイル名 (主役)。末尾セグメントだけにして
-      // 短い key 名に最大限の表示幅を渡す。
-      const head = document.createElement("div");
-      head.className = "s3-object-head";
-      const name = document.createElement("span");
-      name.className = "s3-object-name";
-      name.textContent = fileName;
-      head.append(
-        createKindBadge(object.key, object.contentType, text().kind),
-        name,
-      );
-      row.appendChild(head);
-      // 3 行目: メタ。
-      const meta = document.createElement("span");
-      meta.className = "s3-object-meta";
-      const kind = objectTypeLabel(object.key, object.contentType);
-      const size = formatBytes(object.sizeBytes);
-      const updated = formatFileDate(object.updatedAt, pageLanguage());
-      meta.textContent = [kind, size, updated].filter(Boolean).join(" / ");
-      row.appendChild(meta);
-
-      attachKeyTooltip(row, object);
-      fragment.appendChild(row);
-    }
-    objectList.appendChild(fragment);
-  }
-
   async function loadObjects(append: boolean): Promise<void> {
     if (!currentDbId || !currentBucket || disposed) return;
     const slot = objectGuard.start();
@@ -515,31 +877,27 @@ export function createS3Explorer(
     const requestSearch = currentSearch;
     const requestMode = currentMode;
     const requestSort = currentSort;
-    moreBtn.disabled = true;
+    moreDisabled = true;
     if (!append) {
       listLoaded = true;
-      objectList.innerHTML = "";
       objectsByKey.clear();
-      objectRowsByKey.clear();
-      activeObjectRow = null;
       currentKey = null;
       currentNextToken = undefined;
-      setPaneStatus(objectList, text().loadingObjects);
-      setPaneEmpty(previewPane, text().selectObject);
+      listPane = { status: text().loadingObjects, error: false };
+      previewPane = "empty";
     }
+    draw();
     try {
       const params = new URLSearchParams({
         db: requestDbId,
         bucket: requestBucket,
         mode: requestMode,
         sort: requestSort,
-        limit: requestSort === "updated-desc" ? "1000" : "200",
+        limit: String(
+          requestSort === "updated-desc" ? UPDATED_PAGE_SIZE : KEY_PAGE_SIZE,
+        ),
       });
-      if (requestMode === "prefix") {
-        if (requestSearch) params.set("q", requestSearch);
-      } else if (requestSearch) {
-        params.set("q", requestSearch);
-      }
+      if (requestSearch) params.set("q", requestSearch);
       if (append && currentNextToken) params.set("token", currentNextToken);
       const res = await fetch(`${apiUrl("dbS3Objects")}?${params}`, {
         signal: slot.signal,
@@ -559,47 +917,46 @@ export function createS3Explorer(
       ) {
         return;
       }
-      if (!append) objectList.innerHTML = "";
+      const shown =
+        append && listPane !== null && !isStatus(listPane)
+          ? listPane.objects
+          : [];
       if (data.objects.length === 0 && !append) {
-        setPaneStatus(
-          objectList,
-          data.scanLimitReached
+        listPane = {
+          status: data.scanLimitReached
             ? text().noMatchesInScan(data.scannedObjects.toLocaleString())
             : text().noObjects,
-        );
+          error: false,
+        };
       } else {
-        appendObjects(data.objects);
+        for (const object of data.objects) objectsByKey.set(object.key, object);
+        listPane = { objects: [...shown, ...data.objects] };
       }
       currentNextToken = data.nextToken;
-      moreBtn.hidden = !data.nextToken;
-      setObjectStatusFromResponse(data);
-      highlightActiveObject(currentKey);
+      lastStatusResponse = data;
+      statusShown = true;
+      draw();
     } catch (err) {
       if (slot.isStale()) return;
-      setPaneStatus(
-        objectList,
-        reportDatastoreFailure(
+      listPane = {
+        status: reportDatastoreFailure(
           "S3",
           "object list",
           err,
           requestBucket,
           requestSearch,
         ),
-        { error: true },
-      );
-      objectStatus.textContent = "";
+        error: true,
+      };
+      statusShown = false;
+      draw();
     } finally {
       slot.finish();
-      if (!slot.isStale()) moreBtn.disabled = false;
+      if (!slot.isStale()) {
+        moreDisabled = false;
+        draw();
+      }
     }
-  }
-
-  function mkBtn(label: string, cls: string): HTMLButtonElement {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = cls;
-    b.textContent = label;
-    return b;
   }
 
   async function postS3Write(body: Record<string, unknown>): Promise<void> {
@@ -622,12 +979,18 @@ export function createS3Explorer(
     else void loadObjects(false);
   }
 
+  function setPreviewBody(
+    object: S3ObjectInfo,
+    body: Extract<PreviewPane, { object: S3ObjectInfo }>["body"],
+  ): void {
+    showPreview({ object, body });
+  }
+
   // テキストオブジェクトの内容を取得して textarea 編集する。保存は PUT (上書き)。
   async function startObjectEdit(object: S3ObjectInfo): Promise<void> {
     if (!currentDbId || !currentBucket) return;
-    const bodyEl = previewPane.querySelector<HTMLElement>(".s3-preview-body");
-    if (!bodyEl) return;
-    setPaneStatus(bodyEl, tCommon().saving);
+    if (typeof previewPane !== "object" || !("object" in previewPane)) return;
+    setPreviewBody(object, { status: tCommon().saving, error: false });
     let current = "";
     try {
       const params = new URLSearchParams({
@@ -639,9 +1002,8 @@ export function createS3Explorer(
       await requireOkResponse(res, tFailure().s3ObjectText);
       current = ((await res.json()) as S3ObjectTextResponse).text;
     } catch (err) {
-      setPaneStatus(
-        bodyEl,
-        tCommon().saveError(
+      setPreviewBody(object, {
+        status: tCommon().saveError(
           reportDatastoreFailure(
             "S3",
             "object text",
@@ -650,52 +1012,53 @@ export function createS3Explorer(
             object.key,
           ),
         ),
-        { error: true },
-      );
+        error: true,
+      });
       return;
     }
-    bodyEl.innerHTML = "";
-    const bar = document.createElement("div");
-    bar.className = "s3-edit-bar";
-    const save = mkBtn(tCommon().save, "db-btn db-btn-primary db-btn-sm");
-    const cancel = mkBtn(tCommon().cancel, "db-btn db-btn-sm");
-    const status = document.createElement("span");
-    status.className = "s3-edit-status";
-    bar.append(save, cancel, status);
-    const ta = document.createElement("textarea");
-    ta.className = "s3-edit-textarea";
-    ta.value = current;
-    bodyEl.append(bar, ta);
-    cancel.addEventListener("click", () => void selectObject(object));
-    save.addEventListener("click", async () => {
-      if (!currentDbId || !currentBucket) return;
-      save.disabled = true;
-      cancel.disabled = true;
-      status.textContent = tCommon().saving;
-      try {
-        await postS3Write({
-          db: currentDbId,
-          bucket: currentBucket,
-          key: object.key,
-          content: ta.value,
-          contentType: object.contentType || "text/plain",
-        });
-        await selectObject(object);
-      } catch (err) {
-        save.disabled = false;
-        cancel.disabled = false;
-        status.textContent = tCommon().saveError(
-          reportDatastoreFailure(
-            "S3",
-            "object write",
-            err,
-            currentBucket,
-            object.key,
-          ),
-        );
-      }
+    setPreviewBody(object, { edit: { current, message: "", busy: false } });
+    refs.edit.value?.focus();
+  }
+
+  async function saveObject(object: S3ObjectInfo): Promise<void> {
+    if (!currentDbId || !currentBucket) return;
+    if (
+      typeof previewPane !== "object" ||
+      !("object" in previewPane) ||
+      !("edit" in previewPane.body)
+    )
+      return;
+    const edit = previewPane.body.edit;
+    const content = drawn(refs.edit, "editor").value;
+    setPreviewBody(object, {
+      edit: { ...edit, busy: true, message: tCommon().saving },
     });
-    ta.focus();
+    try {
+      await postS3Write({
+        db: currentDbId,
+        bucket: currentBucket,
+        key: object.key,
+        content,
+        contentType: object.contentType || "text/plain",
+      });
+      await selectObject(object);
+    } catch (err) {
+      setPreviewBody(object, {
+        edit: {
+          ...edit,
+          busy: false,
+          message: tCommon().saveError(
+            reportDatastoreFailure(
+              "S3",
+              "object write",
+              err,
+              currentBucket,
+              object.key,
+            ),
+          ),
+        },
+      });
+    }
   }
 
   async function deleteObject(object: S3ObjectInfo): Promise<void> {
@@ -714,12 +1077,11 @@ export function createS3Explorer(
         op: "delete",
       });
       currentKey = null;
-      setPaneEmpty(previewPane, text().selectObject);
+      showPreview("empty");
       refreshObjectList();
     } catch (err) {
-      setPaneStatus(
-        previewPane,
-        tCommon().saveError(
+      showPreview({
+        status: tCommon().saveError(
           reportDatastoreFailure(
             "S3",
             "object delete",
@@ -728,66 +1090,48 @@ export function createS3Explorer(
             object.key,
           ),
         ),
-        { error: true },
-      );
+        error: true,
+      });
     }
   }
 
   // 新規オブジェクト (テキスト) 作成フォームを preview に表示する。
   function showNewObjectForm(): void {
     if (!currentBucket) {
-      setPaneStatus(previewPane, text().selectObject);
+      showPreview({ status: text().selectObject, error: false });
       return;
     }
-    previewPane.innerHTML = "";
-    const form = document.createElement("form");
-    form.className = "s3-new-object-form";
-    const keyInput = document.createElement("input");
-    keyInput.type = "text";
-    keyInput.className = "s3-new-object-key";
-    keyInput.placeholder = text().newObjectKeyPlaceholder;
-    keyInput.autocomplete = "off";
-    const ta = document.createElement("textarea");
-    ta.className = "s3-edit-textarea";
-    ta.placeholder = text().contentPlaceholder;
-    const bar = document.createElement("div");
-    bar.className = "s3-edit-bar";
-    const create = mkBtn(text().create, "db-btn db-btn-primary db-btn-sm");
-    create.type = "submit";
-    const cancel = mkBtn(tCommon().cancel, "db-btn db-btn-sm");
-    const status = document.createElement("span");
-    status.className = "s3-edit-status";
-    bar.append(create, cancel, status);
-    form.append(bar, keyInput, ta);
-    previewPane.appendChild(form);
-    keyInput.focus();
-    cancel.addEventListener("click", () =>
-      setPaneEmpty(previewPane, text().selectObject),
-    );
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentDbId || !currentBucket) return;
-      const key = keyInput.value.trim();
-      if (!key) {
-        keyInput.focus();
-        return;
-      }
-      create.disabled = true;
-      status.textContent = tCommon().saving;
-      try {
-        await postS3Write({
-          db: currentDbId,
-          bucket: currentBucket,
-          key,
-          content: ta.value,
-          contentType: "text/plain",
-          op: "create",
-        });
-        refreshObjectList();
-        setPaneEmpty(previewPane, text().selectObject);
-      } catch (err) {
-        create.disabled = false;
-        status.textContent = tCommon().saveError(
+    showPreview({ create: true, message: "", busy: false });
+    refs.newKey.value?.focus();
+  }
+
+  async function createObject(): Promise<void> {
+    if (!currentDbId || !currentBucket) return;
+    if (typeof previewPane !== "object" || !("create" in previewPane)) return;
+    const keyInput = drawn(refs.newKey, "new object key");
+    const key = keyInput.value.trim();
+    if (!key) {
+      keyInput.focus();
+      return;
+    }
+    const content = drawn(refs.newContent, "new object content").value;
+    showPreview({ create: true, busy: true, message: tCommon().saving });
+    try {
+      await postS3Write({
+        db: currentDbId,
+        bucket: currentBucket,
+        key,
+        content,
+        contentType: "text/plain",
+        op: "create",
+      });
+      refreshObjectList();
+      showPreview("empty");
+    } catch (err) {
+      showPreview({
+        create: true,
+        busy: false,
+        message: tCommon().saveError(
           reportDatastoreFailure(
             "S3",
             "object create",
@@ -795,105 +1139,51 @@ export function createS3Explorer(
             currentBucket,
             key,
           ),
-        );
-      }
-    });
-  }
-
-  newObjectBtn.addEventListener("click", () => showNewObjectForm());
-
-  function renderPreviewHeader(object: S3ObjectInfo): HTMLElement {
-    const header = document.createElement("div");
-    header.className = "s3-preview-header";
-    const title = document.createElement("div");
-    title.className = "s3-preview-title";
-    title.textContent = object.key;
-    title.title = object.key;
-    const meta = document.createElement("div");
-    meta.className = "s3-preview-meta";
-    meta.textContent = [
-      objectTypeLabel(object.key, object.contentType),
-      formatBytes(object.sizeBytes),
-      formatFileDate(object.updatedAt, pageLanguage()),
-    ]
-      .filter(Boolean)
-      .join(" / ");
-    const actions = document.createElement("div");
-    actions.className = "s3-preview-actions";
-    if (currentDbId && currentBucket) {
-      const rawUrl = buildS3RawUrl(currentDbId, currentBucket, object.key);
-      const open = document.createElement("a");
-      open.className = "db-btn db-btn-sm";
-      open.href = rawUrl;
-      open.target = "_blank";
-      open.rel = "noreferrer";
-      open.textContent = text().openRaw;
-      const download = document.createElement("a");
-      download.className = "db-btn db-btn-sm";
-      download.href = rawUrl;
-      download.download = s3ObjectName(object.key);
-      download.textContent = text().download;
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.className = "db-btn db-btn-sm";
-      copy.textContent = text().copyUri;
-      copy.addEventListener("click", async () => {
-        try {
-          await navigator.clipboard.writeText(
-            s3Uri(currentBucket || "", object.key),
-          );
-          copy.textContent = text().copied;
-          window.setTimeout(() => {
-            copy.textContent = text().copyUri;
-          }, 1200);
-        } catch (err) {
-          // ラベルは成功のときと同じく一時的に変えて戻す。理由の全文は
-          // console と title/aria-label に残す (直す前は理由を捨てていた)。
-          showCopyFailure(
-            copy,
-            `copy s3 uri ${s3Uri(currentBucket || "", object.key)}`,
-            err,
-            text().copyUri,
-            1200,
-          );
-          copy.textContent = text().copyFailed;
-          window.setTimeout(() => {
-            copy.textContent = text().copyUri;
-          }, 1200);
-        }
+        ),
       });
-      actions.append(open, download, copy);
-      // テキストオブジェクトのみ編集可。削除は種類を問わず可。
-      if (sourceDisplayKind(object.key) === "text") {
-        const editBtn = mkBtn(tCommon().edit, "db-btn db-btn-sm");
-        editBtn.addEventListener("click", () => void startObjectEdit(object));
-        actions.appendChild(editBtn);
-      }
-      const delBtn = mkBtn(tCommon().delete, "db-btn db-btn-sm");
-      delBtn.addEventListener("click", () => void deleteObject(object));
-      actions.appendChild(delBtn);
     }
-    header.append(title, meta, actions);
-    return header;
   }
 
-  function renderMediaPreview(object: S3ObjectInfo, kind: string): HTMLElement {
-    const view = document.createElement("div");
-    view.className = `gdp-source-viewer media ${kind} s3-source-preview`;
-    if (!currentDbId || !currentBucket) return view;
+  async function copyUri(
+    button: HTMLElement,
+    object: S3ObjectInfo,
+  ): Promise<void> {
+    const uri = s3Uri(currentBucket || "", object.key);
+    try {
+      await navigator.clipboard.writeText(uri);
+      copyLabel = "copied";
+    } catch (err) {
+      // ラベルは成功のときと同じく一時的に変えて戻す。理由の全文は
+      // console と title/aria-label に残す (直す前は理由を捨てていた)。
+      showCopyFailure(
+        button,
+        `copy s3 uri ${uri}`,
+        err,
+        text().copyUri,
+        COPY_MARK_MS,
+      );
+      copyLabel = "failed";
+    }
+    draw();
+    window.setTimeout(() => {
+      copyLabel = null;
+      draw();
+    }, COPY_MARK_MS);
+  }
+
+  function mediaPreview(object: S3ObjectInfo, kind: string): HTMLElement {
+    const box = templateElement(
+      html`<div
+        class=${`gdp-source-viewer media ${kind} s3-source-preview`}
+      ></div>`,
+    );
+    if (!currentDbId || !currentBucket) return box;
     const url = buildS3RawUrl(currentDbId, currentBucket, object.key);
-    appendMediaEmbed(view, { url, kind, title: object.key });
-    return view;
+    appendMediaEmbed(box, { url, kind, title: object.key });
+    return box;
   }
 
-  function renderUnsupported(): HTMLElement {
-    return renderUnsupportedPreview({
-      className: "s3-source-preview",
-      message: text().unsupported,
-    });
-  }
-
-  async function renderTextPreview(
+  async function textPreview(
     object: S3ObjectInfo,
     slot: ReturnType<typeof previewGuard.start>,
   ): Promise<HTMLElement | null> {
@@ -934,21 +1224,16 @@ export function createS3Explorer(
         },
       );
     } else {
-      const pre = document.createElement("pre");
-      pre.className = "s3-text-preview";
-      pre.textContent = data.text;
-      body = pre;
+      body = templateElement(
+        html`<pre class="s3-text-preview">${data.text}</pre>`,
+      );
     }
-    if (data.truncated) {
-      const wrap = document.createElement("div");
-      wrap.className = "s3-text-preview-wrap";
-      const note = document.createElement("div");
-      note.className = "datastore-value-truncation";
-      note.textContent = text().truncatedNotice(formatBytes(512 * 1024));
-      wrap.append(note, body);
-      return wrap;
-    }
-    return body;
+    if (!data.truncated) return body;
+    return templateElement(
+      html`<div class="s3-text-preview-wrap"><div
+          class="datastore-value-truncation"
+        >${text().truncatedNotice(formatBytes(512 * 1024))}</div>${body}</div>`,
+    );
   }
 
   async function selectObject(object: S3ObjectInfo): Promise<void> {
@@ -959,13 +1244,8 @@ export function createS3Explorer(
     const requestBucket = currentBucket;
     currentKey = object.key;
     notifySelectionChange();
-    highlightActiveObject(object.key);
-    previewPane.innerHTML = "";
-    previewPane.appendChild(renderPreviewHeader(object));
-    const body = document.createElement("div");
-    body.className = "s3-preview-body";
-    setPaneStatus(body, text().loadingPreview);
-    previewPane.appendChild(body);
+    copyLabel = null;
+    setPreviewBody(object, { status: text().loadingPreview, error: false });
     try {
       const displayKind = sourceDisplayKind(object.key);
       let preview: HTMLElement | null;
@@ -975,11 +1255,14 @@ export function createS3Explorer(
         displayKind === "audio" ||
         displayKind === "pdf"
       ) {
-        preview = renderMediaPreview(object, displayKind);
+        preview = mediaPreview(object, displayKind);
       } else if (displayKind === "text") {
-        preview = await renderTextPreview(object, slot);
+        preview = await textPreview(object, slot);
       } else {
-        preview = renderUnsupported();
+        preview = renderUnsupportedPreview({
+          className: "s3-source-preview",
+          message: text().unsupported,
+        });
       }
       if (
         disposed ||
@@ -991,21 +1274,19 @@ export function createS3Explorer(
       ) {
         return;
       }
-      body.innerHTML = "";
-      if (preview) body.appendChild(preview);
+      setPreviewBody(object, { node: preview });
     } catch (err) {
       if (slot.isStale()) return;
-      setPaneStatus(
-        body,
-        reportDatastoreFailure(
+      setPreviewBody(object, {
+        status: reportDatastoreFailure(
           "S3",
           "object preview",
           err,
           requestBucket,
           object.key,
         ),
-        { error: true },
-      );
+        error: true,
+      });
     } finally {
       slot.finish();
     }
@@ -1013,28 +1294,11 @@ export function createS3Explorer(
 
   // ---- Explorer (フォルダツリー) ----
 
-  type ExplorerDir = {
-    childUl: HTMLElement;
-    expand: () => Promise<void>;
-  };
-  const explorerDirByPath = new Map<string, ExplorerDir>();
-
-  function indentPad(depth: number): string {
-    return `${12 + depth * 14}px`;
-  }
-
-  function setExplorerChevron(el: HTMLElement): void {
-    el.innerHTML =
-      '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">' +
-      `<path fill="currentColor" d="${CHEVRON_DOWN_12_PATH}"></path></svg>`;
-  }
-
   function resetExplorer(): void {
     // 進行中の folder fetch を中断してから状態を捨てる。
     explorerAbort?.abort();
     explorerAbort = new AbortController();
-    explorerTree.innerHTML = "";
-    explorerRowsByKey.clear();
+    treePane = null;
     explorerDirByPath.clear();
     explorerPagerByPrefix.clear();
     explorerLoadedFolders.clear();
@@ -1060,142 +1324,55 @@ export function createS3Explorer(
     return (await res.json()) as S3FolderResponse;
   }
 
-  function makeTreeMessageRow(
-    cls: string,
-    depth: number,
-    text: string,
-  ): HTMLElement {
-    const el = document.createElement("div");
-    el.className = cls;
-    el.style.setProperty("--lvl-pad", indentPad(depth));
-    el.textContent = text;
-    return el;
-  }
-
-  function createExplorerFileRow(
-    object: S3ObjectInfo,
-    depth: number,
-  ): HTMLElement {
-    objectsByKey.set(object.key, object);
-    const row = document.createElement("div");
-    row.className = "tree-file";
-    row.dataset.key = object.key;
-    row.style.setProperty("--lvl-pad", indentPad(depth));
-    const spacer = document.createElement("span");
-    spacer.className = "chev-spacer";
-    const name = document.createElement("span");
-    name.className = "name";
-    name.textContent = s3ObjectName(object.key) || object.key;
-    name.title = object.key;
-    row.append(
-      spacer,
-      createKindBadge(object.key, object.contentType, text().kind),
-      name,
-    );
-    explorerRowsByKey.set(object.key, row);
-    // active の付与は highlightActiveObject に一元化する (renderFolderLevel 末尾で
-    // 同期)。ここで直付けすると activeObjectRow と二重管理になりずれる。
-    row.addEventListener("click", () => void selectObject(object));
-    attachKeyTooltip(row, object);
-    return row;
-  }
-
-  function createExplorerDirRow(
-    folderPrefix: string,
-    depth: number,
-  ): HTMLElement {
-    const wrap = document.createElement("div");
-    wrap.className = "s3-tree-node";
-
-    const row = document.createElement("div");
-    row.className = "tree-dir collapsed";
-    row.dataset.dirpath = folderPrefix;
-    row.style.setProperty("--lvl-pad", indentPad(depth));
-
-    const chev = document.createElement("span");
-    chev.className = "chev";
-    setExplorerChevron(chev);
-    const dirIcon = document.createElement("span");
-    dirIcon.className = "dir-icon";
-    setExplorerFolderIcon(dirIcon, true);
-    const label = document.createElement("span");
-    label.className = "dir-label";
-    const dn = document.createElement("span");
-    dn.className = "dir-name";
-    dn.textContent = folderDisplayName(folderPrefix);
-    dn.title = folderPrefix;
-    label.appendChild(dn);
-    row.append(chev, dirIcon, label);
-
-    const childUl = document.createElement("div");
-    childUl.className = "tree-children";
-    wrap.append(row, childUl);
-
-    const expand = async (): Promise<void> => {
-      if (!row.classList.contains("collapsed")) return;
-      await ensureFolderLoaded(folderPrefix, childUl, depth + 1);
-      row.classList.remove("collapsed");
-      setExplorerFolderIcon(dirIcon, false);
-    };
-    const collapse = (): void => {
-      row.classList.add("collapsed");
-      setExplorerFolderIcon(dirIcon, true);
-    };
-    row.addEventListener("click", () => {
-      if (row.classList.contains("collapsed")) void expand();
-      else collapse();
-    });
-
-    explorerDirByPath.set(folderPrefix, { childUl, expand });
-    return wrap;
-  }
-
-  function renderFolderLevel(
-    parent: HTMLElement,
+  // 1 ページ分のフォルダとファイルを、その階層 (level) に足す。append でなければ
+  // 階層を作り直す。続きがあれば、続きを読む関数を階層と explorerPagerByPrefix に置く。
+  function addFolderPage(
+    level: S3Level,
     prefix: string,
-    depth: number,
     data: S3FolderResponse,
     append: boolean,
   ): void {
-    if (!append) {
-      parent.innerHTML = "";
-      explorerPagerByPrefix.delete(prefix);
-    }
+    if (!append) explorerPagerByPrefix.delete(prefix);
     if (!append && data.folders.length === 0 && data.objects.length === 0) {
-      parent.appendChild(
-        makeTreeMessageRow("s3-tree-empty", depth, text().emptyFolder),
-      );
-      if (currentKey) highlightActiveObject(currentKey);
+      level.empty = true;
       return;
     }
-    const fragment = document.createDocumentFragment();
-    for (const folder of data.folders) {
-      fragment.appendChild(createExplorerDirRow(folder, depth));
+    for (const folderPrefix of data.folders) {
+      const folder: S3Folder = {
+        prefix: folderPrefix,
+        depth: level.depth,
+        collapsed: true,
+        children: null,
+      };
+      explorerDirByPath.set(folderPrefix, folder);
+      level.entries.push({ folder });
     }
     for (const object of data.objects) {
-      fragment.appendChild(createExplorerFileRow(object, depth));
+      objectsByKey.set(object.key, object);
+      level.entries.push({ object });
     }
-    parent.appendChild(fragment);
-    if (data.nextToken) {
-      const dbId = currentDbId;
-      const bucket = currentBucket;
-      const more = document.createElement("button");
-      more.type = "button";
-      more.className = "s3-tree-more";
-      more.style.setProperty("--lvl-pad", indentPad(depth));
-      more.textContent = tCommon().loadMore;
-      // 失敗の文言はボタンのラベルに入れない (ラベルが伸びると押せる領域が
-      // 動く)。ボタンの外の状態の行に出し、次の試行で消す。
-      let failureRow: HTMLElement | null = null;
-      // ボタン押下と、復元時のプログラム的なページ送り (expandExplorerToKey) を
-      // 同じ関数で扱う。1 ページ追加できれば true を返す。
-      const loadMore = async (): Promise<boolean> => {
+    const token = data.nextToken;
+    if (!token) {
+      level.more = null;
+      explorerPagerByPrefix.delete(prefix);
+      return;
+    }
+    const dbId = currentDbId;
+    const bucket = currentBucket;
+    // ボタン押下と、復元時のプログラム的なページ送り (expandExplorerToKey) を
+    // 同じ関数で扱う。1 ページ追加できれば true を返す。失敗の文言はボタンの
+    // ラベルに入れず (ラベルが伸びると押せる領域が動く)、ボタンの後ろの行に
+    // 出し、次の試行で消す。
+    const more: NonNullable<S3Level["more"]> = {
+      disabled: false,
+      failure: null,
+      load: async () => {
         if (more.disabled) return false;
         more.disabled = true;
-        failureRow?.remove();
-        failureRow = null;
+        more.failure = null;
+        draw();
         try {
-          const next = await fetchFolder(prefix, data.nextToken);
+          const next = await fetchFolder(prefix, token);
           if (
             !next ||
             disposed ||
@@ -1204,76 +1381,82 @@ export function createS3Explorer(
           ) {
             return false;
           }
-          more.remove();
-          renderFolderLevel(parent, prefix, depth, next, true);
+          level.more = null;
+          addFolderPage(level, prefix, next, true);
+          draw();
           return true;
         } catch (err) {
           if (isAbortError(err) || disposed) return false;
           more.disabled = false;
-          failureRow = makeTreeMessageRow(
-            "s3-tree-error",
-            depth,
-            text().loadMoreFailed(
-              reportDatastoreFailure("S3", "load more", err, bucket, prefix),
-            ),
+          more.failure = text().loadMoreFailed(
+            reportDatastoreFailure("S3", "load more", err, bucket, prefix),
           );
-          more.after(failureRow);
+          draw();
           return false;
         }
-      };
-      explorerPagerByPrefix.set(prefix, loadMore);
-      more.addEventListener("click", () => void loadMore());
-      parent.appendChild(more);
-    } else {
-      explorerPagerByPrefix.delete(prefix);
-    }
-    // active は highlightActiveObject に一元化。再描画後にここで同期する。
-    if (currentKey) highlightActiveObject(currentKey);
+      },
+    };
+    level.more = more;
+    explorerPagerByPrefix.set(prefix, more.load);
   }
 
-  function ensureFolderLoaded(
-    prefix: string,
-    childUl: HTMLElement,
-    depth: number,
-  ): Promise<void> {
+  const newLevel = (depth: number): S3Level => ({
+    depth,
+    entries: [],
+    empty: false,
+    more: null,
+  });
+
+  function ensureFolderLoaded(folder: S3Folder): Promise<void> {
+    const prefix = folder.prefix;
     if (explorerLoadedFolders.has(prefix)) return Promise.resolve();
     const existing = explorerLoadingFolders.get(prefix);
     if (existing) return existing;
     const dbId = currentDbId;
     const bucket = currentBucket;
-    childUl.replaceChildren(
-      makeTreeMessageRow("s3-tree-loading", depth, text().loadingFolder),
-    );
+    folder.children = { loading: true };
+    draw();
     const load = (async () => {
       try {
         const data = await fetchFolder(prefix);
         if (disposed || dbId !== currentDbId || bucket !== currentBucket)
           return;
         if (!data) {
-          childUl.innerHTML = "";
+          folder.children = null;
           return;
         }
-        renderFolderLevel(childUl, prefix, depth, data, false);
+        const level = newLevel(folder.depth + 1);
+        addFolderPage(level, prefix, data, false);
+        folder.children = level;
         explorerLoadedFolders.add(prefix);
       } catch (err) {
         // バケット切替/dispose による中断はエラー表示しない。
-        if (isAbortError(err) || disposed) {
-          childUl.innerHTML = "";
-          return;
-        }
-        childUl.replaceChildren(
-          makeTreeMessageRow(
-            "s3-tree-error",
-            depth,
-            reportDatastoreFailure("S3", "folder", err, bucket, prefix),
-          ),
-        );
+        folder.children =
+          isAbortError(err) || disposed
+            ? null
+            : {
+                error: reportDatastoreFailure(
+                  "S3",
+                  "folder",
+                  err,
+                  bucket,
+                  prefix,
+                ),
+              };
       } finally {
         explorerLoadingFolders.delete(prefix);
+        if (!disposed) draw();
       }
     })();
     explorerLoadingFolders.set(prefix, load);
     return load;
+  }
+
+  async function expandFolder(folder: S3Folder): Promise<void> {
+    if (!folder.collapsed) return;
+    await ensureFolderLoaded(folder);
+    folder.collapsed = false;
+    draw();
   }
 
   async function loadExplorerRoot(): Promise<void> {
@@ -1284,7 +1467,8 @@ export function createS3Explorer(
     const bucket = currentBucket;
     explorerGuard.dispose();
     const slot = explorerGuard.start();
-    setPaneStatus(explorerTree, text().loadingObjects);
+    treePane = { status: text().loadingObjects, error: false };
+    draw();
     try {
       const data = await fetchFolder("");
       if (
@@ -1295,17 +1479,23 @@ export function createS3Explorer(
       ) {
         return;
       }
-      explorerTree.innerHTML = "";
-      if (!data) return;
-      renderFolderLevel(explorerTree, "", 0, data, false);
+      treePane = null;
+      if (!data) {
+        draw();
+        return;
+      }
+      const level = newLevel(0);
+      addFolderPage(level, "", data, false);
+      treePane = level;
       explorerRootLoaded = true;
+      draw();
     } catch (err) {
       if (slot.isStale() || isAbortError(err)) return;
-      setPaneStatus(
-        explorerTree,
-        reportDatastoreFailure("S3", "folder tree", err, bucket),
-        { error: true },
-      );
+      treePane = {
+        status: reportDatastoreFailure("S3", "folder tree", err, bucket),
+        error: true,
+      };
+      draw();
     } finally {
       slot.finish();
     }
@@ -1337,39 +1527,22 @@ export function createS3Explorer(
         dir = explorerDirByPath.get(prefix);
       }
       if (!dir) break;
-      await dir.expand();
+      await expandFolder(dir);
       if (disposed) return;
     }
     const object = objectsByKey.get(key) ??
       fallbackHead ?? { key, sizeBytes: 0 };
     await selectObject(object);
-    explorerRowsByKey.get(key)?.scrollIntoView({ block: "nearest" });
+    sidebarSlot
+      .querySelector(`.s3-tree .tree-file[data-key="${CSS.escape(key)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
   }
 
-  // UI の表示切替のみ (ロードは伴わない)。load() からも使う。
-  // List/Explorer どちらでも sidebarSlot に全 UI が積まれていて、表示は
-  // モードごとに排他で切替える (Search/options/objectList ↔ explorerTree)。
-  function applyViewVisibility(view: S3ViewMode): void {
-    currentView = view;
-    listViewBtn.classList.toggle("active", view === "list");
-    explorerViewBtn.classList.toggle("active", view === "explorer");
-    const explorer = view === "explorer";
-    searchRow.hidden = explorer;
-    optionRow.hidden = explorer;
-    objectStatus.hidden = explorer;
-    objectList.hidden = explorer;
-    moreBtn.hidden = explorer || !currentNextToken;
-    explorerTree.hidden = !explorer;
-  }
-
-  function setView(view: S3ViewMode): void {
-    applyViewVisibility(view);
-    // ハイライト行は表示中ビューのものを指すよう取り直す。
-    activeObjectRow?.classList.remove("active");
-    activeObjectRow = null;
-    if (currentKey) highlightActiveObject(currentKey);
+  function setView(next: S3ViewMode): void {
+    currentView = next;
+    draw();
     // ビュー初回表示時に対応するデータを遅延ロードする。
-    if (view === "explorer") void loadExplorerRoot();
+    if (next === "explorer") void loadExplorerRoot();
     else if (!listLoaded) void loadObjects(false);
   }
 
@@ -1381,66 +1554,12 @@ export function createS3Explorer(
     listLoaded = false;
     resetExplorer();
     // バケット選択後は新規オブジェクト作成を許可する。
-    newObjectBtn.hidden = false;
+    newObjectShown = true;
+    draw();
     notifySelectionChange();
     if (currentView === "explorer") await loadExplorerRoot();
     else await loadObjects(false);
   }
-
-  bucketSelect.addEventListener("change", () => {
-    if (bucketSelect.value) void selectBucket(bucketSelect.value);
-  });
-  listViewBtn.addEventListener("click", () => {
-    if (currentView === "list") return;
-    setView("list");
-    notifySelectionChange();
-  });
-  explorerViewBtn.addEventListener("click", () => {
-    if (currentView === "explorer") return;
-    setView("explorer");
-    notifySelectionChange();
-  });
-  prefixModeBtn.addEventListener("click", () => {
-    setMode("prefix");
-    notifySelectionChange();
-    void loadObjects(false);
-  });
-  containsModeBtn.addEventListener("click", () => {
-    setMode("contains");
-    notifySelectionChange();
-    void loadObjects(false);
-  });
-  sortSelect.addEventListener("change", () => {
-    currentSort = sortSelect.value === "key-asc" ? "key-asc" : "updated-desc";
-    notifySelectionChange();
-    void loadObjects(false);
-  });
-  searchRow.addEventListener("submit", (e) => {
-    e.preventDefault();
-    currentSearch = searchInput.value.trim();
-    notifySelectionChange();
-    void loadObjects(false);
-  });
-  searchInput.addEventListener("keydown", (e) => {
-    if (isImeComposing(e)) return;
-    if (e.key === "Escape") {
-      searchInput.value = "";
-      currentSearch = "";
-      notifySelectionChange();
-      void loadObjects(false);
-    }
-  });
-  moreBtn.addEventListener("click", () => loadObjects(true));
-  objectList.addEventListener("click", (e) => {
-    const row = (e.target as HTMLElement | null)?.closest<HTMLElement>(
-      ".s3-object-item",
-    );
-    if (!row || !objectList.contains(row)) return;
-    const key = row.dataset.key;
-    if (!key) return;
-    const object = objectsByKey.get(key);
-    if (object) void selectObject(object);
-  });
 
   async function load(
     dbId: string,
@@ -1465,22 +1584,19 @@ export function createS3Explorer(
         ? (initial?.query ?? "")
         : (initial?.prefix ?? "");
     currentSort = initial?.sort === "key-asc" ? "key-asc" : "updated-desc";
-    setMode(initialMode);
-    sortSelect.value = currentSort;
-    searchInput.value = currentSearch;
-    objectStatus.textContent = "";
-    objectList.innerHTML = "";
+    currentMode = initialMode;
+    searchInput().value = currentSearch;
+    statusShown = false;
     objectsByKey.clear();
-    objectRowsByKey.clear();
-    activeObjectRow = null;
-    moreBtn.hidden = true;
     resetExplorer();
-    applyViewVisibility(initialView);
-    setPaneEmpty(previewPane, text().selectObject);
-    setPaneStatus(
-      initialView === "explorer" ? explorerTree : objectList,
-      text().loadingBuckets,
-    );
+    currentView = initialView;
+    previewPane = "empty";
+    const loading = { status: text().loadingBuckets, error: false };
+    if (initialView === "explorer") {
+      listPane = null;
+      treePane = loading;
+    } else listPane = loading;
+    draw();
     try {
       const res = await fetch(
         `${apiUrl("dbS3Buckets")}?db=${encodeURIComponent(dbId)}`,
@@ -1497,7 +1613,8 @@ export function createS3Explorer(
       ) {
         return;
       }
-      renderBuckets(data.buckets);
+      buckets = data.buckets;
+      bucketsDisabled = data.buckets.length === 0;
       const selected =
         (initial?.bucket &&
           data.buckets.some((bucket) => bucket.name === initial.bucket) &&
@@ -1505,19 +1622,21 @@ export function createS3Explorer(
         data.buckets[0]?.name ||
         null;
       if (!selected) {
-        setPaneStatus(objectList, text().noBuckets);
+        listPane = { status: text().noBuckets, error: false };
+        draw();
         return;
       }
-      bucketSelect.value = selected;
       // バケットが決まったので新規オブジェクト作成を許可する。
-      newObjectBtn.hidden = false;
+      newObjectShown = true;
+      draw();
+      // 選べる候補を描いた後に、選んだバケットを欄へ入れる。
+      drawn(bucketRef, "bucket select").value = selected;
       suppressNotify = true;
       try {
         currentBucket = selected;
         currentKey = null;
         currentNextToken = undefined;
         notifySelectionChange();
-        highlightActiveObject(null);
         // head が取れなくても復元は続ける (行の大きさが出ないだけ)。
         // ただし理由は console に残す。
         const headPromise = initial?.key
@@ -1560,11 +1679,11 @@ export function createS3Explorer(
       notifySelectionChange();
     } catch (err) {
       if (slot.isStale()) return;
-      setPaneStatus(
-        objectList,
-        reportDatastoreFailure("S3", "bucket list", err, dbId),
-        { error: true },
-      );
+      listPane = {
+        status: reportDatastoreFailure("S3", "bucket list", err, dbId),
+        error: true,
+      };
+      draw();
     } finally {
       slot.finish();
     }
@@ -1585,19 +1704,16 @@ export function createS3Explorer(
     currentNextToken = undefined;
     currentSort = "updated-desc";
     listLoaded = false;
-    setMode("prefix");
-    sortSelect.value = "updated-desc";
-    searchInput.value = "";
-    bucketSelect.innerHTML = "";
-    objectStatus.textContent = "";
-    objectList.innerHTML = "";
+    currentMode = "prefix";
+    searchInput().value = "";
+    buckets = [];
+    statusShown = false;
+    listPane = null;
     objectsByKey.clear();
-    objectRowsByKey.clear();
-    activeObjectRow = null;
-    moreBtn.hidden = true;
     resetExplorer();
-    applyViewVisibility("list");
-    setPaneEmpty(previewPane, text().selectObject);
+    currentView = "list";
+    previewPane = "empty";
+    draw();
   }
 
   function getSelection(): S3ExplorerSelection {
@@ -1624,30 +1740,12 @@ export function createS3Explorer(
     }
   }
 
-  setMode("prefix");
-  applyViewVisibility("list");
-
   function localize(): void {
-    const t = text();
-    // bucketLabel は先頭テキストノード + select。テキストノードのみ更新する。
-    if (bucketLabel.firstChild) bucketLabel.firstChild.textContent = t.bucket;
-    searchBtn.textContent = tCommon().search;
-    prefixModeBtn.textContent = t.prefixMode;
-    containsModeBtn.textContent = t.containsMode;
-    sortUpdated.textContent = t.sortUpdated;
-    sortKey.textContent = t.sortKey;
-    newObjectBtn.textContent = `＋ ${t.newObject}`;
-    newObjectBtn.title = t.newObject;
-    listViewBtn.textContent = t.listView;
-    explorerViewBtn.textContent = t.explorerView;
-    moreBtn.textContent = tCommon().loadMore;
-    searchInput.placeholder =
-      currentMode === "prefix" ? t.prefixPlaceholder : t.containsPlaceholder;
-    if (!currentKey) setPaneEmpty(previewPane, t.selectObject);
-    if (lastStatusResponse && objectStatus.textContent) {
-      setObjectStatusFromResponse(lastStatusResponse);
-    }
+    if (!currentKey) previewPane = "empty";
+    draw();
   }
+
+  draw();
 
   return {
     el: container,

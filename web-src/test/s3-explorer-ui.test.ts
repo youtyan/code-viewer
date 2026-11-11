@@ -5,7 +5,10 @@ import "./_dom";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import { waitFor } from "./_test-helpers";
 
-const { createS3Explorer } = await import("../views/database/s3-explorer");
+const { createS3Explorer, DEFAULT_VIEW } = await import(
+  "../views/database/s3-explorer"
+);
+type S3SidebarProps = Parameters<(typeof DEFAULT_VIEW)["sidebar"]>[0];
 const { dbText } = await import("../views/database/i18n");
 
 type FolderLevel = { folders: string[]; objects: Array<{ key: string }> };
@@ -659,5 +662,59 @@ describe("S3 explorer UI", () => {
         (cell) => cell.textContent,
       ),
     ).toEqual(["alpha", "one, two"]);
+  });
+});
+
+describe("the S3 explorer presenter", () => {
+  test("passes the list, then the lazily loaded folder tree, to the view", async () => {
+    const shown: S3SidebarProps[] = [];
+    const view = createS3Explorer(
+      {},
+      {
+        ...DEFAULT_VIEW,
+        sidebar: (props) => {
+          shown.push(props);
+          return DEFAULT_VIEW.sidebar(props);
+        },
+      },
+    );
+    explorer = view;
+    document.body.append(view.sidebarSlot, view.el);
+    const last = () => shown[shown.length - 1] as S3SidebarProps;
+    await view.load("mock");
+    await waitFor(() => {
+      const list = last().list;
+      return list !== null && "objects" in list;
+    });
+    const list = last().list;
+    expect([
+      last().view,
+      last().buckets.map((bucket) => bucket.name),
+      list !== null && "objects" in list
+        ? list.objects.map((object) => object.key)
+        : list,
+    ]).toEqual(["list", ["media"], ["a.png", "notes.txt", "sample.csv"]]);
+
+    last().onView("explorer");
+    await waitFor(() => {
+      const tree = last().tree;
+      return tree !== null && "entries" in tree;
+    });
+    const tree = last().tree;
+    if (tree === null || !("entries" in tree)) throw new Error("no tree");
+    const images = tree.entries.find(
+      (entry) => "folder" in entry && entry.folder.prefix === "images/",
+    );
+    if (!images || !("folder" in images)) throw new Error("no images folder");
+    last().onToggleFolder(images.folder);
+    await waitFor(() => !images.folder.collapsed);
+    const children = images.folder.children;
+    expect(
+      children !== null && "entries" in children
+        ? children.entries.map((entry) =>
+            "object" in entry ? entry.object.key : entry.folder.prefix,
+          )
+        : children,
+    ).toEqual(["images/hero.png", "images/diagram.svg"]);
   });
 });
