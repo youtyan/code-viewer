@@ -1503,6 +1503,11 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               kind: "list",
               items: [
                 "Fold the file list with the button at the top of the list column.",
+                [
+                  "With the left sidebar collapsed, ",
+                  ui(l.agents.sidebar.expand),
+                  " at the top left shows a colored dot while an agent needs you.",
+                ],
                 "In a narrow window, the list columns get narrower first, and fold when that is not enough.",
               ],
             },

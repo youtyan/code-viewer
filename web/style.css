@@ -18576,6 +18576,26 @@ body.main-split-resizing {
 #project-head > #nav-expand {
   flex: none;
 }
+/* 畳んだサイドバーの「サイドバーを表示」に、手が要るエージェントの印 (入力待ちか
+   完了。app.ts の syncNavExpandMark が data-attention を付ける)。畳んでも気付ける
+   ように、ボタンの右上に未読の点と同じ大きさで重ねる (箱の寸法は変えない)。 */
+#nav-expand[data-attention] {
+  position: relative;
+}
+#nav-expand[data-attention]::after {
+  content: "";
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  width: var(--dot-size);
+  height: var(--dot-size);
+  border-radius: 50%;
+  background: var(--attn);
+  pointer-events: none;
+}
+#nav-expand[data-attention="done"]::after {
+  background: var(--done);
+}
 /* 名前と ▾ (プロジェクトの切替)。四角・名前・▾ を 1 つのボタンにし、押せることは
    hover の面で示す。箱の寸法は状態で変えない。 */
 button.brand {

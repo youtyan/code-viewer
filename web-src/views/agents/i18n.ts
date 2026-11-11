@@ -179,6 +179,8 @@ export type AgentsSidebarText = {
   search: string;
   collapse: string;
   expand: string;
+  /** 畳んだサイドバーの「サイドバーを表示」に添える、手が要るものの数。 */
+  expandAttention: (count: number) => string;
   resize: string;
   newAgent: string;
   openProjectTitle: (name: string) => string;
@@ -680,6 +682,8 @@ const EN: AgentsText = {
     search: "Search",
     collapse: "Hide sidebar",
     expand: "Show sidebar",
+    expandAttention: (count) =>
+      `${count} agent${count === 1 ? "" : "s"} need${count === 1 ? "s" : ""} you`,
     resize: "Resize sidebar",
     newAgent: "New agent",
     openProjectTitle: (name) => `Open a shell, agent or screen in ${name}`,
@@ -860,6 +864,7 @@ const JA: AgentsText = {
     search: "検索",
     collapse: "サイドバーを隠す",
     expand: "サイドバーを表示",
+    expandAttention: (count) => `手が要るエージェント ${count}`,
     resize: "サイドバーの幅を変える",
     newAgent: "新しいエージェント",
     openProjectTitle: (name) => `${name} のシェル・エージェント・画面を開く`,

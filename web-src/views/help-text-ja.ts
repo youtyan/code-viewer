@@ -1481,6 +1481,11 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               kind: "list",
               items: [
                 "ファイル一覧は、一覧の列の上のボタンで畳めます。",
+                [
+                  "左のサイドバーを畳んでも、左上の ",
+                  ui(l.agents.sidebar.expand),
+                  " に、手が要るエージェントがいれば色の点が付きます。",
+                ],
                 "窓が狭いと、一覧の列が細くなり、それでも足りなければ畳まれます。",
               ],
             },

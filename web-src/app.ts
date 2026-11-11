@@ -1,6 +1,7 @@
 import type { AgentHooksResponse } from "./core/agent-hooks";
 import {
   type AgentPane,
+  attentionPanes,
   headerAgentCounts,
   nextAttentionPane,
   titleWithUnread,
@@ -10077,6 +10078,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   AGENT_MONITOR.subscribe(() =>
     PROJECT_LOOKS.update(AGENT_MONITOR.snapshot().overview),
   );
+  AGENT_MONITOR.subscribe(syncNavExpandMark);
 
   // 電話の段の下端の帯の「エージェント」に、最下段と同じ数え方の入力待ちの件数。
   AGENT_MONITOR.subscribe(() =>
@@ -10235,6 +10237,33 @@ window.GdpExpandLogic = GdpExpandLogic;
         })
       : null;
 
+  /**
+   * 畳んだサイドバーの「サイドバーを表示」(#nav-expand) に、手が要るエージェント
+   * (入力待ち → 完了・未読) の一番急ぐ状態の印と数を出す。畳んでも気付けるように。
+   */
+  function navExpandLabel(): string {
+    const t = agentsText(STATE.language).sidebar;
+    const waiting = attentionPanes(
+      AGENT_MONITOR.snapshot().overview?.panes ?? [],
+    );
+    return waiting.length > 0
+      ? `${t.expand} · ${t.expandAttention(waiting.length)}`
+      : t.expand;
+  }
+
+  function syncNavExpandMark(): void {
+    const button = document.querySelector<HTMLElement>("#nav-expand");
+    if (!button) return;
+    const first = attentionPanes(
+      AGENT_MONITOR.snapshot().overview?.panes ?? [],
+    )[0];
+    if (first) button.dataset.attention = first.state;
+    else delete button.dataset.attention;
+    const label = navExpandLabel();
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+
   /** 左のサイドバーの枠の文言 (中の一覧は AGENTS_SIDEBAR が貼る)。 */
   function localizeAppNav(): void {
     const t = agentsText(STATE.language).sidebar;
@@ -10252,7 +10281,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setElementText("#nav-help .nav-foot-label", t.help);
     for (const [selector, label] of [
       ["#nav-collapse", t.collapse],
-      ["#nav-expand", t.expand],
+      ["#nav-expand", navExpandLabel()],
       ["#nav-board-link", t.board],
       ["#nav-add-project", agentsText(STATE.language).projects.addProject],
       ["#app-nav-resizer", t.resize],
