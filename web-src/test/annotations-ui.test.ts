@@ -2,8 +2,11 @@ import "./_dom";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { AnnotationEntry } from "../core/types";
-import type { AnnotationsUiDeps } from "../views/annotations-ui";
-import { createAnnotationsUi } from "../views/annotations-ui";
+import type {
+  AnnotationPanelProps,
+  AnnotationsUiDeps,
+} from "../views/annotations-ui";
+import { createAnnotationsUi, DEFAULT_VIEW } from "../views/annotations-ui";
 import { clickDialogCancel, clickDialogConfirm } from "./_dialog-helpers";
 import { deferred, q } from "./_test-helpers";
 
@@ -1224,5 +1227,66 @@ describe("reading notes beneath code", () => {
     expect(q(row, ".gdp-annotation-inline-location").textContent).toBe(
       "2–4行の注釈",
     );
+  });
+});
+
+// 注釈の画面 (views/annotations-ui.ts) の presenter。描き方を記録する view に
+// 差し替え、一覧に渡す値と、セッションを選ぶ・畳むときの描き直しを見る。
+describe("the annotations presenter", () => {
+  test("gives the view the sessions, and selecting or collapsing one redraws it", async () => {
+    setupDom();
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          version: 1,
+          sessions: [
+            {
+              id: "session-1",
+              title: "Sample session",
+              created_at: "2026-01-01T00:00:00.000Z",
+              entries: [
+                {
+                  id: "entry-1",
+                  path: "sample.ts",
+                  line: { start: 2, end: 2 },
+                  range: { from: "HEAD", to: "worktree" },
+                  title: "Sample note",
+                  body: "Sample body",
+                  created_at: "2026-01-01T00:00:00.000Z",
+                },
+              ],
+            },
+          ],
+        }),
+      );
+    const panels: AnnotationPanelProps[] = [];
+    const ui = createAnnotationsUi(createDeps(), {
+      ...DEFAULT_VIEW,
+      panel: (props) => {
+        panels.push(props);
+        return DEFAULT_VIEW.panel(props);
+      },
+    });
+    await ui.refreshAnnotations();
+    const session = () => {
+      const last = panels[panels.length - 1];
+      if (last?.kind !== "sessions") throw new Error("no sessions shown");
+      return last.sessions[0];
+    };
+    expect([
+      session()?.title,
+      session()?.active,
+      session()?.expanded,
+      session()?.entries.map((entry) => [entry.summary, entry.location]),
+    ]).toEqual([
+      "Sample session",
+      false,
+      true,
+      [["Sample note", "sample.ts:2"]],
+    ]);
+    session()?.onSelect();
+    expect(session()?.active).toBe(true);
+    session()?.collapse.onClick(new MouseEvent("click"));
+    expect(session()?.expanded).toBe(false);
   });
 });

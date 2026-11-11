@@ -1,7 +1,11 @@
 import "./_dom";
 import { afterEach, describe, expect, test } from "vitest";
 import type { AnnotationEntry } from "../core/types";
-import { createAnnotationsPlayer } from "../views/annotations-player";
+import {
+  type AnnotationsPlayerView,
+  createAnnotationsPlayer,
+  DEFAULT_VIEW,
+} from "../views/annotations-player";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -55,7 +59,7 @@ function setupDom() {
   `;
 }
 
-function createHarness() {
+function createHarness(view?: AnnotationsPlayerView) {
   setupSpeechSynthesis();
   setupDom();
   const entries = [
@@ -66,34 +70,37 @@ function createHarness() {
   const changedCallbacks: Array<() => void> = [];
   const openedCallbacks: Array<(entryId: string) => void> = [];
   const openedEntries: string[] = [];
-  createAnnotationsPlayer({
-    $: <T extends Element>(sel: string) => {
-      const found = document.querySelector(sel);
-      if (!found) throw new Error(`Missing test element: ${sel}`);
-      return found as T;
+  createAnnotationsPlayer(
+    {
+      $: <T extends Element>(sel: string) => {
+        const found = document.querySelector(sel);
+        if (!found) throw new Error(`Missing test element: ${sel}`);
+        return found as T;
+      },
+      getActiveSessionEntries: () => entries,
+      openAnnotationEntry: (entryId) => {
+        openedEntries.push(entryId);
+        return Promise.resolve();
+      },
+      setAnnotationPanelOpen: (open) => {
+        panelOpen = open;
+      },
+      onAnnotationsChanged: (cb) => {
+        changedCallbacks.push(cb);
+      },
+      onAnnotationOpened: (cb) => {
+        openedCallbacks.push(cb);
+      },
+      getActiveAnnotationId: () => null,
+      getMuted: () => muted,
+      setMuted: (value) => {
+        muted = value;
+      },
+      getRate: () => undefined,
+      setRate: () => undefined,
     },
-    getActiveSessionEntries: () => entries,
-    openAnnotationEntry: (entryId) => {
-      openedEntries.push(entryId);
-      return Promise.resolve();
-    },
-    setAnnotationPanelOpen: (open) => {
-      panelOpen = open;
-    },
-    onAnnotationsChanged: (cb) => {
-      changedCallbacks.push(cb);
-    },
-    onAnnotationOpened: (cb) => {
-      openedCallbacks.push(cb);
-    },
-    getActiveAnnotationId: () => null,
-    getMuted: () => muted,
-    setMuted: (value) => {
-      muted = value;
-    },
-    getRate: () => undefined,
-    setRate: () => undefined,
-  });
+    view,
+  );
   return {
     changedCallbacks,
     openedCallbacks,
@@ -156,5 +163,22 @@ describe("annotations player UI", () => {
 
     expect(mute.querySelector("svg.octicon-volume-muted")).toBeTruthy();
     expect(mute.getAttribute("aria-label")).toBe("Unmute annotation playback");
+  });
+});
+
+// 再生の帯 (views/annotations-player.ts) の presenter。描き方を記録する view に
+// 差し替え、音を消すと音のボタンの絵が替わることを見る。
+describe("the annotations player presenter", () => {
+  test("asks the view for the mute icon after muting", () => {
+    const icons: string[] = [];
+    createHarness({
+      icon: (iconClass, paths) => {
+        icons.push(iconClass);
+        return DEFAULT_VIEW.icon(iconClass, paths);
+      },
+    });
+    icons.length = 0;
+    button("#annotation-player-mute").click();
+    expect(icons).toContain("octicon-volume-muted");
   });
 });
