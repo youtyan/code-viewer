@@ -4,7 +4,6 @@
 import { html, nothing, type TemplateResult } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { live } from "lit/directives/live.js";
-import { ref } from "lit/directives/ref.js";
 import { repeat } from "lit/directives/repeat.js";
 import type { AgentPane } from "../../core/agent-overview";
 import {
@@ -15,8 +14,7 @@ import {
 import type { ProjectLook } from "../projects/project-looks";
 import { projectMarkTemplate } from "../projects/project-looks";
 import { iconTemplate } from "../ui/icon";
-import { agentStateMarkTemplate } from "./agent-card";
-import { markPreviewRow } from "./pane-preview";
+import { agentRowTemplate, agentStateMarkTemplate } from "./agent-card";
 
 /** 描き直しの前後で同じ要素を指すための鍵。木の行 (矢印で動く) の分。 */
 export const NAV_ATTR = "data-nav-item";
@@ -128,33 +126,12 @@ function note(item: SidebarNote): TemplateResult {
 }
 
 function agentRow(props: AgentsSidebarViewProps, row: AgentRowProps): unknown {
-  const cls = [
-    `nav-agent nav-agent-${row.state}`,
-    row.active ? "active" : "",
-    row.unread ? "unread" : "",
-    "agent-card",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  // ターミナルは 1 か所にしか置けず、仮にもならないので、中ボタン・⌘/Ctrl・Alt
-  // も 1 回押すと同じ (開くか前面に出す)。
-  return html`<button
-    type="button"
-    class=${cls}
-    role="treeitem"
-    tabindex=${live("-1")}
-    data-nav-item=${`pane:${row.id}`}
-    aria-current=${row.active ? "true" : nothing}
-    title=${row.title}
-    aria-label=${row.ariaLabel}
-    ${ref((el) => {
-      if (el instanceof HTMLElement)
-        markPreviewRow(el, row.id, row.previewName);
-    })}
-    @click=${(event: MouseEvent) => props.onOpenPane(row.id, event)}
-    @auxclick=${(event: MouseEvent) => props.onOpenPane(row.id, event)}
-    @contextmenu=${(event: MouseEvent) => props.onPaneMenu(row.id, event)}
-  >${row.card}</button>`;
+  return agentRowTemplate({
+    base: "nav-agent",
+    ...row,
+    onOpen: (event) => props.onOpenPane(row.id, event),
+    onMenu: (event) => props.onPaneMenu(row.id, event),
+  });
 }
 
 function iconAction(

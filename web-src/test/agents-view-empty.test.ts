@@ -12,7 +12,12 @@ import type {
   AgentProjectInfo,
 } from "../core/agent-overview";
 import type { AgentMonitor } from "../views/agents/agent-monitor";
-import { createAgentsView } from "../views/agents/agents-view";
+import { createAgentsPresenter } from "../views/agents/agents-presenter";
+import {
+  type AgentsBoardView,
+  type AgentsBoardViewProps,
+  DEFAULT_VIEW as BOARD_DEFAULT_VIEW,
+} from "../views/agents/agents-view";
 import { agentsText } from "../views/agents/i18n";
 import type { PanePreview } from "../views/agents/pane-preview";
 import type { ProjectActions } from "../views/projects/project-actions";
@@ -39,6 +44,8 @@ async function mountBoard(
   extra: {
     permission?: "granted" | "denied" | "default" | "unsupported";
     tmux?: AgentOverviewResponse["tmux"];
+    /** 表示を差し替える (presenter のテスト)。 */
+    view?: AgentsBoardView;
   } = {},
 ) {
   document.body.innerHTML = '<main id="content"></main>';
@@ -81,49 +88,52 @@ async function mountBoard(
     place: async () => undefined,
     stop: async () => undefined,
   };
-  const view = createAgentsView({
-    monitor,
-    getText: () => agentsText(lang),
-    setPageMode: () => undefined,
-    syncHeaderMenu: () => undefined,
-    openPane: () => undefined,
-    openNotificationSettings: () => undefined,
-    reloadPage: () => {
-      calls.push("reload");
-    },
-    tmuxInstallHelp: () => {
-      calls.push("tmux-help");
-      const box = document.createElement("div");
-      box.className = "sample-install-help";
-      return box;
-    },
-    getHookStatus: () => null,
-    refreshHookStatus: async () => undefined,
-    hookHintDismissed: () => true,
-    dismissHookHint: () => undefined,
-    openHookSettings: () => undefined,
-    accountsBand: {
-      element: document.createElement("div"),
-      render: () => undefined,
-      signature: () => "",
-    },
-    getAccounts: () => null,
-    launch: () => {
-      calls.push("launch");
-    },
-    handoff: {
-      handoff: (pane) => {
-        calls.push(`handoff:${pane.id}`);
+  const view = createAgentsPresenter(
+    {
+      monitor,
+      getText: () => agentsText(lang),
+      setPageMode: () => undefined,
+      syncHeaderMenu: () => undefined,
+      openPane: () => undefined,
+      openNotificationSettings: () => undefined,
+      reloadPage: () => {
+        calls.push("reload");
       },
-      openHookHelp: () => {
-        calls.push("hook-help");
+      tmuxInstallHelp: () => {
+        calls.push("tmux-help");
+        const box = document.createElement("div");
+        box.className = "sample-install-help";
+        return box;
       },
-      hookState: () => null,
+      getHookStatus: () => null,
+      refreshHookStatus: async () => undefined,
+      hookHintDismissed: () => true,
+      dismissHookHint: () => undefined,
+      openHookSettings: () => undefined,
+      accountsBand: {
+        element: document.createElement("div"),
+        render: () => undefined,
+        signature: () => "",
+      },
+      getAccounts: () => null,
+      launch: () => {
+        calls.push("launch");
+      },
+      handoff: {
+        handoff: (pane) => {
+          calls.push(`handoff:${pane.id}`);
+        },
+        openHookHelp: () => {
+          calls.push("hook-help");
+        },
+        hookState: () => null,
+      },
+      onVisibilityChange: () => undefined,
+      projects: actions,
+      preview,
     },
-    onVisibilityChange: () => undefined,
-    projects: actions,
-    preview,
-  });
+    extra.view,
+  );
   await view.enter();
   return { view, calls };
 }
@@ -337,5 +347,75 @@ describe("entries next to the words", () => {
       agentsText("en").emptyNotInstalledBody,
     );
     expect(empty?.nextElementSibling?.className).toBe("sample-install-help");
+  });
+});
+
+// presenter (agents-presenter.ts) を、表示を差し替えて確かめる。描いた後にフォーカスの
+// 戻し先と一覧の箱を読むので、差し替える view は渡された値を記録してから既定の表示に
+// 渡す。見るのは view に渡す値と、絞り込み・起動 (モデルの呼び出し)。
+describe("agents board presenter", () => {
+  async function mountWithView(panes: AgentPane[]) {
+    const seen: AgentsBoardViewProps[] = [];
+    const mounted = await mountBoard(panes, "en", undefined, undefined, {
+      view: (props) => {
+        seen.push(props);
+        return BOARD_DEFAULT_VIEW(props);
+      },
+    });
+    return { ...mounted, last: () => seen[seen.length - 1] };
+  }
+
+  const panes = () => [
+    agentPane({
+      id: "%1",
+      label: "work:0.0",
+      session: "work",
+      title: "task 1",
+      path: "/work/sample-app",
+      state: "waiting",
+      source: "screen",
+      project: "/work/sample-app",
+      kind: "claude",
+    }),
+  ];
+
+  test("the agents reach the view grouped by project, with the filter counts", async () => {
+    const { last } = await mountWithView(panes());
+    const props = last();
+    expect({
+      count: props.board.count,
+      filters: props.board.filters.map((item) => [item.filter, item.count]),
+      projects: props.list
+        .filter((entry) => entry.kind === "project")
+        .map((entry) =>
+          entry.kind === "project"
+            ? [entry.project.name, entry.project.rows.map((row) => row.id)]
+            : null,
+        ),
+    }).toEqual({
+      count: 1,
+      filters: [
+        ["all", 1],
+        ["waiting", 1],
+        ["working", 0],
+        ["idle", 0],
+      ],
+      projects: [["sample-app", ["%1"]]],
+    });
+  });
+
+  test("a filter picked in the view narrows the next draw", async () => {
+    const { last } = await mountWithView(panes());
+    last().onFilter("working");
+    expect([
+      last().board.filters.find((item) => item.active)?.filter,
+      last().list.some((entry) => entry.kind === "project"),
+    ]).toEqual(["working", false]);
+  });
+
+  test("launching from the view starts a new agent", async () => {
+    const { last, calls } = await mountWithView(panes());
+    last().onLaunch();
+    expect(calls).toEqual(["launch"]);
   });
 });

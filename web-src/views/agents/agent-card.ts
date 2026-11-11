@@ -12,12 +12,15 @@
 
 import { html, nothing, render, type TemplateResult } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
+import { live } from "lit/directives/live.js";
+import { ref } from "lit/directives/ref.js";
 import {
   type AgentPane,
   type AgentTransition,
   paneTaskSummary,
 } from "../../core/agent-overview";
 import type { AgentsText } from "./i18n";
+import { markPreviewRow } from "./pane-preview";
 import { paneText } from "./pane-text";
 
 /** 状態の印 (形で区別する)。 */
@@ -56,7 +59,13 @@ export type AgentCardParts = {
 };
 
 /** 補足の後ろに足す項目 (全体ボードのアカウント・tmux の場所)。空の文字は出さない。 */
-export type AgentCardExtra = { cls: string; text: string; title?: string };
+export type AgentCardExtra = {
+  cls: string;
+  text: string;
+  title?: string;
+  /** 文字の後ろに添えるもの (アカウントのタグの札)。 */
+  after?: unknown;
+};
 
 /**
  * カードの中身 (状態の印・1 行目・補足・未読の点) のテンプレート。行の要素
@@ -95,9 +104,62 @@ export function agentCardTemplate(
         html`${index > 0 ? " · " : nothing}<span
             class=${item.cls}
             title=${ifDefined(item.title || undefined)}
-          >${item.text}</span>`,
+          >${item.text}${item.after ?? nothing}</span>`,
     )}</span><span class="agent-card-unread" aria-hidden="true"></span>`;
   return { template, name, ageTitle: age.title };
+}
+
+/** エージェントの行 (左のサイドバー・全体ボード)。押し方・キーは使う側。 */
+export type AgentRowTemplateOptions = {
+  /** 行の場所ごとのクラス (nav-agent・agents-row)。状態ごとのクラスはその後ろに -state。 */
+  base: "nav-agent" | "agents-row";
+  id: string;
+  state: AgentPane["state"];
+  active: boolean;
+  unread: boolean;
+  title: string;
+  ariaLabel?: string;
+  /** 覗き窓の名前 (pane-preview.ts)。 */
+  previewName: string;
+  card: TemplateResult;
+  onOpen(event: MouseEvent): void;
+  onMenu(event: MouseEvent): void;
+};
+
+export function agentRowTemplate(
+  options: AgentRowTemplateOptions,
+): TemplateResult {
+  const cls = [
+    `${options.base} ${options.base}-${options.state}`,
+    options.active ? "active" : "",
+    options.unread ? "unread" : "",
+    "agent-card",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  // 描き直しの前後で同じ行を指す鍵。左のサイドバーは data-nav-item、全体
+  // ボードは data-agent-nav (どちらも描き直し後にフォーカスを戻すのに使う)。
+  const key = `pane:${options.id}`;
+  // ターミナルは 1 か所にしか置けず、仮にもならないので、中ボタン・⌘/Ctrl・Alt
+  // も 1 回押すと同じ (開くか前面に出す)。
+  return html`<button
+    type="button"
+    class=${cls}
+    data-nav-item=${options.base === "nav-agent" ? key : nothing}
+    data-agent-nav=${options.base === "agents-row" ? key : nothing}
+    role="treeitem"
+    tabindex=${live("-1")}
+    aria-current=${options.active ? "true" : nothing}
+    title=${options.title}
+    aria-label=${ifDefined(options.ariaLabel)}
+    ${ref((el) => {
+      if (el instanceof HTMLElement)
+        markPreviewRow(el, options.id, options.previewName);
+    })}
+    @click=${options.onOpen}
+    @auxclick=${options.onOpen}
+    @contextmenu=${options.onMenu}
+  >${options.card}</button>`;
 }
 
 /**

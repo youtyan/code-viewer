@@ -262,7 +262,10 @@ import {
   type AgentsSidebar,
   createAgentsSidebarPresenter,
 } from "./views/agents/agents-sidebar-presenter";
-import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
+import {
+  type AgentsView,
+  createAgentsPresenter,
+} from "./views/agents/agents-presenter";
 import {
   type HandoffMenuActions,
   handoffMenuItems,
@@ -10258,7 +10261,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       })
     : null;
 
-  AGENTS_VIEW = createAgentsView({
+  AGENTS_VIEW = createAgentsPresenter({
     projects: PROJECT_ACTIONS,
     monitor: AGENT_MONITOR,
     getText: () => agentsText(STATE.language),
