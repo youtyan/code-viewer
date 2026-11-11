@@ -1323,6 +1323,28 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
           ],
         },
         {
+          title: "コピーと新しいシェル",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                "新しいシェルは、前面のタブが映している tmux のペインの作業場所で開きます（別の作業ツリーで作業中のときなど）。",
+                "tmux のコピーモードでコピーした文字は、そのままクリップボードに入ります。",
+                "claude など tmux の中のプログラムのコピーも入れるには、tmux の設定に set -g set-clipboard on を足します。",
+                [
+                  "止めるときは ",
+                  settings,
+                  " → ",
+                  ui(cat.appearance.label),
+                  " の ",
+                  ui(l.settings.terminalClipboardWriteLabel),
+                  " を外します。クリップボードを読ませることはしません。",
+                ],
+              ],
+            },
+          ],
+        },
+        {
           title: "便利な使い方",
           blocks: [
             {
@@ -1341,17 +1363,6 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 ],
                 "棚は見出しの ⋯ で右・左・下・上へ移せ、端末の側の縁をドラッグして大きさを変えられます。",
                 "画面の URL・ファイルのパス・画像のパスは、カーソルを載せると開く・コピーの帯が出て、押すと開きます。tmux のマウスが有効なときも ⌘/Ctrl を押しながらなら開けます。",
-                "tmux のコピーモードでコピーした文字は、そのままクリップボードに入ります。",
-                "claude など tmux の中のプログラムのコピーも入れるには、tmux の設定に set -g set-clipboard on を足します。",
-                [
-                  "止めるときは ",
-                  settings,
-                  " → ",
-                  ui(cat.appearance.label),
-                  " の ",
-                  ui(l.settings.terminalClipboardWriteLabel),
-                  " を外します。クリップボードを読ませることはしません。",
-                ],
                 [
                   "ターミナルの中は、画面がライトでもダークで描きます。変えるときは ",
                   settings,

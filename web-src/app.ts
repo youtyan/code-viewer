@@ -8491,6 +8491,24 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
   }
 
+  /**
+   * side の面の前面のタブが tmux のペインを映していて、そのペインが root の
+   * プロジェクトのものなら、そのペインの今の作業場所 (別の作業ツリーで作業中など)。
+   * 新しいシェルをそこで開く。分からなければ undefined (プロジェクトの根で開く)。
+   */
+  function frontPaneFolder(
+    side: PaneSide,
+    root: string | null,
+  ): string | undefined {
+    const front = MAIN_TABS.panes().fronts[side];
+    if (front?.target.kind !== "terminal" || root === null) return undefined;
+    const session = front.target.session;
+    const pane = AGENT_MONITOR.snapshot().overview?.panes.find(
+      (item) => item.shownInShell === session,
+    );
+    return pane && pane.project === root && pane.path ? pane.path : undefined;
+  }
+
   async function openShellIn(
     root: string | null,
     side: PaneSide,
@@ -8501,7 +8519,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       return;
     }
     try {
-      await TERMINAL_VIEW.createShell(side, await shellProjectKey(root));
+      await TERMINAL_VIEW.createShell(
+        side,
+        await shellProjectKey(root),
+        undefined,
+        frontPaneFolder(side, root ?? MAIN_TABS.currentProject()),
+      );
     } catch (error) {
       console.error(
         `[code-viewer] shell create failed${root === null ? "" : ` in ${root}`}`,

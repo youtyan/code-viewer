@@ -166,3 +166,42 @@ describe("shell input validation", () => {
     }
   });
 });
+
+// 新しいシェルの作業場所を画面が選ぶ (前面のペインの場所)。絶対パスで今ある
+// フォルダだけ。選ばなければプロジェクトの根。
+describe("the folder a new shell starts in", () => {
+  test.each([
+    { name: "a relative path", cwd: "work/sample", status: 400 },
+    { name: "not a string", cwd: 7, status: 400 },
+    { name: "a control character", cwd: "/tmp/a\u0007b", status: 400 },
+    { name: "too long", cwd: `/${"a".repeat(5000)}`, status: 400 },
+    {
+      name: "a folder that is not there",
+      cwd: "/no/such/folder/here",
+      status: 404,
+    },
+    { name: "a file", cwd: process.execPath, status: 400 },
+  ])("refuses $name before starting anything", async ({ cwd, status }) => {
+    const spawn = vi.spyOn(shellSession, "createShellSession");
+    const res = await post("/_shell/create", { cwd });
+    expect(res?.status).toBe(status);
+    expect(spawn).not.toHaveBeenCalled();
+    spawn.mockRestore();
+  });
+
+  test.each([
+    { name: "the chosen folder", body: { cwd: "/" }, expected: "/" },
+    {
+      name: "the project root when none is chosen",
+      body: {},
+      expected: process.cwd(),
+    },
+  ])("starts in $name", async ({ body, expected }) => {
+    const spawn = vi
+      .spyOn(shellSession, "createShellSession")
+      .mockResolvedValue({ status: "unavailable", reason: "sample" });
+    await post("/_shell/create", body);
+    expect(spawn.mock.calls[0]?.[0]).toBe(expected);
+    spawn.mockRestore();
+  });
+});

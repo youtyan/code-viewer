@@ -129,11 +129,13 @@ export type TerminalViewHandle = {
    * 新しいシェルを開き、そのタブを前面に出してもらう。失敗は reject する。
    * project はカレントにするプロジェクトの鍵 (無ければこのページのプロジェクト)。
    * id はそのタブのシェルの ID のまま開き直すとき (サーバが起き直して終わった)。
+   * cwd は作業場所 (前面のペインの場所など)。無ければプロジェクトの根。
    */
   createShell(
     side: TabSide,
     project?: string,
     id?: ShellSessionId,
+    cwd?: string,
   ): Promise<void>;
   /**
    * サーバが起き直して終わったシェルのタブを、同じ ID のシェルで保存した tmux の
@@ -476,6 +478,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     side: TabSide,
     project?: string,
     id?: ShellSessionId,
+    cwd?: string,
   ): Promise<void> {
     const size = tabs[side]?.screen.measure();
     const res = await deps.trackLoad(
@@ -487,7 +490,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
           // 入口はシェルの作業場所をこの鍵で決める (server/entry/server.ts)。
           ...(project ? { [PROJECT_HEADER]: project } : {}),
         },
-        body: JSON.stringify({ id, cols: size?.cols, rows: size?.rows }),
+        body: JSON.stringify({ id, cols: size?.cols, rows: size?.rows, cwd }),
       }),
     );
     if (res.status === 429)

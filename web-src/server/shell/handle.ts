@@ -13,6 +13,8 @@ import { isShellViewport } from "../../core/shell";
 // るのに対し、こちらは PTY が吐いた分だけを順に流す。だから poll を持たず、
 // onData をそのまま流しへ橋渡しする。
 
+import { statSync } from "node:fs";
+import { hasControlCharacter } from "../../core/control-chars";
 import { formatErrorDetail } from "../../core/error-detail";
 import {
   isShellSessionId,
@@ -37,6 +39,9 @@ import {
   subscribeShell,
   writeToShell,
 } from "./session";
+
+/** 画面が選ぶ作業場所の長さの上限。 */
+const MAX_SHELL_CWD_LENGTH = 4096;
 
 /** シェルの出力を流しへ送り続ける。シェルが無ければ gone、終われば exited を送って閉じる。 */
 export function startShellStream(id: ShellSessionId, stream: SseStream): void {
@@ -93,8 +98,33 @@ async function handleCreate(req: Request, cwd: string): Promise<Response> {
     id?: unknown;
     cols?: unknown;
     rows?: unknown;
+    cwd?: unknown;
   }>(req);
   if (body instanceof Response) return body;
+  // 作業場所を画面が選んだとき (前面のペインの場所)。絶対パスで、制御文字が無く、
+  // 今あるフォルダだけ。無ければプロジェクトの根 (cwd)。
+  let start = cwd;
+  if (body.cwd !== undefined) {
+    if (
+      typeof body.cwd !== "string" ||
+      !body.cwd.startsWith("/") ||
+      body.cwd.length > MAX_SHELL_CWD_LENGTH ||
+      hasControlCharacter(body.cwd)
+    ) {
+      return textError("invalid cwd", 400);
+    }
+    let isDir = false;
+    try {
+      isDir = statSync(body.cwd).isDirectory();
+    } catch (error) {
+      return textError(
+        `cannot open ${body.cwd}: ${formatErrorDetail(error)}`,
+        404,
+      );
+    }
+    if (!isDir) return textError(`${body.cwd} is not a directory`, 400);
+    start = body.cwd;
+  }
   // id はサーバが起き直して終わったシェルのタブを、同じ ID のまま開き直すとき。
   let id: ShellSessionId | undefined;
   if (body.id !== undefined) {
@@ -102,7 +132,7 @@ async function handleCreate(req: Request, cwd: string): Promise<Response> {
     id = body.id;
   }
   const result = await createShellSession(
-    cwd,
+    start,
     {
       cols: typeof body.cols === "number" ? body.cols : undefined,
       rows: typeof body.rows === "number" ? body.rows : undefined,
