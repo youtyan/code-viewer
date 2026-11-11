@@ -12,17 +12,8 @@
 // xterm・EventSource・fetch は外の境界なので差し替える。マス目は 8×16 px、
 // 偽の端末は 1 字 1 マス。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
 vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
@@ -260,14 +251,6 @@ function installFakes(): void {
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const nextFrame = () =>
   new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 
 beforeEach(async () => {
   term.lines = [...LINES];

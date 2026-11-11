@@ -1,13 +1,7 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
-
-GlobalRegistrator.register();
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 const { createSchemaView } = await import("../views/database/schema-view");
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";

@@ -1,17 +1,10 @@
 // 診断の画面 (views/doctor-view.ts) が /_doctor の失敗の本文を捨てずに出すこと。
 // 裏は 500 の本文に失敗の理由の全文 (cause の連なり) を入れて返す。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, expect, test, vi } from "vitest";
+import "./_dom";
+import { expect, test, vi } from "vitest";
 import { escapeHtml } from "../core/html-escape";
 import { createDoctorView } from "../views/doctor-view";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 
 test("a failed /_doctor shows the status and the whole body, and logs the error", async () => {
   const body = JSON.stringify({

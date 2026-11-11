@@ -1,18 +1,10 @@
 // 行の展開 (views/hunk-expand.ts) を付けるときの配置の読み方。ハンクの行の位置を
 // 書き込みと交互に読むと、読むたびに表全体の配置をやり直す (ハンク 300 の差分で
 // 2 秒止まった)。位置は 1 行 1 回だけ読み、行の高さはまとめて合わせる。
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import "./_dom";
+import { expect, test } from "vitest";
 import type { DiffCardElement } from "../core/types";
 import { createHunkExpand } from "../views/hunk-expand";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 test("reads each hunk row's position once and sets every row height", async () => {
   const hunks = 6;

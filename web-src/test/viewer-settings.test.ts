@@ -1,5 +1,5 @@
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   afterAll,
   beforeAll,
@@ -43,14 +43,6 @@ vi.mock("../core/shiki-loader", () => ({
   highlightToInnerHtml: (code: string) =>
     `<code><span class="tok">${code}</span></code>`,
 }));
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const EN_TEXT: ViewerSettingsText = {
   display: "Display",

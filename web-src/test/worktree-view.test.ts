@@ -7,16 +7,8 @@
 // 差分の描画そのもの (diff2html) はベンダーのライブラリなので、ここでは
 // 「何を渡したか」だけを見る。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { AppRoute, DiffRange } from "../core/routes";
 import type { CommitMeta, WorktreesResponse } from "../core/types";
 import type { WorktreeFileChange, WorktreeItem } from "../core/worktree";
@@ -27,12 +19,6 @@ import {
   type WorktreeView,
   type WorktreeViewOptions,
 } from "../views/worktree-view";
-
-GlobalRegistrator.register();
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const TEXT = worktreeText("en");
 const RANGE: DiffRange = { from: "HEAD", to: "worktree" };

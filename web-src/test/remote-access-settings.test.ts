@@ -1,16 +1,8 @@
 // 設定の「外部接続」の節 (views/remote-access-settings.ts)。入口のサーバの代わりに
 // fetch を差し替え、状態の行・開始と停止・外から開いたとき・値とトークンの保存を見る。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type {
   RemoteAccessSaveRequest,
   RemoteAccessStatus,
@@ -18,14 +10,6 @@ import type {
 import { createRemoteAccessSettings } from "../views/remote-access-settings";
 import { REMOTE_ACCESS_SETTINGS_TEXT } from "../views/remote-access-settings-i18n";
 import { q, waitFor } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   vi.unstubAllGlobals();

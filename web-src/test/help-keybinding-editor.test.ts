@@ -3,8 +3,8 @@
 // 置き換えるか聞くこと、効く所・既定に戻す・JSON の書き出し / 読み込み / 直接編集、
 // 保存がページの「変更を保存」(SettingsDraft) だけで起きることを確かめる。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   defaultKeyBindings,
   type KeymapOverrides,
@@ -23,8 +23,6 @@ import {
   closeOpenDialog,
 } from "./_dialog-helpers";
 
-GlobalRegistrator.register();
-
 const { createShortcutSettings } = await import(
   "../views/help-keybinding-editor"
 );
@@ -32,9 +30,6 @@ const { createShortcutSettings } = await import(
 afterEach(() => {
   closeOpenDialog();
   document.body.innerHTML = "";
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 type Harness = ReturnType<typeof setup>;

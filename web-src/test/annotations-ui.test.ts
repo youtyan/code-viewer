@@ -1,28 +1,11 @@
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { AnnotationEntry } from "../core/types";
 import type { AnnotationsUiDeps } from "../views/annotations-ui";
 import { createAnnotationsUi } from "../views/annotations-ui";
 import { clickDialogCancel, clickDialogConfirm } from "./_dialog-helpers";
 import { deferred, q } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 let originalTestFetch: typeof fetch;
 beforeEach(() => {

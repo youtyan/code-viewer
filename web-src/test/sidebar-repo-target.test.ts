@@ -1,6 +1,6 @@
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   CHANGES_LIST_DOM,
   createSidebar,
@@ -13,14 +13,6 @@ import {
 } from "./_sidebar-fixture";
 
 const styleCss = readFileSync("web/style.css", "utf8");
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";

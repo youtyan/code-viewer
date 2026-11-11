@@ -1,16 +1,14 @@
 // Redis エクスプローラの編集 UI を happy-dom で検証する。文字列値の編集 / キー
 // 削除 / 新規キー作成が、正しい op で POST /_db/redis/write を呼ぶことを確認する。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   clickDialogCancel,
   clickDialogConfirm,
   closeOpenDialog,
 } from "./_dialog-helpers";
 import { q, waitFor } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createRedisExplorer } = await import(
   "../views/database/redis-explorer"
@@ -81,9 +79,6 @@ function installFetch(
 afterEach(() => {
   globalThis.fetch = origFetch;
   closeOpenDialog();
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 async function setupSelectedKey(

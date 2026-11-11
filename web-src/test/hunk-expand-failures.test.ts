@@ -2,26 +2,10 @@
 // 応答を、展開の帯のすぐ下と console に理由つきで出し、もう一度押して読めたら
 // 帯を消す。以前は r.ok を見ずに r.json() し、失敗も行の無い応答も、ボタンが
 // 押せる状態に戻るだけで何も残らなかった。
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { DiffCardElement, FileMeta } from "../core/types";
 import { createHunkExpand } from "../views/hunk-expand";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const originalFetch = globalThis.fetch;
 let consoleError: ReturnType<typeof vi.spyOn>;

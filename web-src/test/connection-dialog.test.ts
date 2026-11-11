@@ -1,8 +1,6 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { closeOpenDialog, getOpenDialog } from "./_dialog-helpers";
-
-GlobalRegistrator.register();
 
 const { showDatastoreConnectionDialog } = await import(
   "../views/database/connection-dialog"
@@ -65,10 +63,6 @@ function requiredVisibleLabels(): string[] {
 afterEach(() => {
   globalThis.fetch = originalFetch;
   closeOpenDialog();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 describe("datastore connection dialog required fields", () => {

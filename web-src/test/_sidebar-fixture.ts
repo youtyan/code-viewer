@@ -2,6 +2,7 @@
 // 一覧 (#sidebar。既定) とファイル一覧 (#file-list) のどちらでも組める。
 // GlobalRegistrator の登録は呼び出し側のテストが行う。
 
+import "./_dom";
 import {
   CHANGES_LIST_DOM,
   createSidebar,

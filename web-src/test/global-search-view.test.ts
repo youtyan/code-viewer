@@ -1,10 +1,8 @@
 // Data の全体検索の画面を happy-dom の実描画で確かめる。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { q, waitFor } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createGlobalSearchView } = await import(
   "../views/database/global-search-view"
@@ -58,10 +56,6 @@ describe("global search view", () => {
     globalThis.fetch = originalFetch;
     document.body.innerHTML = "";
     vi.restoreAllMocks();
-  });
-
-  afterAll(() => {
-    GlobalRegistrator.unregister();
   });
 
   // 直す前は err.message だけを出し、console にも cause にも何も残らなかった。

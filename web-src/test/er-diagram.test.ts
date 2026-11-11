@@ -1,10 +1,8 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DbColumn, DbSchemaResponse } from "../core/database/types";
 import type { ErOption } from "../views/database/er-diagram";
 import { q } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createErDiagram } = await import("../views/database/er-diagram");
 const { dbText } = await import("../views/database/i18n");
@@ -146,10 +144,6 @@ describe("ER diagram", () => {
   afterEach(() => {
     document.body.innerHTML = "";
     vi.restoreAllMocks();
-  });
-
-  afterAll(() => {
-    GlobalRegistrator.unregister();
   });
 
   test.each([

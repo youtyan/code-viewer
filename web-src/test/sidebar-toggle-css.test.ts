@@ -2,18 +2,14 @@
 // ボタンは 16px の列を 1 本だけ持つ grid で、列そのものを中央に置かないと、
 // 列が左端に残って絵だけが左へずれた (畳んだ縦の帯で、上の絵柄の列より 6px 左)。
 // 実物の style.css を happy-dom に流し込み、計算値で見る。
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { beforeAll, expect, test } from "vitest";
 
 beforeAll(() => {
-  GlobalRegistrator.register();
   const style = document.createElement("style");
   style.textContent = readFileSync("web/style.css", "utf8");
   document.head.append(style);
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 test.each([

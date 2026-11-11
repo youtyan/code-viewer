@@ -36,7 +36,7 @@ import {
   type ViewportTier,
 } from "../core/mobile-layout";
 import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from "../core/tmux";
-import type { TabListEntry } from "./main-tabs/main-tabs-view";
+import type { TabListEntry } from "./main-tabs/main-tabs-presenter";
 import { CLOSE_ICON_PATH, pageIconPaths } from "./main-tabs/tab-icons";
 import {
   type MobileShellLang,

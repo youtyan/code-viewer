@@ -1,6 +1,6 @@
+import "./_dom";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import {
   DEFAULT_KEY_BINDINGS,
@@ -52,15 +52,10 @@ vi.mock("../core/lazy-bundle", () => ({
 }));
 
 beforeAll(async () => {
-  GlobalRegistrator.register();
   await loadShikiHighlighter({
     langs: ["bash", "json"],
     failureMode: "throw",
   });
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 function eventKeyForBinding(binding: KeyBinding): string {

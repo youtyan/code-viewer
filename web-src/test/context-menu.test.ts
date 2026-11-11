@@ -2,18 +2,12 @@
 // 閉じる。関係のない箱のスクロール (裏の更新でタブの列を描き直したときなど)
 // で閉じると、開いた直後に消えて項目が押せなくなる。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
-
-GlobalRegistrator.register();
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 
 const { closeContextMenu, isContextMenuOpen, showContextMenu } = await import(
   "../views/context-menu"
 );
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   closeContextMenu();

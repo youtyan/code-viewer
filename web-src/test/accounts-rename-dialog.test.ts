@@ -2,8 +2,8 @@
 // 押す前の検査はサーバと同じ規則 (renameAccount・checkAccountTags) で理由を出し、
 // サーバが断ったときはその理由をダイアログに出す (閉じない)。パス・名前はすべて架空。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import type {
   AccountStatus,
   AccountsResponse,
@@ -15,12 +15,6 @@ import { createAccountDialogs } from "../views/agents/accounts-dialogs";
 import { ACCOUNTS_EN } from "../views/agents/accounts-i18n";
 import { q } from "./_test-helpers";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 afterEach(() => {
   document.body.replaceChildren();
 });

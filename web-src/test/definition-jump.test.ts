@@ -1,13 +1,5 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { FileRangeResponse, GrepMatch, GrepResponse } from "../core/types";
 import { closeContextMenu, showContextMenu } from "../views/context-menu";
@@ -22,14 +14,6 @@ import { definitionJumpText } from "../views/definition-jump-i18n";
 import { deferred, q, waitFor } from "./_test-helpers";
 
 const originalFetch = globalThis.fetch;
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   window.dispatchEvent(new Event("blur"));

@@ -11,8 +11,8 @@
 // - 各節の中の並びは登録の順のまま。節の間を移っても登録の順は変えない
 // - 切替の小窓 (p) は絞り込みと ↑↓ で選ぶので畳まず、起動中 → 区切り → 停止中
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import type {
   AgentOverviewResponse,
   AgentOverviewShell,
@@ -23,7 +23,7 @@ import {
   partitionProjectsByRunning,
   runningProjectRoots,
 } from "../core/project-running";
-import { mountAgentsSidebar } from "../views/agents/agents-sidebar";
+import { createAgentsSidebarPresenter } from "../views/agents/agents-sidebar-presenter";
 import { agentsText } from "../views/agents/i18n";
 import type { ProjectActions } from "../views/projects/project-actions";
 import { mountProjectSwitcher } from "../views/projects/project-switcher";
@@ -35,14 +35,6 @@ import {
   projectNames,
 } from "./_agents-sidebar-fixture";
 import { agentPane, q } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 function pane(
   id: string,
@@ -213,7 +205,7 @@ function mount(
   const { actions, opened } = fakeActions(options.starting);
   const savedOpen: boolean[] = [];
   let stoppedOpen = options.stoppedOpen ?? false;
-  mountAgentsSidebar({
+  createAgentsSidebarPresenter({
     root,
     monitor,
     projects: actions,

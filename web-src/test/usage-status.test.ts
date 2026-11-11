@@ -8,27 +8,12 @@
 // - Esc・外側のクリックで閉じない / 閉じたらフォーカスが迷子になる
 // - 取り直しの失敗を黙る
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { AccountStatus, AccountsResponse } from "../core/agent-accounts";
 import type { AccountsSnapshot } from "../views/agents/accounts-client";
 import { agentsText } from "../views/agents/i18n";
 import { mountUsageStatus } from "../views/agents/usage-status";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 
 const NOW = Date.now();
 const MINUTE = 60_000;

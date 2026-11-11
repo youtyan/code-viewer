@@ -1,18 +1,10 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import {
   findTextRange,
   markNeedleInCell,
   markTextRange,
 } from "../views/text-mark";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 describe("findTextRange", () => {
   test.each([

@@ -7,8 +7,8 @@
 // - 下端に切替の帯、上下に安全領域
 // - 指の画面では押せるものが 44px 以上
 // - 足した部品と SP の名前は SP の節の外に漏れない (デスクトップを変えない)
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import {
   LONG_PRESS_TARGETS,
   PHONE_LANDSCAPE_MEDIA_QUERY,
@@ -648,13 +648,6 @@ describe("電話の段の骨格", () => {
 // 上書きを負かし、帯と最下段の分だけ端末がキーボードの下に沈んでいた。
 // body に当たる規則は happy-dom で選ぶ。
 describe("ソフトキーボードが出ている間は下端をキーボードの上にする", () => {
-  beforeAll(() => {
-    GlobalRegistrator.register();
-  });
-  afterAll(() => {
-    GlobalRegistrator.unregister();
-  });
-
   test.each([
     { body: "印なし", className: "", listColumn: undefined },
     { body: "一覧の列を出す", className: "", listColumn: "diff" },
@@ -977,13 +970,6 @@ describe("the bottom bar marks the current view and waiting agents", () => {
 // 電話の幅で効く節を全部重ね、実際の要素に
 // 当たる規則だけで解く (当たりは happy-dom)。
 describe("on a phone the History list sits in the sheet", () => {
-  beforeAll(() => {
-    GlobalRegistrator.register();
-  });
-  afterAll(() => {
-    GlobalRegistrator.unregister();
-  });
-
   const onPhone = () => [
     ...baseRules(sheet),
     ...sheet.filter(
@@ -1075,13 +1061,6 @@ describe("on a phone the History list sits in the sheet", () => {
 // 出さず、× は前面だけに見せる (ほかのタブも場所は取る: 消すと前面が替わるたびに
 // タブの幅が変わって隣がずれた)。デスクトップは札・＋ を並べ、入らなければ縮める。
 describe("the phone tab strip lists the open tabs without the group and the plus", () => {
-  beforeAll(() => {
-    GlobalRegistrator.register();
-  });
-  afterAll(() => {
-    GlobalRegistrator.unregister();
-  });
-
   function strip(): Record<string, HTMLElement> {
     document.body.innerHTML = `
       <div class="main-tabs-strip">

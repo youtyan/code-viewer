@@ -4,22 +4,14 @@
 // ファイルが開いていた。木の行のリンク (tabIndex -1) と何も選んでいないときは、
 // 今までどおりページの Enter が開く。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import "./_dom";
+import { expect, test } from "vitest";
 import {
   isEnterForFocusedControl,
   isPageKeymapBlockedKey,
   keymapScope,
 } from "../core/focus-scope";
 import { resolveKeymapAction } from "../core/keymap";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 /** app.ts の keydown と同じ組み立てで、その要素の上の Enter が何になるか。 */
 function enterOn(html: string, key = "Enter"): string | null {

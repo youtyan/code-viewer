@@ -2,12 +2,10 @@
 // happy-dom では読み込めない = ハイライタが null になる。その状態でも中身が
 // 欠けないこと (色が付かないだけ) が、ここで守りたい契約。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import { tableData } from "./_table-grid-fixture";
 import { q } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createTableGrid } = await import("../views/database/table-grid");
 const { dbText } = await import("../views/database/i18n");
@@ -62,10 +60,6 @@ function clickFirstCell(root: HTMLElement, rowIndex = 0) {
 }
 
 describe("table-grid detail footer JSON", () => {
-  afterAll(() => {
-    GlobalRegistrator.unregister();
-  });
-
   for (const [label, raw, expected] of [
     ["object", OBJECT_JSON, JSON.stringify(JSON.parse(OBJECT_JSON), null, 2)],
     ["array", ARRAY_JSON, JSON.stringify(JSON.parse(ARRAY_JSON), null, 2)],

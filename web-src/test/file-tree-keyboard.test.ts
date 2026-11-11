@@ -2,18 +2,10 @@
 // ↑↓ / Home / End / → / ← で動く。vim 風のキー (j k h l) はページのキー割り当て
 // のまま (ここでは見ない)。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import { CHANGES_LIST_DOM, FILE_LIST_DOM } from "../views/sidebar";
 import { createSidebarForTest, installSidebarDom } from "./_sidebar-fixture";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";

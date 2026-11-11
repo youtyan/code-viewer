@@ -3,21 +3,13 @@
 // 入れると何が良くなるかを 1〜2 文で言い、入れ方はヘルプへ送る。
 // 行 (claude / codex) の出し方はサーバの答えが要るので、ここでは見ない。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import {
   AGENT_HOOKS_HELP_SECTION,
   createAgentHooksSettings,
 } from "../views/agents/agent-hooks-settings";
 import { agentsText } from "../views/agents/i18n";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 function setup(lang: "en" | "ja") {
   const opened: string[] = [];

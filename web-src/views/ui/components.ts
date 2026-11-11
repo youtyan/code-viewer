@@ -9,6 +9,7 @@ import { defineCvButton } from "./button";
 import { defineCvDiagramViewport } from "./diagram-viewport";
 import { defineCvEmptyState } from "./empty-state";
 import { defineCvIcon } from "./icon";
+import { defineCvMenu } from "./menu";
 import { defineCvResizer } from "./resizer";
 import { defineCvSegmented } from "./segmented";
 
@@ -17,6 +18,7 @@ export function defineUiComponents(): void {
   defineCvDiagramViewport();
   defineCvEmptyState();
   defineCvIcon();
+  defineCvMenu();
   defineCvResizer();
   defineCvSegmented();
 }

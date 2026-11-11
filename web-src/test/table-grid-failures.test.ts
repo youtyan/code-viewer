@@ -3,12 +3,10 @@
 // 実描画で確かめる。直す前は err.message だけを出し、console にも cause にも
 // 何も残らなかった。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { tableData } from "./_table-grid-fixture";
 import { q, waitFor } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createTableGrid } = await import("../views/database/table-grid");
 const { dbText } = await import("../views/database/i18n");
@@ -79,10 +77,6 @@ describe("table-grid failures", () => {
   afterEach(() => {
     document.body.innerHTML = "";
     vi.restoreAllMocks();
-  });
-
-  afterAll(() => {
-    GlobalRegistrator.unregister();
   });
 
   test.each([

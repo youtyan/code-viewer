@@ -1,21 +1,6 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "vitest";
+import "./_dom";
+import { beforeEach, describe, expect, test } from "vitest";
 import { createLineRefPill, readRenderedLines } from "../views/line-ref-pill";
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 beforeEach(() => {
   document.body.innerHTML = "";

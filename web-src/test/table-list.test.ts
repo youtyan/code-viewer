@@ -1,18 +1,12 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DbColumn } from "../core/database/types";
-
-GlobalRegistrator.register();
 
 const { createTableList } = await import("../views/database/table-list");
 const { closeContextMenu, showContextMenu } = await import(
   "../views/context-menu"
 );
 const { dbText } = await import("../views/database/i18n");
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";

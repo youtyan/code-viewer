@@ -1,12 +1,10 @@
 // S3 エクスプローラの編集 UI を happy-dom で検証する。テキストオブジェクトの
 // 編集 / 削除 / 新規作成が正しい body で POST /_db/s3/write を呼ぶことを確認する。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import { clickDialogConfirm } from "./_dialog-helpers";
 import { q } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createS3Explorer } = await import("../views/database/s3-explorer");
 
@@ -76,9 +74,6 @@ afterEach(() => {
   // 各テストの view DOM が body に残ると次テストの querySelector が古い
   // (dispose 済み) view にヒットするのでクリアする (ダイアログも含まれる)。
   document.body.innerHTML = "";
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 async function setupWithObject() {

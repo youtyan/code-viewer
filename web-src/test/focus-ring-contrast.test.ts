@@ -6,8 +6,8 @@
 // 地がアクセントの塗りのボタンでは、輪と塗りが同じ色で接してボタンが少し大きく
 // 見えるだけだったので、輪と部品の間に地の色の隙間を挟む。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { beforeAll, describe, expect, test } from "vitest";
 import { themeVariants } from "./_color-themes";
 import {
   baseRules,
@@ -419,11 +419,7 @@ describe("a focused control draws the ring that fits where it sits", () => {
     </section>`;
 
   beforeAll(() => {
-    GlobalRegistrator.register();
     document.body.innerHTML = PAGE;
-  });
-  afterAll(() => {
-    GlobalRegistrator.unregister();
   });
 
   /** その部品に当たる規則だけで解いた、フォーカス中の outline と box-shadow。 */

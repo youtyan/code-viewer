@@ -1,8 +1,6 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "./_dom";
 import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { waitFor } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createDynamoDbExplorer } = await import(
   "../views/database/dynamodb-explorer"
@@ -105,7 +103,6 @@ beforeEach(() => {
 
 afterAll(() => {
   explorer?.dispose();
-  GlobalRegistrator.unregister();
 });
 
 async function mountExplorer(options?: {

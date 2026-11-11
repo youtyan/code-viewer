@@ -1,15 +1,7 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import { renderDelimitedPreview } from "../views/source-preview-elements";
 import { delimitedPreviewText } from "../views/source-preview-i18n";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 describe("Delimited preview", () => {
   test.each([

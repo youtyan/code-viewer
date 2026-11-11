@@ -1,14 +1,6 @@
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { RepoTreeResponse, SidebarItem } from "../core/types";
 import {
@@ -39,14 +31,6 @@ import { deferred } from "./_test-helpers";
 const range = { from: "HEAD", to: "worktree" };
 
 const originalFetch = globalThis.fetch;
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   globalThis.fetch = originalFetch;

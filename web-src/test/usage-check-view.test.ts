@@ -2,16 +2,8 @@
 // 出す 2 か所 (全体ボードのアカウントのカード・設定の使用量の行)、確認の
 // 状態を持つ AccountsClient。パス・名前はすべて架空。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   type AccountStatus,
   type AccountsResponse,
@@ -35,12 +27,6 @@ import {
 } from "../views/agents/usage-check";
 import { deferred } from "./_test-helpers";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 afterEach(() => {
   document.body.replaceChildren();
 });

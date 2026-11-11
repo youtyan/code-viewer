@@ -1,17 +1,9 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import { COLOR_THEMES } from "../core/color-themes";
 import type { FileRangeResponse, FileSearchListResponse } from "../core/types";
 import type { PaletteCommand } from "../views/search-palette-ui";
 import { q, waitFor } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";

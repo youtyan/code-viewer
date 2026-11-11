@@ -2,18 +2,10 @@
 // 行を押せる最小の高さ (style.css の --sp-touch) より低くしない。以前は CSS の
 // 44px が仮想表示の木に効かず、電話で木の行が 30px のままだった。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, expect, test } from "vitest";
 import { TOUCH_MEDIA_QUERY } from "../core/mobile-layout";
 import { createSidebarForTest, installSidebarDom } from "./_sidebar-fixture";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const originalMatchMedia = () => window.matchMedia;
 let restoreMatchMedia: typeof window.matchMedia | null = null;

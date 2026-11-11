@@ -8,15 +8,8 @@
 //
 // 棚だけを作って見る (端末とサーバは要らない)。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "vitest";
+import "./_dom";
+import { beforeEach, describe, expect, test } from "vitest";
 import { terminalText } from "../views/terminal/i18n";
 import {
   createImageShelf,
@@ -24,14 +17,6 @@ import {
 } from "../views/terminal/image-shelf";
 import type { ShelfEntry } from "../views/terminal/image-shelf-list";
 import { q } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 
 function entry(name: string): ShelfEntry {
   const path = `/repo/out/${name}`;

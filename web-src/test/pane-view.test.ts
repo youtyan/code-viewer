@@ -2,9 +2,8 @@
 // 選択肢・操作札・返事を /_tmux/pane-input へ送る。端末は本物の xterm を画面に
 // 出さずに使い、流し (EventSource) と送信 (fetch) は偽物にする。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "./_dom";
 import {
-  afterAll,
   afterEach,
   beforeAll,
   beforeEach,
@@ -42,7 +41,6 @@ const posted: unknown[] = [];
 let reply: () => Response = () => new Response('{"ok":true}');
 
 beforeAll(() => {
-  GlobalRegistrator.register();
   class FakeEventSource {
     static readonly CLOSED = 2;
     readyState = 1;
@@ -82,10 +80,6 @@ beforeAll(() => {
       return reply();
     },
   });
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
 });
 
 function snapshot(content: string, extra: Partial<TmuxPaneSnapshot> = {}) {

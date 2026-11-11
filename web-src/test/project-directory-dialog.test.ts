@@ -3,16 +3,8 @@
 // 最後に、プロジェクトの操作 (registerByPath) が一覧の GET と既存の登録の
 // POST を出すことを fetch の差し替えで確かめる。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ProjectDirectoryListing } from "../core/projects";
 import { agentsText } from "../views/agents/i18n";
 import { createProjectActions } from "../views/projects/project-actions";
@@ -23,14 +15,6 @@ import {
   getOpenDialog,
 } from "./_dialog-helpers";
 import { deferred, waitFor } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   closeOpenDialog();

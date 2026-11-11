@@ -1,14 +1,5 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { DiffCardElement, DiffMeta, FileMeta } from "../core/types";
 import {
@@ -20,14 +11,6 @@ import {
 import { DIFF_SCREEN_TEXT, type DiffViewText } from "../views/diff-view-i18n";
 import type { ExpandStackElement } from "../views/hunk-expand";
 import { deferred, makeDiffMeta, waitFor } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   const scrollSpy = window.__gdpScrollSpy as

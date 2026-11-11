@@ -9,17 +9,8 @@
 // - 読み上げは中身でなく「プレビュー: 行の名前」
 // - 窓の位置と、画面の文字から出す行 (純関数の表)
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   PANE_PREVIEW_DELAY_MS,
   PANE_PREVIEW_REFRESH_MS,
@@ -112,13 +103,6 @@ describe("panePreviewPosition", () => {
 });
 
 describe("pane preview", () => {
-  beforeAll(() => {
-    GlobalRegistrator.register();
-  });
-  afterAll(() => {
-    GlobalRegistrator.unregister();
-  });
-
   type Read = {
     pane: string;
     signal: AbortSignal;

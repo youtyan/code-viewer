@@ -1,17 +1,8 @@
 // 端末の操作札 (電話・指の画面の Esc・Ctrl+C・↑↓・Enter) は、打鍵と同じ経路
 // (/_shell/keys) で送り、矢印は端末のカーソルキーのモード (DECCKM) に合わせる。
 // 本物の画面での確認 (tmux の中の偽エージェントに届いたバイト列) は作業報告の記録。
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
 vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
@@ -23,14 +14,6 @@ import {
   createTerminalScreen,
   type TerminalScreenHandle,
 } from "../views/terminal/terminal-screen";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 
 vi.mock("../core/xterm-loader", async () => {
   const { FakeWebglAddon } = await import("./_fake-dom");

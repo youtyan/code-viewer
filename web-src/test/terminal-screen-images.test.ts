@@ -17,17 +17,8 @@
 // 画面に見えていないと描画しないので、リンクの出入りは本物では実画面で
 // 確かめる (作業報告の記録)。ここでは xterm に渡したリンクの中身を見る。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
 vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
@@ -424,14 +415,6 @@ function marks(selector: string): Array<{
     cols: Number(el.style.getPropertyValue("--link-cols")),
   }));
 }
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 let handle: TerminalScreenHandle;
 

@@ -3,10 +3,9 @@
 // 後半はアカウントの一覧の使用量と、「別のアカウントで続ける」の形。
 // パス・名前はすべて架空。
 
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
-  afterAll,
   afterEach,
   beforeAll,
   beforeEach,
@@ -27,13 +26,9 @@ import {
 import { agentPane } from "./_test-helpers";
 
 beforeAll(() => {
-  GlobalRegistrator.register();
   const style = document.createElement("style");
   style.textContent = readFileSync("web/style.css", "utf8");
   document.head.appendChild(style);
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
 });
 afterEach(() => {
   document.body.replaceChildren();

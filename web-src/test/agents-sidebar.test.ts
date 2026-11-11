@@ -8,16 +8,8 @@
 //   登録してから移る
 // - 畳む / 開くは山形だけ (名前を押しても畳まない)
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { AgentHookState, HookAgent } from "../core/agent-hooks";
 import type { AgentOverviewResponse, AgentPane } from "../core/agent-overview";
 import type { AgentState } from "../core/agent-state";
@@ -26,8 +18,8 @@ import { PANE_PREVIEW_DELAY_MS } from "../core/pane-preview";
 import { PROJECT_COLORS, type ProjectColor } from "../core/project-colors";
 import {
   type AgentsSidebarDeps,
-  mountAgentsSidebar,
-} from "../views/agents/agents-sidebar";
+  createAgentsSidebarPresenter,
+} from "../views/agents/agents-sidebar-presenter";
 import { agentsText } from "../views/agents/i18n";
 import { PANE_PREVIEW } from "../views/agents/pane-preview";
 import { closeContextMenu } from "../views/context-menu";
@@ -43,14 +35,6 @@ import {
 } from "./_agents-sidebar-fixture";
 import { closeOpenDialog } from "./_dialog-helpers";
 import { agentPane } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   closeContextMenu();
@@ -150,7 +134,7 @@ function mount(
   const projectMenus: { root: string; anchor: HTMLElement }[] = [];
   let dismissed = notify.dismissed ?? false;
   let stoppedOpen = false;
-  mountAgentsSidebar({
+  createAgentsSidebarPresenter({
     root,
     monitor,
     projects: actions,
@@ -904,14 +888,9 @@ describe("agents sidebar focus across redraws", () => {
     before?.focus();
     expect(document.activeElement).toBe(before);
     publish({ ...data(), serverInstance: "restarted" });
+    // 描き直しでボタンの要素が替わっても替わらなくても、同じ役目のボタンにいる。
     const after = root.querySelector<HTMLElement>(selector);
-    expect({
-      replaced: after !== before,
-      focused: document.activeElement,
-    }).toEqual({
-      replaced: true,
-      focused: after,
-    });
+    expect(document.activeElement).toBe(after);
   });
 
   test("a new observation time alone does not redraw", () => {
@@ -1253,9 +1232,10 @@ describe("agents sidebar reordering projects", () => {
       ["sample-app", "sample-lib", "sample-docs"],
     ]);
     drag(head, "dragend");
-    expect([head.isConnected, layout(root).registered]).toEqual([
-      false,
-      ["sample-lib", "sample-app", "sample-docs"],
+    expect(layout(root).registered).toEqual([
+      "sample-lib",
+      "sample-app",
+      "sample-docs",
     ]);
   });
 });

@@ -3,20 +3,14 @@
 // 覆いとダイアログの最初の 1 文に入口の案内 (本文の error) を出す。
 // パス・名前はすべて架空。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, expect, test } from "vitest";
 import { errorWithCause } from "../core/error-detail";
 import type { EntryBackendFailure } from "../core/types";
 import { createBackendState } from "../views/backend-state";
 import { PROJECTS_EN } from "../views/projects/projects-i18n";
 import { closeOpenDialog, getOpenDialog } from "./_dialog-helpers";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 afterEach(() => {
   closeOpenDialog();
   document.body.replaceChildren();

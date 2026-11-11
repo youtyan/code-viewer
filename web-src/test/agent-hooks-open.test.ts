@@ -2,16 +2,8 @@
 // 「codex で /hooks を開いて信頼してください」と言うだけにせず、その場で開けるように
 // する。サーバの答え (一覧・計画・書き込み) は偽の fetch で返す。パスはすべて架空。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type {
   AgentHookApplyResponse,
   AgentHookPlanResponse,
@@ -21,12 +13,6 @@ import type {
 import { createAgentHooksSettings } from "../views/agents/agent-hooks-settings";
 import { agentsText } from "../views/agents/i18n";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();

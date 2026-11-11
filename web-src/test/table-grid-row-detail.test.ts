@@ -2,20 +2,10 @@
 // 列ごとの値の出し方 (JSON・日時・NULL)・今の列・外部キーの関連・絞り込み・
 // 値のコピーを見る。時計は Date だけ止める。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tableData } from "./_table-grid-fixture";
 import { q } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createTableGrid } = await import("../views/database/table-grid");
 const { dbText } = await import("../views/database/i18n");
@@ -121,9 +111,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 describe("row detail", () => {

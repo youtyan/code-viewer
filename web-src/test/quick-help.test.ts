@@ -1,26 +1,11 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "vitest";
+import "./_dom";
+import { beforeEach, describe, expect, test } from "vitest";
 import {
   DEFAULT_KEY_BINDINGS,
   type KeyBinding,
   resolveKeyBindings,
 } from "../core/keymap";
 import { createQuickHelp } from "../views/quick-help";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 function installFixtureDom() {
   document.body.innerHTML = [

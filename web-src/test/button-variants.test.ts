@@ -1,9 +1,9 @@
 // ボタンの種類 (style.css の「ボタンの種類」の節): 主・薄塗り・枠線・小・文字だけ・アイコン。
 // どのボタンも、実際に置かれる場所 (親の「.x button」の規則が効く所) で、その種類の
 // 色になる。部品の規則が地・文字・枠の色を書き足すと、種類の決まりに勝ってここで落ちる。
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { beforeAll, expect, test } from "vitest";
 import { themeVariants } from "./_color-themes";
 import { baseRules, loadStyleSheet, resolveVar } from "./_css-fixture";
 import { withoutHover } from "./_css-without-hover";
@@ -22,7 +22,6 @@ const TONAL_STAND_IN = {
 } as const;
 
 beforeAll(() => {
-  GlobalRegistrator.register();
   const style = document.createElement("style");
   style.textContent = withoutHover(readFileSync("web/style.css", "utf8"));
   const standIn = document.createElement("style");
@@ -37,10 +36,6 @@ const expected = (name: string) =>
   name in TONAL_STAND_IN
     ? TONAL_STAND_IN[name as keyof typeof TONAL_STAND_IN]
     : token(name);
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 
 const KIND_TEXT = {
   primary: "--color-on-accent",

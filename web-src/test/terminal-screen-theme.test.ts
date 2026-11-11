@@ -7,18 +7,9 @@
 //
 // 実物の style.css を happy-dom に当て、xterm は差し替えて受け取った値を見る。
 // 本物の画面での確認 (DOM と WebGL の描画・ライトの画面) は作業報告の記録。
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
 vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
@@ -30,14 +21,6 @@ import {
   TERMINAL_MINIMUM_CONTRAST_RATIO,
   type TerminalScreenHandle,
 } from "../views/terminal/terminal-screen";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 
 type Options = {
   minimumContrastRatio?: number;

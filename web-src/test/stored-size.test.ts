@@ -1,16 +1,10 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   readStoredSize,
   reportStoredSizeFailure,
   writeStoredSize,
 } from "../core/stored-size";
-
-GlobalRegistrator.register();
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const KEY = "code-viewer:test-size";
 

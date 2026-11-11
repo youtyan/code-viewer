@@ -2,8 +2,8 @@
 // 操作、使用量の 1 行、起動コマンドの下書き (保存はページの「変更を保存」)。
 // パス・名前・メールアドレスはすべて架空。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import type {
   AccountLogin,
   AccountStatus,
@@ -18,12 +18,6 @@ import {
 } from "../views/agents/accounts-settings";
 import { deferred } from "./_test-helpers";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 afterEach(() => {
   document.body.replaceChildren();
 });

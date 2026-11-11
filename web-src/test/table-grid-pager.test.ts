@@ -3,12 +3,10 @@
 // 1 画面ぶんのスクロールだけ。happy-dom は寸法を持たないので、表の高さと
 // スクロール量を与えて、範囲の文字とボタンの押せる・押せないで見る。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import { tableData } from "./_table-grid-fixture";
 import { q } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createTableGrid } = await import("../views/database/table-grid");
 const { dbText } = await import("../views/database/i18n");
@@ -65,10 +63,6 @@ function setup(rowCount: number, visibleRows: number) {
 }
 
 describe("table-grid pager", () => {
-  afterAll(() => {
-    GlobalRegistrator.unregister();
-  });
-
   test.each(["compact", "regular", "large", "xlarge"] as const)(
     "shows the visible rows and moves one screen per button at the $0 density",
     async (density) => {

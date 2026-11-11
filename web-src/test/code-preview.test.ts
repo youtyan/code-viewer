@@ -1,13 +1,5 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { FileRangeResponse } from "../core/types";
 import {
   type CodePreviewRequest,
@@ -17,14 +9,6 @@ import { codePreviewText } from "../views/code-preview-i18n";
 import { deferred, q, waitFor } from "./_test-helpers";
 
 const originalFetch = globalThis.fetch;
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";

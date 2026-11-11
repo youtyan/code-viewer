@@ -2,12 +2,10 @@
 // 新規行 / 削除マーク → コミットで、正しい RowMutation[] が applyMutations に
 // 渡されることを確認する (文字列存在ではなく挙動の検証)。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import { tableData } from "./_table-grid-fixture";
 import { type Deferred, deferred, q, waitFor } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createTableGrid } = await import("../views/database/table-grid");
 const { dbText } = await import("../views/database/i18n");
@@ -78,10 +76,6 @@ function enterEdit(cell: HTMLElement) {
 }
 
 describe("table-grid edit mode", () => {
-  afterAll(() => {
-    GlobalRegistrator.unregister();
-  });
-
   test("isEditable reports true for write-capable datastores", () => {
     const { grid } = setup();
     expect(grid.isEditable()).toBe(true);

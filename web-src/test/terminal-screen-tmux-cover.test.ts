@@ -11,10 +11,9 @@
 // 覆う範囲そのものの表は terminal-tmux-cover.test.ts。ここは、届いた大きさを
 // いつ描き、いつ隠すか。xterm は差し替える (マス目の寸法を決めて渡す)。
 
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
-  afterAll,
   afterEach,
   beforeAll,
   beforeEach,
@@ -36,14 +35,9 @@ import {
 } from "../views/terminal/terminal-screen";
 
 beforeAll(() => {
-  GlobalRegistrator.register();
   const style = document.createElement("style");
   style.textContent = readFileSync("web/style.css", "utf8");
   document.head.append(style);
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
 });
 
 vi.mock("../core/xterm-loader", async () => {

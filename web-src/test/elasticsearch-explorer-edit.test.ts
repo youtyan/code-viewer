@@ -2,12 +2,10 @@
 // JSON 編集 (楽観ロック付き) / 削除 / 新規作成が正しい body で
 // POST /_db/elasticsearch/write を呼ぶことを確認する。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { clickDialogConfirm, closeOpenDialog } from "./_dialog-helpers";
 import { q, waitFor } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createElasticsearchExplorer } = await import(
   "../views/database/elasticsearch-explorer"
@@ -77,9 +75,6 @@ function installFetch(fail?: (url: string) => Error | Response | null) {
 afterEach(() => {
   globalThis.fetch = origFetch;
   closeOpenDialog();
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 async function setupWithDoc(fail?: (url: string) => Error | Response | null) {

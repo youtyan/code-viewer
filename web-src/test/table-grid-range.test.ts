@@ -2,12 +2,10 @@
 // happy-dom の実描画で、範囲の色が付いたセルと、クリップボードに入った文字
 // (Excel に貼るタブ区切り) を見る。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { tableData } from "./_table-grid-fixture";
 import { q } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createTableGrid } = await import("../views/database/table-grid");
 const { dbText } = await import("../views/database/i18n");
@@ -133,9 +131,6 @@ async function loaded(rows: DbValue[][] = ROWS) {
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 describe("selecting a range", () => {

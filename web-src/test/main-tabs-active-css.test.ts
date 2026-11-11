@@ -7,9 +7,9 @@
 // - 選択中でない / もう一方の面の選択中 / フォーカスのある面の選択中の 3 つが、
 //   ライトとダークの両方で見分けられる (1 面でもフォーカスのある面の印が付く)
 // - 選んでも寸法が変わらない (タブの幅は中身で決まるので、名前の太さも含めて)
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import {
   baseRules,
   cascadedDeclarations,
@@ -17,13 +17,9 @@ import {
 } from "./_css-fixture";
 
 beforeAll(() => {
-  GlobalRegistrator.register();
   const style = document.createElement("style");
   style.textContent = readFileSync("web/style.css", "utf8");
   document.head.append(style);
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 type State = "plain" | "otherSide" | "focused";

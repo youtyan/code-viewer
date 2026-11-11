@@ -2,15 +2,13 @@
 // OK / Cancel / Escape / backdrop click が Promise を正しく解決すること、
 // prompt の入力 + Enter 確定 + validate ロックが想定通り動くことを確認する。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   clickDialogCancel,
   closeOpenDialog,
   getOpenDialog,
 } from "./_dialog-helpers";
-
-GlobalRegistrator.register();
 
 const { showAlertDialog, showConfirmDialog, showFormDialog, showPromptDialog } =
   await import("../views/ui-dialog");
@@ -27,9 +25,6 @@ function actionButtons(): HTMLButtonElement[] {
 
 afterEach(() => {
   closeOpenDialog();
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 describe("showConfirmDialog", () => {

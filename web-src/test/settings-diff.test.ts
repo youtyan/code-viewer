@@ -2,26 +2,12 @@
 // それを差分の画面と同じ diff2html で描く views/agents/settings-diff.ts。
 // diff2html は index.html が読み込むのと同じ web/vendor の実物を読み込んで描く。
 
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { unifiedDiff } from "../core/text-diff";
 import { settingsDiffBlock } from "../views/agents/settings-diff";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();

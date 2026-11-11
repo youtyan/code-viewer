@@ -14,17 +14,8 @@
 // 替えて確かめる。本物の画面での確認 (素のシェルのペインで再読み込みを
 // 繰り返す) は作業報告の記録。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
 vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
@@ -35,14 +26,6 @@ import {
   createTerminalScreen,
   type TerminalScreenHandle,
 } from "../views/terminal/terminal-screen";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 
 const DA_QUERY = "\u001b[c";
 const DA_ANSWER = "\u001b[?1;2c";

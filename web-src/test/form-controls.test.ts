@@ -2,9 +2,9 @@
 // 入力欄と選ぶ欄、右クリックのメニュー、カード、リンク。どの部品も、実際に置かれる
 // 場所 (親の規則が効く所) で節の決めた見た目になる。部品の規則が地・縁・色を書き足すと、
 // 節の決まりに勝ってここで落ちる。
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import { themeVariants } from "./_color-themes";
 import { baseRules, loadStyleSheet, resolveVar } from "./_css-fixture";
 import { withoutHover } from "./_css-without-hover";
@@ -26,7 +26,6 @@ const expected = (name: string) =>
   name in STAND_IN ? STAND_IN[name as keyof typeof STAND_IN] : token(name);
 
 beforeAll(() => {
-  GlobalRegistrator.register();
   const style = document.createElement("style");
   style.textContent = withoutHover(readFileSync("web/style.css", "utf8"));
   const standIn = document.createElement("style");
@@ -35,10 +34,6 @@ beforeAll(() => {
     .join(" ")} }`;
   document.head.append(style, standIn);
   document.documentElement.dataset.theme = "dark";
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
 });
 
 // happy-dom は text-decoration の一括指定を text-decoration-line に分けないので、

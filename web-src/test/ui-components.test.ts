@@ -69,16 +69,33 @@ const IMPERATIVE_DOM =
   /createElement(NS)?\(|\.innerHTML\s*=|insertAdjacentHTML|\.outerHTML\s*=/g;
 
 /** 宣言的に書き直した所。中に命令的な組み立てが 1 つも無いこと。 */
-const DECLARATIVE = ["web-src/views/ui/", "web-src/views/tools/"];
+const DECLARATIVE = [
+  "web-src/views/ui/",
+  "web-src/views/tools/",
+  "web-src/views/main-tabs/",
+  "web-src/views/agents/agents-sidebar-presenter.ts",
+  "web-src/views/agents/agents-sidebar-view.ts",
+  "web-src/views/agents/agent-card.ts",
+  "web-src/views/context-menu.ts",
+  "web-src/views/ui-dialog.ts",
+  "web-src/views/title-tooltip.ts",
+  "web-src/views/projects/project-looks.ts",
+];
 
 /**
  * 書き直した所の中で、外の部品が DOM を作る・外の部品に DOM を渡すために
  * 命令的な書き方が残る所。ファイルごとの数と理由。
  */
-const EXCEPTIONS: Record<string, { count: number; reason: string }> = {};
+const EXCEPTIONS: Record<string, { count: number; reason: string }> = {
+  "web-src/views/ui/layer.ts": {
+    count: 1,
+    reason:
+      "重ね合わせの層の箱 (cv-layer) を body に置く。宣言的に描く先がまだ DOM に無いため",
+  },
+};
 
 /** まだ書き直していない所も含めた、命令的な組み立ての数の上限。書き直したら下げる。 */
-const IMPERATIVE_LIMIT = 2207;
+const IMPERATIVE_LIMIT = 2139;
 
 function imperativeCount(file: string): number {
   return [...readFileSync(file, "utf8").matchAll(IMPERATIVE_DOM)].length;

@@ -1,10 +1,24 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import type { ContextMenuItem } from "../views/context-menu";
 import {
   createDatabaseView,
   TABLE_SELECT_FETCH_DELAY_MS,
 } from "../views/database/database-view";
 import { closestFor, removeListenerFrom } from "./_fake-dom";
 import { waitFor } from "./_test-helpers";
+
+// 共有のメニュー (views/context-menu.ts) は lit で描くので、このファイルの偽の
+// DOM には描けない。開いたメニューの項目だけを受け取り、項目を選ぶ所はテストが
+// 項目の onSelect を呼ぶ。メニューそのものの動きは context-menu.test.ts が見る。
+const openedMenus = vi.hoisted(() => [] as ContextMenuItem[][]);
+vi.mock("../views/context-menu", () => ({
+  showContextMenu: (_anchor: unknown, items: ContextMenuItem[]) => {
+    openedMenus.push(items);
+    return { isConnected: true };
+  },
+  closeContextMenu: () => undefined,
+  isContextMenuOpen: () => false,
+}));
 
 const originalDocument = globalThis.document;
 const originalWindow = globalThis.window;
@@ -2755,14 +2769,12 @@ describe("database view SQL error rendering", () => {
       ".db-table-item",
     ) as unknown as FakeElement;
     await table.contextmenu();
-    // 共有のメニュー (views/context-menu.ts)。この偽の DOM は単純なセレクタだけ読む。
-    const createItem = Array.from(
-      document.querySelector(".gdp-context-menu")?.querySelectorAll("button") ??
-        [],
-    ).find((item) => item.textContent === "View CREATE TABLE") as unknown as
-      | FakeElement
-      | undefined;
-    await createItem?.click();
+    const createItem = openedMenus[openedMenus.length - 1]?.find(
+      (item) => item.kind !== "separator" && item.label === "View CREATE TABLE",
+    );
+    if (!createItem || createItem.kind === "separator")
+      throw new Error("the table menu has no View CREATE TABLE item");
+    createItem.onSelect();
     await waitFor(() =>
       Boolean(
         schema

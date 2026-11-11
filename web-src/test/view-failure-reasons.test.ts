@@ -3,27 +3,10 @@
 // 理由を捨てていた (本文の JSON の欄を落とす・4xx/5xx を成功扱いにする・
 // err.message だけを出す・catch で何もしない)。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { errorWithCause } from "../core/error-detail";
 import { clickDialogConfirm, closeOpenDialog } from "./_dialog-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const originalFetch = globalThis.fetch;
 let consoleError: ReturnType<typeof vi.spyOn>;

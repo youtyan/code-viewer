@@ -25896,7 +25896,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
    (ui-components.test.ts が見る)。決まりは
    .agents/skills/project-rules/references/ui-components.md。
    ====================================================================== */
-:where(cv-button, cv-diagram-viewport, cv-empty-state, cv-icon, cv-resizer, cv-scratchpad-pane, cv-segmented) {
+:where(cv-button, cv-diagram-viewport, cv-empty-state, cv-icon, cv-layer, cv-menu, cv-resizer, cv-scratchpad-pane, cv-segmented) {
   display: contents;
 }
 

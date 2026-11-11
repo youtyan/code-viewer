@@ -1,13 +1,5 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { TerminalImageRef } from "../core/terminal-images";
 import { createImageTabView, type ImageTabHandle } from "../views/image-tab";
 import { contrastRatio } from "./_color-contrast";
@@ -169,14 +161,6 @@ function installResizeObserver(): {
     disconnected,
   };
 }
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   for (const handle of handles.splice(0)) handle.dispose();

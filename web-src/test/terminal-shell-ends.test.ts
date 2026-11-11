@@ -4,16 +4,8 @@
 // 生きているシェルの一覧から拾う。拾い損ねるとタブが残り、拾い過ぎると
 // 開いた直後のタブ (次の一覧に載る前) が閉じる。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   createShellEndNotice,
   createShellEndTracker,
@@ -132,12 +124,6 @@ describe("createShellEndTracker", () => {
 });
 
 describe("createShellEndNotice", () => {
-  beforeAll(() => {
-    GlobalRegistrator.register();
-  });
-  afterAll(() => {
-    GlobalRegistrator.unregister();
-  });
   afterEach(() => {
     vi.useRealTimers();
     document.body.replaceChildren();

@@ -1,17 +1,8 @@
 // 電話の幅の骨格 (views/mobile-shell.ts): 部品の出し分け・引き出しと面の
 // 開け閉め・下端の帯・端末の操作札・言語の切替。配置は CSS (mobile-shell-css.test.ts)。
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   LONG_PRESS_MOVE_TOLERANCE,
   LONG_PRESS_MS,
@@ -19,7 +10,7 @@ import {
   type TerminalSoftKey,
   TOUCH_MEDIA_QUERY,
 } from "../core/mobile-layout";
-import type { TabListEntry } from "../views/main-tabs/main-tabs-view";
+import type { TabListEntry } from "../views/main-tabs/main-tabs-presenter";
 import {
   installMobileShell,
   type MobileShell,
@@ -28,13 +19,6 @@ import {
 import { q } from "./_test-helpers";
 
 type Viewport = { width: number; height: number; coarse: boolean };
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 let shell: MobileShell | null = null;
 let sent: TerminalSoftKey[] = [];

@@ -1,16 +1,8 @@
 // 入れ方の箱 (views/install-help.ts): 何が無いかの 1 文、コピーのボタンつきの
 // コマンド (ヘルプの本文と同じ部品)、ヘルプの節へのリンク。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   installHelpBlock,
   NODE_PTY_INSTALL_COMMANDS,
@@ -18,12 +10,6 @@ import {
   TMUX_INSTALL_COMMANDS,
 } from "../views/install-help";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();

@@ -1,11 +1,9 @@
 // Query history pane の実DOM挙動を happy-dom 上で検証する。
 // 更新ボタンはサーバの履歴再取得を使い、更新中フィードバックを出す。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { q } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createQueryHistoryView } = await import(
   "../views/database/query-history-view"
@@ -33,10 +31,6 @@ describe("query history view", () => {
     document.body.innerHTML = "";
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
-  });
-
-  afterAll(() => {
-    GlobalRegistrator.unregister();
   });
 
   test("refresh button identifies query history and shows in-flight feedback", async () => {

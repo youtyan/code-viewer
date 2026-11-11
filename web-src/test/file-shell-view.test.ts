@@ -1,5 +1,5 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   type AppRoute,
   buildRoute,
@@ -8,8 +8,6 @@ import {
 } from "../core/routes";
 import type { SourceBlobTab } from "../views/file-shell";
 import { deferred, waitFor } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createBlameView } = await import("../views/blame-view");
 const {
@@ -290,10 +288,6 @@ beforeEach(() => {
     },
   });
   installFetchMock();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 describe("file view shell routing", () => {

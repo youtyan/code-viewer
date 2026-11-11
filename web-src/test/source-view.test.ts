@@ -1,27 +1,11 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { findMainScrollTarget } from "../core/focus-scope";
 import type { AppRoute } from "../core/routes";
 import type { ShikiHighlighter } from "../core/shiki-loader";
 import type { SourceViewDeps } from "../views/source-view";
 import { createSourceView } from "../views/source-view";
 import { deferred, waitFor } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";

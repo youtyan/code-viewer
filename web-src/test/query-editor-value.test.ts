@@ -1,8 +1,6 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DbKind, DbValue } from "../core/database/types";
-
-GlobalRegistrator.register();
 
 const { createQueryEditor, explainStatement } = await import(
   "../views/database/query-editor"
@@ -13,10 +11,6 @@ describe("query editor value display", () => {
   afterEach(() => {
     document.body.innerHTML = "";
     vi.restoreAllMocks();
-  });
-
-  afterAll(() => {
-    GlobalRegistrator.unregister();
   });
 
   test.each([

@@ -1,8 +1,8 @@
 // 差分のカードの貼り付く横スクロールバー (views/diff-hscroll.ts と
 // core/hscroll-proxy.ts)。長いカードの上の方を読んでいる間も、本文の箱の下端で
 // 横に送れるようにする。
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import {
   maxScrollLeft,
   mirroredScrollLeft,
@@ -73,13 +73,6 @@ describe("CSS", () => {
 });
 
 describe("配線", () => {
-  beforeAll(() => {
-    GlobalRegistrator.register();
-  });
-  afterAll(() => {
-    GlobalRegistrator.unregister();
-  });
-
   /** diff2html が描く形 (Split は左右 2 つ、Unified は 1 つの .d2h-code-wrapper)。 */
   function card(sides: number): HTMLElement {
     const shell = document.createElement("div");

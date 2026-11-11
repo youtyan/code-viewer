@@ -16,17 +16,8 @@
 // その順番を守っていることを、xterm を差し替えて確かめる。本物の画面での確認
 // (棚の開閉・ウィンドウ幅・下のパネルの高さ) は作業報告の記録。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
 vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
@@ -37,14 +28,6 @@ import {
   createTerminalScreen,
   type TerminalScreenHandle,
 } from "../views/terminal/terminal-screen";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 
 type RealTerminal = import("@xterm/xterm").Terminal;
 

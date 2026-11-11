@@ -260,8 +260,8 @@ import { createAgentPaneOpener } from "./views/agents/agent-pane-opener";
 import { mountAgentStatus } from "./views/agents/agent-status";
 import {
   type AgentsSidebar,
-  mountAgentsSidebar,
-} from "./views/agents/agents-sidebar";
+  createAgentsSidebarPresenter,
+} from "./views/agents/agents-sidebar-presenter";
 import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
 import {
   type HandoffMenuActions,
@@ -340,7 +340,7 @@ import {
 import { mainTabsText } from "./views/main-tabs/i18n";
 import {
   COMFORTABLE_PANE_WIDTH,
-  createMainTabsView,
+  createMainTabsPresenter,
   type FrontChange,
   isPageKind,
   type PanesView,
@@ -349,7 +349,7 @@ import {
   SPLIT_DIVIDER_WIDTH,
   shellGroupOf,
   type ViewScreen,
-} from "./views/main-tabs/main-tabs-view";
+} from "./views/main-tabs/main-tabs-presenter";
 import { pageIconPaths } from "./views/main-tabs/tab-icons";
 import { installMobileShell } from "./views/mobile-shell";
 import { createProjectActions } from "./views/projects/project-actions";
@@ -1856,7 +1856,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     worktree: "worktree-panel",
   } as const;
 
-  const MAIN_TABS = createMainTabsView({
+  const MAIN_TABS = createMainTabsPresenter({
     // 電話の段のタブ列の右端の「開いているタブ」(MOBILE_SHELL は後で作る)。
     onTabList: () => MOBILE_SHELL.openTabs(),
     mount: (() => {
@@ -10120,7 +10120,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const navProjectsRoot = document.querySelector<HTMLElement>("#nav-projects");
   AGENTS_SIDEBAR = navProjectsRoot
-    ? mountAgentsSidebar({
+    ? createAgentsSidebarPresenter({
         root: navProjectsRoot,
         monitor: AGENT_MONITOR,
         projects: PROJECT_ACTIONS,

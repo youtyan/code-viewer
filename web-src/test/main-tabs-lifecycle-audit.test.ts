@@ -9,13 +9,12 @@
 // (直すまで赤)。ほかは「確かめた、起きない」の記録 (緑)。一覧と判定は
 // 調査の報告 (tab-lifecycle-audit.md) にある。
 
+import "./_dom";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setImmediate as realImmediate } from "node:timers";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
-  afterAll,
   afterEach,
   beforeAll,
   beforeEach,
@@ -45,14 +44,13 @@ import { lastTabNumber } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
 
 import {
-  createMainTabsView,
+  createMainTabsPresenter,
   type MainTabsDeps,
   type MainTabsHandle,
-} from "../views/main-tabs/main-tabs-view";
+} from "../views/main-tabs/main-tabs-presenter";
 import { createProjectLooks } from "../views/projects/project-looks";
 
 beforeAll(() => {
-  GlobalRegistrator.register();
   // happy-dom の classList.toggle は、変わらないときも class を書き直して
   // MutationObserver に届ける (ブラウザは届けない)。画面の部品は body の class の
   // 変化を見て合わせ直す (followGeometry) ので、本物の時計で 1 周回すたびに
@@ -108,10 +106,6 @@ beforeAll(() => {
       );
     }
   } as typeof MutationObserver;
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 let dir = "";
@@ -234,7 +228,7 @@ function openWindow(
   let n = 0;
   const urls: string[] = [];
   const switches: string[] = [];
-  const handle: MainTabsHandle = createMainTabsView({
+  const handle: MainTabsHandle = createMainTabsPresenter({
     mount,
     getLanguage: () => "en",
     pageLabel: (page) => page,

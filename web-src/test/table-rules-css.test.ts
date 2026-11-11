@@ -8,9 +8,9 @@
 //   勝っていない)
 // - キーキャップはどれも同じ形 (縁の線がその線、文字は本文の色)
 // - 行の多い表は 1 行おきに面が付く
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import { themeVariants } from "./_color-themes";
 import {
   baseRules,
@@ -89,13 +89,9 @@ test("the separator of menus is drawn with the row line", () => {
 
 describe("tables drawn with the rule", () => {
   beforeAll(() => {
-    GlobalRegistrator.register();
     const style = document.createElement("style");
     style.textContent = readFileSync("web/style.css", "utf8");
     document.head.append(style);
-  });
-  afterAll(() => {
-    GlobalRegistrator.unregister();
   });
 
   function computed(html: string, selector: string): CSSStyleDeclaration {

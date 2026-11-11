@@ -18,10 +18,7 @@ import {
   parseHostCommand,
   parsePaneMessage,
 } from "../core/workspace-bridge";
-import {
-  installTitleTooltips,
-  TITLE_TOOLTIP_DELAY_MS,
-} from "../views/title-tooltip";
+import { TITLE_TOOLTIP_DELAY_MS } from "../views/title-tooltip";
 import { startWorkspaceHost } from "../views/workspace/host";
 import type { WorkspaceStore } from "../views/workspace/store";
 
@@ -310,6 +307,10 @@ describe("host: フォーカスのある面を写す", () => {
     await vi.waitFor(() =>
       expect(el("auto-update").title).toBe("auto update is off"),
     );
+    // 吹き出しは lit で描く。lit は読み込んだ時点の document を掴むので、この
+    // テストの窓を作った後に読み込み直す (窓はテストごとに作り直している)。
+    vi.resetModules();
+    const { installTitleTooltips } = await import("../views/title-tooltip");
     const uninstall = installTitleTooltips(document);
     let titleWrites = 0;
     let looped = false;

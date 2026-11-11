@@ -1,5 +1,5 @@
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { listColumnLayout } from "../core/list-column";
 import type { SerializedLayout, TabTarget } from "../core/main-tabs";
@@ -11,26 +11,26 @@ import { TAB_FLOOR_UNITS } from "../core/tab-widths";
 import { closeContextMenu } from "../views/context-menu";
 import {
   COMFORTABLE_PANE_WIDTH,
-  createMainTabsView,
+  createMainTabsPresenter,
   type MainTabsDeps,
   type MainTabsHandle,
   routeTarget,
   SPLIT_DIVIDER_WIDTH,
   VIEW_SCREENS,
-} from "../views/main-tabs/main-tabs-view";
+} from "../views/main-tabs/main-tabs-presenter";
 import { pageIconPaths } from "../views/main-tabs/tab-icons";
 
-// 窓 (happy-dom) はテストごとに作り直す。画面の部品は片付けの口を持たず、
-// document.body の class を見張る MutationObserver を残す。同じ窓を使い回すと、
+// body はテストごとに新しい要素に替える。画面の部品は片付けの口を持たず、
+// document.body の class を見張る MutationObserver を残す。同じ body を使い回すと、
 // 前のテストの部品がすべて次のテストの body の変化にも反応し、後ろのテストほど
-// 遅くなっていた (131 件で最初の 15ms が最後は 800ms)。
+// 遅くなっていた (131 件で最初の 15ms が最後は 800ms)。窓 (happy-dom) ごと作り
+// 直すのはやめた: lit は読み込んだ時点の document を掴むので、窓を替えると描けない。
 beforeEach(() => {
-  GlobalRegistrator.register();
+  document.body.replaceWith(document.createElement("body"));
 });
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  await GlobalRegistrator.unregister();
 });
 
 const range = { from: "HEAD", to: "worktree" };
@@ -66,7 +66,7 @@ function setup(
   /** 本文を移した先と、履歴を積まない (replace) か。 */
   const navigations: Array<{ to: string; replace: boolean }> = [];
   let current: AppRoute = initial;
-  const handle: MainTabsHandle = createMainTabsView({
+  const handle: MainTabsHandle = createMainTabsPresenter({
     mount,
     ...(listColumnWidth ? { listColumnWidth } : {}),
     getLanguage: () => "en",
@@ -1024,10 +1024,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
       const rows = openMenu(mount, root)
         .filter((item) => item.getAttribute("role") === "menuitemradio")
         .map((item) => {
-          const label = [...item.childNodes]
-            .filter((node) => node.nodeType === Node.TEXT_NODE)
-            .map((node) => node.textContent)
-            .join("");
+          const label = menuItemLabel(item);
           return [
             item.querySelector(".gdp-context-menu-icon svg") ? "◆ " : "",
             label,
@@ -1134,7 +1131,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
         const { mount } = await setupScreens(initial);
         const checked = openMenu(mount, APP)
           .filter((item) => item.getAttribute("aria-checked") === "true")
-          .map((item) => item.firstChild?.nextSibling?.textContent);
+          .map(menuItemLabel);
         closeContextMenu();
         expect(checked).toEqual(expected === null ? [] : [expected]);
       },
@@ -1211,7 +1208,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
         .find(
           (item) =>
             item.getAttribute("role") === "menuitemradio" &&
-            item.firstChild?.nextSibling?.textContent === row,
+            menuItemLabel(item) === row,
         )
         ?.click();
       expect({
@@ -1716,12 +1713,12 @@ describe("main tabs view: 操作", () => {
       }),
     );
     await Promise.resolve();
+    // 描き直しでタブの要素が替わっても替わらなくても、同じタブへ戻る。
     const active = document.activeElement as HTMLElement;
     expect([
-      active === tab,
       active.classList.contains("main-tab"),
       active.dataset.tabId === id,
-    ]).toEqual([false, true, true]);
+    ]).toEqual([true, true]);
   });
 
   // 版が違えば別のタブ。名前は作業ツリー以外の版だけ短い印を添える。
@@ -1843,10 +1840,9 @@ describe("main tabs view: 操作", () => {
     handle.localize();
     const focused = document.activeElement as HTMLElement | null;
     expect([
-      second.isConnected,
       focused?.classList.contains("main-tab"),
       focused?.dataset.tabId,
-    ]).toEqual([false, true, id]);
+    ]).toEqual([true, id]);
   });
 
   test("描き直しは、タブの外にあるフォーカスを動かさない", async () => {
@@ -1945,6 +1941,14 @@ describe("main tabs view: 操作", () => {
     expect([handle.openFrontMenu(), menuLabels()]).toEqual([false, []]);
   });
 });
+
+/** メニューの項目の名前 (絵を除いた文字)。 */
+function menuItemLabel(item: HTMLElement): string {
+  return [...item.childNodes]
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => node.textContent)
+    .join("");
+}
 
 /** 開いている右クリックのメニューの項目 (押せないものに印)。 */
 function menuLabels(): string[] {
@@ -3324,10 +3328,9 @@ describe("main tabs view: 左右 2 面", () => {
       `.main-tab[data-tab-id="${id}"]`,
     );
     expect([
-      redrawn === dragged,
       redrawn?.classList.contains("main-tab-dragging"),
       document.body.classList.contains("main-tab-drag-active"),
-    ]).toEqual([false, true, true]);
+    ]).toEqual([true, true]);
     // 外れた要素には dragend が来ない。ボタンを離した移動で終わりと分かる
     const moved = new Event("pointermove", { bubbles: true });
     Object.defineProperty(moved, "buttons", { value: 0 });

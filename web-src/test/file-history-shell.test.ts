@@ -1,21 +1,15 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
+import "./_dom";
+import { beforeEach, describe, expect, test } from "vitest";
 import type { AppRoute, DiffRange } from "../core/routes";
 import {
   type FileHistoryRoute,
   renderFileHistoryShell,
 } from "../views/file-history-shell";
 
-GlobalRegistrator.register();
-
 const RANGE: DiffRange = { from: "HEAD", to: "worktree" };
 
 beforeEach(() => {
   document.body.innerHTML = '<main id="diff"></main>';
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 function createDeps() {

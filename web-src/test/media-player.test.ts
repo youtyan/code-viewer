@@ -1,22 +1,6 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { createMediaPlayer } from "../views/media-player";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -119,7 +103,8 @@ describe("media player", () => {
       name: "a refused play shows the reason on the play button",
       failure: new DOMException("sample playback refused", "NotAllowedError"),
       title:
-        "Error: playing /_file?path=clip.mp4 failed\nCaused by: NotAllowedError: sample playback refused",
+        // 画面の URL (http) を基に解決した再生元。ブラウザの media.src と同じ形。
+        "Error: playing http://localhost/_file?path=clip.mp4 failed\nCaused by: NotAllowedError: sample playback refused",
       logged: 1,
     },
     {

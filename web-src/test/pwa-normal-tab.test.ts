@@ -4,22 +4,14 @@
 // window.matchMedia で、窓のキーの表と PWA の既定の割り当ての全部を確かめる。
 // 同じイベントが standalone では受けられることも見て、イベントの組み方が正しい
 // ことを担保する。
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import "./_dom";
+import { expect, test } from "vitest";
 import {
   defaultKeyBindings,
   pwaKeyBindings,
   resolveKeyOutcome,
 } from "../core/keymap";
 import { PWA_WINDOW_KEYS, STANDALONE_MEDIA_QUERY } from "../core/pwa";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 type Press = { key: string; meta: boolean; ctrl: boolean; shift: boolean };
 

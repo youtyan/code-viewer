@@ -1,29 +1,13 @@
 // title の吹き出し (views/title-tooltip.ts): マウスとペンで約 300ms 後に出て、
 // 離れる・押す・キー・スクロール・窓がぼやけるで消える。出している間は title を
 // 外して既定の吹き出しと重ねず、消すときに戻す (その間に書き直された値は残す)。
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   installTitleTooltips,
   placeTooltip,
   TITLE_TOOLTIP_DELAY_MS,
 } from "../views/title-tooltip";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 let uninstall: (() => void) | null = null;
 
@@ -94,10 +78,13 @@ describe("showing", () => {
     pointer("pointerover", el("anchor"));
     vi.advanceTimersByTime(300);
     const tip = document.querySelector(".title-tooltip");
-    expect([tip?.parentElement?.tagName, tip?.getAttribute("role")]).toEqual([
-      "BODY",
-      "tooltip",
-    ]);
+    // 重ね合わせの層の箱 (cv-layer) は箱を作らない (ui-components.test.ts) ので、
+    // 吹き出しの箱の親は body だけになる。
+    expect([
+      tip?.parentElement?.tagName,
+      tip?.parentElement?.parentElement?.tagName,
+      tip?.getAttribute("role"),
+    ]).toEqual(["CV-LAYER", "BODY", "tooltip"]);
   });
 
   test.each([

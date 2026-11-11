@@ -1,15 +1,9 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
+import "./_dom";
+import { beforeEach, describe, expect, test } from "vitest";
 import type { JournalDataResponse, JournalTask } from "../core/journal";
 import type { AppRoute, DiffRange } from "../core/routes";
 import { createJournalView, type JournalViewText } from "../views/journal-view";
 import { q, waitFor } from "./_test-helpers";
-
-GlobalRegistrator.register();
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const RANGE: DiffRange = { from: "HEAD", to: "worktree" };
 const NOW = "2026-07-02T00:00:00.000Z";

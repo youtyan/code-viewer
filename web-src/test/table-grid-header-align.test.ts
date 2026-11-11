@@ -2,12 +2,10 @@
 // 揃えるのはブラウザ (3 つを同じスクロールの箱に入れる) で、ここでは箱の
 // 組み方と、本文に焼く幅が列の合計であることを見る。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import { tableData } from "./_table-grid-fixture";
 import { q } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createTableGrid } = await import("../views/database/table-grid");
 const { dbText } = await import("../views/database/i18n");
@@ -77,10 +75,6 @@ function setup() {
 }
 
 describe("table-grid horizontal alignment", () => {
-  afterAll(() => {
-    GlobalRegistrator.unregister();
-  });
-
   // 列の見出しと絞り込みの行は、本文と同じスクロールの箱の中の頭 (上に貼り付け)
   // にあり、横にはブラウザが本文と一緒に動かす。別の箱にして本文の scroll の
   // たびに JS で scrollLeft を合わせていた頃は、iPhone の Safari で横に送ると
