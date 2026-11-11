@@ -616,6 +616,35 @@ describe("agents sidebar heading marks", () => {
     ]);
   });
 
+  test("a project row shows a branch that is not main and how far it is from its upstream", () => {
+    const { root } = mount(
+      overview(
+        [],
+        [
+          {
+            ...info("/work/sample-app", 0, { status: "current" }),
+            branch: {
+              branch: "feature/x",
+              ahead: 2,
+              behind: 1,
+              upstream: true,
+            },
+          },
+          {
+            ...info("/work/sample-lib", 1, RUNNING),
+            branch: { branch: "main", ahead: 0, behind: 0, upstream: true },
+          },
+        ],
+      ),
+    );
+    expect(
+      [...root.querySelectorAll<HTMLElement>(".nav-project-head")].map(
+        (head) =>
+          head.querySelector(".nav-project-branch")?.textContent ?? null,
+      ),
+    ).toEqual(["feature/x ↑2 ↓1", null]);
+  });
+
   test("the menu's Color… lists the palette and saves the chosen color", () => {
     // 色の一覧は「色…」の同じ click の中で開き直す (待たない)。
     const actions = fakeActions();

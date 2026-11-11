@@ -267,6 +267,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               kind: "list",
               items: [
                 "Select a project's name in the sidebar to switch to it.",
+                "After the name, a branch other than main and how far it is from its upstream (↑ ahead, ↓ behind) are shown.",
                 [
                   "Select the project name at the top of the list column (or press ",
                   key("p"),

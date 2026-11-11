@@ -261,6 +261,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               kind: "list",
               items: [
                 "サイドバーのプロジェクト名を押すと、そのプロジェクトに移ります。",
+                "名前の後ろに、main 以外のブランチと、上流との差 (↑ 進んでいる・↓ 遅れている) が出ます。",
                 [
                   "一覧の列の上のプロジェクト名を押す（",
                   key("p"),

@@ -698,6 +698,62 @@ export async function projectRootResultAsync(
   };
 }
 
+/** 今のブランチと、上流 (@{upstream}) との差 (左のサイドバーのプロジェクトの行)。 */
+export type BranchStatus = {
+  /** ブランチの名前。detached なら null。 */
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  /** 上流があるか (無ければ差は 0)。 */
+  upstream: boolean;
+};
+
+/**
+ * 今のブランチと上流との差を読む。読むだけ (ロックを取らない指定は gitInvocation)。
+ * detached・上流の無いブランチは差 0 で正常。ほかの失敗は error に git の出力ごと。
+ */
+export async function branchStatusResultAsync(
+  cwd: string,
+): Promise<BranchStatus & Partial<GitErrorResult>> {
+  const none: BranchStatus = {
+    branch: null,
+    ahead: 0,
+    behind: 0,
+    upstream: false,
+  };
+  const head = await runGitAsync(
+    ["git", "symbolic-ref", "-q", "--short", "HEAD"],
+    cwd,
+  );
+  // 1 は detached (symbolic-ref -q の決まり)。ほかの失敗は理由を返す。
+  if (head.code === 1) return none;
+  if (head.code !== 0)
+    return { ...none, ...gitFailureResult(head, "git symbolic-ref failed") };
+  const branch = head.stdout.trim();
+  const counts = await runGitAsync(
+    ["git", "rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+    cwd,
+  );
+  if (counts.code !== 0) {
+    // 上流の無いブランチ (push していない・上流を消した) は普通のこと。
+    if (/no upstream|upstream branch .* not stored/i.test(counts.stderr))
+      return { ...none, branch };
+    return {
+      ...none,
+      branch,
+      ...gitFailureResult(counts, "git rev-list failed"),
+    };
+  }
+  const parsed = parseAheadBehind(counts.stdout);
+  if (!parsed)
+    return {
+      ...none,
+      branch,
+      error: `unexpected rev-list output: ${counts.stdout.trim()}`,
+    };
+  return { branch, ...parsed, upstream: true };
+}
+
 export function currentBranchAsync(cwd: string): Promise<string | null> {
   return runGitRefLookupAsync(
     ["git", "rev-parse", "--abbrev-ref", "HEAD"],

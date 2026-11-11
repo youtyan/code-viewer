@@ -28,6 +28,7 @@ import {
   groupAgentPanesByPlace,
   nestAgentPanes,
   notifyPermissionView,
+  projectBranchTail,
 } from "../../core/agent-overview";
 import { SOFT_KEYS_MEDIA_QUERY } from "../../core/mobile-layout";
 import {
@@ -247,6 +248,7 @@ export function createAgentsSidebarPresenter(
       twistyLabel: current.toggleProject,
       mark: starting ? "starting" : projectState,
       startingLabel: starting ? current.sidebar.starting : null,
+      branchTail: projectBranchTail(info.name, info.branch),
       // 件数は右端 (＋と ⋯ の場所)。見出しに載ったとき (hover・フォーカス) は
       // 操作に場所を譲る。
       count: hasAgents ? group.panes.length : null,

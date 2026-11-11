@@ -293,7 +293,9 @@ export type AgentStateObservationError = {
     | "save_unread"
     // インタプリタ (node など) のペインの中のプログラムを ps で調べられなかった
     // (server/terminal/process-kind.ts)。種類はコマンド名と申告で決める。
-    | "probe_process";
+    | "probe_process"
+    /** プロジェクトのブランチと上流との差を読めなかった (server/projects/branch-status.ts)。 */
+    | "branch_status";
   target: string;
   at: number;
   /** Error の cause と独自フィールドを保持した表示用詳細。 */

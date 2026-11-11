@@ -287,7 +287,43 @@ export type AgentProjectInfo = {
    * 登録していなければ null。
    */
   registered: RegisteredProjectInfo | null;
+  /**
+   * 今のブランチと上流との差 (左のサイドバーの行)。まだ読んでいない・git でない・
+   * 読めなかった (理由は errors) ときは無い。この欄を持たない古い版のサーバでも無い。
+   */
+  branch?: {
+    branch: string | null;
+    ahead: number;
+    behind: number;
+    upstream: boolean;
+  };
 };
+
+/**
+ * 左のサイドバーの行の、名前の後ろの補足: 主でないブランチと上流との差 (`feature ↑2 ↓1`)。
+ * main・master と、プロジェクトの名前と同じブランチ (worktree はたいていブランチの名前)
+ * は言うまでもないので出さない。差が無く出すブランチも無ければ null。
+ */
+export function projectBranchTail(
+  name: string,
+  status: AgentProjectInfo["branch"],
+): string | null {
+  if (!status) return null;
+  const branch = status.branch;
+  const shown =
+    branch &&
+    branch !== "main" &&
+    branch !== "master" &&
+    branch.toLowerCase() !== name.toLowerCase()
+      ? branch
+      : "";
+  const parts = [
+    shown,
+    status.ahead > 0 ? `↑${status.ahead}` : "",
+    status.behind > 0 ? `↓${status.behind}` : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" ") : null;
+}
 
 export type AgentOverviewResponse = {
   /**

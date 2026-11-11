@@ -1,10 +1,10 @@
 // 左のサイドバーの「プロジェクト → エージェント」の一覧の表示。
 // agents-sidebar-presenter が渡す値 (AgentsSidebarViewProps) だけから描く。
 
-import { html, nothing, type TemplateResult } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { live } from "lit/directives/live.js";
 import { repeat } from "lit/directives/repeat.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import type { AgentPane } from "../../core/agent-overview";
 import {
   CHEVRON_DOWN_16_PATH,
@@ -58,6 +58,8 @@ export type SidebarProjectProps = {
   /** 畳んでいても中に何があるか分かる印。起こしている最中は回る点線。 */
   mark: AgentPane["state"] | "starting" | null;
   startingLabel: string | null;
+  /** 名前の後ろの主でないブランチと上流との差 (`feature ↑2 ↓1`)。狭いときは消える。 */
+  branchTail: string | null;
   count: number | null;
   problem: string | null;
   open: { title: string } | null;
@@ -216,6 +218,10 @@ function project(
       title=${item.toggleTitle}
       @click=${() => props.onSwitchProject(item.root)}
     >${projectMarkTemplate(item.look, "nav-project-mark")}<span class="nav-project-name">${item.name}</span>${
+      item.branchTail
+        ? html`<span class="nav-project-branch" title=${item.branchTail}>${item.branchTail}</span>`
+        : nothing
+    }${
       item.mark
         ? html`<span class="nav-project-state" aria-hidden="true">${
             item.mark === "starting"

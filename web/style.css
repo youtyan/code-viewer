@@ -17481,6 +17481,18 @@ html[data-workspace="pane"] :is(#app-nav, #statusbar) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 名前の後ろの主でないブランチと上流との差。名前より先に縮み、狭ければ消える
+   (場所を取らない補足。core/agent-overview.ts の projectBranchTail)。 */
+.nav-project-branch {
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  font-weight: normal;
+}
 /* プロジェクトの色と頭文字 (views/projects/project-looks.ts)。色を付けた要素の
    子孫は var(--project-color) で読む (タブのグループ・ファイル一覧の頭も)。
    四角は色だけに頼らないよう頭文字をいつも載せる。 */

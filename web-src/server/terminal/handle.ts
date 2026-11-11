@@ -38,6 +38,7 @@ import {
 import type { AgentOverviewResponse } from "../../core/agent-overview";
 import type { AgentScreenRuleIssue } from "../../core/agent-screen";
 import {
+  type AgentStateObservationError,
   type AgentStatesResponse,
   clipAgentStateText,
   isAgentAttention,
@@ -84,6 +85,7 @@ import {
   parseBoundedJsonBody,
   textError,
 } from "../database/handle-shared";
+import { createBranchStatusTracker } from "../projects/branch-status";
 import { handleProjectDirectoriesGet } from "../projects/directories";
 import {
   handleProjectOpenPost,
@@ -133,6 +135,7 @@ import {
 } from "./overview";
 import { savePastedImage } from "./paste";
 import { resolveTerminalPaths } from "./paths";
+import { noteAgentPins, setAgentPinned } from "./pins";
 import { relayAgentRead } from "./read-relay";
 import {
   MAX_AGENT_SCREEN_RULES_BYTES,
@@ -140,7 +143,6 @@ import {
   resetAgentScreenRules,
   saveAgentScreenRules,
 } from "./rules";
-import { noteAgentPins, setAgentPinned } from "./pins";
 import { clearAgentUnread, markAgentUnread, noteAgentUnread } from "./unread";
 
 const MAX_AGENT_ACTION_BODY_BYTES = 16 * 1024;
@@ -838,6 +840,8 @@ function handleHookFailuresDelete(): Response {
  * リクエストごとに作り直さずプロセスで 1 つ持つ (cwd はプロセスの間変わらない)。
  */
 let overviewDeps: AgentOverviewDeps | null = null;
+/** 左のサイドバーの行のブランチと上流との差 (入口が git を直接読む)。 */
+const BRANCH_STATUS = createBranchStatusTracker();
 
 async function handleOverviewGet(
   cwd: string,
@@ -859,8 +863,38 @@ async function handleOverviewGet(
       }
     : base;
   const overview = await buildAgentOverview(deps);
+  // 左のサイドバーの行のブランチと上流との差。読み直しが要るものだけを裏で読む
+  // (branch-status.ts)。この応答には前に読んだ値を載せる。
+  BRANCH_STATUS.note({
+    roots: overview.projects
+      .filter((info) => info.git && !info.error)
+      .map((info) => info.root),
+    working: new Set(
+      overview.panes
+        .filter((pane) => pane.state === "working")
+        .map((pane) => pane.project),
+    ),
+    selected: deps.serverRoot || null,
+  });
+  const branchErrors: AgentStateObservationError[] = [];
+  const projects = overview.projects.map((info) => {
+    const known = BRANCH_STATUS.get(info.root);
+    if (known?.status === "error") {
+      branchErrors.push({
+        operation: "branch_status",
+        target: info.root,
+        at: Date.now(),
+        detail: known.error,
+        stack: "",
+      });
+      return info;
+    }
+    return known ? { ...info, branch: known.value } : info;
+  });
   return json({
     ...overview,
+    projects,
+    errors: [...overview.errors, ...branchErrors],
     unread: noteAgentUnread(overview.panes),
     pinned: noteAgentPins(overview.panes),
   } satisfies AgentOverviewResponse);
