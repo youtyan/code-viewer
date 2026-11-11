@@ -1,15 +1,20 @@
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { html, nothing } from "lit/html.js";
 import type { DbKind, DbQueryResponse } from "../../core/database/types";
 import { attachDragResizer } from "../../core/drag-resizer";
 import { formatErrorDetail } from "../../core/error-detail";
-import { CHEVRON_DOWN_16_PATH, iconSvg } from "../../core/icons";
+import { CHEVRON_DOWN_16_PATH } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
 import {
   loadShikiHighlighter,
   type ShikiHighlighter,
 } from "../../core/shiki-loader";
 import { phoneMediaQuery } from "../shell/workspace";
+import { iconTemplate } from "../ui/icon";
+import { renderOwned, templateElement } from "../ui/renderer";
 import { type DbText, dbText } from "./i18n";
-import { fillNullOrEmpty, formatQueryValue } from "./query-value";
+import { formatQueryValue, nullOrEmptyMark } from "./query-value";
 import { serverErrorSummary } from "./report-failure";
 import { highlightSqlToInnerHtml } from "./shiki-sql";
 
@@ -64,112 +69,272 @@ export type QueryEditor = {
   localize: () => void;
 };
 
+/** 結果の欄: 失敗の文・失敗の要約と詳細・列の無い結果・表。 */
+type QueryResult =
+  | { error: string }
+  | { summary: string; detail: string }
+  | { noColumns: true }
+  | { table: DbQueryResponse };
+
+/** 履歴の小窓: 読み込み中・空・失敗・SQL の並び。 */
+type HistoryState =
+  | { loading: true }
+  | { empty: true }
+  | { error: string }
+  | { items: string[] };
+
+export type QueryEditorFrameProps = {
+  text: DbText["editor"];
+  expanded: boolean;
+  /** 入力の色付け。色付けできたら html、できなければ文字。空なら null。 */
+  highlight: { html: string } | { text: string } | null;
+  status: string;
+  running: boolean;
+  explaining: boolean;
+  history: HistoryState | null;
+  result: HTMLElement;
+  refs: {
+    input: Ref<HTMLElement>;
+    textarea: Ref<HTMLTextAreaElement>;
+    highlight: Ref<HTMLElement>;
+    history: Ref<HTMLElement>;
+    historyButton: Ref<HTMLButtonElement>;
+    resize: Ref<HTMLElement>;
+  };
+  onInput: () => void;
+  onScroll: () => void;
+  onKeydown: (event: KeyboardEvent) => void;
+  onRun: () => void;
+  onExplain: () => void;
+  onHistory: () => void;
+  onPickHistory: (sql: string) => void;
+  onToggleInput: () => void;
+};
+
+export type QueryEditorResultProps = {
+  text: DbText;
+  result: QueryResult | null;
+};
+
+export type QueryEditorView = {
+  frame: (props: QueryEditorFrameProps) => unknown;
+  result: (props: QueryEditorResultProps) => unknown;
+};
+
+function historyTemplate(p: QueryEditorFrameProps, state: HistoryState) {
+  const t = p.text;
+  if ("loading" in state)
+    return html`<div class="db-query-history-empty">${t.historyLoading}</div>`;
+  if ("empty" in state)
+    return html`<div class="db-query-history-empty">${t.historyEmpty}</div>`;
+  if ("error" in state)
+    return html`<div class="db-query-history-empty db-pane-error">${state.error}</div>`;
+  return state.items.map(
+    (sql) =>
+      html`<div
+        class="db-query-history-item"
+        title=${sql}
+        @click=${() => p.onPickHistory(sql)}
+      >${sql.length > 100 ? `${sql.slice(0, 100)}...` : sql}</div>`,
+  );
+}
+
+export const DEFAULT_VIEW: QueryEditorView = {
+  frame: (p) => {
+    const t = p.text;
+    const collapseLabel = p.expanded ? t.collapseInput : t.expandInput;
+    return html`<div class="db-query-input" ${ref(p.refs.input)}><div
+          class="db-query-editor-wrap"
+          ?hidden=${!p.expanded}
+        ><pre class="db-query-highlight" aria-hidden="true" ${ref(p.refs.highlight)}>${
+          p.highlight === null
+            ? nothing
+            : "html" in p.highlight
+              ? unsafeHTML(p.highlight.html)
+              : p.highlight.text
+        }</pre><textarea
+            class="db-query-textarea"
+            placeholder=${t.sqlPlaceholder}
+            spellcheck="false"
+            rows="3"
+            ${ref(p.refs.textarea)}
+            @input=${p.onInput}
+            @scroll=${p.onScroll}
+            @keydown=${p.onKeydown}
+          ></textarea></div
+        ><div class="db-query-toolbar"><button
+            class="db-btn db-btn-primary db-query-run"
+            type="button"
+            title=${t.runTitle}
+            ?disabled=${p.running || p.explaining}
+            @click=${p.onRun}
+          >${t.run}</button><button
+            class="db-btn db-query-explain"
+            type="button"
+            title=${t.explainTitle}
+            ?disabled=${p.explaining}
+            @click=${p.onExplain}
+          >${t.explain}</button><button
+            class="db-btn db-query-history-btn"
+            type="button"
+            title=${t.localHistoryTitle}
+            ${ref(p.refs.historyButton)}
+            @click=${p.onHistory}
+          >${t.localHistory}</button><span class="db-query-status"
+            >${p.status}</span
+          ><button
+            class="db-query-collapse"
+            type="button"
+            aria-expanded=${String(p.expanded)}
+            title=${collapseLabel}
+            aria-label=${collapseLabel}
+            @click=${p.onToggleInput}
+          >${iconTemplate(CHEVRON_DOWN_16_PATH, "octicon-chevron-down")}</button></div
+        ><div
+          class="db-query-history-dropdown"
+          ?hidden=${p.history === null}
+          ${ref(p.refs.history)}
+        >${p.history === null ? nothing : historyTemplate(p, p.history)}</div></div
+      ><div
+        class="db-query-resize"
+        tabindex="0"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label=${t.resizeInput}
+        ?hidden=${!p.expanded}
+        ${ref(p.refs.resize)}
+      ></div>${p.result}`;
+  },
+  result: ({ text: t, result }) => {
+    if (result === null) return nothing;
+    if ("error" in result)
+      return html`<pre class="db-query-error">${result.error}</pre>`;
+    // 失敗の表示。サーバの JSON の error があれば先頭に出し、全文 (操作・HTTP の
+    // 状態・本文・cause の連鎖) は「詳細」に畳む。
+    if ("summary" in result)
+      return html`<div class="db-query-error"><p class="db-query-error-summary"
+          >${result.summary}</p
+        ><details class="db-query-error-details"><summary
+            >${t.editor.errorDetails}</summary
+          ><pre>${result.detail}</pre></details
+        ></div>`;
+    if ("noColumns" in result) return t.editor.noColumns;
+    const table = result.table;
+    const emptyLabel = t.grid.emptyValue;
+    return html`<div class="db-query-table-wrap"><table class="db-query-table"><thead
+          ><tr><th class="db-grid-rownum">#</th>${table.columns.map(
+            (column, i) =>
+              html`<th><div class="db-query-header-name">${column}</div><div
+                  class="db-query-header-type"
+                >${table.columnTypes[i] || ""}</div></th>`,
+          )}</tr></thead
+        ><tbody>${
+          table.rows.length === 0
+            ? html`<tr><td class="db-query-empty" colspan=${table.columns.length + 1}
+                  >${t.editor.noRows}</td
+                ></tr>`
+            : table.rows.map(
+                (row, i) =>
+                  html`<tr class=${i % 2 === 1 ? "alt" : nothing}><td
+                      class="db-grid-rownum"
+                    >${i + 1}</td>${row.map((value) => {
+                      const shown = nullOrEmptyMark(value, emptyLabel);
+                      return shown
+                        ? html`<td class=${shown.cellClass}>${shown.mark}</td>`
+                        : html`<td>${formatQueryValue(value)}</td>`;
+                    })}</tr>`,
+              )
+        }</tbody></table></div>`;
+  },
+};
+
 export function createQueryEditor(
   callbacks: QueryEditorCallbacks,
+  view: QueryEditorView = DEFAULT_VIEW,
 ): QueryEditor {
   const text = (): DbText => callbacks.getText?.() ?? dbText("en");
-  const el = document.createElement("div");
-  el.className = "db-query-editor";
-
-  const inputArea = document.createElement("div");
-  inputArea.className = "db-query-input";
-
-  const editorWrap = document.createElement("div");
-  editorWrap.className = "db-query-editor-wrap";
-
-  const highlight = document.createElement("pre");
-  highlight.className = "db-query-highlight";
-  highlight.setAttribute("aria-hidden", "true");
-
-  const textarea = document.createElement("textarea");
-  textarea.className = "db-query-textarea";
-  textarea.placeholder = text().editor.sqlPlaceholder;
-  textarea.spellcheck = false;
-  textarea.rows = 3;
-
-  editorWrap.append(highlight, textarea);
+  // 外枠の class (has-result・is-collapsed・引き伸ばし中の is-resizing) は、
+  // 引き伸ばしの部品も書くので、描き方に入れず classList で付け外しする。
+  const el = templateElement(html`<div class="db-query-editor"></div>`);
+  const resultArea = templateElement(
+    html`<div class="db-query-result" hidden></div>`,
+  );
+  const refs: QueryEditorFrameProps["refs"] = {
+    input: createRef(),
+    textarea: createRef(),
+    highlight: createRef(),
+    history: createRef(),
+    historyButton: createRef(),
+    resize: createRef(),
+  };
+  const drawn = <T extends Element>(target: Ref<T>, name: string): T => {
+    const element = target.value;
+    if (!element) throw new Error(`query editor: the ${name} was not drawn`);
+    return element;
+  };
+  const textarea = () => drawn(refs.textarea, "SQL input");
 
   let shiki: ShikiHighlighter | null = null;
+  let code = "";
+  let expanded = true;
+  let status = "";
+  let running = false;
+  let explaining = false;
+  let history: HistoryState | null = null;
+  let result: QueryResult | null = null;
+  let resizedInputHeight: number | null = null;
+
+  function draw(): void {
+    const t = text();
+    renderOwned(
+      el,
+      view.frame({
+        text: t.editor,
+        expanded,
+        highlight: highlightFor(code),
+        status,
+        running,
+        explaining,
+        history,
+        result: resultArea,
+        refs,
+        onInput: () => {
+          code = textarea().value;
+          draw();
+          callbacks.onSqlChange?.(code);
+        },
+        onScroll: () => {
+          const highlight = drawn(refs.highlight, "highlight");
+          highlight.scrollTop = textarea().scrollTop;
+          highlight.scrollLeft = textarea().scrollLeft;
+        },
+        onKeydown,
+        onRun: () => void run(),
+        onExplain: () => void runExplain(),
+        onHistory: toggleHistory,
+        onPickHistory: (sql) => {
+          setSql(sql);
+          history = null;
+          draw();
+        },
+        onToggleInput: () => setInputExpanded(!expanded),
+      }),
+    );
+    renderOwned(resultArea, view.result({ text: t, result }));
+  }
+
+  function highlightFor(value: string): QueryEditorFrameProps["highlight"] {
+    if (!value) return null;
+    const inner = highlightSqlToInnerHtml(value, shiki);
+    return inner ? { html: inner } : { text: value };
+  }
+
   loadShikiHighlighter({
     langs: ["sql"],
   }).then((h) => {
     shiki = h;
-    syncHighlight();
+    draw();
   });
-
-  function syncHighlight() {
-    const code = textarea.value;
-    if (!code) {
-      highlight.innerHTML = "";
-      return;
-    }
-    const inner = highlightSqlToInnerHtml(code, shiki);
-    if (inner) {
-      highlight.innerHTML = inner;
-    } else {
-      highlight.textContent = code;
-    }
-  }
-
-  textarea.addEventListener("input", () => {
-    syncHighlight();
-    callbacks.onSqlChange?.(textarea.value);
-  });
-  textarea.addEventListener("scroll", () => {
-    highlight.scrollTop = textarea.scrollTop;
-    highlight.scrollLeft = textarea.scrollLeft;
-  });
-
-  const toolbar = document.createElement("div");
-  toolbar.className = "db-query-toolbar";
-
-  const runBtn = document.createElement("button");
-  runBtn.className = "db-btn db-btn-primary db-query-run";
-  runBtn.type = "button";
-  runBtn.textContent = text().editor.run;
-  runBtn.title = text().editor.runTitle;
-
-  const explainBtn = document.createElement("button");
-  explainBtn.className = "db-btn db-query-explain";
-  explainBtn.type = "button";
-  explainBtn.textContent = text().editor.explain;
-  explainBtn.title = text().editor.explainTitle;
-
-  const historyBtn = document.createElement("button");
-  historyBtn.className = "db-btn db-query-history-btn";
-  historyBtn.type = "button";
-  historyBtn.textContent = text().editor.localHistory;
-  historyBtn.title = text().editor.localHistoryTitle;
-
-  const statusSpan = document.createElement("span");
-  statusSpan.className = "db-query-status";
-
-  const collapseBtn = document.createElement("button");
-  collapseBtn.className = "db-query-collapse";
-  collapseBtn.type = "button";
-  collapseBtn.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
-  collapseBtn.setAttribute("aria-expanded", "true");
-
-  const historyDropdown = document.createElement("div");
-  historyDropdown.className = "db-query-history-dropdown";
-  historyDropdown.hidden = true;
-
-  toolbar.append(runBtn, explainBtn, historyBtn, statusSpan, collapseBtn);
-  inputArea.append(editorWrap, toolbar, historyDropdown);
-
-  const resizeHandle = document.createElement("div");
-  resizeHandle.className = "db-query-resize";
-  resizeHandle.tabIndex = 0;
-  resizeHandle.setAttribute("role", "separator");
-  resizeHandle.setAttribute("aria-orientation", "vertical");
-
-  const resultArea = document.createElement("div");
-  resultArea.className = "db-query-result";
-  resultArea.hidden = true;
-
-  el.append(inputArea, resizeHandle, resultArea);
-
-  let resizedInputHeight: number | null = null;
 
   function applyInputHeight(height: number): void {
     const availableHeight = el.parentElement?.getBoundingClientRect().height;
@@ -180,12 +345,15 @@ export function createQueryEditor(
     resizedInputHeight = Math.round(
       Math.max(MIN_INPUT_HEIGHT, Math.min(maxHeight, height)),
     );
-    inputArea.style.height = `${resizedInputHeight}px`;
+    drawn(refs.input, "input area").style.height = `${resizedInputHeight}px`;
   }
 
+  draw();
+
   const detachResizer = attachDragResizer({
-    handle: resizeHandle,
-    getSize: () => inputArea.getBoundingClientRect().height,
+    handle: drawn(refs.resize, "resize handle"),
+    getSize: () =>
+      drawn(refs.input, "input area").getBoundingClientRect().height,
     applySize: applyInputHeight,
     axis: "y",
     direction: 1,
@@ -193,28 +361,22 @@ export function createQueryEditor(
     activeClassName: "is-resizing",
   });
 
-  function setInputExpanded(expanded: boolean): void {
-    editorWrap.hidden = !expanded;
-    resizeHandle.hidden = !expanded;
-    collapseBtn.setAttribute("aria-expanded", String(expanded));
-    el.classList.toggle("is-collapsed", !expanded);
-    inputArea.style.height =
-      expanded && resizedInputHeight ? `${resizedInputHeight}px` : "";
-    collapseBtn.title = expanded
-      ? text().editor.collapseInput
-      : text().editor.expandInput;
-    collapseBtn.setAttribute("aria-label", collapseBtn.title);
+  function setInputExpanded(next: boolean): void {
+    expanded = next;
+    el.classList.toggle("is-collapsed", !next);
+    drawn(refs.input, "input area").style.height =
+      next && resizedInputHeight ? `${resizedInputHeight}px` : "";
+    draw();
   }
 
-  collapseBtn.addEventListener("click", () => {
-    setInputExpanded(collapseBtn.getAttribute("aria-expanded") !== "true");
-  });
   // 電話の段では畳んで始める (開いたままでは表の行に高さが残らなかった)。
   if (phoneMediaQuery().matches) setInputExpanded(false);
 
-  function showQueryResult(): void {
+  function showQueryResult(next: QueryResult): void {
+    result = next;
     resultArea.hidden = false;
     el.classList.add("has-result");
+    draw();
     callbacks.onResultShown?.();
   }
 
@@ -223,251 +385,139 @@ export function createQueryEditor(
     el.classList.remove("has-result");
   }
 
-  /**
-   * 失敗の表示。サーバの JSON の error があれば先頭に出し、全文 (操作・HTTP の
-   * 状態・本文・cause の連鎖) は「詳細」に畳む。無ければ全文をそのまま出す。
-   */
-  function renderQueryFailure(err: unknown): HTMLElement {
+  function failureResult(err: unknown): QueryResult {
     const detail = formatErrorDetail(err);
     const summary = serverErrorSummary(err);
-    if (summary === null) {
-      const errEl = document.createElement("pre");
-      errEl.className = "db-query-error";
-      errEl.textContent = detail;
-      return errEl;
-    }
-    const box = document.createElement("div");
-    box.className = "db-query-error";
-    const lead = document.createElement("p");
-    lead.className = "db-query-error-summary";
-    lead.textContent = summary;
-    const more = document.createElement("details");
-    more.className = "db-query-error-details";
-    const label = document.createElement("summary");
-    label.textContent = text().editor.errorDetails;
-    const full = document.createElement("pre");
-    full.textContent = detail;
-    more.append(label, full);
-    box.append(lead, more);
-    return box;
+    return summary === null ? { error: detail } : { summary, detail };
+  }
+
+  function setStatus(next: string): void {
+    status = next;
+    draw();
   }
 
   async function run() {
-    const sql = textarea.value.trim();
+    const sql = textarea().value.trim();
     if (!sql) return;
-    runBtn.disabled = true;
-    statusSpan.textContent = text().editor.running;
+    running = true;
+    status = text().editor.running;
+    draw();
     showTableResult();
     try {
-      const result = await callbacks.executeQuery(sql);
-      if (result.error) {
-        statusSpan.textContent = text().editor.statusError(result.elapsedMs);
-        showQueryResult();
-        resultArea.innerHTML = "";
-        const errEl = document.createElement("pre");
-        errEl.className = "db-query-error";
-        errEl.textContent = result.error;
-        resultArea.appendChild(errEl);
+      const response = await callbacks.executeQuery(sql);
+      if (response.error) {
+        status = text().editor.statusError(response.elapsedMs);
+        showQueryResult({ error: response.error });
         return;
       }
-      const suffix = result.truncated ? "+" : "";
-      statusSpan.textContent = text().editor.statusSuccess(
-        result.rowCount,
+      const suffix = response.truncated ? "+" : "";
+      status = text().editor.statusSuccess(
+        response.rowCount,
         suffix,
-        result.elapsedMs,
+        response.elapsedMs,
       );
-      renderResultTable(result);
+      showResultTable(response);
     } catch (err) {
       console.error("Failed to execute query", err);
-      statusSpan.textContent = text().editor.failed;
-      showQueryResult();
-      resultArea.innerHTML = "";
-      resultArea.appendChild(renderQueryFailure(err));
+      status = text().editor.failed;
+      showQueryResult(failureResult(err));
     } finally {
-      runBtn.disabled = false;
+      running = false;
+      draw();
     }
   }
 
-  function renderResultTable(result: DbQueryResponse) {
-    showQueryResult();
-    resultArea.innerHTML = "";
-    if (result.columns.length === 0) {
-      resultArea.textContent = text().editor.noColumns;
-      return;
-    }
-    const table = document.createElement("table");
-    table.className = "db-query-table";
-
-    const thead = document.createElement("thead");
-    const headRow = document.createElement("tr");
-    const thNum = document.createElement("th");
-    thNum.textContent = "#";
-    thNum.className = "db-grid-rownum";
-    headRow.appendChild(thNum);
-    for (let i = 0; i < result.columns.length; i++) {
-      const th = document.createElement("th");
-      const name = document.createElement("div");
-      name.className = "db-query-header-name";
-      name.textContent = result.columns[i];
-      const type = document.createElement("div");
-      type.className = "db-query-header-type";
-      type.textContent = result.columnTypes[i] || "";
-      th.append(name, type);
-      headRow.appendChild(th);
-    }
-    thead.appendChild(headRow);
-
-    const tbody = document.createElement("tbody");
-    if (result.rows.length === 0) {
-      const tr = document.createElement("tr");
-      const td = document.createElement("td");
-      td.className = "db-query-empty";
-      td.colSpan = result.columns.length + 1;
-      td.textContent = text().editor.noRows;
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-    } else {
-      for (let i = 0; i < result.rows.length; i++) {
-        const row = result.rows[i];
-        const tr = document.createElement("tr");
-        if (i % 2 === 1) tr.classList.add("alt");
-        const tdNum = document.createElement("td");
-        tdNum.className = "db-grid-rownum";
-        tdNum.textContent = String(i + 1);
-        tr.appendChild(tdNum);
-        for (const value of row) {
-          const td = document.createElement("td");
-          if (!fillNullOrEmpty(td, value, text().grid.emptyValue))
-            td.textContent = formatQueryValue(value);
-          tr.appendChild(td);
-        }
-        tbody.appendChild(tr);
-      }
-    }
-    table.append(thead, tbody);
-
-    const wrapper = document.createElement("div");
-    wrapper.className = "db-query-table-wrap";
-    wrapper.appendChild(table);
-    resultArea.appendChild(wrapper);
+  function showResultTable(response: DbQueryResponse) {
+    showQueryResult(
+      response.columns.length === 0 ? { noColumns: true } : { table: response },
+    );
   }
 
   async function runExplain() {
-    const sql = textarea.value.trim();
+    const sql = textarea().value.trim();
     if (!sql) return;
     const statement = explainStatement(callbacks.getKind(), sql);
     if (statement === null) {
-      statusSpan.textContent = text().editor.explainUnsupported;
+      setStatus(text().editor.explainUnsupported);
       return;
     }
-    explainBtn.disabled = true;
-    runBtn.disabled = true;
-    statusSpan.textContent = text().editor.explaining;
+    explaining = true;
+    status = text().editor.explaining;
+    draw();
     showTableResult();
     try {
-      const result = await callbacks.executeQuery(statement);
-      if (result.error) {
-        statusSpan.textContent = text().editor.statusError(result.elapsedMs);
-        showQueryResult();
-        resultArea.innerHTML = "";
-        const errEl = document.createElement("pre");
-        errEl.className = "db-query-error";
-        errEl.textContent = result.error;
-        resultArea.appendChild(errEl);
+      const response = await callbacks.executeQuery(statement);
+      if (response.error) {
+        status = text().editor.statusError(response.elapsedMs);
+        showQueryResult({ error: response.error });
         return;
       }
-      statusSpan.textContent = text().editor.statusExplain(result.elapsedMs);
-      renderResultTable(result);
+      status = text().editor.statusExplain(response.elapsedMs);
+      showResultTable(response);
     } catch (err) {
       console.error("Failed to explain query", err);
-      statusSpan.textContent = text().editor.failed;
-      showQueryResult();
-      resultArea.innerHTML = "";
-      resultArea.appendChild(renderQueryFailure(err));
+      status = text().editor.failed;
+      showQueryResult(failureResult(err));
     } finally {
-      explainBtn.disabled = false;
-      runBtn.disabled = false;
+      explaining = false;
+      draw();
     }
   }
 
-  runBtn.addEventListener("click", run);
-  explainBtn.addEventListener("click", runExplain);
-
-  historyBtn.addEventListener("click", () => {
-    if (!historyDropdown.hidden) {
-      historyDropdown.hidden = true;
+  function toggleHistory(): void {
+    if (history !== null) {
+      history = null;
+      draw();
       return;
     }
-    historyDropdown.innerHTML = "";
-    const loading = document.createElement("div");
-    loading.className = "db-query-history-empty";
-    loading.textContent = text().editor.historyLoading;
-    historyDropdown.appendChild(loading);
-    historyDropdown.hidden = false;
+    history = { loading: true };
+    draw();
     void Promise.resolve(callbacks.loadHistory?.() ?? [])
-      .then((history) => {
-        historyDropdown.innerHTML = "";
-        const items = history.slice(0, MAX_HISTORY);
-        if (items.length === 0) {
-          const empty = document.createElement("div");
-          empty.className = "db-query-history-empty";
-          empty.textContent = text().editor.historyEmpty;
-          historyDropdown.appendChild(empty);
-          return;
-        }
-        for (const sql of items) {
-          const item = document.createElement("div");
-          item.className = "db-query-history-item";
-          item.textContent = sql.length > 100 ? `${sql.slice(0, 100)}...` : sql;
-          item.title = sql;
-          item.addEventListener("click", () => {
-            setSql(sql);
-            historyDropdown.hidden = true;
-          });
-          historyDropdown.appendChild(item);
-        }
+      .then((loaded) => {
+        const items = loaded.slice(0, MAX_HISTORY);
+        history = items.length === 0 ? { empty: true } : { items };
+        draw();
       })
       .catch((error) => {
         console.error("Failed to load query Local History", error);
-        historyDropdown.innerHTML = "";
-        const empty = document.createElement("div");
-        empty.className = "db-query-history-empty db-pane-error";
-        empty.textContent = text().editor.historyError(
-          formatErrorDetail(error),
-        );
-        historyDropdown.appendChild(empty);
+        history = {
+          error: text().editor.historyError(formatErrorDetail(error)),
+        };
+        draw();
       });
-  });
+  }
 
   const onDocumentClick = (e: MouseEvent) => {
     if (
-      !historyDropdown.hidden &&
-      !historyBtn.contains(e.target as Node) &&
-      !historyDropdown.contains(e.target as Node)
+      history !== null &&
+      !refs.historyButton.value?.contains(e.target as Node) &&
+      !refs.history.value?.contains(e.target as Node)
     ) {
-      historyDropdown.hidden = true;
+      history = null;
+      draw();
     }
   };
   document.addEventListener("click", onDocumentClick);
 
-  textarea.addEventListener("keydown", (e) => {
+  function onKeydown(e: KeyboardEvent): void {
     if (isImeComposing(e)) return;
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
-      run();
+      void run();
       return;
     }
     if (e.key === "Tab") {
       e.preventDefault();
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
+      const input = textarea();
+      const start = input.selectionStart;
+      const end = input.selectionEnd;
       if (e.shiftKey) {
-        const before = textarea.value.slice(0, start);
+        const before = input.value.slice(0, start);
         const lineStart = before.lastIndexOf("\n") + 1;
-        const linePrefix = textarea.value.slice(lineStart, start);
+        const linePrefix = input.value.slice(lineStart, start);
         const spaces = linePrefix.match(/^ {1,2}/);
         if (spaces) {
-          textarea.setRangeText(
+          input.setRangeText(
             "",
             lineStart,
             lineStart + spaces[0].length,
@@ -475,45 +525,32 @@ export function createQueryEditor(
           );
         }
       } else {
-        textarea.setRangeText("  ", start, end, "end");
+        input.setRangeText("  ", start, end, "end");
       }
-      syncHighlight();
+      code = input.value;
+      draw();
     }
-  });
+  }
 
   function focus() {
-    textarea.focus();
+    textarea().focus();
   }
 
   function setSql(sql: string, options: { silent?: boolean } = {}) {
-    textarea.value = sql;
-    syncHighlight();
-    if (!options.silent) callbacks.onSqlChange?.(textarea.value);
+    textarea().value = sql;
+    code = sql;
+    draw();
+    if (!options.silent) callbacks.onSqlChange?.(sql);
   }
 
   function getSql(): string {
-    return textarea.value;
+    return textarea().value;
   }
 
   function dispose(): void {
     detachResizer();
     document.removeEventListener("click", onDocumentClick);
   }
-
-  function localize(): void {
-    const t = text().editor;
-    textarea.placeholder = t.sqlPlaceholder;
-    runBtn.textContent = t.run;
-    runBtn.title = t.runTitle;
-    explainBtn.textContent = t.explain;
-    explainBtn.title = t.explainTitle;
-    historyBtn.textContent = t.localHistory;
-    historyBtn.title = t.localHistoryTitle;
-    setInputExpanded(collapseBtn.getAttribute("aria-expanded") === "true");
-    resizeHandle.setAttribute("aria-label", t.resizeInput);
-  }
-
-  localize();
 
   return {
     el,
@@ -524,6 +561,6 @@ export function createQueryEditor(
     explain: runExplain,
     showTableResult,
     dispose,
-    localize,
+    localize: draw,
   };
 }

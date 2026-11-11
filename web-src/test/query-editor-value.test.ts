@@ -2,9 +2,11 @@ import "./_dom";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DbKind, DbValue } from "../core/database/types";
 
-const { createQueryEditor, explainStatement } = await import(
+const { createQueryEditor, DEFAULT_VIEW, explainStatement } = await import(
   "../views/database/query-editor"
 );
+type FrameProps = Parameters<(typeof DEFAULT_VIEW)["frame"]>[0];
+type ResultProps = Parameters<(typeof DEFAULT_VIEW)["result"]>[0];
 const { dbText } = await import("../views/database/i18n");
 
 describe("query editor value display", () => {
@@ -452,4 +454,65 @@ describe("query editor value display", () => {
       editor.dispose();
     },
   );
+});
+
+describe("the query editor presenter", () => {
+  test("passes the running state, the result and the history to the view", async () => {
+    let finish: (() => void) | null = null;
+    const frames: FrameProps[] = [];
+    const results: ResultProps[] = [];
+    const editor = createQueryEditor(
+      {
+        getKind: () => "sqlite",
+        getText: () => dbText("en"),
+        loadHistory: () => ["SELECT 1"],
+        executeQuery: (sql) =>
+          new Promise((resolve) => {
+            finish = () =>
+              resolve({
+                dbId: "sample.db",
+                columns: ["sample_column"],
+                columnTypes: ["TEXT"],
+                rows: [[sql]],
+                rowCount: 1,
+                truncated: false,
+                elapsedMs: 3,
+              });
+          }),
+      },
+      {
+        frame: (props) => {
+          frames.push(props);
+          return DEFAULT_VIEW.frame(props);
+        },
+        result: (props) => {
+          results.push(props);
+          return DEFAULT_VIEW.result(props);
+        },
+      },
+    );
+    document.body.appendChild(editor.el);
+    const last = <T>(list: T[]) => list[list.length - 1] as T;
+    editor.setSql("SELECT sample_column FROM sample_table", { silent: true });
+    const running = editor.run();
+    expect([last(frames).running, last(frames).status]).toEqual([
+      true,
+      "Running…",
+    ]);
+    finish?.();
+    await running;
+    const result = last(results).result;
+    expect([
+      last(frames).running,
+      result !== null && "table" in result ? result.table.rows : result,
+    ]).toEqual([false, [["SELECT sample_column FROM sample_table"]]]);
+
+    last(frames).onHistory();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(last(frames).history).toEqual({ items: ["SELECT 1"] });
+    last(frames).onPickHistory("SELECT 1");
+    expect([last(frames).history, editor.getSql()]).toEqual([null, "SELECT 1"]);
+    editor.dispose();
+  });
 });
