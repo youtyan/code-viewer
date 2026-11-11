@@ -1375,7 +1375,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               ],
             },
             more(
-              "画像を貼り付ける (⌘V / Ctrl+V) とエージェントに渡せます。プロジェクトの .code-viewer/pasted/ に日時の名前で保存し (git には入りません)、そのパスを送信せずに入力します。",
+              "画像を貼り付ける (⌘V / Ctrl+V) か、ターミナルへ落とすとエージェントに渡せます。.code-viewer/pasted/ に日時の名前で保存し (git には入りません)、パスを送信せずに入力します。",
               [
                 "画面に合わせて明るくして読みにくい色が残るときは、エージェントの側の配色もライト向けに替えてください (claude なら ",
                 code("/theme"),

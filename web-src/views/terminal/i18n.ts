@@ -187,6 +187,8 @@ export type TerminalText = {
   pasteFailed: string;
   /** 貼り付けた画像を保存し、そのパスを入力した (保存先はリポジトリからの相対パス)。 */
   pasteSaved: (relativePath: string) => string;
+  /** 落としたファイルに画像が無かった (ブラウザは元の場所を渡さないので、画像しか渡せない)。 */
+  dropNotImage: string;
   /** 最後に人間が出した指示の見出し。 */
   lastPrompt: string;
   /** 状態が変わってからの経過。 */
@@ -359,6 +361,8 @@ const EN: TerminalText = {
   pasteFailed: "Could not attach the pasted image.",
   pasteSaved: (relativePath) =>
     `Pasted image saved in this project as ${relativePath} (not tracked by git); its path is typed for the agent.`,
+  dropNotImage:
+    "Only images can be dropped here (PNG, JPEG, GIF, WebP): the browser does not tell where other files are.",
   lastPrompt: "last instruction",
   elapsed: elapsedFormatter("now", "m", "h", "d"),
 };
@@ -510,6 +514,8 @@ const JA: TerminalText = {
   pasteFailed: "貼り付けた画像を渡せませんでした。",
   pasteSaved: (relativePath) =>
     `貼り付けた画像をこのプロジェクトの ${relativePath} に保存し、エージェントに渡すパスを入力しました (git には入りません)。`,
+  dropNotImage:
+    "ここに落とせるのは画像 (PNG・JPEG・GIF・WebP) だけです。ほかのファイルは、ブラウザが元の場所を教えないので渡せません。",
   lastPrompt: "最後に出した指示",
   elapsed: elapsedFormatter("今", "分", "時間", "日"),
 };

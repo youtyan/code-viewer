@@ -1566,15 +1566,26 @@ export function createTerminalScreen(
     showPasteNotice(deps.getText().pasteSaved(saved.relativePath));
   }
 
-  /** クリップボードから最初の画像を 1 枚取る。無ければ null。 */
-  function firstImage(data: DataTransfer | null): File | null {
+  /** クリップボード・落としたものの中の画像を、並んだ順に全部取る。 */
+  function imageFiles(data: DataTransfer | null): File[] {
+    const files: File[] = [];
     for (const item of data?.items ?? []) {
       if (item.kind !== "file") continue;
       if (!item.type.startsWith("image/")) continue;
       const file = item.getAsFile();
-      if (file) return file;
+      if (file) files.push(file);
     }
-    return null;
+    return files;
+  }
+
+  /** クリップボードから最初の画像を 1 枚取る。無ければ null。 */
+  function firstImage(data: DataTransfer | null): File | null {
+    return imageFiles(data)[0] ?? null;
+  }
+
+  /** ファイルを運んでいるドラッグか (文字や画面の中の要素のドラッグではないか)。 */
+  function carriesFiles(data: DataTransfer | null): boolean {
+    return [...(data?.types ?? [])].includes("Files");
   }
 
   // xterm は textarea で打鍵を受けるので、貼り付けもそこから上がってくる。
@@ -1595,6 +1606,40 @@ export function createTerminalScreen(
     },
     true,
   );
+
+  // 落としたファイル (Finder・macOS のスクショの浮いたサムネイル)。画像は貼り付けと
+  // 同じく保存してパスを打ち込む (ブラウザは元の場所を渡さないので、写すしかない)。
+  // ファイルのドラッグは必ずここで止める: 止めないとブラウザがそのファイルを開き、
+  // 画面ごと離れてしまう。画像の無いドラッグは理由を状態の行に出す。
+  el.addEventListener(
+    "dragover",
+    (event) => {
+      if (!carriesFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    },
+    true,
+  );
+  el.addEventListener(
+    "drop",
+    (event) => {
+      if (!carriesFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const files = imageFiles(event.dataTransfer);
+      if (files.length === 0) {
+        showStatus(deps.getText().dropNotImage);
+        return;
+      }
+      void pasteImagesInOrder(files);
+    },
+    true,
+  );
+
+  /** 落とした順に 1 枚ずつ保存して打ち込む (パスの並びを落とした順に保つ)。 */
+  async function pasteImagesInOrder(files: File[]): Promise<void> {
+    for (const file of files) await pasteImage(file);
+  }
 
   function closeSource(): void {
     source?.close();

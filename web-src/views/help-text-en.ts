@@ -1397,7 +1397,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               ],
             },
             more(
-              "Paste an image (⌘V / Ctrl+V) to hand it to the agent. It is saved in the project under .code-viewer/pasted/ with the date and time as its name (git ignores it), and its path is typed without sending.",
+              "Paste an image (⌘V / Ctrl+V) or drop it onto the terminal to hand it to the agent. It is saved under .code-viewer/pasted/ with the date and time as its name (git ignores it), and its path is typed without sending.",
               [
                 "If some colors are still hard to read after matching a light page, switch the agent's own colors to a light theme too (",
                 code("/theme"),

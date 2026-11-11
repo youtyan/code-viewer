@@ -1016,6 +1016,61 @@ describe("貼り付けた画像", () => {
     };
   });
 
+  /** Finder などからファイルを端末の枠に落とす。 */
+  function dropFiles(files: File[]): Event {
+    const event = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", {
+      value: {
+        types: ["Files"],
+        items: files.map((file) => ({
+          kind: "file",
+          type: file.type,
+          getAsFile: () => file,
+        })),
+      },
+    });
+    handle.el.dispatchEvent(event);
+    return event;
+  }
+
+  test("画像を落とすと、貼り付けと同じく保存してパスを打ち込む", async () => {
+    await attachShell(SHELL);
+    const event = dropFiles([
+      new File([new Uint8Array([137, 80, 78, 71])], "shot.png", {
+        type: "image/png",
+      }),
+    ]);
+    // 落としたファイルをブラウザに開かせない (開くと画面ごと離れる)。
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(requestedUrls).toContain("/_shell/keys"));
+    expect(
+      JSON.parse(requestedBodies[requestedUrls.indexOf("/_shell/keys")]).data,
+    ).toBe(`'${PASTED.path}' `);
+    expect(shelfNames(handle)).toEqual(["pasted-image-20260925-143201.png"]);
+  });
+
+  test("画像でないファイルは送らず、理由を状態の行に出す (ブラウザにも開かせない)", async () => {
+    await attachShell(SHELL);
+    const event = dropFiles([
+      new File(["text"], "notes.txt", { type: "text/plain" }),
+    ]);
+    expect(event.defaultPrevented).toBe(true);
+    await flush();
+    expect(requestedUrls).not.toContain("/_agent/paste");
+    expect(requestedUrls).not.toContain("/_shell/keys");
+    expect(statusMessages[statusMessages.length - 1]).toContain("PNG");
+  });
+
+  test("ファイルを運ばないドラッグ (文字・画面の中の要素) には触らない", async () => {
+    await attachShell(SHELL);
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperty(over, "dataTransfer", {
+      value: { types: ["text/plain"], items: [] },
+    });
+    handle.el.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(false);
+  });
+
   test("貼ったらすぐ棚に出て、パスを端末へ打ち込む", async () => {
     await attachShell(SHELL);
     pastePng();
