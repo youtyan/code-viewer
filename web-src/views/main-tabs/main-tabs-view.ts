@@ -762,15 +762,26 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   }
 
   /**
+   * タブ列に出すタブ。面の中はその面のプロジェクトのタブだけだが、前面のタブは
+   * 隠さない: シェルのグループは前面のペインで変わるので、別のプロジェクトの
+   * ペインへ移ると、本文に出したままタブ列からだけ消えていた (畳んだグループの
+   * 前面のタブと同じ扱い。core/main-tabs.ts の visibleTabs)。
+   */
+  function tabsInStrip(pane: Pane): Tab[] {
+    if (!deps.paneMode) return pane.tabs;
+    return pane.tabs.filter((tab) => {
+      const key = keyOf(tab);
+      return key === null || key === currentRoot || tab.id === pane.activeId;
+    });
+  }
+
+  /**
    * 面のグループ。左の面 (本文の面) には、いま見ているプロジェクトのグループを
    * タブが 0 枚でも並びの位置に入れる: フォルダ表示はタブにしないので、タブの無い
    * プロジェクトを開くと札が出ず、どのプロジェクトを見ているか分からなかった。
    */
   function groupsOf(side: PaneSide, pane: Pane): TabGroup[] {
-    const groups = tabGroups(pane.tabs, keyOf).filter(
-      (group) =>
-        !deps.paneMode || group.key === null || group.key === currentRoot,
-    );
+    const groups = tabGroups(tabsInStrip(pane), keyOf);
     const root = currentRoot;
     if (side !== "left" || root === null) return groups;
     if (groups.some((group) => group.key === root)) return groups;
@@ -2458,12 +2469,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         ? known.reduce((sum, width) => sum + width, 0) / known.length
         : unit * TAB_FLOOR_UNITS;
     // 面の中で出していないグループ (ほかのプロジェクト) の分は数えない。
-    const ids = pane.tabs
-      .filter(
-        (tab) =>
-          !deps.paneMode || keyOf(tab) === null || keyOf(tab) === currentRoot,
-      )
-      .map((tab) => tab.id);
+    const ids = tabsInStrip(pane).map((tab) => tab.id);
     const natural = ids.map((id) => naturalWidths.get(id) ?? average);
     // タブ以外に列が使う幅: 札 (畳んだときの枚数を除く)・＋・隙間 (描いていない
     // タブの分も数える)。

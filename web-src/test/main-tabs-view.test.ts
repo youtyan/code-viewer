@@ -532,8 +532,12 @@ describe("main tabs view: プロジェクトのグループ", () => {
   });
 
   /** 面の中のタブ列。many は窓に面が 2 つ以上あるか、closed は閉じるボタンの記録。 */
-  async function paneTabs(many = false, closed: string[] = []) {
-    const { handle, mount } = setup(
+  async function paneSetup(
+    many = false,
+    closed: string[] = [],
+    extra: Partial<MainTabsDeps> = {},
+  ) {
+    const mounted = setup(
       async () => saved,
       undefined,
       undefined,
@@ -548,17 +552,42 @@ describe("main tabs view: プロジェクトのグループ", () => {
           closePane: () => closed.push("pane"),
           many: () => many,
         },
+        ...extra,
       }),
     );
-    await handle.restore();
-    return mount;
+    await mounted.handle.restore();
+    return mounted;
   }
+  const paneTabs = async (many = false, closed: string[] = []) =>
+    (await paneSetup(many, closed)).mount;
 
   test("面の中では札を出さず、その面のプロジェクトのタブをタブの順に並べる", async () => {
     expect(strip(await paneTabs())).toEqual([
       "-(>app.ts README.md agents)",
       "+",
     ]);
+  });
+
+  // 同じ tmux のウインドウに別のプロジェクトのペインがあると、前面のペインが
+  // 移っただけでシェルのグループが変わる。本文に出したままタブだけ消えていた。
+  test("面の中: 前面のシェルのグループが変わってもタブ列に残し、前面でなくなれば隠す", async () => {
+    let shellProject = APP;
+    const { handle, mount } = await paneSetup(false, [], {
+      terminalProject: (session) =>
+        session === "shell-lib" ? shellProject : null,
+    });
+    handle.openTerminal("shell-lib");
+    shellProject = LIB;
+    handle.localize();
+    const whileInFront = strip(mount);
+
+    mount.querySelector<HTMLElement>('.main-tab[data-tab-id="a1"]')?.click();
+
+    expect({ whileInFront, afterLeaving: strip(mount) }).toEqual({
+      // グループの並び (一覧で sample-lib が先) のまま、頭に出る。
+      whileInFront: ["-(>Shell shell-lib app.ts README.md agents)", "+"],
+      afterLeaving: ["-(>app.ts README.md agents)", "+"],
+    });
   });
 
   // 移す先の面が無いのに出すと、押したら面を分けていた。
