@@ -1717,7 +1717,9 @@ describe("the viewer settings presenter", () => {
 describe("trying the attention sounds", () => {
   test("each button plays its sound, and a sound that cannot play says why", async () => {
     const played: string[] = [];
-    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     const { settings, host } = setup({
       testSound: async (kind) => {
         played.push(kind);
