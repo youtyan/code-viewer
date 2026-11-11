@@ -1,4 +1,5 @@
 import { apiUrl } from "../../core/api-url";
+
 // 設定画面の「エージェント連携」の節。claude と codex に状態を知らせる
 // フックを、書き込む内容を見せて確認してから入れる・外す。
 //
@@ -15,6 +16,7 @@ import { apiUrl } from "../../core/api-url";
 // 中身のハッシュを添えて書かせるので、見せたものと書くものがずれない。
 // 結果 (バックアップの場所か、失敗の理由の全文) はその行に残す。
 
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import type {
   AgentHookApplyResponse,
   AgentHookPlanResponse,
@@ -28,10 +30,16 @@ import { hookRowAction, hookRowTone } from "../../core/agent-hooks";
 import { abbreviateHome } from "../../core/agent-overview";
 import { formatErrorDetail } from "../../core/error-detail";
 import { BACKGROUND_REQUEST_HEADER } from "../../core/network-activity";
+import { renderOwned, templateElement } from "../ui/renderer";
 import { showFormDialog } from "../ui-dialog";
 import { responseFailure } from "./accounts-client";
+import {
+  labeledTemplate,
+  notesTemplate,
+  resultLineTemplate,
+} from "./accounts-dialogs";
 import type { AgentHooksText } from "./i18n";
-import { settingsDiffBlock } from "./settings-diff";
+import { settingsDiffTemplate } from "./settings-diff";
 
 export type AgentHooksSettingsDeps = {
   getText(): AgentHooksText;
@@ -87,73 +95,19 @@ function changesJson(changes: HookChange[]): string {
   return JSON.stringify({ hooks }, null, 2);
 }
 
-function paragraph(text: string, className = ""): HTMLParagraphElement {
-  const p = document.createElement("p");
-  if (className) p.className = className;
-  p.textContent = text;
-  return p;
-}
-
-/** 見出し付きの値 1 つ。短い値 (パス) は横に、長い値 (JSON) は下に置く。 */
-function labeled(label: string, value: string, block: boolean): HTMLElement {
-  const box = document.createElement("div");
-  box.className = block
-    ? "agent-hooks-dialog-block"
-    : "agent-hooks-dialog-field";
-  const name = document.createElement("span");
-  name.className = "agent-hooks-dialog-label";
-  name.textContent = label;
-  const code = document.createElement(block ? "pre" : "code");
-  code.className = block
-    ? "agent-hooks-dialog-code terminal-mono"
-    : "terminal-mono";
-  code.textContent = value;
-  box.append(name, code);
-  return box;
-}
-
 export function createAgentHooksSettings(
   deps: AgentHooksSettingsDeps,
 ): AgentHooksSettings {
-  const element = document.createElement("div");
-  element.className = "scope-settings-section agent-hooks-section";
-  const title = document.createElement("strong");
-  title.className = "scope-settings-section-title";
-  title.id = AGENT_HOOKS_SECTION_ID;
-  const intro = paragraph("", "scope-settings-help");
-  const help = paragraph("", "gdp-help-shortcut-link");
-  const helpAnchor = document.createElement("a");
-  helpAnchor.addEventListener("click", (event) => {
-    event.preventDefault();
-    deps.openHelp();
-  });
-  const rows = document.createElement("div");
-  rows.className = "agent-hooks-rows";
-  const loadError = paragraph(
-    "",
-    "scope-settings-help scope-settings-refresh-error",
+  // 節の箱。設定のページが置き、中はここが描く。
+  const element = templateElement(
+    html`<div class="scope-settings-section agent-hooks-section"></div>`,
   );
-  loadError.hidden = true;
-  const failures = document.createElement("details");
-  failures.className = "agent-hooks-failures";
-  failures.hidden = true;
-  const failuresSummary = document.createElement("summary");
-  const failuresBody = document.createElement("pre");
-  failuresBody.className = "terminal-observation-errors";
-  const failuresFooter = document.createElement("div");
-  failuresFooter.className = "agent-hooks-failures-footer";
-  const failuresLog = paragraph("", "scope-settings-help");
-  const failuresClear = document.createElement("button");
-  failuresClear.type = "button";
-  failuresClear.className = "gdp-btn gdp-btn-sm";
-  const failuresError = paragraph(
-    "",
-    "scope-settings-help scope-settings-refresh-error",
-  );
-  failuresError.hidden = true;
-  failuresFooter.append(failuresLog, failuresClear);
-  failures.append(failuresSummary, failuresBody, failuresFooter, failuresError);
-  element.append(title, intro, help, rows, loadError, failures);
+  /** 状態を読めなかった理由 (読めたら null)。 */
+  let loadError: string | null = null;
+  /** 届かなかった記録を消せなかった理由。 */
+  let failuresError: string | null = null;
+  /** 入れた後の「開く」を押して待っている行。 */
+  let opening: HookAgent | null = null;
 
   let status: AgentHooksResponse | null = null;
   let generation = 0;
@@ -161,8 +115,6 @@ export function createAgentHooksSettings(
   let busy: HookAgent | null = null;
   const results = new Map<HookAgent, RowResult>();
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
-
-  failuresClear.addEventListener("click", () => void clearFailures());
 
   /**
    * @param background 周期の取り直し。通信中の表示と取消の対象から外し
@@ -182,27 +134,21 @@ export function createAgentHooksSettings(
       const next = (await res.json()) as AgentHooksResponse;
       if (mine !== generation) return;
       status = next;
-      loadError.hidden = true;
-      loadError.textContent = "";
+      loadError = null;
       deps.onChanged(next);
     } catch (error) {
       if (mine !== generation) return;
       console.error("[code-viewer] agent hook status failed", error);
-      loadError.textContent = `${text.loadFailed}\n${formatErrorDetail(error)}`;
-      loadError.hidden = false;
+      loadError = `${text.loadFailed}\n${formatErrorDetail(error)}`;
     }
     render();
   }
 
-  function stateLabel(row: AgentHookStatus): HTMLElement {
+  function stateLabel(row: AgentHookStatus): TemplateResult {
     const text = deps.getText();
-    const label = document.createElement("span");
-    label.className = `agent-hooks-state agent-hooks-state-${row.state}`;
-    const mark = document.createElement("i");
-    mark.className = "agent-hooks-mark";
-    mark.setAttribute("aria-hidden", "true");
-    label.append(mark, text.state[row.state]);
-    return label;
+    return html`<span class=${`agent-hooks-state agent-hooks-state-${row.state}`}
+      ><i class="agent-hooks-mark" aria-hidden="true"></i>${text.state[row.state]}</span
+    >`;
   }
 
   function detailText(row: AgentHookStatus): string {
@@ -219,145 +165,152 @@ export function createAgentHooksSettings(
     return lines.join("\n");
   }
 
-  function createRow(row: AgentHookStatus): HTMLElement {
+  function rowTemplate(row: AgentHookStatus): TemplateResult {
     const text = deps.getText();
-    const box = document.createElement("div");
-    box.className = "agent-hooks-row ui-table-row";
-    box.dataset.agent = row.agent;
-    const name = document.createElement("span");
-    name.className = "agent-hooks-name";
-    name.textContent = row.agent;
-    const path = document.createElement("span");
-    path.className = "agent-hooks-path terminal-mono";
     const home = status?.home ?? "";
-    path.textContent = row.symlink
-      ? `${abbreviateHome(row.path, home)} → ${abbreviateHome(row.realPath, home)}`
-      : abbreviateHome(row.path, home);
-    path.title = row.symlink
-      ? `${row.path}\n${text.symlinkTo(row.realPath)}`
-      : row.path;
     const choice = hookRowAction(row);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gdp-btn gdp-btn-sm agent-hooks-action";
-    if (choice) {
-      button.textContent = text.action[choice.kind];
-      button.title = text.actionTitle(row.agent, text.action[choice.kind]);
-      button.disabled = busy !== null;
-      button.addEventListener(
-        "click",
-        () => void review(row.agent, choice.action, button),
-      );
-    } else {
-      // 押せる動作が無くても場所は取っておく (行ごとに列がずれない)。
-      button.hidden = true;
-    }
-    box.append(name, stateLabel(row), path, button);
     const detail = detailText(row);
-    if (detail) {
-      box.appendChild(
-        paragraph(
-          detail,
-          `agent-hooks-detail${hookRowTone(row) === "problem" ? " agent-hooks-detail-problem" : ""}`,
-        ),
-      );
-    }
     const result = results.get(row.agent);
-    if (result) {
-      const out = paragraph(
-        result.text,
-        `agent-hooks-result ${result.ok ? "agent-hooks-result-ok" : "agent-hooks-result-error"}`,
-      );
-      out.setAttribute("role", result.ok ? "status" : "alert");
-      box.appendChild(out);
-      if (result.open) box.appendChild(openAgentRow(row.agent, result));
-    }
-    return box;
+    return html`<div class="agent-hooks-row ui-table-row" data-agent=${row.agent}><span
+      class="agent-hooks-name"
+    >${row.agent}</span>${stateLabel(row)}<span
+      class="agent-hooks-path terminal-mono"
+      title=${row.symlink ? `${row.path}\n${text.symlinkTo(row.realPath)}` : row.path}
+    >${
+      row.symlink
+        ? `${abbreviateHome(row.path, home)} → ${abbreviateHome(row.realPath, home)}`
+        : abbreviateHome(row.path, home)
+    }</span>${
+      // 押せる動作が無くても場所は取っておく (行ごとに列がずれない)。
+      choice
+        ? html`<button
+            type="button"
+            class="gdp-btn gdp-btn-sm agent-hooks-action"
+            title=${text.actionTitle(row.agent, text.action[choice.kind])}
+            ?disabled=${busy !== null}
+            @click=${(event: MouseEvent) =>
+              void review(
+                row.agent,
+                choice.action,
+                event.currentTarget as HTMLElement,
+              )}
+          >${text.action[choice.kind]}</button>`
+        : html`<button type="button" class="gdp-btn gdp-btn-sm agent-hooks-action" hidden></button>`
+    }${
+      detail
+        ? html`<p
+            class=${`agent-hooks-detail${hookRowTone(row) === "problem" ? " agent-hooks-detail-problem" : ""}`}
+          >${detail}</p>`
+        : nothing
+    }${
+      result
+        ? html`${resultLineTemplate(result)}${
+            result.open ? openAgentRow(row.agent, result) : nothing
+          }`
+        : nothing
+    }</div>`;
   }
 
   /** 入れた結果の下の「claude を開く」「codex を開く」と、押した結果。 */
-  function openAgentRow(agent: HookAgent, result: RowResult): HTMLElement {
+  function openAgentRow(agent: HookAgent, result: RowResult): TemplateResult {
     const text = deps.getText();
-    const line = document.createElement("div");
-    line.className = "agent-hooks-open";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gdp-btn gdp-btn-sm";
-    button.textContent = text.openAgent[agent];
-    button.title = text.openAgentTitle(agent);
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      try {
-        const notice = await deps.openAgent(agent);
-        results.set(agent, {
-          ...result,
-          opened: {
-            ok: true,
-            text: [text.openedAgent(agent), notice].filter(Boolean).join("\n"),
-          },
-        });
-      } catch (error) {
-        console.error("[code-viewer] could not open the agent", error);
-        results.set(agent, {
-          ...result,
-          opened: {
-            ok: false,
-            text: `${text.openAgentFailed(agent)}\n${formatErrorDetail(error)}`,
-          },
-        });
-      }
-      render();
-    });
-    line.appendChild(button);
-    if (result.opened) {
-      const out = paragraph(
-        result.opened.text,
-        `agent-hooks-result ${result.opened.ok ? "agent-hooks-result-ok" : "agent-hooks-result-error"}`,
-      );
-      out.setAttribute("role", result.opened.ok ? "status" : "alert");
-      line.appendChild(out);
-    }
-    return line;
+    return html`<div class="agent-hooks-open"><button
+      type="button"
+      class="gdp-btn gdp-btn-sm"
+      title=${text.openAgentTitle(agent)}
+      ?disabled=${opening === agent}
+      @click=${async () => {
+        opening = agent;
+        render();
+        try {
+          const notice = await deps.openAgent(agent);
+          results.set(agent, {
+            ...result,
+            opened: {
+              ok: true,
+              text: [text.openedAgent(agent), notice]
+                .filter(Boolean)
+                .join("\n"),
+            },
+          });
+        } catch (error) {
+          console.error("[code-viewer] could not open the agent", error);
+          results.set(agent, {
+            ...result,
+            opened: {
+              ok: false,
+              text: `${text.openAgentFailed(agent)}\n${formatErrorDetail(error)}`,
+            },
+          });
+        }
+        opening = null;
+        render();
+      }}
+    >${text.openAgent[agent]}</button>${
+      result.opened ? resultLineTemplate(result.opened) : nothing
+    }</div>`;
   }
 
-  function renderFailures(): void {
+  function failuresTemplate(): TemplateResult {
     const text = deps.getText();
     const list = status?.failures;
-    if (!list || list.total === 0) {
-      failures.hidden = true;
-      return;
-    }
-    failures.hidden = false;
-    failuresSummary.textContent = text.failures(list.total);
-    failuresBody.textContent = list.recent
-      .map((item) => {
-        const time = item.at ? new Date(item.at).toLocaleString() : "?";
-        const where = [item.agent, item.hookEvent, item.target, item.server]
-          .filter(Boolean)
-          .join(" ");
-        return `${text.failureLine(time, item.stage, where)}\n${item.detail}`;
-      })
-      .join("\n\n");
-    failuresLog.textContent = text.failuresLog(list.log);
-    failuresClear.textContent = text.failuresClear;
+    const shown = !!list && list.total > 0;
+    return html`<details class="agent-hooks-failures" ?hidden=${!shown}><summary
+        >${shown ? text.failures(list.total) : ""}</summary
+      ><pre class="terminal-observation-errors">${
+        shown
+          ? list.recent
+              .map((item) => {
+                const time = item.at ? new Date(item.at).toLocaleString() : "?";
+                const where = [
+                  item.agent,
+                  item.hookEvent,
+                  item.target,
+                  item.server,
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+                return `${text.failureLine(time, item.stage, where)}\n${item.detail}`;
+              })
+              .join("\n\n")
+          : ""
+      }</pre><div class="agent-hooks-failures-footer"><p class="scope-settings-help">${
+        shown ? text.failuresLog(list.log) : ""
+      }</p><button
+        type="button"
+        class="gdp-btn gdp-btn-sm"
+        @click=${() => void clearFailures()}
+      >${shown ? text.failuresClear : ""}</button></div><p
+        class="scope-settings-help scope-settings-refresh-error"
+        ?hidden=${failuresError === null}
+      >${failuresError ?? ""}</p></details>`;
+  }
+
+  function sectionTemplate(): TemplateResult {
+    const text = deps.getText();
+    const link = deps.helpLink();
+    return html`<strong class="scope-settings-section-title" id=${AGENT_HOOKS_SECTION_ID}
+        >${text.title}</strong
+      ><p class="scope-settings-help">${text.intro}</p><p class="gdp-help-shortcut-link">${text.helpBefore}<a
+        href=${link.href}
+        @click=${(event: MouseEvent) => {
+          event.preventDefault();
+          deps.openHelp();
+        }}
+      >${link.label}</a>${text.helpAfter}</p><div class="agent-hooks-rows">${
+        status
+          ? status.agents.map(rowTemplate)
+          : loadError === null
+            ? html`<p class="scope-settings-help">${text.loading}</p>`
+            : nothing
+      }</div><p
+        class="scope-settings-help scope-settings-refresh-error"
+        ?hidden=${loadError === null}
+      >${loadError ?? ""}</p>${failuresTemplate()}`;
   }
 
   function render(): void {
-    const text = deps.getText();
-    title.textContent = text.title;
-    intro.textContent = text.intro;
-    const link = deps.helpLink();
-    helpAnchor.href = link.href;
-    helpAnchor.textContent = link.label;
-    help.replaceChildren(text.helpBefore, helpAnchor, text.helpAfter);
-    rows.replaceChildren();
-    if (!status) {
-      if (loadError.hidden)
-        rows.appendChild(paragraph(text.loading, "scope-settings-help"));
-    } else {
-      for (const row of status.agents) rows.appendChild(createRow(row));
-    }
-    renderFailures();
+    renderOwned(element, sectionTemplate());
   }
 
   async function fetchPlan(
@@ -377,80 +330,40 @@ export function createAgentHooksSettings(
     return plan.writeBlocked !== "" && plan.changed;
   }
 
-  function notesList(notes: string[]): HTMLElement {
-    const list = document.createElement("ul");
-    list.className = "agent-hooks-dialog-notes";
-    for (const note of notes) {
-      const item = document.createElement("li");
-      item.textContent = note;
-      list.appendChild(item);
-    }
-    return list;
-  }
-
   /**
    * 生成された (書けない) 設定ファイルのときの手順。エラーではないので
    * 注意の色は使わない。書けない生の理由は捨てずに「詳細」に畳む。
    */
-  function guideBody(plan: AgentHookPlanResponse): HTMLElement {
+  function guideBody(plan: AgentHookPlanResponse): TemplateResult {
     const text = deps.getText();
-    const body = document.createElement("div");
-    body.className = "agent-hooks-dialog";
-    const steps = document.createElement("ol");
-    steps.className = "agent-hooks-dialog-steps";
-    for (const step of text.guideSteps[plan.action]) {
-      const item = document.createElement("li");
-      item.textContent = step;
-      steps.appendChild(item);
-    }
-    body.appendChild(steps);
     const changes = plan.added.length > 0 ? plan.added : plan.removed;
-    body.appendChild(
-      labeled(
-        plan.added.length > 0 ? text.dialogAdded : text.dialogRemoved,
-        changesJson(changes),
-        true,
-      ),
-    );
     const home = status?.home ?? "";
     const short = (path: string) => (home ? abbreviateHome(path, home) : path);
     const notes = [text.dialogKept(plan.kept)];
     if (plan.action === "install") {
       notes.push(text.guideLauncher(short(plan.launcher.path)));
     }
-    body.appendChild(notesList(notes));
-    const details = document.createElement("details");
-    details.className = "agent-hooks-dialog-details";
-    const summary = document.createElement("summary");
-    summary.textContent = text.guideDetails;
-    details.append(
-      summary,
-      labeled(text.dialogFile, short(plan.path), false),
-      ...(plan.symlink
-        ? [labeled(text.dialogLinkTarget, short(plan.realPath), false)]
-        : []),
-      labeled("", plan.writeBlocked, true),
-    );
-    body.appendChild(details);
-    return body;
+    return html`<div class="agent-hooks-dialog"><ol class="agent-hooks-dialog-steps">${text.guideSteps[
+      plan.action
+    ].map((step) => html`<li>${step}</li>`)}</ol>${labeledTemplate(
+      plan.added.length > 0 ? text.dialogAdded : text.dialogRemoved,
+      changesJson(changes),
+      true,
+    )}${notesTemplate(notes)}<details class="agent-hooks-dialog-details"><summary
+      >${text.guideDetails}</summary
+    >${labeledTemplate(text.dialogFile, short(plan.path), false)}${
+      plan.symlink
+        ? labeledTemplate(text.dialogLinkTarget, short(plan.realPath), false)
+        : nothing
+    }${labeledTemplate("", plan.writeBlocked, true)}</details></div>`;
   }
 
-  function planBody(plan: AgentHookPlanResponse): HTMLElement {
+  function planBody(plan: AgentHookPlanResponse): TemplateResult {
     if (blockedPlan(plan)) return guideBody(plan);
     const text = deps.getText();
-    const body = document.createElement("div");
-    body.className = "agent-hooks-dialog";
     // パスは ~ で縮める (statusLine の確認の画面と同じ)。
     const home = status?.home ?? "";
     const short = (path: string) => (home ? abbreviateHome(path, home) : path);
-    // 書き込む先と、書く前と後の差分 (サーバが plan で作ったもの) が主役。
-    body.append(
-      ...settingsDiffBlock(plan, home, {
-        file: text.dialogFile,
-        unchanged: text.dialogNothing,
-        drawFailed: text.dialogDiffFailed,
-      }),
-    );
     const notes: string[] = [];
     if (plan.changed) {
       notes.push(
@@ -472,8 +385,16 @@ export function createAgentHooksSettings(
     if (plan.launcher.write)
       notes.push(text.dialogLauncher(short(plan.launcher.path)));
     notes.push(text.effect[plan.agent][plan.action]);
-    body.appendChild(notesList(notes));
-    return body;
+    // 書き込む先と、書く前と後の差分 (サーバが plan で作ったもの) が主役。
+    return html`<div class="agent-hooks-dialog">${settingsDiffTemplate(
+      plan,
+      home,
+      {
+        file: text.dialogFile,
+        unchanged: text.dialogNothing,
+        drawFailed: text.dialogDiffFailed,
+      },
+    )}${notesTemplate(notes)}</div>`;
   }
 
   /**
@@ -581,7 +502,8 @@ export function createAgentHooksSettings(
 
   async function clearFailures(): Promise<void> {
     const text = deps.getText();
-    failuresError.hidden = true;
+    failuresError = null;
+    render();
     try {
       const res = await deps.trackLoad(
         fetch(apiUrl("agentHooksFailures"), {
@@ -592,8 +514,8 @@ export function createAgentHooksSettings(
       if (!res.ok) throw await responseFailure(res, text.failuresClearFailed);
     } catch (error) {
       console.error("[code-viewer] clearing hook failures failed", error);
-      failuresError.textContent = formatErrorDetail(error);
-      failuresError.hidden = false;
+      failuresError = formatErrorDetail(error);
+      render();
       return;
     }
     await load();

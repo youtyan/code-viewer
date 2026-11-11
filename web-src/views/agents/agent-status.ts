@@ -6,7 +6,9 @@
 //
 // 押すとエージェント一覧へ。入力待ちが 1 件だけなら、そのペインを直接開く。
 
+import { html, type TemplateResult } from "lit/html.js";
 import { headerAgentCounts } from "../../core/agent-overview";
+import { renderOwned } from "../ui/renderer";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
 
@@ -17,42 +19,41 @@ export type AgentStatusDeps = {
   openPane(pane: string): void;
 };
 
-function item(state: "waiting" | "working"): {
-  el: HTMLElement;
-  label: HTMLElement;
-  count: HTMLElement;
-} {
-  const el = document.createElement("span");
-  el.className = `agent-status-item agent-status-${state}`;
-  const mark = document.createElement("i");
-  mark.className = `terminal-mark terminal-mark-${state}`;
-  mark.setAttribute("aria-hidden", "true");
-  const label = document.createElement("span");
-  label.className = "agent-status-label";
-  const count = document.createElement("span");
-  count.className = "agent-status-count";
-  el.append(mark, label, count);
-  return { el, label, count };
+function itemTemplate(
+  state: "waiting" | "working",
+  label: string,
+  count: string,
+): TemplateResult {
+  return html`<span class=${`agent-status-item agent-status-${state}`}><i
+      class=${`terminal-mark terminal-mark-${state}`}
+      aria-hidden="true"
+    ></i><span class="agent-status-label">${label}</span><span
+      class="agent-status-count"
+    >${count}</span></span>`;
 }
 
 export function mountAgentStatus(
   button: HTMLButtonElement,
   deps: AgentStatusDeps,
 ): { localize(): void } {
-  const waiting = item("waiting");
-  const working = item("working");
-  button.replaceChildren(waiting.el, working.el);
-
   function render(): void {
     const text = deps.getText();
     const { overview, error } = deps.monitor.snapshot();
     const panes = overview?.panes ?? [];
     const counts = headerAgentCounts(panes);
-    waiting.label.textContent = text.headerWaiting;
-    working.label.textContent = text.headerWorking;
     // 取れていないときは数えられない。0 と出すと「誰も待っていない」と読める。
-    waiting.count.textContent = overview ? String(counts.waiting) : "–";
-    working.count.textContent = overview ? String(counts.working) : "–";
+    renderOwned(
+      button,
+      html`${itemTemplate(
+        "waiting",
+        text.headerWaiting,
+        overview ? String(counts.waiting) : "–",
+      )}${itemTemplate(
+        "working",
+        text.headerWorking,
+        overview ? String(counts.working) : "–",
+      )}`,
+    );
     button.classList.toggle("agent-status-attention", counts.waiting > 0);
     button.classList.toggle("agent-status-busy", counts.working > 0);
     button.classList.toggle("agent-status-error", error !== "");

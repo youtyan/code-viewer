@@ -14,7 +14,6 @@ import type {
   UsageWindowView,
 } from "../../core/agent-accounts";
 import { usageIsStale } from "../../core/agent-accounts";
-import { templateElement } from "../ui/renderer";
 import type { AccountsText } from "./accounts-i18n";
 
 /** バーの幅に使う割合。100 を超えた値もバーは満杯で止める。 */
@@ -99,19 +98,6 @@ export function usageMeterTemplate(
       ? html`<span class="usage-meter-reset">${reset}</span>`
       : nothing
   }</div>`;
-}
-
-/**
- * まだ宣言的に描いていない画面のための、行の要素を 1 つ返す形。宣言的に描く
- * 画面は usageMeterTemplate を使う。
- */
-export function usageMeterRow(
-  view: UsageWindowView,
-  now: number,
-  t: AccountsText,
-  options: { reset: "remaining" | "clock" | "none" },
-): HTMLElement {
-  return templateElement(usageMeterTemplate(view, now, t, options));
 }
 
 /**

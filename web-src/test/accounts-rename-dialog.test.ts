@@ -134,7 +134,9 @@ function nameInput(): HTMLInputElement {
 }
 
 async function submitWith(value: string): Promise<string> {
+  // 打ったときと同じく input を送る (画面は打った値を input で受け取る)。
   nameInput().value = value;
+  nameInput().dispatchEvent(new Event("input", { bubbles: true }));
   document
     .querySelector<HTMLButtonElement>(".gdp-dialog .gdp-dialog-confirm")
     ?.click();

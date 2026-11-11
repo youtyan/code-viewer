@@ -173,6 +173,7 @@ async function openReview(
   );
   if (!name) throw new Error("the name field is missing");
   name.value = "Work";
+  name.dispatchEvent(new Event("input", { bubbles: true }));
   document
     .querySelector<HTMLButtonElement>(".gdp-dialog .gdp-dialog-confirm")
     ?.click();

@@ -13,9 +13,14 @@
 // - 読み上げは中身でなく「プレビュー: 行の名前」(窓の aria-label。行の
 //   aria-describedby で結ぶ。中身の pre は aria-hidden)
 //
+// 窓は重ね合わせの層 (views/ui/layer.ts) に描き、最初に出したときから隠すだけで
+// 外さない (行の aria-describedby が指す先を残す)。
+//
 // 行は取り直しのたびに描き直される (要素が差し替わる) ので、覚えるのは要素でなく
 // ペインの id。位置を合わせるたびに入れ物から同じ id の行を探し直す。
 
+import { ifDefined } from "lit/directives/if-defined.js";
+import { html } from "lit/html.js";
 import { apiUrl } from "../../core/api-url";
 import {
   formatErrorDetail,
@@ -32,11 +37,14 @@ import {
   panePreviewPosition,
 } from "../../core/pane-preview";
 import type { TerminalCaptureResponse } from "../../core/terminal-capture";
+import { createLayer } from "../ui/layer";
 
 /** 覗ける行の印。値はペインの id (`%3`)。 */
 const PANE_ATTR = "data-preview-pane";
 /** 窓の見出しに出す行の名前。 */
 const NAME_ATTR = "data-preview-name";
+/** 窓の id (行の aria-describedby が指す)。 */
+const BOX_ID = "pane-preview";
 
 export type PanePreviewText = {
   /** 窓の読み上げの名前 (中身ではなく「プレビュー」と分かるもの)。 */
@@ -107,10 +115,15 @@ export function createPanePreview(
   },
 ): PanePreview {
   const watches = new Set<Watch>();
+  const layer = createLayer("pane-preview");
+  /** 窓に描くもの。null はまだ一度も出していない。 */
   let box: {
-    root: HTMLElement;
-    head: HTMLElement;
-    screen: HTMLElement;
+    visible: boolean;
+    name: string;
+    label: string;
+    screen: string;
+    tone: "" | "muted" | "failed";
+    at: { left: number; top: number } | null;
   } | null = null;
   /** 出す待ち (timer が動いている)。 */
   let pending: Target | null = null;
@@ -129,26 +142,35 @@ export function createPanePreview(
   /** 最後に動いたポインタの位置 (止まったままの over・move を見分ける)。 */
   let lastMove: { x: number; y: number } | null = null;
 
-  function ensureBox() {
-    if (box) return box;
-    const root = document.createElement("div");
-    root.className = "pane-preview";
-    root.id = "pane-preview";
-    root.role = "tooltip";
-    root.hidden = true;
-    root.style.setProperty("--pane-preview-lines", String(PANE_PREVIEW_LINES));
-    const head = document.createElement("div");
-    head.className = "pane-preview-head";
-    head.setAttribute("aria-hidden", "true");
-    const screen = document.createElement("pre");
-    screen.className = "pane-preview-screen terminal-mono";
+  function boxTemplate() {
+    if (!box) return null;
+    const at = box.at ? ` left: ${box.at.left}px; top: ${box.at.top}px;` : "";
     // 端末の中身なので、ターミナルの明暗 (既定はダーク) で描く (style.css)。
-    screen.dataset.terminalSurface = "";
-    screen.setAttribute("aria-hidden", "true");
-    root.append(head, screen);
-    document.body.appendChild(root);
-    box = { root, head, screen };
-    return box;
+    return html`<div
+      class="pane-preview"
+      id=${BOX_ID}
+      role="tooltip"
+      ?hidden=${!box.visible}
+      aria-label=${ifDefined(box.label || undefined)}
+      style=${`--pane-preview-lines: ${PANE_PREVIEW_LINES};${at}`}
+    ><div class="pane-preview-head" aria-hidden="true">${box.name}</div><pre
+      class="pane-preview-screen terminal-mono"
+      data-terminal-surface=""
+      data-tone=${box.tone}
+      aria-hidden="true"
+    >${box.screen}</pre></div>`;
+  }
+
+  /** 描き直す。層が外されていれば (テストの後片付けなど) 置き直す。 */
+  function draw(): void {
+    if (!box) return;
+    if (layer.host()?.isConnected) layer.update();
+    else layer.show(boxTemplate);
+  }
+
+  /** 描いた窓 (寸法を測る)。 */
+  function boxElement(): HTMLElement | null {
+    return layer.host()?.querySelector<HTMLElement>(".pane-preview") ?? null;
   }
 
   function rowOf(target: Target): HTMLElement | null {
@@ -175,19 +197,23 @@ export function createPanePreview(
     pending = null;
     if (shown) rowOf(shown)?.removeAttribute("aria-describedby");
     shown = null;
-    if (box) box.root.hidden = true;
+    if (box?.visible) {
+      box.visible = false;
+      draw();
+    }
   }
 
   function place(): void {
-    if (!shown || !box) return;
+    const root = boxElement();
+    if (!shown || !box || !root) return;
     const row = rowOf(shown);
     if (!row) {
       // 行が無くなった (エージェントが終わった・畳んだ)。
       hide();
       return;
     }
-    row.setAttribute("aria-describedby", box.root.id);
-    const rect = box.root.getBoundingClientRect();
+    row.setAttribute("aria-describedby", BOX_ID);
+    const rect = root.getBoundingClientRect();
     const anchor = row.getBoundingClientRect();
     // 右に出すものは、行でなく一覧の右端から離す (サイドバーの縁に掛けない)。
     const edge = shown.watch.container.getBoundingClientRect().right;
@@ -202,14 +228,15 @@ export function createPanePreview(
       viewport: { width: window.innerWidth, height: window.innerHeight },
       placement: shown.watch.placement,
     });
-    box.root.style.left = `${at.left}px`;
-    box.root.style.top = `${at.top}px`;
+    box.at = { left: at.left, top: at.top };
+    draw();
   }
 
   function setScreen(text: string, tone: "" | "muted" | "failed"): void {
     if (!box) return;
-    box.screen.textContent = text;
-    box.screen.dataset.tone = tone;
+    box.screen = text;
+    box.tone = tone;
+    draw();
   }
 
   function load(target: Target): void {
@@ -248,14 +275,18 @@ export function createPanePreview(
     hide();
     const row = rowOf(target);
     if (!row) return;
-    const { root, head } = ensureBox();
     const text = target.watch.getText();
     const name = row.getAttribute(NAME_ATTR) ?? target.pane;
-    head.textContent = name;
-    root.setAttribute("aria-label", text.label(name));
-    setScreen(text.loading, "muted");
+    box = {
+      visible: true,
+      name,
+      label: text.label(name),
+      screen: text.loading,
+      tone: "muted",
+      at: box?.at ?? null,
+    };
     shown = target;
-    root.hidden = false;
+    draw();
     place();
     load(target);
   }

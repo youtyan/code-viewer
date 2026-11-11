@@ -4,9 +4,10 @@
 
 import "./_dom";
 import { readFileSync } from "node:fs";
+import { render } from "lit/html.js";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { unifiedDiff } from "../core/text-diff";
-import { settingsDiffBlock } from "../views/agents/settings-diff";
+import { settingsDiffTemplate } from "../views/agents/settings-diff";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -126,12 +127,24 @@ const TEXT = {
   drawFailed: "Shown as text.",
 };
 
-describe("settingsDiffBlock", () => {
+/** 確認の画面に置いたときと同じく、文書の中の箱に描いて、描いた要素を返す。 */
+function settingsDiffBlock(
+  plan: typeof PLAN,
+  home: string,
+  text: typeof TEXT,
+): HTMLElement[] {
+  const box = document.createElement("div");
+  document.body.appendChild(box);
+  render(settingsDiffTemplate(plan, home, text), box);
+  return [...box.children] as HTMLElement[];
+}
+
+describe("settingsDiffTemplate", () => {
   test("draws the diff like the Diff screen: line numbers, added and removed rows", () => {
     loadDiff2Html();
     const body = document.createElement("div");
     body.append(...settingsDiffBlock(PLAN, "/home/sample", TEXT));
-    document.body.appendChild(body);
+    document.body.replaceChildren(body);
     // 書き込む先はリンクなら「リンク → 実体」。
     expect(
       body.querySelector(".agent-hooks-dialog-field code")?.textContent,

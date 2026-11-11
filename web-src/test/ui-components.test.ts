@@ -73,9 +73,6 @@ const DECLARATIVE = [
   "web-src/views/ui/",
   "web-src/views/tools/",
   "web-src/views/main-tabs/",
-  "web-src/views/agents/agents-sidebar-presenter.ts",
-  "web-src/views/agents/agents-sidebar-view.ts",
-  "web-src/views/agents/agent-card.ts",
   "web-src/views/context-menu.ts",
   "web-src/views/ui-dialog.ts",
   "web-src/views/title-tooltip.ts",
@@ -85,15 +82,8 @@ const DECLARATIVE = [
   "web-src/views/sidebar.ts",
   "web-src/views/list-tree-open.ts",
   "web-src/views/workspace/",
-  "web-src/views/agents/usage-status.ts",
-  "web-src/views/agents/usage-status-view.ts",
-  "web-src/views/agents/usage-meter.ts",
-  "web-src/views/agents/agents-presenter.ts",
-  "web-src/views/agents/agents-view.ts",
-  "web-src/views/agents/account-tags.ts",
-  "web-src/views/agents/accounts-band.ts",
-  "web-src/views/agents/accounts-settings.ts",
-  "web-src/views/agents/usage-check.ts",
+  "web-src/views/agents/",
+  "web-src/views/remote-access-settings.ts",
 ];
 
 /**
@@ -109,7 +99,7 @@ const EXCEPTIONS: Record<string, { count: number; reason: string }> = {
 };
 
 /** まだ書き直していない所も含めた、命令的な組み立ての数の上限。書き直したら下げる。 */
-const IMPERATIVE_LIMIT = 1952;
+const IMPERATIVE_LIMIT = 1913;
 
 function imperativeCount(file: string): number {
   return [...readFileSync(file, "utf8").matchAll(IMPERATIVE_DOM)].length;
