@@ -13,6 +13,7 @@ import "./_dom";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   PANE_PREVIEW_DELAY_MS,
+  PANE_PREVIEW_LINES,
   PANE_PREVIEW_REFRESH_MS,
   panePreviewLines,
   panePreviewPosition,
@@ -20,9 +21,11 @@ import {
 import { agentsText } from "../views/agents/i18n";
 import {
   createPanePreview,
+  DEFAULT_VIEW,
   markPreviewRow,
   PaneGoneError,
   type PanePreview,
+  type PanePreviewProps,
 } from "../views/agents/pane-preview";
 
 describe("panePreviewLines", () => {
@@ -454,5 +457,58 @@ describe("pane preview", () => {
     await vi.advanceTimersByTimeAsync(PANE_PREVIEW_DELAY_MS * 2);
     expect([shownPane(), reads.length]).toEqual([null, 1]);
     preview.setPaused(false);
+  });
+});
+
+describe("the pane preview presenter", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.replaceChildren();
+  });
+
+  test("gives the view the row's name, then the last lines of the screen", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="list"></div>';
+    const list = document.querySelector<HTMLElement>("#list") as HTMLElement;
+    const row = document.createElement("button");
+    markPreviewRow(row, "%1", "claude · sample · work:0.0");
+    list.append(row);
+    const shown: PanePreviewProps[] = [];
+    const preview = createPanePreview(
+      {
+        read: async () => "first\nsecond",
+        fingerScreen: () => false,
+      },
+      (props) => {
+        shown.push({ ...props });
+        return DEFAULT_VIEW(props);
+      },
+    );
+    const stop = preview.watch(list, {
+      placement: "right",
+      getText: () => agentsText("en").preview,
+    });
+    row.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        pointerType: "mouse",
+        clientX: 1,
+        clientY: 1,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(PANE_PREVIEW_DELAY_MS);
+    const text = agentsText("en").preview;
+    expect([
+      shown[0]?.name,
+      shown[0]?.screen,
+      shown[shown.length - 1]?.screen,
+      shown[shown.length - 1]?.label,
+    ]).toEqual([
+      "claude · sample · work:0.0",
+      text.loading,
+      panePreviewLines("first\nsecond", PANE_PREVIEW_LINES).join("\n"),
+      text.label("claude · sample · work:0.0"),
+    ]);
+    stop();
   });
 });

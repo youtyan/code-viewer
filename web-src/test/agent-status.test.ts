@@ -3,7 +3,11 @@
 
 import "./_dom";
 import { afterEach, describe, expect, test } from "vitest";
-import { mountAgentStatus } from "../views/agents/agent-status";
+import {
+  type AgentStatusProps,
+  DEFAULT_VIEW,
+  mountAgentStatus,
+} from "../views/agents/agent-status";
 import { agentsText } from "../views/agents/i18n";
 import { fakeMonitor, overview } from "./_agents-sidebar-fixture";
 import { agentPane } from "./_test-helpers";
@@ -49,6 +53,36 @@ describe("the agent counts in the status bar", () => {
     expect(shown()).toEqual([
       ["Needs input", "1"],
       ["Working", "1"],
+    ]);
+  });
+});
+
+describe("the agent counts presenter", () => {
+  test("gives the view a dash while nothing has been read yet", () => {
+    const button = document.createElement("button");
+    document.body.appendChild(button);
+    const feed = fakeMonitor(overview([waiting], []));
+    const shown: AgentStatusProps[] = [];
+    const monitor = {
+      ...feed.monitor,
+      snapshot: () => ({ ...feed.monitor.snapshot(), overview: null }),
+    };
+    mountAgentStatus(
+      button,
+      {
+        monitor,
+        getText: () => agentsText("en"),
+        openList: () => undefined,
+        openPane: () => undefined,
+      },
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    expect(shown[0]?.items.map((item) => [item.state, item.count])).toEqual([
+      ["waiting", "–"],
+      ["working", "–"],
     ]);
   });
 });

@@ -30,6 +30,7 @@ import {
   type ShareEntry,
   type StatusLinePlanResponse,
   tmuxSessionName,
+  type UsageWindowView,
   usageWindowViews,
 } from "../../core/agent-accounts";
 import type {
@@ -42,7 +43,7 @@ import { formatErrorDetail } from "../../core/error-detail";
 import { CHEVRON_DOWN_16_PATH, COPY_16_PATHS } from "../../core/icons";
 import type { ProjectColor } from "../../core/project-colors";
 import { iconTemplate } from "../ui/icon";
-import { renderOwned, templateElement } from "../ui/renderer";
+import { detachedElement } from "../ui/renderer";
 import { showFormDialog } from "../ui-dialog";
 import { createAccountTagEditor } from "./account-tags";
 import type { AccountsClient } from "./accounts-client";
@@ -62,20 +63,6 @@ export type AccountDialogDeps = {
   /** 一覧をすぐ取り直す (起動した行を出すため)。 */
   refreshOverview(): Promise<void>;
 };
-
-/**
- * ダイアログの本文の箱を作り、draw() で中身を描き直す係を返す。本文の中で
- * 選び直したときに、その場で描き直す (箱はダイアログの層が置く)。
- */
-function dialogBody(
-  className: string,
-  template: () => unknown,
-): { element: HTMLElement; draw(): void } {
-  const element = templateElement(html`<div class=${className}></div>`);
-  const draw = () => renderOwned(element, template());
-  draw();
-  return { element, draw };
-}
 
 function fieldTemplate(
   label: string,
@@ -295,7 +282,383 @@ export type LaunchOptions = {
   handoff?: AgentPane;
 };
 
-export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
+type Choice<T extends string> = { value: T; label: string };
+type Pick_<T extends string> = {
+  label: string;
+  choices: Choice<T>[];
+  current: T;
+  onPick(value: T): void;
+};
+
+/** 作る前の確認 (共有するものを選ぶ)。 */
+export type CreatePlanProps = {
+  dir: { label: string; value: string };
+  source: { label: string; value: string };
+  intro: string;
+  groups: {
+    title: string;
+    /** 理由はまとまりに 1 回だけ (無ければ空)。 */
+    why: string;
+    entries: {
+      name: string;
+      title: string;
+      checked: boolean;
+      onToggle(checked: boolean): void;
+      /** 中身を確かめられないもの: 場所を写すボタンと、写した結果。 */
+      copy: {
+        label: string;
+        title: string;
+        status: string;
+        onClick(button: HTMLButtonElement): void;
+      } | null;
+    }[];
+  }[];
+  blocked: { summary: string; lines: string } | null;
+  links: { label: string; text: string };
+  notes: string[];
+};
+
+export type AddDialogProps = {
+  kind: Pick_<AccountAgent>;
+  name: {
+    label: string;
+    value: string;
+    placeholder: string;
+    onInput(value: string): void;
+  };
+  mode: Pick_<"create" | "register">;
+  modeHelp: string;
+  path: {
+    label: string;
+    value: string;
+    hidden: boolean;
+    onInput(value: string): void;
+  };
+};
+
+export type RenameDialogProps = {
+  label: string;
+  value: string;
+  onInput(value: string): void;
+};
+
+export type StatusLineBodyProps =
+  | {
+      kind: "blocked";
+      intro: string;
+      after: { label: string; text: string };
+      reason: string;
+    }
+  | {
+      kind: "diff";
+      plan: StatusLinePlanResponse;
+      home: string;
+      diffText: { file: string; unchanged: string; drawFailed: string };
+      notes: string[];
+    };
+
+/** 起動の画面の 1 アカウントの使用量。 */
+export type LaunchAccountUsageProps =
+  | { kind: "status"; text: string; title: string | null }
+  | {
+      kind: "meters";
+      windows: UsageWindowView[];
+      now: number;
+      text: AccountsText;
+    };
+
+export type LaunchDialogProps = {
+  noProjects: string | null;
+  handoff: {
+    label: string;
+    log: { text: string; title: string };
+    hint: string;
+  } | null;
+  kind: Pick_<AccountAgent>;
+  accounts: {
+    label: string;
+    empty: string | null;
+    items: {
+      id: string;
+      checked: boolean;
+      name: string;
+      current: string | null;
+      observed: { text: string; title: string; stale: boolean };
+      dir: string;
+      usage: LaunchAccountUsageProps;
+    }[];
+    onPick(id: string): void;
+    /** 矢印で前後へ選び直す (step は 1 か -1)。 */
+    onMove(id: string, step: number): void;
+    hint: string;
+  };
+  project: {
+    label: string;
+    name: string;
+    detail: string;
+    choices: Choice<string>[];
+    value: string;
+    onChange(value: string): void;
+  };
+  session: {
+    label: string;
+    value: string;
+    hint: string;
+    onInput(value: string): void;
+  };
+  preview: {
+    label: string;
+    command: string;
+    copy: { label: string; onClick(button: HTMLButtonElement): void };
+    result: string;
+  };
+};
+
+/** 登録する前の確認。 */
+export type RegisterPlanProps = {
+  path: { label: string; value: string };
+  notes: string[];
+};
+
+export type AccountDialogsView = {
+  createPlan(props: CreatePlanProps): unknown;
+  registerPlan(props: RegisterPlanProps): unknown;
+  notes(lines: string[]): unknown;
+  add(props: AddDialogProps): unknown;
+  rename(props: RenameDialogProps): unknown;
+  statusLine(props: StatusLineBodyProps): unknown;
+  launch(props: LaunchDialogProps): unknown;
+};
+
+function pickTemplate<T extends string>(props: Pick_<T>): TemplateResult {
+  return radioSegTemplate(props.choices, props.current, props.onPick);
+}
+
+function launchUsageTemplate(usage: LaunchAccountUsageProps): TemplateResult {
+  if (usage.kind === "status")
+    return html`<span class="agent-launch-account-usage"><span
+        class="agent-launch-account-status"
+        title=${ifDefined(usage.title ?? undefined)}
+      >${usage.text}</span></span>`;
+  return html`<span class="agent-launch-account-usage">${usage.windows.map(
+    (window) =>
+      usageMeterTemplate(window, usage.now, usage.text, { reset: "remaining" }),
+  )}</span>`;
+}
+
+export const DEFAULT_VIEW: AccountDialogsView = {
+  createPlan: (props) => html`<div class="agent-hooks-dialog">${labeledTemplate(
+    props.dir.label,
+    props.dir.value,
+  )}${labeledTemplate(props.source.label, props.source.value)}<p
+      class="agent-accounts-share-intro"
+    >${props.intro}</p>${props.groups.map(
+      (
+        group,
+      ) => html`<div class="agent-accounts-share"><span class="agent-hooks-dialog-label"
+          >${group.title}</span
+        >${
+          group.why
+            ? html`<p class="agent-accounts-share-why">${group.why}</p>`
+            : nothing
+        }<div class="agent-accounts-share-list">${group.entries.map((entry) => {
+          const item = html`<label class="agent-accounts-share-item"><input
+              type="checkbox"
+              .checked=${live(entry.checked)}
+              @change=${(event: Event) =>
+                entry.onToggle(
+                  (event.currentTarget as HTMLInputElement).checked,
+                )}
+            /><span class="terminal-mono" title=${entry.title}>${entry.name}</span></label>`;
+          if (!entry.copy) return item;
+          const copy = entry.copy;
+          return html`<div class="agent-accounts-share-row">${item}<button
+              type="button"
+              class="gdp-btn gdp-btn-sm"
+              title=${copy.title}
+              @click=${(event: MouseEvent) =>
+                copy.onClick(event.currentTarget as HTMLButtonElement)}
+            >${copy.label}</button><span class="agent-accounts-share-copied" role="status"
+              >${copy.status}</span
+            ></div>`;
+        })}</div></div>`,
+    )}${
+      props.blocked
+        ? // 選べないものは畳んでおく (多くても画面を埋めない)。
+          html`<details class="agent-hooks-dialog-details"><summary>${props.blocked.summary}</summary
+            ><pre class="agent-hooks-dialog-code terminal-mono">${props.blocked.lines}</pre></details>`
+        : nothing
+    }<div class="agent-hooks-dialog-block"><span class="agent-hooks-dialog-label"
+        >${props.links.label}</span
+      ><pre class="agent-hooks-dialog-code terminal-mono">${props.links.text}</pre></div>${notesTemplate(
+        props.notes,
+      )}</div>`,
+  registerPlan: (props) =>
+    html`<div class="agent-hooks-dialog">${labeledTemplate(
+      props.path.label,
+      props.path.value,
+    )}${notesTemplate(props.notes)}</div>`,
+  notes: (lines) => notesTemplate(lines),
+  add: (props) => html`<div class="worktree-form">${fieldTemplate(
+    props.kind.label,
+    pickTemplate(props.kind),
+  )}${fieldTemplate(
+    props.name.label,
+    inputTemplate({
+      value: props.name.value,
+      placeholder: props.name.placeholder,
+      onInput: props.name.onInput,
+    }),
+  )}${fieldTemplate(props.mode.label, pickTemplate(props.mode))}<span class="worktree-hint"
+      >${props.modeHelp}</span
+    >${fieldTemplate(
+      props.path.label,
+      inputTemplate({
+        value: props.path.value,
+        placeholder: "/",
+        onInput: props.path.onInput,
+      }),
+      { hidden: props.path.hidden },
+    )}</div>`,
+  rename: (props) =>
+    html`<div class="worktree-form">${fieldTemplate(
+      props.label,
+      inputTemplate({
+        value: props.value,
+        ariaLabel: props.label,
+        onInput: props.onInput,
+      }),
+    )}</div>`,
+  statusLine: (props) =>
+    props.kind === "blocked"
+      ? // 書けない (別の場所から生成される) ファイル: 写す内容を出し、確認の
+        // ボタンでコピーする (フックの同じ画面と同じ作り)。
+        html`<div class="agent-hooks-dialog"><p>${props.intro}</p>${labeledTemplate(
+          props.after.label,
+          props.after.text,
+          true,
+        )}${labeledTemplate("", props.reason, true)}</div>`
+      : // 書き込む先と、書く前と後の差分 (サーバが plan で作ったもの) が主役。
+        html`<div class="agent-hooks-dialog">${settingsDiffTemplate(
+          props.plan,
+          props.home,
+          props.diffText,
+        )}${notesTemplate(props.notes)}</div>`,
+  launch: (props) => html`<div class="agent-launch-form">${
+    props.noProjects
+      ? html`<p class="worktree-hint">${props.noProjects}</p>`
+      : nothing
+  }${
+    props.handoff
+      ? launchRowTemplate(
+          props.handoff.label,
+          html`<span class="agent-launch-log terminal-mono" title=${props.handoff.log.title}
+            >${props.handoff.log.text}</span
+          >`,
+          html`<span class="worktree-hint">${props.handoff.hint}</span>`,
+        )
+      : nothing
+  }${launchRowTemplate(
+    props.kind.label,
+    pickTemplate(props.kind),
+    nothing,
+    "div",
+  )}${launchRowTemplate(
+    props.accounts.label,
+    // アカウントの一覧。各行に 5 時間・週の使用量と「いつの値か」を並べ、
+    // 空いているアカウントを選びやすくする (部品は全体ボードの帯と同じ
+    // usage-meter.ts)。行は radio で、上下の矢印で選び直せる。
+    html`<div class="agent-launch-accounts" role="radiogroup" aria-label=${props.accounts.label}>${
+      props.accounts.empty
+        ? html`<span class="worktree-hint">${props.accounts.empty}</span>`
+        : props.accounts.items.map(
+            (item) => html`<button
+              type="button"
+              role="radio"
+              class=${item.checked ? "agent-launch-account active" : "agent-launch-account"}
+              data-account=${item.id}
+              aria-checked=${String(item.checked)}
+              tabindex=${item.checked ? "0" : "-1"}
+              @click=${() => props.accounts.onPick(item.id)}
+              @keydown=${(event: KeyboardEvent) => {
+                const step =
+                  event.key === "ArrowDown" || event.key === "ArrowRight"
+                    ? 1
+                    : event.key === "ArrowUp" || event.key === "ArrowLeft"
+                      ? -1
+                      : 0;
+                if (step === 0) return;
+                event.preventDefault();
+                props.accounts.onMove(item.id, step);
+              }}
+            ><span class="agent-launch-account-head"><span class="agent-launch-account-name"
+                >${item.name}</span
+              >${
+                item.current
+                  ? html`<span class="agent-launch-account-current">${item.current}</span>`
+                  : nothing
+              }<span
+                class=${`agent-launch-account-observed${item.observed.stale ? " stale" : ""}`}
+                title=${ifDefined(item.observed.title || undefined)}
+              >${item.observed.text}</span></span><span class="agent-launch-account-dir"
+                >${item.dir}</span
+              >${launchUsageTemplate(item.usage)}</button>`,
+          )
+    }</div>`,
+    html`<span class="worktree-hint" ?hidden=${props.accounts.hint === ""}>${props.accounts.hint}</span>`,
+    "div",
+  )}${launchRowTemplate(
+    props.project.label,
+    // 名前と補足 (場所) の 2 段で見せる選択の欄。選ぶのは下に重ねた本物の
+    // select (キー操作・読み上げはそのまま)。
+    html`<span class="agent-launch-choice"><span class="agent-launch-choice-name"
+        >${props.project.name}</span
+      ><span class="agent-launch-choice-detail" ?hidden=${props.project.detail === ""}
+        >${props.project.detail}</span
+      ><span class="agent-launch-choice-chevron" aria-hidden="true">${iconTemplate(
+        CHEVRON_DOWN_16_PATH,
+        "octicon-chevron-down",
+      )}</span><select
+        class="gdp-dialog-input agent-launch-choice-select"
+        .value=${live(props.project.value)}
+        @change=${(event: Event) =>
+          props.project.onChange(
+            (event.currentTarget as HTMLSelectElement).value,
+          )}
+      >${props.project.choices.map(
+        (choice) =>
+          html`<option value=${choice.value} ?selected=${choice.value === props.project.value}
+            >${choice.label}</option
+          >`,
+      )}</select></span>`,
+  )}${launchRowTemplate(
+    props.session.label,
+    inputTemplate({
+      value: props.session.value,
+      onInput: props.session.onInput,
+    }),
+    html`<span class="worktree-hint">${props.session.hint}</span>`,
+  )}<div class="agent-launch-preview-block"><span class="agent-launch-label"
+      >${props.preview.label}</span
+    ><div class="agent-launch-preview"><code class="agent-launch-preview-text terminal-mono"
+        >${props.preview.command}</code
+      ><button
+        type="button"
+        class="agents-icon-action agent-launch-copy"
+        title=${props.preview.copy.label}
+        aria-label=${props.preview.copy.label}
+        @click=${(event: MouseEvent) =>
+          props.preview.copy.onClick(event.currentTarget as HTMLButtonElement)}
+      >${iconTemplate(COPY_16_PATHS, "octicon-copy")}</button></div><span
+      class="worktree-hint agent-launch-copy-result"
+      role="status"
+    >${props.preview.result}</span></div></div>`,
+};
+
+export function createAccountDialogs(
+  deps: AccountDialogDeps,
+  view: AccountDialogsView = DEFAULT_VIEW,
+): AccountDialogs {
   function text(): AccountsText {
     return deps.getText();
   }
@@ -325,7 +688,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       navigator.clipboard.writeText(entry.target).then(
         () => {
           copied.set(entry.name, t.copiedLocation);
-          view.draw();
+          body.draw();
         },
         (error: unknown) => {
           showCopyFailure(
@@ -339,45 +702,36 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
             entry.name,
             `${t.copyLocationFailed}: ${formatErrorDetail(error)}`,
           );
-          view.draw();
+          body.draw();
         },
       );
     };
 
-    function group(
-      title: string,
-      entries: ShareEntry[],
-      why = "",
-    ): TemplateResult {
-      // 理由はまとまりに 1 回だけ (行ごとに同じ文を繰り返すと、名前が読めない)。
-      return html`<div class="agent-accounts-share"><span class="agent-hooks-dialog-label">${title}</span>${
-        why ? html`<p class="agent-accounts-share-why">${why}</p>` : nothing
-      }<div class="agent-accounts-share-list">${entries.map((entry) => {
-        const item = html`<label class="agent-accounts-share-item"><input
-            type="checkbox"
-            .checked=${live(chosen.has(entry.name))}
-            @change=${(event: Event) => {
-              if ((event.currentTarget as HTMLInputElement).checked)
-                chosen.add(entry.name);
-              else chosen.delete(entry.name);
-              view.draw();
-            }}
-          /><span class="terminal-mono" title=${abbreviateHome(entry.target, home)}
-            >${displayName(entry)}</span
-          ></label>`;
-        if (entry.category !== "optional") return item;
+    const group = (title: string, entries: ShareEntry[], why = "") => ({
+      title,
+      why,
+      entries: entries.map((entry) => ({
+        name: displayName(entry),
+        title: abbreviateHome(entry.target, home),
+        checked: chosen.has(entry.name),
+        onToggle(checked: boolean) {
+          if (checked) chosen.add(entry.name);
+          else chosen.delete(entry.name);
+          body.draw();
+        },
         // 中身を確かめられないもの: その場で場所 (絶対パス) を写せるようにする。
-        return html`<div class="agent-accounts-share-row">${item}<button
-            type="button"
-            class="gdp-btn gdp-btn-sm"
-            title=${entry.target}
-            @click=${(event: MouseEvent) =>
-              copyLocation(entry, event.currentTarget as HTMLButtonElement)}
-          >${t.copyLocation}</button><span class="agent-accounts-share-copied" role="status"
-            >${copied.get(entry.name) ?? ""}</span
-          ></div>`;
-      })}</div></div>`;
-    }
+        copy:
+          entry.category === "optional"
+            ? {
+                label: t.copyLocation,
+                title: entry.target,
+                status: copied.get(entry.name) ?? "",
+                onClick: (button: HTMLButtonElement) =>
+                  copyLocation(entry, button),
+              }
+            : null,
+      })),
+    });
 
     const shared = plan.entries.filter((entry) => entry.category === "shared");
     const optional = plan.entries.filter(
@@ -386,14 +740,14 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     const blocked = plan.entries.filter(
       (entry) => entry.category === "blocked",
     );
-    const lines: string[] = [];
+    const notes: string[] = [];
     if (plan.missingShared.length > 0) {
-      lines.push(t.createLinkMissing(plan.missingShared.join(", ")));
+      notes.push(t.createLinkMissing(plan.missingShared.join(", ")));
     }
     if (plan.authKeysInShared.length > 0) {
-      lines.push(t.createAuthKeys(plan.authKeysInShared.join(", ")));
+      notes.push(t.createAuthKeys(plan.authKeysInShared.join(", ")));
     }
-    lines.push(t.createAfter);
+    notes.push(t.createAfter);
 
     function selected(): string[] {
       return plan.entries
@@ -401,39 +755,47 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
         .map((entry) => entry.name);
     }
 
-    const view = dialogBody("agent-hooks-dialog", () => {
+    const props = (): CreatePlanProps => {
       const links = plan.entries
         .filter((entry) => chosen.has(entry.name))
         .map(
           (entry) =>
             `${displayName(entry)}  →  ${abbreviateHome(entry.target, home)}`,
         );
-      return html`${labeledTemplate(t.createDir, abbreviateHome(plan.configDir, home))}${labeledTemplate(
-        t.createSource,
-        source,
-      )}<p class="agent-accounts-share-intro">${t.shareIntro(source)}</p>${
-        shared.length > 0 ? group(t.shareShared, shared) : nothing
-      }${
-        optional.length > 0
-          ? group(t.shareOptional, optional, t.shareOptionalWhy)
-          : nothing
-      }${
-        blocked.length > 0
-          ? // 選べないものは畳んでおく (多くても画面を埋めない)。
-            html`<details class="agent-hooks-dialog-details"><summary>${t.shareBlocked(
-              blocked.length,
-            )}</summary><pre class="agent-hooks-dialog-code terminal-mono">${blocked
-              .map(
-                (entry) =>
-                  `${displayName(entry)}  — ${t.blockedWhy[entry.reason ?? "suspect"]}`,
-              )
-              .join("\n")}</pre></details>`
-          : nothing
-      }<div class="agent-hooks-dialog-block"><span class="agent-hooks-dialog-label">${t.createLinks}</span><pre
-        class="agent-hooks-dialog-code terminal-mono"
-      >${links.length > 0 ? links.join("\n") : t.shareNone}</pre></div>${notesTemplate(lines)}`;
-    });
-    return { body: view.element, selected };
+      return {
+        dir: {
+          label: t.createDir,
+          value: abbreviateHome(plan.configDir, home),
+        },
+        source: { label: t.createSource, value: source },
+        intro: t.shareIntro(source),
+        groups: [
+          ...(shared.length > 0 ? [group(t.shareShared, shared)] : []),
+          ...(optional.length > 0
+            ? [group(t.shareOptional, optional, t.shareOptionalWhy)]
+            : []),
+        ],
+        blocked:
+          blocked.length > 0
+            ? {
+                summary: t.shareBlocked(blocked.length),
+                lines: blocked
+                  .map(
+                    (entry) =>
+                      `${displayName(entry)}  — ${t.blockedWhy[entry.reason ?? "suspect"]}`,
+                  )
+                  .join("\n"),
+              }
+            : null,
+        links: {
+          label: t.createLinks,
+          text: links.length > 0 ? links.join("\n") : t.shareNone,
+        },
+        notes,
+      };
+    };
+    const body = detachedElement(() => view.createPlan(props()));
+    return { body: body.element, selected };
   }
 
   async function add(prefill?: {
@@ -446,61 +808,58 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     let name = "";
     let path = prefill?.path ?? "";
     let mode: "create" | "register" = prefill ? "register" : "create";
-    const view = dialogBody("worktree-form", () => {
-      const creating = mode === "create";
-      return html`${fieldTemplate(
-        t.addKind,
-        radioSegTemplate<AccountAgent>(
-          [
+    const body = detachedElement(() =>
+      view.add({
+        kind: {
+          label: t.addKind,
+          choices: [
             { value: "claude", label: "claude" },
             { value: "codex", label: "codex" },
           ],
-          kind,
-          (value) => {
+          current: kind,
+          onPick(value) {
             kind = value;
-            view.draw();
+            body.draw();
           },
-        ),
-      )}${fieldTemplate(
-        t.addName,
-        inputTemplate({
+        },
+        name: {
+          label: t.addName,
           value: name,
           placeholder: t.addNamePlaceholder,
           onInput(value) {
             name = value;
           },
-        }),
-      )}${fieldTemplate(
-        t.addMode,
-        radioSegTemplate<"create" | "register">(
-          [
+        },
+        mode: {
+          label: t.addMode,
+          choices: [
             { value: "create", label: t.addModeCreate },
             { value: "register", label: t.addModeRegister },
           ],
-          mode,
-          (value) => {
+          current: mode,
+          onPick(value) {
             mode = value;
-            view.draw();
+            body.draw();
           },
-        ),
-      )}<span class="worktree-hint">${creating ? t.addModeCreateHelp : t.addModeRegisterHelp}</span>${fieldTemplate(
-        t.addPath,
-        inputTemplate({
+        },
+        modeHelp:
+          mode === "create" ? t.addModeCreateHelp : t.addModeRegisterHelp,
+        path: {
+          label: t.addPath,
           value: path,
-          placeholder: "/",
+          hidden: mode === "create",
           onInput(value) {
             path = value;
           },
-        }),
-        { hidden: creating },
-      )}`;
-    });
-    const nameInput = view.element.querySelectorAll<HTMLInputElement>(
+        },
+      }),
+    );
+    const nameInput = body.element.querySelectorAll<HTMLInputElement>(
       "input.gdp-dialog-input",
     )[0];
     const choice = await showFormDialog({
       title: t.addTitle,
-      body: view.element,
+      body: body.element,
       wide: true,
       submitLabel: t.addNext,
       cancelLabel: t.cancel,
@@ -529,20 +888,20 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     if (!choice) return null;
     if (choice.kind === "create") {
       const plan = choice.plan;
-      const view = createPlanBody(plan, home);
+      const review = createPlanBody(plan, home);
       const done = await showFormDialog({
         title: t.createTitle(plan.name),
-        body: view.body,
+        body: review.body,
         wide: true,
         submitLabel: t.createRun,
         cancelLabel: t.cancel,
-        submit: async () => deps.client.create(plan, view.selected()),
+        submit: async () => deps.client.create(plan, review.selected()),
       });
       if (!done) return null;
       // 作り終えたら、その場でログインへ進める (カードの行を探させない)。
       const signIn = await showFormDialog({
         title: t.createdTitle(done.name),
-        body: notesTemplate([t.createdBody]),
+        body: view.notes([t.createdBody]),
         submitLabel: t.createdSignIn,
         cancelLabel: t.createdLater,
         submit: () => login({ ...done, builtin: false }),
@@ -553,7 +912,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     if (!plan.exists || !plan.isDirectory) {
       await showFormDialog({
         title: t.registerTitle(plan.name),
-        body: notesTemplate([
+        body: view.notes([
           plan.exists
             ? t.registerNotDir(plan.configDir)
             : t.registerMissing(plan.configDir),
@@ -566,10 +925,10 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     }
     return showFormDialog({
       title: t.registerTitle(plan.name),
-      body: html`<div class="agent-hooks-dialog">${labeledTemplate(
-        t.addPath,
-        plan.configDir,
-      )}${notesTemplate([t.registerBody])}</div>`,
+      body: view.registerPlan({
+        path: { label: t.addPath, value: plan.configDir },
+        notes: [t.registerBody],
+      }),
       wide: true,
       submitLabel: t.registerRun,
       cancelLabel: t.cancel,
@@ -588,7 +947,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     if (account.managed) lines.push(t.removeManaged(account.configDir));
     return showFormDialog({
       title: t.removeDialogTitle(account.name),
-      body: notesTemplate(lines),
+      body: view.notes(lines),
       wide: true,
       danger: true,
       submitLabel: t.removeConfirm,
@@ -608,17 +967,14 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
   async function rename(account: AccountStatus): Promise<string | null> {
     const t = text();
     let name = account.name;
-    const view = dialogBody("worktree-form", () =>
-      fieldTemplate(
-        t.renameLabel,
-        inputTemplate({
-          value: name,
-          ariaLabel: t.renameLabel,
-          onInput(value) {
-            name = value;
-          },
-        }),
-      ),
+    const body = detachedElement(() =>
+      view.rename({
+        label: t.renameLabel,
+        value: name,
+        onInput(value) {
+          name = value;
+        },
+      }),
     );
     const listed = (deps.client.snapshot().data?.accounts ?? []).filter(
       (entry) => !entry.builtin,
@@ -637,8 +993,8 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     return showFormDialog({
       title: t.renameDialogTitle(account.name),
       description: t.renameDescription,
-      body: view.element,
-      focusTarget: view.element.querySelector<HTMLInputElement>("input"),
+      body: body.element,
+      focusTarget: body.element.querySelector<HTMLInputElement>("input"),
       submitLabel: t.renameConfirm,
       cancelLabel: t.cancel,
       validate: () => {
@@ -719,19 +1075,19 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
   }
 
   /** statusLine を包む・戻す確認の画面の中身。 */
-  function statusLineBody(plan: StatusLinePlanResponse): TemplateResult {
+  function statusLineBodyProps(
+    plan: StatusLinePlanResponse,
+  ): StatusLineBodyProps {
     const t = text();
     const home = deps.client.snapshot().data?.home ?? "";
     const short = (path: string) => abbreviateHome(path, home);
-    if (plan.writeBlocked && plan.changed) {
-      // 書けない (別の場所から生成される) ファイル: 写す内容を出し、確認の
-      // ボタンでコピーする (フックの同じ画面と同じ作り)。
-      return html`<div class="agent-hooks-dialog"><p>${t.statusLineBlocked}</p>${labeledTemplate(
-        t.statusLineAfter,
-        statusLineCopyText(plan),
-        true,
-      )}${labeledTemplate("", plan.writeBlocked, true)}</div>`;
-    }
+    if (plan.writeBlocked && plan.changed)
+      return {
+        kind: "blocked",
+        intro: t.statusLineBlocked,
+        after: { label: t.statusLineAfter, text: statusLineCopyText(plan) },
+        reason: plan.writeBlocked,
+      };
     const notes: string[] = [];
     if (plan.changed) {
       notes.push(
@@ -753,16 +1109,17 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       notes.push(t.statusLineRestore);
     }
     notes.push(t.statusLineEffect);
-    // 書き込む先と、書く前と後の差分 (サーバが plan で作ったもの) が主役。
-    return html`<div class="agent-hooks-dialog">${settingsDiffTemplate(
+    return {
+      kind: "diff",
       plan,
       home,
-      {
+      diffText: {
         file: t.statusLineFile,
         unchanged: t.statusLineNothing,
         drawFailed: t.statusLineDiffFailed,
       },
-    )}${notesTemplate(notes)}</div>`;
+      notes,
+    };
   }
 
   /**
@@ -779,7 +1136,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     const blocked = plan.writeBlocked !== "" && plan.changed;
     return showFormDialog({
       title: t.statusLineDialogTitle(action),
-      body: statusLineBody(plan),
+      body: view.statusLine(statusLineBodyProps(plan)),
       wide: true,
       danger: false,
       submitLabel: blocked
@@ -925,86 +1282,31 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     }
 
     /** 1 アカウントの使用量 (未ログイン・取れないときは理由の 1 行)。 */
-    function accountUsage(account: AccountStatus, now: number): TemplateResult {
-      if (account.login.state === "logged-out") {
-        return html`<span class="agent-launch-account-usage"><span class="agent-launch-account-status"
-          >${t.login["logged-out"]}</span
-        ></span>`;
-      }
+    function accountUsage(
+      account: AccountStatus,
+      now: number,
+    ): LaunchAccountUsageProps {
+      if (account.login.state === "logged-out")
+        return { kind: "status", text: t.login["logged-out"], title: null };
       const usage = account.usage;
-      if (usage.status !== "ok") {
-        return html`<span class="agent-launch-account-usage"><span
-          class="agent-launch-account-status"
-          title=${[t.usageReason[usage.reason], usage.detail]
+      if (usage.status !== "ok")
+        return {
+          kind: "status",
+          text: `${t.usageUnavailable} · ${t.usageReasonShort[usage.reason]}`,
+          title: [t.usageReason[usage.reason], usage.detail]
             .filter(Boolean)
-            .join("\n")}
-        >${`${t.usageUnavailable} · ${t.usageReasonShort[usage.reason]}`}</span></span>`;
-      }
-      return html`<span class="agent-launch-account-usage">${usageWindowViews(
-        usage,
+            .join("\n"),
+        };
+      return {
+        kind: "meters",
+        windows: usageWindowViews(usage, now),
         now,
-      ).map((view) =>
-        usageMeterTemplate(view, now, t, { reset: "remaining" }),
-      )}</span>`;
-    }
-
-    /**
-     * アカウントの一覧。各行に 5 時間・週の使用量と「いつの値か」を並べ、
-     * 空いているアカウントを選びやすくする (部品は全体ボードの帯と同じ
-     * usage-meter.ts)。行は radio で、上下の矢印で選び直せる。
-     */
-    function accountsTemplate(): unknown {
-      const now = Date.now();
-      const choices = accountsOfKind();
-      if (choices.length === 0)
-        return html`<span class="worktree-hint">${t.launchNoAccounts}</span>`;
-      return choices.map((account) => {
-        const on = account.id === selectedAccount;
-        const observed = usageObservedText(
-          account.usage,
-          account.login,
-          now,
-          t,
-        );
-        return html`<button
-          type="button"
-          role="radio"
-          class=${on ? "agent-launch-account active" : "agent-launch-account"}
-          data-account=${account.id}
-          aria-checked=${String(on)}
-          tabindex=${on ? "0" : "-1"}
-          @click=${() => pickAccount(account.id)}
-          @keydown=${(event: KeyboardEvent) => {
-            const step =
-              event.key === "ArrowDown" || event.key === "ArrowRight"
-                ? 1
-                : event.key === "ArrowUp" || event.key === "ArrowLeft"
-                  ? -1
-                  : 0;
-            if (step === 0) return;
-            event.preventDefault();
-            const index = choices.findIndex((c) => c.id === account.id);
-            const next =
-              choices[(index + step + choices.length) % choices.length];
-            if (next) pickAccount(next.id, true);
-          }}
-        ><span class="agent-launch-account-head"><span class="agent-launch-account-name"
-          >${accountDisplayName(account, t)}</span
-        >${
-          handoff && account.id === fromAccountId
-            ? html`<span class="agent-launch-account-current">${t.handoffCurrent}</span>`
-            : nothing
-        }<span
-          class=${`agent-launch-account-observed${observed.stale ? " stale" : ""}`}
-          title=${ifDefined(observed.title || undefined)}
-        >${observed.text}</span></span><span class="agent-launch-account-dir"
-          >${abbreviateHome(account.configDir, currentData()?.home ?? "")}</span
-        >${accountUsage(account, now)}</button>`;
-      });
+        text: t,
+      };
     }
 
     function selectedAccountItem(): HTMLElement | null {
-      return view.element.querySelector<HTMLElement>(
+      return body.element.querySelector<HTMLElement>(
         '.agent-launch-account[aria-checked="true"]',
       );
     }
@@ -1012,7 +1314,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     function pickAccount(id: string, focus = false) {
       selectedAccount = id;
       copyResult = "";
-      view.draw();
+      body.draw();
       if (focus) selectedAccountItem()?.focus();
     }
 
@@ -1055,7 +1357,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       navigator.clipboard.writeText(commandLine()).then(
         () => {
           copyResult = t.launchCopied;
-          view.draw();
+          body.draw();
         },
         (error: unknown) => {
           // ほかの画面のコピーと同じ形 (ボタンに失敗の見た目と理由、console に
@@ -1068,123 +1370,114 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
             1500,
           );
           copyResult = `${t.launchCopyFailed}: ${formatErrorDetail(error)}`;
-          view.draw();
+          body.draw();
         },
       );
     }
 
-    chooseAccount();
-    syncSession();
-    const view = dialogBody("agent-launch-form", () => {
+    function launchProps(): LaunchDialogProps {
+      const now = Date.now();
       const panes = deps.getOverview()?.panes ?? [];
       const exists = panes.some((pane) => pane.session === session.trim());
-      const account = currentData()?.accounts.find(
+      const current = currentData();
+      const account = current?.accounts.find(
         (item) => item.id === selectedAccount,
       );
-      const loginHint = launchLoginHint(account, t);
       const shownProject = projects.find((p) => p.value === project);
-      const projectDetail = shownProject
-        ? abbreviateHome(shownProject.value, home)
-        : "";
-      return html`${
-        projects.length === 0
-          ? html`<p class="worktree-hint">${t.launchNoProjects}</p>`
-          : nothing
-      }${
-        handoff
-          ? launchRowTemplate(
-              t.handoffLog,
-              html`<span class="agent-launch-log terminal-mono" title=${transcriptPath}
-                >${abbreviateHome(transcriptPath, home)}</span
-              >`,
-              html`<span class="worktree-hint">${t.handoffLogHint}</span>`,
-            )
-          : nothing
-      }${launchRowTemplate(
-        t.launchKind,
-        radioSegTemplate<AccountAgent>(
-          [
+      const choices = accountsOfKind();
+      return {
+        noProjects: projects.length === 0 ? t.launchNoProjects : null,
+        handoff: handoff
+          ? {
+              label: t.handoffLog,
+              log: {
+                text: abbreviateHome(transcriptPath, home),
+                title: transcriptPath,
+              },
+              hint: t.handoffLogHint,
+            }
+          : null,
+        kind: {
+          label: t.launchKind,
+          choices: [
             { value: "claude", label: "claude" },
             { value: "codex", label: "codex" },
           ],
-          kind,
-          (value) => {
+          current: kind,
+          onPick(value) {
             kind = value;
             chooseAccount();
             copyResult = "";
-            view.draw();
+            body.draw();
           },
-        ),
-        nothing,
-        "div",
-      )}${launchRowTemplate(
-        t.launchAccount,
-        html`<div class="agent-launch-accounts" role="radiogroup" aria-label=${t.launchAccount}>${accountsTemplate()}</div>`,
-        html`<span class="worktree-hint" ?hidden=${loginHint === ""}>${loginHint}</span>`,
-        "div",
-      )}${launchRowTemplate(
-        t.launchProject,
-        // 名前と補足 (場所) の 2 段で見せる選択の欄。選ぶのは下に重ねた本物の
-        // select (キー操作・読み上げはそのまま)。
-        html`<span class="agent-launch-choice"><span class="agent-launch-choice-name"
-            >${shownProject?.label ?? ""}</span
-          ><span class="agent-launch-choice-detail" ?hidden=${projectDetail === ""}
-            >${projectDetail}</span
-          ><span class="agent-launch-choice-chevron" aria-hidden="true">${iconTemplate(
-            CHEVRON_DOWN_16_PATH,
-            "octicon-chevron-down",
-          )}</span><select
-            class="gdp-dialog-input agent-launch-choice-select"
-            .value=${live(project)}
-            @change=${(event: Event) => {
-              project = (event.currentTarget as HTMLSelectElement).value;
-              syncSession();
-              copyResult = "";
-              view.draw();
-            }}
-          >${projects.map(
-            (choice) =>
-              html`<option value=${choice.value} ?selected=${choice.value === project}
-                >${choice.label}</option
-              >`,
-          )}</select></span>`,
-      )}${launchRowTemplate(
-        t.launchSession,
-        inputTemplate({
+        },
+        accounts: {
+          label: t.launchAccount,
+          empty: choices.length === 0 ? t.launchNoAccounts : null,
+          items: choices.map((item) => ({
+            id: item.id,
+            checked: item.id === selectedAccount,
+            name: accountDisplayName(item, t),
+            current:
+              handoff && item.id === fromAccountId ? t.handoffCurrent : null,
+            observed: usageObservedText(item.usage, item.login, now, t),
+            dir: abbreviateHome(item.configDir, current?.home ?? ""),
+            usage: accountUsage(item, now),
+          })),
+          onPick: (id) => pickAccount(id),
+          onMove(id, step) {
+            const index = choices.findIndex((c) => c.id === id);
+            const next =
+              choices[(index + step + choices.length) % choices.length];
+            if (next) pickAccount(next.id, true);
+          },
+          hint: launchLoginHint(account, t),
+        },
+        project: {
+          label: t.launchProject,
+          name: shownProject?.label ?? "",
+          detail: shownProject ? abbreviateHome(shownProject.value, home) : "",
+          choices: projects,
+          value: project,
+          onChange(value) {
+            project = value;
+            syncSession();
+            copyResult = "";
+            body.draw();
+          },
+        },
+        session: {
+          label: t.launchSession,
           value: session,
+          hint: exists ? t.launchSessionExisting : t.launchSessionNew,
           onInput(value) {
             session = value;
             sessionTouched = true;
             copyResult = "";
-            view.draw();
+            body.draw();
           },
-        }),
-        html`<span class="worktree-hint">${exists ? t.launchSessionExisting : t.launchSessionNew}</span>`,
-      )}<div class="agent-launch-preview-block"><span class="agent-launch-label"
-        >${t.launchPreviewLabel}</span
-      ><div class="agent-launch-preview"><code class="agent-launch-preview-text terminal-mono"
-        >${commandLine()}</code
-      ><button
-        type="button"
-        class="agents-icon-action agent-launch-copy"
-        title=${t.launchCopy}
-        aria-label=${t.launchCopy}
-        @click=${(event: MouseEvent) =>
-          copyCommand(event.currentTarget as HTMLButtonElement)}
-      >${iconTemplate(COPY_16_PATHS, "octicon-copy")}</button></div><span
-        class="worktree-hint agent-launch-copy-result"
-        role="status"
-      >${copyResult}</span></div>`;
-    });
+        },
+        preview: {
+          label: t.launchPreviewLabel,
+          command: commandLine(),
+          copy: { label: t.launchCopy, onClick: copyCommand },
+          result: copyResult,
+        },
+      };
+    }
+
+    chooseAccount();
+    syncSession();
+    const body = detachedElement(() => view.launch(launchProps()));
 
     // 開いている間に届いた一覧 (周期の取り直し) で、表示するコマンドと
     // 使用量を合わせ直す (コピーの結果の表示は消さない)。開いた時点でも 1 回
     // 取り直す (別の画面での保存を待たずに拾う)。
     const unsubscribe = deps.client.subscribe(() => {
-      const focused = view.element.contains(document.activeElement)
+      const focused = body.element.contains(document.activeElement)
         ? document.activeElement
         : null;
-      view.draw();
+      body.draw();
       if (focused instanceof HTMLElement && !focused.isConnected)
         selectedAccountItem()?.focus();
     });
@@ -1194,7 +1487,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       description: handoff
         ? t.handoffIntro(`${fromAgent} · ${fromAccountName}`)
         : t.launchIntro,
-      body: view.element,
+      body: body.element,
       wide: true,
       submitLabel: handoff ? t.handoffRun : t.launchRun,
       cancelLabel: t.cancel,

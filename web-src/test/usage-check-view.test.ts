@@ -3,6 +3,7 @@
 // 状態を持つ AccountsClient。パス・名前はすべて架空。
 
 import "./_dom";
+import { render } from "lit/html.js";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   type AccountStatus,
@@ -23,10 +24,11 @@ import { createAccountsSettings } from "../views/agents/accounts-settings";
 import {
   type UsageCheckOpeners,
   usageCheckMenuItem,
-  usageCheckBlock as usageCheckTemplate,
+  usageCheckProps,
+  usageCheckTemplate,
 } from "../views/agents/usage-check";
-import { render } from "lit/html.js";
 import { defineUiComponents } from "../views/ui/components";
+import { accountsData } from "./_accounts-fixture";
 import { deferred } from "./_test-helpers";
 
 /**
@@ -34,10 +36,11 @@ import { deferred } from "./_test-helpers";
  * (cv-usage-check-copy) は画面に置いてから描くので、文書の中に置く。
  */
 function usageCheckBlock(
-  ...args: Parameters<typeof usageCheckTemplate>
+  ...args: Parameters<typeof usageCheckProps>
 ): HTMLElement | null {
-  const template = usageCheckTemplate(...args);
-  if (!template) return null;
+  const props = usageCheckProps(...args);
+  if (!props) return null;
+  const template = usageCheckTemplate(props);
   defineUiComponents();
   const host = document.createElement("div");
   document.body.append(host);
@@ -373,7 +376,7 @@ describe("stopped at a claude screen", () => {
     state: Partial<UsageCheckState> = {},
     lang = t,
   ) {
-    const data = response([account()]);
+    const data = accountsData([account()]);
     const calls: string[] = [];
     const { client, pressed, opened } = fakeClient(
       {
@@ -540,22 +543,9 @@ const DIALOGS: AccountDialogs = {
   statusLine: async () => null,
 };
 
-function response(accounts: AccountStatus[]): AccountsResponse {
-  return {
-    home: "/home/sample",
-    serverRoot: "/home/sample/work/sample-app",
-    accounts,
-    registryError: null,
-    registryPath: "/home/sample/.local/state/code-viewer/accounts.json",
-    launchCommands: { claude: "claude", codex: "codex" },
-    lastLaunch: null,
-    usageFailures: { total: 0, recent: [], log: "" },
-  };
-}
-
 describe("the same part in the card and in Settings", () => {
   test("the account card shows the button and the result inside the card", () => {
-    const data = response([
+    const data = accountsData([
       account(),
       account({
         id: "codex-sample",
@@ -608,7 +598,7 @@ describe("the same part in the card and in Settings", () => {
 
   test("the built-in claude card gets a ⋯ menu with only the check", () => {
     // 登録アカウントがあると帯が出る (無ければ入口の 1 行だけ)。
-    const data = response([
+    const data = accountsData([
       account({
         id: "claude:default",
         builtin: true,
@@ -646,7 +636,7 @@ describe("the same part in the card and in Settings", () => {
   });
 
   test("the Settings usage row shows the same part", () => {
-    const data = response([account()]);
+    const data = accountsData([account()]);
     const { client } = fakeClient({ "claude-sample": { running: true } }, data);
     const settings = createAccountsSettings({
       client,
@@ -716,7 +706,7 @@ describe("the client keeps the state of each check", () => {
         if (!reply) throw new Error("no reply prepared");
         return reply();
       }
-      return new Response(JSON.stringify(response(rows)), {
+      return new Response(JSON.stringify(accountsData(rows)), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });

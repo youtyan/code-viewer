@@ -107,24 +107,53 @@ async function readScreen(pane: string, signal: AbortSignal): Promise<string> {
   return ((await res.json()) as TerminalCaptureResponse).content;
 }
 
+/** 窓に描くもの。 */
+export type PanePreviewProps = {
+  visible: boolean;
+  /** 見出し (行の名前)。 */
+  name: string;
+  /** 読み上げの名前。 */
+  label: string;
+  screen: string;
+  tone: "" | "muted" | "failed";
+  /** 置く位置 (測る前は null)。 */
+  at: { left: number; top: number } | null;
+};
+
+export type PanePreviewView = (props: PanePreviewProps) => unknown;
+
+export const DEFAULT_VIEW: PanePreviewView = (props) => {
+  const at = props.at
+    ? ` left: ${props.at.left}px; top: ${props.at.top}px;`
+    : "";
+  // 端末の中身なので、ターミナルの明暗 (既定はダーク) で描く (style.css)。
+  return html`<div
+    class="pane-preview"
+    id=${BOX_ID}
+    role="tooltip"
+    ?hidden=${!props.visible}
+    aria-label=${ifDefined(props.label || undefined)}
+    style=${`--pane-preview-lines: ${PANE_PREVIEW_LINES};${at}`}
+  ><div class="pane-preview-head" aria-hidden="true">${props.name}</div><pre
+    class="pane-preview-screen terminal-mono"
+    data-terminal-surface=""
+    data-tone=${props.tone}
+    aria-hidden="true"
+  >${props.screen}</pre></div>`;
+};
+
 export function createPanePreview(
   deps: PanePreviewDeps = {
     read: readScreen,
     fingerScreen: () =>
       window.matchMedia?.(SOFT_KEYS_MEDIA_QUERY).matches ?? false,
   },
+  view: PanePreviewView = DEFAULT_VIEW,
 ): PanePreview {
   const watches = new Set<Watch>();
   const layer = createLayer("pane-preview");
   /** 窓に描くもの。null はまだ一度も出していない。 */
-  let box: {
-    visible: boolean;
-    name: string;
-    label: string;
-    screen: string;
-    tone: "" | "muted" | "failed";
-    at: { left: number; top: number } | null;
-  } | null = null;
+  let box: PanePreviewProps | null = null;
   /** 出す待ち (timer が動いている)。 */
   let pending: Target | null = null;
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;
@@ -143,22 +172,7 @@ export function createPanePreview(
   let lastMove: { x: number; y: number } | null = null;
 
   function boxTemplate() {
-    if (!box) return null;
-    const at = box.at ? ` left: ${box.at.left}px; top: ${box.at.top}px;` : "";
-    // 端末の中身なので、ターミナルの明暗 (既定はダーク) で描く (style.css)。
-    return html`<div
-      class="pane-preview"
-      id=${BOX_ID}
-      role="tooltip"
-      ?hidden=${!box.visible}
-      aria-label=${ifDefined(box.label || undefined)}
-      style=${`--pane-preview-lines: ${PANE_PREVIEW_LINES};${at}`}
-    ><div class="pane-preview-head" aria-hidden="true">${box.name}</div><pre
-      class="pane-preview-screen terminal-mono"
-      data-terminal-surface=""
-      data-tone=${box.tone}
-      aria-hidden="true"
-    >${box.screen}</pre></div>`;
+    return box ? view(box) : null;
   }
 
   /** 描き直す。層が外されていれば (テストの後片付けなど) 置き直す。 */

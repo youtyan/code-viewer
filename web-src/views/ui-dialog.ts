@@ -14,9 +14,10 @@
 // 描き方: 開いている間の状態 (入力・押せるか・誤りの文言) は各 show* の中に持ち、
 // 枠 (dialogTemplate) を重ね合わせの層 (views/ui/layer.ts) に描く。状態が変わったら
 // layer.update() で描き直す。
-import { html, nothing, type TemplateResult } from "lit/html.js";
+
 import { ifDefined } from "lit/directives/if-defined.js";
 import { live } from "lit/directives/live.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import { formatErrorDetail } from "../core/error-detail";
 import { X_16_PATH } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
@@ -374,7 +375,8 @@ export type FormDialogOptions<T> = {
   /** 見出しの下の 1 文 (何をする画面か)。 */
   description?: string;
   /** 本文 (要素かテンプレート)。 */
-  body: HTMLElement | TemplateResult;
+  /** 本文 (要素かテンプレート。view が描いたもの)。 */
+  body: unknown;
   submit: () => T | Promise<T>;
   validate?: () => string | null;
   submitLabel?: string;

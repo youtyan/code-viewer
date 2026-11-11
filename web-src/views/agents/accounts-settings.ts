@@ -31,8 +31,8 @@
 // 確認の画面はフックの入れ外しと同じ部品・同じ作法 (書く前に差分を見せ、
 // そのときの中身のハッシュを添えて書かせる)。
 
-import { html, nothing, type TemplateResult } from "lit/html.js";
 import { live } from "lit/directives/live.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import type {
   AccountAgent,
   AccountLogin,
@@ -55,7 +55,11 @@ import {
 } from "./accounts-dialogs";
 import type { AccountsText } from "./accounts-i18n";
 import type { AgentHooksSettings } from "./agent-hooks-settings";
-import { usageCheckBlock } from "./usage-check";
+import {
+  type UsageCheckProps,
+  usageCheckProps,
+  usageCheckTemplate,
+} from "./usage-check";
 
 export type AccountsSettingsDeps = {
   client: AccountsClient;
@@ -96,8 +100,243 @@ function commandToSave(agent: AccountAgent, value: string): string {
   return trimmed === DEFAULT_COMMANDS[agent] ? "" : trimmed;
 }
 
+type ActionProps = { label: string; title: string; onClick(): void };
+
+/** ログインの表の 1 行。 */
+export type AccountsSettingsRowProps = {
+  id: string;
+  agent: AccountAgent;
+  display: string;
+  tags: AccountStatus["tags"];
+  login: "in" | "out" | "unknown";
+  stateLabel: string;
+  email: { text: string; title: string; plan: string | null };
+  checked: { text: string; title: string | null };
+  actions: ActionProps[];
+  path: { text: string; title: string };
+  reason: { problem: boolean; text: string } | null;
+  result: Result | null;
+};
+
+/** 使用量の 1 行 (実際に書く設定ファイルごと)。 */
+export type AccountsUsageRowProps = {
+  tone: "problem" | "on" | "waiting" | "off";
+  who: string;
+  line: { text: string; title: string | null };
+  action: ActionProps | null;
+  checks: UsageCheckProps[];
+  problems: string | null;
+  result: Result | null;
+};
+
+export type AccountsSettingsViewProps = {
+  title: string;
+  intro: string;
+  registryError: string | null;
+  table: { head: string[]; rows: AccountsSettingsRowProps[] } | null;
+  loading: string | null;
+  /** 操作の最中 (行のボタンと追加を押させない)。 */
+  busy: boolean;
+  add: { label: string; onClick(): void };
+  sectionMessage: Result | null;
+  usage: {
+    title: string;
+    refresh: {
+      label: string;
+      title: string;
+      disabled: boolean;
+      onClick(): void;
+    };
+    rows: AccountsUsageRowProps[];
+    howLabel: string;
+    paragraphs: string[];
+    facts: string[];
+    failures: {
+      hidden: boolean;
+      summary: string;
+      lines: string;
+      log: string;
+      clearLabel: string;
+      onClear(): void;
+    };
+  };
+  commands: {
+    title: string;
+    unsaved: { label: string; shown: boolean };
+    intro: string;
+    items: {
+      agent: AccountAgent;
+      value: string;
+      onInput(value: string): void;
+    }[];
+    reset: { label: string; disabled: boolean; onClick(): void };
+  };
+  error: string | null;
+};
+
+export type AccountsSettingsView = (
+  props: AccountsSettingsViewProps,
+) => unknown;
+
+function actionButtonTemplate(
+  action: ActionProps,
+  busy: boolean,
+): TemplateResult {
+  return html`<button
+    type="button"
+    class="gdp-btn gdp-btn-sm"
+    title=${action.title}
+    ?disabled=${busy}
+    @click=${action.onClick}
+  >${action.label}</button>`;
+}
+
+function accountRowTemplate(
+  row: AccountsSettingsRowProps,
+  busy: boolean,
+): TemplateResult {
+  return html`<div
+    class="agent-accounts-row ui-table-row"
+    role="row"
+    data-account=${row.id}
+    data-login=${row.login}
+  ><span class="agent-accounts-name-cell" role="cell"><span class="agent-accounts-kind"
+    >${row.agent}</span
+  ><span class="agent-accounts-name">${row.display}</span>${accountTagListTemplate(row.tags)}</span
+  ><span class="agent-accounts-email" role="cell"><span
+    class="agent-accounts-address"
+    title=${row.email.title}
+  >${row.email.text}</span>${
+    row.email.plan
+      ? html`<span class="agent-accounts-plan">${row.email.plan}</span>`
+      : nothing
+  }</span><span
+    class=${`agent-accounts-state agent-accounts-state-${row.login}`}
+    role="cell"
+  ><span class="agent-accounts-mark" aria-hidden="true">${
+    row.login === "in"
+      ? iconTemplate(CHECK_16_PATHS, "agent-accounts-mark-icon")
+      : row.login === "unknown"
+        ? "?"
+        : nothing
+  }</span><span class="agent-accounts-state-label">${row.stateLabel}</span></span><span
+    class="agent-accounts-checked"
+    role="cell"
+    title=${row.checked.title ?? nothing}
+  >${row.checked.text}</span><span class="agent-accounts-actions" role="cell">${row.actions.map(
+    (action) => actionButtonTemplate(action, busy),
+  )}</span><span class="agent-accounts-path terminal-mono" title=${row.path.title}
+    >${row.path.text}</span
+  >${
+    row.reason
+      ? html`<p
+          class=${row.reason.problem ? "agent-hooks-detail agent-hooks-detail-problem" : "agent-hooks-detail"}
+        >${row.reason.text}</p>`
+      : nothing
+  }${row.result ? resultLineTemplate(row.result) : nothing}</div>`;
+}
+
+function usageRowTemplate(
+  row: AccountsUsageRowProps,
+  busy: boolean,
+): TemplateResult {
+  return html`<div class="agent-accounts-usage-row ui-table-row" data-usage=${row.tone}><span
+    class="agent-accounts-usage-who"
+  >${row.who}</span><span class="agent-accounts-usage-line" title=${row.line.title ?? nothing}
+    >${row.line.text}</span
+  ><span class="agent-accounts-actions">${
+    row.action ? actionButtonTemplate(row.action, busy) : nothing
+  }</span>${row.checks.map(usageCheckTemplate)}${
+    row.problems
+      ? html`<p class="agent-hooks-detail agent-hooks-detail-problem">${row.problems}</p>`
+      : nothing
+  }${row.result ? resultLineTemplate(row.result) : nothing}</div>`;
+}
+
+export const DEFAULT_VIEW: AccountsSettingsView = (props) => html`<strong
+    class="agent-accounts-subtitle"
+    id=${ACCOUNTS_SECTION_ID}
+    >${props.title}</strong
+  ><p class="scope-settings-help">${props.intro}</p><p
+    class="scope-settings-help scope-settings-refresh-error"
+    ?hidden=${!props.registryError}
+  >${props.registryError ?? ""}</p><div class="agent-accounts-table" role="table">${
+    props.table
+      ? html`<div class="agent-accounts-row agent-accounts-head ui-table-head" role="row">${props.table.head.map(
+          (label) =>
+            html`<span class="agent-accounts-head-cell" role="columnheader">${label}</span>`,
+        )}</div>${props.table.rows.map((row) => accountRowTemplate(row, props.busy))}`
+      : props.loading
+        ? html`<p class="scope-settings-help">${props.loading}</p>`
+        : nothing
+  }</div><div class="agent-accounts-add"><button
+    type="button"
+    class="gdp-btn gdp-btn-sm"
+    ?disabled=${props.busy}
+    @click=${props.add.onClick}
+  >${props.add.label}</button></div><p
+    class=${`agent-hooks-result ${props.sectionMessage?.ok === false ? "agent-hooks-result-error" : "agent-hooks-result-ok"}`}
+    ?hidden=${!props.sectionMessage}
+  >${props.sectionMessage?.text ?? ""}</p><div class="agent-accounts-subtitle-row"><strong
+    class="agent-accounts-subtitle"
+  >${props.usage.title}</strong><button
+    type="button"
+    class="gdp-btn gdp-btn-sm agents-usage-refresh"
+    title=${props.usage.refresh.title}
+    ?disabled=${props.usage.refresh.disabled}
+    @click=${props.usage.refresh.onClick}
+  >${props.usage.refresh.label}</button></div><div class="agent-accounts-usage">${props.usage.rows.map(
+    (row) => usageRowTemplate(row, props.busy),
+  )}</div><details class="agent-accounts-how"><summary class="">${props.usage.howLabel}</summary
+    ><div class="agent-accounts-how-body">${props.usage.paragraphs.map(
+      (paragraph) => html`<p class="scope-settings-help">${paragraph}</p>`,
+    )}${props.usage.facts.map(
+      (fact) =>
+        html`<p class="agent-accounts-how-fact terminal-mono">${fact}</p>`,
+    )}</div></details
+  ><details class="agent-hooks-failures" ?hidden=${props.usage.failures.hidden}><summary
+      class=""
+      >${props.usage.failures.summary}</summary
+    ><pre class="terminal-observation-errors">${props.usage.failures.lines}</pre><div
+      class="agent-hooks-failures-footer"
+    ><p class="scope-settings-help">${props.usage.failures.log}</p><button
+      type="button"
+      class="gdp-btn gdp-btn-sm"
+      @click=${props.usage.failures.onClear}
+    >${props.usage.failures.clearLabel}</button></div></details
+  ><div class="agent-accounts-subtitle-row"><strong class="agent-accounts-subtitle"
+      >${props.commands.title}</strong
+    ><span class="agent-accounts-unsaved" ?hidden=${!props.commands.unsaved.shown}
+      >${props.commands.unsaved.label}</span
+    ></div
+  ><p class="scope-settings-help">${props.commands.intro}</p><div class="agent-accounts-commands">${props.commands.items.map(
+    (
+      item,
+    ) => html`<label class="agent-accounts-command"><span class="agent-hooks-name"
+        >${item.agent}</span
+      ><input
+        class="gdp-dialog-input"
+        id=${item.agent === "claude" ? CLAUDE_LAUNCH_COMMAND_ID : nothing}
+        type="text"
+        spellcheck="false"
+        data-agent=${item.agent}
+        .value=${live(item.value)}
+        @input=${(event: Event) =>
+          item.onInput((event.currentTarget as HTMLInputElement).value)}
+      /></label>`,
+  )}<button
+    type="button"
+    class="gdp-btn gdp-btn-sm"
+    ?disabled=${props.commands.reset.disabled}
+    @click=${props.commands.reset.onClick}
+  >${props.commands.reset.label}</button></div><p
+    class="scope-settings-help scope-settings-refresh-error"
+    ?hidden=${!props.error}
+  >${props.error ?? ""}</p>`;
+
 export function createAccountsSettings(
   deps: AccountsSettingsDeps,
+  view: AccountsSettingsView = DEFAULT_VIEW,
 ): AccountsSettings {
   const now = deps.now ?? Date.now;
   // 節の箱。設定のページが置き、中はここが描く。
@@ -161,84 +400,27 @@ export function createAccountsSettings(
       : t.checkedAgo(t.duration(elapsed));
   }
 
-  function stateCell(account: AccountStatus): TemplateResult {
-    const t = text();
-    const shown = shownLoginState(account.login);
-    return html`<span
-      class=${`agent-accounts-state agent-accounts-state-${shown}`}
-      role="cell"
-    ><span class="agent-accounts-mark" aria-hidden="true">${
-      shown === "in"
-        ? iconTemplate(CHECK_16_PATHS, "agent-accounts-mark-icon")
-        : shown === "unknown"
-          ? "?"
-          : nothing
-    }</span><span class="agent-accounts-state-label">${t.loginShown[shown]}</span></span>`;
-  }
-
-  function emailCell(account: AccountStatus): TemplateResult {
-    const t = text();
-    const login = account.login;
-    const who = login.state === "logged-in" ? login.who : "";
-    return html`<span class="agent-accounts-email" role="cell"><span
-      class="agent-accounts-address"
-      title=${[who, login.method].filter(Boolean).join("\n")}
-    >${who || t.noEmail}</span>${
-      login.state === "logged-in" && login.plan
-        ? html`<span class="agent-accounts-plan">${planLabel(login.plan)}</span>`
-        : nothing
-    }</span>`;
-  }
-
-  function checkedCell(account: AccountStatus): TemplateResult {
-    const t = text();
-    const pending = checking.has(account.id);
-    return html`<span
-      class="agent-accounts-checked"
-      role="cell"
-      title=${pending ? nothing : new Date(account.login.checkedAt).toLocaleString()}
-    >${pending ? t.checking : agoText(account.login.checkedAt)}</span>`;
-  }
-
-  /** 2 段目の下に出す理由。無ければ何も出さない。 */
+  /** 2 段目の下に出す理由。無ければ null。 */
   function reasonLine(
     account: AccountStatus,
     home: string,
-  ): TemplateResult | typeof nothing {
+  ): AccountsSettingsRowProps["reason"] {
     const t = text();
     const login = account.login;
-    const line = (problem: boolean, value: string) =>
-      html`<p
-        class=${problem ? "agent-hooks-detail agent-hooks-detail-problem" : "agent-hooks-detail"}
-      >${value}</p>`;
     if (login.state === "unknown")
-      return line(true, t.unknownWhy(login.detail));
+      return { problem: true, text: t.unknownWhy(login.detail) };
     if (login.state === "no-config-dir")
       return account.builtin
-        ? line(
-            false,
-            t.defaultNotSetUp(abbreviateHome(account.configDir, home)),
-          )
-        : line(true, t.noConfigDir(account.configDir));
+        ? {
+            problem: false,
+            text: t.defaultNotSetUp(abbreviateHome(account.configDir, home)),
+          }
+        : { problem: true, text: t.noConfigDir(account.configDir) };
     if (login.state === "logged-in" && login.setupDetail)
-      return line(true, t.onboardingMarkFailed(login.setupDetail));
+      return { problem: true, text: t.onboardingMarkFailed(login.setupDetail) };
     if (login.state === "logged-in" && !login.who && login.whoDetail)
-      return line(false, t.noEmailWhy(login.whoDetail));
-    return nothing;
-  }
-
-  function actionButton(
-    label: string,
-    title: string,
-    onClick: () => void,
-  ): TemplateResult {
-    return html`<button
-      type="button"
-      class="gdp-btn gdp-btn-sm"
-      title=${title}
-      ?disabled=${busy}
-      @click=${onClick}
-    >${label}</button>`;
+      return { problem: false, text: t.noEmailWhy(login.whoDetail) };
+    return null;
   }
 
   function recheck(account: AccountStatus): void {
@@ -257,19 +439,6 @@ export function createAccountsSettings(
     });
   }
 
-  function headRow(): TemplateResult {
-    const t = text();
-    return html`<div class="agent-accounts-row agent-accounts-head ui-table-head" role="row">${[
-      t.columns.account,
-      t.columns.email,
-      t.columns.state,
-      t.columns.checked,
-    ].map(
-      (label) =>
-        html`<span class="agent-accounts-head-cell" role="columnheader">${label}</span>`,
-    )}</div>`;
-  }
-
   /** 結果の文を節の下に出す操作 (追加・タグ・名前の変更・外す)。 */
   function runForSection(
     key: string,
@@ -282,44 +451,78 @@ export function createAccountsSettings(
     });
   }
 
-  function accountRow(account: AccountStatus, home: string): TemplateResult {
+  function accountRowProps(
+    account: AccountStatus,
+    home: string,
+  ): AccountsSettingsRowProps {
     const t = text();
     const shown = shownLoginState(account.login);
     const display = accountDisplayName(account, t);
-    const result = results.get(account.id);
-    return html`<div
-      class="agent-accounts-row ui-table-row"
-      role="row"
-      data-account=${account.id}
-      data-login=${shown}
-    ><span class="agent-accounts-name-cell" role="cell"><span class="agent-accounts-kind"
-      >${account.agent}</span
-    ><span class="agent-accounts-name">${display}</span>${accountTagListTemplate(account.tags)}</span
-    >${emailCell(account)}${stateCell(account)}${checkedCell(account)}<span
-      class="agent-accounts-actions"
-      role="cell"
-    >${actionButton(t.recheck, t.recheckTitle(display), () => recheck(account))}${
-      // 既定のアカウントは設定ディレクトリが無くてもログインで作られる。
-      shown === "out" && (account.exists || account.builtin)
-        ? actionButton(
-            t.loginButton,
-            t.loginTitle(display),
-            () => void run(account.id, () => deps.dialogs.login(account)),
-          )
-        : nothing
-    }${actionButton(t.tags, t.tagsTitle(display), () =>
-      runForSection(account.id, () => deps.dialogs.tags(account)),
-    )}${
-      account.builtin
-        ? nothing
-        : html`${actionButton(t.rename, t.renameTitle(account.name), () =>
+    const login = account.login;
+    const who = login.state === "logged-in" ? login.who : "";
+    const pending = checking.has(account.id);
+    const actions: ActionProps[] = [
+      {
+        label: t.recheck,
+        title: t.recheckTitle(display),
+        onClick: () => recheck(account),
+      },
+    ];
+    // 既定のアカウントは設定ディレクトリが無くてもログインで作られる。
+    if (shown === "out" && (account.exists || account.builtin))
+      actions.push({
+        label: t.loginButton,
+        title: t.loginTitle(display),
+        onClick: () => void run(account.id, () => deps.dialogs.login(account)),
+      });
+    actions.push({
+      label: t.tags,
+      title: t.tagsTitle(display),
+      onClick: () =>
+        runForSection(account.id, () => deps.dialogs.tags(account)),
+    });
+    if (!account.builtin)
+      actions.push(
+        {
+          label: t.rename,
+          title: t.renameTitle(account.name),
+          onClick: () =>
             runForSection(account.id, () => deps.dialogs.rename(account)),
-          )}${actionButton(t.remove, t.removeTitle(account.name), () =>
+        },
+        {
+          label: t.remove,
+          title: t.removeTitle(account.name),
+          onClick: () =>
             runForSection(account.id, () => deps.dialogs.remove(account)),
-          )}`
-    }</span><span class="agent-accounts-path terminal-mono" title=${account.configDir}
-      >${abbreviateHome(account.configDir, home)}</span
-    >${reasonLine(account, home)}${result ? resultLineTemplate(result) : nothing}</div>`;
+        },
+      );
+    return {
+      id: account.id,
+      agent: account.agent,
+      display,
+      tags: account.tags,
+      login: shown,
+      stateLabel: t.loginShown[shown],
+      email: {
+        text: who || t.noEmail,
+        title: [who, login.method].filter(Boolean).join("\n"),
+        plan:
+          login.state === "logged-in" && login.plan
+            ? planLabel(login.plan)
+            : null,
+      },
+      checked: {
+        text: pending ? t.checking : agoText(login.checkedAt),
+        title: pending ? null : new Date(login.checkedAt).toLocaleString(),
+      },
+      actions,
+      path: {
+        text: abbreviateHome(account.configDir, home),
+        title: account.configDir,
+      },
+      reason: reasonLine(account, home),
+      result: results.get(account.id) ?? null,
+    };
   }
 
   /** 使用量を確かめるの開く操作。起動コマンドの欄は同じページにある。 */
@@ -341,12 +544,10 @@ export function createAccountsSettings(
   function usageParts(
     accounts: AccountStatus[],
     home: string,
-  ): { rows: TemplateResult[]; how: TemplateResult[] } {
+  ): { rows: AccountsUsageRowProps[]; facts: string[] } {
     const t = text();
-    const how: TemplateResult[] = t.usageIntro.map(
-      (paragraph) => html`<p class="scope-settings-help">${paragraph}</p>`,
-    );
-    const rows: TemplateResult[] = [];
+    const rows: AccountsUsageRowProps[] = [];
+    const facts: string[] = [];
     const groups = new Map<string, AccountStatus[]>();
     for (const account of accounts) {
       if (account.agent !== "claude" || !account.statusLine) continue;
@@ -379,51 +580,48 @@ export function createAccountsSettings(
       const problems: string[] = [];
       if (status.wrapperMissing) problems.push(t.statusLineWrapperMissing);
       if (status.detail) problems.push(status.detail);
-      const result = results.get(`statusline:${realPath}`);
-      rows.push(html`<div class="agent-accounts-usage-row ui-table-row" data-usage=${tone}><span
-        class="agent-accounts-usage-who"
-      >${names}</span><span
-        class="agent-accounts-usage-line"
-        title=${received > 0 ? new Date(received).toLocaleString() : nothing}
-      >${
-        status.state === "unreadable"
-          ? t.statusLine.unreadable
-          : status.state === "no-config-dir"
-            ? t.statusLine["no-config-dir"]
-            : !on
-              ? t.usageOff
-              : received > 0
-                ? t.usageReceiving(agoText(received))
-                : t.usageWaiting
-      }</span><span class="agent-accounts-actions">${
-        canAct
-          ? actionButton(
-              action === "install"
-                ? t.statusLineInstall
-                : t.statusLineUninstall,
-              t.statusLineDialogTitle(action),
-              () =>
+      rows.push({
+        tone,
+        who: names,
+        line: {
+          text:
+            status.state === "unreadable"
+              ? t.statusLine.unreadable
+              : status.state === "no-config-dir"
+                ? t.statusLine["no-config-dir"]
+                : !on
+                  ? t.usageOff
+                  : received > 0
+                    ? t.usageReceiving(agoText(received))
+                    : t.usageWaiting,
+          title: received > 0 ? new Date(received).toLocaleString() : null,
+        },
+        action: canAct
+          ? {
+              label:
+                action === "install"
+                  ? t.statusLineInstall
+                  : t.statusLineUninstall,
+              title: t.statusLineDialogTitle(action),
+              onClick: () =>
                 void run(`statusline:${realPath}`, () =>
                   deps.dialogs.statusLine(first, action),
                 ),
-            )
-          : nothing
-      }</span>${
+            }
+          : null,
         // 使用量を確かめる (全体ボードのカードと同じ部品)。同じ設定ファイルを
         // 共有するアカウントが並ぶときは、ボタンに名前を添える。
-        members.map(
+        checks: members.flatMap(
           (member) =>
-            usageCheckBlock(member, now(), deps.client, t, openers, {
+            usageCheckProps(member, now(), deps.client, t, openers, {
               name:
                 members.length > 1 ? accountDisplayName(member, t) : undefined,
-            }) ?? nothing,
-        )
-      }${
-        problems.length > 0
-          ? html`<p class="agent-hooks-detail agent-hooks-detail-problem">${problems.join("\n")}</p>`
-          : nothing
-      }${result ? resultLineTemplate(result) : nothing}</div>`);
-      const facts = [
+            }) ?? [],
+        ),
+        problems: problems.length > 0 ? problems.join("\n") : null,
+        result: results.get(`statusline:${realPath}`) ?? null,
+      });
+      const lines = [
         `${names}: ${t.statusLine[status.state]}`,
         t.usageFile(
           status.symlink
@@ -431,15 +629,13 @@ export function createAccountsSettings(
             : abbreviateHome(status.path, home),
         ),
       ];
-      if (status.command) facts.push(t.statusLineCommand(status.command));
-      how.push(
-        html`<p class="agent-accounts-how-fact terminal-mono">${facts.join("\n")}</p>`,
-      );
+      if (status.command) lines.push(t.statusLineCommand(status.command));
+      facts.push(lines.join("\n"));
     }
-    return { rows, how };
+    return { rows, facts };
   }
 
-  function sectionTemplate(): TemplateResult {
+  function viewProps(): AccountsSettingsViewProps {
     const t = text();
     const { data, error } = deps.client.snapshot();
     const refreshing =
@@ -451,95 +647,88 @@ export function createAccountsSettings(
       commandValues.codex = data.launchCommands.codex;
     }
     const usage = data ? usageParts(data.accounts, data.home) : null;
-    return html`<strong class="agent-accounts-subtitle" id=${ACCOUNTS_SECTION_ID}>${t.sectionTitle}</strong><p
-        class="scope-settings-help"
-      >${t.sectionIntro}</p><p
-        class="scope-settings-help scope-settings-refresh-error"
-        ?hidden=${!data?.registryError}
-      >${data?.registryError ? `${t.registryError(data.registryPath)}\n${data.registryError}` : ""}</p><div
-        class="agent-accounts-table"
-        role="table"
-      >${
-        data
-          ? html`${headRow()}${data.accounts.map((account) => accountRow(account, data.home))}`
-          : error
-            ? nothing
-            : html`<p class="scope-settings-help">${t.loading}</p>`
-      }</div><div class="agent-accounts-add"><button
-        type="button"
-        class="gdp-btn gdp-btn-sm"
-        ?disabled=${busy}
-        @click=${() => runForSection("add", () => deps.dialogs.add())}
-      >${t.add}</button></div><p
-        class=${`agent-hooks-result ${sectionMessage?.ok === false ? "agent-hooks-result-error" : "agent-hooks-result-ok"}`}
-        ?hidden=${!sectionMessage}
-      >${sectionMessage?.text ?? ""}</p><div class="agent-accounts-subtitle-row"><strong
-        class="agent-accounts-subtitle"
-      >${t.usageTitle}</strong><button
-        type="button"
-        class="gdp-btn gdp-btn-sm agents-usage-refresh"
-        title=${t.usageRefreshAuto}
-        ?disabled=${refreshing || !data}
-        @click=${() => void deps.client.checkAllUsage()}
-      >${refreshing ? t.usageChecking : t.usageRefreshAll}</button></div><div
-        class="agent-accounts-usage"
-      >${usage?.rows ?? nothing}</div><details class="agent-accounts-how"><summary class=""
-        >${t.usageHow}</summary
-      ><div class="agent-accounts-how-body">${usage?.how ?? nothing}</div></details><details
-        class="agent-hooks-failures"
-        ?hidden=${!data || data.usageFailures.total === 0}
-      ><summary class="">${data ? t.usageFailures(data.usageFailures.total) : ""}</summary><pre
-        class="terminal-observation-errors"
-      >${data ? data.usageFailures.recent.join("\n") : ""}</pre><div
-        class="agent-hooks-failures-footer"
-      ><p class="scope-settings-help">${data ? t.usageFailuresLog(data.usageFailures.log) : ""}</p><button
-        type="button"
-        class="gdp-btn gdp-btn-sm"
-        @click=${() =>
-          void run("failures", async () => {
-            await deps.client.clearUsageFailures();
-            return null;
-          })}
-      >${t.usageFailuresClear}</button></div></details><div class="agent-accounts-subtitle-row"><strong
-        class="agent-accounts-subtitle"
-      >${t.commandsTitle}</strong><span class="agent-accounts-unsaved" ?hidden=${!data || !commandsDirty()}
-        >${t.commandsUnsaved}</span
-      ></div><p class="scope-settings-help">${t.commandsIntro}</p><div class="agent-accounts-commands">${HOOK_AGENTS.map(
-        (
+    const failures = data?.usageFailures;
+    return {
+      title: t.sectionTitle,
+      intro: t.sectionIntro,
+      registryError: data?.registryError
+        ? `${t.registryError(data.registryPath)}\n${data.registryError}`
+        : null,
+      table: data
+        ? {
+            head: [
+              t.columns.account,
+              t.columns.email,
+              t.columns.state,
+              t.columns.checked,
+            ],
+            rows: data.accounts.map((account) =>
+              accountRowProps(account, data.home),
+            ),
+          }
+        : null,
+      loading: !data && !error ? t.loading : null,
+      busy,
+      add: {
+        label: t.add,
+        onClick: () => runForSection("add", () => deps.dialogs.add()),
+      },
+      sectionMessage,
+      usage: {
+        title: t.usageTitle,
+        refresh: {
+          label: refreshing ? t.usageChecking : t.usageRefreshAll,
+          title: t.usageRefreshAuto,
+          disabled: refreshing || !data,
+          onClick: () => void deps.client.checkAllUsage(),
+        },
+        rows: usage?.rows ?? [],
+        howLabel: t.usageHow,
+        paragraphs: usage ? [...t.usageIntro] : [],
+        facts: usage?.facts ?? [],
+        failures: {
+          hidden: !failures || failures.total === 0,
+          summary: failures ? t.usageFailures(failures.total) : "",
+          lines: failures ? failures.recent.join("\n") : "",
+          log: failures ? t.usageFailuresLog(failures.log) : "",
+          clearLabel: t.usageFailuresClear,
+          onClear: () =>
+            void run("failures", async () => {
+              await deps.client.clearUsageFailures();
+              return null;
+            }),
+        },
+      },
+      commands: {
+        title: t.commandsTitle,
+        unsaved: { label: t.commandsUnsaved, shown: !!data && commandsDirty() },
+        intro: t.commandsIntro,
+        items: HOOK_AGENTS.map((agent) => ({
           agent,
-        ) => html`<label class="agent-accounts-command"><span class="agent-hooks-name">${agent}</span><input
-          class="gdp-dialog-input"
-          id=${agent === "claude" ? CLAUDE_LAUNCH_COMMAND_ID : nothing}
-          type="text"
-          spellcheck="false"
-          data-agent=${agent}
-          .value=${live(commandValues[agent])}
-          @input=${(event: Event) => {
-            commandValues[agent] = (
-              event.currentTarget as HTMLInputElement
-            ).value;
+          value: commandValues[agent],
+          onInput(value: string) {
+            commandValues[agent] = value;
             commandsEdited = true;
             commandsChanged();
-          }}
-        /></label>`,
-      )}<button
-        type="button"
-        class="gdp-btn gdp-btn-sm"
-        ?disabled=${!data}
-        @click=${() => {
-          for (const agent of HOOK_AGENTS)
-            commandValues[agent] = DEFAULT_COMMANDS[agent];
-          commandsEdited = true;
-          commandsChanged();
-        }}
-      >${t.commandsReset}</button></div><p
-        class="scope-settings-help scope-settings-refresh-error"
-        ?hidden=${!error}
-      >${error ? `${t.bandLoadFailed}\n${error}` : ""}</p>`;
+          },
+        })),
+        reset: {
+          label: t.commandsReset,
+          disabled: !data,
+          onClick: () => {
+            for (const agent of HOOK_AGENTS)
+              commandValues[agent] = DEFAULT_COMMANDS[agent];
+            commandsEdited = true;
+            commandsChanged();
+          },
+        },
+      },
+      error: error ? `${t.bandLoadFailed}\n${error}` : null,
+    };
   }
 
   function render(): void {
-    renderOwned(element, sectionTemplate());
+    renderOwned(element, view(viewProps()));
   }
 
   deps.client.subscribe(() => {

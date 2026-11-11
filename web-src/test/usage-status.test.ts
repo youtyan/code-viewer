@@ -10,16 +10,17 @@
 
 import "./_dom";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import type { AccountStatus, AccountsResponse } from "../core/agent-accounts";
+import type { AccountStatus } from "../core/agent-accounts";
 import type { AccountsSnapshot } from "../views/agents/accounts-client";
 import { agentsText } from "../views/agents/i18n";
+import { createUsageStatusPresenter } from "../views/agents/usage-status";
 import {
   DEFAULT_VIEW as USAGE_DEFAULT_VIEW,
   type UsagePopoverProps,
   type UsageStatusView,
   type UsageStatusViewProps,
 } from "../views/agents/usage-status-view";
-import { createUsageStatusPresenter } from "../views/agents/usage-status";
+import { accountsData } from "./_accounts-fixture";
 
 const NOW = Date.now();
 const MINUTE = 60_000;
@@ -67,19 +68,6 @@ function account(
   };
 }
 
-function response(accounts: AccountStatus[]): AccountsResponse {
-  return {
-    home: "/home/sample",
-    serverRoot: "/home/sample/work/sample-app",
-    accounts,
-    registryError: null,
-    registryPath: "/home/sample/.local/state/code-viewer/accounts.json",
-    launchCommands: { claude: "claude", codex: "codex" },
-    lastLaunch: null,
-    usageFailures: { total: 0, recent: [], log: "" },
-  };
-}
-
 type Harness = {
   root: HTMLElement;
   logins: string[];
@@ -97,7 +85,7 @@ function mount(accounts: AccountStatus[], view?: UsageStatusView): void {
   root.id = "usage-status";
   document.body.appendChild(root);
   const listeners = new Set<() => void>();
-  let snapshot: AccountsSnapshot = { data: response(accounts), error: "" };
+  let snapshot: AccountsSnapshot = { data: accountsData(accounts), error: "" };
   const h: Harness = {
     root,
     logins: [],
@@ -262,7 +250,7 @@ describe("the usage popover", () => {
     ]);
     // 最下段の塊は値があるときだけなので、ポップオーバーは値のあるもう 1 つから開く。
     harness.setSnapshot({
-      data: response([
+      data: accountsData([
         account({ id: "claude:default" }),
         account({
           id: "codex:personal",

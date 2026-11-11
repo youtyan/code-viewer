@@ -6,7 +6,7 @@
 //
 // 押すとエージェント一覧へ。入力待ちが 1 件だけなら、そのペインを直接開く。
 
-import { html, type TemplateResult } from "lit/html.js";
+import { html } from "lit/html.js";
 import { headerAgentCounts } from "../../core/agent-overview";
 import { renderOwned } from "../ui/renderer";
 import type { AgentMonitor } from "./agent-monitor";
@@ -19,22 +19,29 @@ export type AgentStatusDeps = {
   openPane(pane: string): void;
 };
 
-function itemTemplate(
-  state: "waiting" | "working",
-  label: string,
-  count: string,
-): TemplateResult {
-  return html`<span class=${`agent-status-item agent-status-${state}`}><i
-      class=${`terminal-mark terminal-mark-${state}`}
-      aria-hidden="true"
-    ></i><span class="agent-status-label">${label}</span><span
-      class="agent-status-count"
-    >${count}</span></span>`;
-}
+/** 件数の欄に描くもの (入力待ち・作業中の順)。 */
+export type AgentStatusProps = {
+  items: { state: "waiting" | "working"; label: string; count: string }[];
+};
+
+export type AgentStatusView = (props: AgentStatusProps) => unknown;
+
+export const DEFAULT_VIEW: AgentStatusView = (props) =>
+  props.items.map(
+    (
+      item,
+    ) => html`<span class=${`agent-status-item agent-status-${item.state}`}><i
+        class=${`terminal-mark terminal-mark-${item.state}`}
+        aria-hidden="true"
+      ></i><span class="agent-status-label">${item.label}</span><span
+        class="agent-status-count"
+      >${item.count}</span></span>`,
+  );
 
 export function mountAgentStatus(
   button: HTMLButtonElement,
   deps: AgentStatusDeps,
+  view: AgentStatusView = DEFAULT_VIEW,
 ): { localize(): void } {
   function render(): void {
     const text = deps.getText();
@@ -44,16 +51,22 @@ export function mountAgentStatus(
     // 取れていないときは数えられない。0 と出すと「誰も待っていない」と読める。
     renderOwned(
       button,
-      html`${itemTemplate(
-        "waiting",
-        text.headerWaiting,
-        overview ? String(counts.waiting) : "–",
-      )}${itemTemplate(
-        "working",
-        text.headerWorking,
-        overview ? String(counts.working) : "–",
-      )}`,
+      view({
+        items: [
+          {
+            state: "waiting",
+            label: text.headerWaiting,
+            count: overview ? String(counts.waiting) : "–",
+          },
+          {
+            state: "working",
+            label: text.headerWorking,
+            count: overview ? String(counts.working) : "–",
+          },
+        ],
+      }),
     );
+
     button.classList.toggle("agent-status-attention", counts.waiting > 0);
     button.classList.toggle("agent-status-busy", counts.working > 0);
     button.classList.toggle("agent-status-error", error !== "");

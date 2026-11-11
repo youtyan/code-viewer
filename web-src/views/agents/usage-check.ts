@@ -175,19 +175,44 @@ function failureLines(state: UsageCheckState, t: AccountsText): Failure | null {
   };
 }
 
-/**
- * フォルダの場所。~ で縮め、最後の段を残して前を省略する (真ん中が「…」に
- * なる。CSS の .usage-check-folder)。全文は title。
- */
-function folderLineTemplate(folder: string, home: string): TemplateResult {
-  const shown = home ? abbreviateHome(folder, home) : folder;
-  const cut = shown.lastIndexOf("/", shown.length - 2) + 1;
-  return html`<p class="usage-check-folder terminal-mono" title=${folder}><span
-      class="usage-check-folder-head"
-    >${shown.slice(0, cut)}</span><span class="usage-check-folder-tail"
-      >${shown.slice(cut)}</span
-    ></p>`;
-}
+type UsageCheckButton = {
+  label: string;
+  title: string;
+  disabled: boolean;
+  onClick(): void;
+};
+
+/** 使用量の確かめの欄に出すもの (presenter が作り、view が描く)。 */
+export type UsageCheckProps = {
+  account: string;
+  /** 先頭の「確かめる」(出さないなら null)。 */
+  check: UsageCheckButton | null;
+  /** 走っている間の文。 */
+  running: string | null;
+  failure: {
+    reason: string;
+    /** 画面で止まった: フォルダ・「このアカウントで開く」・開いた結果。 */
+    stop: {
+      folder: { head: string; tail: string; title: string };
+      open: { label: string; title: string; onClick(): void };
+      again: UsageCheckButton;
+      opened:
+        | { kind: "failed"; title: string; detail: string }
+        | { kind: "opened"; next: string; notice: string }
+        | null;
+    } | null;
+    next: string;
+    /** 起動コマンドで起こせなかった: その欄へ移るボタン。 */
+    commands: { label: string; onClick(): void; again: UsageCheckButton } | null;
+    more: {
+      label: string;
+      text: string;
+      copy: { label: string; copied: string; failed: string };
+      open: boolean;
+      onToggle(open: boolean): void;
+    } | null;
+  } | null;
+};
 
 /**
  * 「このアカウントで開く」「ログイン」「起動コマンドを開く」を押したとき。
@@ -198,18 +223,17 @@ export type UsageCheckOpeners = Pick<AccountDialogs, "openHere" | "login"> & {
 };
 
 /**
- * ボタン・走っている間の文・失敗の理由と次の手順。出すものが無ければ null。
- * name はボタンに添える表示名 (設定の行で複数のアカウントが並ぶとき)。
+ * ボタン・走っている間の文・失敗の理由と次の手順を決める。出すものが無ければ
+ * null。name はボタンに添える表示名 (設定の行で複数のアカウントが並ぶとき)。
  */
-export function usageCheckBlock(
+export function usageCheckProps(
   account: AccountStatus,
   now: number,
   client: AccountsClient,
   t: AccountsText,
   openers: UsageCheckOpeners,
   options: { name?: string } = {},
-): TemplateResult | null {
-  defineCvUsageCheckCopy();
+): UsageCheckProps | null {
   const state = client.usageCheck(account.id);
   const running = state?.running === true;
   // 今回の取得失敗は、保存済みの値が新しくても隠さない。
@@ -227,106 +251,210 @@ export function usageCheckBlock(
   const offered = usageCheckOffered(account, now);
   if (!running && !showFailure && !offered) return null;
 
-  const checkButton = (label: string) =>
-    html`<button
-      type="button"
-      class="agents-secondary usage-check-button"
-      title=${t.usageCheckTitle}
-      ?disabled=${running}
-      @click=${() => void client.checkUsage(account.id)}
-    >${label}</button>`;
+  const checkButton = (label: string): UsageCheckButton => ({
+    label,
+    title: t.usageCheckTitle,
+    disabled: running,
+    onClick: () => void client.checkUsage(account.id),
+  });
   // 画面で止まった・起動に失敗したときは、下の「もう一度確かめる」が同じ役をする。
   const startFailed =
     showFailure &&
     state?.response?.status === "failed" &&
     state.response.reason === "start-failed";
-  const first =
+  const check =
     running || ((offered || refreshFailed) && !stop && !startFailed)
       ? checkButton(options.name ? t.usageCheckFor(options.name) : t.usageCheck)
-      : nothing;
+      : null;
   if (running)
-    return html`<div class="usage-check" data-account=${account.id}>${first}<p
-        class="usage-check-status"
-        role="status"
-      >${t.usageChecking}</p></div>`;
+    return {
+      account: account.id,
+      check,
+      running: t.usageChecking,
+      failure: null,
+    };
   if (!showFailure || !failure)
-    return html`<div class="usage-check" data-account=${account.id}>${first}</div>`;
+    return { account: account.id, check, running: null, failure: null };
   const opened = state?.opened;
-  const stopPart = stop
-    ? html`${folderLineTemplate(stop.folder, client.snapshot().data?.home ?? "")}<div
-          class="usage-check-actions"
-        ><button
-          type="button"
-          class="agents-secondary usage-check-open"
-          title=${stop.kind === "login" ? t.loginTitle(accountDisplayName(account, t)) : t.usageCheckOpenHereTitle(stop.folder)}
-          @click=${async () => {
-            try {
-              let notice = "";
-              if (stop.kind === "login") await openers.login(account);
-              else notice = await openers.openHere(account, stop.folder);
-              client.noteUsageCheckOpened(account.id, "", notice);
-            } catch (error) {
-              console.error("[code-viewer] could not open the account", error);
-              client.noteUsageCheckOpened(account.id, formatErrorDetail(error));
-            }
-          }}
-        >${stop.kind === "login" ? t.loginButton : t.usageCheckOpenHere}</button>${checkButton(
-          t.usageCheckAgain,
-        )}</div>${
-          opened?.error
-            ? html`<p class="usage-check-failed">${t.usageCheckOpenFailed}</p><p
-                  class="usage-check-next"
-                >${opened.error}</p>`
-            : opened
-              ? html`<p class="usage-check-next">${t.usageCheckAfterOpen(
-                  stop.kind === "login"
-                    ? "login"
-                    : stop.kind === "timeout"
-                      ? "look"
-                      : "answer",
-                  t.usageCheckAgain,
-                )}</p>${
-                  opened.notice
-                    ? html`<p class="usage-check-failed">${opened.notice}</p>`
-                    : nothing
-                }`
-              : nothing
-        }`
-    : nothing;
+  const home = client.snapshot().data?.home ?? "";
+  const shownFolder = stop
+    ? home
+      ? abbreviateHome(stop.folder, home)
+      : stop.folder
+    : "";
+  const cut = shownFolder.lastIndexOf("/", shownFolder.length - 2) + 1;
   // 一覧の取り直しのたびに描き直すので、開いたことを結果ごとに覚える。
   const key = `${account.id}\n${failure.more}`;
-  return html`<div class="usage-check" data-account=${account.id}>${first}<p
+  return {
+    account: account.id,
+    check,
+    running: null,
+    failure: {
+      reason: failure.reason,
+      stop: stop
+        ? {
+            folder: {
+              head: shownFolder.slice(0, cut),
+              tail: shownFolder.slice(cut),
+              title: stop.folder,
+            },
+            open: {
+              label:
+                stop.kind === "login" ? t.loginButton : t.usageCheckOpenHere,
+              title:
+                stop.kind === "login"
+                  ? t.loginTitle(accountDisplayName(account, t))
+                  : t.usageCheckOpenHereTitle(stop.folder),
+              onClick: async () => {
+                try {
+                  let notice = "";
+                  if (stop.kind === "login") await openers.login(account);
+                  else notice = await openers.openHere(account, stop.folder);
+                  client.noteUsageCheckOpened(account.id, "", notice);
+                } catch (error) {
+                  console.error(
+                    "[code-viewer] could not open the account",
+                    error,
+                  );
+                  client.noteUsageCheckOpened(
+                    account.id,
+                    formatErrorDetail(error),
+                  );
+                }
+              },
+            },
+            again: checkButton(t.usageCheckAgain),
+            opened: opened?.error
+              ? {
+                  kind: "failed",
+                  title: t.usageCheckOpenFailed,
+                  detail: opened.error,
+                }
+              : opened
+                ? {
+                    kind: "opened",
+                    next: t.usageCheckAfterOpen(
+                      stop.kind === "login"
+                        ? "login"
+                        : stop.kind === "timeout"
+                          ? "look"
+                          : "answer",
+                      t.usageCheckAgain,
+                    ),
+                    notice: opened.notice,
+                  }
+                : null,
+          }
+        : null,
+      next: failure.next,
+      commands: startFailed
+        ? {
+            label: t.usageCheckOpenCommands,
+            onClick: () => openers.openLaunchCommands(),
+            again: checkButton(t.usageCheckAgain),
+          }
+        : null,
+      more: failure.more
+        ? {
+            label: t.usageCheckMore,
+            text: failure.more,
+            copy: {
+              label: t.usageCheckCopy,
+              copied: t.copiedLocation,
+              failed: t.copyLocationFailed,
+            },
+            open: openDetails.has(key),
+            onToggle: (open) => {
+              if (open) openDetails.add(key);
+              else openDetails.delete(key);
+            },
+          }
+        : null,
+    },
+  };
+}
+
+function checkButtonTemplate(button: UsageCheckButton): TemplateResult {
+  return html`<button
+    type="button"
+    class="agents-secondary usage-check-button"
+    title=${button.title}
+    ?disabled=${button.disabled}
+    @click=${button.onClick}
+  >${button.label}</button>`;
+}
+
+/** 使用量の確かめの欄 (既定の描き方)。全体ボードのカードと設定の行が使う。 */
+export function usageCheckTemplate(props: UsageCheckProps): TemplateResult {
+  defineCvUsageCheckCopy();
+  const first = props.check ? checkButtonTemplate(props.check) : nothing;
+  if (props.running)
+    return html`<div class="usage-check" data-account=${props.account}>${first}<p
+        class="usage-check-status"
+        role="status"
+      >${props.running}</p></div>`;
+  const failure = props.failure;
+  if (!failure)
+    return html`<div class="usage-check" data-account=${props.account}>${first}</div>`;
+  const stop = failure.stop;
+  return html`<div class="usage-check" data-account=${props.account}>${first}<p
       class="usage-check-failed"
       role="alert"
-    >${failure.reason}</p>${stopPart}${
+    >${failure.reason}</p>${
+      stop
+        ? html`<p class="usage-check-folder terminal-mono" title=${stop.folder.title}><span
+                class="usage-check-folder-head"
+              >${stop.folder.head}</span><span class="usage-check-folder-tail"
+                >${stop.folder.tail}</span
+              ></p
+            ><div class="usage-check-actions"><button
+              type="button"
+              class="agents-secondary usage-check-open"
+              title=${stop.open.title}
+              @click=${stop.open.onClick}
+            >${stop.open.label}</button>${checkButtonTemplate(stop.again)}</div>${
+              stop.opened?.kind === "failed"
+                ? html`<p class="usage-check-failed">${stop.opened.title}</p><p
+                      class="usage-check-next"
+                    >${stop.opened.detail}</p>`
+                : stop.opened?.kind === "opened"
+                  ? html`<p class="usage-check-next">${stop.opened.next}</p>${
+                      stop.opened.notice
+                        ? html`<p class="usage-check-failed">${stop.opened.notice}</p>`
+                        : nothing
+                    }`
+                  : nothing
+            }`
+        : nothing
+    }${
       failure.next
         ? html`<p class="usage-check-next">${failure.next}</p>`
         : nothing
     }${
-      // 起動コマンドで claude を起こせなかった: その欄へ移るボタン。
-      startFailed
+      failure.commands
         ? html`<div class="usage-check-actions"><button
               type="button"
               class="agents-secondary usage-check-commands"
-              @click=${() => openers.openLaunchCommands()}
-            >${t.usageCheckOpenCommands}</button>${checkButton(t.usageCheckAgain)}</div>`
+              @click=${failure.commands.onClick}
+            >${failure.commands.label}</button>${checkButtonTemplate(
+              failure.commands.again,
+            )}</div>`
         : nothing
     }${
       failure.more
         ? html`<details
             class="usage-check-more"
-            .open=${openDetails.has(key)}
-            @toggle=${(event: Event) => {
-              if ((event.currentTarget as HTMLDetailsElement).open)
-                openDetails.add(key);
-              else openDetails.delete(key);
-            }}
-          ><summary class="">${t.usageCheckMore}</summary><cv-usage-check-copy
-            .text=${failure.more}
-            .label=${t.usageCheckCopy}
-            .copiedLabel=${t.copiedLocation}
-            .failedLabel=${t.copyLocationFailed}
-          ></cv-usage-check-copy><pre class="usage-check-detail terminal-mono">${failure.more}</pre></details>`
+            .open=${failure.more.open}
+            @toggle=${(event: Event) =>
+              failure.more?.onToggle(
+                (event.currentTarget as HTMLDetailsElement).open,
+              )}
+          ><summary class="">${failure.more.label}</summary><cv-usage-check-copy
+            .text=${failure.more.text}
+            .label=${failure.more.copy.label}
+            .copiedLabel=${failure.more.copy.copied}
+            .failedLabel=${failure.more.copy.failed}
+          ></cv-usage-check-copy><pre class="usage-check-detail terminal-mono">${failure.more.text}</pre></details>`
         : nothing
     }</div>`;
 }

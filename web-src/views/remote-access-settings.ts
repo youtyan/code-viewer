@@ -89,8 +89,165 @@ const FIELD_INPUT: Record<
   token: { type: "password" },
 };
 
+/** 状態の 1 行。detail が button なら 3 列目に小さなボタンを置く。 */
+export type RemoteAccessRowProps = {
+  name: string;
+  tone: Tone;
+  label: string;
+  detail:
+    | { kind: "text"; text: string }
+    | { kind: "button"; label: string; title?: string; onClick(): void };
+  /** 理由 (赤)。 */
+  problem?: string;
+  /** 補足 (無彩色)。 */
+  note?: string;
+};
+
+export type RemoteAccessFieldProps = {
+  field: Field | "token";
+  label: string;
+  placeholder?: string;
+  disabled: boolean;
+  value: string;
+  onInput(value: string): void;
+};
+
+type ButtonProps = { label: string; disabled: boolean; onClick(): void };
+
+export type RemoteAccessViewProps = {
+  title: string;
+  notice: { text: string; hidden: boolean; error: boolean };
+  /** 読み込みの失敗の文。null は隠す。 */
+  loadError: string | null;
+  /** 外から開いた・入口でないサーバ: 案内の 1 文だけを出して本文を隠す。 */
+  bodyHidden: boolean;
+  intro: string;
+  rows: RemoteAccessRowProps[];
+  start: ButtonProps;
+  stop: ButtonProps;
+  install: ButtonProps & { hidden: boolean };
+  actionError: string;
+  autoStart: {
+    label: string;
+    checked: boolean;
+    disabled: boolean;
+    onChange(checked: boolean): void;
+  };
+  valuesTitle: string;
+  unsaved: { label: string; shown: boolean };
+  valuesIntro: string;
+  fields: RemoteAccessFieldProps[];
+  tokenHelp: string;
+  savedTo: string;
+  log: { hidden: boolean; summary: string; text: string };
+};
+
+export type RemoteAccessView = (props: RemoteAccessViewProps) => unknown;
+
+function remoteRowTemplate(row: RemoteAccessRowProps): TemplateResult {
+  return html`<div class="agent-hooks-row remote-access-row ui-table-row"><span
+      class="agent-hooks-name"
+    >${row.name}</span><span class=${`agent-hooks-state ${TONE_CLASS[row.tone]}`.trim()}
+      ><i class="agent-hooks-mark" aria-hidden="true"></i>${row.label}</span
+    >${
+      row.detail.kind === "text"
+        ? html`<span class="agent-hooks-path" title=${row.detail.text}>${row.detail.text}</span>`
+        : html`<button
+            type="button"
+            class="gdp-btn gdp-btn-sm remote-access-row-button"
+            title=${ifDefined(row.detail.title)}
+            @click=${row.detail.onClick}
+          >${row.detail.label}</button>`
+    }${
+      row.problem
+        ? html`<p class="agent-hooks-detail agent-hooks-detail-problem">${row.problem}</p>`
+        : nothing
+    }${row.note ? html`<p class="agent-hooks-detail">${row.note}</p>` : nothing}</div>`;
+}
+
+function remoteFieldTemplate(props: RemoteAccessFieldProps): TemplateResult {
+  const look = FIELD_INPUT[props.field];
+  const id = `remote-access-${props.field}`;
+  return html`<label for=${id}>${props.label}</label><input
+      class="gdp-dialog-input"
+      id=${id}
+      spellcheck="false"
+      autocomplete="off"
+      type=${look.type}
+      placeholder=${ifDefined(props.placeholder)}
+      min=${ifDefined(look.range ? "1" : undefined)}
+      max=${ifDefined(look.range ? "65535" : undefined)}
+      step=${ifDefined(look.range ? "1" : undefined)}
+      ?disabled=${props.disabled}
+      .value=${live(props.value)}
+      @input=${(event: Event) =>
+        props.onInput((event.currentTarget as HTMLInputElement).value)}
+    />`;
+}
+
+export const DEFAULT_VIEW: RemoteAccessView = (props) => html`<strong
+    class="agent-accounts-subtitle"
+    id=${REMOTE_ACCESS_SECTION_ID}
+    >${props.title}</strong
+  ><p
+    class=${props.notice.error ? "scope-settings-help scope-settings-refresh-error" : "scope-settings-help"}
+    ?hidden=${props.notice.hidden}
+  >${props.notice.text}</p><p
+    class="scope-settings-help scope-settings-refresh-error"
+    ?hidden=${props.loadError === null}
+  >${props.loadError ?? ""}</p><div ?hidden=${props.bodyHidden}><p
+      class="scope-settings-help"
+      >${props.intro}</p
+    ><div class="agent-hooks-rows">${props.rows.map(remoteRowTemplate)}</div><div
+      class="remote-access-actions"
+    ><button
+      type="button"
+      class="gdp-btn gdp-btn-sm remote-access-start"
+      ?disabled=${props.start.disabled}
+      @click=${props.start.onClick}
+    >${props.start.label}</button><button
+      type="button"
+      class="gdp-btn gdp-btn-sm remote-access-stop"
+      ?disabled=${props.stop.disabled}
+      @click=${props.stop.onClick}
+    >${props.stop.label}</button><button
+      type="button"
+      class="gdp-btn gdp-btn-sm remote-access-install"
+      ?hidden=${props.install.hidden}
+      ?disabled=${props.install.disabled}
+      @click=${props.install.onClick}
+    >${props.install.label}</button></div><p
+      class="agent-hooks-result agent-hooks-result-error"
+      ?hidden=${!props.actionError}
+    >${props.actionError}</p><label class="scope-settings-toggle"><input
+      type="checkbox"
+      ?disabled=${props.autoStart.disabled}
+      .checked=${live(props.autoStart.checked)}
+      @change=${(event: Event) =>
+        props.autoStart.onChange(
+          (event.currentTarget as HTMLInputElement).checked,
+        )}
+    /><span>${props.autoStart.label}</span></label><div
+      class="agent-accounts-subtitle-row"
+    ><strong class="agent-accounts-subtitle">${props.valuesTitle}</strong><span
+        class="agent-accounts-unsaved"
+        ?hidden=${!props.unsaved.shown}
+        >${props.unsaved.label}</span
+      ></div
+    ><p class="scope-settings-help">${props.valuesIntro}</p><div
+      class="remote-access-fields"
+    >${props.fields.map(remoteFieldTemplate)}</div><p class="scope-settings-help"
+      >${props.tokenHelp}</p
+    ><p class="scope-settings-help remote-access-path">${props.savedTo}</p><details
+      class="agent-accounts-how remote-access-log"
+      ?hidden=${props.log.hidden}
+    ><summary>${props.log.summary}</summary><pre class="agent-hooks-dialog-code"
+        >${props.log.text}</pre
+      ></details></div>`;
+
 export function createRemoteAccessSettings(
   deps: RemoteAccessSettingsDeps,
+  view: RemoteAccessView = DEFAULT_VIEW,
 ): RemoteAccessSettings {
   // 節の箱。設定のページが置き、中はここが描く。
   const element = templateElement(
@@ -249,74 +406,53 @@ export function createRemoteAccessSettings(
     }
   }
 
-  /**
-   * note は補足 (無彩色)、problem は理由 (赤)。どちらも全文を折り返して出す。
-   * detail がテンプレート (ボタン) なら 3 列目にそのまま置く。
-   */
-  function stateRow(
-    name: string,
-    tone: Tone,
-    label: string,
-    detail: string | TemplateResult,
-    extra: { problem?: string; note?: string } = {},
-  ): TemplateResult {
-    return html`<div class="agent-hooks-row remote-access-row ui-table-row"><span
-        class="agent-hooks-name"
-      >${name}</span><span class=${`agent-hooks-state ${TONE_CLASS[tone]}`.trim()}
-        ><i class="agent-hooks-mark" aria-hidden="true"></i>${label}</span
-      >${
-        typeof detail === "string"
-          ? html`<span class="agent-hooks-path" title=${detail}>${detail}</span>`
-          : detail
-      }${
-        extra.problem
-          ? html`<p class="agent-hooks-detail agent-hooks-detail-problem">${extra.problem}</p>`
-          : nothing
-      }${extra.note ? html`<p class="agent-hooks-detail">${extra.note}</p>` : nothing}</div>`;
-  }
-
   /** 3 列目に置く小さなボタン (列の幅に伸ばさない)。 */
   function rowButton(
     label: string,
     onClick: () => void,
     title?: string,
-  ): TemplateResult {
-    return html`<button
-      type="button"
-      class="gdp-btn gdp-btn-sm remote-access-row-button"
-      title=${ifDefined(title)}
-      @click=${onClick}
-    >${label}</button>`;
+  ): RemoteAccessRowProps["detail"] {
+    return { kind: "button", label, title, onClick };
   }
 
-  function listenerRow(current: RemoteAccessStatus): TemplateResult {
+  function rowText(text: string): RemoteAccessRowProps["detail"] {
+    return { kind: "text", text };
+  }
+
+  function listenerRow(current: RemoteAccessStatus): RemoteAccessRowProps {
     const t = text();
     const { listener } = current;
     const note = t.listenerNote;
     if (listener.state === "running")
-      return stateRow(
-        t.rowListener,
-        "ok",
-        t.listenerRunning,
-        t.listenerTarget(serviceUrl(listener.port), listener.origin),
-        { note },
-      );
+      return {
+        name: t.rowListener,
+        tone: "ok",
+        label: t.listenerRunning,
+        detail: rowText(
+          t.listenerTarget(serviceUrl(listener.port), listener.origin),
+        ),
+        note,
+      };
     if (listener.state === "failed")
-      return stateRow(t.rowListener, "error", t.listenerFailed, "", {
+      return {
+        name: t.rowListener,
+        tone: "error",
+        label: t.listenerFailed,
+        detail: rowText(""),
         problem: listener.error,
         note,
-      });
+      };
     const saved = savedValues();
-    return stateRow(
-      t.rowListener,
-      "idle",
-      t.listenerStopped,
-      saved ? serviceUrl(saved.port) : "",
-      { note },
-    );
+    return {
+      name: t.rowListener,
+      tone: "idle",
+      label: t.listenerStopped,
+      detail: rowText(saved ? serviceUrl(saved.port) : ""),
+      note,
+    };
   }
 
-  function tunnelRow(current: RemoteAccessStatus): TemplateResult {
+  function tunnelRow(current: RemoteAccessStatus): RemoteAccessRowProps {
     const t = text();
     const { tunnel, cloudflared } = current;
     const version = cloudflared.state === "ok" ? cloudflared.version : "";
@@ -328,64 +464,79 @@ export function createRemoteAccessSettings(
         : "";
     if (tunnel.state === "running") {
       const { shell } = tunnel;
-      return stateRow(
-        t.rowTunnel,
-        tunnel.connections > 0 ? "ok" : "warn",
-        tunnel.connections > 0
-          ? t.tunnelConnected(tunnel.connections)
-          : t.tunnelWaiting,
-        rowButton(
+      return {
+        name: t.rowTunnel,
+        tone: tunnel.connections > 0 ? "ok" : "warn",
+        label:
+          tunnel.connections > 0
+            ? t.tunnelConnected(tunnel.connections)
+            : t.tunnelWaiting,
+        detail: rowButton(
           t.openTerminal,
           () => deps.openShell(shell),
           t.tunnelProcess(version, tunnel.pid),
         ),
-      );
+      };
     }
     if (tunnel.state === "exited")
-      return stateRow(
-        t.rowTunnel,
-        "error",
-        t.tunnelExited,
-        version ? t.cloudflaredVersion(version) : "",
-        { problem: tunnel.error, note: installNote },
-      );
+      return {
+        name: t.rowTunnel,
+        tone: "error",
+        label: t.tunnelExited,
+        detail: rowText(version ? t.cloudflaredVersion(version) : ""),
+        problem: tunnel.error,
+        note: installNote,
+      };
     if (cloudflared.state === "installing")
-      return stateRow(t.rowTunnel, "warn", t.installing, "", {
+      return {
+        name: t.rowTunnel,
+        tone: "warn",
+        label: t.installing,
+        detail: rowText(""),
         note: t.installingNote,
-      });
+      };
     if (tunnel.state === "skipped")
-      return stateRow(t.rowTunnel, "idle", t.tunnelSkipped, "", {
+      return {
+        name: t.rowTunnel,
+        tone: "idle",
+        label: t.tunnelSkipped,
+        detail: rowText(""),
         note: t.tunnelSkippedDetail,
-      });
-    return stateRow(
-      t.rowTunnel,
-      probeProblem ? "error" : "idle",
-      probeProblem ? t.tunnelUnavailable : t.tunnelStopped,
-      version ? t.cloudflaredVersion(version) : "",
-      { problem: probeProblem, note: installNote },
-    );
+      };
+    return {
+      name: t.rowTunnel,
+      tone: probeProblem ? "error" : "idle",
+      label: probeProblem ? t.tunnelUnavailable : t.tunnelStopped,
+      detail: rowText(version ? t.cloudflaredVersion(version) : ""),
+      problem: probeProblem,
+      note: installNote,
+    };
   }
 
-  function tokenRow(current: RemoteAccessStatus): TemplateResult {
+  function tokenRow(current: RemoteAccessStatus): RemoteAccessRowProps {
     const t = text();
     const { token: saved } = current;
     if (saved.state === "ok")
-      return stateRow(
-        t.rowToken,
-        "ok",
-        t.tokenSaved,
-        t.tokenTunnelId(saved.tunnelId),
-      );
+      return {
+        name: t.rowToken,
+        tone: "ok",
+        label: t.tokenSaved,
+        detail: rowText(t.tokenTunnelId(saved.tunnelId)),
+      };
     if (saved.state === "invalid")
-      return stateRow(t.rowToken, "error", t.tokenInvalid, "", {
+      return {
+        name: t.rowToken,
+        tone: "error",
+        label: t.tokenInvalid,
+        detail: rowText(""),
         problem: saved.error,
-      });
+      };
     // 状態の行から、貼る欄 (Cloudflare の値の最後) へ送る。
-    return stateRow(
-      t.rowToken,
-      "idle",
-      t.tokenAbsent,
-      rowButton(t.tokenJump, () => {
+    return {
+      name: t.rowToken,
+      tone: "idle",
+      label: t.tokenAbsent,
+      detail: rowButton(t.tokenJump, () => {
         const input = element.querySelector<HTMLInputElement>(
           "#remote-access-token",
         );
@@ -394,17 +545,15 @@ export function createRemoteAccessSettings(
         input.scrollIntoView({ block: "center" });
         input.focus();
       }),
-      { note: t.tokenAbsentNote },
-    );
+      note: t.tokenAbsentNote,
+    };
   }
 
-  function fieldTemplate(
+  function fieldProps(
     field: Field | "token",
     label: string,
     disabled: boolean,
-  ): TemplateResult {
-    const look = FIELD_INPUT[field];
-    const id = `remote-access-${field}`;
+  ): RemoteAccessFieldProps {
     const placeholder =
       field === "token"
         ? status?.token.state === "ok"
@@ -412,33 +561,26 @@ export function createRemoteAccessSettings(
           : status
             ? text().tokenPlaceholderAbsent
             : undefined
-        : look.placeholder;
-    return html`<label for=${id}>${label}</label><input
-        class="gdp-dialog-input"
-        id=${id}
-        spellcheck="false"
-        autocomplete="off"
-        type=${look.type}
-        placeholder=${ifDefined(placeholder)}
-        min=${ifDefined(look.range ? "1" : undefined)}
-        max=${ifDefined(look.range ? "65535" : undefined)}
-        step=${ifDefined(look.range ? "1" : undefined)}
-        ?disabled=${disabled}
-        .value=${live(field === "token" ? token : fieldValues[field])}
-        @input=${(event: Event) => {
-          const value = (event.currentTarget as HTMLInputElement).value;
-          if (field === "token") {
-            token = value;
-          } else {
-            fieldValues[field] = value;
-            edited = true;
-          }
-          draftChanged();
-        }}
-      />`;
+        : FIELD_INPUT[field].placeholder;
+    return {
+      field,
+      label,
+      placeholder,
+      disabled,
+      value: field === "token" ? token : fieldValues[field],
+      onInput(value) {
+        if (field === "token") {
+          token = value;
+        } else {
+          fieldValues[field] = value;
+          edited = true;
+        }
+        draftChanged();
+      },
+    };
   }
 
-  function sectionTemplate(): TemplateResult {
+  function viewProps(): RemoteAccessViewProps {
     const t = text();
     const current = status;
     const off = !current || busy;
@@ -449,104 +591,94 @@ export function createRemoteAccessSettings(
       current?.listener.state === "running" &&
       (current.tunnel.state === "running" ||
         current.tunnel.state === "skipped");
-    const noticeText = !current
-      ? unavailable === "local-only"
-        ? t.localOnly
-        : unavailable === "standalone"
-          ? t.standalone
-          : t.loading
-      : current.config.state === "invalid"
-        ? `${t.configInvalid}\n${current.config.error}`
-        : t.needValues;
-    // 読み込みに失敗したときは loadError が理由を出す。
-    const noticeHidden = current
-      ? current.config.state === "ok"
-      : !unavailable && loadError !== null;
-    return html`<strong class="agent-accounts-subtitle" id=${REMOTE_ACCESS_SECTION_ID}
-        >${t.statusTitle}</strong
-      ><p
-        class=${current?.config.state === "invalid" ? "scope-settings-help scope-settings-refresh-error" : "scope-settings-help"}
-        ?hidden=${noticeHidden}
-      >${noticeText}</p><p
-        class="scope-settings-help scope-settings-refresh-error"
-        ?hidden=${loadError === null}
-      >${loadError ?? ""}</p><div ?hidden=${unavailable !== null}><p class="scope-settings-help"
-        >${t.statusIntro}</p
-      ><div class="agent-hooks-rows">${
-        current
-          ? [listenerRow(current), tunnelRow(current), tokenRow(current)]
-          : nothing
-      }</div><div class="remote-access-actions"><button
-        type="button"
-        class="gdp-btn gdp-btn-sm remote-access-start"
-        ?disabled=${off || started || current.config.state !== "ok" || installing}
-        @click=${() => {
+    return {
+      title: t.statusTitle,
+      notice: {
+        text: !current
+          ? unavailable === "local-only"
+            ? t.localOnly
+            : unavailable === "standalone"
+              ? t.standalone
+              : t.loading
+          : current.config.state === "invalid"
+            ? `${t.configInvalid}\n${current.config.error}`
+            : t.needValues,
+        // 読み込みに失敗したときは loadError が理由を出す。
+        hidden: current
+          ? current.config.state === "ok"
+          : !unavailable && loadError !== null,
+        error: current?.config.state === "invalid",
+      },
+      loadError,
+      bodyHidden: unavailable !== null,
+      intro: t.statusIntro,
+      rows: current
+        ? [listenerRow(current), tunnelRow(current), tokenRow(current)]
+        : [],
+      start: {
+        label: t.start,
+        disabled: off || started || current.config.state !== "ok" || installing,
+        onClick: () => {
           void run(text().startFailed, () => act("entryRemoteStart"));
-        }}
-      >${t.start}</button><button
-        type="button"
-        class="gdp-btn gdp-btn-sm remote-access-stop"
-        ?disabled=${off || (current.listener.state !== "running" && current.tunnel.state !== "running")}
-        @click=${() => {
+        },
+      },
+      stop: {
+        label: t.stop,
+        disabled:
+          off ||
+          (current.listener.state !== "running" &&
+            current.tunnel.state !== "running"),
+        onClick: () => {
           void run(text().stopFailed, () => act("entryRemoteStop"));
-        }}
-      >${t.stop}</button><button
-        type="button"
-        class="gdp-btn gdp-btn-sm remote-access-install"
-        ?hidden=${!(
+        },
+      },
+      install: {
+        label: t.install,
+        hidden: !(
           current &&
           (installing ||
             (current.cloudflared.state === "unavailable" &&
               current.cloudflared.installable))
-        )}
-        ?disabled=${busy || installing}
-        @click=${() => {
+        ),
+        disabled: busy || installing,
+        onClick: () => {
           void run(text().installFailed, () => act("entryRemoteInstall"));
-        }}
-      >${t.install}</button></div><p
-        class="agent-hooks-result agent-hooks-result-error"
-        ?hidden=${!actionError}
-      >${actionError}</p><label class="scope-settings-toggle"><input
-        type="checkbox"
-        ?disabled=${off || current.config.state !== "ok"}
-        .checked=${live(autoStartChecked)}
-        @change=${(event: Event) => {
-          const next = (event.currentTarget as HTMLInputElement).checked;
+        },
+      },
+      actionError,
+      autoStart: {
+        label: t.autoStart,
+        checked: autoStartChecked,
+        disabled: off || current.config.state !== "ok",
+        onChange(next) {
           autoStartChecked = next;
           void run(text().autoStartFailed, () =>
             act("entryRemoteConfig", { autoStart: next }),
           );
-        }}
-      /><span>${t.autoStart}</span></label><div class="agent-accounts-subtitle-row"><strong
-        class="agent-accounts-subtitle"
-      >${t.valuesTitle}</strong><span class="agent-accounts-unsaved" ?hidden=${!unsavedShown}
-        >${t.unsaved}</span
-      ></div><p class="scope-settings-help">${t.valuesIntro}</p><div class="remote-access-fields">${fieldTemplate(
-        "origin",
-        t.originLabel,
-        off,
-      )}${fieldTemplate("teamDomain", t.teamDomainLabel, off)}${fieldTemplate(
-        "audience",
-        t.audienceLabel,
-        off,
-      )}${fieldTemplate("port", t.portLabel, off)}${fieldTemplate(
-        "token",
-        t.tokenLabel,
-        off,
-      )}</div><p class="scope-settings-help">${t.tokenHelp}</p><p
-        class="scope-settings-help remote-access-path"
-      >${
-        current
-          ? current.configFromFlag
-            ? t.fromFlag(current.configPath, current.tokenPath)
-            : t.savedTo(current.configPath, current.tokenPath)
-          : ""
-      }</p><details
-        class="agent-accounts-how remote-access-log"
-        ?hidden=${!current || current.log.length === 0}
-      ><summary>${current ? t.logTitle(current.log.length) : ""}</summary><pre
-        class="agent-hooks-dialog-code"
-      >${current?.log.join("\n") ?? ""}</pre></details></div>`;
+        },
+      },
+      valuesTitle: t.valuesTitle,
+      unsaved: { label: t.unsaved, shown: unsavedShown },
+      valuesIntro: t.valuesIntro,
+      fields: [
+        fieldProps("origin", t.originLabel, off),
+        fieldProps("teamDomain", t.teamDomainLabel, off),
+        fieldProps("audience", t.audienceLabel, off),
+        fieldProps("port", t.portLabel, off),
+        fieldProps("token", t.tokenLabel, off),
+      ],
+      tokenHelp: t.tokenHelp,
+      savedTo: current
+        ? current.configFromFlag
+          ? t.fromFlag(current.configPath, current.tokenPath)
+          : t.savedTo(current.configPath, current.tokenPath)
+        : "",
+      log: {
+        hidden: !current || current.log.length === 0,
+        summary: current ? t.logTitle(current.log.length) : "",
+        text: current?.log.join("\n") ?? "",
+      },
+    };
   }
 
   function render(): void {
@@ -568,7 +700,7 @@ export function createRemoteAccessSettings(
       logBody !== null &&
       logBody.scrollTop + logBody.clientHeight >= logBody.scrollHeight - 4;
     const before = logBody?.textContent ?? "";
-    renderOwned(element, sectionTemplate());
+    renderOwned(element, view(viewProps()));
     if (logBody && atEnd && logBody.textContent !== before)
       logBody.scrollTop = logBody.scrollHeight;
   }

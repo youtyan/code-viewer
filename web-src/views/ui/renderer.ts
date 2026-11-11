@@ -74,3 +74,22 @@ export function templateElement<T extends Element = HTMLElement>(
   if (!element) throw new Error("templateElement: the template has no element");
   return element as T;
 }
+
+/**
+ * templateElement の描き直せる形。テンプレートの最初の要素を作って返し、
+ * draw() でその要素の中を描き直す (要素は外の部品が置く。ダイアログの本文など)。
+ * テンプレートの最上段の形 (最初の要素の種類) は描き直しで変えないこと。
+ */
+export function detachedElement(template: () => unknown): {
+  element: HTMLElement;
+  draw(): void;
+} {
+  defineUiComponents();
+  const fragment = document.createDocumentFragment();
+  render(template(), fragment);
+  const element = fragment.firstElementChild;
+  if (!(element instanceof HTMLElement))
+    throw new Error("detachedElement: the template has no element");
+  // 要素を外へ動かしても、中の部分は要素についていく (最上段の印だけが残る)。
+  return { element, draw: () => render(template(), fragment) };
+}
