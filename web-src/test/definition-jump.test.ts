@@ -5,7 +5,10 @@ import type { FileRangeResponse, GrepMatch, GrepResponse } from "../core/types";
 import { closeContextMenu, showContextMenu } from "../views/context-menu";
 import {
   createDefinitionJump,
+  DEFAULT_VIEW,
   type DefinitionJumpDeps,
+  type DefinitionJumpView,
+  type DefinitionUnderlineProps,
   diffCellContext,
   offsetInCell,
   sourceCellContext,
@@ -407,6 +410,7 @@ function setupDefinitionFlow(
       request: RecordedRequest,
       index: number,
     ) => Promise<Response>;
+    view?: DefinitionJumpView;
   } = {},
 ) {
   document.body.innerHTML =
@@ -479,25 +483,28 @@ function setupDefinitionFlow(
       return fetchResponse(request, requests.length - 1);
     },
   });
-  const jump = createDefinitionJump({
-    STATE: state,
-    trackLoad: (promise) => {
-      loads.push(promise);
-      return promise;
+  const jump = createDefinitionJump(
+    {
+      STATE: state,
+      trackLoad: (promise) => {
+        loads.push(promise);
+        return promise;
+      },
+      isAbortError: (error) =>
+        error instanceof DOMException && error.name === "AbortError",
+      appendScopeParams: () => {
+        scopeAppends.count += 1;
+      },
+      inferLang: () => "typescript",
+      getSyntaxHighlight: () => false,
+      loadSourceShikiHighlighter: async () => null,
+      sourceShikiLines: () => null,
+      openMatch: (match) => opened.push(match),
+      openSearch: (query) => searchSheets.push(query),
+      caretFromPoint: () => ({ node: textNode, offset: 3 }),
     },
-    isAbortError: (error) =>
-      error instanceof DOMException && error.name === "AbortError",
-    appendScopeParams: () => {
-      scopeAppends.count += 1;
-    },
-    inferLang: () => "typescript",
-    getSyntaxHighlight: () => false,
-    loadSourceShikiHighlighter: async () => null,
-    sourceShikiLines: () => null,
-    openMatch: (match) => opened.push(match),
-    openSearch: (query) => searchSheets.push(query),
-    caretFromPoint: () => ({ node: textNode, offset: 3 }),
-  });
+    options.view,
+  );
   jump.install(content);
 
   return {
@@ -1105,5 +1112,41 @@ describe("definition hover affordance", () => {
       hidden: underline.hidden,
       modifierClass: document.body.classList.contains("gdp-def-mod"),
     }).toEqual({ hidden: true, modifierClass: false });
+  });
+});
+
+describe("the definition jump presenter", () => {
+  test("gives the underline view the word's rectangle while the modifier is held", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(
+      () => undefined,
+    );
+    vi.spyOn(Range.prototype, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(24, 32, 88, 18),
+    );
+    const underlines: DefinitionUnderlineProps[] = [];
+    const flow = setupDefinitionFlow(async () => grepResponse([]), {
+      view: {
+        ...DEFAULT_VIEW,
+        underline: (props) => {
+          underlines.push(props);
+          return DEFAULT_VIEW.underline(props);
+        },
+      },
+    });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Meta" }));
+    flow.cell.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 80, clientY: 40 }),
+    );
+    frames.shift()?.(16);
+    window.dispatchEvent(new KeyboardEvent("keyup", { key: "Meta" }));
+    expect(underlines.map((props) => props.rect)).toEqual([
+      { left: 24, top: 32, width: 88, height: 18 },
+      null,
+    ]);
   });
 });

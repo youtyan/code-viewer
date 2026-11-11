@@ -363,23 +363,26 @@ export function createAgentsPresenter(
 
   function notifyProps(): Pick<AgentsBoardViewProps, "notify" | "notifyError"> {
     const current = text();
-    const view = notifyPermissionView(
+    const permission = notifyPermissionView(
       deps.monitor.permission(),
       deps.monitor.snapshot().permissionAsked,
     );
     const failure = notifyRequestError || deps.monitor.snapshot().notifyError;
     const notifyError = failure || null;
-    if (view === "ask" || view === "ask-again")
+    if (permission === "ask" || permission === "ask-again")
       return {
         notify: {
           kind: "ask",
-          status: view === "ask-again" ? current.notifyNotYet : null,
-          label: view === "ask" ? current.notifyEnable : current.notifyAskAgain,
+          status: permission === "ask-again" ? current.notifyNotYet : null,
+          label:
+            permission === "ask"
+              ? current.notifyEnable
+              : current.notifyAskAgain,
           title: current.notifyEnableTitle,
         },
         notifyError,
       };
-    if (view === "granted")
+    if (permission === "granted")
       return {
         notify: {
           kind: "granted",
@@ -388,7 +391,7 @@ export function createAgentsPresenter(
         },
         notifyError,
       };
-    if (view === "denied")
+    if (permission === "denied")
       return {
         notify: {
           kind: "denied",

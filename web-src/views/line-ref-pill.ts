@@ -144,7 +144,98 @@ export function readRenderedLines(
 // (copy + close), and a button can't validly nest another button.
 type CopyState = "ready" | "copied" | "copied-code" | "failed";
 
-export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
+/** 札に描くもの。 */
+export type LineRefPillProps = {
+  copy: {
+    label: string;
+    state: CopyState;
+    ref: string;
+    /** 2 行以上の選択の行数 (多すぎるときは注意の色)。 */
+    count: { text: string; warn: boolean } | null;
+    onClick(event: MouseEvent): void;
+  };
+  /** 選択の行の GitHub のリンク (無ければ null)。 */
+  github: {
+    url: string;
+    openTitle: string;
+    copyTitle: string;
+    copied: boolean;
+    onCopy(event: MouseEvent): void;
+  } | null;
+  history: { title: string; onClick(): void } | null;
+  onClose(): void;
+};
+
+export type LineRefPillView = (props: LineRefPillProps) => unknown;
+
+export const DEFAULT_VIEW: LineRefPillView = (props) => {
+  const { copy } = props;
+  const copied = copy.state === "copied" || copy.state === "copied-code";
+  const github = props.github;
+  return html`<button
+      id="line-ref-pill-copy"
+      type="button"
+      class=${copied ? "copied" : copy.state === "failed" ? "failed" : ""}
+      title=${copy.label}
+      aria-label=${copy.label}
+      @click=${copy.onClick}
+    >${pillIconTemplate(copied ? [PILL_CHECK_PATH] : COPY_16_PATHS)}<span
+        class="lrp-label"
+        >${copy.label}</span
+      ><span class="lrp-ref">${copy.ref}</span>${
+        copy.count
+          ? html`<span class=${copy.count.warn ? "lrp-count lrp-count-warn" : "lrp-count"}
+              >${copy.count.text}</span
+            >`
+          : nothing
+      }</button
+    ><div id="line-ref-pill-github-actions" ?hidden=${!github}><a
+        id="line-ref-pill-github-open"
+        target="_blank"
+        rel="noopener"
+        href=${github?.url || "#"}
+        title=${github?.openTitle ?? ""}
+        aria-label=${github?.openTitle ?? ""}
+      >${iconTemplate(MARK_GITHUB_16_PATH, "octicon-mark-github")}<span
+          class="lrp-github-open-label"
+          >${github?.openTitle ?? ""}</span
+        >${iconTemplate(OPEN_EXTERNAL_16_PATH, "octicon-link-external")}</a
+      ><button
+        id="line-ref-pill-github-copy"
+        type="button"
+        class=${github?.copied ? "copied" : ""}
+        title=${github?.copyTitle ?? ""}
+        aria-label=${github?.copyTitle ?? ""}
+        @click=${(event: MouseEvent) => github?.onCopy(event)}
+      ><span class="lrp-github-copy-icon">${
+        github?.copied
+          ? pillIconTemplate([PILL_CHECK_PATH])
+          : iconTemplate(COPY_16_PATHS, "octicon-copy")
+      }</span><span class="lrp-github-copy-label">${github?.copyTitle ?? ""}</span></button></div
+    ><button
+      id="line-ref-pill-history"
+      type="button"
+      ?hidden=${!props.history}
+      title=${props.history?.title ?? nothing}
+      aria-label=${props.history?.title ?? nothing}
+      @click=${() => props.history?.onClick()}
+    >${iconTemplate(GIT_BRANCH_16_PATH, "octicon-git-branch")}<span
+        class="lrp-history-label"
+        >${props.history?.title ?? ""}</span
+      ></button
+    ><button
+      id="line-ref-pill-close"
+      type="button"
+      title="選択を解除"
+      aria-label="選択を解除"
+      @click=${props.onClose}
+    >×</button>`;
+};
+
+export function createLineRefPill(
+  deps: LineRefPillDeps,
+  view: LineRefPillView = DEFAULT_VIEW,
+): LineRefPill {
   // 札の箱。body の末尾に 1 つ置き、中はここが描く。出す / 隠すと位置は箱に書く。
   const pill = templateElement(html`<div id="line-ref-pill" hidden></div>`);
   document.body.appendChild(pill);
@@ -192,15 +283,6 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
   // single-line selection (self-evident from "@path#42") stays uncluttered.
   function selectionLineCount(): number {
     return currentEnd - currentStart + 1;
-  }
-
-  function countBadgeTemplate(): unknown {
-    const count = selectionLineCount();
-    if (count <= 1) return nothing;
-    const warn = count >= AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD;
-    return html`<span class=${warn ? "lrp-count lrp-count-warn" : "lrp-count"}
-      >${deps.lineCountLabel(count)}</span
-    >`;
   }
 
   async function copyReference(event: MouseEvent) {
@@ -274,72 +356,43 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
     }, 1200);
   }
 
-  function pillTemplate(): TemplateResult {
+  function pillProps(): LineRefPillProps {
     const label = deps.copyReferenceLabel();
-    const copied = copyState === "copied" || copyState === "copied-code";
-    const openTitle = deps.githubOpenTitle();
-    const copyTitle = deps.githubCopyTitle();
-    const historyTitle = deps.lineHistoryTitle?.() ?? "Line history";
-    return html`<button
-        id="line-ref-pill-copy"
-        type="button"
-        class=${copied ? "copied" : copyState === "failed" ? "failed" : ""}
-        title=${label}
-        aria-label=${label}
-        @click=${copyReference}
-      >${pillIconTemplate(copied ? [PILL_CHECK_PATH] : COPY_16_PATHS)}<span
-          class="lrp-label"
-          >${label}</span
-        ><span class="lrp-ref">${refText}</span>${countBadgeTemplate()}</button
-      ><div id="line-ref-pill-github-actions" ?hidden=${!githubUrl}><a
-          id="line-ref-pill-github-open"
-          target="_blank"
-          rel="noopener"
-          href=${githubUrl || "#"}
-          title=${openTitle}
-          aria-label=${openTitle}
-        >${iconTemplate(MARK_GITHUB_16_PATH, "octicon-mark-github")}<span
-            class="lrp-github-open-label"
-            >${openTitle}</span
-          >${iconTemplate(OPEN_EXTERNAL_16_PATH, "octicon-link-external")}</a
-        ><button
-          id="line-ref-pill-github-copy"
-          type="button"
-          class=${githubCopied ? "copied" : ""}
-          title=${copyTitle}
-          aria-label=${copyTitle}
-          @click=${copyGithubUrl}
-        ><span class="lrp-github-copy-icon">${
-          githubCopied
-            ? pillIconTemplate([PILL_CHECK_PATH])
-            : iconTemplate(COPY_16_PATHS, "octicon-copy")
-        }</span><span class="lrp-github-copy-label">${copyTitle}</span></button></div
-      ><button
-        id="line-ref-pill-history"
-        type="button"
-        ?hidden=${!deps.openLineHistory}
-        title=${ifHistory(historyTitle)}
-        aria-label=${ifHistory(historyTitle)}
-        @click=${() => {
-          if (!currentPath || !deps.openLineHistory) return;
-          deps.openLineHistory(currentPath, currentStart, currentEnd);
-        }}
-      >${iconTemplate(GIT_BRANCH_16_PATH, "octicon-git-branch")}<span
-          class="lrp-history-label"
-          >${deps.openLineHistory ? historyTitle : ""}</span
-        ></button
-      ><button
-        id="line-ref-pill-close"
-        type="button"
-        title="選択を解除"
-        aria-label="選択を解除"
-        @click=${() => deps.onClose()}
-      >×</button>`;
-  }
-
-  /** 行の履歴が無い画面では、見出しの文言を付けない (前と同じ)。 */
-  function ifHistory(title: string): string | typeof nothing {
-    return deps.openLineHistory ? title : nothing;
+    const count = selectionLineCount();
+    return {
+      copy: {
+        label,
+        state: copyState,
+        ref: refText,
+        count:
+          count > 1
+            ? {
+                text: deps.lineCountLabel(count),
+                warn: count >= AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD,
+              }
+            : null,
+        onClick: (event) => void copyReference(event),
+      },
+      github: githubUrl
+        ? {
+            url: githubUrl,
+            openTitle: deps.githubOpenTitle(),
+            copyTitle: deps.githubCopyTitle(),
+            copied: githubCopied,
+            onCopy: (event) => void copyGithubUrl(event),
+          }
+        : null,
+      history: deps.openLineHistory
+        ? {
+            title: deps.lineHistoryTitle?.() ?? "Line history",
+            onClick: () => {
+              if (!currentPath || !deps.openLineHistory) return;
+              deps.openLineHistory(currentPath, currentStart, currentEnd);
+            },
+          }
+        : null,
+      onClose: () => deps.onClose(),
+    };
   }
 
   // 中身は初めて出すときに描く (文言を返す側は、札を作った時点ではまだ文言の
@@ -348,7 +401,7 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
 
   function draw(): void {
     drawn = true;
-    renderOwned(pill, pillTemplate());
+    renderOwned(pill, view(pillProps()));
   }
 
   return {

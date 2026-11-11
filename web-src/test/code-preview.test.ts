@@ -2,8 +2,11 @@ import "./_dom";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { FileRangeResponse } from "../core/types";
 import {
+  type CodePreviewProps,
   type CodePreviewRequest,
+  type CodePreviewView,
   createCodePreview,
+  DEFAULT_VIEW,
 } from "../views/code-preview";
 import { codePreviewText } from "../views/code-preview-i18n";
 import { deferred, q, waitFor } from "./_test-helpers";
@@ -63,30 +66,36 @@ function installFetch(
   return requests;
 }
 
-function createPreview(options: { stale?: boolean | (() => boolean) } = {}) {
+function createPreview(
+  options: { stale?: boolean | (() => boolean); view?: CodePreviewView } = {},
+) {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const tracked: Promise<unknown>[] = [];
-  const preview = createCodePreview(host, {
-    trackLoad: (promise) => {
-      tracked.push(promise);
-      return promise;
+  const preview = createCodePreview(
+    host,
+    {
+      trackLoad: (promise) => {
+        tracked.push(promise);
+        return promise;
+      },
+      isAbortError: (error) =>
+        error instanceof DOMException && error.name === "AbortError",
+      getLanguage: () => "en",
+      getSyntaxHighlight: () => true,
+      inferLang: () => "typescript",
+      loadSourceShikiHighlighter: async () => ({ codeToHtml: () => "" }),
+      sourceShikiLines: (textValue) =>
+        textValue
+          .split("\n")
+          .map((line) => `<span class="token">${line || " "}</span>`),
+      isStaleGeneration: () =>
+        typeof options.stale === "function"
+          ? options.stale()
+          : options.stale === true,
     },
-    isAbortError: (error) =>
-      error instanceof DOMException && error.name === "AbortError",
-    getLanguage: () => "en",
-    getSyntaxHighlight: () => true,
-    inferLang: () => "typescript",
-    loadSourceShikiHighlighter: async () => ({ codeToHtml: () => "" }),
-    sourceShikiLines: (textValue) =>
-      textValue
-        .split("\n")
-        .map((line) => `<span class="token">${line || " "}</span>`),
-    isStaleGeneration: () =>
-      typeof options.stale === "function"
-        ? options.stale()
-        : options.stale === true,
-  });
+    options.view,
+  );
   return { host, preview, tracked };
 }
 
@@ -303,5 +312,50 @@ describe("code preview", () => {
     expect(q(document, ".gdp-code-preview-message").textContent).toContain(
       "\nCaused by: SyntaxError: ",
     );
+  });
+});
+
+describe("the code preview presenter", () => {
+  test("gives the view the frame while loading, then the lines with the match range", async () => {
+    installFetch(async () => rangeResponse());
+    const shown: CodePreviewProps[] = [];
+    const { preview } = createPreview({
+      view: (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    });
+    preview.show(SAMPLE_REQUEST);
+    expect(shown[0]?.kind).toBe("frame");
+    await waitFor(() => shown.some((props) => props.kind === "code"));
+    const code = shown.find((props) => props.kind === "code");
+    if (code?.kind !== "code") throw new Error("no code");
+    expect(
+      code.lines.map((line) => [line.line, line.target, line.code]),
+    ).toEqual([
+      [
+        9,
+        false,
+        {
+          kind: "plain",
+          text: "export const sampleBefore = true;",
+          mark: null,
+        },
+      ],
+      [
+        10,
+        true,
+        {
+          kind: "plain",
+          text: "export function sampleThing() {}",
+          mark: { start: 16, end: 27 },
+        },
+      ],
+      [
+        11,
+        false,
+        { kind: "plain", text: "export const sampleAfter = true;", mark: null },
+      ],
+    ]);
   });
 });

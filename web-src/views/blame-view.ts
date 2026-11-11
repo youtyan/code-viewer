@@ -16,7 +16,6 @@ import { SOURCE_READING_TEXT } from "./source-preview-i18n";
 
 import {
   BLAME_TIME_BIN_COUNT,
-  type BlameCommit,
   type BlameGroup,
   type BlameResponse,
   blameShortSha,
@@ -106,7 +105,138 @@ export type BlameViewDeps = {
   renderRepoBlobSidebar(path: string, ref: string): Promise<unknown> | unknown;
 };
 
-export function createBlameView(deps: BlameViewDeps) {
+/** まとまり (同じコミットの続く行) の印と説明。 */
+export type BlameGroupProps = {
+  bar: { bin: number; uncommitted: boolean };
+  /** 1 段目: 時刻・作者・コミット (押すと履歴へ。未コミットなら押せない)。 */
+  meta: {
+    time: string;
+    author: string;
+    sha: string;
+    open: { sha: string; title: string; onClick(): void } | null;
+  };
+  /** 2 段目: コミットの件名。 */
+  summary: string;
+};
+
+export type BlameRowProps = {
+  line: number;
+  sha: string;
+  target: boolean;
+  /** まとまりの 1 行目だけ: 左の欄 (rowspan で続く行をまたぐ)。 */
+  info: { group: BlameGroupProps; rowspan: number } | null;
+  code: { kind: "plain"; text: string } | { kind: "html"; html: string };
+};
+
+export type BlameBodyProps =
+  | { kind: "loading"; text: string }
+  | { kind: "error"; text: string }
+  | { kind: "virtual"; element: HTMLElement }
+  | {
+      kind: "table";
+      rows: BlameRowProps[];
+      /** 行番号の欄 (行を選ぶ操作を付ける)。 */
+      onLineNumber(element: HTMLElement, line: number): void;
+    };
+
+/** 大きなファイルの左の欄の 1 行。group が無ければ空の欄。 */
+export type BlameGutterProps = {
+  group: BlameGroupProps;
+  start: boolean;
+  meta: boolean;
+  summary: boolean;
+} | null;
+
+export type BlameView = {
+  legend(props: { older: string; newer: string; bins: number }): unknown;
+  body(props: BlameBodyProps): unknown;
+  gutterCell(props: BlameGutterProps): unknown;
+};
+
+function colourBarTemplate(bar: BlameGroupProps["bar"]): TemplateResult {
+  return html`<span
+    class=${bar.uncommitted ? "gdp-blame-bar uncommitted" : "gdp-blame-bar"}
+    data-bin=${String(bar.bin)}
+  ></span>`;
+}
+
+function blameMetaTemplate(meta: BlameGroupProps["meta"]): TemplateResult {
+  const open = meta.open;
+  return html`<div class="gdp-blame-meta"><span class="gdp-blame-time">${meta.time}</span
+    ><span class="gdp-blame-author">${meta.author}</span>${
+      open
+        ? html`<span
+            class="gdp-blame-sha"
+            data-sha=${open.sha}
+            title=${open.title}
+            style="cursor: pointer;"
+            @click=${open.onClick}
+          >${meta.sha}</span>`
+        : html`<span class="gdp-blame-sha">${meta.sha}</span>`
+    }</div>`;
+}
+
+function blameSummaryTemplate(summary: string): TemplateResult {
+  return html`<div class="gdp-blame-summary" title=${summary}>${summary}</div>`;
+}
+
+export const DEFAULT_VIEW: BlameView = {
+  legend: (props) => html`<div class="gdp-blame-legend"><span
+      class="gdp-blame-legend-label"
+      >${props.older}</span
+    ><span class="gdp-blame-legend-stops">${Array.from(
+      { length: props.bins },
+      (_, i) =>
+        html`<span class="gdp-blame-legend-stop" data-bin=${String(i)}></span>`,
+    )}</span><span class="gdp-blame-legend-label">${props.newer}</span></div>`,
+  body: (props) => {
+    if (props.kind === "loading")
+      return html`<div class="gdp-blame-loading">${props.text}</div>`;
+    if (props.kind === "error")
+      return html`<div class="gdp-blame-error">${props.text}</div>`;
+    if (props.kind === "virtual") return props.element;
+    return html`<table class="gdp-source-table gdp-blame-table"><tbody>${props.rows.map(
+      (row) => html`<tr
+        class=${row.target ? "gdp-blame-row gdp-source-line-target" : "gdp-blame-row"}
+        data-line=${String(row.line)}
+        data-sha=${row.sha}
+      >${
+        row.info
+          ? html`<td class="gdp-blame-info" rowspan=${row.info.rowspan}
+              >${colourBarTemplate(row.info.group.bar)}${blameMetaTemplate(
+                row.info.group.meta,
+              )}${blameSummaryTemplate(row.info.group.summary)}</td
+            >`
+          : nothing
+      }<td
+        class="gdp-source-line-number"
+        ${ref((num) => {
+          if (num instanceof HTMLElement) props.onLineNumber(num, row.line);
+        })}
+      >${String(row.line)}</td>${
+        row.code.kind === "html"
+          ? html`<td class="gdp-source-line-code shiki"><code
+              >${unsafeHTML(row.code.html || " ")}</code
+            ></td>`
+          : html`<td class="gdp-source-line-code"><code>${row.code.text || " "}</code></td>`
+      }</tr>`,
+    )}</tbody></table>`;
+  },
+  gutterCell: (props) => {
+    if (!props) return html`<span class="gdp-blame-cell"></span>`;
+    return html`<span
+      class=${props.start ? "gdp-blame-cell gdp-blame-cell-start" : "gdp-blame-cell"}
+      >${colourBarTemplate(props.group.bar)}${
+        props.meta ? blameMetaTemplate(props.group.meta) : nothing
+      }${props.summary ? blameSummaryTemplate(props.group.summary) : nothing}</span
+    >`;
+  },
+};
+
+export function createBlameView(
+  deps: BlameViewDeps,
+  view: BlameView = DEFAULT_VIEW,
+) {
   let activeGeneration = 0;
 
   function cleanup() {
@@ -116,28 +246,6 @@ export function createBlameView(deps: BlameViewDeps) {
       .forEach((el) => {
         el.remove();
       });
-  }
-
-  function colourBarTemplate(
-    commit: BlameCommit,
-    bin: number,
-    binCount: number,
-  ): TemplateResult {
-    return html`<span
-      class=${commit.isUncommitted ? "gdp-blame-bar uncommitted" : "gdp-blame-bar"}
-      data-bin=${String(commit.isUncommitted ? binCount - 1 : bin)}
-    ></span>`;
-  }
-
-  function legendTemplate(): TemplateResult {
-    const text = SOURCE_READING_TEXT[pageLanguage()];
-    return html`<div class="gdp-blame-legend"><span class="gdp-blame-legend-label"
-        >${text.blameOlder}</span
-      ><span class="gdp-blame-legend-stops">${Array.from(
-        { length: BLAME_TIME_BIN_COUNT },
-        (_, i) =>
-          html`<span class="gdp-blame-legend-stop" data-bin=${String(i)}></span>`,
-      )}</span><span class="gdp-blame-legend-label">${text.blameNewer}</span></div>`;
   }
 
   async function fetchBlame(
@@ -194,28 +302,30 @@ export function createBlameView(deps: BlameViewDeps) {
     );
   }
 
-  /** まとまり (同じコミットの続く行) の 1 段目: 時刻・作者・コミット (押すと履歴へ)。 */
-  function blameMetaTemplate(
+  function groupProps(
     group: BlameGroup,
+    bins: Record<string, number>,
     target: SourceFileTarget,
-  ): TemplateResult {
+  ): BlameGroupProps {
     const text = SOURCE_READING_TEXT[pageLanguage()];
     const uncommitted = group.commit.isUncommitted;
-    return html`<div class="gdp-blame-meta"><span class="gdp-blame-time"
-        >${
-          uncommitted
-            ? text.blameUncommitted
-            : relativeTimeText(group.commit.authorTime, pageLanguage())
-        }</span
-      ><span class="gdp-blame-author">${group.commit.author}</span>${
-        uncommitted
-          ? html`<span class="gdp-blame-sha">${blameShortSha(group.sha)}</span>`
-          : html`<span
-              class="gdp-blame-sha"
-              data-sha=${group.sha}
-              title=${text.blameOpenCommit}
-              style="cursor: pointer;"
-              @click=${() => {
+    return {
+      bar: {
+        bin: uncommitted ? BLAME_TIME_BIN_COUNT - 1 : (bins[group.sha] ?? 0),
+        uncommitted,
+      },
+      meta: {
+        time: uncommitted
+          ? text.blameUncommitted
+          : relativeTimeText(group.commit.authorTime, pageLanguage()),
+        author: group.commit.author,
+        sha: blameShortSha(group.sha),
+        open: uncommitted
+          ? null
+          : {
+              sha: group.sha,
+              title: text.blameOpenCommit,
+              onClick: () => {
                 const ref =
                   target.ref && target.ref !== "worktree" ? target.ref : "HEAD";
                 deps.setRoute({
@@ -225,16 +335,11 @@ export function createBlameView(deps: BlameViewDeps) {
                   range: deps.currentRange(),
                 });
                 deps.applyRouteFromLocation?.();
-              }}
-            >${blameShortSha(group.sha)}</span>`
-      }</div>`;
-  }
-
-  /** まとまりの 2 段目: コミットの件名。 */
-  function blameSummaryTemplate(group: BlameGroup): TemplateResult {
-    return html`<div class="gdp-blame-summary" title=${group.commit.summary}
-      >${group.commit.summary}</div
-    >`;
+              },
+            },
+      },
+      summary: group.commit.summary,
+    };
   }
 
   /**
@@ -257,27 +362,20 @@ export function createBlameView(deps: BlameViewDeps) {
       fullView: () => deps.applyRouteFromLocation?.(),
       cell(line) {
         const group = groupOfLine[line];
-        if (!group)
-          return templateElement(html`<span class="gdp-blame-cell"></span>`);
-        const start = line === group.startLine;
+        const start = !!group && line === group.startLine;
         return templateElement(
-          html`<span class=${start ? "gdp-blame-cell gdp-blame-cell-start" : "gdp-blame-cell"}
-            >${colourBarTemplate(
-              group.commit,
-              bins[group.sha] ?? 0,
-              BLAME_TIME_BIN_COUNT,
-            )}${
-              start
-                ? html`${blameMetaTemplate(group, target)}${
-                    group.endLine === group.startLine
-                      ? blameSummaryTemplate(group)
-                      : nothing
-                  }`
-                : line === group.startLine + 1
-                  ? blameSummaryTemplate(group)
-                  : nothing
-            }</span
-          >`,
+          view.gutterCell(
+            group
+              ? {
+                  group: groupProps(group, bins, target),
+                  start,
+                  meta: start,
+                  summary: start
+                    ? group.endLine === group.startLine
+                    : line === group.startLine + 1,
+                }
+              : null,
+          ),
         );
       },
     };
@@ -289,7 +387,7 @@ export function createBlameView(deps: BlameViewDeps) {
     response: BlameResponse,
     sourceText: string,
     highlighter: SourceShikiHighlighter | null,
-  ): { template: TemplateResult; highlightError: unknown } {
+  ): { body: BlameBodyProps; highlightError: unknown } {
     const groups = groupBlameLines(response.lines, response.commits);
     const bins = blameTimeBins(response.commits, BLAME_TIME_BIN_COUNT);
     const sourceLines = sourceText
@@ -317,47 +415,33 @@ export function createBlameView(deps: BlameViewDeps) {
     }
 
     const lineTarget = deps.currentSourceLineTarget(target);
-    const rows: TemplateResult[] = [];
+    const rows: BlameRowProps[] = [];
     for (const group of groups) {
+      const info = groupProps(group, bins, target);
       for (let lineNo = group.startLine; lineNo <= group.endLine; lineNo++) {
         const highlighted = shikiLines?.[lineNo - 1];
-        const codeContent = sourceLines[lineNo - 1] ?? "";
-        rows.push(html`<tr
-          class=${
-            deps.lineInSourceTarget(lineNo, lineTarget)
-              ? "gdp-blame-row gdp-source-line-target"
-              : "gdp-blame-row"
-          }
-          data-line=${String(lineNo)}
-          data-sha=${group.sha}
-        >${
-          lineNo === group.startLine
-            ? html`<td
-                class="gdp-blame-info"
-                rowspan=${group.endLine - group.startLine + 1}
-              >${colourBarTemplate(
-                group.commit,
-                bins[group.sha] ?? 0,
-                BLAME_TIME_BIN_COUNT,
-              )}${blameMetaTemplate(group, target)}${blameSummaryTemplate(group)}</td>`
-            : nothing
-        }<td
-          class="gdp-source-line-number"
-          ${ref((num) => {
-            if (num instanceof HTMLElement)
-              deps.bindSourceLineNumber(num, card, target, lineNo);
-          })}
-        >${String(lineNo)}</td>${
-          highlighted != null
-            ? html`<td class="gdp-source-line-code shiki"><code
-                >${unsafeHTML(highlighted || " ")}</code
-              ></td>`
-            : html`<td class="gdp-source-line-code"><code>${codeContent || " "}</code></td>`
-        }</tr>`);
+        rows.push({
+          line: lineNo,
+          sha: group.sha,
+          target: deps.lineInSourceTarget(lineNo, lineTarget),
+          info:
+            lineNo === group.startLine
+              ? { group: info, rowspan: group.endLine - group.startLine + 1 }
+              : null,
+          code:
+            highlighted != null
+              ? { kind: "html", html: highlighted }
+              : { kind: "plain", text: sourceLines[lineNo - 1] ?? "" },
+        });
       }
     }
     return {
-      template: html`<table class="gdp-source-table gdp-blame-table"><tbody>${rows}</tbody></table>`,
+      body: {
+        kind: "table",
+        rows,
+        onLineNumber: (num, line) =>
+          deps.bindSourceLineNumber(num, card, target, line),
+      },
       highlightError,
     };
   }
@@ -383,7 +467,16 @@ export function createBlameView(deps: BlameViewDeps) {
       target,
       "blame",
     );
-    sticky.append(templateElement(legendTemplate()));
+    const text = SOURCE_READING_TEXT[pageLanguage()];
+    sticky.append(
+      templateElement(
+        view.legend({
+          older: text.blameOlder,
+          newer: text.blameNewer,
+          bins: BLAME_TIME_BIN_COUNT,
+        }),
+      ),
+    );
     const card = templateElement(
       html`<article
         class="gdp-file-shell loaded gdp-standalone-blame gdp-blame-mode"
@@ -394,12 +487,7 @@ export function createBlameView(deps: BlameViewDeps) {
     );
     const body = card.querySelector<HTMLElement>(".gdp-blame-body");
     if (!body) throw new Error("blame: the card body was not drawn");
-    renderOwned(
-      body,
-      html`<div class="gdp-blame-loading">${
-        SOURCE_READING_TEXT[pageLanguage()].blameLoading
-      }</div>`,
-    );
+    renderOwned(body, view.body({ kind: "loading", text: text.blameLoading }));
     mountFileShellCard(deps, target, card);
 
     const sourceShikiLang = normalizeSourceShikiLang(
@@ -421,13 +509,16 @@ export function createBlameView(deps: BlameViewDeps) {
         error,
       );
       console.error(failure);
-      renderOwned(body, blameErrorTemplate(formatErrorDetail(failure)));
+      renderOwned(
+        body,
+        view.body({ kind: "error", text: formatErrorDetail(failure) }),
+      );
       return;
     }
     const [blameResp, srcText, highlighter] = loaded;
     if (generation !== activeGeneration || !blameResp) return;
     if (!blameResp.lines.length && blameResp.error) {
-      renderOwned(body, blameErrorTemplate(blameResp.error));
+      renderOwned(body, view.body({ kind: "error", text: blameResp.error }));
       return;
     }
     const virtual = await deps.renderVirtualSourceWithGutter(
@@ -437,11 +528,11 @@ export function createBlameView(deps: BlameViewDeps) {
     );
     if (generation !== activeGeneration) return;
     if (virtual) {
-      renderOwned(body, virtual);
+      renderOwned(body, view.body({ kind: "virtual", element: virtual }));
       return;
     }
     const table = blameTable(card, target, blameResp, srcText, highlighter);
-    renderOwned(body, table.template);
+    renderOwned(body, view.body(table.body));
     // 強調に失敗したら原文のまま、表に失敗の印と理由を付ける。
     const drawn = body.querySelector<HTMLElement>(".gdp-blame-table");
     if (table.highlightError !== null && drawn)
@@ -450,10 +541,6 @@ export function createBlameView(deps: BlameViewDeps) {
         `syntax highlighting failed for ${target.path}`,
         table.highlightError,
       );
-  }
-
-  function blameErrorTemplate(detail: string): TemplateResult {
-    return html`<div class="gdp-blame-error">${detail}</div>`;
   }
 
   function removeBlamePage() {

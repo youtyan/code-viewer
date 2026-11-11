@@ -1,6 +1,11 @@
 import "./_dom";
 import { beforeEach, describe, expect, test } from "vitest";
-import { createLineRefPill, readRenderedLines } from "../views/line-ref-pill";
+import {
+  createLineRefPill,
+  DEFAULT_VIEW,
+  type LineRefPillProps,
+  readRenderedLines,
+} from "../views/line-ref-pill";
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -287,5 +292,41 @@ describe("line reference pill placement", () => {
     pill.show("src/sample.ts", 3, 3);
     const el = document.querySelector<HTMLElement>("#line-ref-pill");
     expect(el?.style.getPropertyValue("--lrp-center")).toBe("");
+  });
+});
+
+describe("the line reference pill presenter", () => {
+  test("gives the view the reference and the line count; close goes to the host", () => {
+    const shown: LineRefPillProps[] = [];
+    const closed: string[] = [];
+    const pill = createLineRefPill(
+      {
+        onClose: () => closed.push("close"),
+        githubUrlForSelection: () => null,
+        copyReferenceLabel: () => "Copy AI reference",
+        lineCountLabel: (count) => `${count} lines`,
+        githubOpenTitle: () => "Open on GitHub",
+        githubCopyTitle: () => "Copy GitHub link",
+      },
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    pill.show("src/index.ts", 10, 12);
+    const last = shown[shown.length - 1];
+    expect([
+      last?.copy.ref,
+      last?.copy.count,
+      last?.github,
+      last?.history,
+    ]).toEqual([
+      "@src/index.ts#10-12",
+      { text: "3 lines", warn: false },
+      null,
+      null,
+    ]);
+    last?.onClose();
+    expect(closed).toEqual(["close"]);
   });
 });

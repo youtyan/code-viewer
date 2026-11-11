@@ -4,7 +4,11 @@ import { findMainScrollTarget } from "../core/focus-scope";
 import type { AppRoute } from "../core/routes";
 import type { ShikiHighlighter } from "../core/shiki-loader";
 import type { SourceViewDeps } from "../views/source-view";
-import { createSourceView } from "../views/source-view";
+import {
+  createSourceView,
+  DEFAULT_VIEW,
+  type SourceViewView,
+} from "../views/source-view";
 import { deferred, waitFor } from "./_test-helpers";
 
 afterEach(() => {
@@ -65,6 +69,7 @@ describe("sourceTargetFromRoute on the history screen", () => {
 function createSourceViewForCursorTest(
   route: AppRoute,
   overrides: Partial<SourceViewDeps> = {},
+  view?: SourceViewView,
 ) {
   const state: SourceViewDeps["STATE"] = {
     route,
@@ -73,63 +78,66 @@ function createSourceViewForCursorTest(
     files: [],
     syntaxHighlight: false,
   };
-  return createSourceView({
-    STATE: state,
-    // 本文の実体と同じく、渡された STATE の route を読む (STATE を差し替える
-    // テストがある)。
-    route: () => (overrides.STATE ?? state).route,
-    setRoute(nextRoute) {
-      state.route = nextRoute;
+  return createSourceView(
+    {
+      STATE: state,
+      // 本文の実体と同じく、渡された STATE の route を読む (STATE を差し替える
+      // テストがある)。
+      route: () => (overrides.STATE ?? state).route,
+      setRoute(nextRoute) {
+        state.route = nextRoute;
+      },
+      scope: () => document,
+      mountRoot: () => {
+        const el = document.querySelector<HTMLElement>("#diff");
+        if (!el) throw new Error("missing #diff");
+        return el;
+      },
+      mainScrollTarget: () => findMainScrollTarget(),
+      setPageMode() {
+        /* noop */
+      },
+      currentRange: () => ({ from: "HEAD", to: "worktree" }),
+      trackLoad: (promise) => promise,
+      isAbortError: () => false,
+      loadRepo: async () => undefined,
+      repoRoute: (ref, path) => ({
+        screen: "repo",
+        ref,
+        path,
+        range: { from: "HEAD", to: "worktree" },
+      }),
+      repoFileTargetFromRoute: () => null,
+      renderRepoBlobSidebar: async () => undefined,
+      placeSidebarToggle() {
+        /* noop */
+      },
+      createFileBreadcrumb: () => document.createElement("nav"),
+      createFileDetailMeta: () => document.createElement("div"),
+      createOpenPathButton: () => document.createElement("button"),
+      createMoveToTrashButton: () => document.createElement("button"),
+      canTrashWorktreeRef: () => false,
+      loadRawFileInfo: async () => ({
+        type: "text",
+        size: 0,
+        metadata: {},
+      }),
+      loadSyntaxHighlighter: async () => null,
+      setViewFileButtonState() {
+        /* noop */
+      },
+      scrollMainPanel() {
+        /* noop */
+      },
+      focusMainSurface() {
+        /* noop */
+      },
+      isPaletteOpen: () => false,
+      getLanguage: () => "en",
+      ...overrides,
     },
-    scope: () => document,
-    mountRoot: () => {
-      const el = document.querySelector<HTMLElement>("#diff");
-      if (!el) throw new Error("missing #diff");
-      return el;
-    },
-    mainScrollTarget: () => findMainScrollTarget(),
-    setPageMode() {
-      /* noop */
-    },
-    currentRange: () => ({ from: "HEAD", to: "worktree" }),
-    trackLoad: (promise) => promise,
-    isAbortError: () => false,
-    loadRepo: async () => undefined,
-    repoRoute: (ref, path) => ({
-      screen: "repo",
-      ref,
-      path,
-      range: { from: "HEAD", to: "worktree" },
-    }),
-    repoFileTargetFromRoute: () => null,
-    renderRepoBlobSidebar: async () => undefined,
-    placeSidebarToggle() {
-      /* noop */
-    },
-    createFileBreadcrumb: () => document.createElement("nav"),
-    createFileDetailMeta: () => document.createElement("div"),
-    createOpenPathButton: () => document.createElement("button"),
-    createMoveToTrashButton: () => document.createElement("button"),
-    canTrashWorktreeRef: () => false,
-    loadRawFileInfo: async () => ({
-      type: "text",
-      size: 0,
-      metadata: {},
-    }),
-    loadSyntaxHighlighter: async () => null,
-    setViewFileButtonState() {
-      /* noop */
-    },
-    scrollMainPanel() {
-      /* noop */
-    },
-    focusMainSurface() {
-      /* noop */
-    },
-    isPaletteOpen: () => false,
-    getLanguage: () => "en",
-    ...overrides,
-  });
+    view,
+  );
 }
 
 describe("source view cursor", () => {
@@ -1178,5 +1186,31 @@ describe("find in a large file", () => {
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
     );
     expect(hits()).toBe(0);
+  });
+});
+
+describe("the source view presenter", () => {
+  test("gives the table view one row per line of the file", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    installRawFileFetchMock();
+    const rows: Parameters<SourceViewView["tableRows"]>[0][] = [];
+    const view = createSourceViewForCursorTest(
+      blobRoute("a.txt"),
+      {},
+      {
+        ...DEFAULT_VIEW,
+        tableRows: (props) => {
+          rows.push(props);
+          return DEFAULT_VIEW.tableRows(props);
+        },
+      },
+    );
+    await view.renderStandaloneSource({ path: "a.txt", ref: "worktree" });
+    const last = rows[rows.length - 1];
+    expect(last?.rows.map((row) => [row.line, row.text, row.html])).toEqual([
+      [1, "line one", null],
+      [2, "line two", null],
+      [3, "", null],
+    ]);
   });
 });

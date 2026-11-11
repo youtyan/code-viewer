@@ -86,7 +86,7 @@ import {
 } from "./source-preview-i18n";
 import { markNeedleInCell } from "./text-mark";
 import { iconTemplate } from "./ui/icon";
-import { renderOwned, templateElement } from "./ui/renderer";
+import { detachedElement, renderOwned, templateElement } from "./ui/renderer";
 
 export type VirtualSourcePagingKeyboardEvent = KeyboardEvent & {
   __gdpVirtualSourcePagingHandled?: boolean;
@@ -182,13 +182,390 @@ export type SourceViewDeps = {
   requestUrl?(url: string): string;
 };
 
+type CopyButtonProps = {
+  label: string;
+  disabled: boolean;
+  extraClass: string;
+  onClick(button: HTMLButtonElement): void;
+};
+
+/** 行へ移る欄。 */
+export type SourceLineJumpProps = {
+  count: string;
+  label: string;
+  go: string;
+  value: string;
+  max: number | null;
+  onSubmit(input: HTMLInputElement): void;
+};
+
+/** 小さなファイルの表の 1 行。 */
+export type SourceRowProps = {
+  line: number;
+  target: boolean;
+  cursor: boolean;
+  /** 色付けした HTML (届くまでは null で原文)。 */
+  html: string | null;
+  text: string;
+};
+
+/** 大きなファイルの窓の 1 行。 */
+export type SourceVirtualRowProps = {
+  line: number;
+  target: boolean;
+  cursor: boolean;
+  rowClass: string | null;
+  gutter: HTMLElement | null;
+  code:
+    | { kind: "missing"; failed: string | null }
+    | {
+        kind: "marked";
+        pieces: { text: string; hit: boolean; active: boolean }[];
+      }
+    | { kind: "html"; html: string }
+    | { kind: "plain"; text: string };
+};
+
+export type SourceFindBarProps = {
+  placeholder: string;
+  value: string;
+  count: { text: string; title: string | null };
+  previous: string;
+  next: string;
+  close: string;
+  onInput(value: string): void;
+  onEscape(): void;
+  onMove(direction: 1 | -1): void;
+  onClose(): void;
+};
+
+export type SourceViewView = {
+  loading(props: {
+    title: string;
+    message: string;
+    slow: string | null;
+    cancel: { label: string; title: string; onClick(): void } | null;
+  }): unknown;
+  error(text: string): unknown;
+  cancelled(props: {
+    title: string;
+    message: string;
+    reopen: { label: string; onClick(): void };
+  }): unknown;
+  download(props: { href: string; label: string }): unknown;
+  fileInfo(props: {
+    kind: string;
+    size: string | null;
+    resolution: string | null;
+  }): unknown;
+  copyButton(props: CopyButtonProps): unknown;
+  tabs(props: {
+    fileTabs: Parameters<typeof fileViewTabsTemplate>;
+    lineJump: SourceLineJumpProps;
+  }): unknown;
+  table(): unknown;
+  tableRows(props: {
+    rows: SourceRowProps[];
+    onLineNumber(element: HTMLElement, line: number): void;
+  }): unknown;
+  viewer(props: {
+    virtual: boolean;
+    meta: string | null;
+    children: Node[];
+  }): unknown;
+  virtualFrame(props: {
+    mode: string;
+    summary: string;
+    sourceLabel: string;
+    copy: CopyButtonProps | null;
+    raw: { href: string; label: string } | null;
+    full: {
+      href: string;
+      title: string;
+      label: string;
+      onOpen(href: string): void;
+    };
+  }): unknown;
+  virtualRows(props: {
+    rows: SourceVirtualRowProps[];
+    onLineNumber(element: HTMLElement, line: number): void;
+  }): unknown;
+  findBar(props: SourceFindBarProps): unknown;
+  media(props: {
+    kind: string;
+    meta: string | null;
+    info: HTMLElement;
+    embed: Parameters<typeof mediaEmbedTemplate>[0];
+  }): unknown;
+  card(props: { path: string; ref: string; sticky: HTMLElement }): unknown;
+  backButton(props: {
+    onClick(): void;
+    init(button: HTMLButtonElement): void;
+  }): unknown;
+};
+
+/** 行番号の欄に、行を選ぶ操作を 1 度だけ付ける (描き直しでは付け直さない)。 */
+const boundLineNumbers = new WeakSet<Element>();
+function lineNumberRef(
+  bind: (element: HTMLElement, line: number) => void,
+  line: number,
+) {
+  return ref((element) => {
+    if (!(element instanceof HTMLElement) || boundLineNumbers.has(element))
+      return;
+    boundLineNumbers.add(element);
+    bind(element, line);
+  });
+}
+
+function copyButtonTemplate(props: CopyButtonProps): TemplateResult {
+  return html`<button
+    type="button"
+    class=${`gdp-file-header-icon gdp-copy-source${props.extraClass ? ` ${props.extraClass}` : ""}`}
+    title=${props.label}
+    aria-label=${props.label}
+    ?disabled=${props.disabled}
+    @click=${(event: MouseEvent) =>
+      props.onClick(event.currentTarget as HTMLButtonElement)}
+  >${iconTemplate(COPY_16_PATHS, "octicon-copy")}</button>`;
+}
+
+export const DEFAULT_VIEW: SourceViewView = {
+  loading: (props) => html`<div class="gdp-source-viewer loading"><div
+      class="gdp-source-loading-content"
+    ><span class="gdp-source-loading-spinner" aria-hidden="true"></span><strong
+        class="gdp-source-loading-title"
+        >${props.title}</strong
+      ><div class="gdp-source-loading-message">${props.message}</div>${
+        props.slow !== null
+          ? html`<div class="gdp-source-loading-slow-note">${props.slow}</div>`
+          : nothing
+      }${
+        props.cancel
+          ? html`<button
+              type="button"
+              class="gdp-btn gdp-btn-sm gdp-source-cancel"
+              title=${props.cancel.title}
+              @click=${(event: MouseEvent) => {
+                event.stopPropagation();
+                props.cancel?.onClick();
+              }}
+            >${props.cancel.label}</button>`
+          : nothing
+      }</div></div>`,
+  error: (text) => html`<div class="gdp-source-viewer error">${text}</div>`,
+  cancelled: (props) => html`<div class="gdp-source-viewer cancelled"><div
+      class="gdp-source-loading-content"
+    ><strong class="gdp-source-loading-title">${props.title}</strong><div
+        class="gdp-source-loading-message"
+      >${props.message}</div><button
+        type="button"
+        class="gdp-btn gdp-btn-sm"
+        @click=${props.reopen.onClick}
+      >${props.reopen.label}</button></div></div>`,
+  download: (props) => html`<a
+    class="gdp-btn gdp-btn-sm gdp-source-download"
+    href=${props.href}
+    target="_blank"
+    rel="noreferrer"
+  >${props.label}</a>`,
+  fileInfo: (props) => html`<div class="gdp-source-file-info"><span class="kind"
+      >${props.kind}</span
+    >${props.size !== null ? html`<span>${props.size}</span>` : nothing}${
+      props.resolution !== null
+        ? html`<span>${props.resolution}</span>`
+        : nothing
+    }</div>`,
+  copyButton: copyButtonTemplate,
+  tabs: (props) => {
+    const jump = props.lineJump;
+    // 文字は span に包む: 狭い面では CSS がこれだけを畳む (欄は残す)。
+    // localize は label の最初の子の文字を書き換える。
+    return html`<div class="gdp-source-tabs">${fileViewTabsTemplate(
+      ...props.fileTabs,
+    )}<form
+      class="gdp-source-line-jump"
+      @submit=${(event: SubmitEvent) => {
+        event.preventDefault();
+        const input = (event.currentTarget as HTMLFormElement).querySelector(
+          "input",
+        );
+        if (input) jump.onSubmit(input);
+      }}
+    ><span class="gdp-source-line-count">${jump.count}</span><label
+        ><span class="gdp-source-line-jump-label">${jump.label}</span><input
+          type="number"
+          min="1"
+          step="1"
+          required
+          max=${jump.max !== null ? String(jump.max) : nothing}
+          aria-label=${jump.label}
+          .value=${jump.value}
+      /></label><button type="submit" class="gdp-btn gdp-btn-sm">${jump.go}</button></form
+    ></div>`;
+  },
+  table: () =>
+    html`<table class="gdp-source-table" data-source-pane="code"><tbody></tbody></table>`,
+  tableRows: (props) =>
+    props.rows.map((row) => {
+      const cls = [
+        row.target ? "gdp-source-line-target" : "",
+        row.cursor ? "gdp-source-cursor" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return html`<tr data-line=${String(row.line)} class=${cls}><td
+          class="gdp-source-line-number"
+          ${lineNumberRef(props.onLineNumber, row.line)}
+        >${String(row.line)}</td>${
+          // 同じ升のまま中身だけを色付けしたものに替える (升を作り直さない)。
+          html`<td class=${row.html === null ? "gdp-source-line-code" : "gdp-source-line-code shiki"}
+            >${row.html === null ? row.text || " " : unsafeHTML(row.html || " ")}</td
+          >`
+        }</tr>`;
+    }),
+  viewer: (props) => html`<div
+    class=${props.virtual ? "gdp-source-viewer virtual" : "gdp-source-viewer"}
+    >${props.meta !== null ? html`<div class="gdp-source-meta">${props.meta}</div>` : nothing}${props.children}</div
+  >`,
+  virtualFrame: (props) => html`<div class="gdp-source-virtual"><div
+      class="gdp-source-virtual-info"
+    ><span class="gdp-source-virtual-badge">${props.mode}</span><span
+        class="gdp-source-virtual-summary"
+        >${props.summary}</span
+      ><span class="gdp-source-virtual-actions">${
+        props.copy ? copyButtonTemplate(props.copy) : nothing
+      }${
+        props.raw
+          ? html`<a
+              class="gdp-source-virtual-action"
+              href=${props.raw.href}
+              target="_blank"
+              rel="noreferrer"
+              >${props.raw.label}</a
+            >`
+          : nothing
+      }<a
+          class="gdp-source-virtual-action"
+          href=${props.full.href}
+          title=${props.full.title}
+          @click=${(event: MouseEvent) => {
+            event.preventDefault();
+            props.full.onOpen((event.currentTarget as HTMLAnchorElement).href);
+          }}
+        >${props.full.label}</a
+      ></span></div
+    ><div
+      class="gdp-source-virtual-scroller"
+      tabindex="0"
+      role="region"
+      aria-label=${props.sourceLabel}
+    ><div class="gdp-source-virtual-spacer"><div
+          class="gdp-source-virtual-window"
+        ></div></div></div></div>`,
+  virtualRows: (props) =>
+    repeat(
+      props.rows,
+      (row) => row.line,
+      (row) => {
+        const cls = [
+          "gdp-source-virtual-row",
+          row.target ? "gdp-source-line-target" : "",
+          row.cursor ? "gdp-source-cursor" : "",
+          row.rowClass ?? "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        const code = row.code;
+        return html`<div class=${cls} data-line=${String(row.line)}>${
+          row.gutter ?? nothing
+        }<span
+            class="gdp-source-virtual-line-number"
+            ${lineNumberRef(props.onLineNumber, row.line)}
+          >${String(row.line)}</span
+          >${
+            code.kind === "missing"
+              ? // 読めなかった範囲の行は空のままにせず、失敗の印と理由を付ける。
+                html`<span
+                  class=${code.failed ? "gdp-source-virtual-line-code gdp-highlight-failed" : "gdp-source-virtual-line-code"}
+                  title=${code.failed ?? nothing}
+                ></span>`
+              : code.kind === "marked"
+                ? html`<span class="gdp-source-virtual-line-code">${code.pieces.map(
+                    (piece) =>
+                      piece.hit
+                        ? html`<mark
+                            class=${piece.active ? "gdp-source-virtual-search-hit active" : "gdp-source-virtual-search-hit"}
+                            >${piece.text}</mark
+                          >`
+                        : piece.text,
+                  )}</span>`
+                : code.kind === "html"
+                  ? html`<span class="gdp-source-virtual-line-code hljs">${unsafeHTML(code.html)}</span>`
+                  : html`<span class="gdp-source-virtual-line-code">${code.text}</span>`
+          }</div>`;
+      },
+    ),
+  findBar: (props) => html`<input
+      type="search"
+      placeholder=${props.placeholder}
+      autocomplete="off"
+      spellcheck="false"
+      .value=${live(props.value)}
+      @input=${(event: Event) =>
+        props.onInput((event.currentTarget as HTMLInputElement).value)}
+      @keydown=${(event: KeyboardEvent) => {
+        if (isImeComposing(event)) return;
+        if (event.key === "Escape") {
+          event.preventDefault();
+          props.onEscape();
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          props.onMove(event.shiftKey ? -1 : 1);
+        }
+      }}
+    /><span class="gdp-source-virtual-search-count" title=${props.count.title ?? nothing}
+      >${props.count.text}</span
+    ><button type="button" class="gdp-btn gdp-btn-sm" @click=${() => props.onMove(-1)}
+      >${props.previous}</button
+    ><button type="button" class="gdp-btn gdp-btn-sm" @click=${() => props.onMove(1)}
+      >${props.next}</button
+    ><button type="button" class="gdp-btn gdp-btn-sm" @click=${props.onClose}
+      >${props.close}</button
+    >`,
+  media: (props) =>
+    html`<div class=${`gdp-source-viewer media ${props.kind}`}>${
+      props.meta !== null
+        ? html`<div class="gdp-source-meta">${props.meta}</div>`
+        : nothing
+    }${props.info}${mediaEmbedTemplate(props.embed)}</div>`,
+  card: (props) => html`<article
+    class="gdp-file-shell loaded gdp-standalone-source gdp-source-mode"
+    data-path=${props.path}
+    data-source-ref=${props.ref}
+  ><div class="gdp-file-detail-wrapper">${props.sticky}<div
+        class="gdp-file-detail-body"
+      ></div></div></article>`,
+  backButton: (props) => html`<button
+    type="button"
+    class="gdp-view-file gdp-btn gdp-btn-sm"
+    ${ref((back) => {
+      if (back instanceof HTMLButtonElement) props.init(back);
+    })}
+    @click=${props.onClick}
+  ></button>`,
+};
+
 /** 小さなファイルの表と、色付けした行で描き直す口。 */
 type SourceTable = {
   table: HTMLTableElement;
   highlight(lines: string[]): void;
 };
 
-export function createSourceView(deps: SourceViewDeps) {
+export function createSourceView(
+  deps: SourceViewDeps,
+  view: SourceViewView = DEFAULT_VIEW,
+) {
   const {
     STATE,
     route: currentRoute,
@@ -802,65 +1179,39 @@ export function createSourceView(deps: SourceViewDeps) {
     target: SourceFileTarget,
     onCancel?: () => void,
   ) {
-    const view = templateElement(
-      html`<div class="gdp-source-viewer loading"></div>`,
-    );
     const startedAt = Date.now();
     /** 長くかかっているときの経過秒 (null はまだ普通の待ち)。 */
     let elapsed: number | null = null;
-    const draw = () => {
+    const box = detachedElement(() => {
       const text = SOURCE_READING_TEXT[getLanguage()];
-      renderOwned(
-        view,
-        html`<div class="gdp-source-loading-content"><span
-            class="gdp-source-loading-spinner"
-            aria-hidden="true"
-          ></span><strong class="gdp-source-loading-title"
-            >${elapsed === null ? text.loadingFile : text.stillLoading(elapsed)}</strong
-          ><div class="gdp-source-loading-message">${text.fileAtRef(
-            target.path,
-            target.ref,
-          )}</div>${
-            elapsed === null
-              ? nothing
-              : html`<div class="gdp-source-loading-slow-note">${text.slowNote(
-                  elapsed,
-                )}</div>`
-          }${
-            onCancel
-              ? html`<button
-                  type="button"
-                  class="gdp-btn gdp-btn-sm gdp-source-cancel"
-                  title=${text.cancelTitle}
-                  @click=${(event: MouseEvent) => {
-                    event.stopPropagation();
-                    onCancel();
-                  }}
-                >${text.cancel}</button>`
-              : nothing
-          }</div>`,
-      );
-    };
-    draw();
+      return view.loading({
+        title: elapsed === null ? text.loadingFile : text.stillLoading(elapsed),
+        message: text.fileAtRef(target.path, target.ref),
+        slow: elapsed === null ? null : text.slowNote(elapsed),
+        cancel: onCancel
+          ? { label: text.cancel, title: text.cancelTitle, onClick: onCancel }
+          : null,
+      });
+    });
     // Loads usually finish in well under a second. If this exact loading
     // view is still mounted past the threshold, that is no longer the
     // common case, so say so explicitly instead of leaving the user
     // guessing whether the app has silently hung.
     window.setTimeout(() => {
-      if (!view.isConnected) return;
+      if (!box.element.isConnected) return;
       let interval: number | null = null;
       const updateSlowNote = () => {
-        if (!view.isConnected) {
+        if (!box.element.isConnected) {
           if (interval !== null) window.clearInterval(interval);
           return;
         }
         elapsed = Math.max(1, Math.floor((Date.now() - startedAt) / 1000));
-        draw();
+        box.draw();
       };
       updateSlowNote();
       interval = window.setInterval(updateSlowNote, 1000);
     }, SOURCE_LOADING_SLOW_THRESHOLD_MS);
-    replaceSourceBody(card, view);
+    replaceSourceBody(card, box.element);
   }
 
   function renderSourceError(
@@ -871,10 +1222,13 @@ export function createSourceView(deps: SourceViewDeps) {
     replaceSourceBody(
       card,
       templateElement(
-        html`<div class="gdp-source-viewer error">${
+        view.error(
           message ||
-          SOURCE_READING_TEXT[getLanguage()].cannotLoad(target.path, target.ref)
-        }</div>`,
+            SOURCE_READING_TEXT[getLanguage()].cannotLoad(
+              target.path,
+              target.ref,
+            ),
+        ),
       ),
     );
     setSourceCardState(card, "error");
@@ -888,18 +1242,15 @@ export function createSourceView(deps: SourceViewDeps) {
     replaceSourceBody(
       card,
       templateElement(
-        html`<div class="gdp-source-viewer cancelled"><div
-            class="gdp-source-loading-content"
-          ><strong class="gdp-source-loading-title">${text.loadingCancelled}</strong
-            ><div class="gdp-source-loading-message">${text.fileAtRef(
-              target.path,
-              target.ref,
-            )}</div><button
-              type="button"
-              class="gdp-btn gdp-btn-sm"
-              @click=${() =>
-                renderStandaloneSource(sourceTargetFromRoute() || target)}
-            >${text.reopen}</button></div></div>`,
+        view.cancelled({
+          title: text.loadingCancelled,
+          message: text.fileAtRef(target.path, target.ref),
+          reopen: {
+            label: text.reopen,
+            onClick: () =>
+              renderStandaloneSource(sourceTargetFromRoute() || target),
+          },
+        }),
       ),
     );
     setSourceCardState(card, "cancelled");
@@ -912,12 +1263,7 @@ export function createSourceView(deps: SourceViewDeps) {
     const text = SOURCE_READING_TEXT[getLanguage()];
     const info = createSourceFileInfo(target, "unsupported file");
     const link = templateElement(
-      html`<a
-        class="gdp-btn gdp-btn-sm gdp-source-download"
-        href=${rawFileUrl(target)}
-        target="_blank"
-        rel="noreferrer"
-      >${text.downloadRaw}</a>`,
+      view.download({ href: rawFileUrl(target), label: text.downloadRaw }),
     );
     replaceSourceBody(
       card,
@@ -959,36 +1305,25 @@ export function createSourceView(deps: SourceViewDeps) {
     kind: string,
     options: { loadMeta?: boolean } = {},
   ): { element: HTMLElement; setResolution(text: string): void } {
-    const element = templateElement(
-      html`<div class="gdp-source-file-info"></div>`,
-    );
     let meta: RawFileInfo | undefined;
-    let resolution = "";
-    const draw = () =>
-      renderOwned(
-        element,
-        html`<span class="kind">${humanFileKind(
-          target.path,
-          meta?.type,
-          kind,
-          getLanguage(),
-        )}</span>${
-          meta?.size != null
-            ? html`<span>${formatBytes(meta.size)}</span>`
-            : nothing
-        }${resolution ? html`<span>${resolution}</span>` : nothing}`,
-      );
-    draw();
+    let resolution: string | null = null;
+    const box = detachedElement(() =>
+      view.fileInfo({
+        kind: humanFileKind(target.path, meta?.type, kind, getLanguage()),
+        size: meta?.size != null ? formatBytes(meta.size) : null,
+        resolution,
+      }),
+    );
     if (options.loadMeta !== false)
       loadRawFileInfo(target).then((loaded) => {
         meta = loaded;
-        draw();
+        box.draw();
       });
     return {
-      element,
+      element: box.element,
       setResolution(text) {
         resolution = text;
-        draw();
+        box.draw();
       },
     };
   }
@@ -1005,20 +1340,17 @@ export function createSourceView(deps: SourceViewDeps) {
    * 中身をコピーするボタン。textValue が null なら読み込む前の場所取り
    * (押せない。読み込んだら本物と差し替える)。
    */
-  function sourceCopyButtonTemplate(
+  function copyButtonProps(
     textValue: string | null,
     extraClass = "",
-  ): TemplateResult {
+  ): CopyButtonProps {
     const text = SOURCE_READING_TEXT[getLanguage()];
-    return html`<button
-      type="button"
-      class=${`gdp-file-header-icon gdp-copy-source${extraClass ? ` ${extraClass}` : ""}`}
-      title=${text.copySource}
-      aria-label=${text.copySource}
-      ?disabled=${textValue === null}
-      @click=${async (event: MouseEvent) => {
+    return {
+      label: text.copySource,
+      disabled: textValue === null,
+      extraClass,
+      onClick: async (copy) => {
         if (textValue === null) return;
-        const copy = event.currentTarget as HTMLButtonElement;
         try {
           await navigator.clipboard.writeText(textValue);
           copy.classList.add("copied");
@@ -1034,41 +1366,28 @@ export function createSourceView(deps: SourceViewDeps) {
             1600,
           );
         }
-      }}
-    >${iconTemplate(COPY_16_PATHS, "octicon-copy")}</button>`;
+      },
+    };
   }
 
-  function sourceLineJumpTemplate(target: SourceFileTarget): TemplateResult {
+  function lineJumpProps(target: SourceFileTarget): SourceLineJumpProps {
     const text = SOURCE_READING_TEXT[getLanguage()];
     const total = SOURCE_CURSOR_TOTALS.get(sourceCursorKey(target));
-    // 文字は span に包む: 狭い面では CSS がこれだけを畳む (欄は残す)。
-    // localize は label の最初の子の文字を書き換える。
-    return html`<form
-      class="gdp-source-line-jump"
-      @submit=${(event: SubmitEvent) => {
-        event.preventDefault();
-        const input = (event.currentTarget as HTMLFormElement).querySelector(
-          "input",
-        );
-        if (!input?.reportValidity()) return;
+    return {
+      count: total ? text.total(total) : text.totalPending,
+      label: text.line,
+      go: text.go,
+      value: String(lineTargetStart(currentSourceLineTarget(target)) || 1),
+      max: total || null,
+      onSubmit: (input) => {
+        if (!input.reportValidity()) return;
         const cursor = ensureSourceCursor(target);
         cursor.line = input.valueAsNumber;
         syncSourceCursorRows(target);
         scrollSourceCursorIntoView(cursor, "center");
         focusMainSurface();
-      }}
-    ><span class="gdp-source-line-count">${
-      total ? text.total(total) : text.totalPending
-    }</span><label><span class="gdp-source-line-jump-label">${text.line}</span><input
-          type="number"
-          min="1"
-          step="1"
-          required
-          max=${total ? String(total) : nothing}
-          aria-label=${text.line}
-          .value=${String(lineTargetStart(currentSourceLineTarget(target)) || 1)}
-        /></label
-      ><button type="submit" class="gdp-btn gdp-btn-sm">${text.go}</button></form>`;
+      },
+    };
   }
 
   /**
@@ -1083,21 +1402,26 @@ export function createSourceView(deps: SourceViewDeps) {
     options: { previewable?: boolean } = {},
   ) {
     const tabs = templateElement(
-      html`<div class="gdp-source-tabs">${fileViewTabsTemplate(
-        { currentRange, setRoute, setPreferredSourceTab },
-        target,
-        active,
-        {
-          includeFileTabs:
-            currentRoute().screen === "file" &&
-            sourceInternalPathKind(target.path) !== "code-viewer",
-          previewable: !!options.previewable || active === "preview",
-          sourceTabClick: "manual",
-          ...(textValue !== undefined
-            ? { sourceCopyButton: sourceCopyButtonTemplate(textValue) }
-            : {}),
-        },
-      )}${sourceLineJumpTemplate(target)}</div>`,
+      view.tabs({
+        fileTabs: [
+          { currentRange, setRoute, setPreferredSourceTab },
+          target,
+          active,
+          {
+            includeFileTabs:
+              currentRoute().screen === "file" &&
+              sourceInternalPathKind(target.path) !== "code-viewer",
+            previewable: !!options.previewable || active === "preview",
+            sourceTabClick: "manual",
+            ...(textValue !== undefined
+              ? {
+                  sourceCopyButton: view.copyButton(copyButtonProps(textValue)),
+                }
+              : {}),
+          },
+        ],
+        lineJump: lineJumpProps(target),
+      }),
     );
     const button = (tab: SourceBlobTab) =>
       tabs.querySelector<HTMLButtonElement>(`button[data-file-tab="${tab}"]`);
@@ -1106,21 +1430,6 @@ export function createSourceView(deps: SourceViewDeps) {
       codeButton: button("code"),
       previewButton: button("preview"),
     };
-  }
-
-  /** 行番号の欄に、行を選ぶ操作を 1 度だけ付ける (描き直しでは付け直さない)。 */
-  const boundLineNumbers = new WeakSet<Element>();
-  function lineNumberRef(
-    card: HTMLElement,
-    target: SourceFileTarget,
-    line: number,
-  ) {
-    return ref((element) => {
-      if (!(element instanceof HTMLElement) || boundLineNumbers.has(element))
-        return;
-      boundLineNumbers.add(element);
-      bindSourceLineNumber(element, card, target, line);
-    });
   }
 
   /**
@@ -1133,34 +1442,22 @@ export function createSourceView(deps: SourceViewDeps) {
     lines: string[],
     signal?: AbortSignal,
   ): Promise<SourceTable | null> {
-    const table = templateElement<HTMLTableElement>(
-      html`<table class="gdp-source-table" data-source-pane="code"><tbody></tbody></table>`,
-    );
+    const table = templateElement<HTMLTableElement>(view.table());
     const tbody = table.tBodies[0];
     if (!tbody) throw new Error("source table: the body was not drawn");
     let highlighted: string[] | null = null;
     const rows = (count: number) => {
       const lineTarget = currentSourceLineTarget(target);
-      return lines.slice(0, count).map((line, index) => {
-        const number = index + 1;
-        const code = highlighted?.[index];
-        const cls = [
-          lineInSourceTarget(number, lineTarget)
-            ? "gdp-source-line-target"
-            : "",
-          sourceCursorMatches(target, number) ? "gdp-source-cursor" : "",
-        ]
-          .filter(Boolean)
-          .join(" ");
-        return html`<tr data-line=${String(number)} class=${cls}><td
-            class="gdp-source-line-number"
-            ${lineNumberRef(card, target, number)}
-          >${String(number)}</td>${
-            // 同じ升のまま中身だけを色付けしたものに替える (升を作り直さない)。
-            html`<td class=${code == null ? "gdp-source-line-code" : "gdp-source-line-code shiki"}
-              >${code == null ? line || " " : unsafeHTML(code || " ")}</td
-            >`
-          }</tr>`;
+      return view.tableRows({
+        rows: lines.slice(0, count).map((line, index) => ({
+          line: index + 1,
+          target: lineInSourceTarget(index + 1, lineTarget),
+          cursor: sourceCursorMatches(target, index + 1),
+          html: highlighted?.[index] ?? null,
+          text: line,
+        })),
+        onLineNumber: (element, line) =>
+          bindSourceLineNumber(element, card, target, line),
       });
     };
     /** 描いた行のうち from から後の目当ての行に、探した語の印を付ける。 */
@@ -1211,13 +1508,11 @@ export function createSourceView(deps: SourceViewDeps) {
     /** 本文の面。単独で開いたカードでなければ、頭にパスと ref を出す。 */
     const sourceView = (virtual: boolean, children: Node[]) =>
       templateElement(
-        html`<div class=${virtual ? "gdp-source-viewer virtual" : "gdp-source-viewer"}
-          >${
-            isStandalone
-              ? nothing
-              : html`<div class="gdp-source-meta">${target.path} @ ${target.ref}</div>`
-          }${children}</div
-        >`,
+        view.viewer({
+          virtual,
+          meta: isStandalone ? null : `${target.path} @ ${target.ref}`,
+          children,
+        }),
       );
     const lang = inferLang(target.path);
     const sourceShikiLang = normalizeSourceShikiLang(lang);
@@ -1317,9 +1612,9 @@ export function createSourceView(deps: SourceViewDeps) {
             preview,
           );
         });
-        const view = sourceView(true, [preview, virtualCode]);
-        if (body) body.replaceWith(view);
-        else card.appendChild(view);
+        const viewer = sourceView(true, [preview, virtualCode]);
+        if (body) body.replaceWith(viewer);
+        else card.appendChild(viewer);
         if (initialSourceTab === "preview") ensurePreviewHighlight();
         return true;
       }
@@ -1331,9 +1626,9 @@ export function createSourceView(deps: SourceViewDeps) {
         tabsHost.replaceChildren(tabs);
       }
       if (signal?.aborted) return false;
-      const view = sourceView(true, [virtualCode]);
-      if (body) body.replaceWith(view);
-      else card.appendChild(view);
+      const viewer = sourceView(true, [virtualCode]);
+      if (body) body.replaceWith(viewer);
+      else card.appendChild(viewer);
       return true;
     }
     const sourceTable = await buildSourceTable(card, target, lines, signal);
@@ -1416,9 +1711,9 @@ export function createSourceView(deps: SourceViewDeps) {
         );
       });
       if (signal?.aborted) return false;
-      const view = sourceView(false, [preview, table]);
-      if (body) body.replaceWith(view);
-      else card.appendChild(view);
+      const viewer = sourceView(false, [preview, table]);
+      if (body) body.replaceWith(viewer);
+      else card.appendChild(viewer);
       if (STATE.syntaxHighlight && sourceShikiLang)
         scheduleSourceHighlight(
           sourceTable,
@@ -1431,9 +1726,9 @@ export function createSourceView(deps: SourceViewDeps) {
       return true;
     }
     if (signal?.aborted) return false;
-    const view = sourceView(false, [table]);
-    if (body) body.replaceWith(view);
-    else card.appendChild(view);
+    const viewer = sourceView(false, [table]);
+    if (body) body.replaceWith(viewer);
+    else card.appendChild(viewer);
     if (STATE.syntaxHighlight && sourceShikiLang)
       scheduleSourceHighlight(
         sourceTable,
@@ -1764,34 +2059,38 @@ export function createSourceView(deps: SourceViewDeps) {
     return matches;
   }
 
-  /** 検索の当たりに印を付けた行の中身。当たりが無ければ null。 */
-  function virtualSourceSearchLineTemplate(
+  /** 検索の当たりで分けた行の文字。当たりが無ければ null。 */
+  function virtualSourceSearchPieces(
     line: string,
     query: string,
     activeRange: VirtualSourceSearchMatch | null,
     lineNumber: number,
-  ): TemplateResult | null {
+  ): { text: string; hit: boolean; active: boolean }[] | null {
     const ranges = virtualSourceSearchRanges(line, query);
     if (!ranges.length) return null;
-    const pieces: unknown[] = [];
+    const pieces: { text: string; hit: boolean; active: boolean }[] = [];
     let cursor = 0;
     for (const range of ranges) {
-      if (range.start > cursor) pieces.push(line.slice(cursor, range.start));
-      const active =
-        !!activeRange &&
-        activeRange.line === lineNumber &&
-        activeRange.start === range.start &&
-        activeRange.end === range.end;
-      pieces.push(
-        html`<mark
-          class=${active ? "gdp-source-virtual-search-hit active" : "gdp-source-virtual-search-hit"}
-          >${line.slice(range.start, range.end)}</mark
-        >`,
-      );
+      if (range.start > cursor)
+        pieces.push({
+          text: line.slice(cursor, range.start),
+          hit: false,
+          active: false,
+        });
+      pieces.push({
+        text: line.slice(range.start, range.end),
+        hit: true,
+        active:
+          !!activeRange &&
+          activeRange.line === lineNumber &&
+          activeRange.start === range.start &&
+          activeRange.end === range.end,
+      });
       cursor = range.end;
     }
-    if (cursor < line.length) pieces.push(line.slice(cursor));
-    return html`<span class="gdp-source-virtual-line-code">${pieces}</span>`;
+    if (cursor < line.length)
+      pieces.push({ text: line.slice(cursor), hit: false, active: false });
+    return pieces;
   }
 
   type VirtualRow = {
@@ -1821,21 +2120,17 @@ export function createSourceView(deps: SourceViewDeps) {
     const query = search?.query() || "";
     const activeRange = search?.activeRange() || null;
     const failures: Array<{ line: number; error: unknown }> = [];
-    const codeTemplate = (row: VirtualRow): TemplateResult => {
+    const codeProps = (row: VirtualRow): SourceVirtualRowProps["code"] => {
       const line = row.text;
       if (line == null)
-        // 読めなかった範囲の行は空のままにせず、失敗の印と理由を付ける。
-        return html`<span
-          class=${row.failedReason ? "gdp-source-virtual-line-code gdp-highlight-failed" : "gdp-source-virtual-line-code"}
-          title=${row.failedReason ?? nothing}
-        ></span>`;
-      const marked = virtualSourceSearchLineTemplate(
+        return { kind: "missing", failed: row.failedReason ?? null };
+      const pieces = virtualSourceSearchPieces(
         line,
         query,
         activeRange,
         row.number,
       );
-      if (marked) return marked;
+      if (pieces) return { kind: "marked", pieces };
       if (
         hljsRef?.highlight &&
         lang &&
@@ -1843,42 +2138,33 @@ export function createSourceView(deps: SourceViewDeps) {
         (!hljsRef.getLanguage || hljsRef.getLanguage(lang))
       ) {
         try {
-          const value = hljsRef.highlight(line, {
-            language: lang,
-            ignoreIllegals: true,
-          }).value;
-          return html`<span class="gdp-source-virtual-line-code hljs">${unsafeHTML(value)}</span>`;
+          return {
+            kind: "html",
+            html: hljsRef.highlight(line, {
+              language: lang,
+              ignoreIllegals: true,
+            }).value,
+          };
         } catch (error) {
           failures.push({ line: row.number, error });
         }
       }
-      return html`<span class="gdp-source-virtual-line-code">${line}</span>`;
+      return { kind: "plain", text: line };
     };
     renderOwned(
       windowEl,
-      repeat(
-        rows,
-        (row) => row.number,
-        (row) => {
-          const cls = [
-            "gdp-source-virtual-row",
-            lineInSourceTarget(row.number, lineTarget)
-              ? "gdp-source-line-target"
-              : "",
-            sourceCursorMatches(target, row.number) ? "gdp-source-cursor" : "",
-            gutter?.rowClass ?? "",
-          ]
-            .filter(Boolean)
-            .join(" ");
-          return html`<div class=${cls} data-line=${String(row.number)}>${
-            gutter ? gutter.cell(row.number) : nothing
-          }<span
-              class="gdp-source-virtual-line-number"
-              ${lineNumberRef(wrap, target, row.number)}
-            >${String(row.number)}</span
-            >${codeTemplate(row)}</div>`;
-        },
-      ),
+      view.virtualRows({
+        rows: rows.map((row) => ({
+          line: row.number,
+          target: lineInSourceTarget(row.number, lineTarget),
+          cursor: sourceCursorMatches(target, row.number),
+          rowClass: gutter?.rowClass ?? null,
+          gutter: gutter ? gutter.cell(row.number) : null,
+          code: codeProps(row),
+        })),
+        onLineNumber: (element, line) =>
+          bindSourceLineNumber(element, wrap, target, line),
+      }),
     );
     for (const failure of failures) {
       const code = windowEl.querySelector<HTMLElement>(
@@ -1916,36 +2202,22 @@ export function createSourceView(deps: SourceViewDeps) {
       const text = SOURCE_READING_TEXT[getLanguage()];
       renderOwned(
         bar,
-        html`<input
-            type="search"
-            placeholder=${text.findInFile}
-            autocomplete="off"
-            spellcheck="false"
-            .value=${live(query)}
-            @input=${(event: Event) => {
-              query = (event.currentTarget as HTMLInputElement).value;
-              active = 0;
-              scheduleSync();
-            }}
-            @keydown=${(event: KeyboardEvent) => {
-              if (isImeComposing(event)) return;
-              if (event.key === "Escape") {
-                event.preventDefault();
-                hide();
-              } else if (event.key === "Enter") {
-                event.preventDefault();
-                move(event.shiftKey ? -1 : 1);
-              }
-            }}
-          /><span class="gdp-source-virtual-search-count" title=${count.title ?? nothing}
-            >${count.text}</span
-          ><button type="button" class="gdp-btn gdp-btn-sm" @click=${() => move(-1)}
-            >${text.findPrev}</button
-          ><button type="button" class="gdp-btn gdp-btn-sm" @click=${() => move(1)}
-            >${text.findNext}</button
-          ><button type="button" class="gdp-btn gdp-btn-sm" @click=${hide}
-            >${text.findClose}</button
-          >`,
+        view.findBar({
+          placeholder: text.findInFile,
+          value: query,
+          count: { text: count.text, title: count.title ?? null },
+          previous: text.findPrev,
+          next: text.findNext,
+          close: text.findClose,
+          onInput: (value) => {
+            query = value;
+            active = 0;
+            scheduleSync();
+          },
+          onEscape: hide,
+          onMove: move,
+          onClose: hide,
+        }),
       );
     };
     const setCount = (next: { text: string; title?: string }) => {
@@ -2036,7 +2308,12 @@ export function createSourceView(deps: SourceViewDeps) {
   /** 大きなファイルの枠: 情報の帯 (印・要約・操作) と、行の窓を持つ巻物。 */
   function virtualSourceFrame(
     target: SourceFileTarget,
-    actions: TemplateResult,
+    actions: {
+      copy: CopyButtonProps | null;
+      raw: { href: string; label: string } | null;
+      fullTitle: string;
+      onFull(): void;
+    },
     summary: string,
   ): {
     wrap: VirtualSourceSearchRoot;
@@ -2047,21 +2324,26 @@ export function createSourceView(deps: SourceViewDeps) {
   } {
     const text = SOURCE_READING_TEXT[getLanguage()];
     const wrap = templateElement<VirtualSourceSearchRoot>(
-      html`<div class="gdp-source-virtual"><div class="gdp-source-virtual-info"><span
-            class="gdp-source-virtual-badge"
-            >${text.virtualMode}</span
-          ><span class="gdp-source-virtual-summary">${summary}</span><span
-            class="gdp-source-virtual-actions"
-            >${actions}</span
-          ></div
-        ><div
-          class="gdp-source-virtual-scroller"
-          tabindex="0"
-          role="region"
-          aria-label=${text.sourceCode(target.path)}
-        ><div class="gdp-source-virtual-spacer"><div
-              class="gdp-source-virtual-window"
-            ></div></div></div></div>`,
+      view.virtualFrame({
+        mode: text.virtualMode,
+        summary,
+        sourceLabel: text.sourceCode(target.path),
+        copy: actions.copy,
+        raw: actions.raw,
+        full: {
+          href: buildCurrentFileRouteWithVirtualMode(target, "off"),
+          title: actions.fullTitle,
+          label: text.openFullView,
+          onOpen: (href) => {
+            const url = new URL(href, window.location.origin);
+            setRoute(
+              parseRoute(url.pathname, url.search, currentRange()),
+              true,
+            );
+            actions.onFull();
+          },
+        },
+      }),
     );
     const find = (selector: string) => {
       const element = wrap.querySelector<HTMLElement>(selector);
@@ -2076,29 +2358,6 @@ export function createSourceView(deps: SourceViewDeps) {
       spacer: find(".gdp-source-virtual-spacer"),
       windowEl: find(".gdp-source-virtual-window"),
     };
-  }
-
-  /** 全体を開くリンク (仮想表示をやめる)。 */
-  function openFullViewTemplate(
-    target: SourceFileTarget,
-    title: string,
-    onOpen: () => void,
-  ): TemplateResult {
-    const href = buildCurrentFileRouteWithVirtualMode(target, "off");
-    return html`<a
-      class="gdp-source-virtual-action"
-      href=${href}
-      title=${title}
-      @click=${(event: MouseEvent) => {
-        event.preventDefault();
-        const url = new URL(
-          (event.currentTarget as HTMLAnchorElement).href,
-          window.location.origin,
-        );
-        setRoute(parseRoute(url.pathname, url.search, currentRange()), true);
-        onOpen();
-      }}
-    >${SOURCE_READING_TEXT[getLanguage()].openFullView}</a>`;
   }
 
   function openVirtualSourceSearchFromKeyboard(
@@ -2129,14 +2388,15 @@ export function createSourceView(deps: SourceViewDeps) {
     const text = SOURCE_READING_TEXT[getLanguage()];
     const { wrap, scroller, spacer, windowEl } = virtualSourceFrame(
       target,
-      html`${sourceCopyButtonTemplate(textValue, "gdp-source-virtual-copy")}${openFullViewTemplate(
-        target,
-        text.openFullViewTitle,
-        () => {
+      {
+        copy: copyButtonProps(textValue, "gdp-source-virtual-copy"),
+        raw: null,
+        fullTitle: text.openFullViewTitle,
+        onFull: () => {
           if (gutter) gutter.fullView();
           else renderStandaloneSource(target, { refresh: true });
         },
-      )}`,
+      },
       text.virtualSummary(
         lines.length.toLocaleString(),
         formatBytes(textValue.length),
@@ -2251,15 +2511,12 @@ export function createSourceView(deps: SourceViewDeps) {
     const text = SOURCE_READING_TEXT[getLanguage()];
     const { wrap, summaryEl, scroller, spacer, windowEl } = virtualSourceFrame(
       target,
-      html`<a
-          class="gdp-source-virtual-action"
-          href=${rawFileUrl(target)}
-          target="_blank"
-          rel="noreferrer"
-          >${text.openRaw}</a
-        >${openFullViewTemplate(target, text.openFullViewPagedTitle, () =>
-          renderStandaloneSource(target, { refresh: true }),
-        )}`,
+      {
+        copy: null,
+        raw: { href: rawFileUrl(target), label: text.openRaw },
+        fullTitle: text.openFullViewPagedTitle,
+        onFull: () => renderStandaloneSource(target, { refresh: true }),
+      },
       "",
     );
 
@@ -2563,15 +2820,15 @@ export function createSourceView(deps: SourceViewDeps) {
       lang,
       signal,
     );
-    const view = templateElement(
-      html`<div class="gdp-source-viewer virtual">${
-        isStandalone
-          ? nothing
-          : html`<div class="gdp-source-meta">${target.path} @ ${target.ref}</div>`
-      }${virtualCode}</div>`,
+    const viewer = templateElement(
+      view.viewer({
+        virtual: true,
+        meta: isStandalone ? null : `${target.path} @ ${target.ref}`,
+        children: [virtualCode],
+      }),
     );
-    if (body) body.replaceWith(view);
-    else card.appendChild(view);
+    if (body) body.replaceWith(viewer);
+    else card.appendChild(viewer);
     return true;
   }
 
@@ -2585,17 +2842,18 @@ export function createSourceView(deps: SourceViewDeps) {
     replaceSourceBody(
       card,
       templateElement(
-        html`<div class=${`gdp-source-viewer media ${mediaKind}`}>${
-          isStandalone
-            ? nothing
-            : html`<div class="gdp-source-meta">${target.path} @ ${target.ref}</div>`
-        }${info.element}${mediaEmbedTemplate({
-          url: rawFileUrl(target),
+        view.media({
           kind: mediaKind,
-          title: target.path,
-          onImageLoad: (img) =>
-            info.setResolution(`${img.naturalWidth} x ${img.naturalHeight}`),
-        })}</div>`,
+          meta: isStandalone ? null : `${target.path} @ ${target.ref}`,
+          info: info.element,
+          embed: {
+            url: rawFileUrl(target),
+            kind: mediaKind,
+            title: target.path,
+            onImageLoad: (img) =>
+              info.setResolution(`${img.naturalWidth} x ${img.naturalHeight}`),
+          },
+        }),
       ),
     );
     setSourceCardState(card, "done");
@@ -2726,14 +2984,9 @@ export function createSourceView(deps: SourceViewDeps) {
     if (!repoTarget) {
       header.appendChild(
         templateElement(
-          html`<button
-            type="button"
-            class="gdp-view-file gdp-btn gdp-btn-sm"
-            ${ref((back) => {
-              if (back instanceof HTMLButtonElement)
-                setViewFileButtonState(back, true);
-            })}
-            @click=${() => {
+          view.backButton({
+            init: (back) => setViewFileButtonState(back, true),
+            onClick: () => {
               const route = currentRoute();
               setRoute(
                 route.screen === "history"
@@ -2742,20 +2995,19 @@ export function createSourceView(deps: SourceViewDeps) {
               );
               setPageMode();
               removeStandaloneSource();
-            }}
-          ></button>`,
+            },
+          }),
         ),
       );
     }
     const card = templateElement<DiffCardElement>(
-      html`<article
-        class="gdp-file-shell loaded gdp-standalone-source gdp-source-mode"
-        data-path=${target.path}
-        data-source-ref=${target.ref || "worktree"}
-      ><div class="gdp-file-detail-wrapper">${sticky}<div
-            class="gdp-file-detail-body"
-          ></div></div></article>`,
+      view.card({
+        path: target.path,
+        ref: target.ref || "worktree",
+        sticky,
+      }),
     );
+
     setSourceCardState(card, "loading");
     const wrapper = card.querySelector<HTMLElement>(".gdp-file-detail-wrapper");
     if (!wrapper) throw new Error("source view: the card was not drawn");

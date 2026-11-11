@@ -82,9 +82,124 @@ type PreviewState =
       highlighted: string[] | null;
     };
 
+/** 見本の見出し (場所と、あれば操作)。 */
+export type CodePreviewHeaderProps = {
+  location: string;
+  title: string;
+  action: { label: string; onSelect(): void } | null;
+};
+
+export type CodePreviewLineProps = {
+  line: number;
+  target: boolean;
+  /** 色付け前は原文 (探した文字の範囲つき)、色付けの後はその HTML。 */
+  code:
+    | {
+        kind: "plain";
+        text: string;
+        mark: { start: number; end: number } | null;
+      }
+    | { kind: "html"; html: string };
+};
+
+export type CodePreviewProps =
+  | { kind: "empty" }
+  | { kind: "placeholder"; message: string }
+  | {
+      kind: "frame";
+      header: CodePreviewHeaderProps;
+      message: string | null;
+      /** ファイルが変わった: この見本だけを読み直すボタン。 */
+      reload: { label: string; onClick(): void } | null;
+    }
+  | {
+      kind: "code";
+      header: CodePreviewHeaderProps;
+      /** 見本ごとに変わる番号 (表を見本ごとに作り直す)。 */
+      key: number;
+      meta: string;
+      empty: string | null;
+      lines: CodePreviewLineProps[];
+    };
+
+export type CodePreviewView = (props: CodePreviewProps) => unknown;
+
+function headerTemplate(header: CodePreviewHeaderProps): TemplateResult {
+  return html`<div class="gdp-code-preview-header"><div
+      class="gdp-code-preview-location"
+      title=${header.title}
+    >${header.location}</div>${
+      header.action
+        ? html`<button
+            type="button"
+            class="gdp-btn gdp-btn-sm"
+            @mousedown=${(event: MouseEvent) => event.preventDefault()}
+            @click=${header.action.onSelect}
+          >${header.action.label}</button>`
+        : nothing
+    }</div>`;
+}
+
+function lineCodeTemplate(code: CodePreviewLineProps["code"]): TemplateResult {
+  if (code.kind === "html")
+    return html`<td class="gdp-source-line-code shiki">${unsafeHTML(code.html || " ")}</td>`;
+  const { text, mark } = code;
+  if (!mark) return html`<td class="gdp-source-line-code">${text || " "}</td>`;
+  return html`<td class="gdp-source-line-code">${text.slice(0, mark.start)}<mark
+      class="gdp-grep-match"
+      >${text.slice(mark.start, mark.end)}</mark
+    >${text.slice(mark.end)}</td>`;
+}
+
+export const DEFAULT_VIEW: CodePreviewView = (props) => {
+  switch (props.kind) {
+    case "empty":
+      return nothing;
+    case "placeholder":
+      return html`<div class="gdp-code-preview-placeholder">${props.message}</div>`;
+    case "frame":
+      // 文とボタンを 1 つの行にまとめる (枠は grid の中央寄せなので、
+      // 別々に置くと上下に離れて並ぶ)。
+      return html`${headerTemplate(props.header)}<div class="gdp-code-preview-code">${
+        props.message
+          ? html`<div class="gdp-code-preview-message">${
+              props.reload
+                ? html`<div>${props.message}<button
+                    type="button"
+                    class="gdp-btn gdp-btn-sm gdp-code-preview-reload"
+                    @mousedown=${(event: MouseEvent) =>
+                      // 検索の小窓の入力欄から焦点を奪わない (見出しの操作と同じ)。
+                      event.preventDefault()}
+                    @click=${props.reload.onClick}
+                  >${props.reload.label}</button></div>`
+                : props.message
+            }</div>`
+          : nothing
+      }</div>`;
+    case "code":
+      // 表は見本ごとに作り直す (色付けの後に印を付けた行を、次の見本で使い回さない)。
+      return html`${headerTemplate(props.header)}<div class="gdp-code-preview-code">${keyed(
+        props.key,
+        html`<div class="gdp-code-preview-meta">${props.meta}</div>${
+          props.empty
+            ? html`<div class="gdp-code-preview-message">${props.empty}</div>`
+            : html`<table class="gdp-source-table"><tbody>${props.lines.map(
+                (line) => html`<tr
+                  data-line=${String(line.line)}
+                  class=${line.target ? "gdp-source-line-target" : ""}
+                ><td class="gdp-source-line-number">${String(line.line)}</td>${lineCodeTemplate(
+                  line.code,
+                )}</tr>`,
+              )}</tbody></table>`
+        }`,
+      )}</div>`;
+  }
+};
+
 export function createCodePreview(
   host: HTMLElement,
   deps: CodePreviewDeps,
+  view: CodePreviewView = DEFAULT_VIEW,
 ): CodePreview {
   let controller: AbortController | null = null;
   let generation = 0;
@@ -96,126 +211,99 @@ export function createCodePreview(
   const isCurrent = (myGeneration: number, signal: AbortSignal): boolean =>
     !disposed && !signal.aborted && myGeneration === generation;
 
-  function headerTemplate(request: CodePreviewRequest): TemplateResult {
+  function headerProps(request: CodePreviewRequest): CodePreviewHeaderProps {
     const { target, action } = request;
-    return html`<div class="gdp-code-preview-header"><div
-        class="gdp-code-preview-location"
-        title=${
-          target.line
-            ? `${target.path}:${target.line}:${target.column ?? 1}`
-            : target.path
-        }
-      >${target.line ? `${target.path}:${target.line}` : target.path}</div>${
-        action
-          ? html`<button
-              type="button"
-              class="gdp-btn gdp-btn-sm"
-              @mousedown=${(event: MouseEvent) => event.preventDefault()}
-              @click=${action.onSelect}
-            >${action.label}</button>`
-          : nothing
-      }</div>`;
+    return {
+      location: target.line ? `${target.path}:${target.line}` : target.path,
+      title: target.line
+        ? `${target.path}:${target.line}:${target.column ?? 1}`
+        : target.path,
+      action: action
+        ? { label: action.label, onSelect: action.onSelect }
+        : null,
+    };
   }
 
-  /** 目当ての行の、探した文字に印を付けた中身 (色付け前の原文)。 */
-  function plainLineTemplate(
+  /** 目当ての行の、探した文字の範囲 (色付け前の原文で印を付ける)。 */
+  function markRange(
     request: CodePreviewRequest,
     line: number,
     lineText: string,
-  ): unknown {
+  ): { start: number; end: number } | null {
     const { match, target } = request;
-    const range =
-      match && line === target.line
-        ? findTextRange(lineText, match.text, {
-            caseSensitive: match.caseSensitive,
-            nearColumn: target.column,
-          })
-        : null;
-    if (!range) return lineText || " ";
-    return html`${lineText.slice(0, range.start)}<mark class="gdp-grep-match"
-        >${lineText.slice(range.start, range.end)}</mark
-      >${lineText.slice(range.end)}`;
+    return match && line === target.line
+      ? findTextRange(lineText, match.text, {
+          caseSensitive: match.caseSensitive,
+          nearColumn: target.column,
+        })
+      : null;
   }
 
-  function codeTemplate(
-    current: Extract<PreviewState, { kind: "code" }>,
-  ): TemplateResult {
-    const { request, response, highlighted } = current;
-    const text = codePreviewText(deps.getLanguage());
-    const meta = html`<div class="gdp-code-preview-meta">${text.lines(
-      response.start,
-      Math.min(
-        response.end,
-        response.start + Math.max(0, response.lines.length - 1),
-      ),
-      response.complete ? response.total : undefined,
-    )}</div>`;
-    if (response.lines.length === 0)
-      return html`${meta}<div class="gdp-code-preview-message">${text.noText}</div>`;
-    return html`${meta}<table class="gdp-source-table"><tbody>${response.lines.map(
-      (lineText, index) => {
-        const line = response.start + index;
-        const target =
-          request.target.line !== undefined && line === request.target.line;
-        const code = highlighted?.[index];
-        return html`<tr
-          data-line=${String(line)}
-          class=${target ? "gdp-source-line-target" : ""}
-        ><td class="gdp-source-line-number">${String(line)}</td>${
-          code == null
-            ? html`<td class="gdp-source-line-code">${plainLineTemplate(
-                request,
-                line,
-                lineText,
-              )}</td>`
-            : html`<td class="gdp-source-line-code shiki">${unsafeHTML(code || " ")}</td>`
-        }</tr>`;
-      },
-    )}</tbody></table>`;
-  }
-
-  function previewTemplate(): unknown {
+  function previewProps(): CodePreviewProps {
     switch (state.kind) {
       case "empty":
-        return nothing;
+        return { kind: "empty" };
       case "placeholder":
-        return html`<div class="gdp-code-preview-placeholder">${state.message}</div>`;
+        return { kind: "placeholder", message: state.message };
       case "frame": {
-        const { request, message, reload } = state;
+        const { request } = state;
         const text = codePreviewText(deps.getLanguage());
-        // 文とボタンを 1 つの行にまとめる (枠は grid の中央寄せなので、
-        // 別々に置くと上下に離れて並ぶ)。
-        return html`${headerTemplate(request)}<div class="gdp-code-preview-code">${
-          message
-            ? html`<div class="gdp-code-preview-message">${
-                reload
-                  ? html`<div>${message}<button
-                      type="button"
-                      class="gdp-btn gdp-btn-sm gdp-code-preview-reload"
-                      @mousedown=${(event: MouseEvent) =>
-                        // 検索の小窓の入力欄から焦点を奪わない (見出しの操作と同じ)。
-                        event.preventDefault()}
-                      @click=${() => {
-                        previewKey = "";
-                        show(request);
-                      }}
-                    >${text.reload}</button></div>`
-                  : message
-              }</div>`
-            : nothing
-        }</div>`;
+        return {
+          kind: "frame",
+          header: headerProps(request),
+          message: state.message ?? null,
+          reload: state.reload
+            ? {
+                label: text.reload,
+                onClick: () => {
+                  previewKey = "";
+                  show(request);
+                },
+              }
+            : null,
+        };
       }
-      case "code":
-        // 表は見本ごとに作り直す (色付けの後に印を付けた行を、次の見本で使い回さない)。
-        return html`${headerTemplate(state.request)}<div class="gdp-code-preview-code">${keyed(
-          generation,
-          codeTemplate(state),
-        )}</div>`;
+      case "code": {
+        const { request, response, highlighted } = state;
+        const text = codePreviewText(deps.getLanguage());
+        return {
+          kind: "code",
+          header: headerProps(request),
+          key: generation,
+          meta: text.lines(
+            response.start,
+            Math.min(
+              response.end,
+              response.start + Math.max(0, response.lines.length - 1),
+            ),
+            response.complete ? response.total : undefined,
+          ),
+          empty: response.lines.length === 0 ? text.noText : null,
+          lines: response.lines.map((lineText, index) => {
+            const line = response.start + index;
+            const code = highlighted?.[index];
+            return {
+              line,
+              target:
+                request.target.line !== undefined &&
+                line === request.target.line,
+              code:
+                code == null
+                  ? {
+                      kind: "plain" as const,
+                      text: lineText,
+                      mark: markRange(request, line, lineText),
+                    }
+                  : { kind: "html" as const, html: code },
+            };
+          }),
+        };
+      }
     }
   }
 
   function draw(): void {
-    renderOwned(host, previewTemplate());
+    renderOwned(host, view(previewProps()));
   }
 
   const clear = (message: string): void => {

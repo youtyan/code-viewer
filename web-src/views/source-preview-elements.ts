@@ -1,6 +1,6 @@
 import { csvParseRows, tsvParseRows } from "d3-dsv";
 import { live } from "lit/directives/live.js";
-import { html, nothing, type TemplateResult } from "lit/html.js";
+import { html, nothing } from "lit/html.js";
 import { SEARCH_16_PATH } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
 import { createMediaPlayer } from "./media-player";
@@ -20,11 +20,132 @@ export type DelimitedPreviewElement = HTMLElement & {
 
 type SortDirection = "asc" | "desc";
 
+type SearchProps = {
+  placeholder: string;
+  label: string;
+  value: string;
+  onInput(value: string): void;
+  /** Escape で空にする (空なら何もしない。外の Escape に渡す)。 */
+  onClear(): void;
+};
+
+/** 表の下見に描くもの。 */
+export type DelimitedPreviewProps = {
+  toolbarLabel: string;
+  search: SearchProps;
+  count: { text: string; label: string };
+  reset: { label: string; title: string; disabled: boolean; onClick(): void };
+  columns: {
+    index: number;
+    label: string;
+    sort: {
+      direction: SortDirection | "none";
+      ariaSort: "ascending" | "descending" | "none";
+      title: string;
+      onClick(): void;
+    };
+    filter: SearchProps;
+  }[];
+  rows: { index: number; cells: string[] }[];
+  /** 何も当たらないときの文 (当たれば null)。 */
+  empty: string | null;
+};
+
+export type DelimitedPreviewView = (props: DelimitedPreviewProps) => unknown;
+
+/** Escape で欄を空にする (空なら何もしない。外の Escape に渡す)。 */
+function clearOnEscape(event: KeyboardEvent, clear: () => void): void {
+  const input = event.currentTarget as HTMLInputElement;
+  if (isImeComposing(event) || event.key !== "Escape" || !input.value) return;
+  clear();
+}
+
+export const DEFAULT_VIEW: DelimitedPreviewView = (props) => html`<section
+  class="gdp-csv-shell"
+><div class="gdp-csv-toolbar" aria-label=${props.toolbarLabel}><span
+      class="gdp-csv-search-icon"
+      aria-hidden="true"
+      >${iconTemplate(SEARCH_16_PATH, "octicon-search")}</span
+    ><input
+      type="search"
+      class="gdp-csv-search"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder=${props.search.placeholder}
+      aria-label=${props.search.label}
+      .value=${live(props.search.value)}
+      @input=${(event: Event) =>
+        props.search.onInput((event.currentTarget as HTMLInputElement).value)}
+      @keydown=${(event: KeyboardEvent) =>
+        clearOnEscape(event, props.search.onClear)}
+    /><span
+      class="gdp-csv-result-count"
+      role="status"
+      aria-live="polite"
+      aria-label=${props.count.label}
+      >${props.count.text}</span
+    ><button
+      type="button"
+      class="gdp-csv-reset"
+      title=${props.reset.title}
+      aria-label=${props.reset.title}
+      ?disabled=${props.reset.disabled}
+      @click=${props.reset.onClick}
+    >${props.reset.label}</button></div
+  ><table class="gdp-csv-table"><thead><tr
+        ><th class="gdp-csv-row-number" aria-hidden="true"></th>${props.columns.map(
+          (
+            column,
+          ) => html`<th scope="col" aria-sort=${column.sort.ariaSort}><button
+              type="button"
+              class="gdp-csv-sort-button"
+              data-csv-sort-column=${String(column.index)}
+              data-sort-direction=${column.sort.direction}
+              title=${column.sort.title}
+              aria-label=${column.sort.title}
+              @click=${column.sort.onClick}
+            ><span>${column.label}</span></button></th>`,
+        )}</tr
+      ><tr class="gdp-csv-filter-row"><th
+          class="gdp-csv-row-number"
+          aria-hidden="true"
+        ></th>${props.columns.map(
+          (column) => html`<th><input
+              type="search"
+              class="gdp-csv-column-filter"
+              data-csv-column-filter=${String(column.index)}
+              autocomplete="off"
+              spellcheck="false"
+              placeholder=${column.filter.placeholder}
+              aria-label=${column.filter.label}
+              .value=${live(column.filter.value)}
+              @input=${(event: Event) =>
+                column.filter.onInput(
+                  (event.currentTarget as HTMLInputElement).value,
+                )}
+              @keydown=${(event: KeyboardEvent) =>
+                clearOnEscape(event, column.filter.onClear)}
+            /></th>`,
+        )}</tr></thead
+    ><tbody>${props.rows.map(
+      (row) =>
+        html`<tr><th class="gdp-csv-row-number" scope="row">${String(
+          row.index,
+        )}</th>${row.cells.map((value) => html`<td>${value}</td>`)}</tr>`,
+    )}${
+      props.empty !== null
+        ? html`<tr class="gdp-csv-empty-row"><td colspan=${props.columns.length + 1}
+            >${props.empty}</td
+          ></tr>`
+        : nothing
+    }</tbody></table></section>`;
+
 export function renderDelimitedPreview(
   text: string,
   format: DelimitedPreviewFormat,
   getText: () => DelimitedPreviewText = () =>
     delimitedPreviewText("en", format),
+  view: DelimitedPreviewView = DEFAULT_VIEW,
 ): DelimitedPreviewElement {
   const preview: DelimitedPreviewElement = Object.assign(
     templateElement(html`<div class="gdp-csv-preview"></div>`),
@@ -118,140 +239,85 @@ export function renderDelimitedPreview(
     draw();
   }
 
-  /** Escape で欄を空にする (空なら何もしない。外の Escape に渡す)。 */
-  function clearOnEscape(event: KeyboardEvent, clear: () => void): void {
-    const input = event.currentTarget as HTMLInputElement;
-    if (isImeComposing(event) || event.key !== "Escape" || !input.value) return;
-    clear();
-    draw();
-  }
-
-  function sortHeaderTemplate(
-    column: number,
-    textValue: DelimitedPreviewText,
-  ): TemplateResult {
-    const columnLabel = localizedColumnLabel(column, textValue);
-    const active = sortColumn === column ? sortDirection : null;
-    const action =
-      active === "asc"
-        ? textValue.sortDescending(columnLabel)
-        : active === "desc"
-          ? textValue.clearSort(columnLabel)
-          : textValue.sortAscending(columnLabel);
-    return html`<th
-      scope="col"
-      aria-sort=${
-        active === "asc"
-          ? "ascending"
-          : active === "desc"
-            ? "descending"
-            : "none"
-      }
-    ><button
-      type="button"
-      class="gdp-csv-sort-button"
-      data-csv-sort-column=${String(column)}
-      data-sort-direction=${active ?? "none"}
-      title=${action}
-      aria-label=${action}
-      @click=${() => cycleSort(column)}
-    ><span>${header[column] ?? ""}</span></button></th>`;
-  }
-
-  function filterTemplate(
-    column: number,
-    textValue: DelimitedPreviewText,
-  ): TemplateResult {
-    return html`<th><input
-      type="search"
-      class="gdp-csv-column-filter"
-      data-csv-column-filter=${String(column)}
-      autocomplete="off"
-      spellcheck="false"
-      placeholder=${textValue.columnFilterPlaceholder}
-      aria-label=${textValue.columnFilterLabel(
-        localizedColumnLabel(column, textValue),
-      )}
-      .value=${live(columnFilters[column])}
-      @input=${(event: Event) => {
-        columnFilters[column] = (event.currentTarget as HTMLInputElement).value;
-        draw();
-      }}
-      @keydown=${(event: KeyboardEvent) =>
-        clearOnEscape(event, () => {
-          columnFilters[column] = "";
-        })}
-    /></th>`;
-  }
-
-  function previewTemplate(): TemplateResult {
+  function previewProps(): DelimitedPreviewProps {
     const textValue = getText();
     const shown = visibleRows();
-    return html`<section class="gdp-csv-shell"><div
-        class="gdp-csv-toolbar"
-        aria-label=${textValue.searchLabel}
-      ><span class="gdp-csv-search-icon" aria-hidden="true">${iconTemplate(
-        SEARCH_16_PATH,
-        "octicon-search",
-      )}</span><input
-        type="search"
-        class="gdp-csv-search"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder=${textValue.searchPlaceholder}
-        aria-label=${textValue.searchLabel}
-        .value=${live(search)}
-        @input=${(event: Event) => {
-          search = (event.currentTarget as HTMLInputElement).value;
+    return {
+      toolbarLabel: textValue.searchLabel,
+      search: {
+        placeholder: textValue.searchPlaceholder,
+        label: textValue.searchLabel,
+        value: search,
+        onInput: (value) => {
+          search = value;
           draw();
-        }}
-        @keydown=${(event: KeyboardEvent) =>
-          clearOnEscape(event, () => {
-            search = "";
-          })}
-      /><span
-        class="gdp-csv-result-count"
-        role="status"
-        aria-live="polite"
-        aria-label=${textValue.resultCountLabel}
-      >${textValue.resultCount(shown.length, dataRows.length)}</span><button
-        type="button"
-        class="gdp-csv-reset"
-        title=${textValue.resetAction}
-        aria-label=${textValue.resetAction}
-        ?disabled=${activeStateCount() === 0}
-        @click=${() => {
+        },
+        onClear: () => {
+          search = "";
+          draw();
+        },
+      },
+      count: {
+        text: textValue.resultCount(shown.length, dataRows.length),
+        label: textValue.resultCountLabel,
+      },
+      reset: {
+        label: textValue.resetLabel,
+        title: textValue.resetAction,
+        disabled: activeStateCount() === 0,
+        onClick: () => {
           search = "";
           columnFilters.fill("");
           sortColumn = null;
           sortDirection = null;
           draw();
           preview.querySelector<HTMLInputElement>(".gdp-csv-search")?.focus();
-        }}
-      >${textValue.resetLabel}</button></div><table class="gdp-csv-table"><thead><tr
-            ><th class="gdp-csv-row-number" aria-hidden="true"></th>${columns.map(
-              (column) => sortHeaderTemplate(column, textValue),
-            )}</tr
-          ><tr class="gdp-csv-filter-row"><th
-              class="gdp-csv-row-number"
-              aria-hidden="true"
-            ></th>${columns.map((column) => filterTemplate(column, textValue))}</tr></thead
-        ><tbody>${shown.map(
-          (row) =>
-            html`<tr><th class="gdp-csv-row-number" scope="row">${String(
-              row.sourceIndex,
-            )}</th>${row.cells.map((value) => html`<td>${value}</td>`)}</tr>`,
-        )}${
-          shown.length === 0
-            ? html`<tr class="gdp-csv-empty-row"><td colspan=${columnCount + 1}
-                >${textValue.noMatches}</td
-              ></tr>`
-            : nothing
-        }</tbody></table></section>`;
+        },
+      },
+      columns: columns.map((column) => {
+        const columnLabel = localizedColumnLabel(column, textValue);
+        const active = sortColumn === column ? sortDirection : null;
+        return {
+          index: column,
+          label: header[column] ?? "",
+          sort: {
+            direction: active ?? "none",
+            ariaSort:
+              active === "asc"
+                ? "ascending"
+                : active === "desc"
+                  ? "descending"
+                  : "none",
+            title:
+              active === "asc"
+                ? textValue.sortDescending(columnLabel)
+                : active === "desc"
+                  ? textValue.clearSort(columnLabel)
+                  : textValue.sortAscending(columnLabel),
+            onClick: () => cycleSort(column),
+          },
+          filter: {
+            placeholder: textValue.columnFilterPlaceholder,
+            label: textValue.columnFilterLabel(columnLabel),
+            value: columnFilters[column] ?? "",
+            onInput: (value) => {
+              columnFilters[column] = value;
+              draw();
+            },
+            onClear: () => {
+              columnFilters[column] = "";
+              draw();
+            },
+          },
+        };
+      }),
+      rows: shown.map((row) => ({ index: row.sourceIndex, cells: row.cells })),
+      empty: shown.length === 0 ? textValue.noMatches : null,
+    };
   }
 
   function draw(): void {
-    renderOwned(preview, previewTemplate());
+    renderOwned(preview, view(previewProps()));
   }
 
   preview.localize = draw;
