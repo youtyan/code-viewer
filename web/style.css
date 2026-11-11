@@ -4047,6 +4047,11 @@ html[data-theme="dark"] .agent-screen-rules-highlight span[style] {
   gap: 8px;
   margin-top: 10px;
 }
+/* 欄のすぐ下に置く小さな操作 (音を試す)。欄の頭にそろえる。 */
+.scope-settings-actions-inline {
+  justify-content: flex-start;
+  margin-top: var(--space-2);
+}
 .scope-watch-limit-row {
   display: flex;
   align-items: center;

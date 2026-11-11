@@ -678,7 +678,7 @@ function sectionTemplate(section: ViewerSettingsSectionProps): unknown {
         section.sound,
       )}${
         section.soundTests.length > 0
-          ? html`<div class="scope-settings-actions">${section.soundTests.map(
+          ? html`<div class="scope-settings-actions scope-settings-actions-inline">${section.soundTests.map(
               (test) =>
                 html`<button type="button" class="gdp-btn gdp-btn-sm" @click=${test.onPlay}>${test.label}</button>`,
             )}</div>`
