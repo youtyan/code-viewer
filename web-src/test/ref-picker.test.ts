@@ -2,7 +2,12 @@ import "./_dom";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 import type { AppRoute } from "../core/routes";
-import { createRefPicker } from "../views/ref-picker";
+import {
+  createRefPicker,
+  DEFAULT_VIEW,
+  type RefPickerView,
+  type RefPopEntry,
+} from "../views/ref-picker";
 import { q, waitFor } from "./_test-helpers";
 
 afterEach(() => {
@@ -25,32 +30,34 @@ function installRefPickerDom() {
   `;
 }
 
-function createPickerForRoute(route: AppRoute) {
+function createPickerForRoute(route: AppRoute, view?: RefPickerView) {
   let currentRoute = route;
   const routes: AppRoute[] = [];
   let repoLoads = 0;
-  const picker = createRefPicker({
-    $: <T extends Element = HTMLElement>(selector: string): T => {
-      const el = document.querySelector(selector);
-      if (!el) throw new Error(`missing ${selector}`);
-      return el as T;
+  const picker = createRefPicker(
+    {
+      $: <T extends Element = HTMLElement>(selector: string): T => {
+        const el = document.querySelector(selector);
+        if (!el) throw new Error(`missing ${selector}`);
+        return el as T;
+      },
+      currentRange: () => ({ from: "HEAD", to: "worktree" }),
+      setRange: () => undefined,
+      setRoute: (nextRoute) => {
+        currentRoute = nextRoute;
+        routes.push(nextRoute);
+      },
+      loadRepo: async () => {
+        repoLoads++;
+      },
+      renderStandaloneSource: async () => undefined,
+      getFrom: () => "HEAD",
+      getTo: () => "worktree",
+      getRepoRef: () => "worktree",
+      getRoute: () => currentRoute,
     },
-    escapeHtml: (value) => String(value),
-    currentRange: () => ({ from: "HEAD", to: "worktree" }),
-    setRange: () => undefined,
-    setRoute: (nextRoute) => {
-      currentRoute = nextRoute;
-      routes.push(nextRoute);
-    },
-    loadRepo: async () => {
-      repoLoads++;
-    },
-    renderStandaloneSource: async () => undefined,
-    getFrom: () => "HEAD",
-    getTo: () => "worktree",
-    getRepoRef: () => "worktree",
-    getRoute: () => currentRoute,
-  });
+    view,
+  );
   if (!picker) throw new Error("picker not created");
   return { picker, routes, repoLoads: () => repoLoads };
 }
@@ -240,7 +247,6 @@ describe("ref picker recent refs", () => {
         if (!el) throw new Error(`missing ${selector}`);
         return el as T;
       },
-      escapeHtml: (value) => String(value),
       currentRange: () => ({ from: "HEAD", to: "worktree" }),
       setRange: () => undefined,
       setRoute: () => undefined,
@@ -319,5 +325,65 @@ describe("ref picker recent refs", () => {
     }
     expect(remembered).toEqual(expected);
     if (pick !== "HEAD") expect(input.value).toBe("main");
+  });
+});
+
+// ref を選ぶ小窓 (views/ref-picker.ts) の presenter。描き方を記録する view に
+// 差し替え、枝の欄に渡す行 (今の値の印) を見る。
+describe("the ref picker presenter", () => {
+  test("gives the view the branches with the input's current value marked", async () => {
+    installRefPickerDom();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            branches: [
+              { name: "main", when: "" },
+              { name: "feature/sample", when: "2 days ago" },
+            ],
+            tags: [],
+            commits: [],
+            current: "main",
+          }),
+        ),
+      )) as typeof fetch;
+    try {
+      const bodies: RefPopEntry[][] = [];
+      const { picker } = createPickerForRoute(
+        {
+          screen: "repo",
+          ref: "worktree",
+          path: "",
+          range: { from: "HEAD", to: "worktree" },
+        },
+        {
+          ...DEFAULT_VIEW,
+          body: (entries) => {
+            bodies.push([...entries]);
+            return DEFAULT_VIEW.body(entries);
+          },
+        },
+      );
+      const input = q<HTMLInputElement>(document, "#repo-target");
+      input.value = "feature/sample";
+      q<HTMLElement>(document, '.rp-tab[data-tab="branches"]').click();
+      picker.openPopover(input);
+      await waitFor(() =>
+        (bodies[bodies.length - 1] ?? []).some((entry) => entry.kind === "ref"),
+      );
+      expect(
+        (bodies[bodies.length - 1] ?? []).flatMap((entry) =>
+          entry.kind === "ref"
+            ? [[entry.name, entry.badge.text, entry.current]]
+            : [],
+        ),
+      ).toEqual([
+        ["main", "current", false],
+        ["feature/sample", "branch", true],
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

@@ -656,6 +656,12 @@ describe("#first-status は setStatus と同じ文言を同じ並びで重ねる
       [text.live, text.loading, text.error, text.idle],
       text.idle,
     );
+    // lit が描くときに置く印 (コメント) は、描いた中身ではないので外して比べる。
+    const walker = document.createTreeWalker(host, NodeFilter.SHOW_COMMENT);
+    const marks: Node[] = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode())
+      marks.push(node);
+    for (const mark of marks) mark.parentNode?.removeChild(mark);
     return host.innerHTML;
   }
 

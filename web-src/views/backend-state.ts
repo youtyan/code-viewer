@@ -10,15 +10,18 @@
 // - 起動中は、入口に裏の状態を 1 度だけ聞き (apiUrl("entryBackend"))、起こしている
 //   最中なら「起動中」を出す。プロジェクトの要求が 1 つでも返ったら消す
 
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
-import { iconSvg, SYNC_16_PATH } from "../core/icons";
+import { SYNC_16_PATH } from "../core/icons";
 import {
   type EntryBackendFailure,
   type EntryBackendStateResponse,
   isEntryBackendFailure,
 } from "../core/types";
 import type { ProjectsText } from "./projects/projects-i18n";
+import { iconTemplate } from "./ui/icon";
+import { detachedElement } from "./ui/renderer";
 import { showFormDialog } from "./ui-dialog";
 
 export type BackendStateDeps = {
@@ -29,100 +32,143 @@ export type BackendStateDeps = {
   reportError(operation: string, error: unknown): void;
 };
 
+/** 中央の面を覆う空表示 (起動中・止まった)。 */
+export type BackendSurfaceProps = {
+  hidden: boolean;
+  mode: "starting" | "failure" | null;
+  heading: string;
+  body: string;
+  /** 止まったときだけ (起動中は隠す)。 */
+  actions: {
+    restart: { label: string; busy: boolean; onClick(): void };
+    details: { label: string; onClick(): void };
+  } | null;
+};
+
+/** ダイアログの「詳細」(理由の全文)。 */
+export type BackendDetailsProps = {
+  summary: string;
+  text: string;
+  open: boolean;
+};
+
+export type BackendStateView = {
+  surface(props: BackendSurfaceProps): unknown;
+  details(props: BackendDetailsProps): unknown;
+};
+
+const actionTemplate = (
+  label: string,
+  primary: boolean,
+  onClick: () => void,
+  busy = false,
+) => html`<button
+  type="button"
+  class=${`${primary ? "empty-action empty-action-primary" : "empty-action"}${busy ? " spinning" : ""}`}
+  ?disabled=${busy}
+  @click=${onClick}
+><span class="empty-action-icon" aria-hidden="true">${
+  primary ? iconTemplate(SYNC_16_PATH, "octicon-sync") : nothing
+}</span><span class="empty-action-label">${label}</span></button>`;
+
+export const DEFAULT_VIEW: BackendStateView = {
+  surface: (props) => html`<section
+    id="backend-state"
+    class="empty empty-with-actions backend-state"
+    ?hidden=${props.hidden}
+    role="status"
+    data-backend-state=${props.mode ?? nothing}
+  ><div
+      class=${props.mode === "starting" ? "empty-icon backend-state-spinning" : "empty-icon"}
+      aria-hidden="true"
+    >${iconTemplate(SYNC_16_PATH, "octicon-sync")}</div><h2>${props.heading}</h2><p
+      >${props.body}</p
+    ><div class="empty-actions" ?hidden=${!props.actions}>${
+      props.actions
+        ? html`${actionTemplate(
+            props.actions.restart.label,
+            true,
+            props.actions.restart.onClick,
+            props.actions.restart.busy,
+          )}${actionTemplate(props.actions.details.label, false, props.actions.details.onClick)}`
+        : nothing
+    }</div></section>`,
+  details: (props) => html`<div class="agent-hooks-dialog"><details
+      class="agent-hooks-dialog-details"
+      .open=${props.open}
+    ><summary>${props.summary}</summary><pre
+        class="agent-hooks-dialog-code terminal-mono"
+      >${props.text}</pre></details></div>`,
+};
+
 function projectName(root: string): string {
   return root.split("/").pop() || root;
 }
 
-export function createBackendState(deps: BackendStateDeps) {
-  let surface: HTMLElement | null = null;
+export function createBackendState(
+  deps: BackendStateDeps,
+  view: BackendStateView = DEFAULT_VIEW,
+) {
+  let surface: { element: HTMLElement; draw(): void } | null = null;
+  let shown: Omit<BackendSurfaceProps, "hidden"> = {
+    mode: null,
+    heading: "",
+    body: "",
+    actions: null,
+  };
+  let surfaceHidden = true;
+  let restarting = false;
   let failure: EntryBackendFailure | null = null;
   let dialogOpen = false;
   /** プロジェクトの要求が 1 つでも返ったか (返った後は「起動中」を出さない)。 */
   let projectAnswered = false;
 
-  function ensureSurface(): HTMLElement {
-    if (surface) return surface;
-    const el = document.createElement("section");
-    el.id = "backend-state";
-    el.className = "empty empty-with-actions backend-state";
-    el.hidden = true;
-    el.setAttribute("role", "status");
-    const icon = document.createElement("div");
-    icon.className = "empty-icon";
-    icon.setAttribute("aria-hidden", "true");
-    icon.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
-    const title = document.createElement("h2");
-    const body = document.createElement("p");
-    const actions = document.createElement("div");
-    actions.className = "empty-actions";
-    el.append(icon, title, body, actions);
-    document.getElementById("app")?.appendChild(el);
-    surface = el;
-    return el;
-  }
-
-  function actionButton(
-    label: string,
-    primary: boolean,
-    run: (button: HTMLButtonElement) => void,
-  ): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = primary
-      ? "empty-action empty-action-primary"
-      : "empty-action";
-    const icon = document.createElement("span");
-    icon.className = "empty-action-icon";
-    icon.setAttribute("aria-hidden", "true");
-    if (primary) icon.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
-    const text = document.createElement("span");
-    text.className = "empty-action-label";
-    text.textContent = label;
-    button.append(icon, text);
-    button.addEventListener("click", () => run(button));
-    return button;
+  function drawSurface(): HTMLElement {
+    if (!surface) {
+      surface = detachedElement(() =>
+        view.surface({ ...shown, hidden: surfaceHidden }),
+      );
+      document.getElementById("app")?.appendChild(surface.element);
+    }
+    surface.draw();
+    return surface.element;
   }
 
   function render(
     mode: "starting" | "failure",
     heading: string,
     body: string,
-  ): HTMLElement {
-    const el = ensureSurface();
-    el.dataset.backendState = mode;
-    const title = el.querySelector("h2");
-    if (title) title.textContent = heading;
-    const text = el.querySelector("p");
-    if (text) text.textContent = body;
-    el.querySelector(".empty-icon")?.classList.toggle(
-      "backend-state-spinning",
-      mode === "starting",
-    );
-    el.hidden = false;
-    return el;
+    actions: BackendSurfaceProps["actions"],
+  ): void {
+    shown = { mode, heading, body, actions };
+    surfaceHidden = false;
+    drawSurface();
   }
 
-  /** ダイアログの「詳細」(理由の全文)。 */
+  function hideSurface(): void {
+    surfaceHidden = true;
+    if (surface) surface.draw();
+  }
+
+  /** ダイアログの「詳細」(理由の全文)。set で中身を替えて開く。 */
   function detailsBlock(text: string): {
     root: HTMLElement;
     set(detail: string): void;
   } {
-    const root = document.createElement("div");
-    root.className = "agent-hooks-dialog";
-    const details = document.createElement("details");
-    details.className = "agent-hooks-dialog-details";
-    const summary = document.createElement("summary");
-    summary.textContent = deps.text().backendDetails;
-    const pre = document.createElement("pre");
-    pre.className = "agent-hooks-dialog-code terminal-mono";
-    pre.textContent = text;
-    details.append(summary, pre);
-    root.append(details);
+    const state = { text, open: false };
+    const block = detachedElement(() =>
+      view.details({
+        summary: deps.text().backendDetails,
+        text: state.text,
+        open: state.open,
+      }),
+    );
     return {
-      root,
+      root: block.element,
       set(detail) {
-        pre.textContent = detail;
-        details.open = true;
+        state.text = detail;
+        state.open = true;
+        block.draw();
       },
     };
   }
@@ -218,43 +264,49 @@ export function createBackendState(deps: BackendStateDeps) {
     failure = body;
     const text = deps.text();
     const name = projectName(body.project.root);
-    const el = render(
-      "failure",
-      body.code === "backend-stopped"
-        ? text.backendStoppedHeading
-        : text.backendFailedTitle(name),
-      // 入口が古いなら「再起動」では直らない。入口の止め方をここで出す。
-      body.entryOutdated ? body.error : text.backendSurfaceText(name),
-    );
-    const actions = el.querySelector<HTMLElement>(".empty-actions");
-    actions?.replaceChildren(
-      actionButton(text.backendRestart, true, (button) => {
-        if (button.disabled) return;
-        button.disabled = true;
-        button.classList.add("spinning");
-        void restart(body.project.key).then((result) => {
-          button.disabled = false;
-          button.classList.remove("spinning");
-          if (result.ok === false) void openDialog(result);
-          else deps.reload();
-        });
-      }),
-      actionButton(text.backendDetails, false, () => void openDialog()),
-    );
-    if (actions) actions.hidden = false;
+    const draw = () =>
+      render(
+        "failure",
+        body.code === "backend-stopped"
+          ? text.backendStoppedHeading
+          : text.backendFailedTitle(name),
+        // 入口が古いなら「再起動」では直らない。入口の止め方をここで出す。
+        body.entryOutdated ? body.error : text.backendSurfaceText(name),
+        {
+          restart: {
+            label: text.backendRestart,
+            busy: restarting,
+            onClick: () => {
+              if (restarting) return;
+              restarting = true;
+              draw();
+              void restart(body.project.key).then((result) => {
+                restarting = false;
+                draw();
+                if (result.ok === false) void openDialog(result);
+                else deps.reload();
+              });
+            },
+          },
+          details: {
+            label: text.backendDetails,
+            onClick: () => void openDialog(),
+          },
+        },
+      );
+    draw();
     void openDialog();
   }
 
   function showStarting(root: string): void {
     if (failure || projectAnswered) return;
     const text = deps.text();
-    const el = render(
+    render(
       "starting",
       text.backendStartingTitle(projectName(root)),
       text.backendStartingText,
+      null,
     );
-    const actions = el.querySelector<HTMLElement>(".empty-actions");
-    if (actions) actions.hidden = true;
   }
 
   /** 入口に、このプロジェクトの裏の状態を聞く (画面を開いたときに 1 度)。 */
@@ -292,7 +344,7 @@ export function createBackendState(deps: BackendStateDeps) {
     if (!path.startsWith("/p/")) return;
     if (response.status !== 502 && response.status !== 503) {
       projectAnswered = true;
-      if (surface?.dataset.backendState === "starting") surface.hidden = true;
+      if (shown.mode === "starting") hideSurface();
       return;
     }
     if (!(response.headers.get("content-type") ?? "").includes("json")) return;
@@ -318,7 +370,7 @@ export function createBackendState(deps: BackendStateDeps) {
     resetProject() {
       failure = null;
       projectAnswered = false;
-      if (surface) surface.hidden = true;
+      hideSurface();
     },
   };
 }

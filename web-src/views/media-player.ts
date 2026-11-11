@@ -1,8 +1,9 @@
+import { live } from "lit/directives/live.js";
+import { html } from "lit/html.js";
 import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import {
   FULLSCREEN_ENTER_16_PATHS,
   FULLSCREEN_EXIT_16_PATHS,
-  iconSvg,
   PAUSE_16_PATHS,
   PLAY_16_PATH,
   VOLUME_MUTED_16_PATHS,
@@ -10,6 +11,8 @@ import {
 } from "../core/icons";
 import { pageLanguage } from "./page-language";
 import { MEDIA_PLAYER_TEXT } from "./source-preview-i18n";
+import { iconTemplate } from "./ui/icon";
+import { detachedElement } from "./ui/renderer";
 
 type MediaKind = "video" | "audio";
 
@@ -25,129 +28,221 @@ function formatMediaTime(seconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
 }
 
+type MediaButtonProps = {
+  label: string;
+  icon: { cls: string; paths: string | string[] };
+  onClick(): void;
+};
+
+/** 動画・音の再生の箱 (createMediaPlayer) の中。 */
+export type MediaPlayerProps = {
+  kind: MediaKind;
+  label: string;
+  url: string;
+  title: string;
+  play: MediaButtonProps;
+  time: { current: string; duration: string };
+  seek: {
+    label: string;
+    value: number;
+    onInput(percent: number): void;
+    onGrab(): void;
+    onRelease(): void;
+  };
+  volume: MediaButtonProps & {
+    sliderLabel: string;
+    value: number;
+    onInput(value: number): void;
+  };
+  speed: { label: string; text: string; onClick(): void };
+  /** 動画だけ。 */
+  fullscreen: MediaButtonProps | null;
+  onMediaClick(): void;
+  onKeyDown(event: KeyboardEvent): void;
+};
+
+export type MediaPlayerView = (props: MediaPlayerProps) => unknown;
+
+const controlButton = (props: MediaButtonProps) => html`<button
+  type="button"
+  class="gdp-media-control"
+  title=${props.label}
+  aria-label=${props.label}
+  @click=${props.onClick}
+>${iconTemplate(props.icon.paths, props.icon.cls)}</button>`;
+
+export const DEFAULT_VIEW: MediaPlayerView = (props) => html`<div
+  class=${`gdp-media-player kind-${props.kind}`}
+  tabindex="0"
+  role="region"
+  aria-label=${props.label}
+  @keydown=${props.onKeyDown}
+>${
+  props.kind === "video"
+    ? html`<video
+        src=${props.url}
+        preload="metadata"
+        aria-label=${props.title}
+        @click=${props.onMediaClick}
+      ></video>`
+    : html`<audio
+        src=${props.url}
+        preload="metadata"
+        aria-label=${props.title}
+        @click=${props.onMediaClick}
+      ></audio>`
+}<div class="gdp-media-controls">${controlButton(props.play)}<span
+      class="gdp-media-time"
+    >${props.time.current}</span><span class="gdp-media-time"
+      >${props.time.duration}</span
+    ><input
+      type="range"
+      class="gdp-media-seek"
+      min="0"
+      max="100"
+      aria-label=${props.seek.label}
+      .value=${live(String(props.seek.value))}
+      @input=${(event: Event) =>
+        props.seek.onInput(
+          Number((event.currentTarget as HTMLInputElement).value),
+        )}
+      @mousedown=${props.seek.onGrab}
+      @mouseup=${props.seek.onRelease}
+    />${controlButton(props.volume)}<input
+      type="range"
+      class="gdp-media-volume"
+      min="0"
+      max="1"
+      step="0.05"
+      aria-label=${props.volume.sliderLabel}
+      .value=${live(String(props.volume.value))}
+      @input=${(event: Event) =>
+        props.volume.onInput(
+          Number((event.currentTarget as HTMLInputElement).value),
+        )}
+    /><button
+      type="button"
+      class="gdp-media-speed"
+      title=${props.speed.label}
+      aria-label=${props.speed.label}
+      @click=${props.speed.onClick}
+    >${props.speed.text}</button>${
+      props.fullscreen ? controlButton(props.fullscreen) : ""
+    }</div></div>`;
+
 export function createMediaPlayer(
   url: string,
   kind: MediaKind,
   title: string,
+  view: MediaPlayerView = DEFAULT_VIEW,
 ): HTMLElement {
   const text = MEDIA_PLAYER_TEXT[pageLanguage()];
-  const container = document.createElement("div");
-  container.className = `gdp-media-player kind-${kind}`;
-  container.tabIndex = 0;
-  container.setAttribute("role", "region");
-  container.setAttribute("aria-label", text.player(kind, title));
-
-  const media: HTMLVideoElement | HTMLAudioElement =
-    kind === "video"
-      ? document.createElement("video")
-      : document.createElement("audio");
-  media.src = url;
-  media.preload = "metadata";
-  media.setAttribute("aria-label", title);
-  container.appendChild(media);
-
-  const controls = document.createElement("div");
-  controls.className = "gdp-media-controls";
-
-  const playButton = createIconButton(text.play, PLAY_16_PATH);
-  const currentTimeEl = document.createElement("span");
-  currentTimeEl.className = "gdp-media-time";
-  currentTimeEl.textContent = "0:00";
-  const durationEl = document.createElement("span");
-  durationEl.className = "gdp-media-time";
-  durationEl.textContent = " / 0:00";
-
-  const seek = document.createElement("input");
-  seek.type = "range";
-  seek.className = "gdp-media-seek";
-  seek.min = "0";
-  seek.max = "100";
-  seek.value = "0";
-  seek.setAttribute("aria-label", text.seek);
-
-  const volumeButton = createIconButton(text.mute, VOLUME_UNMUTED_16_PATHS);
-  const volume = document.createElement("input");
-  volume.type = "range";
-  volume.className = "gdp-media-volume";
-  volume.min = "0";
-  volume.max = "1";
-  volume.step = "0.05";
-  volume.value = "1";
-  volume.setAttribute("aria-label", text.volume);
-
-  const speedButton = document.createElement("button");
-  speedButton.type = "button";
-  speedButton.className = "gdp-media-speed";
-  speedButton.textContent = "1x";
-  speedButton.title = text.playbackSpeed;
-  speedButton.setAttribute("aria-label", text.playbackSpeed);
-
-  controls.append(
-    playButton,
-    currentTimeEl,
-    durationEl,
-    seek,
-    volumeButton,
-    volume,
-    speedButton,
-  );
-
-  let fullscreenButton: HTMLButtonElement | null = null;
-  if (kind === "video") {
-    fullscreenButton = createIconButton(
-      text.enterFullscreen,
-      FULLSCREEN_ENTER_16_PATHS,
-    );
-    controls.appendChild(fullscreenButton);
-  }
-
-  container.appendChild(controls);
-
   let rateIndex = 0;
   let wasPlayingBeforeSeek = false;
   let raf = 0;
+  /** 再生に失敗した理由 (再生ボタンの title。次の再生・一時停止で元に戻る)。 */
+  let playFailure = "";
+  /** 音量の欄に出す値 (音を消すと 0)。 */
+  let volumeValue = 1;
+  let seekPercent = 0;
+  let media: HTMLVideoElement | HTMLAudioElement | null = null;
+  /** 箱 (描いた後に決まる。最初に描くときは null)。 */
+  let box: HTMLElement | null = null;
 
-  function updatePlayButton() {
-    playButton.innerHTML = iconSvg(
-      media.paused ? "octicon-play" : "octicon-pause",
-      media.paused ? PLAY_16_PATH : PAUSE_16_PATHS,
-    );
-    const label = media.paused ? text.play : text.pause;
-    playButton.title = label;
-    playButton.setAttribute("aria-label", label);
+  function element(): HTMLVideoElement | HTMLAudioElement {
+    if (!media)
+      throw new Error("media player: the media element was not drawn");
+    return media;
   }
 
-  function updateVolumeButton() {
-    const muted = media.muted || media.volume === 0;
-    volumeButton.innerHTML = iconSvg(
-      muted ? "octicon-volume-mute" : "octicon-volume",
-      muted ? VOLUME_MUTED_16_PATHS : VOLUME_UNMUTED_16_PATHS,
-    );
-    const label = muted ? text.unmute : text.mute;
-    volumeButton.title = label;
-    volumeButton.setAttribute("aria-label", label);
+  function props(): MediaPlayerProps {
+    const paused = media ? media.paused : true;
+    const muted = media ? media.muted || media.volume === 0 : false;
+    const fullscreen = box !== null && document.fullscreenElement === box;
+    const playLabel = paused ? text.play : text.pause;
+    return {
+      kind,
+      label: text.player(kind, title),
+      url,
+      title,
+      play: {
+        label: playFailure || playLabel,
+        icon: paused
+          ? { cls: "octicon-play", paths: PLAY_16_PATH }
+          : { cls: "octicon-pause", paths: PAUSE_16_PATHS },
+        onClick: togglePlay,
+      },
+      time: {
+        current: formatMediaTime(media?.currentTime ?? 0),
+        duration: ` / ${formatMediaTime(media?.duration ?? 0)}`,
+      },
+      seek: {
+        label: text.seek,
+        value: seekPercent,
+        onInput: seekToPercent,
+        onGrab: () => {
+          wasPlayingBeforeSeek = !element().paused;
+          element().pause();
+        },
+        onRelease: () => {
+          if (wasPlayingBeforeSeek) play();
+        },
+      },
+      volume: {
+        label: muted ? text.unmute : text.mute,
+        icon: muted
+          ? { cls: "octicon-volume-mute", paths: VOLUME_MUTED_16_PATHS }
+          : { cls: "octicon-volume", paths: VOLUME_UNMUTED_16_PATHS },
+        onClick: toggleMute,
+        sliderLabel: text.volume,
+        value: volumeValue,
+        onInput: (value) => {
+          volumeValue = value;
+          element().volume = value;
+          element().muted = value === 0;
+          draw();
+        },
+      },
+      speed: {
+        label: text.playbackSpeed,
+        text: `${PLAYBACK_RATES[rateIndex]}x`,
+        onClick: cycleSpeed,
+      },
+      fullscreen:
+        kind === "video"
+          ? {
+              label: fullscreen ? text.exitFullscreen : text.enterFullscreen,
+              icon: fullscreen
+                ? {
+                    cls: "octicon-screen-normal",
+                    paths: FULLSCREEN_EXIT_16_PATHS,
+                  }
+                : {
+                    cls: "octicon-screen-full",
+                    paths: FULLSCREEN_ENTER_16_PATHS,
+                  },
+              onClick: toggleFullscreen,
+            }
+          : null,
+      onMediaClick: togglePlay,
+      onKeyDown,
+    };
   }
 
-  function updateFullscreenButton() {
-    if (!fullscreenButton) return;
-    const isFullscreen = document.fullscreenElement === container;
-    fullscreenButton.innerHTML = iconSvg(
-      isFullscreen ? "octicon-screen-normal" : "octicon-screen-full",
-      isFullscreen ? FULLSCREEN_EXIT_16_PATHS : FULLSCREEN_ENTER_16_PATHS,
-    );
-    const label = isFullscreen ? text.exitFullscreen : text.enterFullscreen;
-    fullscreenButton.title = label;
-    fullscreenButton.setAttribute("aria-label", label);
-  }
+  const player = detachedElement(() => view(props()));
+  const container = player.element;
+  box = container;
+  const draw = () => player.draw();
+  media = container.querySelector<HTMLVideoElement | HTMLAudioElement>(
+    "video, audio",
+  );
+  const mediaElement = element();
 
   function syncSeek() {
-    const pct = media.duration ? (media.currentTime / media.duration) * 100 : 0;
-    seek.value = String(pct);
-  }
-
-  function updateTime() {
-    currentTimeEl.textContent = formatMediaTime(media.currentTime);
-    durationEl.textContent = ` / ${formatMediaTime(media.duration)}`;
+    const current = element();
+    seekPercent = current.duration
+      ? (current.currentTime / current.duration) * 100
+      : 0;
   }
 
   function onTimeUpdate() {
@@ -155,57 +250,60 @@ export function createMediaPlayer(
       raf = requestAnimationFrame(() => {
         raf = 0;
         syncSeek();
-        updateTime();
+        draw();
       });
     }
   }
 
   function play() {
-    void media.play().catch((error) => {
+    const current = element();
+    void current.play().catch((error) => {
       // 再生の開始前に pause() や src の差し替えが入ると AbortError で打ち切ら
       // れる。これは失敗ではない。
       if ((error as { name?: unknown } | null)?.name === "AbortError") return;
       const failure = errorWithCause(
-        `playing ${media.currentSrc || media.src} failed`,
+        `playing ${current.currentSrc || current.src} failed`,
         error,
       );
       console.error(failure);
-      // 再生ボタンの title に理由を出す (次の再生・一時停止で元の文言に戻る)。
-      playButton.title = formatErrorDetail(failure);
-      playButton.setAttribute("aria-label", playButton.title);
+      playFailure = formatErrorDetail(failure);
+      draw();
     });
   }
 
   function togglePlay() {
-    if (media.paused) {
+    if (element().paused) {
       play();
     } else {
-      media.pause();
+      element().pause();
     }
   }
 
   function toggleMute() {
-    media.muted = !media.muted;
-    if (media.muted) {
-      volume.value = "0";
-    } else if (media.volume === 0) {
-      media.volume = 0.5;
-      volume.value = "0.5";
+    const current = element();
+    current.muted = !current.muted;
+    if (current.muted) {
+      volumeValue = 0;
+    } else if (current.volume === 0) {
+      current.volume = 0.5;
+      volumeValue = 0.5;
     } else {
-      volume.value = String(media.volume);
+      volumeValue = current.volume;
     }
-    updateVolumeButton();
+    draw();
   }
 
   function cycleSpeed() {
     rateIndex = (rateIndex + 1) % PLAYBACK_RATES.length;
-    media.playbackRate = PLAYBACK_RATES[rateIndex];
-    speedButton.textContent = `${PLAYBACK_RATES[rateIndex]}x`;
+    element().playbackRate = PLAYBACK_RATES[rateIndex];
+    draw();
   }
 
   function seekToPercent(percent: number) {
-    if (!media.duration || !Number.isFinite(media.duration)) return;
-    media.currentTime = (percent / 100) * media.duration;
+    const current = element();
+    seekPercent = percent;
+    if (!current.duration || !Number.isFinite(current.duration)) return;
+    current.currentTime = (percent / 100) * current.duration;
   }
 
   function toggleFullscreen() {
@@ -216,44 +314,7 @@ export function createMediaPlayer(
     }
   }
 
-  playButton.addEventListener("click", togglePlay);
-  volumeButton.addEventListener("click", toggleMute);
-  speedButton.addEventListener("click", cycleSpeed);
-  volume.addEventListener("input", () => {
-    const value = Number(volume.value);
-    media.volume = value;
-    media.muted = value === 0;
-    updateVolumeButton();
-  });
-  seek.addEventListener("input", () => {
-    seekToPercent(Number(seek.value));
-  });
-  seek.addEventListener("mousedown", () => {
-    wasPlayingBeforeSeek = !media.paused;
-    media.pause();
-  });
-  seek.addEventListener("mouseup", () => {
-    if (wasPlayingBeforeSeek) play();
-  });
-  media.addEventListener("click", togglePlay);
-  media.addEventListener("play", updatePlayButton);
-  media.addEventListener("pause", updatePlayButton);
-  media.addEventListener("timeupdate", onTimeUpdate);
-  media.addEventListener("durationchange", updateTime);
-  media.addEventListener("volumechange", updateVolumeButton);
-  media.addEventListener("loadedmetadata", () => {
-    updateTime();
-    syncSeek();
-  });
-  media.addEventListener("ended", () => {
-    updatePlayButton();
-  });
-  if (fullscreenButton) {
-    fullscreenButton.addEventListener("click", toggleFullscreen);
-  }
-  document.addEventListener("fullscreenchange", updateFullscreenButton);
-
-  container.addEventListener("keydown", (e) => {
+  function onKeyDown(e: KeyboardEvent) {
     if (
       e.target instanceof HTMLInputElement ||
       e.target instanceof HTMLButtonElement
@@ -262,6 +323,7 @@ export function createMediaPlayer(
       if (e.key !== " " && e.key !== "ArrowLeft" && e.key !== "ArrowRight")
         return;
     }
+    const current = element();
     switch (e.key) {
       case " ":
       case "k":
@@ -270,24 +332,26 @@ export function createMediaPlayer(
         break;
       case "ArrowLeft":
         e.preventDefault();
-        media.currentTime = Math.max(0, media.currentTime - 5);
+        current.currentTime = Math.max(0, current.currentTime - 5);
         break;
       case "ArrowRight":
         e.preventDefault();
-        media.currentTime = Math.min(
-          media.duration || 0,
-          media.currentTime + 5,
+        current.currentTime = Math.min(
+          current.duration || 0,
+          current.currentTime + 5,
         );
         break;
       case "ArrowUp":
         e.preventDefault();
-        media.volume = Math.min(1, media.volume + 0.1);
-        volume.value = String(media.volume);
+        current.volume = Math.min(1, current.volume + 0.1);
+        volumeValue = current.volume;
+        draw();
         break;
       case "ArrowDown":
         e.preventDefault();
-        media.volume = Math.max(0, media.volume - 0.1);
-        volume.value = String(media.volume);
+        current.volume = Math.max(0, current.volume - 0.1);
+        volumeValue = current.volume;
+        draw();
         break;
       case "m":
       case "M":
@@ -298,36 +362,34 @@ export function createMediaPlayer(
         if (kind === "video") toggleFullscreen();
         break;
     }
+  }
+
+  // 再生・一時停止で、再生の失敗の理由は消して元の文言に戻す。
+  const onPlayState = () => {
+    playFailure = "";
+    draw();
+  };
+  mediaElement.addEventListener("play", onPlayState);
+  mediaElement.addEventListener("pause", onPlayState);
+  mediaElement.addEventListener("ended", draw);
+  mediaElement.addEventListener("timeupdate", onTimeUpdate);
+  mediaElement.addEventListener("durationchange", draw);
+  mediaElement.addEventListener("volumechange", draw);
+  mediaElement.addEventListener("loadedmetadata", () => {
+    syncSeek();
+    draw();
   });
+  document.addEventListener("fullscreenchange", draw);
 
   const cleanupObserver = new MutationObserver(() => {
     if (!container.isConnected) {
       cleanupObserver.disconnect();
-      document.removeEventListener("fullscreenchange", updateFullscreenButton);
+      document.removeEventListener("fullscreenchange", draw);
       if (raf) cancelAnimationFrame(raf);
     }
   });
   cleanupObserver.observe(document.body, { childList: true, subtree: true });
 
-  updatePlayButton();
-  updateVolumeButton();
-  updateTime();
-
+  draw();
   return container;
-}
-
-function createIconButton(
-  label: string,
-  path: string | string[],
-): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "gdp-media-control";
-  button.title = label;
-  button.setAttribute("aria-label", label);
-  button.innerHTML = iconSvg(
-    `octicon-${label.toLowerCase().replace(/\s+/g, "-")}`,
-    path,
-  );
-  return button;
 }

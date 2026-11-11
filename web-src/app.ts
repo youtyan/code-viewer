@@ -10381,7 +10381,6 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const REF_PICKER = createRefPicker({
     $,
-    escapeHtml,
     currentRange,
     setRange,
     setRoute,
