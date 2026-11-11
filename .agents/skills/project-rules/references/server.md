@@ -290,7 +290,8 @@ docker コンテナ、OS の設定）を変える機能は、次の 3 つが揃�
   README / Help に書いた呼び出し方と実装がずれると落ちる
 - 利用者の画面を動かす CLI は `show` だけ（`server/show-cli.ts` → `POST /_show` → プロジェクトの
   通知の `show` → 画面は Web Locks で 1 つの窓だけが新しいタブで開く。`views/show-claim.ts`）。
-  映している画面が無ければ 409 で理由を返す。使うのは利用者に頼まれたときだけ（配布スキル・help に書く）。
+  映している画面が無ければ 409 で理由を返す。裏が動いていなければ起こさない（`ensureServerUrl` の `wake: false`。
+  起こすと、頼まれていないのにリポジトリがプロジェクトの一覧に加わる）。使うのは利用者に頼まれたときだけ（配布スキル・help に書く）。
   画面を動かす口を足すときもこの形にし、いま見ているタブを変えない
 - CLI からサーバを叩くときは `server/cli-helpers.ts` の `requestJson`
   （Origin と `X-Code-Viewer-Action` を付ける）

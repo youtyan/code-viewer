@@ -17484,7 +17484,7 @@ html[data-workspace="pane"] :is(#app-nav, #statusbar) {
 /* 名前の後ろの主でないブランチと上流との差。名前より先に縮み、狭ければ消える
    (場所を取らない補足。core/agent-overview.ts の projectBranchTail)。 */
 .nav-project-branch {
-  flex: 0 100 auto;
+  flex: 0 10000 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

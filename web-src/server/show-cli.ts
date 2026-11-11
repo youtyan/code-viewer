@@ -148,7 +148,11 @@ export async function runShowCli(argv: string[]): Promise<void> {
     console.error(made.error);
     process.exit(1);
   }
-  const serverUrl = await ensureServerUrl(root, args.server, "/_show");
+  // 裏を起こさない: 画面が無ければ開けないうえ、起こすとリポジトリがプロジェクトの
+  // 一覧に加わってしまう (頼まれていない登録)。
+  const serverUrl = await ensureServerUrl(root, args.server, "/_show", {
+    wake: false,
+  });
   const result = (await requestJson(
     serverUrl,
     "/_show",

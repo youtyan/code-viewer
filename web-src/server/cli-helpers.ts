@@ -297,6 +297,14 @@ export async function resolveServerUrl(
   override: string | undefined,
   healthPath: string,
   deps: ServerUrlDeps = defaultServerUrlDeps,
+  options: {
+    /**
+     * 裏が動いていなければ入口に頼んで起こすか (既定は起こす)。起こすと、まだ
+     * 登録していないリポジトリはプロジェクトの一覧に加わる。画面が無ければ意味の
+     * 無い操作 (`show`) は起こさない。
+     */
+    wake?: boolean;
+  } = {},
 ): Promise<ServerUrlResult> {
   if (override) {
     const url = override.replace(/\/+$/, "");
@@ -324,6 +332,15 @@ export async function resolveServerUrl(
           registeredFailure,
       };
     }
+  }
+  if (options.wake === false) {
+    return {
+      status: "error",
+      message:
+        "no code-viewer window is showing this repository (its project is not open in code-viewer).\n" +
+        "Open this repository in code-viewer in the browser first." +
+        registeredFailure,
+    };
   }
   const entry = deps.liveEntry();
   if (!entry) {
@@ -488,8 +505,15 @@ export async function ensureServerUrl(
   root: string,
   override: string | undefined,
   healthPath: string,
+  options: { wake?: boolean } = {},
 ): Promise<string> {
-  const result = await resolveServerUrl(root, override, healthPath);
+  const result = await resolveServerUrl(
+    root,
+    override,
+    healthPath,
+    defaultServerUrlDeps,
+    options,
+  );
   if (result.status === "ok") return result.url;
   console.error(result.message);
   process.exit(1);
