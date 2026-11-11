@@ -272,6 +272,7 @@ import {
   createAgentsSidebarPresenter,
 } from "./views/agents/agents-sidebar-presenter";
 import { playAttentionSound } from "./views/agents/attention-sound";
+import { createAttentionToasts } from "./views/agents/attention-toast";
 import {
   type HandoffMenuActions,
   handoffMenuItems,
@@ -9838,8 +9839,25 @@ window.GdpExpandLogic = GdpExpandLogic;
     void TERMINAL_VIEW.openPaneInTab(pane, MAIN_TABS.panes().focused);
   }
 
+  // 窓の中の知らせ (窓が前面のとき。押すとそのペインへ)。知らせるのは外側の
+  // ページだけなので、面の中には置かない。
+  const ATTENTION_TOASTS =
+    WORKSPACE_ROLE === "pane"
+      ? null
+      : createAttentionToasts({
+          closeLabel: () => agentsText(STATE.language).toastClose,
+          open: (pane) => openAgentPane(pane),
+        });
   const AGENT_MONITOR = createAgentMonitor({
     getText: () => agentsText(STATE.language),
+    ...(ATTENTION_TOASTS
+      ? {
+          showToast: (pane, transition, text) =>
+            ATTENTION_TOASTS.show({ pane: pane.id, transition, ...text }),
+          isWindowInFront: () =>
+            document.visibilityState === "visible" && document.hasFocus(),
+        }
+      : {}),
     // 面の中では知らせない (同じ窓の host が知らせる)。
     getNotifySettings: () =>
       WORKSPACE_ROLE === "pane"

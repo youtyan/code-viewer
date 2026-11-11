@@ -130,6 +130,8 @@ export type AgentsText = {
   /** 手が要るエージェントへ移るキーを押したが、1 つも無いとき (最下段の吹き出し)。 */
   noAttentionAgents: string;
   notifyFinishedTitle: (project: string) => string;
+  /** 窓の中の知らせを閉じるボタン。 */
+  toastClose: string;
   /** ヘッダの件数表示。 */
   headerWaiting: string;
   headerWorking: string;
@@ -647,6 +649,7 @@ const EN: AgentsText = {
   notifyAttentionTitle: (reason, project) => `${reason} · ${project}`,
   noAttentionAgents: "No agent needs you right now",
   notifyFinishedTitle: (project) => `Finished · ${project}`,
+  toastClose: "Dismiss",
   headerWaiting: "Needs input",
   headerWorking: "Working",
   headerTitle: (waiting, working) =>
@@ -832,6 +835,7 @@ const JA: AgentsText = {
   notifyAttentionTitle: (reason, project) => `${reason} · ${project}`,
   noAttentionAgents: "いま手が要るエージェントはありません",
   notifyFinishedTitle: (project) => `完了 · ${project}`,
+  toastClose: "閉じる",
   headerWaiting: "入力待ち",
   headerWorking: "作業中",
   headerTitle: (waiting, working) =>

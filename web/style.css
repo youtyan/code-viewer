@@ -2121,6 +2121,85 @@ body[data-code-font-size="xlarge"] {
   color: var(--attn);
   border-color: var(--attn);
 }
+/* 窓の中の知らせ (views/agents/attention-toast.ts)。見ていないペインが入力待ち・
+   完了になったとき、窓が前面なら右下に重ねる。場所は取らない (本文の寸法を
+   変えない) ので、最下段の上に浮かせるだけ。押すとそのペインを開く。 */
+.attention-toasts {
+  position: fixed;
+  right: var(--space-3);
+  bottom: calc(var(--chrome-bottom) + var(--space-3));
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  max-width: min(360px, calc(100vw - 2 * var(--space-3)));
+}
+.attention-toast {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  border: 1px solid var(--color-line-strong);
+  border-left: 3px solid var(--color-done);
+  border-radius: var(--radius-md);
+  background: var(--color-overlay);
+  box-shadow: var(--shadow-context-menu);
+  animation: gdp-banner-slide 0.15s ease;
+}
+.attention-toast[data-transition="waiting"] {
+  border-left-color: var(--color-waiting);
+}
+.attention-toast-open {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: none;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+.attention-toast-open:hover {
+  background: var(--color-select);
+}
+.attention-toast-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attention-toast-body {
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.attention-toast-close {
+  flex: none;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  margin: var(--space-1);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+.attention-toast-close:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.attention-toast-close svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
 #auto-update.active {
   background: var(--success-subtle);
   border-color: var(--success);

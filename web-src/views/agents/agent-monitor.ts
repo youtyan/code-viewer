@@ -24,8 +24,8 @@ import {
   type AgentOverviewResponse,
   type AgentPane,
   type AgentTransition,
+  agentAlertPlace,
   nextAgentUnread,
-  shouldNotifyAgent,
   withFinishedAsDone,
 } from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
@@ -78,6 +78,17 @@ export type AgentMonitorDeps = {
   onUnreadCountChange(count: number): void;
   /** 通知を押されたとき。そのペインを開く。 */
   onNotificationClick(pane: AgentPane): void;
+  /**
+   * 窓の中の知らせを出す (窓が前面のとき。押すとそのペインを開く)。無ければ
+   * いつも OS の通知 (attention-toast.ts)。
+   */
+  showToast?(
+    pane: AgentPane,
+    transition: AgentTransition,
+    text: { title: string; body: string },
+  ): void;
+  /** 窓が前面か (見えていて、キーを受けている)。 */
+  isWindowInFront?(): boolean;
   actionHeaders(): HeadersInit;
   /**
    * 外側のページが取った一覧を受け取る (面の中。core/workspace-role.ts)。あれば自分
@@ -158,9 +169,11 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     return api ? api.permission : "unsupported";
   }
 
-  function notify(pane: AgentPane, transition: AgentTransition): void {
-    const api = notificationApi();
-    if (!api) return;
+  /** 知らせの題と本文 (OS の通知と窓の中の知らせで同じ)。 */
+  function alertText(
+    pane: AgentPane,
+    transition: AgentTransition,
+  ): { title: string; body: string } {
     const text = deps.getText();
     // 通知に色は出せないので、プロジェクト名の前に頭文字 (左の一覧の四角と同じ)。
     const info = overview?.projects.find((item) => item.root === pane.project);
@@ -176,10 +189,17 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
               project,
             )
           : text.notifyWaitingTitle(project);
+    return { title, body: `${paneText(pane, text).summary}\n${pane.label}` };
+  }
+
+  function notify(pane: AgentPane, transition: AgentTransition): void {
+    const api = notificationApi();
+    if (!api) return;
+    const { title, body } = alertText(pane, transition);
     // 同じペインの同じ変化は 1 枚に畳む。同じサーバを複数のタブで開いて
     // いても、OS の通知が重ならない。
     const notification = new api(title, {
-      body: `${paneText(pane, text).summary}\n${pane.label}`,
+      body,
       tag: `code-viewer-agent:${pane.id}:${transition}`,
     });
     notification.addEventListener("click", () => {
@@ -220,15 +240,17 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
         sound !== "waiting"
       )
         sound = transition;
-      if (
-        !shouldNotifyAgent(transition, {
-          ...context,
-          viewing: deps.isViewing(pane),
-        })
-      )
-        continue;
+      const place = agentAlertPlace(transition, {
+        ...context,
+        viewing: deps.isViewing(pane),
+        windowInFront: deps.isWindowInFront?.() === true,
+        canToast: deps.showToast !== undefined,
+      });
+      if (place === null) continue;
       try {
-        notify(pane, transition);
+        if (place === "toast")
+          deps.showToast?.(pane, transition, alertText(pane, transition));
+        else notify(pane, transition);
       } catch (cause) {
         // 通知が出せなくても一覧の更新は止めない。理由は画面に出す。
         console.error("[code-viewer] agent notification failed", cause);

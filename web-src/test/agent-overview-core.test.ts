@@ -13,6 +13,7 @@ import {
   type AgentStateFilter,
   type AgentTransition,
   abbreviateHome,
+  agentAlertPlace,
   agentKindFromArgs,
   agentKindOf,
   agentTransition,
@@ -23,7 +24,6 @@ import {
   nextAgentUnread,
   notifyPermissionView,
   paneTaskText,
-  shouldNotifyAgent,
   titleWithUnread,
   withFinishedAsDone,
 } from "../core/agent-overview";
@@ -656,7 +656,8 @@ describe("notifyPermissionView", () => {
   );
 });
 
-describe("shouldNotifyAgent", () => {
+// 窓が前面でないとき (OS の通知だけ): 許可・見ている・種類ごとの設定で決まる。
+describe("agentAlertPlace (window not in front)", () => {
   const on = { waiting: true, finished: true };
   test.each<{
     name: string;
@@ -740,7 +741,83 @@ describe("shouldNotifyAgent", () => {
     },
   ])("$name", ({ transition, settings, permission, viewing, expected }) => {
     expect(
-      shouldNotifyAgent(transition, { settings, permission, viewing }),
+      agentAlertPlace(transition, {
+        settings,
+        permission,
+        viewing,
+        windowInFront: false,
+        canToast: true,
+      }),
+    ).toBe(expected ? "os" : null);
+  });
+});
+
+// 窓が前面のときは、許可に関係なく窓の中の知らせ (押すとそこへ)。
+describe("agentAlertPlace (window in front)", () => {
+  const on = { waiting: true, finished: true };
+  test.each<{
+    name: string;
+    context: {
+      settings: { waiting: boolean; finished: boolean };
+      permission: "granted" | "denied" | "default" | "unsupported";
+      viewing: boolean;
+      canToast: boolean;
+    };
+    expected: "toast" | "os" | null;
+  }>([
+    {
+      name: "許可済みでも窓の中",
+      context: {
+        settings: on,
+        permission: "granted",
+        viewing: false,
+        canToast: true,
+      },
+      expected: "toast",
+    },
+    {
+      name: "許可が無くても窓の中",
+      context: {
+        settings: on,
+        permission: "denied",
+        viewing: false,
+        canToast: true,
+      },
+      expected: "toast",
+    },
+    {
+      name: "そのペインを見ているなら出さない",
+      context: {
+        settings: on,
+        permission: "granted",
+        viewing: true,
+        canToast: true,
+      },
+      expected: null,
+    },
+    {
+      name: "種類を切ってあれば出さない",
+      context: {
+        settings: { waiting: false, finished: true },
+        permission: "granted",
+        viewing: false,
+        canToast: true,
+      },
+      expected: null,
+    },
+    {
+      name: "窓の中の知らせが無い画面では OS の通知",
+      context: {
+        settings: on,
+        permission: "granted",
+        viewing: false,
+        canToast: false,
+      },
+      expected: "os",
+    },
+  ])("$name", ({ context, expected }) => {
+    expect(
+      agentAlertPlace("waiting", { ...context, windowInFront: true }),
     ).toBe(expected);
   });
 });

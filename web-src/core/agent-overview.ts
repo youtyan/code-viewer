@@ -820,16 +820,24 @@ export function notifyPermissionView(
   return asked ? "ask-again" : "ask";
 }
 
-/** ブラウザの通知を出すか。 */
-export function shouldNotifyAgent(
+/**
+ * 知らせをどこに出すか。見ているペイン・種類ごとの設定で切ったものは出さない。
+ * 窓が前面 (見えていて、キーを受けている) なら窓の中の知らせ (押すとそこへ)。
+ * 前面で作業している人に OS の通知の帯は届きにくく、押してもタブを探すため。
+ * 窓が前面でなければ、許可があるときだけ OS の通知。
+ */
+export function agentAlertPlace(
   transition: AgentTransition,
-  context: AgentNotifyContext,
-): boolean {
-  if (context.permission !== "granted") return false;
-  if (context.viewing) return false;
-  return transition === "waiting"
-    ? context.settings.waiting
-    : context.settings.finished;
+  context: AgentNotifyContext & { windowInFront: boolean; canToast: boolean },
+): "toast" | "os" | null {
+  if (context.viewing) return null;
+  const wanted =
+    transition === "waiting"
+      ? context.settings.waiting
+      : context.settings.finished;
+  if (!wanted) return null;
+  if (context.canToast && context.windowInFront) return "toast";
+  return context.permission === "granted" ? "os" : null;
 }
 
 /** タブのタイトル。未読があれば先頭に件数を付ける。 */

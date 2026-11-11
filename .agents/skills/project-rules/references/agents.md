@@ -252,7 +252,7 @@ claude / codex の複数アカウントを使い分け（opencode も同じ一�
 
 ## 3. 通知と未読
 
-`core/agent-overview.ts` の `agentTransition`・`nextAgentUnread`・`shouldNotifyAgent` が
+`core/agent-overview.ts` の `agentTransition`・`nextAgentUnread`・`agentAlertPlace` が
 条件の全部。ここは理由だけ書く。
 
 | 決まり | 理由 |
@@ -264,6 +264,7 @@ claude / codex の複数アカウントを使い分け（opencode も同じ一�
 | 通知の許可は、一覧の「通知を有効にする」か、最初の入力待ちでサイドバーに 1 度だけ出す案内（`agentNotifyHintDismissed`。許可かブロックを選ぶか、閉じたら二度と出さない。許可の窓を閉じただけで default のままなら、どちらも「まだ許可されていません」と「もう一度求める」を出す。判定は `notifyPermissionView` だけ）を押したときだけ求める | ページを開いた瞬間に許可を求めない。入力待ちが来たときが、通知の要る理由が分かる瞬間 |
 | 通知は画面が見た変化に加えて、サーバの未読に新しく載った変化でも出す（`agent-monitor.ts` の `serverOnlyTransitions`） | 背面のタブはブラウザが取り直しを十数秒まで間引き、短い作業中をまるごと見逃す（実測で 17 秒あいた）。通知が要るのはまさに背面にいるとき |
 | 短い音（設定の「短い音も鳴らす」`agentNotifySound`。既定は切）は、通知の許可に関係なく、見ていないペインの変化で 1 回の取得に 1 回（入力待ちを優先）。種類ごとの通知の設定に従う。音のファイルは持たず Web Audio で鳴らす（`views/agents/attention-sound.ts`）。鳴らせなければ理由を console に。設定の節に「試しに鳴らす」（入力待ち・完了。`onTestSound`、鳴らせなければ理由を節の下に） | 許可を出していない人・通知を見落とす人にも気付かせる。毎回は鳴らさない（既定は切）。音を写さない（自作） |
+| 窓が前面（見えていてキーを受けている）なら、OS の通知の代わりに窓の中の知らせ（右下。`views/agents/attention-toast.ts`。押すとそのペインを開く・しばらくで消える・同じペインの同じ変化は 1 枚・3 枚まで）。前面でなければ許可があるときだけ OS の通知（`agentAlertPlace`）。出すのは外側のページだけ（面の中には置かない） | 前面で作業している人に OS の通知の帯は届きにくく、押してもタブを探すことになる。通知の許可が無い人にも、窓の中なら届く |
 | 通知の `tag` はペインと変化の組 | 同じオリジンのタブが複数あっても重ならない |
 | 取り直しの fetch に `BACKGROUND_REQUEST_HEADER` を付ける | 通信中の表示と画面切替の中断の巻き添えにしないため。規則は `server.md` の Request Lifecycle の表 |
 
