@@ -782,6 +782,18 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 [ui(l.agents.state.idle), "何もしていません"],
               ],
             },
+            {
+              kind: "paragraph",
+              text: [
+                "フックを入れていると、入力待ちの代わりに理由が出ます（",
+                ui(l.agents.attention.permission),
+                "・",
+                ui(l.agents.attention.question),
+                "・",
+                ui(l.agents.attention.error),
+                "）。エラーで止まったもの（利用の上限・認証切れなど）は、返事をするまで手が要るものとして残ります。",
+              ],
+            },
             w.see("agent-hooks"),
           ],
         },

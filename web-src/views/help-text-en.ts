@@ -799,6 +799,18 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 [ui(l.agents.state.idle), "Doing nothing"],
               ],
             },
+            {
+              kind: "paragraph",
+              text: [
+                "With hooks installed, the reason shows instead of needing input (",
+                ui(l.agents.attention.permission),
+                ", ",
+                ui(l.agents.attention.question),
+                ", ",
+                ui(l.agents.attention.error),
+                "). An agent stopped on an error (a usage limit, an expired sign-in) stays as needing you until you reply.",
+              ],
+            },
             w.see("agent-hooks"),
           ],
         },
