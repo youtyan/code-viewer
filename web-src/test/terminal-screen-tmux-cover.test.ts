@@ -31,7 +31,9 @@ import type { TmuxClientWindow } from "../core/tmux";
 import { terminalText } from "../views/terminal/i18n";
 import {
   createTerminalScreen,
+  DEFAULT_VIEW,
   type TerminalScreenHandle,
+  type TerminalScreenView,
 } from "../views/terminal/terminal-screen";
 
 beforeAll(() => {
@@ -249,6 +251,46 @@ describe("tmux のウインドウの外側の覆い", () => {
         },
       ],
     });
+  });
+
+  test("覆いの部分の位置と文を view に渡す", async () => {
+    const drawn: Parameters<TerminalScreenView["coverParts"]>[0][] = [];
+    const other = createTerminalScreen(
+      {
+        getText: () => terminalText("en"),
+        getFontSize: () => 13,
+        actionHeaders: () => ({}),
+        trackLoad: (promise) => promise,
+        onStatus: () => undefined,
+        onTargetGone: () => undefined,
+        onShellExited: () => undefined,
+        tmuxWindow: () => window,
+        onTmuxWindowStale: () => undefined,
+        isImageShelfCollapsed: () => false,
+        setImageShelfCollapsed: () => undefined,
+      },
+      {
+        ...DEFAULT_VIEW,
+        coverParts: (parts) => {
+          drawn.push(parts);
+          return DEFAULT_VIEW.coverParts(parts);
+        },
+      },
+    );
+    host.append(other.el);
+    window = SHARED;
+    await other.attach(SESSION);
+    expect(drawn[drawn.length - 1]).toEqual([
+      {
+        top: 29,
+        left: 0,
+        rows: 18,
+        cols: 132,
+        message:
+          "The tmux window is 132×29 (sized to another terminal attached to the same session).",
+      },
+    ]);
+    other.dispose();
   });
 
   test("覆いは操作を下の端末へ通し、箱の流れに入らない (style.css)", async () => {

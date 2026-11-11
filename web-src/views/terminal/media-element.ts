@@ -5,10 +5,12 @@
 // 動画の見本は音を消した video を最初の辺りで止めたまま見せる。読むのは寸法と
 // 最初の辺りだけ (preload="metadata")。
 
+import { html, nothing } from "lit/html.js";
 import {
   type TerminalImageRef,
   terminalMediaKind,
 } from "../../core/terminal-images";
+import { templateElement } from "../ui/renderer";
 
 export type MediaElement = HTMLImageElement | HTMLVideoElement;
 
@@ -16,27 +18,34 @@ export function createMediaElement(
   image: Pick<TerminalImageRef, "url" | "name" | "path">,
   use: "thumbnail" | "player",
 ): MediaElement {
-  if (terminalMediaKind(image.path) !== "video") {
-    const picture = document.createElement("img");
-    if (use === "thumbnail") picture.loading = "lazy";
-    picture.decoding = "async";
-    picture.alt = image.name;
-    picture.src = image.url;
-    return picture;
-  }
-  const clip = document.createElement("video");
-  clip.playsInline = true;
-  clip.preload = "metadata";
-  clip.setAttribute("aria-label", image.name);
-  if (use === "player") {
-    clip.controls = true;
-    clip.src = image.url;
-  } else {
-    clip.muted = true;
-    // 最初の辺りへ送っておかないと、Safari は preload="metadata" で絵を出さない。
-    clip.src = `${image.url}#t=0.1`;
-  }
-  return clip;
+  if (terminalMediaKind(image.path) !== "video")
+    return templateElement<HTMLImageElement>(
+      html`<img
+        loading=${use === "thumbnail" ? "lazy" : nothing}
+        decoding="async"
+        alt=${image.name}
+        src=${image.url}
+      />`,
+    );
+  // 見本は音を消して最初の辺りで止める。最初の辺りへ送っておかないと、Safari は
+  // preload="metadata" で絵を出さない。
+  return templateElement<HTMLVideoElement>(
+    use === "player"
+      ? html`<video
+          .playsInline=${true}
+          preload="metadata"
+          aria-label=${image.name}
+          .controls=${true}
+          src=${image.url}
+        ></video>`
+      : html`<video
+          .playsInline=${true}
+          preload="metadata"
+          aria-label=${image.name}
+          .muted=${true}
+          src=${`${image.url}#t=0.1`}
+        ></video>`,
+  );
 }
 
 /** 寸法が分かったら呼ぶ (画像は load、動画は loadedmetadata)。 */

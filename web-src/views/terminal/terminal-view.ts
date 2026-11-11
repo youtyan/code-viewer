@@ -1,3 +1,4 @@
+import { html } from "lit/html.js";
 import { apiUrl, PROJECT_HEADER } from "../../core/api-url";
 // メインの面 (左 / 右) のターミナルのタブの中身。映すのは PTY のシェルで、
 // tmux はその中で普通に動く。
@@ -30,6 +31,7 @@ import {
 } from "../../core/tmux";
 import type { ContextMenuItem } from "../context-menu";
 import { renderEmptyState } from "../ui/empty-state";
+import { templateElement } from "../ui/renderer";
 import { type TerminalLang, type TerminalText, terminalText } from "./i18n";
 import type { ImageShelfLayout } from "./image-shelf";
 import {
@@ -193,7 +195,29 @@ type ScreenSlot = {
   hint: HTMLElement;
 };
 
-export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
+/** ターミナルの面の描き方。枠とタブの面の形だけを持つ (中身は画面の部品)。 */
+export type TerminalViewView = {
+  /** 画面の下端の状態の行 (文字は後から書き込む)。 */
+  statusLine: () => unknown;
+  /** 何も映していない間の、真ん中の案内 (文字は後から書き込む)。 */
+  emptyHint: () => unknown;
+  /** 画面・案内・状態の行を入れる枠。 */
+  slot: (children: Node[]) => unknown;
+  tabPane: () => unknown;
+};
+
+export const DEFAULT_VIEW: TerminalViewView = {
+  statusLine: () => html`<p class="terminal-status" role="status" hidden></p>`,
+  emptyHint: () =>
+    html`<p class="terminal-empty-hint" role="status" hidden></p>`,
+  slot: (children) => html`<div class="terminal-slot">${children}</div>`,
+  tabPane: () => html`<div class="terminal-pane"></div>`,
+};
+
+export function createTerminalView(
+  deps: TerminalViewDeps,
+  view: TerminalViewView = DEFAULT_VIEW,
+): TerminalViewHandle {
   /** 面ごとにタブで映す枠。最初にその面で映すときに作る。 */
   const tabs: Record<TabSide, ScreenSlot | null> = { left: null, right: null };
   /** 面ごとの、枠を置く場所 (app がその面の箱に入れる)。 */
@@ -248,16 +272,10 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   }
 
   function createSlot(): ScreenSlot {
-    const status = document.createElement("p");
-    status.className = "terminal-status";
-    status.role = "status";
-    status.hidden = true;
+    const status = templateElement(view.statusLine());
     // 見えるのは status か hint のどちらか一方だけ (style.css)。読み上げも
     // 見えている方から届く。
-    const hint = document.createElement("p");
-    hint.className = "terminal-empty-hint";
-    hint.role = "status";
-    hint.hidden = true;
+    const hint = templateElement(view.emptyHint());
     const screen = createTerminalScreen({
       trackLoad: deps.trackLoad,
       actionHeaders: deps.actionHeaders,
@@ -290,16 +308,12 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       onOpenImage: deps.onOpenImage,
     });
     screen.setInputEnabled(inputEnabled);
-    const el = document.createElement("div");
-    el.className = "terminal-slot";
-    el.append(screen.el, hint, status);
+    const el = templateElement(view.slot([screen.el, hint, status]));
     return { el, screen, status, hint };
   }
 
   function createTabPane(): HTMLElement {
-    const pane = document.createElement("div");
-    pane.className = "terminal-pane";
-    return pane;
+    return templateElement(view.tabPane());
   }
 
   /** 左右の面の枠を入れ替える (反対側へ移したタブの xterm を付け替える)。 */

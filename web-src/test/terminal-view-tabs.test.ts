@@ -56,7 +56,9 @@ vi.mock("../views/terminal/terminal-screen", () => ({
   },
 }));
 
-const { createTerminalView } = await import("../views/terminal/terminal-view");
+const { createTerminalView, DEFAULT_VIEW } = await import(
+  "../views/terminal/terminal-view"
+);
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -80,6 +82,7 @@ function shell(id: string): ShellSession {
 function setup(
   responses: Array<() => Response | Promise<Response>>,
   extra: Partial<TerminalViewDeps> = {},
+  look: typeof DEFAULT_VIEW = DEFAULT_VIEW,
 ) {
   const requests: string[] = [];
   /** 要求ごとの、プロジェクトの鍵のヘッダ (無ければ null)。 */
@@ -97,24 +100,27 @@ function setup(
   const opened: string[] = [];
   const ended: string[] = [];
   const openFailures: string[] = [];
-  const view = createTerminalView({
-    trackLoad: (promise) => promise,
-    actionHeaders: () => ({}),
-    getLanguage: () => "en",
-    getFontSize: () => 13,
-    onFontSizeChange: () => undefined,
-    isImageShelfCollapsed: () => false,
-    onImageShelfCollapsedChange: () => undefined,
-    onOpenInTab: (session, pane, side) =>
-      opened.push(
-        pane ? `${session.id}:${pane}:${side}` : `${session.id}:${side}`,
-      ),
-    onShellEnded: (id) => ended.push(id),
-    onOpenFailed: (message) => openFailures.push(message),
-    tmuxWindow: () => null,
-    onTmuxWindowStale: () => undefined,
-    ...extra,
-  });
+  const view = createTerminalView(
+    {
+      trackLoad: (promise) => promise,
+      actionHeaders: () => ({}),
+      getLanguage: () => "en",
+      getFontSize: () => 13,
+      onFontSizeChange: () => undefined,
+      isImageShelfCollapsed: () => false,
+      onImageShelfCollapsedChange: () => undefined,
+      onOpenInTab: (session, pane, side) =>
+        opened.push(
+          pane ? `${session.id}:${pane}:${side}` : `${session.id}:${side}`,
+        ),
+      onShellEnded: (id) => ended.push(id),
+      onOpenFailed: (message) => openFailures.push(message),
+      tmuxWindow: () => null,
+      onTmuxWindowStale: () => undefined,
+      ...extra,
+    },
+    look,
+  );
   return { view, requests, projects, opened, ended, openFailures };
 }
 
@@ -616,5 +622,34 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
       ["Error: Could not open a shell. (HTTP 500): spawn failed"],
       "The shell ended when the server restarted",
     ]);
+  });
+});
+
+describe("the terminal view's view", () => {
+  test("builds the slot for a tab from the view", async () => {
+    const session = shell("shell-a1");
+    const slots: Node[][] = [];
+    const { view } = setup(
+      [() => json({ available: true, sessions: [session] })],
+      {},
+      {
+        ...DEFAULT_VIEW,
+        slot: (children) => {
+          slots.push(children);
+          return DEFAULT_VIEW.slot(children);
+        },
+      },
+    );
+    await view.loadShells();
+    await view.showInTab(session.id, "left");
+    expect(
+      slots.map((children) =>
+        children.map((child) => (child as HTMLElement).className),
+      ),
+    ).toEqual([[expect.any(String), "terminal-empty-hint", "terminal-status"]]);
+    expect(view.tabPaneFor("left").firstElementChild?.className).toBe(
+      "terminal-slot",
+    );
+    view.dispose();
   });
 });

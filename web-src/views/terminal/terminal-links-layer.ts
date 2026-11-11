@@ -20,14 +20,21 @@
 // 層は文字の上に重なるが、印は線と半透明の面だけで、操作は下の端末へ通す
 // (pointer-events: none)。帯だけが押せる。
 
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html } from "lit/html.js";
 import { formatErrorDetail } from "../../core/error-detail";
 import {
   CHECK_16_PATHS,
   COPY_16_PATHS,
-  iconSvg,
   OPEN_EXTERNAL_16_PATH,
 } from "../../core/icons";
 import type { XtermTerminal } from "../../core/xterm-loader";
+import { iconTemplate } from "../ui/icon";
+import {
+  templateElement,
+  templateElements,
+  templateFragment,
+} from "../ui/renderer";
 import type { TerminalText } from "./i18n";
 import type { ShelfOpenMode } from "./image-shelf";
 import {
@@ -145,36 +152,91 @@ let barSeq = 0;
 /**
  * @param host マウスを受ける箱 (端末の画面の箱。xterm より先に受ける)
  */
+/**
+ * リンクの層の描き方。印の層と帯は 1 度だけ作り、presenter が位置・中身・
+ * 出し分けを書き込む (端末の文字に合わせて動くので、描き直さない)。
+ */
+export type TerminalLinkLayerView = {
+  /** 画面の上に重ねる印の層。 */
+  layer: () => unknown;
+  /** 帯 (見本・ファイル名・開く・コピー)。 */
+  bar: (props: {
+    id: string;
+    refs: {
+      preview: Ref<HTMLElement>;
+      caption: Ref<HTMLElement>;
+      open: Ref<HTMLButtonElement>;
+      copy: Ref<HTMLButtonElement>;
+    };
+  }) => unknown;
+  /** 印 (薄い印・指している印) の 1 区間。 */
+  segments: (
+    parts: { className: string; row: number; col: number; cols: number }[],
+  ) => unknown;
+  /** 帯のボタンの中身 (絵と文字)。 */
+  action: (paths: string | readonly string[], label: string) => unknown;
+};
+
+export const DEFAULT_VIEW: TerminalLinkLayerView = {
+  layer: () => html`<div class="terminal-link-layer" aria-hidden="true"></div>`,
+  bar: ({ id, refs }) =>
+    html`<div class="terminal-link-bar" role="toolbar" id=${id} hidden><div
+        class="terminal-link-preview"
+        ${ref(refs.preview)}
+      ><div class="terminal-link-preview-caption" ${ref(refs.caption)}></div></div
+      ><div class="terminal-link-actions"><button
+          type="button"
+          class="terminal-link-action"
+          ${ref(refs.open)}
+        ></button><button
+          type="button"
+          class="terminal-link-action"
+          ${ref(refs.copy)}
+        ></button></div
+    ></div>`,
+  segments: (parts) =>
+    parts.map(
+      (part) =>
+        html`<div
+          class=${part.className}
+          style=${`--link-row: ${part.row}; --link-col: ${part.col}; --link-cols: ${part.cols};`}
+        ></div>`,
+    ),
+  action: (paths, label) =>
+    html`${iconTemplate(paths, "terminal-link-action-icon")}${label}`,
+};
+
+function drawnPart<T extends Element>(part: Ref<T>): T {
+  if (!part.value) throw new Error("terminal link layer: a part was not drawn");
+  return part.value;
+}
+
 export function createTerminalLinkLayer(
   host: HTMLElement,
   deps: TerminalLinkLayerDeps,
+  view: TerminalLinkLayerView = DEFAULT_VIEW,
 ): TerminalLinkLayer {
-  const layer = document.createElement("div");
-  layer.className = "terminal-link-layer";
-  layer.setAttribute("aria-hidden", "true");
-
-  const bar = document.createElement("div");
-  bar.className = "terminal-link-bar";
-  bar.setAttribute("role", "toolbar");
-  bar.id = `terminal-link-bar-${++barSeq}`;
-  bar.hidden = true;
-  const preview = document.createElement("div");
-  preview.className = "terminal-link-preview";
+  const layer = templateElement(view.layer());
+  const barRefs = {
+    preview: createRef<HTMLElement>(),
+    caption: createRef<HTMLElement>(),
+    open: createRef<HTMLButtonElement>(),
+    copy: createRef<HTMLButtonElement>(),
+  };
+  const bar = templateElement(
+    view.bar({ id: `terminal-link-bar-${++barSeq}`, refs: barRefs }),
+  );
+  const preview = drawnPart(barRefs.preview);
   // 見本 (画像か動画)。画像が変わったときだけ作り直す。
   let previewMedia: MediaElement | null = null;
-  const previewCaption = document.createElement("div");
-  previewCaption.className = "terminal-link-preview-caption";
-  preview.append(previewCaption);
-  const actions = document.createElement("div");
-  actions.className = "terminal-link-actions";
-  const openButton = document.createElement("button");
-  openButton.type = "button";
-  openButton.className = "terminal-link-action";
-  const copyButton = document.createElement("button");
-  copyButton.type = "button";
-  copyButton.className = "terminal-link-action";
-  actions.append(openButton, copyButton);
-  bar.append(preview, actions);
+  const previewCaption = drawnPart(barRefs.caption);
+  const openButton = drawnPart(barRefs.open);
+  const copyButton = drawnPart(barRefs.copy);
+  const setAction = (
+    button: HTMLButtonElement,
+    paths: string | readonly string[],
+    label: string,
+  ) => button.replaceChildren(templateFragment(view.action(paths, label)));
 
   let hovered: ScreenLink | null = null;
   let strong: readonly LinkSegment[] | null = null;
@@ -196,18 +258,16 @@ export function createTerminalLinkLayer(
     };
   }
 
-  function segmentEl(
+  const segmentPart = (
     segment: LinkSegment,
     className: string,
     top: number,
-  ): HTMLElement {
-    const el = document.createElement("div");
-    el.className = className;
-    el.style.setProperty("--link-row", String(segment.y - top));
-    el.style.setProperty("--link-col", String(segment.x0));
-    el.style.setProperty("--link-cols", String(segment.x1 - segment.x0 + 1));
-    return el;
-  }
+  ) => ({
+    className,
+    row: segment.y - top,
+    col: segment.x0,
+    cols: segment.x1 - segment.x0 + 1,
+  });
 
   function render(): void {
     const term = deps.term();
@@ -223,12 +283,12 @@ export function createTerminalLinkLayer(
     const top = term.buffer.active.viewportY;
     const visible = (segment: LinkSegment) =>
       segment.y >= top && segment.y < top + term.rows;
-    const parts: HTMLElement[] = [];
+    const parts: ReturnType<typeof segmentPart>[] = [];
     // 常に薄い印は画像のパスだけ。
     for (const link of deps.links()) {
       if (link.kind !== "image") continue;
       for (const segment of link.segments.filter(visible))
-        parts.push(segmentEl(segment, "terminal-link-mark", top));
+        parts.push(segmentPart(segment, "terminal-link-mark", top));
     }
     const current = hovered
       ? deps.links().find((link) => link.key === hovered?.key)
@@ -237,8 +297,8 @@ export function createTerminalLinkLayer(
       ...(current?.segments ?? []),
       ...(strong ?? []),
     ].filter(visible))
-      parts.push(segmentEl(segment, "terminal-link-hover", top));
-    layer.replaceChildren(...parts);
+      parts.push(segmentPart(segment, "terminal-link-hover", top));
+    layer.replaceChildren(...templateElements(view.segments(parts)));
     // 帯を出している間に文字列が消えた (流れた・書き換わった) ら帯も消す。
     if (hovered && !current) setHovered(null);
   }
@@ -305,13 +365,8 @@ export function createTerminalLinkLayer(
 
   function fillBar(link: ScreenLink): void {
     const text = deps.getText();
-    openButton.innerHTML = iconSvg(
-      "terminal-link-action-icon",
-      OPEN_EXTERNAL_16_PATH,
-    );
-    openButton.append(text.linkOpen);
-    copyButton.innerHTML = iconSvg("terminal-link-action-icon", COPY_16_PATHS);
-    copyButton.append(text.linkCopy);
+    setAction(openButton, OPEN_EXTERNAL_16_PATH, text.linkOpen);
+    setAction(copyButton, COPY_16_PATHS, text.linkCopy);
     delete copyButton.dataset.copied;
     bar.setAttribute("aria-label", link.text);
     preview.hidden = !link.image;
@@ -416,11 +471,7 @@ export function createTerminalLinkLayer(
     navigator.clipboard.writeText(value).then(
       () => {
         // 形は変えず、印と文言だけ替える (押した後にボタンの箱を動かさない)。
-        copyButton.innerHTML = iconSvg(
-          "terminal-link-action-icon",
-          CHECK_16_PATHS,
-        );
-        copyButton.append(text.linkCopied);
+        setAction(copyButton, CHECK_16_PATHS, text.linkCopied);
         copyButton.dataset.copied = "true";
         if (copiedTimer) clearTimeout(copiedTimer);
         copiedTimer = setTimeout(() => {

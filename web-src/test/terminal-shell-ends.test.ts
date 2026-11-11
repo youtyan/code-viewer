@@ -9,7 +9,9 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   createShellEndNotice,
   createShellEndTracker,
+  DEFAULT_VIEW,
   SHELL_END_NOTICE_MS,
+  type ShellEndNoticeView,
 } from "../views/terminal/shell-ends";
 
 describe("createShellEndTracker", () => {
@@ -145,5 +147,31 @@ describe("createShellEndNotice", () => {
       [false, "Shell 2 has ended.", "status"],
       true,
     ]);
+  });
+});
+
+describe("the shell end notice presenter", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.replaceChildren();
+  });
+
+  test("passes the message, then hides it after a while", () => {
+    vi.useFakeTimers();
+    const shown: Parameters<ShellEndNoticeView>[0][] = [];
+    const host = document.createElement("div");
+    document.body.append(host);
+    const notice = createShellEndNotice(host, (props) => {
+      shown.push(props);
+      return DEFAULT_VIEW(props);
+    });
+    notice.show("Shell 2 has ended.");
+    const visible = shown[shown.length - 1];
+    vi.advanceTimersByTime(SHELL_END_NOTICE_MS);
+    expect([visible, shown[shown.length - 1]?.shown]).toEqual([
+      { message: "Shell 2 has ended.", shown: true },
+      false,
+    ]);
+    notice.dispose();
   });
 });
