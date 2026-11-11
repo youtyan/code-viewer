@@ -50,6 +50,27 @@ const conversations = new Map<string, AgentConversationEntry>();
 let conversationsChanged: (() => void) | null = null;
 let tmuxGeneration: string | null = null;
 
+/**
+ * 記録が増えた・変わったときに呼ぶもの (unread-store.ts の保存と読み戻し)。
+ * first: その対象の最初の記録 (サーバが起きてから)。読み戻す側はこの記録の
+ * 経過時刻を書き換えてよい (states に置く前に呼ぶ)。
+ */
+export type AgentRecordListener = (event: {
+  key: string;
+  record: AgentStateRecord;
+  first: boolean;
+}) => void;
+let recordListener: AgentRecordListener | null = null;
+
+export function onAgentRecord(listener: AgentRecordListener | null): void {
+  recordListener = listener;
+}
+
+/** 今の tmux のサーバの世代。最初の巡回の前は null。 */
+export function currentAgentTmuxGeneration(): string | null {
+  return tmuxGeneration;
+}
+
 /** 会話の場所が変わったら呼ぶ。保存する側 (agent-conversations.ts) が 1 つだけ置く。 */
 export function onAgentConversationsChanged(
   listener: (() => void) | null,
@@ -230,6 +251,13 @@ export function recordAgentState(
   if (previous?.state !== next) {
     noteAgentStateChange(key, previous?.state, next);
   }
+  if (
+    previous === undefined ||
+    previous.state !== record.state ||
+    previous.updatedAt !== record.updatedAt
+  ) {
+    recordListener?.({ key, record, first: previous === undefined });
+  }
   states.set(key, record);
   evictOldest();
   return record;
@@ -328,6 +356,20 @@ export function restoreAgentConversations(
   }
   evictOldestConversations();
   return restored;
+}
+
+/** tmux のペインの記録 (保存する側が読む)。世代が分かるまでは null。 */
+export function agentRecordsSnapshot(): {
+  generation: string;
+  records: [key: string, record: AgentStateRecord][];
+} | null {
+  if (tmuxGeneration === null) return null;
+  return {
+    generation: tmuxGeneration,
+    records: [...states.entries()].filter(([, record]) =>
+      isTmuxPaneId(record.target),
+    ),
+  };
 }
 
 /** 一覧。人間の番のものが先、その中では待たせている順に並べる。 */

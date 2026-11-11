@@ -286,7 +286,11 @@ export type AgentStateObservationError = {
     /** 保存した会話の場所を読めなかった (server/terminal/agent-conversations.ts)。 */
     | "restore_conversations"
     /** 会話の場所を保存できなかった。 */
-    | "save_conversations";
+    | "save_conversations"
+    /** 保存した未読と変わった時刻を読めなかった (server/terminal/unread-store.ts)。 */
+    | "restore_unread"
+    /** 未読と変わった時刻を保存できなかった。 */
+    | "save_unread";
   target: string;
   at: number;
   /** Error の cause と独自フィールドを保持した表示用詳細。 */

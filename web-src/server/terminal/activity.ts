@@ -48,6 +48,7 @@ import {
 } from "./agent-state";
 import { getActiveAgentScreenRules, reloadAgentScreenRules } from "./rules";
 import { resetAgentUnread } from "./unread";
+import { getUnreadStoreErrors, startUnreadPersistence } from "./unread-store";
 
 /**
  * 見に行く間隔。エージェント一覧とヘッダの件数表示は、状態が変わってから
@@ -337,7 +338,11 @@ function deferredCaptureError(
 }
 
 export function getAgentActivityErrors(): AgentStateObservationError[] {
-  return [...activityErrors.values(), ...getConversationStoreErrors()]
+  return [
+    ...activityErrors.values(),
+    ...getConversationStoreErrors(),
+    ...getUnreadStoreErrors(),
+  ]
     .sort((a, b) => a.at - b.at)
     .map((error) => ({ ...error }));
 }
@@ -584,6 +589,8 @@ export function startAgentActivityWatch(
   watching = { cwd, options: paneListOptions };
   // 巡回するサーバ (入口・--standalone) だけが会話の場所を保存する。
   startConversationPersistence();
+  // 未読と変わった時刻も (unread-store.ts)。同じく最初の記録で読み戻す。
+  startUnreadPersistence();
   // 起動した直後は見られている扱い (開いたタブがすぐ取りに来る)。
   lastWatchedAt = Date.now();
   // 読めなければ既定のルールで始め、理由を出す (投げっぱなしにすると入口ごと終わる)。
