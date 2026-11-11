@@ -199,7 +199,10 @@ import {
   createScrollMemory,
   scrollKeyOfHistoryState,
 } from "./core/scroll-memory";
-import { rememberPaletteSelection } from "./core/search-palette";
+import {
+  rememberPaletteSelection,
+  rememberRecentPaletteAction,
+} from "./core/search-palette";
 import {
   isShellSessionId,
   type ShellListResponse,
@@ -2629,6 +2632,16 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // ---------- Search palette: extracted to search-palette-ui.ts ----------
   const SEARCH_PALETTE = createSearchPalette({
+    recentActions: {
+      get: () => APP_SETTINGS.paletteRecentActions ?? [],
+      note: (id) =>
+        void patchSettings({
+          paletteRecentActions: rememberRecentPaletteAction(
+            APP_SETTINGS.paletteRecentActions ?? [],
+            id,
+          ),
+        }),
+    },
     STATE,
     setRoute,
     openingNewTab: (run) => MAIN_TABS.openingNewTab(run),

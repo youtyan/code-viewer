@@ -19,6 +19,7 @@ import {
   MAX_GREP_PALETTE_WIDTH,
   MIN_GREP_PALETTE_HEIGHT,
   MIN_GREP_PALETTE_WIDTH,
+  RECENT_PALETTE_ACTIONS_LIMIT,
 } from "../core/search-palette";
 import { isTerminalImageShelfPlacement } from "../core/terminal-images";
 import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from "../core/tmux";
@@ -339,6 +340,11 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     out.agentAccountsCollapsed = agentAccountsCollapsed;
   if (raw.agentsBoardOrder === "project" || raw.agentsBoardOrder === "urgency")
     out.agentsBoardOrder = raw.agentsBoardOrder;
+  const paletteRecentActions = normalizeStringList(raw.paletteRecentActions, {
+    maxItems: RECENT_PALETTE_ACTIONS_LIMIT,
+    maxLen: 200,
+  });
+  if (paletteRecentActions) out.paletteRecentActions = paletteRecentActions;
   const terminalImageShelfCollapsed = optionalBoolean(
     raw.terminalImageShelfCollapsed,
   );

@@ -271,6 +271,8 @@ export type AppSettingsState = {
   agentAccountsCollapsed?: boolean;
   /** エージェントの全体ボードの並び (プロジェクトごと / 急ぐ順)。未設定ならプロジェクトごと。 */
   agentsBoardOrder?: "project" | "urgency";
+  /** ⌘K のパレットで最近使った操作の id (新しい順。検索欄が空のときに先に出す)。 */
+  paletteRecentActions?: string[];
   /** ターミナルの画像の棚を畳んだ。 */
   terminalImageShelfCollapsed?: boolean;
   /** 画像の棚の置き場所 (右・左・下・上)。 */

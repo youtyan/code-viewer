@@ -30,6 +30,7 @@ import {
 import type { AppRoute } from "../core/routes";
 import {
   buildGrepRequestParams,
+  emptyQueryActions,
   limitPaletteResults,
   MAX_GREP_PALETTE_HEIGHT,
   MAX_GREP_PALETTE_WIDTH,
@@ -147,6 +148,11 @@ export type SearchPaletteDeps = {
   openSearchResults?(query: string): void;
   /** ファイルの検索に混ぜるプロジェクト・エージェント・セッション・操作。 */
   getPaletteCommands?(): PaletteCommand[];
+  /**
+   * 最近使った操作 (操作の群の id、新しい順)。検索欄が空のとき、決め打ちで勧める
+   * 操作より先に出す。note は操作を選んだとき。無ければ覚えない。
+   */
+  recentActions?: { get(): readonly string[]; note(id: string): void };
   /** 表示 (既定は search-palette-view.ts の DEFAULT_VIEW)。テストで差し替える。 */
   view?: (props: PaletteViewProps) => unknown;
   STATE: {
@@ -1027,12 +1033,22 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     };
     const trimmed = query.trim();
     const scored: Array<{ item: PaletteCommandItem; score: number }> = [];
-    for (const command of getPaletteCommands?.() ?? []) {
-      if (!trimmed) {
-        if (command.suggested)
-          groups[command.group].push({ kind: "command", command, ranges: [] });
-        continue;
-      }
+    const commands = getPaletteCommands?.() ?? [];
+    if (!trimmed) {
+      // 操作は最近使ったものを先に (人ごとに毎日使う操作が違う)。
+      const actions = emptyQueryActions(
+        commands.filter((command) => command.group === "actions"),
+        deps.recentActions?.get() ?? [],
+      );
+      for (const command of [
+        ...commands.filter(
+          (command) => command.group !== "actions" && command.suggested,
+        ),
+        ...actions,
+      ])
+        groups[command.group].push({ kind: "command", command, ranges: [] });
+    }
+    for (const command of trimmed ? commands : []) {
       // 名前はあいまい一致、補助の文字 (長いパス・作業内容) は含むかだけを見る
       // (長い文字列へのあいまい一致は、ほとんど何にでも当たってしまう)。
       const title = fuzzyMatchPath(trimmed, command.title);
@@ -1399,6 +1415,8 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     if (!item || state.opening) return;
     if (item.kind === "command") {
       closeSearchPalette();
+      if (item.command.group === "actions")
+        deps.recentActions?.note(item.command.id);
       item.command.run();
       return;
     }

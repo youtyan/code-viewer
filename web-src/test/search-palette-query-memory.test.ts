@@ -20,6 +20,7 @@ async function setup(options: {
   truncated?: boolean;
   fileSelectionHistory?: string[];
   commands?: PaletteCommand[];
+  recentActions?: { get(): readonly string[]; note(id: string): void };
 }) {
   const fileRequests: string[] = [];
   const persisted: unknown[] = [];
@@ -110,6 +111,7 @@ async function setup(options: {
     ...(options.commands
       ? { getPaletteCommands: () => options.commands ?? [] }
       : {}),
+    recentActions: options.recentActions,
   });
   return { palette, fileRequests, persisted };
 }
@@ -470,6 +472,66 @@ describe("palette projects, agents and actions", () => {
     }
   });
 
+  test("an empty query puts the actions used most recently first, and running an action remembers it", async () => {
+    const ran: string[] = [];
+    const noted: string[] = [];
+    let recent: readonly string[] = ["actions:Toggle theme"];
+    const { palette } = await setup({
+      files: ["src/a.ts"],
+      fileSelectionHistory: ["src/a.ts"],
+      commands: commands(ran),
+      recentActions: {
+        get: () => recent,
+        note: (id) => {
+          noted.push(id);
+          recent = [id, ...recent.filter((entry) => entry !== id)];
+        },
+      },
+    });
+    try {
+      palette.openSearchPalette("file");
+      await waitFor(() => status() === "Recent files - 1");
+      expect(listing().slice(-3)).toEqual([
+        "# Actions",
+        "Toggle theme|",
+        "New agent|",
+      ]);
+      // 最後の行 (New agent) を選んで実行する。
+      key("ArrowDown");
+      key("ArrowDown");
+      expect(listing()).toContain("New agent| *");
+      key("Enter");
+      await waitFor(() => ran.length === 1);
+      expect({ ran, noted }).toEqual({
+        ran: ["New agent"],
+        noted: ["actions:New agent"],
+      });
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+
+  test("choosing a project or agent is not remembered as a recent action", async () => {
+    const ran: string[] = [];
+    const noted: string[] = [];
+    const { palette } = await setup({
+      files: ["src/a.ts"],
+      fileSelectionHistory: ["src/a.ts"],
+      commands: commands(ran),
+      recentActions: { get: () => [], note: (id) => noted.push(id) },
+    });
+    try {
+      palette.openSearchPalette("file");
+      await waitFor(() => status() === "Recent files - 1");
+      key("ArrowUp");
+      key("Enter");
+      await waitFor(() => ran.length === 1);
+      expect({ ran, noted }).toEqual({ ran: ["sample-shell"], noted: [] });
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+
   test("arrow keys cross the groups and Enter runs the command without saving file history", async () => {
     const ran: string[] = [];
     const { palette, persisted } = await setup({
@@ -509,5 +571,39 @@ describe("palette projects, agents and actions", () => {
     } finally {
       palette.closeSearchPalette();
     }
+  });
+});
+
+describe("recent palette actions", () => {
+  test("the used action goes first, without duplicates, up to the limit", async () => {
+    const { rememberRecentPaletteAction, RECENT_PALETTE_ACTIONS_LIMIT } =
+      await import("../core/search-palette");
+    expect(rememberRecentPaletteAction(["a", "b", "c"], "b")).toEqual([
+      "b",
+      "a",
+      "c",
+    ]);
+    const many = Array.from(
+      { length: RECENT_PALETTE_ACTIONS_LIMIT },
+      (_, i) => `x${i}`,
+    );
+    const next = rememberRecentPaletteAction(many, "new");
+    expect([next.length, next[0], next[next.length - 1]]).toEqual([
+      RECENT_PALETTE_ACTIONS_LIMIT,
+      "new",
+      `x${RECENT_PALETTE_ACTIONS_LIMIT - 2}`,
+    ]);
+  });
+
+  test("recent actions come before the suggested ones, and ids no longer offered are skipped", async () => {
+    const { emptyQueryActions } = await import("../core/search-palette");
+    const actions = [
+      { id: "a", suggested: true },
+      { id: "b", suggested: false },
+      { id: "c", suggested: true },
+    ];
+    expect(
+      emptyQueryActions(actions, ["gone", "b", "c"]).map((item) => item.id),
+    ).toEqual(["b", "c", "a"]);
   });
 });
