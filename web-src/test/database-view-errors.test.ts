@@ -1,10 +1,10 @@
+import "./_dom";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ContextMenuItem } from "../views/context-menu";
 import {
   createDatabaseView,
   TABLE_SELECT_FETCH_DELAY_MS,
 } from "../views/database/database-view";
-import { closestFor, removeListenerFrom } from "./_fake-dom";
 import { waitFor } from "./_test-helpers";
 
 // 共有のメニュー (views/context-menu.ts) は lit で描くので、このファイルの偽の
@@ -20,30 +20,11 @@ vi.mock("../views/context-menu", () => ({
   isContextMenuOpen: () => false,
 }));
 
-const originalDocument = globalThis.document;
-const originalWindow = globalThis.window;
-const originalNavigator = globalThis.navigator;
 const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
 const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
 const originalFetch = globalThis.fetch;
-const originalNode = globalThis.Node;
 
 afterEach(() => {
-  Object.defineProperty(globalThis, "document", {
-    configurable: true,
-    writable: true,
-    value: originalDocument,
-  });
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    writable: true,
-    value: originalWindow,
-  });
-  Object.defineProperty(globalThis, "navigator", {
-    configurable: true,
-    writable: true,
-    value: originalNavigator,
-  });
   Object.defineProperty(globalThis, "requestAnimationFrame", {
     configurable: true,
     writable: true,
@@ -59,403 +40,61 @@ afterEach(() => {
     writable: true,
     value: originalFetch,
   });
-  Object.defineProperty(globalThis, "Node", {
-    configurable: true,
-    writable: true,
-    value: originalNode,
-  });
   vi.restoreAllMocks();
+  document.body.replaceChildren();
 });
 
-class FakeClassList {
-  private classes = new Set<string>();
-
-  constructor(value = "") {
-    this.set(value);
-  }
-
-  set(value: string) {
-    this.classes = new Set(value.split(/\s+/).filter(Boolean));
-  }
-
-  add(...names: string[]) {
-    for (const name of names) this.classes.add(name);
-  }
-
-  remove(...names: string[]) {
-    for (const name of names) this.classes.delete(name);
-  }
-
-  contains(name: string) {
-    return this.classes.has(name);
-  }
-
-  // ai-dup-check: allow -- local fake DOM class list for database view tests.
-  toggle(name: string, force?: boolean) {
-    const next = force ?? !this.classes.has(name);
-    if (next) this.classes.add(name);
-    else this.classes.delete(name);
-    return next;
-  }
-
-  toString() {
-    return Array.from(this.classes).join(" ");
-  }
+/**
+ * 押して、押した後の非同期の処理 (取得の偽物はすぐ返る) が片付くまで待つ。
+ * 前の偽の DOM の click() は、非同期の listener を待ってから返していた。
+ */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 10; i++)
+    await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-type FakeNode = FakeElement | FakeText;
-type FakeAppendChild = FakeNode | string;
-
-class FakeText {
-  readonly nodeType = 3;
-  parentElement: FakeElement | null = null;
-
-  constructor(public textContent = "") {}
-
-  remove() {
-    this.parentElement?.removeChild(this);
-  }
+async function press(el: Element | null | undefined): Promise<void> {
+  (el as HTMLElement | null | undefined)?.click();
+  await settle();
 }
 
-// 本物の style は setProperty を持つ。プレーンなオブジェクトのままだと
-// CSS 変数を書くコード (table-grid の --db-related-list-w など) が
-// TypeError で落ちるので、最低限の API を実装しておく。
-class FakeStyle {
-  [key: string]: unknown;
-
-  setProperty(name: string, value: string) {
-    this[name] = value;
-  }
-
-  getPropertyValue(name: string): string {
-    const value = this[name];
-    return typeof value === "string" ? value : "";
-  }
-
-  removeProperty(name: string) {
-    delete this[name];
-  }
+async function typeIn(el: Element | null | undefined): Promise<void> {
+  el?.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
 }
 
-class FakeElement {
-  readonly nodeType = 1;
-  children: FakeNode[] = [];
-  classList = new FakeClassList();
-  dataset: Record<string, string> = {};
-  attributes: Record<string, string> = {};
-  parentElement: FakeElement | null = null;
-  style = new FakeStyle();
-  title = "";
-  type = "";
-  value = "";
-  placeholder = "";
-  autocomplete = "";
-  spellcheck = false;
-  rows = 0;
-  disabled = false;
-  hidden = false;
-  tabIndex = 0;
-  draggable = false;
-  href = "";
-  download = "";
-  scrollTop = 0;
-  scrollLeft = 0;
-  clientHeight = 0;
-  offsetHeight = 120;
-  offsetWidth = 80;
-  private listeners: Record<
-    string,
-    Array<(event: Record<string, unknown>) => unknown>
-  > = {};
-  private classValue = "";
-  private textValue = "";
+async function openContextMenu(el: Element | null | undefined): Promise<void> {
+  el?.dispatchEvent(
+    new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 10,
+      clientY: 10,
+    }),
+  );
+  await settle();
+}
 
-  constructor(
-    public tagName = "div",
-    public id = "",
-  ) {}
-
-  get className() {
-    return this.classValue;
-  }
-
-  set className(value: string) {
-    this.classValue = value;
-    this.classList.set(value);
-  }
-
-  get textContent(): string {
-    if (this.textValue) return this.textValue;
-    return this.children.map((child) => child.textContent).join("");
-  }
-
-  set textContent(value: string | null) {
-    this.textValue = value ?? "";
-    this.children = [];
-  }
-
-  get innerHTML(): string {
-    return this.textContent;
-  }
-
-  set innerHTML(value: string) {
-    this.textValue = value;
-    this.children = [];
-  }
-
-  get firstChild(): FakeNode | null {
-    return this.children[0] ?? null;
-  }
-
-  get nextSibling(): FakeNode | null {
-    if (!this.parentElement) return null;
-    const siblings = this.parentElement.children;
-    const index = siblings.indexOf(this);
-    return index >= 0 ? (siblings[index + 1] ?? null) : null;
-  }
-
-  appendChild(child: FakeAppendChild) {
-    const node = this.normalizeChild(child);
-    this.detachChildFromParent(node);
-    node.parentElement = this;
-    this.children.push(node);
-    return node;
-  }
-
-  append(...children: FakeAppendChild[]) {
-    for (const child of children) this.appendChild(child);
-  }
-
-  prepend(child: FakeAppendChild) {
-    const node = this.normalizeChild(child);
-    this.detachChildFromParent(node);
-    node.parentElement = this;
-    this.children.unshift(node);
-  }
-
-  insertBefore(child: FakeAppendChild, before: FakeNode | null) {
-    const node = this.normalizeChild(child);
-    this.detachChildFromParent(node);
-    node.parentElement = this;
-    if (!before) {
-      this.children.push(node);
-      return node;
-    }
-    const index = this.children.indexOf(before);
-    if (index < 0) this.children.push(node);
-    else this.children.splice(index, 0, node);
-    return node;
-  }
-
-  removeChild(child: FakeNode) {
-    this.children = this.children.filter((existing) => existing !== child);
-    child.parentElement = null;
-    return child;
-  }
-
-  remove() {
-    this.parentElement?.removeChild(this);
-  }
-
-  setAttribute(name: string, value: string) {
-    this.attributes[name] = value;
-    if (name === "id") this.id = value;
-    if (name === "class") this.className = value;
-  }
-
-  getAttribute(name: string) {
-    return this.attributes[name] ?? null;
-  }
-
-  addEventListener(
-    event: string,
-    listener: (event: Record<string, unknown>) => unknown,
-  ) {
-    this.listeners[event] = [...(this.listeners[event] || []), listener];
-  }
-
-  removeEventListener(
-    event: string,
-    listener: (event: Record<string, unknown>) => unknown,
-  ) {
-    removeListenerFrom(this.listeners, event, listener);
-  }
-
-  async click() {
-    const event = {
-      target: this,
-      button: 0,
-      preventDefault() {
-        /* noop */
-      },
-      stopPropagation() {
-        /* noop */
-      },
-    };
-    for (const listener of this.listeners.click || []) {
-      await listener(event);
-    }
-  }
-
-  async input() {
-    const event = { target: this };
-    for (const listener of this.listeners.input || []) {
-      await listener(event);
-    }
-  }
-
-  async contextmenu() {
-    const event = {
-      target: this,
-      pageX: 10,
-      pageY: 10,
-      preventDefault() {
-        /* noop */
-      },
-      stopPropagation() {
-        /* noop */
-      },
-    };
-    for (const listener of this.listeners.contextmenu || []) {
-      await listener(event);
-    }
-  }
-
-  async dblclick(target: FakeElement = this) {
-    const event = {
-      target,
-      preventDefault() {
-        /* noop */
-      },
-      stopPropagation() {
-        /* noop */
-      },
-    };
-    for (const listener of this.listeners.dblclick || []) {
-      await listener(event);
-    }
-  }
-
-  focus() {
-    /* noop */
-  }
-
-  querySelector(selector: string) {
-    return this.querySelectorAll(selector)[0] || null;
-  }
-
-  // ai-dup-check: allow -- local fake DOM selector traversal for database view tests.
-  querySelectorAll(selector: string) {
-    const selectors = selector.split(",").map((part) => part.trim());
-    const found: FakeElement[] = [];
-    const visit = (node: FakeElement) => {
-      for (const child of node.children) {
-        if (!(child instanceof FakeElement)) continue;
-        if (selectors.some((part) => child.matches(part))) found.push(child);
-        visit(child);
-      }
-    };
-    visit(this);
-    return found;
-  }
-
-  matches(selector: string) {
-    if (selector.startsWith("#")) return this.id === selector.slice(1);
-    if (selector.startsWith(".")) {
-      return selector
-        .slice(1)
-        .split(".")
-        .every((name) => this.classList.contains(name));
-    }
-    return this.tagName.toLowerCase() === selector.toLowerCase();
-  }
-
-  closest(selector: string): FakeElement | null {
-    return closestFor<FakeElement>(this, selector);
-  }
-
-  contains(target: FakeNode | null) {
-    if (!target) return false;
-    let node: FakeNode | null = target;
-    while (node) {
-      if (node === this) return true;
-      node = node.parentElement;
-    }
-    return false;
-  }
-
-  getBoundingClientRect() {
-    return { left: 0, width: 100 };
-  }
-
-  private normalizeChild(child: FakeAppendChild): FakeNode {
-    return typeof child === "string" ? new FakeText(child) : child;
-  }
-
-  // ai-dup-check: allow -- local fake DOM parent bookkeeping for database view tests.
-  private detachChildFromParent(child: FakeNode) {
-    if (!child.parentElement) return;
-    child.parentElement.children = child.parentElement.children.filter(
-      (existing) => existing !== child,
-    );
-  }
+async function doubleClick(el: Element | null | undefined): Promise<void> {
+  el?.dispatchEvent(
+    new MouseEvent("dblclick", { bubbles: true, cancelable: true }),
+  );
+  await settle();
 }
 
 function installDatabaseDom() {
-  const body = new FakeElement("body");
-  const content = new FakeElement("div", "content");
-  const diff = new FakeElement("div", "diff");
-  const empty = new FakeElement("div", "empty");
-  body.append(content, diff, empty);
-  const windowListeners: Record<string, Array<() => void>> = {};
-
-  const fakeDocument = {
-    body,
-    // 電話の段かは html[data-workspace] と matchMedia で読む (views/shell/workspace.ts)。
-    documentElement: { dataset: {} },
-    createElement: (tagName: string) => new FakeElement(tagName),
-    createElementNS: (_ns: string, tagName: string) => new FakeElement(tagName),
-    createDocumentFragment: () => new FakeElement("fragment"),
-    createTextNode: (text: string) => new FakeText(text),
-    getElementById: (id: string) => body.querySelector(`#${id}`),
-    querySelector: (selector: string) => body.querySelector(selector),
-    querySelectorAll: (selector: string) => body.querySelectorAll(selector),
-    addEventListener() {
-      /* noop */
-    },
-    removeEventListener() {
-      /* noop */
-    },
-  };
-  Object.defineProperty(globalThis, "document", {
+  document.body.innerHTML =
+    '<div id="content"></div><div id="diff"></div><div id="empty"></div>';
+  // 保存は sendBeacon ではなく keepalive の fetch で送る (テストが要求を数える)。
+  Object.defineProperty(navigator, "sendBeacon", {
     configurable: true,
     writable: true,
-    value: fakeDocument,
+    value: () => false,
   });
-  Object.defineProperty(globalThis, "window", {
+  Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     writable: true,
-    value: {
-      addEventListener(event: string, listener: () => void) {
-        windowListeners[event] = [...(windowListeners[event] || []), listener];
-      },
-      removeEventListener(event: string, listener: () => void) {
-        windowListeners[event] = (windowListeners[event] || []).filter(
-          (current) => current !== listener,
-        );
-      },
-      matchMedia: () => ({ matches: false }),
-    },
-  });
-  Object.defineProperty(globalThis, "navigator", {
-    configurable: true,
-    writable: true,
-    value: {
-      clipboard: {
-        writeText: () => Promise.resolve(),
-      },
-      sendBeacon: () => false,
-    },
+    value: { writeText: () => Promise.resolve() },
   });
   Object.defineProperty(globalThis, "requestAnimationFrame", {
     configurable: true,
@@ -470,13 +109,8 @@ function installDatabaseDom() {
     writable: true,
     value: () => undefined,
   });
-  Object.defineProperty(globalThis, "Node", {
-    configurable: true,
-    writable: true,
-    value: { TEXT_NODE: 3 },
-  });
-  // 表は表示密度 (body の data-sidebar-font-size) の変化を見張る。この簡易 DOM
-  // では密度を変えないので、見張りは何もしない。
+  // 表は表示密度 (body の data-sidebar-font-size) の変化を見張る。このテストでは
+  // 密度を変えないので、見張りは何もしない。
   Object.defineProperty(globalThis, "MutationObserver", {
     configurable: true,
     writable: true,
@@ -489,8 +123,7 @@ function installDatabaseDom() {
       }
     },
   });
-
-  return { body, windowListeners };
+  return { body: document.body };
 }
 
 function jsonResponse(body: unknown): Response {
@@ -628,7 +261,7 @@ describe("database view SQL error rendering", () => {
 
     const errors = Array.from(
       document.querySelectorAll(".db-pane-error"),
-    ) as unknown as FakeElement[];
+    ) as unknown as HTMLElement[];
     expect(errors).toHaveLength(2);
     expect(errors.map((error) => error.textContent)).toEqual([
       "Error: failed to fetch schema (HTTP 500): schema failed",
@@ -673,7 +306,7 @@ describe("database view SQL error rendering", () => {
 
     const errors = Array.from(
       document.querySelectorAll(".db-pane-error"),
-    ) as unknown as FakeElement[];
+    ) as unknown as HTMLElement[];
     expect(errors).toHaveLength(2);
     expect(errors.map((error) => error.textContent)).toEqual([
       "Error: failed to fetch schemas (HTTP 503): schemas failed",
@@ -740,7 +373,7 @@ describe("database view SQL error rendering", () => {
       const shown = (
         Array.from(
           document.querySelectorAll(".db-pane-error"),
-        ) as unknown as FakeElement[]
+        ) as unknown as HTMLElement[]
       ).map((error) => String(error.textContent));
       // 頭の "Error:" は文言ではなく、formatErrorDetail が出す error の型名。
       expect(shown).toEqual([
@@ -829,7 +462,7 @@ describe("database view SQL error rendering", () => {
       const shown = (
         Array.from(
           document.querySelectorAll(".db-pane-error"),
-        ) as unknown as FakeElement[]
+        ) as unknown as HTMLElement[]
       ).map((error) => String(error.textContent));
       expect(shown.some((text) => text.includes(detail))).toBe(true);
       expect(consoleError).toHaveBeenCalledWith(
@@ -864,9 +497,9 @@ describe("database view SQL error rendering", () => {
 
     const entry = document.querySelector(
       ".db-session-log-entry",
-    ) as unknown as FakeElement | null;
+    ) as unknown as HTMLElement | null;
     if (!entry) throw new Error("session log entry is missing");
-    await entry.click();
+    await press(entry);
     const message = document.querySelector(".db-session-log-message");
     expect(message?.textContent).toBe(
       "TypeError: table request failed\nCaused by: Error: network is unreachable",
@@ -911,15 +544,15 @@ describe("database view SQL error rendering", () => {
       await view.enter("docker:db");
       const newTab = document.querySelector(
         ".db-tabs-new-btn",
-      ) as unknown as FakeElement | null;
+      ) as unknown as HTMLElement | null;
       if (!newTab) throw new Error("new tab button is missing");
-      await newTab.click();
+      await press(newTab);
       await flushMicrotasks();
 
       const guides = (
         Array.from(
           document.querySelectorAll(".db-no-datastores"),
-        ) as unknown as FakeElement[]
+        ) as unknown as HTMLElement[]
       ).filter((pane) => !pane.hidden);
       expect(guides).toHaveLength(1);
       const guide = guides[0] as unknown as HTMLElement;
@@ -932,13 +565,12 @@ describe("database view SQL error rendering", () => {
       const placeholders = (
         Array.from(
           document.querySelectorAll(".db-file-select"),
-        ) as unknown as FakeElement[]
+        ) as unknown as HTMLElement[]
       )
-        .flatMap((selectEl) => selectEl.children)
+        .flatMap((selectEl) => [...selectEl.children])
         .filter(
-          (option): option is FakeElement =>
-            option instanceof FakeElement &&
-            (option as unknown as { disabled?: boolean }).disabled === true,
+          (option): option is HTMLOptionElement =>
+            option instanceof HTMLOptionElement && option.disabled,
         );
       expect(placeholders.map((option) => option.textContent)).toEqual([
         select,
@@ -1028,34 +660,34 @@ describe("database view SQL error rendering", () => {
 
     const refresh = document.querySelector(
       ".db-refresh-btn",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLButtonElement;
     const label = refresh.querySelector(
       ".db-refresh-label",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLElement;
     const result = document.querySelector(
       ".db-refresh-result",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLElement;
     expect(refresh).toBeTruthy();
-    expect(refresh.attributes["aria-label"]).toBe("Refresh datastores");
-    expect(refresh.attributes["aria-busy"]).toBe("false");
+    expect(refresh.getAttribute("aria-label")).toBe("Refresh datastores");
+    expect(refresh.getAttribute("aria-busy")).toBe("false");
     expect(label.textContent).toBe("");
     expect(result.hidden).toBe(true);
 
-    const refreshClick = refresh.click();
+    const refreshClick = press(refresh);
     await waitFor(() => filesFetches === 2);
     expect(refresh.disabled).toBe(true);
     expect(refresh.classList.contains("spinning")).toBe(true);
-    expect(refresh.attributes["aria-busy"]).toBe("true");
+    expect(refresh.getAttribute("aria-busy")).toBe("true");
     expect(label.textContent).toBe("");
 
     resolveRefreshFiles?.();
     await refreshClick;
-    await waitFor(() => refresh.attributes["aria-busy"] === "false");
+    await waitFor(() => refresh.getAttribute("aria-busy") === "false");
 
     expect(filesFetches).toBe(2);
     expect(refresh.disabled).toBe(false);
     expect(refresh.classList.contains("spinning")).toBe(false);
-    expect(refresh.attributes["aria-busy"]).toBe("false");
+    expect(refresh.getAttribute("aria-busy")).toBe("false");
     expect(label.textContent).toBe("");
     expect(result.hidden).toBe(true);
     expect(result.textContent).toBe("");
@@ -1083,7 +715,7 @@ describe("database view SQL error rendering", () => {
 
     const empty = document.querySelector(
       ".db-no-datastores",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLElement;
     expect(empty).toBeTruthy();
     expect(empty.hidden).toBe(false);
     expect(empty.querySelector(".db-pane-empty-title")?.textContent).toBe(
@@ -1098,9 +730,9 @@ describe("database view SQL error rendering", () => {
 
     const action = empty.querySelector(
       ".db-no-datastores-action",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLElement;
     expect(action.textContent).toBe("Refresh datastores");
-    const click = action.click();
+    const click = press(action);
     await waitFor(() => filesFetches === 2);
     await click;
 
@@ -1137,8 +769,8 @@ describe("database view SQL error rendering", () => {
     nextTotalRows = 3;
     const refresh = document.querySelector(
       ".db-grid-refresh",
-    ) as unknown as FakeElement;
-    await refresh.click();
+    ) as unknown as HTMLElement;
+    await press(refresh);
     await waitFor(() => tableFetches === 2);
     // 取得が 2 回走ったことと、その結果が件数表示に入ったことは別。
     // 表示が変わるまで待つ (fetch の完了だけでは DOM はまだ古い)。
@@ -1193,16 +825,16 @@ describe("database view SQL error rendering", () => {
 
     const filter = document.querySelector(
       ".db-grid-filter-input",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLInputElement;
     filter.value = "sample";
-    await filter.input();
+    await typeIn(filter);
     await waitFor(() => tableFetches === 2);
     expect(document.querySelector(".db-table-count")?.textContent).toBe("3");
 
     const refresh = document.querySelector(
       ".db-grid-refresh",
-    ) as unknown as FakeElement;
-    await refresh.click();
+    ) as unknown as HTMLElement;
+    await press(refresh);
     await waitFor(() => countFetches === 1);
 
     expect(document.querySelector(".db-table-count")?.textContent).toBe("4");
@@ -1254,36 +886,38 @@ describe("database view SQL error rendering", () => {
 
     const refresh = document.querySelector(
       ".db-schema-refresh",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLButtonElement;
     const label = refresh.querySelector(
       ".db-grid-refresh-label",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLElement;
     expect(refresh).toBeTruthy();
-    expect(refresh.attributes["aria-label"]).toBe("Refresh this table schema");
-    expect(refresh.attributes["aria-busy"]).toBe("false");
+    expect(refresh.getAttribute("aria-label")).toBe(
+      "Refresh this table schema",
+    );
+    expect(refresh.getAttribute("aria-busy")).toBe("false");
     expect(label.textContent).toBe("");
 
-    refresh.click();
+    void press(refresh);
     await waitFor(() => schemaFetches === 2);
     expect(refresh.disabled).toBe(true);
     expect(refresh.classList.contains("spinning")).toBe(true);
-    expect(refresh.attributes["aria-busy"]).toBe("true");
+    expect(refresh.getAttribute("aria-busy")).toBe("true");
     expect(label.textContent).toBe("");
 
     resolveRefreshSchema?.();
     await waitFor(() => {
       const doneRefresh = document.querySelector(
         ".db-schema-refresh",
-      ) as unknown as FakeElement | null;
-      return doneRefresh?.attributes["aria-busy"] === "false";
+      ) as unknown as HTMLElement | null;
+      return doneRefresh?.getAttribute("aria-busy") === "false";
     });
 
     const doneRefresh = document.querySelector(
       ".db-schema-refresh",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLButtonElement;
     const doneLabel = doneRefresh.querySelector(
       ".db-grid-refresh-label",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLElement;
     const schemaText = document.querySelector(".db-schema-view")?.textContent;
     expect(schemaFetches).toBe(2);
     expect(doneRefresh.disabled).toBe(false);
@@ -1321,7 +955,7 @@ describe("database view SQL error rendering", () => {
 
     await view.enter("docker:db");
 
-    const root = document.querySelector(".db-root") as unknown as FakeElement;
+    const root = document.querySelector(".db-root") as unknown as HTMLElement;
     expect(root).toBeTruthy();
     expect(root.hidden).toBe(false);
     await leaveView(view);
@@ -1901,8 +1535,8 @@ describe("database view SQL error rendering", () => {
     const activeChip = Array.from(
       document.querySelectorAll(".db-tabs-chip"),
     ).find((chip) =>
-      (chip as unknown as FakeElement).classList.contains("active"),
-    ) as unknown as FakeElement | undefined;
+      (chip as unknown as HTMLElement).classList.contains("active"),
+    ) as unknown as HTMLElement | undefined;
     expect(activeChip?.textContent).toMatch(/minio/);
     await leaveView(view);
   });
@@ -1962,11 +1596,11 @@ describe("database view SQL error rendering", () => {
     const bookingsRow = Array.from(
       document.querySelectorAll(".db-table-item"),
     ).find(
-      (row) => (row as unknown as FakeElement).dataset.table === "bookings",
-    ) as unknown as FakeElement | undefined;
+      (row) => (row as unknown as HTMLElement).dataset.table === "bookings",
+    ) as unknown as HTMLElement | undefined;
     expect(bookingsRow).toBeTruthy();
 
-    const clicking = bookingsRow?.click();
+    const clicking = press(bookingsRow);
     await waitFor(() => tableRequests.length > 1);
 
     expect(tableRequests[0].signal?.aborted).toBe(true);
@@ -2027,11 +1661,11 @@ describe("database view SQL error rendering", () => {
     const bookingsRow = Array.from(
       document.querySelectorAll(".db-table-item"),
     ).find(
-      (row) => (row as unknown as FakeElement).dataset.table === "bookings",
-    ) as unknown as FakeElement | undefined;
+      (row) => (row as unknown as HTMLElement).dataset.table === "bookings",
+    ) as unknown as HTMLElement | undefined;
     expect(bookingsRow).toBeTruthy();
 
-    const clicking = bookingsRow?.click();
+    const clicking = press(bookingsRow);
     await waitFor(() => tableRequests.length > 1);
 
     tableRequests[1].resolve(
@@ -2119,7 +1753,7 @@ describe("database view SQL error rendering", () => {
 
     const tableRows = Array.from(
       document.querySelectorAll(".db-table-item"),
-    ) as unknown as FakeElement[];
+    ) as unknown as HTMLElement[];
     const brandsRow = tableRows.find((row) => row.dataset.table === "brands");
     const citiesRow = tableRows.find((row) => row.dataset.table === "cities");
     expect(brandsRow).toBeTruthy();
@@ -2130,9 +1764,7 @@ describe("database view SQL error rendering", () => {
     const noExtraFetchWindowMs = TABLE_SELECT_FETCH_DELAY_MS + 25;
     const clicks: Array<Promise<void>> = [];
     for (let i = 0; i < clickCount; i++) {
-      clicks.push(
-        (i % 2 ? citiesRow : brandsRow)?.click() ?? Promise.resolve(),
-      );
+      clicks.push(press(i % 2 ? citiesRow : brandsRow));
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     await waitFor(() => tableRequests.length >= 1);
@@ -2146,7 +1778,7 @@ describe("database view SQL error rendering", () => {
       (
         document.querySelector(
           ".db-table-item.active",
-        ) as unknown as FakeElement
+        ) as unknown as HTMLElement
       )?.dataset.table,
     ).toBe(lastTable);
     tableRequests[0].resolve(
@@ -2158,7 +1790,7 @@ describe("database view SQL error rendering", () => {
   });
 
   test("sends a keepalive tabs save even when the same state is already pending", async () => {
-    const { windowListeners } = installDatabaseDom();
+    installDatabaseDom();
     const tabPuts: RequestInit[] = [];
     mockFetch((url, init) => {
       if (url === "/_db/tabs" && init?.method === "PUT") {
@@ -2191,7 +1823,7 @@ describe("database view SQL error rendering", () => {
     await waitFor(() => tabPuts.length === 1);
     expect(Boolean(tabPuts[0]?.keepalive)).toBe(false);
 
-    windowListeners.beforeunload?.[0]?.();
+    window.dispatchEvent(new Event("beforeunload"));
     await waitFor(() => tabPuts.length === 2);
 
     expect(tabPuts[0]?.signal?.aborted).toBe(true);
@@ -2483,8 +2115,8 @@ describe("database view SQL error rendering", () => {
 
     const mainTab = document.querySelectorAll(
       ".db-tabs-chip",
-    )[0] as unknown as FakeElement;
-    await mainTab.click();
+    )[0] as unknown as HTMLElement;
+    await press(mainTab);
     await waitFor(() => events.includes("table:docker:db:users"));
     expect(events).toEqual([
       "schema:docker:analytics",
@@ -2519,12 +2151,12 @@ describe("database view SQL error rendering", () => {
 
     const textarea = document.querySelector(
       "textarea",
-    ) as unknown as FakeElement | null;
+    ) as unknown as HTMLTextAreaElement | null;
     if (textarea) textarea.value = "select 1";
     const runButton = document.querySelector(
       ".db-query-run",
-    ) as unknown as FakeElement | null;
-    await runButton?.click();
+    ) as unknown as HTMLElement | null;
+    await press(runButton);
 
     // 画面には error の型名から始まる全文を出す (cause があれば続く)。
     expect(document.querySelector(".db-query-error")?.textContent).toBe(
@@ -2537,8 +2169,8 @@ describe("database view SQL error rendering", () => {
 
     const dataTab = document.querySelector(
       ".db-tab",
-    ) as unknown as FakeElement | null;
-    await dataTab?.click();
+    ) as unknown as HTMLElement | null;
+    await press(dataTab);
 
     expect(document.querySelector<HTMLElement>(".db-grid")?.hidden).toBe(false);
     expect(
@@ -2698,7 +2330,7 @@ describe("database view SQL error rendering", () => {
 
     const unavailable = document.querySelector(
       ".db-no-datastores",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLElement;
     expect(unavailable.hidden).toBe(false);
     expect(
       (unavailable.querySelector(".db-pane-error")?.textContent || "").includes(
@@ -2718,8 +2350,11 @@ describe("database view SQL error rendering", () => {
       "Choose a datastore",
     );
     expect(
-      (document.querySelector(".db-file-select") as unknown as FakeElement)
-        .disabled,
+      (
+        document.querySelector(
+          ".db-file-select",
+        ) as unknown as HTMLSelectElement
+      ).disabled,
     ).toBe(false);
     await leaveView(view);
   });
@@ -2753,10 +2388,9 @@ describe("database view SQL error rendering", () => {
 
     const view = createViewForTest();
     await view.enter("docker:db", undefined, "users", "schema");
-    expect(document.querySelector(".db-schema-view .db-pane-error")).toBeNull();
     const schema = document.querySelector(
       ".db-schema-view",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLElement;
     expect(
       (schema.querySelector(".db-pane-error")?.textContent || "").includes(
         "column reason\ncolumn detail",
@@ -2767,8 +2401,8 @@ describe("database view SQL error rendering", () => {
     await view.enter("docker:db", undefined, "users", "data");
     const table = document.querySelector(
       ".db-table-item",
-    ) as unknown as FakeElement;
-    await table.contextmenu();
+    ) as unknown as HTMLElement;
+    await openContextMenu(table);
     const createItem = openedMenus[openedMenus.length - 1]?.find(
       (item) => item.kind !== "separator" && item.label === "View CREATE TABLE",
     );
@@ -2814,13 +2448,11 @@ describe("database view SQL error rendering", () => {
     await view.enter("docker:db");
     const filter = document.querySelector(
       ".db-grid-filter-input",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLInputElement;
     filter.value = "sample";
-    await filter.input();
+    await typeIn(filter);
     await waitFor(() => tableFetches === 2);
-    await (
-      document.querySelector(".db-grid-refresh") as unknown as FakeElement
-    ).click();
+    await press(document.querySelector(".db-grid-refresh"));
     await waitFor(() =>
       Boolean(
         document
@@ -2904,18 +2536,16 @@ describe("database view SQL error rendering", () => {
 
     const view = createViewForTest();
     await view.enter("docker:db");
-    await (
-      document.querySelector(".db-table-arrow") as unknown as FakeElement
-    ).click();
+    await press(document.querySelector(".db-table-arrow"));
     await waitFor(() => patchAttempts === 1);
 
     const header = document.querySelector(
       ".db-grid-header-cell",
-    ) as unknown as FakeElement;
+    ) as unknown as HTMLElement;
     const resize = header.querySelector(
       ".db-grid-resize-handle",
-    ) as unknown as FakeElement;
-    await header.dblclick(resize);
+    ) as unknown as HTMLElement;
+    await doubleClick(resize);
     await waitFor(() => patchAttempts === 2);
     await waitFor(() => consoleError.mock.calls.length === 2);
 
@@ -2959,9 +2589,7 @@ describe("database view SQL error rendering", () => {
       ).includes("restore reason\nrestore detail"),
     ).toBe(true);
 
-    await (
-      document.querySelector(".db-tabs-chip-close") as unknown as FakeElement
-    ).click();
+    await press(document.querySelector(".db-tabs-chip-close"));
     await waitFor(() => closeAttempts === 1);
     await waitFor(() =>
       consoleError.mock.calls.some((call) =>
@@ -3039,9 +2667,7 @@ describe("database view SQL error rendering", () => {
 
     const view = createViewForTest();
     await view.enter("docker:db");
-    await (
-      document.querySelector(".db-query-history-btn") as unknown as FakeElement
-    ).click();
+    await press(document.querySelector(".db-query-history-btn"));
     await waitFor(() =>
       Boolean(
         document

@@ -7,8 +7,8 @@
 //   const highlighter = await loadShikiHighlighter({
 //     langs: ["sql"],
 //   });
-//   pre.innerHTML = highlightSqlToInnerHtml(sql, highlighter)
-//                 || (pre.textContent = sql, "");
+//   const html = highlightSqlToInnerHtml(sql, highlighter);
+//   (空なら色を付けずに文字のまま出す)
 
 import {
   highlightToInnerHtml,

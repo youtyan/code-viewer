@@ -1,4 +1,6 @@
+import { html } from "lit/html.js";
 import type { DbValue } from "../../core/database/types";
+import { templateElement } from "../ui/renderer";
 
 export function formatQueryValue(value: DbValue): string {
   if (value === null) return "NULL";
@@ -19,10 +21,13 @@ export function fillNullOrEmpty(
   emptyLabel: string,
 ): boolean {
   if (value !== null && value !== "") return false;
-  const badge = document.createElement("span");
-  badge.className = value === null ? "db-grid-null" : "db-grid-empty";
-  badge.textContent = value === null ? "NULL" : emptyLabel;
-  cell.replaceChildren(badge);
+  cell.replaceChildren(
+    templateElement(
+      value === null
+        ? html`<span class="db-grid-null">NULL</span>`
+        : html`<span class="db-grid-empty">${emptyLabel}</span>`,
+    ),
+  );
   cell.classList.add(value === null ? "is-null" : "is-empty");
   return true;
 }

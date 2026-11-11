@@ -124,6 +124,12 @@ const DECLARATIVE = [
   "web-src/views/annotations/",
   "web-src/views/annotations-player.ts",
   "web-src/views/journal-view.ts",
+  "web-src/views/database/shiki-sql.ts",
+  "web-src/views/database/query-value.ts",
+  "web-src/views/database/pref-toggle.ts",
+  "web-src/views/database/pane-status.ts",
+  "web-src/views/database/detail-table.ts",
+  "web-src/views/database/detail-tabs.ts",
 ];
 
 /**
@@ -144,7 +150,7 @@ const EXCEPTIONS: Record<string, { count: number; reason: string }> = {
 };
 
 /** まだ書き直していない所も含めた、命令的な組み立ての数の上限。書き直したら下げる。 */
-const IMPERATIVE_LIMIT = 1071;
+const IMPERATIVE_LIMIT = 1045;
 
 function imperativeCount(file: string): number {
   return [...readFileSync(file, "utf8").matchAll(IMPERATIVE_DOM)].length;
