@@ -87,6 +87,18 @@ export function templateElements(template: unknown): Element[] {
 }
 
 /**
+ * テンプレートの中身 (文字も含めた全部の節) を、どこにも置かずに作る。ほかの所も
+ * 中身を書き換える箱 (画面にもとからあるボタンなど) へ replaceChildren で入れる
+ * ときに使う (箱に描く係を置かないので、書き換えられても次にまた入れられる)。
+ */
+export function templateFragment(template: unknown): DocumentFragment {
+  defineUiComponents();
+  const fragment = document.createDocumentFragment();
+  render(template, fragment);
+  return fragment;
+}
+
+/**
  * templateElement の描き直せる形。テンプレートの最初の要素を作って返し、
  * draw() でその要素の中を描き直す (要素は外の部品が置く。ダイアログの本文など)。
  * テンプレートの最上段の形 (最初の要素の種類) は描き直しで変えないこと。

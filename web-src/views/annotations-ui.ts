@@ -52,6 +52,7 @@ import {
   renderOwned,
   templateElement,
   templateElements,
+  templateFragment,
 } from "./ui/renderer";
 import { showConfirmDialog, showPromptDialog } from "./ui-dialog";
 
@@ -533,18 +534,18 @@ export function createAnnotationsUi(
   const annotationCountEl = $("#annotations-count");
   const annotationListCountEl = $("#annotation-list-count");
   const annotationAdd = $<HTMLButtonElement>("#annotation-add");
-  renderOwned(annotationAdd, view.iconLabel("octicon-plus", PLUS_16_PATH));
+  annotationAdd.replaceChildren(
+    templateFragment(view.iconLabel("octicon-plus", PLUS_16_PATH)),
+  );
   const annotationDetailPrev = $<HTMLButtonElement>("#annotation-detail-prev");
   const annotationDetailNext = $<HTMLButtonElement>("#annotation-detail-next");
-  renderOwned(
-    annotationDetailPrev,
-    view.iconLabel("octicon-skip-back", PREVIOUS_16_PATHS),
+  annotationDetailPrev.replaceChildren(
+    templateFragment(view.iconLabel("octicon-skip-back", PREVIOUS_16_PATHS)),
   );
   annotationDetailPrev.title = t().previous;
   annotationDetailPrev.setAttribute("aria-label", t().previous);
-  renderOwned(
-    annotationDetailNext,
-    view.iconLabel("octicon-skip-forward", NEXT_16_PATHS),
+  annotationDetailNext.replaceChildren(
+    templateFragment(view.iconLabel("octicon-skip-forward", NEXT_16_PATHS)),
   );
   annotationDetailNext.title = t().next;
   annotationDetailNext.setAttribute("aria-label", t().next);
@@ -657,14 +658,15 @@ export function createAnnotationsUi(
   }
 
   function localize() {
-    renderOwned(
-      annotationAdd,
-      view.iconLabel("octicon-plus", PLUS_16_PATH, t().add),
+    annotationAdd.replaceChildren(
+      templateFragment(view.iconLabel("octicon-plus", PLUS_16_PATH, t().add)),
     );
     annotationAdd.title = t().add;
     annotationAdd.setAttribute("aria-label", t().add);
     const close = $("#annotation-panel-close");
-    renderOwned(close, view.iconLabel("octicon-x", X_16_PATH));
+    close.replaceChildren(
+      templateFragment(view.iconLabel("octicon-x", X_16_PATH)),
+    );
     close.title = t().close;
     close.setAttribute("aria-label", t().close);
     $("#annotation-detail-close").textContent = t().back;
