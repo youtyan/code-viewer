@@ -2,7 +2,13 @@ import "./_dom";
 import { beforeEach, describe, expect, test } from "vitest";
 import type { JournalDataResponse, JournalTask } from "../core/journal";
 import type { AppRoute, DiffRange } from "../core/routes";
-import { createJournalView, type JournalViewText } from "../views/journal-view";
+import {
+  createJournalView,
+  DEFAULT_VIEW,
+  type JournalTasksProps,
+  type JournalViewText,
+  type JournalViewView,
+} from "../views/journal-view";
 import { q, waitFor } from "./_test-helpers";
 
 const RANGE: DiffRange = { from: "HEAD", to: "worktree" };
@@ -170,17 +176,24 @@ function installDom(): void {
   `;
 }
 
-function createView(route: AppRoute, setRouteCalls: AppRoute[] = []) {
-  return createJournalView({
-    getRoute: () => route,
-    setRoute: (next) => setRouteCalls.push(next),
-    currentRange: () => RANGE,
-    trackLoad: (promise) => promise,
-    getText: () => TEXT,
-    setPageMode: () => undefined,
-    syncHeaderMenu: () => undefined,
-    setStatus: () => undefined,
-  });
+function createView(
+  route: AppRoute,
+  setRouteCalls: AppRoute[] = [],
+  view?: JournalViewView,
+) {
+  return createJournalView(
+    {
+      getRoute: () => route,
+      setRoute: (next) => setRouteCalls.push(next),
+      currentRange: () => RANGE,
+      trackLoad: (promise) => promise,
+      getText: () => TEXT,
+      setPageMode: () => undefined,
+      syncHeaderMenu: () => undefined,
+      setStatus: () => undefined,
+    },
+    view,
+  );
 }
 
 beforeEach(() => {
@@ -551,5 +564,59 @@ describe("journal view", () => {
       new Event("pointerdown", { bubbles: true, cancelable: true }),
     );
     expect(document.querySelector(".journal-github-panel")).toBeNull();
+  });
+});
+
+// ワークログの画面 (views/journal-view.ts) の presenter。描き方を記録する view に
+// 差し替え、ボードの列と札に渡す値と、札を押したときの route を見る。
+describe("the journal presenter", () => {
+  test("gives the view the board columns and selecting a card routes to it", async () => {
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async () =>
+        json(
+          journalData([
+            task(),
+            task({ id: "t-2", title: "Doing task", status: "doing" }),
+          ]),
+        )) as typeof fetch,
+    });
+    const pages: (JournalTasksProps | null)[] = [];
+    const routes: AppRoute[] = [];
+    const journal = createView(
+      { screen: "journal", tab: "tasks", range: RANGE },
+      routes,
+      {
+        ...DEFAULT_VIEW,
+        page: (props) => {
+          pages.push(props.tasks);
+          return DEFAULT_VIEW.page(props);
+        },
+      },
+    );
+    await journal.enter();
+    await waitFor(() =>
+      (pages[pages.length - 1]?.columns ?? []).some((column) => column.count),
+    );
+    const columns = pages[pages.length - 1]?.columns ?? [];
+    expect(
+      columns
+        .filter((column) => column.count > 0)
+        .map((column) => [
+          column.status,
+          column.cards.map((card) => card.title),
+        ]),
+    ).toEqual([
+      ["todo", ["Sample task"]],
+      ["doing", ["Doing task"]],
+    ]);
+    const doing = columns.find((column) => column.status === "doing");
+    doing?.cards[0]?.on.click(new MouseEvent("click"));
+    expect(routes[routes.length - 1]).toMatchObject({
+      screen: "journal",
+      tab: "tasks",
+      task: "t-2",
+    });
   });
 });

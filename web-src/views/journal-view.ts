@@ -1,9 +1,10 @@
+import { keyed } from "lit/directives/keyed.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 import {
   COMMENT_DISCUSSION_16_PATH,
   GRABBER_16_PATH,
-  iconSvg,
   PLUS_16_PATH,
   SYNC_16_PATH,
   TRASH_16_PATH,
@@ -33,6 +34,8 @@ import {
   writeStoredSize,
 } from "../core/stored-size";
 import type { PageView } from "./page-view";
+import { iconTemplate } from "./ui/icon";
+import { detachedElement, renderOwned, templateElement } from "./ui/renderer";
 import { showConfirmDialog } from "./ui-dialog";
 
 export type JournalViewText = {
@@ -190,50 +193,606 @@ function taskCoversDate(task: JournalTask, date: string): boolean {
   return !!range && range.start <= date && date <= range.end;
 }
 
-function labelChip(label: string): HTMLElement {
-  const chip = document.createElement("span");
-  chip.className = "journal-label-chip";
-  chip.textContent = label;
-  return chip;
+/** ラベルを足す欄 (日誌とタスクの 2 か所)。 */
+export type JournalLabelEditorProps = {
+  labels: { name: string; removeLabel: string; onRemove(event: Event): void }[];
+  placeholder: string;
+  quick: { label: string; onPick(event: Event): void }[];
+  /** 打っている語の候補 (欄にフォーカスがあるときだけ)。 */
+  suggestions: { label: string; active: boolean; onPick(event: Event): void }[];
+  onClick(): void;
+  input: {
+    onKeyDown(event: KeyboardEvent): void;
+    onInput(): void;
+    onFocus(): void;
+    onPaste(event: ClipboardEvent): void;
+    onBlur(): void;
+  };
+};
+
+export type JournalButtonProps = { label: string; onClick(event: Event): void };
+
+/** タスクの札 (ボードと、日誌の横の関係するタスク)。 */
+export type JournalTaskCardProps = {
+  id: string;
+  selected: boolean;
+  compact: boolean;
+  priority: { value: string; label: string };
+  status: string;
+  dragTitle: string;
+  title: string;
+  labels: string[];
+  due: string | null;
+  claim: string | null;
+  /** 引いて並べ替える (札の要素は event.currentTarget)。 */
+  on: {
+    click(event: MouseEvent): void;
+    dragstart(event: DragEvent): void;
+    dragenter(event: DragEvent): void;
+    dragover(event: DragEvent): void;
+    dragleave(event: DragEvent): void;
+    drop(event: DragEvent): void;
+    dragend(event: DragEvent): void;
+    pointerdown(event: PointerEvent): void;
+  };
+};
+
+export type JournalHeaderProps = {
+  title: string;
+  tabs: { label: string; active: boolean; onClick(): void }[];
+  refresh: JournalButtonProps;
+  status: string;
+};
+
+export type JournalDailyProps = {
+  date: { value: string; onChange(value: string): void };
+  newEntry: JournalButtonProps;
+  entries: { label: string; active: boolean; onClick(): void }[];
+  noEntries: string;
+  title: { value: string; placeholder: string };
+  labels: HTMLElement;
+  body: { value: string; placeholder: string };
+  save: JournalButtonProps;
+  remove: JournalButtonProps | null;
+  related: { heading: string; empty: string; cards: JournalTaskCardProps[] };
+};
+
+export type JournalGithubIssueProps = {
+  number: number;
+  state: string;
+  linked: string | null;
+  title: string;
+  labels: string[];
+  action: JournalButtonProps;
+  onDragStart(event: DragEvent): void;
+  onDragEnd(event: DragEvent): void;
+};
+
+export type JournalGithubPanelProps = {
+  title: string;
+  close: JournalButtonProps;
+  repo: { value: string; placeholder: string };
+  labels: { value: string; placeholder: string };
+  search: { value: string; placeholder: string };
+  state: { options: { value: string; label: string; selected: boolean }[] };
+  /** 欄を変えた (中身は欄から読む)・Enter で読む。 */
+  onChange(event: Event): void;
+  onEnter(event: KeyboardEvent): void;
+  load: { label: string; disabled: boolean; onClick(event: Event): void };
+  hint: string;
+  onListDragOver(event: DragEvent): void;
+  issues: JournalGithubIssueProps[];
+  empty: string;
+  more: { label: string; disabled: boolean; onClick(): void } | null;
+};
+
+export type JournalTaskEditorProps = {
+  resizer: { label: string; onPointerDown(event: PointerEvent): void };
+  heading: string;
+  newTask: JournalButtonProps;
+  title: { value: string; placeholder: string };
+  status: {
+    label: string;
+    options: { value: string; label: string; selected: boolean }[];
+  };
+  priority: {
+    label: string;
+    options: { value: string; label: string; selected: boolean }[];
+  };
+  start: { label: string; value: string };
+  end: { label: string; value: string };
+  labels: HTMLElement;
+  tools: { label: string; onClick(event: Event): void }[];
+  modes: { label: string; active: boolean; onClick(): void }[];
+  body: {
+    value: string;
+    placeholder: string;
+    hidden: boolean;
+    onInput(event: Event): void;
+  };
+  previewHidden: boolean;
+  save: JournalButtonProps;
+  /** 既にあるタスクだけ。 */
+  task: {
+    claim: JournalButtonProps;
+    done: JournalButtonProps & { disabled: boolean };
+    remove: JournalButtonProps;
+  } | null;
+};
+
+export type JournalTasksProps = {
+  filter: { value: string; placeholder: string; onChange(value: string): void };
+  queue: { title: string; command: string; items: string[] };
+  githubToggle: {
+    active: boolean;
+    label: string;
+    count: string;
+    onClick(): void;
+  };
+  labelFilters: {
+    label: string;
+    buttons: {
+      name: string;
+      count: number;
+      active: boolean;
+      onClick(): void;
+    }[];
+  };
+  github: JournalGithubPanelProps | null;
+  columns: {
+    status: string;
+    title: string;
+    count: number;
+    empty: string;
+    cards: JournalTaskCardProps[];
+    on: {
+      dragover(event: DragEvent): void;
+      dragleave(event: DragEvent): void;
+      drop(event: DragEvent): void;
+    };
+  }[];
+  editor: JournalTaskEditorProps;
+};
+
+/** ワークログの画面 (createJournalView) の描き方。 */
+export type JournalViewView = {
+  root(): unknown;
+  page(props: {
+    header: JournalHeaderProps;
+    daily: JournalDailyProps | null;
+    tasks: JournalTasksProps | null;
+  }): unknown;
+  labelEditor(props: JournalLabelEditorProps): unknown;
+};
+
+const chipTemplate = (label: string) =>
+  html`<span class="journal-label-chip">${label}</span>`;
+
+const iconLabelButton = (
+  cls: string,
+  icon: { paths: string | string[]; cls: string },
+  props: JournalButtonProps,
+) => html`<button type="button" class=${cls} @click=${props.onClick}
+  >${iconTemplate(icon.paths, icon.cls)}<span>${props.label}</span></button
+>`;
+
+function taskCardTemplate(card: JournalTaskCardProps): unknown {
+  const cls = [
+    "journal-task-card",
+    card.selected ? "selected" : "",
+    card.compact ? "compact" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return html`<button
+    type="button"
+    class=${cls}
+    data-task-id=${card.id}
+    @click=${card.on.click}
+    @dragstart=${card.on.dragstart}
+    @dragenter=${card.on.dragenter}
+    @dragover=${card.on.dragover}
+    @dragleave=${card.on.dragleave}
+    @drop=${card.on.drop}
+    @dragend=${card.on.dragend}
+    @pointerdown=${card.on.pointerdown}
+  ><span class="journal-task-card-top"><span
+        class=${`journal-priority journal-priority-${card.priority.value}`}
+      >${card.priority.label}</span><span class="journal-task-status"
+        >${card.status}</span
+      ><span
+        class="journal-task-drag-handle"
+        draggable="true"
+        title=${card.dragTitle}
+        aria-hidden="true"
+      >${iconTemplate(GRABBER_16_PATH, "journal-task-drag-icon")}</span></span
+    ><strong>${card.title}</strong><span class="journal-task-labels"
+      >${card.labels.map(chipTemplate)}</span
+    >${card.due === null ? nothing : html`<span class="journal-task-due">${card.due}</span>`}${
+      card.claim === null
+        ? nothing
+        : html`<span class="journal-task-claim">${card.claim}</span>`
+    }</button>`;
 }
 
-function taskField(
-  labelText: string,
-  control: HTMLInputElement | HTMLSelectElement,
-): HTMLLabelElement {
-  const field = document.createElement("label");
-  field.className = "journal-field";
-  const caption = document.createElement("span");
-  caption.className = "journal-field-label";
-  caption.textContent = labelText;
-  field.append(caption, control);
-  return field;
+const headerTemplate = (props: JournalHeaderProps) => html`<div
+  class="journal-header"
+><div class="journal-title">${props.title}</div><div
+    class="seg journal-tabs"
+    role="tablist"
+  >${props.tabs.map(
+    (tab) => html`<button
+      type="button"
+      class=${tab.active ? "active" : ""}
+      @click=${tab.onClick}
+    >${tab.label}</button>`,
+  )}</div><button
+    type="button"
+    class="global-icon-action journal-icon-action"
+    title=${props.refresh.label}
+    aria-label=${props.refresh.label}
+    @click=${props.refresh.onClick}
+  >${iconTemplate(SYNC_16_PATH, "octicon-sync")}</button><span
+    class="journal-status"
+    ?hidden=${!props.status}
+    role="status"
+  >${props.status}</span></div>`;
+
+const dailyTemplate = (props: JournalDailyProps) => html`<div
+  class="journal-daily-layout"
+><section class="journal-editor"><div class="journal-section-head"><input
+        type="date"
+        .value=${props.date.value}
+        @change=${(event: Event) =>
+          props.date.onChange((event.currentTarget as HTMLInputElement).value)}
+      />${iconLabelButton(
+        "gdp-btn gdp-btn-sm",
+        { paths: PLUS_16_PATH, cls: "octicon-plus" },
+        props.newEntry,
+      )}</div
+    ><div class="journal-entry-list">${
+      props.entries.length
+        ? props.entries.map(
+            (entry) => html`<button
+              type="button"
+              class=${entry.active ? "journal-entry-row active" : "journal-entry-row"}
+              @click=${entry.onClick}
+            >${entry.label}</button>`,
+          )
+        : html`<div class="journal-empty">${props.noEntries}</div>`
+    }</div><input
+      class="journal-title-input"
+      name="title"
+      placeholder=${props.title.placeholder}
+      .value=${props.title.value}
+    />${props.labels}<textarea
+      class="journal-body-input"
+      name="body"
+      placeholder=${props.body.placeholder}
+      .value=${props.body.value}
+    ></textarea><div class="journal-editor-actions"><button
+        type="button"
+        class="journal-primary-action"
+        @click=${props.save.onClick}
+      >${props.save.label}</button>${
+        props.remove
+          ? iconLabelButton(
+              "journal-danger-action",
+              { paths: TRASH_16_PATH, cls: "octicon-trash" },
+              props.remove,
+            )
+          : nothing
+      }</div></section
+  ><aside class="journal-related"><h2>${props.related.heading}</h2>${
+    props.related.cards.length
+      ? props.related.cards.map(taskCardTemplate)
+      : html`<div class="journal-empty">${props.related.empty}</div>`
+  }</aside></div>`;
+
+const field = (label: string, control: unknown) => html`<label
+  class="journal-field"
+  ><span class="journal-field-label">${label}</span>${control}</label
+>`;
+
+const optionsTemplate = (
+  options: { value: string; label: string; selected: boolean }[],
+) =>
+  options.map(
+    (option) =>
+      html`<option value=${option.value} ?selected=${option.selected}
+        >${option.label}</option
+      >`,
+  );
+
+function githubPanelTemplate(props: JournalGithubPanelProps): unknown {
+  return html`<section class="journal-github-panel"><div
+      class="journal-github-panel-head"
+    ><strong>${props.title}</strong><button
+        type="button"
+        class="journal-github-close"
+        title=${props.close.label}
+        aria-label=${props.close.label}
+        @click=${props.close.onClick}
+      >${iconTemplate(X_16_PATH, "journal-github-close-icon")}</button></div
+    ><div class="journal-github-controls"><input
+        type="text"
+        name="repo"
+        placeholder=${props.repo.placeholder}
+        .value=${props.repo.value}
+        @change=${props.onChange}
+        @keydown=${props.onEnter}
+      /><input
+        type="text"
+        name="labels"
+        placeholder=${props.labels.placeholder}
+        .value=${props.labels.value}
+        @change=${props.onChange}
+        @keydown=${props.onEnter}
+      /><input
+        type="search"
+        name="search"
+        placeholder=${props.search.placeholder}
+        .value=${props.search.value}
+        @change=${props.onChange}
+        @keydown=${props.onEnter}
+      /><select name="state" @change=${props.onChange}
+        >${optionsTemplate(props.state.options)}</select
+      ><button
+        type="button"
+        ?disabled=${props.load.disabled}
+        @click=${props.load.onClick}
+      >${props.load.label}</button></div
+    ><p class="journal-github-hint">${props.hint}</p><div
+      class="journal-github-issues"
+      @dragover=${props.onListDragOver}
+    >${
+      props.issues.length
+        ? props.issues.map(
+            (issue) => html`<article
+              class=${issue.linked ? "journal-github-issue-card linked" : "journal-github-issue-card"}
+              data-issue-number=${String(issue.number)}
+              draggable=${issue.linked ? "false" : "true"}
+              @dragstart=${issue.linked ? undefined : issue.onDragStart}
+              @dragend=${issue.linked ? undefined : issue.onDragEnd}
+            ><div class="journal-github-issue-head"><span>#${issue.number}</span><span
+                  >${issue.state}</span
+                >${
+                  issue.linked
+                    ? html`<span class="journal-github-linked">${issue.linked}</span>`
+                    : nothing
+                }</div
+              ><strong>${issue.title}</strong><div class="journal-github-issue-labels"
+                >${issue.labels.map(chipTemplate)}</div
+              ><button
+                type="button"
+                draggable="false"
+                class="journal-github-issue-action"
+                @click=${issue.action.onClick}
+              >${issue.action.label}</button></article>`,
+          )
+        : html`<div class="journal-empty">${props.empty}</div>`
+    }</div>${
+      props.more
+        ? html`<button
+            type="button"
+            class="journal-github-load-more"
+            ?disabled=${props.more.disabled}
+            @click=${props.more.onClick}
+          >${props.more.label}</button>`
+        : nothing
+    }</section>`;
 }
 
+function taskEditorTemplate(props: JournalTaskEditorProps): unknown {
+  return html`<aside class="journal-task-editor"><div
+      class="journal-task-editor-resizer"
+      role="separator"
+      tabindex="0"
+      aria-orientation="vertical"
+      aria-label=${props.resizer.label}
+      @pointerdown=${props.resizer.onPointerDown}
+    ></div><div class="journal-section-head"><strong>${props.heading}</strong>${iconLabelButton(
+      "gdp-btn gdp-btn-sm",
+      { paths: PLUS_16_PATH, cls: "octicon-plus" },
+      props.newTask,
+    )}</div><input
+      class="journal-title-input"
+      name="title"
+      placeholder=${props.title.placeholder}
+      .value=${props.title.value}
+    /><div class="journal-task-fields">${field(
+      props.status.label,
+      html`<select name="status">${optionsTemplate(props.status.options)}</select>`,
+    )}${field(
+      props.priority.label,
+      html`<select name="priority">${optionsTemplate(props.priority.options)}</select>`,
+    )}${field(
+      props.start.label,
+      html`<input
+        type="date"
+        name="source_date"
+        title=${props.start.label}
+        aria-label=${props.start.label}
+        .value=${props.start.value}
+      />`,
+    )}${field(
+      props.end.label,
+      html`<input
+        type="date"
+        name="due_date"
+        title=${props.end.label}
+        aria-label=${props.end.label}
+        .value=${props.end.value}
+      />`,
+    )}</div>${props.labels}<div class="journal-markdown-toolbar">${props.tools.map(
+      (tool) => html`<button
+        type="button"
+        class="journal-toolbar-action"
+        @click=${tool.onClick}
+      >${tool.label}</button>`,
+    )}<div class="seg journal-editor-mode">${props.modes.map(
+      (mode) => html`<button
+        type="button"
+        class=${mode.active ? "active" : ""}
+        @click=${mode.onClick}
+      >${mode.label}</button>`,
+    )}</div></div><textarea
+      class="journal-body-input journal-task-body-input"
+      name="body"
+      placeholder=${props.body.placeholder}
+      ?hidden=${props.body.hidden}
+      .value=${props.body.value}
+      @input=${props.body.onInput}
+    ></textarea><div class="journal-markdown-preview" ?hidden=${props.previewHidden}></div
+    ><div class="journal-editor-actions"><button
+        type="button"
+        class="journal-primary-action"
+        @click=${props.save.onClick}
+      >${props.save.label}</button>${
+        props.task
+          ? html`<button type="button" @click=${props.task.claim.onClick}
+                >${props.task.claim.label}</button
+              ><button
+                type="button"
+                ?disabled=${props.task.done.disabled}
+                @click=${props.task.done.onClick}
+              >${props.task.done.label}</button>${iconLabelButton(
+                "journal-danger-action",
+                { paths: TRASH_16_PATH, cls: "octicon-trash" },
+                props.task.remove,
+              )}`
+          : nothing
+      }</div></aside>`;
+}
+
+const tasksTemplate = (props: JournalTasksProps) => html`<div
+  class="journal-tasks-layout"
+><div class="journal-task-toolbar"><input
+      type="search"
+      placeholder=${props.filter.placeholder}
+      .value=${props.filter.value}
+      @change=${(event: Event) =>
+        props.filter.onChange((event.currentTarget as HTMLInputElement).value)}
+    /><section class="journal-command-preview journal-queue"><strong
+        >${props.queue.title}</strong
+      ><code>${props.queue.command}</code>${
+        props.queue.items.length
+          ? html`<ol>${props.queue.items.map((item) => html`<li>${item}</li>`)}</ol>`
+          : nothing
+      }</section
+    ><button
+      type="button"
+      class=${props.githubToggle.active ? "journal-github-toggle active" : "journal-github-toggle"}
+      aria-expanded=${props.githubToggle.active ? "true" : "false"}
+      @click=${props.githubToggle.onClick}
+    >${iconTemplate(COMMENT_DISCUSSION_16_PATH, "journal-github-toggle-icon")}<span
+        >${props.githubToggle.label}</span
+      ><span class="journal-github-toggle-count">${props.githubToggle.count}</span></button
+    ><div class="journal-label-filters" aria-label=${props.labelFilters.label}>${props.labelFilters.buttons.map(
+      (button) => html`<button
+        type="button"
+        class=${button.active ? "journal-label-filter active" : "journal-label-filter"}
+        aria-pressed=${button.active ? "true" : "false"}
+        @click=${button.onClick}
+      ><span class="journal-label-filter-name">${button.name}</span><span
+          class="journal-label-filter-count"
+        >${button.count}</span></button>`,
+    )}</div>${props.github ? githubPanelTemplate(props.github) : nothing}</div
+  ><div class="journal-task-board-wrap"><div class="journal-task-board">${props.columns.map(
+    (column) => html`<section
+      class=${`journal-task-column journal-task-column-${column.status}`}
+      data-status=${column.status}
+      @dragover=${column.on.dragover}
+      @dragleave=${column.on.dragleave}
+      @drop=${column.on.drop}
+    ><div class="journal-task-column-head"><strong>${column.title}</strong><span
+          >${column.count}</span
+        ></div
+      >${
+        column.cards.length
+          ? nothing
+          : html`<div class="journal-column-empty">${column.empty}</div>`
+      }${column.cards.map(taskCardTemplate)}</section>`,
+  )}</div></div>${taskEditorTemplate(props.editor)}</div>`;
+
+export const DEFAULT_VIEW: JournalViewView = {
+  root: () => html`<section class="journal-page" hidden></section>`,
+  page: (props) =>
+    html`${headerTemplate(props.header)}<div class="journal-content">${
+      props.daily
+        ? dailyTemplate(props.daily)
+        : props.tasks
+          ? tasksTemplate(props.tasks)
+          : nothing
+    }</div>`,
+  labelEditor: (props) => html`<div
+    class="journal-label-editor"
+    @click=${props.onClick}
+  >${props.labels.map(
+    (label) => html`<span class="journal-label-editor-chip"><span
+          >${label.name}</span
+        ><button
+          type="button"
+          class="journal-label-editor-remove"
+          aria-label=${label.removeLabel}
+          @click=${label.onRemove}
+        >${iconTemplate(X_16_PATH, "octicon-x")}</button></span
+      >`,
+  )}<input
+      class="journal-label-editor-input"
+      type="text"
+      autocomplete="off"
+      placeholder=${props.placeholder}
+      @keydown=${props.input.onKeyDown}
+      @input=${props.input.onInput}
+      @focus=${props.input.onFocus}
+      @paste=${props.input.onPaste}
+      @blur=${props.input.onBlur}
+    /><div class="journal-label-editor-quick" ?hidden=${!props.quick.length}>${props.quick.map(
+      (item) => html`<button
+        type="button"
+        class="journal-label-editor-quick-chip"
+        @click=${item.onPick}
+      >${item.label}</button>`,
+    )}</div><div
+      class="journal-label-editor-suggestions"
+      ?hidden=${!props.suggestions.length}
+    >${props.suggestions.map(
+      (item) => html`<button
+        type="button"
+        class=${item.active ? "journal-label-editor-suggestion active" : "journal-label-editor-suggestion"}
+        @mousedown=${item.onPick}
+      >${item.label}</button>`,
+    )}</div></div>`,
+};
+
+/**
+ * ラベルを足す欄。並べたラベルと候補の選び位置はこの欄の中の状態で、欄を
+ * 作り直すと最初の値に戻る (画面を描き直すたびに作る)。
+ */
 function createLabelEditor(
   initialLabels: string[],
   placeholder: string,
   suggestionLabels: string[],
   removeLabelText: (label: string) => string,
+  view: JournalViewView,
 ): { element: HTMLElement; getLabels(): string[] } {
-  const root = document.createElement("div");
-  root.className = "journal-label-editor";
-  const input = document.createElement("input");
-  input.className = "journal-label-editor-input";
-  input.type = "text";
-  input.autocomplete = "off";
   const labels = normalizeJournalLabels(initialLabels);
   const suggestions = normalizeJournalLabels(suggestionLabels);
-  const menu = document.createElement("div");
-  menu.className = "journal-label-editor-suggestions";
-  menu.hidden = true;
-  const quick = document.createElement("div");
-  quick.className = "journal-label-editor-quick";
-  quick.hidden = true;
   let highlightedSuggestion = -1;
+  /** 欄から離れた直後は候補を閉じる (押した候補が先に選ばれるよう少し待つ)。 */
+  let menuClosed = false;
+  /** 欄の要素 (最初に描くまでは null)。 */
+  let box: { element: HTMLElement; draw(): void } | null = null;
+  const draw = () => box?.draw();
+
+  const input = (): HTMLInputElement | null =>
+    box?.element.querySelector<HTMLInputElement>(
+      ".journal-label-editor-input",
+    ) ?? null;
 
   const suggestionItems = () => {
-    const raw = input.value.trim().toLowerCase();
+    const raw = (input()?.value ?? "").trim().toLowerCase();
     const normalized = normalizeJournalLabel(raw) || raw;
     return suggestions
       .filter(
@@ -244,152 +803,134 @@ function createLabelEditor(
       .slice(0, 8);
   };
 
-  const renderSuggestions = () => {
-    const items = suggestionItems();
-    const hasQuery = !!(
-      normalizeJournalLabel(input.value) || input.value.trim()
-    );
-    menu.replaceChildren();
-    if (!items.length || !hasQuery || document.activeElement !== input) {
-      menu.hidden = true;
-      highlightedSuggestion = -1;
-      return;
-    }
-    menu.hidden = false;
-    if (highlightedSuggestion >= items.length) highlightedSuggestion = 0;
-    items.forEach((label, index) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "journal-label-editor-suggestion";
-      button.classList.toggle("active", index === highlightedSuggestion);
-      button.textContent = label;
-      button.addEventListener("mousedown", (event) => {
-        event.preventDefault();
-        commit(label);
-      });
-      menu.appendChild(button);
-    });
-  };
-
-  const renderQuickSuggestions = () => {
-    const items = suggestionItems().slice(0, 6);
-    quick.replaceChildren();
-    quick.hidden = !items.length;
-    for (const label of items) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "journal-label-editor-quick-chip";
-      button.textContent = label;
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        commit(label);
-      });
-      quick.appendChild(button);
-    }
-  };
-
-  const render = () => {
-    root.replaceChildren();
-    for (const label of labels) {
-      const chip = document.createElement("span");
-      chip.className = "journal-label-editor-chip";
-      const name = document.createElement("span");
-      name.textContent = label;
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "journal-label-editor-remove";
-      remove.setAttribute("aria-label", removeLabelText(label));
-      remove.innerHTML = iconSvg("octicon-x", X_16_PATH);
-      remove.addEventListener("click", (event) => {
-        event.stopPropagation();
-        const index = labels.indexOf(label);
-        if (index >= 0) labels.splice(index, 1);
-        render();
-        input.focus();
-      });
-      chip.append(name, remove);
-      root.appendChild(chip);
-    }
-    input.placeholder = labels.length ? "" : placeholder;
-    root.append(input, quick, menu);
-    renderQuickSuggestions();
-    renderSuggestions();
-  };
-
   const commit = (raw: string): boolean => {
     const label = normalizeJournalLabel(raw);
-    input.value = "";
+    const field = input();
+    if (field) field.value = "";
     if (!label || labels.includes(label)) return false;
     labels.push(label);
     highlightedSuggestion = -1;
-    render();
-    input.focus();
+    draw();
+    input()?.focus();
     return true;
   };
 
-  input.addEventListener("keydown", (event) => {
+  const props = (): JournalLabelEditorProps => {
+    const field = input();
+    const value = field?.value ?? "";
     const items = suggestionItems();
-    if (event.key === "ArrowDown" && items.length) {
-      event.preventDefault();
-      highlightedSuggestion = (highlightedSuggestion + 1) % items.length;
-      renderSuggestions();
-      return;
-    }
-    if (event.key === "ArrowUp" && items.length) {
-      event.preventDefault();
-      highlightedSuggestion =
-        (highlightedSuggestion - 1 + items.length) % items.length;
-      renderSuggestions();
-      return;
-    }
-    const value = input.value.trim();
-    if (event.key === "Enter" || event.key === ",") {
-      event.preventDefault();
-      commit(
-        event.key === "Enter" &&
-          highlightedSuggestion >= 0 &&
-          items[highlightedSuggestion]
-          ? items[highlightedSuggestion]
-          : value,
-      );
-      return;
-    }
-    if (event.key === "Tab" && value) {
-      event.preventDefault();
-      commit(value);
-      return;
-    }
-    if (event.key === "Backspace" && !value && labels.length) {
-      labels.pop();
-      render();
-      input.focus();
-    }
-  });
-  input.addEventListener("input", () => {
-    highlightedSuggestion = -1;
-    renderQuickSuggestions();
-    renderSuggestions();
-  });
-  input.addEventListener("focus", renderSuggestions);
-  input.addEventListener("paste", (event) => {
-    const pasted = event.clipboardData?.getData("text") || "";
-    if (!/[,\n]/.test(pasted)) return;
-    event.preventDefault();
-    for (const item of pasted.split(/[,\n]+/)) commit(item);
-  });
-  input.addEventListener("blur", () => {
-    if (input.value.trim()) commit(input.value);
-    window.setTimeout(() => {
-      menu.hidden = true;
-      highlightedSuggestion = -1;
-    }, 120);
-  });
-  root.addEventListener("click", () => input.focus());
-  render();
+    const hasQuery = !!(normalizeJournalLabel(value) || value.trim());
+    const showMenu =
+      !menuClosed &&
+      items.length > 0 &&
+      hasQuery &&
+      !!field &&
+      document.activeElement === field;
+    if (!showMenu) highlightedSuggestion = -1;
+    else if (highlightedSuggestion >= items.length) highlightedSuggestion = 0;
+    return {
+      labels: labels.map((label) => ({
+        name: label,
+        removeLabel: removeLabelText(label),
+        onRemove: (event) => {
+          event.stopPropagation();
+          const index = labels.indexOf(label);
+          if (index >= 0) labels.splice(index, 1);
+          draw();
+          input()?.focus();
+        },
+      })),
+      placeholder: labels.length ? "" : placeholder,
+      quick: items.slice(0, 6).map((label) => ({
+        label,
+        onPick: (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          commit(label);
+        },
+      })),
+      suggestions: showMenu
+        ? items.map((label, index) => ({
+            label,
+            active: index === highlightedSuggestion,
+            onPick: (event) => {
+              event.preventDefault();
+              commit(label);
+            },
+          }))
+        : [],
+      onClick: () => input()?.focus(),
+      input: {
+        onKeyDown: (event) => {
+          const items = suggestionItems();
+          if (event.key === "ArrowDown" && items.length) {
+            event.preventDefault();
+            highlightedSuggestion = (highlightedSuggestion + 1) % items.length;
+            draw();
+            return;
+          }
+          if (event.key === "ArrowUp" && items.length) {
+            event.preventDefault();
+            highlightedSuggestion =
+              (highlightedSuggestion - 1 + items.length) % items.length;
+            draw();
+            return;
+          }
+          const value = (input()?.value ?? "").trim();
+          if (event.key === "Enter" || event.key === ",") {
+            event.preventDefault();
+            commit(
+              event.key === "Enter" &&
+                highlightedSuggestion >= 0 &&
+                items[highlightedSuggestion]
+                ? items[highlightedSuggestion]
+                : value,
+            );
+            return;
+          }
+          if (event.key === "Tab" && value) {
+            event.preventDefault();
+            commit(value);
+            return;
+          }
+          if (event.key === "Backspace" && !value && labels.length) {
+            labels.pop();
+            draw();
+            input()?.focus();
+          }
+        },
+        onInput: () => {
+          highlightedSuggestion = -1;
+          menuClosed = false;
+          draw();
+        },
+        onFocus: () => {
+          menuClosed = false;
+          draw();
+        },
+        onPaste: (event) => {
+          const pasted = event.clipboardData?.getData("text") || "";
+          if (!/[,\n]/.test(pasted)) return;
+          event.preventDefault();
+          for (const item of pasted.split(/[,\n]+/)) commit(item);
+        },
+        onBlur: () => {
+          const field = input();
+          if (field?.value.trim()) commit(field.value);
+          window.setTimeout(() => {
+            menuClosed = true;
+            highlightedSuggestion = -1;
+            draw();
+          }, 120);
+        },
+      },
+    };
+  };
 
+  const editor = detachedElement(() => view.labelEditor(props()));
+  box = editor;
   return {
-    element: root,
+    element: editor.element,
     getLabels: () => [...labels],
   };
 }
@@ -399,11 +940,14 @@ function setButtonBusy(button: HTMLButtonElement, busy: boolean): void {
   button.setAttribute("aria-busy", busy ? "true" : "false");
 }
 
-export function createJournalView(deps: JournalViewDeps): JournalView {
-  const root = document.createElement("section");
-  root.className = "journal-page";
-  root.hidden = true;
+export function createJournalView(
+  deps: JournalViewDeps,
+  view: JournalViewView = DEFAULT_VIEW,
+): JournalView {
+  const root = templateElement(view.root());
   root.setAttribute("aria-label", deps.getText().ariaLabel);
+  /** 描くたびに画面を作り直す (前と同じく、欄の中身は保存した値に戻る)。 */
+  let renderSeq = 0;
 
   let mounted = false;
   let lifecycle = 0;
@@ -745,343 +1289,252 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     deps.setRoute(routeFor(next), replace);
   }
 
-  function renderHeader(): HTMLElement {
-    const header = document.createElement("div");
-    header.className = "journal-header";
-
-    const title = document.createElement("div");
-    title.className = "journal-title";
-    title.textContent = text().title;
-
-    const tabs = document.createElement("div");
-    tabs.className = "seg journal-tabs";
-    tabs.setAttribute("role", "tablist");
-    for (const tab of ["journal", "tasks"] as const) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.classList.toggle("active", activeTab === tab);
-      button.textContent = text().tabs[tab];
-      button.addEventListener("click", () => {
-        activeTab = tab;
-        setRoute({ tab });
-      });
-      tabs.appendChild(button);
-    }
-
-    const refreshButton = document.createElement("button");
-    refreshButton.type = "button";
-    refreshButton.className = "global-icon-action journal-icon-action";
-    refreshButton.title = text().refresh;
-    refreshButton.setAttribute("aria-label", text().refresh);
-    refreshButton.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
-    refreshButton.addEventListener("click", () => void refresh());
-
-    const status = document.createElement("span");
-    status.className = "journal-status";
-    status.textContent = message;
-    status.hidden = !message;
-    status.setAttribute("role", "status");
-
-    header.append(title, tabs, refreshButton, status);
-    return header;
+  function headerProps(): JournalHeaderProps {
+    return {
+      title: text().title,
+      tabs: (["journal", "tasks"] as const).map((tab) => ({
+        label: text().tabs[tab],
+        active: activeTab === tab,
+        onClick: () => {
+          activeTab = tab;
+          setRoute({ tab });
+        },
+      })),
+      refresh: { label: text().refresh, onClick: () => void refresh() },
+      status: message,
+    };
   }
 
-  function renderJournalEntryList(entries: DailyJournalEntry[]): HTMLElement {
-    const list = document.createElement("div");
-    list.className = "journal-entry-list";
-    if (!entries.length) {
-      const empty = document.createElement("div");
-      empty.className = "journal-empty";
-      empty.textContent = text().noEntries;
-      list.appendChild(empty);
-      return list;
-    }
-    for (const entry of entries) {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "journal-entry-row";
-      row.classList.toggle("active", entry.id === selectedEntryId);
-      row.textContent = entry.title || entry.body.split("\n")[0] || entry.date;
-      row.addEventListener("click", () => {
-        selectedEntryId = entry.id;
-        creatingEntry = false;
-        render();
-      });
-      list.appendChild(row);
-    }
-    return list;
+  /** 画面の中の欄 (描いた後に値を読む)。 */
+  function fieldIn<T extends Element>(scope: string, name: string): T | null {
+    return root.querySelector<T & Element>(`${scope} [name="${name}"]`);
   }
 
-  function renderJournalEditor(): HTMLElement {
+  function dailyProps(): JournalDailyProps {
     const selected = selectedEntry();
-    const wrap = document.createElement("section");
-    wrap.className = "journal-editor";
-
-    const head = document.createElement("div");
-    head.className = "journal-section-head";
-    const dateInput = document.createElement("input");
-    dateInput.type = "date";
-    dateInput.value = selectedDate;
-    dateInput.addEventListener("change", () => {
-      selectedDate = dateInput.value || todayIsoDate();
-      selectedEntryId = "";
-      creatingEntry = false;
-      setRoute({ date: selectedDate });
-    });
-    const newButton = document.createElement("button");
-    newButton.type = "button";
-    newButton.className = "gdp-btn gdp-btn-sm";
-    newButton.innerHTML = `${iconSvg("octicon-plus", PLUS_16_PATH)}<span>${text().new}</span>`;
-    newButton.addEventListener("click", () => {
-      selectedEntryId = "";
-      creatingEntry = true;
-      render();
-    });
-    head.append(dateInput, newButton);
-
     const entriesForDate = (data?.journal.entries || []).filter(
       (entry) => entry.date === selectedDate,
     );
-    const title = document.createElement("input");
-    title.className = "journal-title-input";
-    title.placeholder = text().titlePlaceholder;
-    title.value = selected?.title || "";
     const labels = createLabelEditor(
       selected ? selected.labels : [],
       text().labelPlaceholder,
       labelSuggestions(),
       text().removeLabel,
+      view,
     );
-    const body = document.createElement("textarea");
-    body.className = "journal-body-input";
-    body.placeholder = text().entryBodyPlaceholder;
-    body.value = selected?.body || "";
-
-    const actions = document.createElement("div");
-    actions.className = "journal-editor-actions";
-    const save = document.createElement("button");
-    save.type = "button";
-    save.className = "journal-primary-action";
-    save.textContent = selected ? text().saveEntry : text().addEntry;
-    save.addEventListener("click", async () => {
-      setButtonBusy(save, true);
-      try {
-        const payload = {
-          date: selectedDate,
-          title: title.value,
-          labels: labels.getLabels(),
-          body: body.value,
-        };
-        if (selected)
-          await requestJournal("update-entry", { id: selected.id, ...payload });
-        else
-          await requestJournal("add-entry", payload, (next) => {
-            if (next.entry) {
-              selectedEntryId = next.entry.id;
-              creatingEntry = false;
-            }
-          });
-      } catch (error) {
-        showFailure(text().saveEntryFailed, error);
-      } finally {
-        setButtonBusy(save, false);
-      }
-    });
-    actions.appendChild(save);
-    if (selected) {
-      const del = document.createElement("button");
-      del.type = "button";
-      del.className = "journal-danger-action";
-      del.innerHTML = `${iconSvg("octicon-trash", TRASH_16_PATH)}<span>${text().delete}</span>`;
-      del.addEventListener("click", async () => {
-        const ok = await showConfirmDialog({
-          title: `${text().delete}?`,
-          body: selected.title || selected.date,
-          confirmLabel: text().delete,
-          danger: true,
-          focusReturnTarget: del,
-        });
-        if (!ok) return;
-        setButtonBusy(del, true);
-        try {
-          await requestJournal("delete-entry", { id: selected.id });
-          selectedEntryId = "";
-          creatingEntry = false;
-        } catch (error) {
-          showFailure(text().deleteEntryFailed, error);
-        } finally {
-          setButtonBusy(del, false);
-        }
-      });
-      actions.appendChild(del);
-    }
-
-    wrap.append(
-      head,
-      renderJournalEntryList(entriesForDate),
-      title,
-      labels.element,
-      body,
-      actions,
-    );
-    return wrap;
-  }
-
-  function renderRelatedTasks(): HTMLElement {
-    const panel = document.createElement("aside");
-    panel.className = "journal-related";
-    const heading = document.createElement("h2");
-    heading.textContent = text().relatedTasks;
-    panel.appendChild(heading);
+    const value = (name: string) =>
+      fieldIn<HTMLInputElement>(".journal-editor", name)?.value ?? "";
     const tasks = (data?.tasks.tasks || []).filter((task) =>
       taskCoversDate(task, selectedDate),
     );
-    if (!tasks.length) {
-      const empty = document.createElement("div");
-      empty.className = "journal-empty";
-      empty.textContent = text().noRelatedTasks;
-      panel.appendChild(empty);
-      return panel;
-    }
-    for (const task of tasks)
-      panel.appendChild(renderTaskCard(task, { compact: true }));
-    return panel;
-  }
-
-  function renderJournalTab(): HTMLElement {
-    const body = document.createElement("div");
-    body.className = "journal-daily-layout";
-    body.append(renderJournalEditor(), renderRelatedTasks());
-    return body;
+    return {
+      date: {
+        value: selectedDate,
+        onChange: (next) => {
+          selectedDate = next || todayIsoDate();
+          selectedEntryId = "";
+          creatingEntry = false;
+          setRoute({ date: selectedDate });
+        },
+      },
+      newEntry: {
+        label: text().new,
+        onClick: () => {
+          selectedEntryId = "";
+          creatingEntry = true;
+          render();
+        },
+      },
+      entries: entriesForDate.map((entry) => ({
+        label: entry.title || entry.body.split("\n")[0] || entry.date,
+        active: entry.id === selectedEntryId,
+        onClick: () => {
+          selectedEntryId = entry.id;
+          creatingEntry = false;
+          render();
+        },
+      })),
+      noEntries: text().noEntries,
+      title: {
+        value: selected?.title || "",
+        placeholder: text().titlePlaceholder,
+      },
+      labels: labels.element,
+      body: {
+        value: selected?.body || "",
+        placeholder: text().entryBodyPlaceholder,
+      },
+      save: {
+        label: selected ? text().saveEntry : text().addEntry,
+        onClick: async (event) => {
+          const save = event.currentTarget as HTMLButtonElement;
+          setButtonBusy(save, true);
+          try {
+            const payload = {
+              date: selectedDate,
+              title: value("title"),
+              labels: labels.getLabels(),
+              body: value("body"),
+            };
+            if (selected)
+              await requestJournal("update-entry", {
+                id: selected.id,
+                ...payload,
+              });
+            else
+              await requestJournal("add-entry", payload, (next) => {
+                if (next.entry) {
+                  selectedEntryId = next.entry.id;
+                  creatingEntry = false;
+                }
+              });
+          } catch (error) {
+            showFailure(text().saveEntryFailed, error);
+          } finally {
+            setButtonBusy(save, false);
+          }
+        },
+      },
+      remove: selected
+        ? {
+            label: text().delete,
+            onClick: async (event) => {
+              const del = event.currentTarget as HTMLButtonElement;
+              const ok = await showConfirmDialog({
+                title: `${text().delete}?`,
+                body: selected.title || selected.date,
+                confirmLabel: text().delete,
+                danger: true,
+                focusReturnTarget: del,
+              });
+              if (!ok) return;
+              setButtonBusy(del, true);
+              try {
+                await requestJournal("delete-entry", { id: selected.id });
+                selectedEntryId = "";
+                creatingEntry = false;
+              } catch (error) {
+                showFailure(text().deleteEntryFailed, error);
+              } finally {
+                setButtonBusy(del, false);
+              }
+            },
+          }
+        : null,
+      related: {
+        heading: text().relatedTasks,
+        empty: text().noRelatedTasks,
+        cards: tasks.map((task) => taskCardProps(task, { compact: true })),
+      },
+    };
   }
 
   function taskVisible(task: JournalTask): boolean {
     return !labelFilter || task.labels.includes(labelFilter);
   }
 
-  function renderTaskCard(
+  function taskCardProps(
     task: JournalTask,
     options: { compact?: boolean } = {},
-  ): HTMLElement {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "journal-task-card";
-    card.dataset.taskId = task.id;
-    card.classList.toggle("selected", task.id === selectedTaskId);
-    card.classList.toggle("compact", !!options.compact);
-    card.addEventListener("click", (event) => {
-      if (
-        draggingTaskId ||
-        suppressTaskClick ||
-        taskDragHandleFromTarget(card, event.target)
-      )
-        return;
-      selectTask(task.id, { revealEditor: true });
-    });
-    card.addEventListener("dragstart", (event) => {
-      if (!taskDragHandleFromTarget(card, event.target)) {
-        event.preventDefault();
-        return;
-      }
-      draggingTaskId = task.id;
-      nativeTaskDragActive = true;
-      lastTaskDropTarget = null;
-      card.classList.add("dragging");
-      if (event.dataTransfer) {
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", task.id);
-        const rect = card.getBoundingClientRect();
-        event.dataTransfer.setDragImage?.(
-          card,
-          Math.max(0, Math.min(rect.width, event.clientX - rect.left)),
-          Math.max(0, Math.min(rect.height, event.clientY - rect.top)),
-        );
-      }
-    });
-    card.addEventListener("dragenter", (event) => {
-      if (
-        (!draggingTaskId && !draggingGithubIssue()) ||
-        draggingTaskId === task.id
-      )
-        return;
-      event.preventDefault();
-      const after = isTaskDropAfter(card, event);
-      lastTaskDropTarget = after
-        ? { after_id: task.id }
-        : { before_id: task.id };
-      markTaskDropTarget(card, after);
-    });
-    card.addEventListener("dragover", (event) => {
-      const issue = draggingGithubIssue();
-      if ((!draggingTaskId && !issue) || draggingTaskId === task.id) return;
-      event.preventDefault();
-      if (event.dataTransfer)
-        event.dataTransfer.dropEffect = issue ? "copy" : "move";
-      scheduleTaskDragAutoScroll(event);
-      const after = isTaskDropAfter(card, event);
-      lastTaskDropTarget = after
-        ? { after_id: task.id }
-        : { before_id: task.id };
-      markTaskDropTarget(card, after);
-    });
-    card.addEventListener("dragleave", (event) => {
-      const related = event.relatedTarget as Node | null;
-      if (related && card.contains(related)) return;
-      lastTaskDropTarget = null;
-      card.classList.remove("drop-target", "drop-after");
-    });
-    card.addEventListener("drop", (event) => {
-      const issue =
-        draggingGithubIssue() ||
-        githubIssueFromDataTransfer(event.dataTransfer);
-      if ((!draggingTaskId && !issue) || draggingTaskId === task.id) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const after = isTaskDropAfter(card, event);
-      const target = after ? { after_id: task.id } : { before_id: task.id };
-      lastTaskDropTarget = null;
-      if (issue) void linkGithubIssueToTask(issue, target);
-      else void moveDraggedTask(target);
-    });
-    card.addEventListener("dragend", (event) => finishNativeTaskDrag(event));
-    card.addEventListener("pointerdown", (event) => {
-      beginPointerTaskDrag(task.id, event);
-    });
-    const top = document.createElement("span");
-    top.className = "journal-task-card-top";
-    const priority = document.createElement("span");
-    priority.className = `journal-priority journal-priority-${task.priority}`;
-    priority.textContent = text().priorityLabels[task.priority];
-    const status = document.createElement("span");
-    status.className = "journal-task-status";
-    status.textContent = text().statusLabels[task.status];
-    top.append(priority, status);
-    const dragHandle = document.createElement("span");
-    dragHandle.className = "journal-task-drag-handle";
-    dragHandle.draggable = true;
-    dragHandle.title = text().dragTask;
-    dragHandle.innerHTML = iconSvg("journal-task-drag-icon", GRABBER_16_PATH);
-    dragHandle.setAttribute("aria-hidden", "true");
-    top.appendChild(dragHandle);
-    const title = document.createElement("strong");
-    title.textContent = task.title;
-    const labels = document.createElement("span");
-    labels.className = "journal-task-labels";
-    for (const label of task.labels) labels.appendChild(labelChip(label));
-    card.append(top, title, labels);
-    if (task.due_date) {
-      const due = document.createElement("span");
-      due.className = "journal-task-due";
-      due.textContent = `${text().duePrefix} ${task.due_date}`;
-      card.appendChild(due);
-    }
-    if (task.claim) {
-      const claim = document.createElement("span");
-      claim.className = "journal-task-claim";
-      claim.textContent = text().claimedBy(task.claim.by);
-      card.appendChild(claim);
-    }
-    return card;
+  ): JournalTaskCardProps {
+    const cardOf = (event: Event) => event.currentTarget as HTMLElement;
+    return {
+      id: task.id,
+      selected: task.id === selectedTaskId,
+      compact: !!options.compact,
+      priority: {
+        value: task.priority,
+        label: text().priorityLabels[task.priority],
+      },
+      status: text().statusLabels[task.status],
+      dragTitle: text().dragTask,
+      title: task.title,
+      labels: task.labels,
+      due: task.due_date ? `${text().duePrefix} ${task.due_date}` : null,
+      claim: task.claim ? text().claimedBy(task.claim.by) : null,
+      on: {
+        click: (event) => {
+          if (
+            draggingTaskId ||
+            suppressTaskClick ||
+            taskDragHandleFromTarget(cardOf(event), event.target)
+          )
+            return;
+          selectTask(task.id, { revealEditor: true });
+        },
+        dragstart: (event) => {
+          const card = cardOf(event);
+          if (!taskDragHandleFromTarget(card, event.target)) {
+            event.preventDefault();
+            return;
+          }
+          draggingTaskId = task.id;
+          nativeTaskDragActive = true;
+          lastTaskDropTarget = null;
+          card.classList.add("dragging");
+          if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", task.id);
+            const rect = card.getBoundingClientRect();
+            event.dataTransfer.setDragImage?.(
+              card,
+              Math.max(0, Math.min(rect.width, event.clientX - rect.left)),
+              Math.max(0, Math.min(rect.height, event.clientY - rect.top)),
+            );
+          }
+        },
+        dragenter: (event) => {
+          if (
+            (!draggingTaskId && !draggingGithubIssue()) ||
+            draggingTaskId === task.id
+          )
+            return;
+          event.preventDefault();
+          const card = cardOf(event);
+          const after = isTaskDropAfter(card, event);
+          lastTaskDropTarget = after
+            ? { after_id: task.id }
+            : { before_id: task.id };
+          markTaskDropTarget(card, after);
+        },
+        dragover: (event) => {
+          const issue = draggingGithubIssue();
+          if ((!draggingTaskId && !issue) || draggingTaskId === task.id) return;
+          event.preventDefault();
+          if (event.dataTransfer)
+            event.dataTransfer.dropEffect = issue ? "copy" : "move";
+          scheduleTaskDragAutoScroll(event);
+          const card = cardOf(event);
+          const after = isTaskDropAfter(card, event);
+          lastTaskDropTarget = after
+            ? { after_id: task.id }
+            : { before_id: task.id };
+          markTaskDropTarget(card, after);
+        },
+        dragleave: (event) => {
+          const card = cardOf(event);
+          const related = event.relatedTarget as Node | null;
+          if (related && card.contains(related)) return;
+          lastTaskDropTarget = null;
+          card.classList.remove("drop-target", "drop-after");
+        },
+        drop: (event) => {
+          const issue =
+            draggingGithubIssue() ||
+            githubIssueFromDataTransfer(event.dataTransfer);
+          if ((!draggingTaskId && !issue) || draggingTaskId === task.id) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const after = isTaskDropAfter(cardOf(event), event);
+          const target = after ? { after_id: task.id } : { before_id: task.id };
+          lastTaskDropTarget = null;
+          if (issue) void linkGithubIssueToTask(issue, target);
+          else void moveDraggedTask(target);
+        },
+        dragend: (event) => finishNativeTaskDrag(event),
+        pointerdown: (event) => beginPointerTaskDrag(task.id, event),
+      },
+    };
   }
 
   function taskDragHandleFromTarget(
@@ -1386,70 +1839,6 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     }
   }
 
-  function renderQueuePreview(): HTMLElement {
-    const queue = document.createElement("section");
-    queue.className = "journal-command-preview journal-queue";
-    const title = document.createElement("strong");
-    title.textContent = text().aiQueue;
-    const command = document.createElement("code");
-    command.textContent = labelFilter
-      ? `code-viewer journal task-next --label ${labelFilter} --limit 5`
-      : "code-viewer journal task-next --limit 5";
-    queue.append(title, command);
-    const next = data
-      ? selectNextJournalTasks(
-          data.tasks,
-          { labels: labelFilter ? [labelFilter] : [] },
-          5,
-        )
-      : [];
-    if (next.length) {
-      const list = document.createElement("ol");
-      for (const task of next) {
-        const item = document.createElement("li");
-        item.textContent = `${text().priorityLabels[task.priority]} ${task.title}`;
-        list.appendChild(item);
-      }
-      queue.appendChild(list);
-    }
-    return queue;
-  }
-
-  function renderGithubIssueToggle(): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "journal-github-toggle";
-    button.classList.toggle("active", githubInboxOpen);
-    button.setAttribute("aria-expanded", githubInboxOpen ? "true" : "false");
-    button.innerHTML = iconSvg(
-      "journal-github-toggle-icon",
-      COMMENT_DISCUSSION_16_PATH,
-    );
-    const label = document.createElement("span");
-    label.textContent = text().githubIssues;
-    button.appendChild(label);
-    const count = document.createElement("span");
-    count.className = "journal-github-toggle-count";
-    count.textContent = githubIssuesLoading
-      ? "..."
-      : githubIssuesLoaded
-        ? String(githubIssues.length)
-        : "0";
-    button.appendChild(count);
-    button.addEventListener("click", () => {
-      githubInboxOpen = !githubInboxOpen;
-      render();
-      if (
-        githubInboxOpen &&
-        !githubIssuesAutoRequested &&
-        !githubIssuesLoading
-      ) {
-        void loadGithubIssues();
-      }
-    });
-    return button;
-  }
-
   function issueLabel(issueNumber: number): string {
     return journalIssueLabel(issueNumber);
   }
@@ -1652,100 +2041,54 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     return githubIssues.find((issue) => issue.number === issueNumber) || null;
   }
 
-  function renderGithubIssueCard(issue: GithubIssueItem): HTMLElement {
-    const card = document.createElement("article");
-    card.className = "journal-github-issue-card";
-    card.dataset.issueNumber = String(issue.number);
+  function githubIssueProps(issue: GithubIssueItem): JournalGithubIssueProps {
     const linked = linkedTaskForIssue(issue.number);
-    card.draggable = !linked;
-    if (linked) card.classList.add("linked");
-    if (!linked) {
-      card.addEventListener("dragstart", (event) => {
+    return {
+      number: issue.number,
+      state: githubIssueStateLabel(issue.state),
+      linked: linked ? text().githubLinked : null,
+      title: issue.title,
+      labels: issue.labels.slice(0, 4),
+      action: {
+        label: linked ? text().githubOpenTask : text().githubAddToBoard,
+        onClick: async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (linked) {
+            githubInboxOpen = false;
+            selectTask(linked.id, { focusEditor: true, revealEditor: true });
+            return;
+          }
+          (event.currentTarget as HTMLButtonElement).disabled = true;
+          const taskId = await linkGithubIssueToTask(issue, {
+            status: "draft",
+          });
+          if (taskId)
+            selectTask(taskId, { focusEditor: true, revealEditor: true });
+        },
+      },
+      onDragStart: (event) => {
         draggingGithubIssueNumber = issue.number;
         lastTaskDropTarget = null;
         event.dataTransfer?.setData("text/plain", `#${issue.number}`);
         if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
-      });
-      card.addEventListener("dragend", (event) => finishNativeTaskDrag(event));
-    }
-    const head = document.createElement("div");
-    head.className = "journal-github-issue-head";
-    const number = document.createElement("span");
-    number.textContent = `#${issue.number}`;
-    const state = document.createElement("span");
-    state.textContent = githubIssueStateLabel(issue.state);
-    head.append(number, state);
-    if (linked) {
-      const linkedBadge = document.createElement("span");
-      linkedBadge.className = "journal-github-linked";
-      linkedBadge.textContent = text().githubLinked;
-      head.appendChild(linkedBadge);
-    }
-    const title = document.createElement("strong");
-    title.textContent = issue.title;
-    const labels = document.createElement("div");
-    labels.className = "journal-github-issue-labels";
-    for (const label of issue.labels.slice(0, 4)) {
-      labels.appendChild(labelChip(label));
-    }
-    const action = document.createElement("button");
-    action.type = "button";
-    action.draggable = false;
-    action.className = "journal-github-issue-action";
-    action.textContent = linked
-      ? text().githubOpenTask
-      : text().githubAddToBoard;
-    action.addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (linked) {
-        githubInboxOpen = false;
-        selectTask(linked.id, { focusEditor: true, revealEditor: true });
-        return;
-      }
-      action.disabled = true;
-      const taskId = await linkGithubIssueToTask(issue, { status: "draft" });
-      if (taskId) selectTask(taskId, { focusEditor: true, revealEditor: true });
-    });
-    card.append(head, title, labels, action);
-    return card;
+      },
+      onDragEnd: (event) => finishNativeTaskDrag(event),
+    };
   }
 
-  function renderGithubIssuesPanel(): HTMLElement {
-    const panel = document.createElement("section");
-    panel.className = "journal-github-panel";
-    const title = document.createElement("strong");
-    title.textContent = text().githubIssues;
-    const controls = document.createElement("div");
-    controls.className = "journal-github-controls";
-    const repo = document.createElement("input");
-    repo.type = "text";
-    repo.placeholder = text().githubRepoPlaceholder;
-    repo.value = githubRepoFilter;
-    const ghLabel = document.createElement("input");
-    ghLabel.type = "text";
-    ghLabel.placeholder = text().githubLabelPlaceholder;
-    ghLabel.value = githubLabelFilter;
-    const search = document.createElement("input");
-    search.type = "search";
-    search.placeholder = text().githubSearchPlaceholder;
-    search.value = githubSearchFilter;
-    const state = document.createElement("select");
-    for (const value of ["open", "closed", "all"] as const) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = text().githubStateLabels[value];
-      option.selected = value === githubStateFilter;
-      state.appendChild(option);
-    }
+  function githubPanelProps(): JournalGithubPanelProps {
+    const value = (name: string) =>
+      fieldIn<HTMLInputElement | HTMLSelectElement>(
+        ".journal-github-panel",
+        name,
+      )?.value ?? "";
     const syncControls = (shouldRender = true, shouldLoad = shouldRender) => {
-      const nextState =
-        state.value === "closed" || state.value === "all"
-          ? state.value
-          : "open";
-      const nextRepo = repo.value.trim();
-      const nextLabel = ghLabel.value.trim();
-      const nextSearch = search.value.trim();
+      const state = value("state");
+      const nextState = state === "closed" || state === "all" ? state : "open";
+      const nextRepo = value("repo").trim();
+      const nextLabel = value("labels").trim();
+      const nextSearch = value("search").trim();
       const changed =
         nextRepo !== githubRepoFilter ||
         nextLabel !== githubLabelFilter ||
@@ -1759,89 +2102,72 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
       resetGithubIssueFilters(shouldRender);
       if (shouldLoad && githubInboxOpen) void loadGithubIssues();
     };
-    const loadOnEnter = (event: KeyboardEvent) => {
-      if (event.key !== "Enter") return;
-      event.preventDefault();
-      syncControls(false, false);
-      void loadGithubIssues();
-    };
-    repo.addEventListener("change", () => syncControls());
-    repo.addEventListener("keydown", loadOnEnter);
-    ghLabel.addEventListener("change", () => syncControls());
-    ghLabel.addEventListener("keydown", loadOnEnter);
-    search.addEventListener("change", () => syncControls());
-    search.addEventListener("keydown", loadOnEnter);
-    state.addEventListener("change", () => syncControls());
-    const load = document.createElement("button");
-    load.type = "button";
-    load.textContent = githubIssuesLoading
-      ? text().githubLoading
-      : text().githubLoad;
-    load.disabled = !githubCanRequest();
-    load.addEventListener("click", () => {
-      syncControls(false, false);
-      void loadGithubIssues();
-    });
-    controls.append(repo, ghLabel, search, state, load);
-    const hint = document.createElement("p");
-    hint.className = "journal-github-hint";
     const showing =
       githubIssuesLoaded && !githubIssuesError
         ? ` ${text().githubShowing(githubIssues.length, githubIssueLimit)}`
         : "";
-    hint.textContent =
-      githubIssuesError || `${text().githubDragHint}${showing}`;
-    const list = document.createElement("div");
-    list.className = "journal-github-issues";
-    list.addEventListener("dragover", (event) => {
-      if (!draggingGithubIssue()) return;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-      scheduleTaskDragAutoScroll(event);
-    });
-    if (githubIssues.length) {
-      for (const issue of githubIssues) {
-        list.appendChild(renderGithubIssueCard(issue));
-      }
-    } else {
-      const empty = document.createElement("div");
-      empty.className = "journal-empty";
-      empty.textContent = githubIssuesLoading
+    return {
+      title: text().githubIssues,
+      close: { label: text().githubClose, onClick: () => closeGithubInbox() },
+      repo: {
+        value: githubRepoFilter,
+        placeholder: text().githubRepoPlaceholder,
+      },
+      labels: {
+        value: githubLabelFilter,
+        placeholder: text().githubLabelPlaceholder,
+      },
+      search: {
+        value: githubSearchFilter,
+        placeholder: text().githubSearchPlaceholder,
+      },
+      state: {
+        options: (["open", "closed", "all"] as const).map((state) => ({
+          value: state,
+          label: text().githubStateLabels[state],
+          selected: state === githubStateFilter,
+        })),
+      },
+      onChange: () => syncControls(),
+      onEnter: (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        syncControls(false, false);
+        void loadGithubIssues();
+      },
+      load: {
+        label: githubIssuesLoading ? text().githubLoading : text().githubLoad,
+        disabled: !githubCanRequest(),
+        onClick: () => {
+          syncControls(false, false);
+          void loadGithubIssues();
+        },
+      },
+      hint: githubIssuesError || `${text().githubDragHint}${showing}`,
+      onListDragOver: (event) => {
+        if (!draggingGithubIssue()) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+        scheduleTaskDragAutoScroll(event);
+      },
+      issues: githubIssues.map(githubIssueProps),
+      empty: githubIssuesLoading
         ? text().githubLoading
         : githubIssuesLoaded
           ? text().githubNoIssues
-          : text().githubNotLoaded;
-      list.appendChild(empty);
-    }
-    const head = document.createElement("div");
-    head.className = "journal-github-panel-head";
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "journal-github-close";
-    close.title = text().githubClose;
-    close.setAttribute("aria-label", text().githubClose);
-    close.innerHTML = iconSvg("journal-github-close-icon", X_16_PATH);
-    close.addEventListener("click", () => {
-      closeGithubInbox();
-    });
-    head.append(title, close);
-    panel.append(head, controls, hint, list);
-    if (
-      githubIssuesLoaded &&
-      githubIssues.length >= githubIssueLimit &&
-      githubIssueLimit < GITHUB_ISSUE_LIMIT_MAX
-    ) {
-      const more = document.createElement("button");
-      more.type = "button";
-      more.className = "journal-github-load-more";
-      more.textContent = text().githubLoadMore;
-      more.disabled = !githubCanRequest();
-      more.addEventListener("click", () =>
-        loadGithubIssues(githubIssueLimit + GITHUB_ISSUE_LIMIT_STEP),
-      );
-      panel.appendChild(more);
-    }
-    return panel;
+          : text().githubNotLoaded,
+      more:
+        githubIssuesLoaded &&
+        githubIssues.length >= githubIssueLimit &&
+        githubIssueLimit < GITHUB_ISSUE_LIMIT_MAX
+          ? {
+              label: text().githubLoadMore,
+              disabled: !githubCanRequest(),
+              onClick: () =>
+                loadGithubIssues(githubIssueLimit + GITHUB_ISSUE_LIMIT_STEP),
+            }
+          : null,
+    };
   }
 
   function taskLabelCounts(): Map<string, number> {
@@ -1854,112 +2180,84 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     return counts;
   }
 
-  function renderLabelFilterButton(
-    label: string,
-    count: number,
-    active: boolean,
-    value = label,
-  ): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "journal-label-filter";
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", active ? "true" : "false");
-    const name = document.createElement("span");
-    name.className = "journal-label-filter-name";
-    name.textContent = label;
-    const badge = document.createElement("span");
-    badge.className = "journal-label-filter-count";
-    badge.textContent = String(count);
-    button.append(name, badge);
-    button.addEventListener("click", () => {
-      labelFilter = active ? "" : value;
-      setRoute({ tab: "tasks", label: labelFilter || undefined });
-    });
-    return button;
-  }
-
-  function renderLabelFilters(): HTMLElement {
-    const wrap = document.createElement("div");
-    wrap.className = "journal-label-filters";
-    wrap.setAttribute("aria-label", text().labelFilters);
+  function labelFilterButtons(): JournalTasksProps["labelFilters"]["buttons"] {
     const counts = taskLabelCounts();
     const total = data?.tasks.tasks.length || 0;
-    wrap.appendChild(
-      renderLabelFilterButton(text().allLabels, total, !labelFilter, ""),
-    );
-    for (const [label, count] of [...counts.entries()].sort((a, b) =>
-      a[0].localeCompare(b[0]),
-    )) {
-      wrap.appendChild(
-        renderLabelFilterButton(label, count, label === labelFilter),
-      );
-    }
-    return wrap;
+    const button = (
+      name: string,
+      count: number,
+      active: boolean,
+      value = name,
+    ) => ({
+      name,
+      count,
+      active,
+      onClick: () => {
+        labelFilter = active ? "" : value;
+        setRoute({ tab: "tasks", label: labelFilter || undefined });
+      },
+    });
+    return [
+      button(text().allLabels, total, !labelFilter, ""),
+      ...[...counts.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([label, count]) => button(label, count, label === labelFilter)),
+    ];
   }
 
-  function renderTaskBoard(): HTMLElement {
-    const board = document.createElement("div");
-    board.className = "journal-task-board";
-    for (const status of JOURNAL_TASK_STATUSES) {
-      const column = document.createElement("section");
-      column.className = `journal-task-column journal-task-column-${status}`;
-      column.dataset.status = status;
-      column.addEventListener("dragover", (event) => {
-        const issue =
-          draggingGithubIssue() ||
-          githubIssueFromDataTransfer(event.dataTransfer);
-        if (!draggingTaskId && !issue) return;
-        const targetCard = (event.target as HTMLElement | null)?.closest(
-          ".journal-task-card",
-        );
-        if (targetCard && column.contains(targetCard)) return;
-        event.preventDefault();
-        if (event.dataTransfer)
-          event.dataTransfer.dropEffect = issue ? "copy" : "move";
-        scheduleTaskDragAutoScroll(event);
-        lastTaskDropTarget = { status };
-        markColumnDropTarget(column);
-      });
-      column.addEventListener("dragleave", (event) => {
-        const related = event.relatedTarget as Node | null;
-        if (related && column.contains(related)) return;
-        lastTaskDropTarget = null;
-        column.classList.remove("drop-target");
-      });
-      column.addEventListener("drop", (event) => {
-        const issue = draggingGithubIssue();
-        if (!draggingTaskId && !issue) return;
-        const targetCard = (event.target as HTMLElement | null)?.closest(
-          ".journal-task-card",
-        );
-        if (targetCard && column.contains(targetCard)) return;
-        event.preventDefault();
-        lastTaskDropTarget = null;
-        if (issue) void linkGithubIssueToTask(issue, { status });
-        else void moveDraggedTask({ status });
-      });
-      const head = document.createElement("div");
-      head.className = "journal-task-column-head";
-      const title = document.createElement("strong");
-      title.textContent = text().statusLabels[status];
-      const count = document.createElement("span");
+  function boardColumns(): JournalTasksProps["columns"] {
+    return JOURNAL_TASK_STATUSES.map((status) => {
       const tasks = (data?.tasks.tasks || []).filter(
         (task) => task.status === status && taskVisible(task),
       );
-      count.textContent = String(tasks.length);
-      head.append(title, count);
-      column.appendChild(head);
-      if (!tasks.length) {
-        const empty = document.createElement("div");
-        empty.className = "journal-column-empty";
-        empty.textContent = text().empty;
-        column.appendChild(empty);
-      }
-      for (const task of tasks) column.appendChild(renderTaskCard(task));
-      board.appendChild(column);
-    }
-    return board;
+      const columnOf = (event: Event) => event.currentTarget as HTMLElement;
+      return {
+        status,
+        title: text().statusLabels[status],
+        count: tasks.length,
+        empty: text().empty,
+        cards: tasks.map((task) => taskCardProps(task)),
+        on: {
+          dragover: (event) => {
+            const column = columnOf(event);
+            const issue =
+              draggingGithubIssue() ||
+              githubIssueFromDataTransfer(event.dataTransfer);
+            if (!draggingTaskId && !issue) return;
+            const targetCard = (event.target as HTMLElement | null)?.closest(
+              ".journal-task-card",
+            );
+            if (targetCard && column.contains(targetCard)) return;
+            event.preventDefault();
+            if (event.dataTransfer)
+              event.dataTransfer.dropEffect = issue ? "copy" : "move";
+            scheduleTaskDragAutoScroll(event);
+            lastTaskDropTarget = { status };
+            markColumnDropTarget(column);
+          },
+          dragleave: (event) => {
+            const column = columnOf(event);
+            const related = event.relatedTarget as Node | null;
+            if (related && column.contains(related)) return;
+            lastTaskDropTarget = null;
+            column.classList.remove("drop-target");
+          },
+          drop: (event) => {
+            const column = columnOf(event);
+            const issue = draggingGithubIssue();
+            if (!draggingTaskId && !issue) return;
+            const targetCard = (event.target as HTMLElement | null)?.closest(
+              ".journal-task-card",
+            );
+            if (targetCard && column.contains(targetCard)) return;
+            event.preventDefault();
+            lastTaskDropTarget = null;
+            if (issue) void linkGithubIssueToTask(issue, { status });
+            else void moveDraggedTask({ status });
+          },
+        },
+      };
+    });
   }
 
   function insertMarkdown(
@@ -1981,285 +2279,288 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     textarea.selectionEnd = end + before.length;
   }
 
-  async function renderTaskPreview(
-    host: HTMLElement,
-    body: string,
-  ): Promise<void> {
+  function taskEditorProps(): JournalTaskEditorProps {
+    const task = selectedTask();
+    const labels = createLabelEditor(
+      task ? task.labels : normalizeJournalLabels([labelFilter]),
+      text().labelPlaceholder,
+      labelSuggestions(),
+      text().removeLabel,
+      view,
+    );
+    const value = (name: string) =>
+      fieldIn<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+        ".journal-task-editor",
+        name,
+      )?.value ?? "";
+    const body = () =>
+      fieldIn<HTMLTextAreaElement>(".journal-task-editor", "body");
+    const busy =
+      (run: (button: HTMLButtonElement) => Promise<void>) =>
+      async (event: Event) => {
+        const button = event.currentTarget as HTMLButtonElement;
+        setButtonBusy(button, true);
+        try {
+          await run(button);
+        } finally {
+          setButtonBusy(button, false);
+        }
+      };
+    return {
+      resizer: {
+        label: text().resizeTaskPanel,
+        onPointerDown: (event) => {
+          const panel = (
+            event.currentTarget as HTMLElement
+          ).closest<HTMLElement>(".journal-task-editor");
+          if (panel) startTaskEditorResize(event, panel);
+        },
+      },
+      heading: task ? text().taskHeading : text().newTaskHeading,
+      newTask: {
+        label: text().new,
+        onClick: () => {
+          selectedTaskId = "";
+          setRoute({ tab: "tasks", task: undefined });
+        },
+      },
+      title: { value: task?.title || "", placeholder: text().titlePlaceholder },
+      status: {
+        label: text().statusField,
+        options: JOURNAL_TASK_STATUSES.map((status) => ({
+          value: status,
+          label: text().statusLabels[status],
+          selected: (task?.status || "todo") === status,
+        })),
+      },
+      priority: {
+        label: text().priorityField,
+        options: JOURNAL_TASK_PRIORITIES.map((priority) => ({
+          value: priority,
+          label: text().priorityLabels[priority],
+          selected: (task?.priority || "p2") === priority,
+        })),
+      },
+      start: {
+        label: text().startDate,
+        value: task?.source_date || selectedDate,
+      },
+      end: { label: text().endDate, value: task?.due_date || "" },
+      labels: labels.element,
+      tools: (
+        [
+          ["B", "**", "**"],
+          ["`", "`", "`"],
+          ["[]", "- [ ] ", ""],
+          [">", "> ", ""],
+        ] as const
+      ).map(([label, before, after]) => ({
+        label,
+        onClick: () => {
+          const field = body();
+          if (field) insertMarkdown(field, before, after);
+        },
+      })),
+      modes: (["write", "preview", "split"] as const).map((mode) => ({
+        label: text().editorModes[mode],
+        active: editorMode === mode,
+        onClick: () => {
+          editorMode = mode;
+          render();
+        },
+      })),
+      body: {
+        value: task?.body || "",
+        placeholder: text().taskBodyPlaceholder,
+        hidden: editorMode === "preview",
+        onInput: () => {
+          if (editorMode !== "write") void drawTaskPreview();
+        },
+      },
+      previewHidden: editorMode === "write",
+      save: {
+        label: task ? text().saveTask : text().addTask,
+        onClick: busy(async () => {
+          const payload = {
+            title: value("title"),
+            status: value("status"),
+            priority: value("priority"),
+            labels: labels.getLabels(),
+            due_date: value("due_date") || null,
+            source_date: value("source_date") || null,
+            body: value("body"),
+          };
+          try {
+            if (task)
+              await requestJournal("update-task", { id: task.id, ...payload });
+            else {
+              const response = await requestJournal(
+                "add-task",
+                payload,
+                (next) => {
+                  if (next.task) selectedTaskId = next.task.id;
+                },
+              );
+              if (response.task)
+                setRoute({ tab: "tasks", task: response.task.id });
+            }
+          } catch (error) {
+            showFailure(text().saveTaskFailed, error);
+          }
+        }),
+      },
+      task: task
+        ? {
+            claim: {
+              label: text().claim,
+              onClick: busy(async () => {
+                try {
+                  await requestJournal("claim-task", {
+                    id: task.id,
+                    by: "user",
+                  });
+                } catch (error) {
+                  showFailure(text().claimTaskFailed, error);
+                }
+              }),
+            },
+            done: {
+              label: text().done,
+              disabled: task.status !== "doing" || task.claim?.by !== "user",
+              onClick: busy(async () => {
+                try {
+                  await requestJournal("complete-task", {
+                    id: task.id,
+                    by: "user",
+                    source: "user",
+                  });
+                } catch (error) {
+                  showFailure(text().doneTaskFailed, error);
+                }
+              }),
+            },
+            remove: {
+              label: text().delete,
+              onClick: async (event) => {
+                const del = event.currentTarget as HTMLButtonElement;
+                const ok = await showConfirmDialog({
+                  title: `${text().delete}?`,
+                  body: task.title,
+                  confirmLabel: text().delete,
+                  danger: true,
+                  focusReturnTarget: del,
+                });
+                if (!ok) return;
+                setButtonBusy(del, true);
+                try {
+                  const result = await requestJournal("delete-task", {
+                    id: task.id,
+                  });
+                  if (!result.removed)
+                    throw new Error(
+                      "the server reported that the task was not removed",
+                    );
+                  selectedTaskId = "";
+                  setRoute({ tab: "tasks", task: undefined });
+                } catch (error) {
+                  showFailure(text().deleteTaskFailed, error);
+                } finally {
+                  setButtonBusy(del, false);
+                }
+              },
+            },
+          }
+        : null,
+    };
+  }
+
+  /** タスクの本文の下見 (描いた Markdown の要素を箱に置く)。 */
+  async function drawTaskPreview(): Promise<void> {
+    const host = root.querySelector<HTMLElement>(
+      ".journal-task-editor .journal-markdown-preview",
+    );
+    const body = fieldIn<HTMLTextAreaElement>(".journal-task-editor", "body");
+    if (!host || !body) return;
     host.replaceChildren();
     const rendered = await renderMarkdownPreview(
-      body || `_${text().noBody}_`,
+      body.value || `_${text().noBody}_`,
       { path: "journal-task.md", ref: "worktree" },
       { syntaxHighlight: false },
     );
     host.appendChild(rendered);
   }
 
-  function renderTaskEditor(): HTMLElement {
-    const task = selectedTask();
-    const panel = document.createElement("aside");
-    panel.className = "journal-task-editor";
-    const resizer = document.createElement("div");
-    resizer.className = "journal-task-editor-resizer";
-    resizer.role = "separator";
-    resizer.tabIndex = 0;
-    resizer.setAttribute("aria-orientation", "vertical");
-    resizer.setAttribute("aria-label", text().resizeTaskPanel);
-    resizer.addEventListener("pointerdown", (event) =>
-      startTaskEditorResize(event, panel),
-    );
-    const heading = document.createElement("div");
-    heading.className = "journal-section-head";
-    const titleText = document.createElement("strong");
-    titleText.textContent = task ? text().taskHeading : text().newTaskHeading;
-    const newTask = document.createElement("button");
-    newTask.type = "button";
-    newTask.className = "gdp-btn gdp-btn-sm";
-    newTask.innerHTML = `${iconSvg("octicon-plus", PLUS_16_PATH)}<span>${text().new}</span>`;
-    newTask.addEventListener("click", () => {
-      selectedTaskId = "";
-      setRoute({ tab: "tasks", task: undefined });
-    });
-    heading.append(titleText, newTask);
-
-    const title = document.createElement("input");
-    title.className = "journal-title-input";
-    title.placeholder = text().titlePlaceholder;
-    title.value = task?.title || "";
-    const row = document.createElement("div");
-    row.className = "journal-task-fields";
-    const status = document.createElement("select");
-    for (const value of JOURNAL_TASK_STATUSES) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = text().statusLabels[value];
-      option.selected = (task?.status || "todo") === value;
-      status.appendChild(option);
-    }
-    const priority = document.createElement("select");
-    for (const value of JOURNAL_TASK_PRIORITIES) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = text().priorityLabels[value];
-      option.selected = (task?.priority || "p2") === value;
-      priority.appendChild(option);
-    }
-    const due = document.createElement("input");
-    due.type = "date";
-    due.title = text().endDate;
-    due.setAttribute("aria-label", text().endDate);
-    due.value = task?.due_date || "";
-    const sourceDate = document.createElement("input");
-    sourceDate.type = "date";
-    sourceDate.title = text().startDate;
-    sourceDate.setAttribute("aria-label", text().startDate);
-    sourceDate.value = task?.source_date || selectedDate;
-    row.append(
-      taskField(text().statusField, status),
-      taskField(text().priorityField, priority),
-      taskField(text().startDate, sourceDate),
-      taskField(text().endDate, due),
-    );
-
-    const labels = createLabelEditor(
-      task ? task.labels : normalizeJournalLabels([labelFilter]),
-      text().labelPlaceholder,
-      labelSuggestions(),
-      text().removeLabel,
-    );
-
-    const toolbar = document.createElement("div");
-    toolbar.className = "journal-markdown-toolbar";
-    const body = document.createElement("textarea");
-    body.className = "journal-body-input journal-task-body-input";
-    body.placeholder = text().taskBodyPlaceholder;
-    body.value = task?.body || "";
-    const preview = document.createElement("div");
-    preview.className = "journal-markdown-preview";
-    const syncMode = () => {
-      body.hidden = editorMode === "preview";
-      preview.hidden = editorMode === "write";
-      void renderTaskPreview(preview, body.value);
+  function tasksProps(): JournalTasksProps {
+    const next = data
+      ? selectNextJournalTasks(
+          data.tasks,
+          { labels: labelFilter ? [labelFilter] : [] },
+          5,
+        )
+      : [];
+    return {
+      filter: {
+        value: labelFilter,
+        placeholder: text().labelFilterPlaceholder,
+        onChange: (value) => {
+          labelFilter = normalizeJournalLabel(value) || "";
+          setRoute({ tab: "tasks", label: labelFilter || undefined });
+        },
+      },
+      queue: {
+        title: text().aiQueue,
+        command: labelFilter
+          ? `code-viewer journal task-next --label ${labelFilter} --limit 5`
+          : "code-viewer journal task-next --limit 5",
+        items: next.map(
+          (task) => `${text().priorityLabels[task.priority]} ${task.title}`,
+        ),
+      },
+      githubToggle: {
+        active: githubInboxOpen,
+        label: text().githubIssues,
+        count: githubIssuesLoading
+          ? "..."
+          : githubIssuesLoaded
+            ? String(githubIssues.length)
+            : "0",
+        onClick: () => {
+          githubInboxOpen = !githubInboxOpen;
+          render();
+          if (
+            githubInboxOpen &&
+            !githubIssuesAutoRequested &&
+            !githubIssuesLoading
+          ) {
+            void loadGithubIssues();
+          }
+        },
+      },
+      labelFilters: {
+        label: text().labelFilters,
+        buttons: labelFilterButtons(),
+      },
+      github: githubInboxOpen ? githubPanelProps() : null,
+      columns: boardColumns(),
+      editor: taskEditorProps(),
     };
-    for (const spec of [
-      ["B", "**", "**"],
-      ["`", "`", "`"],
-      ["[]", "- [ ] ", ""],
-      [">", "> ", ""],
-    ] as const) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "journal-toolbar-action";
-      button.textContent = spec[0];
-      button.addEventListener("click", () =>
-        insertMarkdown(body, spec[1], spec[2]),
-      );
-      toolbar.appendChild(button);
-    }
-    const modes = document.createElement("div");
-    modes.className = "seg journal-editor-mode";
-    for (const mode of ["write", "preview", "split"] as const) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.classList.toggle("active", editorMode === mode);
-      button.textContent = text().editorModes[mode];
-      button.addEventListener("click", () => {
-        editorMode = mode;
-        render();
-      });
-      modes.appendChild(button);
-    }
-    toolbar.appendChild(modes);
-    body.addEventListener("input", () => {
-      if (editorMode !== "write") void renderTaskPreview(preview, body.value);
-    });
-    syncMode();
-
-    const actions = document.createElement("div");
-    actions.className = "journal-editor-actions";
-    const save = document.createElement("button");
-    save.type = "button";
-    save.className = "journal-primary-action";
-    save.textContent = task ? text().saveTask : text().addTask;
-    save.addEventListener("click", async () => {
-      setButtonBusy(save, true);
-      const payload = {
-        title: title.value,
-        status: status.value,
-        priority: priority.value,
-        labels: labels.getLabels(),
-        due_date: due.value || null,
-        source_date: sourceDate.value || null,
-        body: body.value,
-      };
-      try {
-        if (task)
-          await requestJournal("update-task", { id: task.id, ...payload });
-        else {
-          const response = await requestJournal("add-task", payload, (next) => {
-            if (next.task) selectedTaskId = next.task.id;
-          });
-          if (response.task) setRoute({ tab: "tasks", task: response.task.id });
-        }
-      } catch (error) {
-        showFailure(text().saveTaskFailed, error);
-      } finally {
-        setButtonBusy(save, false);
-      }
-    });
-    actions.appendChild(save);
-    if (task) {
-      const claim = document.createElement("button");
-      claim.type = "button";
-      claim.textContent = text().claim;
-      claim.addEventListener("click", async () => {
-        setButtonBusy(claim, true);
-        try {
-          await requestJournal("claim-task", { id: task.id, by: "user" });
-        } catch (error) {
-          showFailure(text().claimTaskFailed, error);
-        } finally {
-          setButtonBusy(claim, false);
-        }
-      });
-      const done = document.createElement("button");
-      done.type = "button";
-      done.textContent = text().done;
-      done.disabled = task.status !== "doing" || task.claim?.by !== "user";
-      done.addEventListener("click", async () => {
-        setButtonBusy(done, true);
-        try {
-          await requestJournal("complete-task", {
-            id: task.id,
-            by: "user",
-            source: "user",
-          });
-        } catch (error) {
-          showFailure(text().doneTaskFailed, error);
-        } finally {
-          setButtonBusy(done, false);
-        }
-      });
-      const del = document.createElement("button");
-      del.type = "button";
-      del.className = "journal-danger-action";
-      del.innerHTML = `${iconSvg("octicon-trash", TRASH_16_PATH)}<span>${text().delete}</span>`;
-      del.addEventListener("click", async () => {
-        const ok = await showConfirmDialog({
-          title: `${text().delete}?`,
-          body: task.title,
-          confirmLabel: text().delete,
-          danger: true,
-          focusReturnTarget: del,
-        });
-        if (!ok) return;
-        setButtonBusy(del, true);
-        try {
-          const result = await requestJournal("delete-task", { id: task.id });
-          if (!result.removed)
-            throw new Error(
-              "the server reported that the task was not removed",
-            );
-          selectedTaskId = "";
-          setRoute({ tab: "tasks", task: undefined });
-        } catch (error) {
-          showFailure(text().deleteTaskFailed, error);
-        } finally {
-          setButtonBusy(del, false);
-        }
-      });
-      actions.append(claim, done, del);
-    }
-
-    panel.append(
-      resizer,
-      heading,
-      title,
-      row,
-      labels.element,
-      toolbar,
-      body,
-      preview,
-      actions,
-    );
-    return panel;
-  }
-
-  function renderTasksTab(): HTMLElement {
-    const wrap = document.createElement("div");
-    wrap.className = "journal-tasks-layout";
-    const toolbar = document.createElement("div");
-    toolbar.className = "journal-task-toolbar";
-    const labelInput = document.createElement("input");
-    labelInput.type = "search";
-    labelInput.placeholder = text().labelFilterPlaceholder;
-    labelInput.value = labelFilter;
-    labelInput.addEventListener("change", () => {
-      labelFilter = normalizeJournalLabel(labelInput.value) || "";
-      setRoute({ tab: "tasks", label: labelFilter || undefined });
-    });
-    toolbar.append(
-      labelInput,
-      renderQueuePreview(),
-      renderGithubIssueToggle(),
-      renderLabelFilters(),
-    );
-    if (githubInboxOpen) toolbar.appendChild(renderGithubIssuesPanel());
-    const boardWrap = document.createElement("div");
-    boardWrap.className = "journal-task-board-wrap";
-    boardWrap.appendChild(renderTaskBoard());
-    wrap.append(toolbar, boardWrap, renderTaskEditor());
-    return wrap;
   }
 
   function render(): void {
     root.setAttribute("aria-label", text().ariaLabel);
-    root.replaceChildren(renderHeader());
-    const content = document.createElement("div");
-    content.className = "journal-content";
-    content.appendChild(
-      activeTab === "journal" ? renderJournalTab() : renderTasksTab(),
+    renderSeq += 1;
+    renderOwned(
+      root,
+      keyed(
+        renderSeq,
+        view.page({
+          header: headerProps(),
+          daily: activeTab === "journal" ? dailyProps() : null,
+          tasks: activeTab === "journal" ? null : tasksProps(),
+        }),
+      ),
     );
-    root.appendChild(content);
+    if (activeTab !== "journal") void drawTaskPreview();
     if (pendingTaskEditorFocus || pendingTaskEditorReveal)
       scheduleTaskEditorInteraction();
   }
