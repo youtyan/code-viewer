@@ -30,9 +30,11 @@ import {
   AGENT_STATE_FILTERS,
   type AgentPane,
   type AgentProjectGroup,
+  type AgentProjectInfo,
   type AgentStateFilter,
   filterAgentPanes,
   groupAgentPanes,
+  groupAgentPanesByUrgency,
   matchesStateFilter,
   notifyPermissionView,
 } from "../../core/agent-overview";
@@ -59,6 +61,7 @@ import {
   type AgentsBoardViewProps,
   type BoardActivity,
   type BoardListEntry,
+  type BoardOrder,
   type BoardProjectProps,
   type BoardRowProps,
   DEFAULT_VIEW,
@@ -121,6 +124,8 @@ export function createAgentsPresenter(
   let mounted = false;
   let stateFilter: AgentStateFilter = "all";
   let allPanes = false;
+  /** 並び (プロジェクトの畳みと同じくメモリだけ)。 */
+  let order: BoardOrder = "project";
   let selected: string | null = null;
   /** 畳んだプロジェクト (root)。取り直しを跨いで保つ。 */
   const collapsed = new Set<string>();
@@ -165,12 +170,13 @@ export function createAgentsPresenter(
     render(true);
   }
 
-  function rowProps(pane: AgentPane): BoardRowProps {
+  function rowProps(pane: AgentPane, project?: AgentCardExtra): BoardRowProps {
     const current = text();
     const unread = deps.monitor.snapshot().unread.get(pane.id);
     // 左のサイドバーと同じ 2 行組のカード (agent-card.ts)。この画面は幅が
-    // あるので、補足にアカウントと tmux の場所も足す。
+    // あるので、補足にアカウントと tmux の場所も足す。急ぐ順ではプロジェクトも。
     const card = agentCardTemplate(pane, current, unread, [
+      ...(project ? [project] : []),
       accountLabel(pane),
       { cls: "agents-place terminal-mono", text: pane.label },
     ]);
@@ -306,7 +312,7 @@ export function createAgentsPresenter(
       activity: activityProps(group.info.root, group.info.name),
       // エージェントの居ない登録プロジェクトは見出しと「エージェントはいません」。
       noAgents: group.panes.length === 0 ? current.board.noAgents : null,
-      rows: group.panes.map(rowProps),
+      rows: group.panes.map((pane) => rowProps(pane)),
     };
   }
 
@@ -528,6 +534,10 @@ export function createAgentsPresenter(
       );
       return entries;
     }
+    if (order === "urgency") {
+      entries.push(...urgencyEntries(visible, overview.projects));
+      return entries;
+    }
     // 絞り込み中は、エージェントの居ない登録プロジェクトを出さない
     // (「入力待ちだけ」を見たいときに、関係の無い見出しが並ばないように)。
     entries.push(
@@ -538,6 +548,29 @@ export function createAgentsPresenter(
       ),
     );
     return entries;
+  }
+
+  /**
+   * 急ぐ順: プロジェクトをまたいで状態ごとの段に並べる (groupAgentPanesByUrgency)。
+   * 行の補足にプロジェクトの名前を足す (見出しがプロジェクトでないので)。
+   */
+  function urgencyEntries(
+    panes: AgentPane[],
+    projects: readonly AgentProjectInfo[],
+  ): BoardListEntry[] {
+    const current = text();
+    const names = new Map(projects.map((info) => [info.root, info.name]));
+    return groupAgentPanesByUrgency(panes).map((group) => ({
+      kind: "section",
+      state: group.state,
+      label: current.state[group.state],
+      rows: group.panes.map((pane) =>
+        rowProps(pane, {
+          cls: "agents-project-label",
+          text: names.get(pane.project) ?? pane.project,
+        }),
+      ),
+    }));
   }
 
   /**
@@ -612,6 +645,18 @@ export function createAgentsPresenter(
           title: current.allPanesTitle,
           checked: allPanes,
         },
+        order: {
+          label: current.board.orderLabel,
+          options: (["project", "urgency"] as const).map((item) => ({
+            order: item,
+            label:
+              item === "project"
+                ? current.board.orderByProject
+                : current.board.orderByUrgency,
+            title: item === "urgency" ? current.board.orderByUrgencyTitle : "",
+            active: order === item,
+          })),
+        },
         // 狭いと末尾を省くので、全文はカーソルを置いたときに出す。
         hint: current.keyboardHint,
       },
@@ -648,6 +693,10 @@ export function createAgentsPresenter(
       },
       onAllPanes(checked) {
         allPanes = checked;
+        render(true);
+      },
+      onOrder(next) {
+        order = next;
         render(true);
       },
       onListKeydown,

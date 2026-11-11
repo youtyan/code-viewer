@@ -1,14 +1,14 @@
 # code-viewer
 
 A local, browser-based viewer for your repository's code and git diffs, with a
-place to run and watch AI coding agents (claude, codex) in tmux.
+place to run and watch AI coding agents (claude, codex, opencode) in tmux.
 
 English | [日本語](README_ja.md)
 
 ![code-viewer: projects and agents on the left, the file list and changed files in the middle, a diff on the right](web/help-images/overview.en.webp)
 
 - Read files, diffs, commit history, blame and every worktree of a repository.
-- Start claude or codex in tmux, see which ones need input, and answer them in a terminal tab.
+- Start claude, codex or opencode in tmux, see which ones need input, and answer them in a terminal tab.
 - Keep several claude / codex accounts and see their usage.
 - Browse SQLite, PostgreSQL, MySQL, Redis, Elasticsearch, DynamoDB, S3-compatible storage and Cloudflare D1.
 - Let AI agents use it through a CLI, an MCP server and bundled skills.
@@ -36,7 +36,7 @@ One code-viewer serves every project from one port. It listens on `127.0.0.1` on
 |---|---|
 | Node.js 22.14 or newer, git | Everything |
 | [tmux](https://github.com/tmux/tmux) | Agents, account sign-in and tmux panes (shells work without it) |
-| claude and / or codex CLI | Running agents |
+| claude, codex and / or opencode CLI | Running agents |
 | `better-sqlite3` (optional dependency, installed with the package) | SQLite viewer, snapshots and `code-viewer query` |
 | `@lydell/node-pty` (optional dependency, installed with the package) | Terminal tabs (shells, and agents opened in a tab) |
 | Chrome | Installing it as an app (optional) |
@@ -54,7 +54,7 @@ One code-viewer serves every project from one port. It listens on `127.0.0.1` on
 3. Install tmux (`brew install tmux`, or your package manager on Linux).
 4. **Settings → Accounts**: select **Sign in** on the claude or codex row.
 5. (Recommended) **Settings → Agents → Agent integration**: select **Set up** to install hooks, so agent states are reliable.
-6. **New agent** at the bottom of the sidebar: choose claude or codex, the account and the project, then **Launch**.
+6. **New agent** at the bottom of the sidebar: choose claude, codex or opencode, the account and the project, then **Launch**.
 7. (Optional) **Enable notifications** on the **All agents** screen (`g a`).
 8. (Optional) Give your AI the bundled skills: `npx @youtyan/code-viewer skill install`.
 
@@ -199,7 +199,7 @@ Marks in the file list:
 
 ### Agents
 
-- **New agent**: starts claude or codex in a new tmux window, with the account and project you choose. The dialog shows the exact command and each account's 5-hour and weekly usage.
+- **New agent**: starts claude, codex or opencode in a new tmux window, with the account and project you choose. The dialog shows the exact command and each account's 5-hour and weekly usage.
 - The launch commands can be edited in **Settings → Accounts → Launch commands**.
 - claude started from code-viewer uses the classic renderer even if fullscreen (`"tui": "fullscreen"`) is set, so its earlier output stays in tmux for the phone to read.
 - Agents are listed under their project in the sidebar, on every screen. Select one to open its pane in a terminal tab. Rest the pointer on it to see the last lines of its screen.
@@ -217,13 +217,13 @@ Marks in the file list:
 
 How the state is decided, strongest first:
 
-1. Hooks: claude and codex report it themselves. **Set up** in **Settings → Agents → Agent integration** shows the file and the diff before writing, backs up the file, and keeps your other hooks. If the settings file is generated (for example from dotfiles), it shows the hooks to add to the source instead. codex runs new hooks only after you trust them in `/hooks`.
+1. Hooks: claude, codex and opencode report it themselves (for opencode, a plugin file in `~/.config/opencode/plugins/`; restart a running opencode). **Set up** in **Settings → Agents → Agent integration** shows the file and the diff before writing, backs up the file, and keeps your other hooks. If the settings file is generated (for example from dotfiles), it shows the hooks to add to the source instead. codex runs new hooks only after you trust them in `/hooks`.
 2. Screen text: rules match what the agent shows. Edit them as JSON in **Settings → Advanced**.
 3. Screen motion: whether the screen keeps changing.
 
 ### Accounts
 
-- An account is one claude or codex settings directory (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`).
+- An account is one claude or codex settings directory (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`). opencode has only its default account: no opencode setting keeps a sign-in in another directory. Its sign-in state comes from `opencode auth list`, and it has no usage limits to show.
 - **Settings → Accounts → Add account…**: create a new directory that links your settings from the default one, or register one you already have. It shows what will be created first. Sign-in details and history are never shared.
 - **Sign in** runs the official login command in a new tmux window.
 - Sign-in state and email come from `claude auth status`, `codex login status` and `codex app-server`. code-viewer does not read tokens.
@@ -541,7 +541,7 @@ npx -y @youtyan/code-viewer skill install --agent claude,codex   # several agent
 npx -y @youtyan/code-viewer skill install --agent all --global   # every agent, in your home directory
 ```
 
-- `--agent`: `claude`, `codex`, `gemini`, `cursor`, `agents` (`.agents/skills`) or `all`.
+- `--agent`: `claude`, `codex`, `gemini`, `cursor`, `agents` (`.agents/skills`), `opencode` (`.opencode/skills`, `--global`: `~/.config/opencode/skills`) or `all`.
 - Run it at the repository root: without `--global` it installs into the current directory. `--global` installs into `~/.claude/skills/`, `~/.codex/skills/` and so on; `--cwd <dir>` picks another directory.
 - Running it again updates the installed skills.
 

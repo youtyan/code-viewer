@@ -106,6 +106,7 @@ function overviewDeps(
     findServer: async () => ({ status: "absent" }),
     forgetServer: () => undefined,
     paneAccounts: async () => new Map(),
+    paneProcessKinds: async () => ({ kinds: new Map(), errors: [] }),
     readRegistry: () => ({
       projects: registered,
       error: "",

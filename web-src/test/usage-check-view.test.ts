@@ -258,6 +258,25 @@ describe("when the check is offered", () => {
     expect(usageCheckMenuItem(row, client, t)?.label).toBe(t.usageCheck);
   });
 
+  // opencode は上限を出す仕組みが無い (usageSupported)。理由は一覧の使用量の欄に出る。
+  test("opencode is never offered a check, in the card or the menu", () => {
+    const { client } = fakeClient();
+    const row = account({
+      agent: "opencode",
+      statusLine: null,
+      usage: {
+        status: "unavailable",
+        reason: "unsupported",
+        detail: "",
+        observedAt: 0,
+      },
+    });
+    expect(
+      shown(usageCheckBlock(row, NOW, client, t, NO_OPENERS))?.button ?? null,
+    ).toBeNull();
+    expect(usageCheckMenuItem(row, client, t)).toBeNull();
+  });
+
   test("pressing starts the check at once (no confirmation)", () => {
     const { client, pressed } = fakeClient();
     const block = usageCheckBlock(account(), NOW, client, t, NO_OPENERS);

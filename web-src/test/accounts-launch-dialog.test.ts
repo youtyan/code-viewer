@@ -69,7 +69,7 @@ function response(claude: string): AccountsResponse {
     ],
     registryError: null,
     registryPath: "/home/sample/.local/state/code-viewer/accounts.json",
-    launchCommands: { claude, codex: "codex" },
+    launchCommands: { claude, codex: "codex", opencode: "opencode" },
     lastLaunch: null,
     usageFailures: { total: 0, recent: [], log: "" },
   };
@@ -552,6 +552,51 @@ describe("別のアカウントで続ける (起動の画面を引き継ぎの�
         project: "/home/sample/work/sample-lib",
         session: "sample-agents",
         handoff: { pane: "%4", language: "ja", fromAccount: "Work" },
+      },
+    ]);
+  });
+
+  test("opencode を選ぶと既定のアカウントで、指示は --prompt で渡し、資格情報が無くても使えると言う", async () => {
+    const data = accountsResponse();
+    const [builtin] = data.accounts;
+    if (!builtin) throw new Error("the sample response has no account");
+    data.accounts.push(
+      account({
+        id: "opencode:default",
+        agent: "opencode",
+        name: "",
+        builtin: true,
+        configDir: "/home/sample/.config/opencode",
+        login: { ...builtin.login, state: "logged-out", checkedAt: NOW },
+        usage: {
+          status: "unavailable",
+          reason: "unsupported",
+          detail: "",
+          observedAt: 0,
+        },
+      }),
+    );
+    const { closed, launched } = openDialog(data, { handoff: from });
+    [...document.querySelectorAll<HTMLButtonElement>(".seg button")]
+      .find((button) => button.textContent === "opencode")
+      ?.click();
+    const prompt = `Take over the work of the previous agent (claude · Work). Its conversation log is at ${LOG} (JSONL). Read the last request and how far it got, then continue the work. If anything is unclear, ask before you start.`;
+    expect(preview()).toBe(`opencode --prompt '${prompt}'`);
+    const dialog = document.querySelector<HTMLElement>(".gdp-dialog");
+    expect(dialog?.textContent).toContain(
+      ACCOUNTS_EN.launchOpencodeNoCredentials,
+    );
+    expect(dialog?.textContent).not.toContain(ACCOUNTS_EN.launchNeedsLogin);
+    document
+      .querySelector<HTMLButtonElement>(".gdp-dialog .gdp-dialog-confirm")
+      ?.click();
+    await closed;
+    expect(launched).toEqual([
+      {
+        accountId: "opencode:default",
+        project: "/home/sample/work/sample-lib",
+        session: "sample-agents",
+        handoff: { pane: "%4", language: "en", fromAccount: "Work" },
       },
     ]);
   });

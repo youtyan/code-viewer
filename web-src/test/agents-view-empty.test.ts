@@ -21,6 +21,7 @@ import {
 import { agentsText } from "../views/agents/i18n";
 import type { PanePreview } from "../views/agents/pane-preview";
 import type { ProjectActions } from "../views/projects/project-actions";
+import { flushRenders } from "../views/ui/render-queue";
 import { info, overview as overviewWith } from "./_agents-sidebar-fixture";
 import { agentPane } from "./_test-helpers";
 
@@ -417,5 +418,51 @@ describe("agents board presenter", () => {
     const { last, calls } = await mountWithView(panes());
     last().onLaunch();
     expect(calls).toEqual(["launch"]);
+  });
+
+  test("Needs you first lists every project together, by state, with the project on each row", async () => {
+    const row = (
+      id: string,
+      state: AgentPane["state"],
+      project: string,
+      updatedAt: number,
+    ) =>
+      agentPane({
+        id,
+        label: `work:0.${id.slice(1)}`,
+        state,
+        project,
+        updatedAt,
+        kind: "claude",
+      });
+    const { last } = await mountWithView([
+      row("%1", "working", "/work/sample-app", 10),
+      row("%2", "waiting", "/work/sample-lib", 20),
+      row("%3", "done", "/work/sample-app", 30),
+      row("%4", "waiting", "/work/sample-app", 40),
+    ]);
+    expect(
+      last().board.order.options.map((item) => [item.order, item.active]),
+    ).toEqual([
+      ["project", true],
+      ["urgency", false],
+    ]);
+    last().onOrder("urgency");
+    await flushRenders();
+    const sections = last().list.flatMap((entry) =>
+      entry.kind === "section"
+        ? [[entry.state, entry.rows.map((item) => item.id)]]
+        : [],
+    );
+    expect(sections).toEqual([
+      ["waiting", ["%4", "%2"]],
+      ["done", ["%3"]],
+      ["working", ["%1"]],
+    ]);
+    expect(last().list.some((entry) => entry.kind === "project")).toBe(false);
+    expect(
+      document.querySelector('[data-agent-nav="pane:%2"] .agents-project-label')
+        ?.textContent,
+    ).toBe("/work/sample-lib");
   });
 });

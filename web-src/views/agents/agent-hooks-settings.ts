@@ -1,6 +1,6 @@
 import { apiUrl } from "../../core/api-url";
 
-// 設定画面の「エージェント連携」の節。claude と codex に状態を知らせる
+// 設定画面の「エージェント連携」の節。claude・codex・opencode に状態を知らせる
 // フックを、書き込む内容を見せて確認してから入れる・外す。
 //
 //   エージェント連携

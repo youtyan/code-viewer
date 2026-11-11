@@ -34,12 +34,12 @@ describe("the agent integration section", () => {
   test.each([
     [
       "en",
-      "With these hooks, claude and codex tell code-viewer themselves when they are working, waiting for input or done, so the states shown are reliable. Other hooks in the file stay as they are.",
+      "With these hooks (a plugin for opencode), claude, codex and opencode tell code-viewer themselves when they are working, waiting for input or done, so the states shown are reliable. Other hooks in the file stay as they are.",
       "How to set them up and what they change: Help › sample section (en).",
     ],
     [
       "ja",
-      "入れると、claude と codex が作業中・入力待ち・完了を自分で知らせるので、状態の表示が確かになります。ファイルにあるほかのフックはそのまま残ります。",
+      "入れると、claude・codex・opencode（opencode はプラグイン）が作業中・入力待ち・完了を自分で知らせるので、状態の表示が確かになります。ファイルにあるほかのフックはそのまま残ります。",
       "入れ方と、入れると何が変わるかは Help › sample section (ja) にあります。",
     ],
   ] as const)(

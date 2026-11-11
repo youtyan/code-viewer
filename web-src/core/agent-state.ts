@@ -91,7 +91,7 @@ export function agentStateForEvent(
  * フックが名乗ってきたエージェントの種類。プロセス名から見分けられない
  * もの (node として動く claude など) を一覧に出すために使う。
  */
-export const REPORTED_AGENTS = ["claude", "codex"] as const;
+export const REPORTED_AGENTS = ["claude", "codex", "opencode"] as const;
 
 export type ReportedAgent = (typeof REPORTED_AGENTS)[number];
 
@@ -290,7 +290,10 @@ export type AgentStateObservationError = {
     /** 保存した未読と変わった時刻を読めなかった (server/terminal/unread-store.ts)。 */
     | "restore_unread"
     /** 未読と変わった時刻を保存できなかった。 */
-    | "save_unread";
+    | "save_unread"
+    // インタプリタ (node など) のペインの中のプログラムを ps で調べられなかった
+    // (server/terminal/process-kind.ts)。種類はコマンド名と申告で決める。
+    | "probe_process";
   target: string;
   at: number;
   /** Error の cause と独自フィールドを保持した表示用詳細。 */

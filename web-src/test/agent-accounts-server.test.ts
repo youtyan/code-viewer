@@ -39,6 +39,7 @@ import {
   parseClaudeAuthStatus,
   parseCodexAccountRead,
   parseCodexLoginStatus,
+  parseOpencodeAuthList,
 } from "../server/accounts/login";
 import {
   createProcessEnvProber,
@@ -943,6 +944,77 @@ describe("login status (asked from the CLI itself)", () => {
     expect(JSON.stringify(login)).not.toContain("sample output");
   });
 
+  // `opencode auth list` の人向けの一覧 (1.19.5 の形。色の制御文字と行頭の飾り
+  // つき)。提供元の名前は中立なものに置き換えた。
+  const GRAY = `${ESC}[90m`;
+  const RESET = `${ESC}[0m`;
+  const opencodeList = (credentials: string[], environment: string[]) =>
+    [
+      RESET,
+      `┌  Credentials ${GRAY}~/.local/share/opencode/auth.json`,
+      "│",
+      ...credentials.flatMap((line) => [`●  ${line}`, "│"]),
+      `└  ${credentials.length} credential${credentials.length === 1 ? "" : "s"}`,
+      ...(environment.length
+        ? [
+            "",
+            "┌  Environment",
+            "│",
+            ...environment.flatMap((line) => [`●  ${line}`, "│"]),
+            `└  ${environment.length} environment variable${environment.length === 1 ? "" : "s"}`,
+          ]
+        : []),
+      "",
+    ].join("\n");
+  test.each([
+    {
+      name: "no credentials",
+      out: ok(opencodeList([], [])),
+      expected: { state: "logged-out", who: "" },
+    },
+    {
+      name: "stored credentials",
+      out: ok(
+        opencodeList(
+          [`Sample Provider ${GRAY}api`, `Other Provider ${GRAY}oauth`],
+          [],
+        ),
+      ),
+      expected: {
+        state: "logged-in",
+        who: "Sample Provider, Other Provider",
+        whoDetail: "",
+      },
+    },
+    {
+      name: "a credential from an environment variable only",
+      out: ok(opencodeList([], [`Sample Provider ${GRAY}SAMPLE_API_KEY`])),
+      expected: { state: "logged-in", who: "Sample Provider" },
+    },
+    {
+      name: "the command is missing",
+      out: ok("", 127, "zsh:1: command not found: opencode\n"),
+      expected: {
+        state: "unknown",
+        detail:
+          "opencode auth list: the command was not found (exit 127: zsh:1: command not found: opencode)",
+      },
+    },
+    {
+      name: "output without the count line",
+      out: ok("sample output"),
+      expected: {
+        state: "unknown",
+        detail:
+          'opencode auth list exited with 0 (stdout 13 bytes, not shown); no "N credentials" line in the output',
+      },
+    },
+  ])("opencode: $name", ({ out, expected }) => {
+    const login = parseOpencodeAuthList(out, AT);
+    expect(login).toMatchObject(expected);
+    expect(JSON.stringify(login)).not.toContain("sample output");
+  });
+
   const answer = (result: unknown) =>
     JSON.stringify({ id: ACCOUNT_READ_ID, result });
   const rpcOk = (...lines: string[]) => ({
@@ -1335,6 +1407,76 @@ describe("login status (asked from the CLI itself)", () => {
     } finally {
       for (const spy of spies) spy.mockRestore();
     }
+  });
+
+  // opencode は既定のアカウントだけ。ログインは `opencode auth list`、使用量は
+  // 出す仕組みが無い (unsupported)、ペインのプロセスは調べない。
+  test("opencode: sign-in from auth list, usage unsupported, panes are the default account", async () => {
+    mkdirSync(join(paths.home, ".config", "opencode"), { recursive: true });
+    const asked: string[][] = [];
+    const probed: string[] = [];
+    const service = createAccountService(
+      paths,
+      createProcessEnvProber({
+        async listProcesses() {
+          return [];
+        },
+        async readAccountEnv(pids) {
+          probed.push(...pids.map(String));
+          return new Map();
+        },
+        now: () => AT,
+      }),
+      createLoginChecker({
+        async run(args) {
+          asked.push(args.slice(-2));
+          return args[args.length - 1] === "list"
+            ? ok("└  1 credential\n●  Sample Provider api\n")
+            : ok("", 1, "unexpected\n");
+        },
+        async rpc() {
+          throw new Error("opencode does not use app-server");
+        },
+        now: () => AT,
+        markOnboarded: async () => ({ status: "already" as const }),
+      }),
+    );
+    const body = await service.overview({ serverRoot: root, forceLogin: true });
+    const opencode = body.accounts.find(
+      (account) => account.id === "opencode:default",
+    );
+    expect(opencode).toMatchObject({
+      agent: "opencode",
+      builtin: true,
+      exists: true,
+      login: { state: "logged-in" },
+      usage: { status: "unavailable", reason: "unsupported" },
+    });
+    expect(asked).toContainEqual(["auth", "list"]);
+    expect(body.launchCommands.opencode).toBe("opencode");
+
+    const accounts = await service.paneAccounts([
+      { id: "%9", pid: 99, command: "opencode", kind: "opencode" },
+    ]);
+    expect(accounts.get("%9")).toEqual({
+      kind: "default",
+      id: "opencode:default",
+    });
+    expect(probed).toEqual([]);
+  });
+
+  test("opencode: the environment is passed as it is (no variable picks an account)", () => {
+    const base = { XDG_DATA_HOME: "/somewhere", PATH: "/bin" };
+    expect(
+      accountEnv(
+        {
+          agent: "opencode",
+          builtin: true,
+          configDir: "/home/sample/.config/opencode",
+        },
+        base,
+      ),
+    ).toEqual(base);
   });
 
   test("the default account unsets the variable, others set it", () => {

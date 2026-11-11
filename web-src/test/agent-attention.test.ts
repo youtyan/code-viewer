@@ -81,6 +81,24 @@ describe("agentAttentionForHook", () => {
     ],
     ["claude", { hook_event_name: "PermissionRequest" }, null],
     ["codex", { hook_event_name: "StopFailure", error: "rate_limit" }, null],
+    // opencode のプラグインが渡す許可と質問 (core/agent-hooks.ts の HOOK_SPECS)。
+    [
+      "opencode",
+      { hook_event_name: "permission.asked" },
+      { kind: "permission", reason: "", detail: "" },
+    ],
+    [
+      "opencode",
+      { hook_event_name: "permission.updated" },
+      { kind: "permission", reason: "", detail: "" },
+    ],
+    [
+      "opencode",
+      { hook_event_name: "question.asked" },
+      { kind: "question", reason: "", detail: "" },
+    ],
+    ["opencode", { hook_event_name: "permission.replied" }, null],
+    ["opencode", { hook_event_name: "session.idle" }, null],
   ] satisfies [HookAgent, Record<string, unknown>, AgentAttention | null][])(
     "%s %j -> %j",
     (agent, input, expected) => {

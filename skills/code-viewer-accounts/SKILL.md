@@ -11,6 +11,11 @@ An account is its own settings directory (`CLAUDE_CONFIG_DIR` for claude,
 calls the same server routes as Settings > Accounts; the server enforces what
 may be shared and refuses two accounts on one directory.
 
+opencode is listed too, but only as its default account (`opencode:default`):
+no opencode setting keeps its sign-in in another directory, so `create` and
+`register` refuse `--agent opencode`. `login --account opencode:default` opens
+`opencode auth login` like the others.
+
 ## Requirements
 
 - code-viewer must already be running (the human starts it with: `code-viewer`,
@@ -42,7 +47,7 @@ code-viewer accounts list --json
 ```
 
 `list` includes the default accounts (`claude:default`, `codex:default`,
-which use `~/.claude` / `~/.codex`). Pick names that no other account of the
+`opencode:default`, which use `~/.claude` / `~/.codex` / `~/.config/opencode`). Pick names that no other account of the
 same service uses, and not `Default` / `既定`: creating does not refuse a
 repeated name yet, and the lists would show two rows the human cannot tell
 apart.
@@ -153,8 +158,8 @@ history) stays, running agents keep running, and `register` brings it back.
 code-viewer accounts remove --account <id>
 ```
 
-The default accounts (`claude:default`, `codex:default`) cannot be renamed or
-removed.
+The default accounts (`claude:default`, `codex:default`, `opencode:default`)
+cannot be renamed or removed.
 
 ## Full reference
 

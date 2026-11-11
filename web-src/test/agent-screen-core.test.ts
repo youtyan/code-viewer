@@ -407,6 +407,127 @@ describe("detectAgentScreen: 入力欄の下に行が積まれた画面", () => 
   });
 });
 
+// opencode (1.19.5) の画面を中立な文字に置き換えたもの。右の欄 (Context・
+// LSP・フォルダ) は端末が広いときだけ同じ行の右に出る。
+const OC_SIDE = "                                        ";
+const OC_BOX_BOTTOM = `  ╹${"▀".repeat(60)}`;
+function opencodeScreen(bottom: string[], above: string[] = []): string {
+  return [
+    "  ┃  sample question",
+    "  ┃",
+    `     ▣  Build · sample-model${OC_SIDE}Context`,
+    ...above,
+    "  ┃",
+    `  ┃  Build · sample-model${OC_SIDE}~/sample`,
+    ...bottom,
+  ].join("\n");
+}
+
+describe("detectAgentScreen: opencode", () => {
+  test.each([
+    {
+      name: "作業中 (入力欄の下の行に動く印と esc interrupt)",
+      screen: opencodeScreen([
+        OC_BOX_BOTTOM,
+        `   ⬝⬝■■■■■■  esc interrupt${OC_SIDE}ctrl+p commands    • OpenCode 0.0.0`,
+      ]),
+      expected: { state: "working", ruleId: "opencode_working" },
+    },
+    {
+      name: "作業中 (印の字が変わっても形で見る)",
+      screen: opencodeScreen([
+        OC_BOX_BOTTOM,
+        `   ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt${OC_SIDE}tab agents  ctrl+p commands`,
+      ]),
+      expected: { state: "working", ruleId: "opencode_working" },
+    },
+    {
+      name: "待機 (入力欄の下端があり、作業中の行が無い)",
+      screen: opencodeScreen([
+        OC_BOX_BOTTOM,
+        `   ~/sample${OC_SIDE}17.5K (9%)  ctrl+p commands    • OpenCode 0.0.0`,
+      ]),
+      expected: { state: "idle", ruleId: "opencode_prompt" },
+    },
+    {
+      name: "待機 (起動直後の入力欄)",
+      screen: [
+        "  ┃",
+        '  ┃  Ask anything… "Fix a TODO in the codebase"',
+        "  ┃",
+        "  ┃  Build · sample-model",
+        OC_BOX_BOTTOM,
+        "                     tab agents  ctrl+p commands",
+      ].join("\n"),
+      expected: { state: "idle", ruleId: "opencode_prompt" },
+    },
+    {
+      name: "入力待ち (許可の選択肢)",
+      screen: [
+        "     $ sample-command",
+        "     ▣  Build · sample-model",
+        "  ┃",
+        "  ┃  △ Permission required",
+        "  ┃    # Shell command",
+        "  ┃",
+        "  ┃  $ sample-command",
+        `  ┃${OC_SIDE}~/sample`,
+        `  ┃   Allow once   Allow always   Reject${OC_SIDE}ctrl+f fullscreen  ⇆ select  enter confirm`,
+        `  ┃${OC_SIDE}• OpenCode 0.0.0`,
+      ].join("\n"),
+      expected: { state: "waiting", ruleId: "opencode_permission" },
+    },
+    {
+      name: "入力待ち (質問の選択肢)",
+      screen: [
+        "     → Asked 1 question",
+        "     ▣  Build · sample-model",
+        "  ┃",
+        "  ┃  A or B?",
+        "  ┃",
+        "  ┃  1. A",
+        "  ┃  2. B",
+        `  ┃  3. Type your own answer${OC_SIDE}~/sample`,
+        "  ┃  ↑↓ select  enter submit  esc dismiss",
+        `  ┃${OC_SIDE}• OpenCode 0.0.0`,
+      ].join("\n"),
+      expected: { state: "waiting", ruleId: "opencode_question" },
+    },
+  ])("$name", ({ screen, expected }) => {
+    expect(detectAgentScreen({ screen, title: "OC | sample" })).toMatchObject({
+      kind: "state",
+      ...expected,
+    });
+  });
+
+  test.each([
+    {
+      name: "claude の作業中の行 (esc to interrupt) は opencode の作業中に当てない",
+      screen: "• Working (5s • esc to interrupt)\n› ",
+      not: "opencode_working",
+    },
+    {
+      name: "会話の本文に出た esc interrupt は、行の頭の形が違えば作業中にしない",
+      screen: opencodeScreen(
+        [OC_BOX_BOTTOM, "   ~/sample"],
+        ["     press esc interrupt to stop it"],
+      ),
+      not: "opencode_working",
+    },
+    {
+      name: "許可の見出しだけ (選択肢が出ていない) は入力待ちにしない",
+      screen: opencodeScreen(
+        [OC_BOX_BOTTOM, "   ~/sample"],
+        ["     △ Permission required"],
+      ),
+      not: "opencode_permission",
+    },
+  ])("$name", ({ screen, not }) => {
+    const detected = detectAgentScreen({ screen, title: "" });
+    expect(detected.kind === "none" ? null : detected.ruleId).not.toBe(not);
+  });
+});
+
 describe("parseAgentScreenRuleSet", () => {
   test("既定ルールは設定ファイルとして妥当", () => {
     expect(parseAgentScreenRuleSet(DEFAULT_AGENT_SCREEN_RULES)).toEqual({

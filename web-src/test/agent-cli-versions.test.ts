@@ -51,6 +51,7 @@ describe("doctor: agent CLIs", () => {
   const CHECKED = {
     claude: { version: "9.8.7", checkedOn: "2026-01-02" },
     codex: { version: "0.1.0", checkedOn: "2026-01-02" },
+    opencode: { version: "0.2.0", checkedOn: "2026-01-02" },
   };
 
   test("asks the configured launch command through the interactive shell", async () => {
@@ -60,11 +61,16 @@ describe("doctor: agent CLIs", () => {
         asked.push(argv.slice(2));
         return ok("1.0.0\n");
       },
-      { claude: "my-claude", codex: "codex --profile work" },
+      {
+        claude: "my-claude",
+        codex: "codex --profile work",
+        opencode: "/opt/sample/opencode",
+      },
     );
     expect(asked).toEqual([
       ["-c", 'my-claude "$@"', expect.any(String), "--version"],
       ["-c", 'codex --profile work "$@"', expect.any(String), "--version"],
+      ["-c", '/opt/sample/opencode "$@"', expect.any(String), "--version"],
     ]);
   });
 
@@ -136,7 +142,7 @@ describe("doctor: agent CLIs", () => {
   ])("$name", async ({ result, row }) => {
     const group = await checkAgentClis(
       async () => result,
-      { claude: "claude", codex: "codex" },
+      { claude: "claude", codex: "codex", opencode: "opencode" },
       CHECKED,
     );
     const claude = group.rows.find(

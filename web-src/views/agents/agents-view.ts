@@ -1,11 +1,11 @@
 // エージェントの全体ボード (/agents) の表示。agents-presenter.ts が渡す値
 // (AgentsBoardViewProps) だけから描く。
 
-import { html, nothing, type TemplateResult } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { live } from "lit/directives/live.js";
 import { ref } from "lit/directives/ref.js";
 import { repeat } from "lit/directives/repeat.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import type { AgentPane, AgentStateFilter } from "../../core/agent-overview";
 import {
   CHEVRON_DOWN_16_PATH,
@@ -88,6 +88,16 @@ export type AgentsBoardViewProps = {
       active: boolean;
     }[];
     allPanes: { label: string; title: string; checked: boolean };
+    /** 並びの切替 (プロジェクトごと・急ぐ順)。 */
+    order: {
+      label: string;
+      options: {
+        order: BoardOrder;
+        label: string;
+        title: string;
+        active: boolean;
+      }[];
+    };
     hint: string;
   };
   /** 一覧の中身 (順に並べる)。 */
@@ -101,6 +111,7 @@ export type AgentsBoardViewProps = {
   onHookClose(): void;
   onFilter(filter: AgentStateFilter): void;
   onAllPanes(checked: boolean): void;
+  onOrder(order: BoardOrder): void;
   onListKeydown(event: KeyboardEvent): void;
   onOpenPane(id: string, event: MouseEvent): void;
   onPaneMenu(id: string, event: MouseEvent): void;
@@ -113,8 +124,18 @@ export type AgentsBoardViewProps = {
   listRef(el: Element | undefined): void;
 };
 
+/** 全体ボードの並び。 */
+export type BoardOrder = "project" | "urgency";
+
 export type BoardListEntry =
   | { kind: "activity"; activity: BoardActivity; root: string }
+  | {
+      /** 急ぐ順の 1 段 (状態ごと。プロジェクトをまたぐ)。 */
+      kind: "section";
+      state: AgentPane["state"];
+      label: string;
+      rows: BoardRowProps[];
+    }
   | { kind: "content"; content: unknown }
   | { kind: "project"; project: BoardProjectProps }
   | {
@@ -252,6 +273,16 @@ function listEntryTemplate(
       return activityTemplate(props, entry.root, entry.activity);
     case "content":
       return entry.content;
+    case "section":
+      return html`<section class="agents-project agents-urgency-section"><div
+        class="agents-project-head"
+      ><span class="agents-project-name">${entry.label}</span><span
+        class="agents-chip"
+      >${entry.rows.length}</span></div><div class="agents-rows" role="group">${repeat(
+        entry.rows,
+        (row) => row.id,
+        (row) => rowTemplate(props, row),
+      )}</div></section>`;
     case "project":
       return projectTemplate(props, entry.project);
     case "stopped":
@@ -371,7 +402,20 @@ export const DEFAULT_VIEW: AgentsBoardView = (props) => {
       .checked=${live(board.allPanes.checked)}
       @change=${(event: Event) =>
         props.onAllPanes((event.currentTarget as HTMLInputElement).checked)}
-    /><span>${board.allPanes.label}</span></label><span class="agents-spacer"></span><span
+    /><span>${board.allPanes.label}</span></label><div
+      class="agents-filter agents-order"
+      role="group"
+      aria-label=${board.order.label}
+    >${board.order.options.map(
+      (item) => html`<button
+        type="button"
+        data-order=${item.order}
+        class=${item.active ? "active" : ""}
+        aria-pressed=${String(item.active)}
+        title=${item.title}
+        @click=${() => props.onOrder(item.order)}
+      ><span class="agents-filter-label">${item.label}</span></button>`,
+    )}</div><span class="agents-spacer"></span><span
       class="agents-hint"
       title=${board.hint}
     >${board.hint}</span></div><div

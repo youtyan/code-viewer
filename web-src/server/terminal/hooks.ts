@@ -7,6 +7,10 @@
 //   に同じ形で足す。戻すには設定画面の「外す」か、印を含むフックを手で消す。
 //   書く前のファイルは同じディレクトリに `<名前>.code-viewer-backup-<時刻>`
 //   として残る
+// - opencode: `<~/.config/opencode>/plugins/code-viewer-agent-hook.js` を
+//   1 つ置く (無ければ plugins/ も作る)。中身は code-viewer だけのもの
+//   (core/agent-hooks.ts の opencodePluginSource)。戻すには「外す」か、
+//   そのファイルを消す。plugins/ は外しても残る (ほかのプラグインの置き場)
 // - code-viewer の状態ディレクトリに起動スクリプト (code-viewer-agent-hook)
 //   を置く。フックはこれを呼ぶ。外してもこのファイルは残る (ほかのエージェント
 //   の分がまだ使っているかもしれないため)。消してよいのは両方外した後
@@ -17,7 +21,9 @@
 // バックアップ・一時ファイルで置き換え・リンクのまま) は settings-file.ts。
 
 import {
+  accessSync,
   appendFileSync,
+  constants,
   mkdirSync,
   readFileSync,
   statSync,
@@ -28,6 +34,7 @@ import { basename, dirname, join } from "node:path";
 import {
   AGENT_HOOK_MARKER,
   type AgentHookFailure,
+  type AgentHookState,
   type AgentHookPlanResponse,
   type AgentHookStatus,
   type AgentHooksResponse,
@@ -35,8 +42,11 @@ import {
   HOOK_SPECS,
   type HookAction,
   type HookAgent,
+  type HookChange,
   hookEntriesState,
   type LauncherHealth,
+  OPENCODE_PLUGIN_FILE,
+  opencodePluginSource,
   planHookChange,
   serializeHookFile,
 } from "../../core/agent-hooks";
@@ -51,8 +61,10 @@ import {
   contentHash,
   DEFAULT_WRITE_OPS,
   errno,
+  type JsonFileRead,
   readJsonSettingsFile,
   type SettingsWriteOps,
+  type ShapeIssue,
   settingsFileIdentity,
   settingsRevisionConflicts,
   writeBlockedReason,
@@ -63,8 +75,12 @@ type Env = Record<string, string | undefined>;
 
 /**
  * 設定ディレクトリの既定。エージェント自身と同じ環境変数を見る
- * (CLAUDE_CONFIG_DIR / CODEX_HOME)。無ければ ~/.claude と ~/.codex。
- * 呼び出し側は別のディレクトリを渡してよい (アカウントごとの設定など)。
+ * (CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_CONFIG_HOME)。無ければ ~/.claude・
+ * ~/.codex・~/.config/opencode。呼び出し側は別のディレクトリを渡してよい
+ * (アカウントごとの設定など)。
+ *
+ * opencode の OPENCODE_CONFIG_DIR は全体の設定に足して読む場所で、全体の
+ * 設定 (ここ) は変わらない (`opencode debug paths` の config) ので見ない。
  */
 export function defaultAgentConfigDir(
   agent: HookAgent,
@@ -72,10 +88,16 @@ export function defaultAgentConfigDir(
   home: string = homedir(),
 ): string {
   if (agent === "claude") return env.CLAUDE_CONFIG_DIR || join(home, ".claude");
+  if (agent === "opencode") {
+    return join(env.XDG_CONFIG_HOME || join(home, ".config"), "opencode");
+  }
   return env.CODEX_HOME || join(home, ".codex");
 }
 
 export function agentHookFile(agent: HookAgent, configDir: string): string {
+  if (agent === "opencode") {
+    return join(configDir, "plugins", OPENCODE_PLUGIN_FILE);
+  }
   return join(configDir, agent === "claude" ? "settings.json" : "hooks.json");
 }
 
@@ -257,12 +279,103 @@ function describe(target: AgentHookTarget, launcher: HookLauncher) {
   return { path, read, command, specs: HOOK_SPECS[target.agent] };
 }
 
+/**
+ * opencode のプラグインのファイルは中身ごと code-viewer のもの。読んだ中身を
+ * そのまま持つ (JSON ではない)。
+ */
+const parsePluginSource = (text: string) => ({ source: text });
+
+/** 印の無い同名のファイルはほかの人のものなので、読めない扱いで書かない。 */
+function checkPluginShape(root: unknown): ShapeIssue[] {
+  const source = (root as { source?: unknown } | null)?.source;
+  return typeof source === "string" && source.includes(AGENT_HOOK_MARKER)
+    ? []
+    : [
+        {
+          path: "$",
+          message: `not written by code-viewer (it does not mention ${AGENT_HOOK_MARKER}); it is left as it is`,
+        },
+      ];
+}
+
+function readPlugin(target: AgentHookTarget): {
+  path: string;
+  read: JsonFileRead;
+} {
+  const path = agentHookFile(target.agent, target.configDir);
+  return {
+    path,
+    read: readJsonSettingsFile(
+      target.configDir,
+      path,
+      checkPluginShape,
+      parsePluginSource,
+    ),
+  };
+}
+
+function pluginSourceFor(launcher: HookLauncher): string {
+  return opencodePluginSource({
+    launcher: launcher.path,
+    failureLog: launcher.failureLog,
+  });
+}
+
+/** 確認の画面に出す「足す・消す出来事」。中身は出来事の名前と絞り込みだけ。 */
+function pluginEvents(): HookChange[] {
+  return HOOK_SPECS.opencode.map((spec) => ({
+    event: spec.event,
+    entry: spec.matcher === undefined ? {} : { matcher: spec.matcher },
+  }));
+}
+
+/** プラグインのファイルの状態 (設定ファイルの none / partial / installed と同じ)。 */
+function pluginEntriesState(
+  read: JsonFileRead,
+  launcher: HookLauncher,
+): AgentHookState {
+  if (read.kind !== "ok") return "none";
+  return read.text === pluginSourceFor(launcher) ? "installed" : "partial";
+}
+
+/**
+ * 書けない理由。plugins/ がまだ無いときは、それを作る設定のディレクトリが
+ * 書けるかを見る (無いディレクトリそのものは「書けない」ではない)。
+ */
+function pluginWriteBlocked(
+  target: AgentHookTarget,
+  path: string,
+  read: JsonFileRead,
+): string {
+  if (read.kind !== "missing") return writeBlockedReason(path, read);
+  try {
+    statSync(dirname(read.realPath));
+  } catch (error) {
+    if (errno(error) !== "ENOENT") throw error;
+    try {
+      accessSync(target.configDir, constants.W_OK);
+      return "";
+    } catch (accessError) {
+      return `${target.configDir} is not writable (${errno(accessError) ?? formatErrorDetail(accessError)})`;
+    }
+  }
+  return writeBlockedReason(path, read);
+}
+
+/** 書く中身。外すなら null (ファイルを消す)。 */
+function nextPluginText(action: HookAction, launcher: HookLauncher) {
+  return action === "install" ? pluginSourceFor(launcher) : null;
+}
+
 export function agentHookStatus(
   target: AgentHookTarget,
   launcher: HookLauncher,
   health: LauncherHealth = launcherHealth(launcher),
 ): AgentHookStatus {
-  const { path, read, command, specs } = describe(target, launcher);
+  const { path, read, command, specs } =
+    target.agent === "opencode"
+      ? { ...readPlugin(target), command: "", specs: [] }
+      : describe(target, launcher);
   const base = {
     agent: target.agent,
     configDir: target.configDir,
@@ -270,7 +383,10 @@ export function agentHookStatus(
     realPath: read.kind === "missing-dir" ? path : read.realPath,
     symlink:
       read.kind === "ok" || read.kind === "unreadable" ? read.symlink : false,
-    writeBlocked: writeBlockedReason(path, read),
+    writeBlocked:
+      target.agent === "opencode"
+        ? pluginWriteBlocked(target, path, read)
+        : writeBlockedReason(path, read),
   };
   if (read.kind === "missing-dir") {
     return {
@@ -284,8 +400,13 @@ export function agentHookStatus(
     return { ...base, state: "unreadable", detail: read.detail, kept: 0 };
   }
   const root = read.kind === "ok" ? read.root : null;
-  const entries = hookEntriesState(root, specs, command);
-  const kept = planHookChange(root, "uninstall", specs, command).kept;
+  const opencode = target.agent === "opencode";
+  const entries = opencode
+    ? pluginEntriesState(read, launcher)
+    : hookEntriesState(root, specs, command);
+  const kept = opencode
+    ? 0
+    : planHookChange(root, "uninstall", specs, command).kept;
   if (entries === "none") return { ...base, state: "none", detail: "", kept };
   if (health.state === "missing" || health.state === "target-missing") {
     return {
@@ -317,6 +438,9 @@ export function planAgentHooks(
   launcher: HookLauncher,
   now: Date = new Date(),
 ): AgentHookPlanResponse {
+  if (target.agent === "opencode") {
+    return planOpencodePlugin(target, action, launcher, now);
+  }
   const { path, read, command, specs } = describe(target, launcher);
   if (read.kind === "missing-dir") {
     throw new AgentHookError(
@@ -361,6 +485,54 @@ export function planAgentHooks(
       write: action === "install" && health.state !== "ok",
     },
     writeBlocked: writeBlockedReason(path, read),
+    baseHash: contentHash(read),
+    fileIdentity: settingsFileIdentity(read),
+  };
+}
+
+/** opencode のプラグインのファイルを置く・消す計画。設定ファイルと同じ形で返す。 */
+function planOpencodePlugin(
+  target: AgentHookTarget,
+  action: HookAction,
+  launcher: HookLauncher,
+  now: Date,
+): AgentHookPlanResponse {
+  const { path, read } = readPlugin(target);
+  if (read.kind === "missing-dir") {
+    throw new AgentHookError(
+      `the ${target.agent} settings directory does not exist: ${target.configDir}`,
+      "unreadable",
+    );
+  }
+  if (read.kind === "unreadable") {
+    throw new AgentHookError(
+      `cannot read ${path}; nothing was changed.\n${read.detail}`,
+      "unreadable",
+    );
+  }
+  const original = read.kind === "ok" ? read.text : null;
+  const next = nextPluginText(action, launcher);
+  const changed = next === null ? original !== null : original !== next;
+  const health = launcherHealth(launcher);
+  return {
+    agent: target.agent,
+    action,
+    path,
+    realPath: read.realPath,
+    symlink: read.kind === "ok" ? read.symlink : false,
+    fileExists: read.kind === "ok",
+    added: changed && next !== null ? pluginEvents() : [],
+    removed: changed && next === null ? pluginEvents() : [],
+    kept: 0,
+    changed,
+    backupPath: changed && read.kind === "ok" ? backupPathFor(path, now) : null,
+    diff: changed ? unifiedDiff(original, next ?? "", basename(path)) : "",
+    formattingChanged: false,
+    launcher: {
+      path: launcher.path,
+      write: action === "install" && health.state !== "ok",
+    },
+    writeBlocked: pluginWriteBlocked(target, path, read),
     baseHash: contentHash(read),
     fileIdentity: settingsFileIdentity(read),
   };
@@ -413,6 +585,37 @@ export async function applyAgentHooks(
       backupPath: null,
       launcherWritten,
     };
+  }
+  if (target.agent === "opencode") {
+    // plugins/ が無ければ作る (設定のディレクトリはあることを計画で確かめた)。
+    if (action === "install") {
+      try {
+        mkdirSync(dirname(plan.realPath), { recursive: true });
+      } catch (cause) {
+        throw new AgentHookError(
+          `failed to create ${dirname(plan.realPath)}; nothing was changed.`,
+          "failed",
+          { cause },
+        );
+      }
+    }
+    const { backupPath } = await commitJsonSettingsChange({
+      configDir: target.configDir,
+      path: plan.path,
+      check: checkPluginShape,
+      parse: parsePluginSource,
+      ...expected,
+      next: () => nextPluginText(action, launcher),
+      now,
+      ops,
+      error: (code, message, cause) =>
+        new AgentHookError(
+          message,
+          code,
+          cause === undefined ? undefined : { cause },
+        ),
+    });
+    return { path: plan.path, changed: true, backupPath, launcherWritten };
   }
   const { backupPath } = await commitJsonSettingsChange({
     configDir: target.configDir,

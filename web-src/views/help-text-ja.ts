@@ -663,7 +663,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
     "start-agent": {
       title: "エージェントを起動する",
       intro:
-        "エージェントは、tmux のウィンドウで動く claude か codex です。プロジェクトとアカウントを選んで起動します。",
+        "エージェントは、tmux のウィンドウで動く claude・codex・opencode です。プロジェクトとアカウントを選んで起動します。",
       groups: [
         {
           title: "左のサイドバーから",
@@ -837,6 +837,10 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   "）は、このマシンの tmux で動くエージェントを全部並べます。",
                 ],
                 "各プロジェクトの中は入力待ちが先頭なので、上から順に片付けられます。",
+                [
+                  ui(l.agents.board.orderByUrgency),
+                  " に切り替えると、全プロジェクトをまとめて入力待ち・完了・作業中・待機の順に並べます。",
+                ],
               ],
             },
             {
@@ -927,7 +931,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
     "agent-hooks": {
       title: "エージェントの状態を正しく出す（フックを入れる）",
       intro:
-        "フックを入れると、claude と codex が自分で「作業中・入力待ち・完了」を code-viewer に知らせます。入れないと、状態は画面の見た目からの推測だけになり、エージェントの表示が変わると外れます。",
+        "フックを入れると、claude・codex・opencode が自分で「作業中・入力待ち・完了」を code-viewer に知らせます。入れないと、状態は画面の見た目からの推測だけになり、エージェントの表示が変わると外れます。",
       groups: [
         {
           title: "入れ方",
@@ -953,7 +957,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 },
                 {
                   text: [
-                    "claude か codex の行の ",
+                    "claude・codex・opencode の行の ",
                     ui(hooks.action.install),
                     " を押します。",
                   ],
@@ -978,6 +982,15 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                     " で開いたタブの ",
                     code("/hooks"),
                     " で、code-viewer のフックを信頼します。信頼するまで動きません。",
+                  ],
+                },
+                {
+                  text: [
+                    "opencode には、プラグインのファイル ",
+                    code(
+                      "~/.config/opencode/plugins/code-viewer-agent-hook.js",
+                    ),
+                    " を書きます。動いている opencode は起動し直します。",
                   ],
                 },
               ],
@@ -1052,7 +1065,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
     "add-account": {
       title: "アカウントを追加する",
       intro:
-        "アカウントは、claude か codex の設定ディレクトリ 1 つです。仕事用と個人用を分けたいとき、別の契約でログインしたいときに足します。",
+        "アカウントは、claude か codex の設定ディレクトリ 1 つです。仕事用と個人用を分けたいとき、別の契約でログインしたいときに足します。opencode は既定のアカウントだけです。",
       groups: [
         {
           title: "画面で追加する",
@@ -2448,7 +2461,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
             {
               kind: "command",
               title:
-                "入れるエージェントを選ぶ（claude・codex・gemini・cursor・agents、または all）",
+                "入れるエージェントを選ぶ（claude・codex・gemini・cursor・agents・opencode、または all）",
               command: "code-viewer skill install --agent claude,codex",
             },
             {

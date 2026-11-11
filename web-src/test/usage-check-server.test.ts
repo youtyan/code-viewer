@@ -132,6 +132,21 @@ describe("token-free usage checks", () => {
     );
     expect(publish).toHaveBeenCalledOnce();
   });
+  test("opencode has no command for limits: refused without running anything", async () => {
+    const { checker, run, rpc, publish } = harness();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const result = await checker.check(
+      { ...ACCOUNT, agent: "opencode", configDir: "/sample/.config/opencode" },
+      "/sample/check",
+    );
+    expect(result).toMatchObject({ status: "failed", reason: "read-failed" });
+    expect(result.status === "failed" ? result.detail : "").toContain(
+      "opencode has no command that reports its plan limits",
+    );
+    expect(run).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+  });
   test("Codex asks for rate limits without creating a thread", async () => {
     const { checker, rpc } = harness();
     const result = await checker.check(

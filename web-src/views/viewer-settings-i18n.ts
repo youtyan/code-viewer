@@ -157,7 +157,7 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
       accounts: {
         label: "Accounts",
         description:
-          "claude and codex accounts: sign-in, usage and the command that starts them.",
+          "claude, codex and opencode accounts: sign-in, usage and the command that starts them.",
       },
       shortcuts: {
         label: "Shortcuts",
@@ -300,7 +300,7 @@ export const VIEWER_SETTINGS_TEXT: Record<"en" | "ja", ViewerSettingsText> = {
       accounts: {
         label: "アカウント",
         description:
-          "claude と codex のアカウント。ログイン・使用量・起動のコマンド。",
+          "claude・codex・opencode のアカウント。ログイン・使用量・起動のコマンド。",
       },
       shortcuts: {
         label: "ショートカット",

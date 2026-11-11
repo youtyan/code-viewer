@@ -20,6 +20,7 @@ import type {
   StoredAccount,
   UsageCheckResponse,
 } from "../../core/agent-accounts";
+import { usageSupported } from "../../core/agent-accounts";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { BACKGROUND_REQUEST_HEADER } from "../../core/network-activity";
 
@@ -271,6 +272,7 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
     const accounts =
       data?.accounts.filter(
         (account) =>
+          usageSupported(account.agent) &&
           account.login.state !== "logged-out" &&
           account.login.state !== "no-config-dir",
       ) ?? [];

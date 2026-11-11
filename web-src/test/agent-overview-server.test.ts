@@ -190,6 +190,7 @@ function deps(over: Partial<AgentOverviewDeps> = {}): AgentOverviewDeps {
         ? { status: "running", url: "http://127.0.0.1:64172/", launched: false }
         : { status: "absent" },
     paneAccounts: async () => new Map(),
+    paneProcessKinds: async () => ({ kinds: new Map(), errors: [] }),
     readRegistry: () => ({
       projects: [],
       error: "",
@@ -257,6 +258,41 @@ describe("buildAgentOverview", () => {
       ],
       ["%4", null],
     ]);
+  });
+
+  test("インタプリタのペインは引数から当てた種類で出し、調べられなかった理由を errors に載せる", async () => {
+    const asked: string[] = [];
+    const overview = await buildAgentOverview(
+      deps({
+        listPanes: async () =>
+          panesResponse([
+            { id: "%1", path: "/work/sample-repo", command: "node" },
+            { id: "%2", path: "/work/sample-repo", command: "node" },
+            { id: "%3", path: "/work/sample-repo", command: "zsh" },
+          ]),
+        paneProcessKinds: async (targets) => {
+          asked.push(...targets.map((target) => target.id));
+          return {
+            kinds: new Map([["%1", "claude" as const]]),
+            errors: [{ target: "%2", error: new Error("sample ps failure") }],
+          };
+        },
+      }),
+    );
+    expect(asked).toEqual(["%1", "%2", "%3"]);
+    expect(overview.panes.map((item) => [item.id, item.kind])).toEqual([
+      ["%1", "claude"],
+      // 調べられなかったものは今までどおりの判定 (コマンド名と申告)。
+      ["%2", null],
+      ["%3", null],
+    ]);
+    expect(overview.errors).toContainEqual(
+      expect.objectContaining({
+        operation: "probe_process",
+        target: "%2",
+        detail: "Error: sample ps failure",
+      }),
+    );
   });
 
   test("ペインを本体のルートでまとめ、worktree 名・種類・状態を付ける", async () => {

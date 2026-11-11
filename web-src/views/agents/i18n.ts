@@ -157,6 +157,11 @@ export type AgentsBoardText = {
   noAgents: string;
   /** プロジェクトの見出しのツールチップに出す件数。 */
   projectCounts: (summary: string) => string;
+  /** 並びの切替 (プロジェクトごと・急ぐ順)。 */
+  orderLabel: string;
+  orderByProject: string;
+  orderByUrgency: string;
+  orderByUrgencyTitle: string;
 };
 
 export type AgentsSidebarText = {
@@ -261,7 +266,7 @@ export type AgentHooksText = {
 const HOOKS_EN: AgentHooksText = {
   title: "Agent integration",
   intro:
-    "With these hooks, claude and codex tell code-viewer themselves when they are working, waiting for input or done, so the states shown are reliable. Other hooks in the file stay as they are.",
+    "With these hooks (a plugin for opencode), claude, codex and opencode tell code-viewer themselves when they are working, waiting for input or done, so the states shown are reliable. Other hooks in the file stay as they are.",
   helpBefore: "How to set them up and what they change: ",
   helpAfter: ".",
   state: {
@@ -355,14 +360,26 @@ const HOOKS_EN: AgentHooksText = {
       uninstall:
         "Sessions started from now on no longer call the hooks. Already running ones may keep them until restarted.",
     },
+    opencode: {
+      install:
+        "opencode loads plugins when it starts, so this works in opencode started from now on. Restart a running one to pick it up.",
+      uninstall:
+        "opencode started from now on no longer loads the plugin. A running one keeps it until restarted.",
+    },
   },
   afterInstall: {
     claude:
       "Running claude sessions normally pick this up on their own. If one does not, /hooks in the tab Open claude opens shows the hooks that are in.",
     codex:
       "codex runs the hooks once you trust them: in the tab Open codex opens, open /hooks and trust the code-viewer hooks.",
+    opencode:
+      "opencode loads the plugin when it starts: Open opencode starts one that reports its state. Restart opencode that is already running.",
   },
-  openAgent: { claude: "Open claude", codex: "Open codex" },
+  openAgent: {
+    claude: "Open claude",
+    codex: "Open codex",
+    opencode: "Open opencode",
+  },
   openAgentTitle: (agent) =>
     `Starts ${agent} with the default account in this project's folder and brings its terminal tab to the front.`,
   openedAgent: (agent) => `Opened ${agent} in a terminal tab.`,
@@ -379,7 +396,7 @@ const HOOKS_EN: AgentHooksText = {
 const HOOKS_JA: AgentHooksText = {
   title: "エージェント連携",
   intro:
-    "入れると、claude と codex が作業中・入力待ち・完了を自分で知らせるので、状態の表示が確かになります。ファイルにあるほかのフックはそのまま残ります。",
+    "入れると、claude・codex・opencode（opencode はプラグイン）が作業中・入力待ち・完了を自分で知らせるので、状態の表示が確かになります。ファイルにあるほかのフックはそのまま残ります。",
   helpBefore: "入れ方と、入れると何が変わるかは ",
   helpAfter: " にあります。",
   state: {
@@ -470,14 +487,26 @@ const HOOKS_JA: AgentHooksText = {
       uninstall:
         "これから起動する codex では呼ばれません。動いているものには、起動し直すまで残ることがあります。",
     },
+    opencode: {
+      install:
+        "opencode は起動するときにプラグインを読むので、これから起動する opencode で効きます。動いているものは起動し直すと効きます。",
+      uninstall:
+        "これから起動する opencode では読まれません。動いているものには、起動し直すまで残ります。",
+    },
   },
   afterInstall: {
     claude:
       "動いている claude にも、通常はそのまま効きます。効かないときは、［claude を開く］で開いたタブの /hooks で、入ったフックを確かめられます。",
     codex:
       "codex は信頼するまでフックを実行しません。［codex を開く］で開いたタブで /hooks を開き、code-viewer のフックを信頼すると効きます。",
+    opencode:
+      "opencode は起動するときにプラグインを読みます。［opencode を開く］で起動したものから状態を知らせます。動いている opencode は起動し直してください。",
   },
-  openAgent: { claude: "claude を開く", codex: "codex を開く" },
+  openAgent: {
+    claude: "claude を開く",
+    codex: "codex を開く",
+    opencode: "opencode を開く",
+  },
   openAgentTitle: (agent) =>
     `既定のアカウントで、このプロジェクトのフォルダの ${agent} を起こし、ターミナルのタブで前に出します。`,
   openedAgent: (agent) => `${agent} をターミナルのタブで開きました。`,
@@ -500,7 +529,12 @@ const EN: AgentsText = {
     done: "Finished · unread",
     idle: "Idle",
   },
-  kind: { claude: "claude", codex: "codex", other: "agent" },
+  kind: {
+    claude: "claude",
+    codex: "codex",
+    opencode: "opencode",
+    other: "agent",
+  },
   kindShell: "shell",
   filterLabel: "State",
   filterAll: "All",
@@ -541,7 +575,7 @@ const EN: AgentsText = {
   openPane: "Open in a tab",
   handoff: "Continue with another account…",
   handoffTitle:
-    "Start claude or codex with another account in a new window of the same tmux session, and have it read this agent's conversation log and continue",
+    "Start claude, codex or opencode with another account in a new window of the same tmux session, and have it read this agent's conversation log and continue",
   handoffNeedsHooks: "Needs the agent hooks — show how to install",
   handoffNeedsHooksTitle:
     "The hooks tell code-viewer where the conversation log is. After installing them, send the agent one message.",
@@ -561,7 +595,7 @@ const EN: AgentsText = {
   toggleProject: "Collapse or expand this project",
   emptyNoTmuxTitle: "tmux is not running",
   emptyNoTmuxBody:
-    "Agents are listed here when they run inside tmux. New agent starts claude or codex in a new tmux session for you, or run them in tmux yourself (“tmux new -s work”).",
+    "Agents are listed here when they run inside tmux. New agent starts claude, codex or opencode in a new tmux session for you, or run them in tmux yourself (“tmux new -s work”).",
   emptyNotInstalledTitle: "tmux was not found",
   emptyNotInstalledBody:
     "This list reads the agents that run inside tmux, and tmux was not found (if it lives elsewhere, start code-viewer with --bin tmux=<path>).",
@@ -570,7 +604,7 @@ const EN: AgentsText = {
   tmuxInstallHelp: (section) => `Help › ${section}`,
   emptyNoAgentsTitle: "No agents are running",
   emptyNoAgentsBody:
-    "Start one with New agent, or launch claude or codex in a tmux pane; it appears here, grouped by project.",
+    "Start one with New agent, or launch claude, codex or opencode in a tmux pane; it appears here, grouped by project.",
   emptyNoAgentsAction: "Show all panes",
   emptyRegisterProject: "Register a project…",
   emptyKeysLabel: "Keys",
@@ -607,6 +641,11 @@ const EN: AgentsText = {
     allAgents: "All agents",
     noAgents: "No agents",
     projectCounts: (summary) => summary || "No agents",
+    orderLabel: "Order",
+    orderByProject: "By project",
+    orderByUrgency: "Needs you first",
+    orderByUrgencyTitle:
+      "Every project together: needs input, then done, then working, then idle. Newest change first in each.",
   },
   hookHint: (agents) =>
     `Finish detection is off for ${agents}. Hooks make it reliable.`,
@@ -667,7 +706,12 @@ const JA: AgentsText = {
     done: "完了・未読",
     idle: "待機",
   },
-  kind: { claude: "claude", codex: "codex", other: "エージェント" },
+  kind: {
+    claude: "claude",
+    codex: "codex",
+    opencode: "opencode",
+    other: "エージェント",
+  },
   kindShell: "シェル",
   filterLabel: "状態",
   filterAll: "すべて",
@@ -706,7 +750,7 @@ const JA: AgentsText = {
   openPane: "タブで開く",
   handoff: "別のアカウントで続ける…",
   handoffTitle:
-    "同じ tmux のセッションの新しいウィンドウで、別のアカウントの claude か codex を起動し、このエージェントの会話記録を読んで続きをやらせます",
+    "同じ tmux のセッションの新しいウィンドウで、別のアカウントの claude・codex・opencode を起動し、このエージェントの会話記録を読んで続きをやらせます",
   handoffNeedsHooks: "フックを入れると使えます（入れ方を見る）",
   handoffNeedsHooksTitle:
     "会話記録の場所はフックから受け取ります。入れた後、そのエージェントに一度話しかけると使えます。",
@@ -726,7 +770,7 @@ const JA: AgentsText = {
   toggleProject: "このプロジェクトを畳む / 開く",
   emptyNoTmuxTitle: "tmux が動いていません",
   emptyNoTmuxBody:
-    "エージェントは tmux の中で動いているとここに並びます。「新しいエージェント」で claude や codex を新しい tmux のセッションに起動できます (自分で「tmux new -s work」から起動してもかまいません)。",
+    "エージェントは tmux の中で動いているとここに並びます。「新しいエージェント」で claude・codex・opencode を新しい tmux のセッションに起動できます (自分で「tmux new -s work」から起動してもかまいません)。",
   emptyNotInstalledTitle: "tmux が見つかりません",
   emptyNotInstalledBody:
     "この一覧は tmux の中で動くエージェントを読み取ります。tmux が見つかりませんでした（別の場所にあるなら --bin tmux=<パス> で起動します）。",
@@ -735,7 +779,7 @@ const JA: AgentsText = {
   tmuxInstallHelp: (section) => `ヘルプ › ${section}`,
   emptyNoAgentsTitle: "エージェントが動いていません",
   emptyNoAgentsBody:
-    "「新しいエージェント」で起動するか、tmux のペインで claude や codex を起動すると、プロジェクトごとにここへ並びます。",
+    "「新しいエージェント」で起動するか、tmux のペインで claude・codex・opencode を起動すると、プロジェクトごとにここへ並びます。",
   emptyNoAgentsAction: "すべてのペインを表示",
   emptyRegisterProject: "プロジェクトを登録…",
   emptyKeysLabel: "キー",
@@ -772,6 +816,11 @@ const JA: AgentsText = {
     allAgents: "すべてのエージェント",
     noAgents: "エージェントはいません",
     projectCounts: (summary) => summary || "エージェントはいません",
+    orderLabel: "並び",
+    orderByProject: "プロジェクトごと",
+    orderByUrgency: "急ぐ順",
+    orderByUrgencyTitle:
+      "全プロジェクトをまとめて、入力待ち → 完了 → 作業中 → 待機。それぞれ変わったのが新しい順。",
   },
   hookHint: (agents) =>
     `${agents} の完了の検知を有効にできます (フックが未設定です)。`,

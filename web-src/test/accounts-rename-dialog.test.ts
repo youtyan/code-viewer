@@ -73,7 +73,7 @@ function response(): AccountsResponse {
     ],
     registryError: null,
     registryPath: "/home/sample/.local/state/code-viewer/accounts.json",
-    launchCommands: { claude: "claude", codex: "codex" },
+    launchCommands: { claude: "claude", codex: "codex", opencode: "opencode" },
     lastLaunch: null,
     usageFailures: { total: 0, recent: [], log: "" },
   };

@@ -34,7 +34,8 @@
 ## 1. 全体像
 
 tmux の全ペインを「プロジェクト → エージェント」でまとめて見せ、入力待ちと完了に気付かせ、
-claude / codex の複数アカウントを使い分け、登録したプロジェクトの間を同じタブ・同じポートで移る機能群。
+claude / codex の複数アカウントを使い分け（opencode も同じ一覧・状態・起動・フックに載るが、
+アカウントは既定だけ。5 の冒頭）、登録したプロジェクトの間を同じタブ・同じポートで移る機能群。
 
 | 画面 | 置き場所 |
 |---|---|
@@ -77,11 +78,12 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 
 状態は 4 つ（`core/agent-state.ts` の `AGENT_STATES`）。
 
-**並びは画面で 2 通り。混ぜない。**
+**並びは画面ごとに決める。混ぜない。**
 
 | 画面 | 並べる関数 | 並び | 理由 |
 |---|---|---|---|
 | エージェントの全体ボード | `groupAgentPanes` | プロジェクトはサイドバーと同じ（下の行）。行は 入力待ち → 完了・未読 → 作業中 → 待機（`STATE_RANK`） | 行は「いま手が要るものを上から片付ける」。プロジェクトの順は利用者が並べた 1 つの順（2026-09-23 に決めた。以前は入力待ちを含むプロジェクトを先に出していた） |
+| エージェントの全体ボードの「急ぐ順」（並びの切替。既定は上の行） | `groupAgentPanesByUrgency` | プロジェクトをまたいで 入力待ち → 完了 → 作業中 → 待機 の段。段の中は変わったのが新しい順（見ていないものは後ろ）、同じなら場所の順。行の補足にプロジェクトの名前 | プロジェクトが多いと手が要るものが各プロジェクトに散る。選んだ並びはプロジェクトの畳みと同じくメモリだけ |
 | 左のサイドバー | `groupAgentPanesByPlace` | プロジェクトは登録順 → 未登録（名前の順、同名はパスの順）。行は tmux の場所（セッション名 → ウィンドウ番号 → ペイン番号） | 行が勝手に上下すると押そうとしたものが逃げる。気づかせる役目は行の印・畳んだ見出しの印・最下段の件数・通知が持つ |
 
 プロジェクトの順（登録簿の配列の順）は、サイドバーの見出しのドラッグ・見出しで Alt+↑↓・
@@ -277,7 +279,21 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 ## 4. フック
 
 エージェント自身に状態を申告させる。画面の推測（2）の弱点（完了が「15 秒動かなかった」
-でしか分からない・node として動く claude の種類が分からない）を埋める。
+でしか分からない）を埋める。
+
+**インタプリタで動くエージェントの種類**（2026-11-12）。npm で入れた claude などは `node` として動き、
+`pane_current_command` から種類が分からなかった（フックが無いと一覧に出ない）。前面のコマンドが
+インタプリタのペインだけ、前面のプロセスの引数（`ps -o pid=,args=`。環境変数は読まない `e` なし）から
+中のプログラムを当てる。決まりは `core/agent-overview.ts` の `agentKindFromArgs`（表のテストは
+`agent-overview-core.test.ts`）、調べ役は `server/terminal/process-kind.ts`:
+
+- ペイン（シェルの pid）か前面のコマンドが変わったときだけ ps を呼び、結果を覚える（一覧の取り直しのたびに
+  呼ばない）。インタプリタでなくなったペインは忘れる
+- 調べられなかった（ps の失敗・プロセスが見つからない・終わっていた）ときは覚えず、理由を一覧の errors
+  （`probe_process`）に出し、種類は今までどおりコマンド名と申告で決める
+- 引数にもトークンが入りうるので、当てた種類だけを残す（引数をログ・失敗の説明・応答に載せない）
+- 会話の場所の読み戻し（`agent-conversations.ts`）はコマンド名だけで決めるので、node として動く
+  claude は今も戻らない
 
 設定の節（`views/agents/agent-hooks-settings.ts`、分類は「エージェント」）は、見出しの下に
 「入れると何が良くなるか」の 1〜2 文とヘルプへの 1 行（`AGENT_HOOKS_HELP_SECTION`。いまは
@@ -291,7 +307,31 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 |---|---|---|
 | claude | `<設定ディレクトリ>/settings.json` の `hooks` | コマンド `<状態ディレクトリ>/agent-hooks/code-viewer-agent-hook claude` |
 | codex | `<CODEX_HOME>/hooks.json` | 同じ形で `… codex` |
-| 両方 | `<状態ディレクトリ>/agent-hooks/code-viewer-agent-hook` | 起動スクリプト（node と code-viewer の場所を持つ） |
+| opencode | `${XDG_CONFIG_HOME:-~/.config}/opencode/plugins/code-viewer-agent-hook.js`（無ければ `plugins/` も作る） | プラグインのファイル 1 つ（`opencodePluginSource`）。中身が起動スクリプトを `… opencode` で呼ぶ |
+| 全部 | `<状態ディレクトリ>/agent-hooks/code-viewer-agent-hook` | 起動スクリプト（node と code-viewer の場所を持つ） |
+
+### opencode のプラグイン
+
+opencode には設定ファイルのフックが無く、起動時に `plugins/` の .js を読むプラグインの仕組みが
+ある（https://opencode.ai/docs/plugins/）。code-viewer は自分だけのファイルを 1 つ置く。
+
+- **ファイルの中身ごと code-viewer のもの。** 入れる = 書く、外す = 消す（`settings-file.ts` の
+  約束をそのまま通す。読み方だけ JSON でない `parse` を渡し、消すときは `next` が null）。中身に
+  印（`AGENT_HOOK_MARKER`）の無い同名のファイルはほかの人のものとして「読めない」にし、書かない。
+  中身が今の版と違えば「一部だけ」（入れ直すと書き直す）
+- 中身は起動スクリプトの場所と出来事の一覧だけを持つ（code-viewer の場所は持たない）。出来事と
+  申告の対応は claude・codex と同じく `HOOK_SPECS` と `agentEventForHook`（プラグインは名前と
+  `status` を渡すだけ。決めるのは core）
+- プラグインは同じセッションで同じ出来事が続けば 1 回にまとめ（`session.status` の busy は 1 ターンに
+  何度も来る）、起動スクリプトを **1 つずつ順に** 呼ぶ（申告の時刻は CLI が起きたときに付くので、
+  並べて起こすと完了が作業中より先に着く）。下請けのセッション（`session.created` の `parentID`）は
+  許可と質問だけを送る（下請けの終わりで親が「完了」に見えないように）
+- 起動スクリプトを起こせない・異常終了したときは、起動スクリプトと同じ `failures.jsonl` に残す
+  （子の出力は端末の画面を崩すので捨てる）
+- 置くのは全体の設定（`OPENCODE_CONFIG_DIR` は足して読む場所で、全体の設定は変わらない）。opencode は
+  起動時にプラグインを読むので、動いているものには起動し直すまで効かない
+- 確かめるときは本物の設定に置かない。`OPENCODE_CONFIG_DIR=<一時フォルダ>` で起動すると、その
+  `plugins/` も読む（足して読む場所なので本物はそのまま）
 
 出来事と申告の対応は `core/agent-hooks.ts` の `HOOK_SPECS` と `agentEventForHook`（**2 つは
 必ず一緒に直す**）。上のコメントに入れなかった出来事とその理由がある。要点:
@@ -449,6 +489,15 @@ doctor の検出行・消しても検出行を残す）が適用される。doct
 アカウント = 種類（claude / codex）と設定ディレクトリの組。claude は `CLAUDE_CONFIG_DIR`、
 codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴・セッションがそこに分かれる。
 既定のアカウント（変数なし = `~/.claude`・`~/.codex`）は登録しなくても常にあり、消せない。
+
+**opencode は既定のアカウント（`opencode:default`、`~/.config/opencode`）だけ**（2026-11-12）。
+認証はデータのフォルダ（`~/.local/share/opencode`。`opencode auth list` の `Credentials` の行）にあり、
+それを動かせるのは汎用の `XDG_DATA_HOME` だけ（V2 の文書 https://opencode.ai/docs/cli/providers/ ）。
+`XDG_DATA_HOME` はエージェントが起こす全部のプログラムに引き継がれ（pnpm のストアなども移る）、
+`OPENCODE_CONFIG_DIR` は認証を動かさないので、分けない。`ACCOUNT_ENV.opencode` が null で、
+登録・新しく作るは `checkAddAccount` が `single-account` で断る（登録簿に書かれていても読めない扱い）。
+ペインのアカウントはプロセスを調べずに既定とする。ログインは `opencode auth login`、状態は
+`opencode auth list`（人向けの一覧の件数の行。メールアドレスは出ないので「誰として」に提供元の名前）
 登録簿は `<状態ディレクトリ>/accounts.json`（起動コマンドと前回の起動の選択も同じファイル）。
 「新しく作る」の設定ディレクトリは
 `<状態ディレクトリ>/accounts/<種類>-<表示名の slug>`（同名があれば `-2`、`-3`）で、
@@ -570,6 +619,7 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 | 種類 | 出どころ | 注意 |
 |---|---|---|
 | claude | ローカルの `/usage` コマンド。任意で settings.json の `statusLine.command` を包み、受け取った JSON を `<状態ディレクトリ>/agent-usage/` に保存してから元のコマンドにそのまま渡す（`server/terminal/statusline.ts`） | 包む・戻すは 4 の部品と同じ約束・同じ確認画面。**包むスクリプトは元の出力と終了コードを必ず返す**（保存に失敗しても。失敗は同じ場所の `failures.log`）。動いているセッションが無いと更新されない |
+| opencode | 無い（`opencode stats` はトークンと費用の集計）。`usageSupported` が偽で、一覧は理由（`unsupported`）を出し、「使用量を確かめる」は出さない・サーバも断る | 仕組みができたらこの行を変える（点検表 U7） |
 | codex | app-server の `account/rateLimits/read`。あわせて `<CODEX_HOME>/sessions/` のセッション記録の `token_count` の上限情報（`server/accounts/usage.ts`） | **セッション記録は公式に約束された書式ではない。** 読めなければ理由つきで「取得できません」にし、0% や空欄にしない。mtime は読む候補を有界に絞るためだけに使い、解析後の新旧はイベントの `observedAt` で決める。大きなファイルは末尾だけ読む |
 
 **プロジェクトの statusLine に負けない起動**（`server/accounts/project-statusline.ts`）。プロジェクトの
@@ -678,6 +728,11 @@ A のアカウントのエージェントの作業を、ログインし直さず
    - claude: `claude "<指示>" --add-dir <記録のフォルダ>`。作業フォルダの外を読むには許可が要るため
      `--add-dir` を足す。指示を先に置くのは、`--add-dir` が値を複数とるので後ろの指示を
      フォルダとして読んでしまうため
+   - opencode: `opencode --prompt "<指示>"`（`opencode --help`）。作業フォルダの外を読むかは
+     permission の `external_directory` が決める（https://opencode.ai/docs/permissions/）
+   - 前の担当が opencode: 会話のファイルが無い（データベース）。フックの `session_id` を使い、
+     指示に `opencode export <セッション>` で書き出して読むよう書く（`handoffSource`）。
+     code-viewer は書き出さない・読まない（4 の「中身は読まない」と同じ）
    - codex: `codex "<指示>"` だけ。codex の `--add-dir` は書き込みの許可を足すもの（公式の CLI
      reference）で、読むだけには強すぎる。既定のサンドボックス（workspace-write / read-only）は
      作業フォルダの外も読める（公式の文書には明記が無い。openai/codex の discussions #13559 の

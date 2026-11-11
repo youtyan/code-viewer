@@ -21,6 +21,7 @@ import {
   type AccountTag,
   handoffArgs,
   handoffPrompt,
+  handoffSource,
   isAccountAgent,
   isHandoffLanguage,
   LOGIN_SESSION,
@@ -445,29 +446,34 @@ function handoffLaunchArgs(value: unknown, agent: AccountAgent): string[] {
     throw new AccountError("invalid handoff account name", "invalid");
   }
   const record = getAgentConversation(pane);
-  const transcriptPath = record?.conversation.transcriptPath ?? "";
-  if (!record || !transcriptPath) {
+  const source = record
+    ? handoffSource(record.agent, record.conversation)
+    : null;
+  if (!record || !source) {
     throw new AccountError(
       `${pane} has no conversation log reported by a hook (install the agent hooks, then use the agent once)`,
       "conflict",
     );
   }
-  const dir = transcriptDir(transcriptPath);
-  try {
-    if (!statSync(dir).isDirectory()) {
-      throw new Error(`${dir} is not a directory`);
+  const transcriptPath = source.transcriptPath ?? "";
+  if (transcriptPath) {
+    const dir = transcriptDir(transcriptPath);
+    try {
+      if (!statSync(dir).isDirectory()) {
+        throw new Error(`${dir} is not a directory`);
+      }
+    } catch (error) {
+      throw new AccountError(
+        `cannot open the folder of the conversation log of ${pane}: ${dir}`,
+        "unreadable",
+        { cause: error },
+      );
     }
-  } catch (error) {
-    throw new AccountError(
-      `cannot open the folder of the conversation log of ${pane}: ${dir}`,
-      "unreadable",
-      { cause: error },
-    );
   }
   const prompt = handoffPrompt(language, {
     agent: record.agent,
     account: fromAccount,
-    transcriptPath,
+    ...source,
   });
   return handoffArgs(agent, prompt, transcriptPath);
 }

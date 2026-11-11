@@ -188,7 +188,7 @@ describe("parseAccountsArgs — 弾くもの", () => {
     {
       name: "未知の種類",
       argv: ["create", "--agent", "gemini", "--name", "work"],
-      error: "--agent must be one of: claude, codex",
+      error: "--agent must be one of: claude, codex, opencode",
     },
     {
       name: "種類なし",

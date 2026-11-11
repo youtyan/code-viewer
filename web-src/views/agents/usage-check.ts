@@ -6,6 +6,7 @@ import {
   type AccountStatus,
   type UsageCheckFailure,
   usageIsStale,
+  usageSupported,
 } from "../../core/agent-accounts";
 import { abbreviateHome } from "../../core/agent-overview";
 import { showCopyFailure } from "../../core/copy-failure";
@@ -88,7 +89,8 @@ export function usageCheckOffered(
   account: AccountStatus,
   now: number,
 ): boolean {
-  if (!usageCheckWanted(account, now)) return false;
+  if (!usageSupported(account.agent) || !usageCheckWanted(account, now))
+    return false;
   return (
     account.login.state !== "logged-out" &&
     account.login.state !== "no-config-dir"
@@ -101,6 +103,7 @@ export function usageCheckMenuItem(
   client: AccountsClient,
   t: AccountsText,
 ): Exclude<ContextMenuItem, { kind: "separator" }> | null {
+  if (!usageSupported(account.agent)) return null;
   const running = client.usageCheck(account.id)?.running === true;
   return {
     label: running ? t.usageChecking : t.usageCheck,

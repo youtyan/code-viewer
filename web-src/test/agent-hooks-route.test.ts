@@ -39,12 +39,14 @@ import { callRoute, postRoute } from "./_test-helpers";
 const ENV_KEYS = [
   "CLAUDE_CONFIG_DIR",
   "CODEX_HOME",
+  "XDG_CONFIG_HOME",
   "CODE_VIEWER_TEST_STATE_DIR",
 ] as const;
 const saved = new Map<string, string | undefined>();
 let root: string;
 let claudeDir: string;
 let codexDir: string;
+let opencodeDir: string;
 
 const call = (
   path: string,
@@ -76,8 +78,12 @@ beforeEach(() => {
   codexDir = join(root, "codex");
   mkdirSync(claudeDir);
   mkdirSync(codexDir);
+  // opencode の全体の設定は $XDG_CONFIG_HOME/opencode (利用者の ~/.config を読まない)。
+  opencodeDir = join(root, "xdg", "opencode");
+  mkdirSync(opencodeDir, { recursive: true });
   process.env.CLAUDE_CONFIG_DIR = claudeDir;
   process.env.CODEX_HOME = codexDir;
+  process.env.XDG_CONFIG_HOME = join(root, "xdg");
   process.env.CODE_VIEWER_TEST_STATE_DIR = join(root, "state");
 });
 
@@ -210,6 +216,11 @@ describe("/_agent/hooks", () => {
     expect(body.agents.map((row) => [row.agent, row.state, row.path])).toEqual([
       ["claude", "none", join(claudeDir, "settings.json")],
       ["codex", "none", join(codexDir, "hooks.json")],
+      [
+        "opencode",
+        "none",
+        join(opencodeDir, "plugins", "code-viewer-agent-hook.js"),
+      ],
     ]);
     expect(body.launcher.state).toBe("missing");
     expect(body.failures).toMatchObject({ total: 0, recent: [] });

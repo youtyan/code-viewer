@@ -36,6 +36,7 @@ import type { ProjectRegistrySnapshot } from "../../core/projects";
 import type { ShellSession } from "../../core/shell";
 import { basenameOf, linkShellsAndPanes } from "../../core/terminal-board";
 import type { TmuxClient, TmuxPanesResponse } from "../../core/tmux";
+import type { ProbeTarget } from "../accounts/process-env";
 import {
   type PaneAccountTarget,
   sharedAccountService,
@@ -55,6 +56,11 @@ import {
   getAgentConversation,
   listAgentStates,
 } from "./agent-state";
+import {
+  createProcessKindProber,
+  type ProcessKindProber,
+  type ProcessKindResult,
+} from "./process-kind";
 
 export type ProjectResolution =
   | { kind: "root"; root: string; toplevel: string }
@@ -104,6 +110,11 @@ export type AgentOverviewDeps = {
   paneAccounts(
     targets: readonly PaneAccountTarget[],
   ): Promise<Map<string, PaneAccount>>;
+  /**
+   * 前面のコマンドがインタプリタ (node など) のペインの中のプログラムの種類。
+   * process-kind.ts が覚えておき、ペインかコマンドが変わったときだけ ps を呼ぶ。
+   */
+  paneProcessKinds(targets: readonly ProbeTarget[]): Promise<ProcessKindResult>;
   now(): number;
 };
 
@@ -181,12 +192,27 @@ export async function buildAgentOverview(
   const states = new Map(
     deps.listStates().map((record) => [record.target, record]),
   );
+  const processKinds = await deps.paneProcessKinds(
+    tmuxPanes.map((pane) => ({
+      id: pane.id,
+      pid: pane.pid,
+      command: pane.command,
+    })),
+  );
+  for (const failure of processKinds.errors) {
+    errors.push(error("probe_process", failure.target, failure.error, now));
+  }
   const kinds = new Map(
     tmuxPanes.map((pane) => {
       const record = states.get(pane.id) ?? null;
       return [
         pane.id,
-        agentKindOf(pane.command, record?.source ?? null, record),
+        agentKindOf(
+          pane.command,
+          record?.source ?? null,
+          record,
+          processKinds.kinds.get(pane.id) ?? null,
+        ),
       ] as const;
     }),
   );
@@ -405,6 +431,14 @@ const SERVER_CACHE_TTL_MS = 10_000;
 /** 登録されたサーバの生存確認の上限。一覧の応答を待たせすぎない。 */
 const SERVER_HEALTH_TIMEOUT_MS = 800;
 
+let processKindProber: ProcessKindProber | null = null;
+
+/** サーバのプロセスで 1 つ (覚えた結果を一覧の取り直しの間で持つ)。 */
+function sharedProcessKindProber(): ProcessKindProber {
+  processKindProber ??= createProcessKindProber();
+  return processKindProber;
+}
+
 export function defaultAgentOverviewDeps(cwd: string): AgentOverviewDeps {
   const projectCache = createTtlCache<ProjectResolution>(
     PROJECT_CACHE_TTL_MS,
@@ -452,6 +486,7 @@ export function defaultAgentOverviewDeps(cwd: string): AgentOverviewDeps {
       }),
     forgetServer: (root) => serverCache.forget(root),
     paneAccounts: (targets) => sharedAccountService().paneAccounts(targets),
+    paneProcessKinds: (targets) => sharedProcessKindProber().probe(targets),
     readRegistry: () => projectRegistrySnapshot(projectRegistryPath()),
     rootExists: existsSync,
     now: Date.now,

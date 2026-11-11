@@ -259,6 +259,53 @@ export const DEFAULT_AGENT_SCREEN_RULES: AgentScreenRuleSet = {
       lineRegex: ["^\\s*[›❯]"],
       not: BLOCKING_HINTS,
     },
+    {
+      // opencode の質問 (question ツール) の選択肢。下端の操作の案内の行。
+      // 「to」の無い書き方 (`enter submit`) なので、ほかのルールに当たらない。
+      id: "opencode_question",
+      state: "waiting",
+      priority: 965,
+      region: "bottom_non_empty",
+      lines: 6,
+      contains: ["enter submit", "esc dismiss"],
+    },
+    {
+      // opencode の許可の画面。下端の選択肢の行 (`Allow once  Allow always
+      // Reject … enter confirm`)。見出し (`Permission required`) は許可の中身
+      // (コマンドや差分) の長さで下端から離れるので条件にしない。
+      id: "opencode_permission",
+      state: "waiting",
+      priority: 964,
+      region: "bottom_non_empty",
+      lines: 6,
+      lineRegex: ["Allow once {2,}Allow always"],
+      contains: ["enter confirm"],
+    },
+    {
+      // opencode の作業中の行 (`<動く印>  esc interrupt  …`)。入力欄の下の
+      // 1 行で、印の字は動くので「字の後に空白 2 つで esc interrupt」の形だけを
+      // 見る (本文の「… esc interrupt」は空白 1 つ)。claude・codex の
+      // `esc to interrupt` とは綴りが違う。
+      id: "opencode_working",
+      state: "working",
+      priority: 958,
+      region: "whole_recent",
+      lineRegex: ["\\S {2}esc interrupt\\b"],
+    },
+    {
+      // opencode の入力欄の下端 (`╹▀▀▀…`)。作業中も出ているので、作業中の行が
+      // 上の優先度で勝つ。許可・質問の画面では入力欄が消える。
+      id: "opencode_prompt",
+      state: "idle",
+      priority: 935,
+      region: "whole_recent",
+      lineRegex: ["╹▀{8}"],
+      not: [
+        { contains: ["esc interrupt"] },
+        { contains: ["enter confirm"] },
+        { contains: ["esc dismiss"] },
+      ],
+    },
   ],
 };
 

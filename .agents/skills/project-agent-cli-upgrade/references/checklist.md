@@ -1,4 +1,4 @@
-# 点検表 — code-viewer が claude / codex の振る舞いに頼っている所
+# 点検表 — code-viewer が claude / codex / opencode の振る舞いに頼っている所
 
 `SKILL.md` の手順 3 で上から使う。各行の「場所」は `` `パス#名前` ``、「テスト」は
 `` `web-src/test/….test.ts` `` の形で書く（`web-src/test/agent-cli-checklist.test.ts` が実在を
@@ -23,6 +23,8 @@
 | H4 | 両方 | 書き込む先と形: claude は `<設定ディレクトリ>/settings.json` の `hooks`、codex は `<CODEX_HOME>/hooks.json` の `hooks`。`hooks.<出来事>` は配列で、各要素の `hooks` も配列。コメントなしの JSON | `web-src/server/terminal/hooks.ts#agentHookFile`・`web-src/server/terminal/hooks.ts#defaultAgentConfigDir`・`web-src/core/agent-hooks.ts#checkHookShape` | 置き場所が変わると設定の行が「未設定」。形が変わると「読めない」で書き込みを断る（見える） | `web-src/test/agent-hooks-server.test.ts` |
 | H5 | 両方 | フックの呼ばれ方: `command` をシェルで分けて動かす・エージェントの環境（`TMUX_PANE` / `CODE_VIEWER_SHELL_ID`）を受け継ぐ・終了コード 0 は止めない・stdout を出さない（claude は一部の出来事の stdout を会話に足す）。**要 C**（2026-10-02 時点で未確認）: codex は 0.157.0 から共有の裏のサーバを既定で自動起動し（`codex features list` の `daemon_auto_start`）、0.158.0 でフックの起こし方も変えた（#47610）。フックが受け継ぐ環境がペインのものかを C で見る | `web-src/server/terminal/hooks.ts#hookLauncherScript`・`web-src/server/terminal-cli.ts#runHook` | 環境が渡らないと「tmux の外」として黙って何もしない（失敗の記録も残らない） | `web-src/test/agent-hook-report.test.ts` |
 | H6 | codex | 新しいフックは利用者が `/hooks` で信頼するまで動かない。信頼は定義の文字列のハッシュで覚える。hooks の機能は `codex features list` の `hooks` が `stable true` | `web-src/server/terminal/hooks.ts#agentHookCommand` | 信頼の仕組みや機能の名前が変わると、入れたのに黙って動かない（設定の行は「入っている」のまま） | なし |
+| H7 | opencode | フックの代わりのプラグイン: `<全体の設定>/plugins/*.js` を起動時に読み、書き出した関数を呼ぶ（https://opencode.ai/docs/plugins/）。関数の引数の `directory`、返す `event` と `dispose`。出来事 `session.status`（`properties.status.type` が `busy` / `retry` / `idle`）・`session.idle`・`permission.asked`（古い版は `permission.updated`）・`permission.replied`・`question.asked` / `replied` / `rejected`・`session.created`（`properties.info.parentID` で下請けのセッション）。各出来事の `properties.sessionID`。1.19.5 で観測（2026-11-12） | `web-src/core/agent-hooks.ts#HOOK_SPECS`・`web-src/core/agent-hooks.ts#opencodePluginSource`・`web-src/core/agent-hooks.ts#agentEventForHook` | 読み込まれないと黙って画面の推測に落ちる。出来事の名前・欄が変わると作業中・入力待ち・完了の申告が来ない | `web-src/test/agent-hooks-opencode-plugin.test.ts`・`web-src/test/agent-hooks-core.test.ts` |
+| H8 | opencode | プラグインの置き場所は全体の設定 `${XDG_CONFIG_HOME:-~/.config}/opencode`（`opencode debug paths` の `config`。`OPENCODE_CONFIG_DIR` は足して読む場所で、全体の設定は変わらない）。プラグインは opencode のプロセスの環境（`TMUX_PANE`）を受け継ぐ | `web-src/server/terminal/hooks.ts#defaultAgentConfigDir`・`web-src/server/terminal/hooks.ts#agentHookFile` | 置き場所が変わると設定の行が「未設定」。環境が渡らないと「tmux の外」として申告が届かない | `web-src/test/agent-hooks-server.test.ts` |
 
 **確かめ方**
 
@@ -54,6 +56,7 @@
 | U4 | claude | `claude --safe-mode --print /usage --output-format stream-json --verbose` の出力: `type: "result"` の行が `is_error: false`・`local_command: "usage"`・`num_turns`・`total_cost_usd`・`duration_api_ms` が 0。`usage_report.rate_limits.limits[]` の `kind`（`session` / `weekly_all`）・`percent`（0〜100）・`resets_at`（ISO か null）。`ANTHROPIC_BASE_URL` を繋がらない所にしても `/usage` は通る | `web-src/server/accounts/usage-check.ts#claudeWindows` | 「使用量を確かめる」が理由つきで失敗する（見える）。`percent` の尺度が変わると黙って誤った値 | `web-src/test/usage-check-server.test.ts` |
 | U5 | codex | `codex app-server`（1 行 1 JSON、`jsonrpc` の欄なし）に `initialize` → 答えを待って `initialized` → `account/rateLimits/read`。答えの `result.rateLimits.primary` / `secondary` は null か `{usedPercent, windowDurationMins, resetsAt}`（`resetsAt` は秒）。stdin を閉じたら 8 秒以内に 0 で終わる | `web-src/server/accounts/usage-check.ts#codexWindows`・`web-src/server/accounts/login.ts#runRpc` | 理由つきで失敗（見える）。`resetsAt` がミリ秒になると黙って遠い未来の時刻 | `web-src/test/usage-check-server.test.ts` |
 | U6 | codex | セッション記録 `<CODEX_HOME>/sessions/YYYY/MM/DD/rollout-*.jsonl` の `payload.type == "token_count"` の行の `payload.rate_limits.primary` / `secondary` の `used_percent`・`window_minutes`・`resets_at`、行の `timestamp`。**公式に約束された形ではない** | `web-src/server/accounts/usage.ts#parseCodexTokenCountLine`・`web-src/server/accounts/usage.ts#recentRolloutFiles` | 「取得できません」と理由が出る。U5 が通っている間は隠れる | `web-src/test/agent-accounts-server.test.ts` |
+| U7 | opencode | 5 時間・週の上限を出す仕組みが無い（`opencode stats` はトークンと費用の集計）。仕組みができたら「取得できません（unsupported）」をやめる | `web-src/core/agent-accounts.ts#usageSupported`・`web-src/server/accounts/usage.ts#readAccountUsage` | 新しい仕組みに気付かず「取得できません」のまま（見える） | `web-src/test/agent-accounts-server.test.ts`・`web-src/test/usage-check-view.test.ts` |
 
 **確かめ方**
 
@@ -122,6 +125,7 @@
 | A7 | codex | `codex login status` の文言（stdout と stderr を合わせる）: `not logged in` / `logged in using (ChatGPT\|an API key…)`。メールを訊くのは `ChatGPT` のときだけ | `web-src/server/accounts/login.ts#parseCodexLoginStatus` | 文言が変わると「不明」。方式の言い方が変わるとメールが黙って出ない | `web-src/test/agent-accounts-server.test.ts` |
 | A8 | codex | app-server の `account/read`（`refreshToken: false`）の答え `result.account` が `{type: "chatgpt", email, planType}`・`{type: "apiKey"}`・null。未ログインのディレクトリでは app-server を起こさない | `web-src/server/accounts/login.ts#parseCodexAccountRead`・`web-src/server/accounts/login.ts#ACCOUNT_READ_REQUESTS` | メールが出ず、理由が行に出る | `web-src/test/agent-accounts-server.test.ts` |
 | A9 | claude | 対話の画面は `<設定ディレクトリ>/.claude.json` の `hasCompletedOnboarding` で初回の案内を飛ばす。`claude auth login` はこの印を付けない（上流は直さないと閉じた: anthropics/claude-code#67149） | `web-src/server/accounts/onboarding.ts#markClaudeOnboarded` | code-viewer で作ったアカウントを開くと初回の案内をやり直させる（ログインが消えたように見える） | `web-src/test/accounts-onboarding.test.ts` |
+| A10 | opencode | 認証の置き場所はデータのフォルダ（`opencode auth list` の `Credentials <場所>`。`XDG_DATA_HOME` で動く）で、opencode だけに効く変数で分けられない → 既定のアカウントだけ。ログインは `opencode auth login`、状態は `opencode auth list` の人向けの一覧（`N credentials`・`N environment variables`・`● 提供元 方式` の行。`auth` は `providers` の別名） | `web-src/core/agent-accounts.ts#ACCOUNT_ENV`・`web-src/server/accounts/launch.ts#AGENT_SUBCOMMANDS`・`web-src/server/accounts/login.ts#parseOpencodeAuthList` | 件数の行の形が変わると「不明」（見える）。分ける変数ができたら、アカウントを足せるようにできる | `web-src/test/agent-accounts-server.test.ts`・`web-src/test/agent-accounts-core.test.ts` |
 
 **確かめ方**
 
@@ -169,10 +173,11 @@
 | L1 | 両方 | 起動・ログイン・状態の確認は、設定の起動コマンドを対話シェル（`$SHELL -i -c '<コマンド> "$@"'`）で動かす | `web-src/server/accounts/launch.ts#agentCommandArgv` | — （CLI の変化では壊れない。ラッパーの利用者向けの前提） | `web-src/test/agent-accounts-server.test.ts` |
 | L2 | claude | 引き継ぎ: `claude "<指示>" --add-dir <フォルダ>`（指示が先。`--add-dir` は値を複数取り、フォルダが実在しないと断る） | `web-src/core/agent-accounts.ts#handoffArgs`・`web-src/core/agent-accounts.ts#handoffPrompt` | 起動の窓に CLI のエラー（`remain-on-exit` で読める） | `web-src/test/agent-handoff.test.ts` |
 | L3 | codex | 引き継ぎ: `codex "<指示>"` だけ（`--add-dir` は書き込みの許可なので使わない）。既定のサンドボックスで作業フォルダの外を読める | `web-src/core/agent-accounts.ts#handoffArgs` | 外を読めなくなった版では、codex が読む前に許可を求めるはず（未確認） | `web-src/test/agent-handoff.test.ts` |
-| L4 | 両方 | ペインの前面のコマンド名（tmux の `pane_current_command`）で種類を決める: `claude`、または `x.y.z`（ネイティブの claude は版の名前で動く）→ claude、`codex` → codex。`node` で動く claude はフックの名乗りだけ | `web-src/core/agent-overview.ts#agentKindOf` | 黙って種類が出ない。アカウントが分からない・会話の場所を戻せない | `web-src/test/agent-overview-core.test.ts`・`web-src/test/agent-conversations.test.ts` |
+| L4 | 両方 | ペインの前面のコマンド名（tmux の `pane_current_command`）で種類を決める: `claude`、または `x.y.z`（ネイティブの claude は版の名前で動く）→ claude、`codex` → codex、`opencode` → opencode。前面がインタプリタ（`node`・`nodejs`・`bun`・`deno`）なら、そのプロセスの引数（`ps -o pid=,args=`）の最初のスクリプトの場所（`…/@anthropic-ai/claude-code/`・`…/@openai/codex/`・`…/opencode-ai/`、または bin の名前 `claude` / `codex` / `opencode`）と、対話シェルの包み（`zsh -ic '<コマンド>' …` の -c の次の語）で決める | `web-src/core/agent-overview.ts#agentKindOf`・`web-src/core/agent-overview.ts#agentKindFromArgs`・`web-src/server/terminal/process-kind.ts#createProcessKindProber` | 黙って種類が出ない。アカウントが分からない・会話の場所を戻せない | `web-src/test/agent-overview-core.test.ts`・`web-src/test/agent-conversations.test.ts` |
 | L5 | 両方 | エージェントのプロセスがペインのシェルの子孫で、名前が `pane_current_command` と同じ。`CLAUDE_CONFIG_DIR` / `CODEX_HOME` を受け継ぐ。**要 C**（2026-10-02 時点で未確認）: codex 0.157.0 からの共有の裏のサーバ（H5）で、作業するプロセスがペインのシェルの子孫でなくなっていないか | `web-src/server/accounts/process-env.ts#findAgentProcess` | 行のアカウントが「不明」と理由 | `web-src/test/agent-accounts-server.test.ts` |
 | L6 | 両方 | `transcript_path` が実在するファイルを指す（中身は読まない） | `web-src/server/terminal/agent-conversations.ts#decideConversationRestore` | 再起動の後に会話の場所を戻さず、理由をログに出す | `web-src/test/agent-conversations.test.ts` |
 | L7 | claude | 起動に `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` を足すと、設定の `tui`（全画面表示）より優先して通常の表示で動き、会話が tmux の過去の行に残る | `web-src/core/agent-accounts.ts#LAUNCH_ENV` | 全画面表示のまま起動し、スマホの読む画面で過去の出力が読めない（ペインの `alternate_on` が 1） | `web-src/test/agent-accounts-core.test.ts` |
+| L8 | opencode | 前面のコマンド名は `opencode`。起動は `opencode`、引き継ぎの指示は `opencode --prompt "<指示>"`。opencode が前の担当なら、会話は `opencode export <セッション>` で書き出させる（会話のファイルは無い） | `web-src/core/agent-overview.ts#agentKindOf`・`web-src/core/agent-accounts.ts#handoffArgs`・`web-src/core/agent-accounts.ts#handoffPrompt` | 種類が分からない・指示が渡らない・書き出せない | `web-src/test/agent-overview-core.test.ts`・`web-src/test/agent-handoff.test.ts` |
 
 **確かめ方**
 
@@ -200,6 +205,7 @@
 | S3 | claude | 電話の読む画面: スピナーの行・`⎿ Waiting…`・入力欄の上下の `─` の線（全幅、0 桁目から）・`⏺` / `⎿` の印 | `web-src/core/pane-reflow.ts#withoutTransient` | 見た目だけ（消えるはずの行が残る・折り返しを誤る） | `web-src/test/pane-reflow.test.ts` |
 | S4 | 両方 | 選択肢 `1. …` と、数字のキーでそれを選べること | `web-src/core/pane-reflow.ts#findChoices` | 電話のボタンが出ない・押しても違うものを選ぶ | `web-src/test/pane-reflow.test.ts` |
 | S5 | claude | 添付の行の折り返し（`› [image] /path/ban (124.9KB)` の次の行に続き） | `web-src/core/terminal-images.ts#joinBrokenPathLines` | 画像の棚がそのパスを拾わない | `web-src/test/terminal-images-core.test.ts` |
+| S6 | opencode | 画面ルール: 作業中は入力欄の下の行の `<印>  esc interrupt`、許可は `Allow once  Allow always  Reject` と `enter confirm`、質問は `enter submit` と `esc dismiss`、待機は入力欄の下端 `╹▀▀▀`（1.19.5 の実画面で観測） | `web-src/core/agent-screen.ts#DEFAULT_AGENT_SCREEN_RULES` | 作業中・入力待ちが「待機」に見える（フックが無いとき） | `web-src/test/agent-screen-core.test.ts` |
 
 **確かめ方**
 
@@ -235,6 +241,7 @@
 | D1 | 両方 | `skill install --agent <種類>` の入れ先: `<base>/.claude/skills/`・`<base>/.codex/skills/`・`<base>/.agents/skills/`（`--global` なら base はホーム） | `web-src/server/skill-cli.ts#AGENT_SKILL_DIRS` | 入れたスキルが黙って読まれない | `web-src/test/skill-cli.test.ts` |
 | D2 | 両方 | 配るスキルの frontmatter は `name` と `description` だけ（`skills/*/SKILL.md`） | `web-src/server/skill-cli.ts#AGENT_SKILL_DIRS` | 読まれない・説明が切られる | `web-src/test/skill-cli.test.ts`・`web-src/test/accounts-cli.test.ts` |
 | D3 | 両方 | MCP の `initialize` に、要求に関わらず `2025-06-18` を返す。POST だけ・JSON の応答だけ・`Mcp-Session-Id` なし。claude は v2 の MCP クライアントで `2026-07-28` の取り決めを既定で使う（変更履歴。`MCP_PROTOCOL_NEGOTIATION=legacy` で戻せる）ので、古い版を答えるサーバに繋がるかは C で見る | `web-src/server/mcp.ts#MCP_PROTOCOL_VERSION` | その版を受けない CLI が繋がらない（CLI の MCP の一覧にエラー） | `web-src/test/mcp.test.ts` |
+| D4 | opencode | `skill install --agent opencode` の入れ先: `<リポジトリ>/.opencode/skills/`、`--global` なら `~/.config/opencode/skills/`（https://opencode.ai/docs/skills/） | `web-src/server/skill-cli.ts#AGENT_SKILL_DIRS` | 読まれない | `web-src/test/skill-cli.test.ts` |
 
 **確かめ方**
 

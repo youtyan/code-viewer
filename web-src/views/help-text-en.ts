@@ -672,7 +672,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
     "start-agent": {
       title: "Start an agent",
       intro:
-        "An agent is claude or codex running in a tmux window. You start it for a project, with the account you choose.",
+        "An agent is claude, codex or opencode running in a tmux window. You start it for a project, with the account you choose.",
       groups: [
         {
           title: "From the left sidebar",
@@ -854,6 +854,10 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ") lists every agent running in tmux on this machine.",
                 ],
                 "Inside each project, agents that need input come first, so you can work down from the top.",
+                [
+                  ui(l.agents.board.orderByUrgency),
+                  " lists every project together: needs input, then done, then working, then idle.",
+                ],
               ],
             },
             {
@@ -943,7 +947,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
     "agent-hooks": {
       title: "Show agent state reliably (install hooks)",
       intro:
-        "With hooks, claude and codex tell code-viewer themselves when they are working, need input or are done. Without them, the state is only a guess from what the screen shows, and it goes wrong when an agent changes how its screen looks.",
+        "With hooks, claude, codex and opencode tell code-viewer themselves when they are working, need input or are done. Without them, the state is only a guess from the screen, and it goes wrong when an agent changes how its screen looks.",
       groups: [
         {
           title: "Set them up",
@@ -972,7 +976,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   text: [
                     "Select ",
                     ui(hooks.action.install),
-                    " on the claude or codex row.",
+                    " on the claude, codex or opencode row.",
                   ],
                 },
                 {
@@ -995,6 +999,15 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                     " after installing and trust the code-viewer hooks under ",
                     code("/hooks"),
                     " in that tab. They do not run until you do.",
+                  ],
+                },
+                {
+                  text: [
+                    "For opencode, it writes one plugin file, ",
+                    code(
+                      "~/.config/opencode/plugins/code-viewer-agent-hook.js",
+                    ),
+                    ". opencode reads plugins when it starts, so restart an opencode that is already running.",
                   ],
                 },
               ],
@@ -1072,7 +1085,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
     "add-account": {
       title: "Add an account",
       intro:
-        "An account is one claude or codex settings directory. Add one to keep work and personal use apart, or to sign in to another plan.",
+        "An account is one claude or codex settings directory. Add one to keep work and personal use apart, or to sign in to another plan. opencode has only its default account: no opencode setting keeps a sign-in in another directory.",
       groups: [
         {
           title: "Add one in the app",
@@ -2470,7 +2483,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
             {
               kind: "command",
               title:
-                "Choose the agents (claude, codex, gemini, cursor, agents, or all)",
+                "Choose the agents (claude, codex, gemini, cursor, agents, opencode, or all)",
               command: "code-viewer skill install --agent claude,codex",
             },
             {

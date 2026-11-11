@@ -1,13 +1,13 @@
 # code-viewer
 
-手元で動く、リポジトリのコードと git の差分をブラウザで読むツールです。AI のコーディングエージェント（claude・codex）を tmux で動かして、様子を見ることもできます。
+手元で動く、リポジトリのコードと git の差分をブラウザで読むツールです。AI のコーディングエージェント（claude・codex・opencode）を tmux で動かして、様子を見ることもできます。
 
 [English](README.md) | 日本語
 
 ![code-viewer の画面。左にプロジェクトとエージェント、中央にファイル一覧と変更ファイル、右に差分](web/help-images/overview.ja.webp)
 
 - リポジトリのファイル・差分・コミット履歴・Blame・すべての作業ツリーを読めます。
-- claude や codex を tmux で起動し、どれが入力待ちかを見て、ターミナルのタブで返事できます。
+- claude・codex・opencode を tmux で起動し、どれが入力待ちかを見て、ターミナルのタブで返事できます。
 - claude・codex のアカウントを複数持ち、それぞれの使用量を見られます。
 - SQLite・PostgreSQL・MySQL・Redis・Elasticsearch・DynamoDB・S3 互換ストレージ・Cloudflare D1 の中身を見られます。
 - AI エージェントからは CLI・MCP サーバ・同梱のスキルで使えます。
@@ -35,7 +35,7 @@ code-viewer を 1 つ起動すれば、すべてのプロジェクトを同じ�
 |---|---|
 | Node.js 22.14 以上、git | すべて |
 | [tmux](https://github.com/tmux/tmux) | エージェント、アカウントのログイン、tmux のペイン（シェルは tmux が無くても使えます） |
-| claude か codex の CLI（両方でも可） | エージェントを動かす |
+| claude・codex・opencode のどれかの CLI（いくつでも可） | エージェントを動かす |
 | `better-sqlite3`（任意の依存。パッケージと一緒に入ります） | SQLite の表示、スナップショット、`code-viewer query` |
 | `@lydell/node-pty`（任意の依存。パッケージと一緒に入ります） | ターミナルのタブ（シェルと、タブで開いたエージェント） |
 | Chrome | アプリとして入れる（任意） |
@@ -53,7 +53,7 @@ code-viewer を 1 つ起動すれば、すべてのプロジェクトを同じ�
 3. tmux を入れます（`brew install tmux`。Linux ではパッケージマネージャで）。
 4. **設定 → アカウント** で、claude か codex の行の **ログイン** を押します。
 5. （おすすめ）**設定 → エージェント → エージェント連携** で **入れる** を押してフックを入れます。エージェントの状態が正しく出ます。
-6. サイドバーの下の **新しいエージェント** で、claude か codex・アカウント・プロジェクトを選んで **起動** を押します。
+6. サイドバーの下の **新しいエージェント** で、claude・codex・opencode のどれか・アカウント・プロジェクトを選んで **起動** を押します。
 7. （任意）**すべてのエージェント** の画面（`g a`）で **通知を有効にする** を押します。
 8. （任意）AI に同梱のスキルを入れます: `npx @youtyan/code-viewer skill install`
 
@@ -196,7 +196,7 @@ code-viewer
 
 ### エージェント
 
-- **新しいエージェント**: 選んだアカウントとプロジェクトで、claude か codex を tmux の新しいウィンドウで起動します。画面に実行するコマンドと、各アカウントの 5 時間と 1 週間の使用量が出ます。
+- **新しいエージェント**: 選んだアカウントとプロジェクトで、claude・codex・opencode を tmux の新しいウィンドウで起動します。画面に実行するコマンドと、各アカウントの 5 時間と 1 週間の使用量が出ます。
 - 起動するコマンドは **設定 → アカウント → 起動コマンド** で変えられます。
 - エージェントは、どの画面でもサイドバーのプロジェクトの下に並びます。押すと、そのペインをターミナルのタブで開きます。ポインタを載せると、画面の最後の数行が出ます。
 - **すべてのエージェント**（`g a`）: このマシンの tmux で動くエージェントを、プロジェクトごとに全部並べます。入力待ちが先頭です。**すべてのペイン** でただのシェルも出ます。
@@ -213,13 +213,13 @@ code-viewer
 
 状態の決め方（上ほど優先）:
 
-1. フック: claude と codex が自分で知らせます。**設定 → エージェント → エージェント連携** の **入れる** を押すと、書き込む前に、書くファイルと差分を見せます。元の中身はバックアップに残し、ほかのフックは消しません。設定のファイルが dotfiles などから作られているときは、書き込まずに、元のファイルへ足すフックを見せます。codex は `/hooks` で信頼するまで新しいフックを動かしません。
+1. フック: claude・codex・opencode が自分で知らせます（opencode は `~/.config/opencode/plugins/` にプラグインのファイルを置きます。動いている opencode は起動し直します）。**設定 → エージェント → エージェント連携** の **入れる** を押すと、書き込む前に、書くファイルと差分を見せます。元の中身はバックアップに残し、ほかのフックは消しません。設定のファイルが dotfiles などから作られているときは、書き込まずに、元のファイルへ足すフックを見せます。codex は `/hooks` で信頼するまで新しいフックを動かしません。
 2. 画面の文言のルール: 画面に出ている文字で決めます。JSON のルールは **設定 → 詳細** で直せます。
 3. 画面の動き: 画面が変わり続けているか。
 
 ### アカウント
 
-- アカウントは、claude か codex の設定ディレクトリ 1 つです（`CLAUDE_CONFIG_DIR` / `CODEX_HOME`）。
+- アカウントは、claude か codex の設定ディレクトリ 1 つです（`CLAUDE_CONFIG_DIR` / `CODEX_HOME`）。opencode は既定のアカウントだけです（ログインを別のディレクトリに分ける opencode の設定が無いため）。ログインの状態は `opencode auth list` から取り、使用量の上限は出せません。
 - **設定 → アカウント → アカウントを追加…**: 既定の設定ディレクトリから設定をリンクした新しいディレクトリを作るか、既にあるものを登録します。作る前に、何を作るかを見せます。ログインの情報と履歴は共有しません。
 - **ログイン** は、公式のログインのコマンドを tmux の新しいウィンドウで実行します。
 - ログインの状態とメールアドレスは `claude auth status`・`codex login status`・`codex app-server` から取ります。code-viewer はトークンを読みません。
@@ -533,7 +533,7 @@ npx -y @youtyan/code-viewer skill install --agent claude,codex   # 複数のエ�
 npx -y @youtyan/code-viewer skill install --agent all --global   # すべてのエージェント、ホームディレクトリ
 ```
 
-- `--agent`: `claude`・`codex`・`gemini`・`cursor`・`agents`（`.agents/skills`）・`all`。
+- `--agent`: `claude`・`codex`・`gemini`・`cursor`・`agents`（`.agents/skills`）・`opencode`（`.opencode/skills`、`--global` なら `~/.config/opencode/skills`）・`all`。
 - リポジトリのいちばん上で実行します。`--global` が無いと、今のディレクトリに入れます。`--global` で `~/.claude/skills/`・`~/.codex/skills/` などに入れます。`--cwd <dir>` で別のディレクトリに入れます。
 - もう一度実行すると、入れたスキルを新しくします。
 

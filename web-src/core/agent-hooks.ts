@@ -14,6 +14,12 @@
 // 自分の入れたものは、コマンド文字列に含まれる AGENT_HOOK_MARKER で
 // 見分ける。ほかのツールが入れたフックは読むだけで、1 つも消さず、順序も
 // 変えない。
+//
+// opencode には設定ファイルのフックが無い。代わりに、起動時に
+// `<設定ディレクトリ>/plugins/` の .js を読むプラグインの仕組みがある
+// (https://opencode.ai/docs/plugins/)。code-viewer は自分だけのファイル
+// (OPENCODE_PLUGIN_FILE) を 1 つ置き、その中で受けた出来事を同じ起動
+// スクリプトに渡す。中身は opencodePluginSource が作る。
 
 import {
   type AgentAttention,
@@ -22,7 +28,7 @@ import {
 } from "./agent-state";
 import { hasControlCharacter } from "./control-chars";
 
-export const HOOK_AGENTS = ["claude", "codex"] as const;
+export const HOOK_AGENTS = ["claude", "codex", "opencode"] as const;
 
 export type HookAgent = (typeof HOOK_AGENTS)[number];
 
@@ -44,8 +50,12 @@ export const AGENT_HOOK_MARKER = "code-viewer-agent-hook";
 export type HookSpec = {
   /** エージェント側の出来事の名前 (settings の hooks のキー)。 */
   event: string;
+  /**
+   * claude / codex は出来事の中の種類 (source など) を選ぶ正規表現。
+   * opencode は session.status の status.type を選ぶ (プラグインが当てる)。
+   */
   matcher?: string;
-  /** 秒。エージェント側の打ち切り時間。 */
+  /** 秒。エージェント側の打ち切り時間 (opencode はプラグインが子を止める)。 */
   timeout: number;
   /** claude の async。バックグラウンドで走らせ、エージェントを待たせない。 */
   async?: boolean;
@@ -66,6 +76,12 @@ export type HookSpec = {
  * - codex の SessionEnd と Interrupt は既定 1 秒・上限 3 秒 (公式)
  * - claude の StopFailure (API の失敗・上限・認証切れでターンが止まった) は
  *   完了にしない。人の手が要る (ask) として、理由を agentAttentionForHook で添える
+ * - opencode はプラグインの event で受ける出来事 (手元の 1.19.5 で観測し、
+ *   @opencode-ai/sdk の Event 型で欄を確かめた)。session.status は作業中の
+ *   busy と再試行の retry だけ (idle は session.idle と重なる)。
+ *   permission.updated は古い版の許可の出来事 (今の版は permission.asked)。
+ *   OPENCODE_START / OPENCODE_DISPOSE はプラグインの読み込み・終わり
+ *   (dispose) で、opencode の出来事ではなくプラグインが自分で名付けたもの
  */
 export const HOOK_SPECS: Record<HookAgent, readonly HookSpec[]> = {
   claude: [
@@ -95,7 +111,55 @@ export const HOOK_SPECS: Record<HookAgent, readonly HookSpec[]> = {
     { event: "Interrupt", timeout: 3 },
     { event: "SessionEnd", timeout: 3 },
   ],
+  opencode: [
+    { event: "code-viewer.start", timeout: 5 },
+    { event: "session.status", matcher: "busy|retry", timeout: 5 },
+    { event: "permission.asked", timeout: 5 },
+    { event: "permission.updated", timeout: 5 },
+    { event: "permission.replied", timeout: 5 },
+    { event: "question.asked", timeout: 5 },
+    { event: "question.replied", timeout: 5 },
+    { event: "question.rejected", timeout: 5 },
+    { event: "session.idle", timeout: 5 },
+    { event: "code-viewer.dispose", timeout: 3 },
+  ],
 };
+
+/** opencode のプラグインが読み込み・終わりに自分で名乗る出来事。 */
+export const OPENCODE_START = "code-viewer.start";
+export const OPENCODE_DISPOSE = "code-viewer.dispose";
+
+/** opencode のプラグインが渡す出来事と申告の対応。 */
+const OPENCODE_EVENTS = new Map<string, AgentEvent>([
+  [OPENCODE_START, "ready"],
+  ["session.status", "progress"],
+  ["permission.asked", "ask"],
+  ["permission.updated", "ask"],
+  ["permission.replied", "progress"],
+  ["question.asked", "ask"],
+  ["question.replied", "progress"],
+  ["question.rejected", "progress"],
+  ["session.idle", "stop"],
+  [OPENCODE_DISPOSE, "exit"],
+]);
+
+/**
+ * opencode の出来事を申告に直す。session.status は status.type が
+ * HOOK_SPECS の matcher に当たるときだけ (プラグインも同じ条件で絞るが、
+ * 古い版のプラグインからも来うるのでここでも見る)。
+ */
+function opencodeEvent(input: Record<string, unknown>): AgentEvent | null {
+  const name = input.hook_event_name;
+  if (typeof name !== "string") return null;
+  const event = OPENCODE_EVENTS.get(name);
+  if (!event) return null;
+  if (name !== "session.status") return event;
+  const spec = HOOK_SPECS.opencode.find((item) => item.event === name);
+  const status = typeof input.status === "string" ? input.status : "";
+  return spec?.matcher && new RegExp(`^(?:${spec.matcher})$`).test(status)
+    ? event
+    : null;
+}
 
 /** フックの入力で、SessionStart が要約による作り直しかどうかを見る欄。 */
 const COMPACT_SOURCE = "compact";
@@ -114,6 +178,7 @@ export function agentEventForHook(
   agent: HookAgent,
   input: Record<string, unknown>,
 ): AgentEvent | null {
+  if (agent === "opencode") return opencodeEvent(input);
   const name = input.hook_event_name;
   if (name === "SessionStart") {
     return input.source === COMPACT_SOURCE ? null : "ready";
@@ -171,6 +236,15 @@ export function agentAttentionForHook(
   }
   if (name === "PermissionRequest") {
     return { kind: "permission", reason: "", detail: "" };
+  }
+  // opencode の許可 (permission.asked / 古い版の permission.updated) と質問
+  // (question ツール)。
+  if (agent === "opencode") {
+    return {
+      kind: name === "question.asked" ? "question" : "permission",
+      reason: "",
+      detail: "",
+    };
   }
   return null;
 }
@@ -619,4 +693,113 @@ export function hookRowAction(status: AgentHookStatus): HookRowAction | null {
   if (status.state === "installed") return { kind: "uninstall", action };
   if (status.state === "none") return { kind: "install", action };
   return { kind: "repair", action };
+}
+
+/**
+ * opencode のプラグインのファイル名。`<設定ディレクトリ>/plugins/` に置く。
+ * 名前が印 (AGENT_HOOK_MARKER) を含むので、古い版の中身でも自分のものと
+ * 分かる。中身に印の無い同名のファイルはほかの人のものとして扱い、書かない。
+ */
+export const OPENCODE_PLUGIN_FILE = `${AGENT_HOOK_MARKER}.js`;
+
+/** プラグインの中身が知る場所。起動スクリプトと失敗の記録。 */
+export type OpencodePluginTarget = { launcher: string; failureLog: string };
+
+/**
+ * opencode のプラグインの中身 (ES モジュール)。設定ファイルのフックと同じく、
+ * 起動スクリプトの場所だけを持ち、code-viewer の場所は持たない (版が上がっても
+ * 中身が変わらない)。
+ *
+ * - 受ける出来事と打ち切り時間は HOOK_SPECS.opencode から作る
+ * - 同じセッションで同じ出来事が続けば 2 回目からは呼ばない (session.status の
+ *   busy は 1 ターンに何度も来る)
+ * - 起動スクリプトは 1 つずつ順に呼ぶ (申告の時刻は CLI が付けるので、並べると
+ *   順序が入れ替わる)
+ * - 子のセッション (task で起こした下請け) は、許可と質問のほかは送らない。
+ *   下請けの終わりで親が「完了」に見えないようにする
+ * - 起動スクリプトを起こせなかったときは、起動スクリプトと同じ失敗の記録に
+ *   残す (設定の節が出す)。子の出力は捨てる (端末の画面を崩さない。失敗は
+ *   CLI が記録に書く)
+ */
+export function opencodePluginSource(target: OpencodePluginTarget): string {
+  const events = Object.fromEntries(
+    HOOK_SPECS.opencode.map((spec) => [
+      spec.event,
+      { timeout: spec.timeout, matcher: spec.matcher ?? null },
+    ]),
+  );
+  return `// ${AGENT_HOOK_MARKER}: written by code-viewer (Settings > Agent integration).
+// Tells code-viewer when this opencode is working, waiting for you, or done, by
+// calling code-viewer's hook launcher. Remove it there, or delete this file.
+import { appendFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+
+const LAUNCHER = ${JSON.stringify(target.launcher)};
+const FAILURE_LOG = ${JSON.stringify(target.failureLog)};
+const EVENTS = ${JSON.stringify(events)};
+const START = ${JSON.stringify(OPENCODE_START)};
+const DISPOSE = ${JSON.stringify(OPENCODE_DISPOSE)};
+const CHILD_EVENTS = new Set(["permission.asked", "permission.updated", "permission.replied", "question.asked", "question.replied", "question.rejected"]);
+
+function recordFailure(name, detail) {
+  try {
+    appendFileSync(FAILURE_LOG, JSON.stringify({ at: Date.now(), agent: "opencode", hookEvent: name, stage: "launch", detail }) + "\\n", { mode: 0o600 });
+  } catch (error) {
+    console.error(\`[${AGENT_HOOK_MARKER}] \${detail}; the failure log \${FAILURE_LOG} could not be written either\`, error);
+  }
+}
+
+export const CodeViewerAgentHook = async ({ directory }) => {
+  const children = new Set();
+  const last = new Map();
+  // 1 つずつ順に送る。申告の時刻は CLI が起きたときに付くので、並べて起こすと
+  // 後の出来事 (完了) が先の出来事 (作業中) より前に着くことがある。
+  let queue = Promise.resolve();
+  const report = (name, sessionID, status) =>
+    (queue = queue.then(() => send(name, sessionID, status)));
+  const send = (name, sessionID, status) =>
+    new Promise((resolve) => {
+      const spec = EVENTS[name];
+      const input = JSON.stringify({ hook_event_name: name, session_id: sessionID, cwd: directory, status });
+      const child = spawn(LAUNCHER, ["opencode"], { stdio: ["pipe", "ignore", "ignore"] });
+      const timer = setTimeout(() => child.kill(), spec.timeout * 1000);
+      child.on("exit", (code, signal) => {
+        clearTimeout(timer);
+        if (signal || code !== 0) {
+          recordFailure(name, \`\${LAUNCHER} ended with \${signal ? \`signal \${signal} (the limit is \${spec.timeout}s)\` : \`exit code \${code}\`}\`);
+        }
+        resolve();
+      });
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        recordFailure(name, \`could not run \${LAUNCHER}: \${error?.stack ?? error}\`);
+        resolve();
+      });
+      child.stdin.on("error", (error) => recordFailure(name, \`could not pass the event to \${LAUNCHER}: \${error?.stack ?? error}\`));
+      child.stdin.end(input);
+    });
+  report(START, "", "");
+  return {
+    event: async ({ event }) => {
+      const props = event.properties ?? {};
+      if (event.type === "session.created" && props.info?.parentID) {
+        children.add(props.info.id);
+        return;
+      }
+      const spec = Object.hasOwn(EVENTS, event.type) ? EVENTS[event.type] : null;
+      if (!spec || event.type === START || event.type === DISPOSE) return;
+      const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
+      if (children.has(sessionID) && !CHILD_EVENTS.has(event.type)) return;
+      const status = event.type === "session.status" ? String(props.status?.type ?? "") : "";
+      if (spec.matcher && !new RegExp(\`^(?:\${spec.matcher})$\`).test(status)) return;
+      const key = \`\${event.type}:\${status}\`;
+      if (last.get(sessionID) === key) return;
+      last.set(sessionID, key);
+      report(event.type, sessionID, status);
+    },
+    // 終わるときは届くまで待つ (待たないと、送る前にプロセスが終わる)。
+    dispose: () => report(DISPOSE, "", ""),
+  };
+};
+`;
 }

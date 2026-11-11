@@ -143,7 +143,7 @@ function response(): AccountsResponse {
     accounts: ROWS,
     registryError: null,
     registryPath: "/home/sample/.local/state/code-viewer/accounts.json",
-    launchCommands: { claude: "claude", codex: "codex" },
+    launchCommands: { claude: "claude", codex: "codex", opencode: "opencode" },
     lastLaunch: null,
     usageFailures: { total: 0, recent: [], log: "" },
   };
@@ -188,6 +188,7 @@ function harness(
       data.launchCommands = {
         claude: commands.claude || "claude",
         codex: commands.codex || "codex",
+        opencode: commands.opencode || "opencode",
       };
       for (const listener of listeners) listener();
     },
@@ -566,7 +567,7 @@ describe("launch commands (saved by the page's Save changes)", () => {
 
     await view.settings.draft.save();
     expect(view.saves).toEqual([
-      { claude: "/opt/sample/claude-wrapper", codex: "" },
+      { claude: "/opt/sample/claude-wrapper", codex: "", opencode: "" },
     ]);
     expect(view.settings.draft.dirty()).toBe(false);
     expect(unsaved()?.hidden).toBe(true);
@@ -587,6 +588,7 @@ describe("launch commands (saved by the page's Save changes)", () => {
     view.data.launchCommands = {
       claude: "/opt/sample/claude-wrapper",
       codex: "sample-codex",
+      opencode: "opencode",
     };
     view.settings.localize();
     const reset = Array.from(
@@ -604,6 +606,6 @@ describe("launch commands (saved by the page's Save changes)", () => {
     expect(view.settings.draft.dirty()).toBe(true);
     await view.settings.draft.save();
     // 既定の名前は「既定」として保存する (登録簿から外れる)。
-    expect(view.saves).toEqual([{ claude: "", codex: "" }]);
+    expect(view.saves).toEqual([{ claude: "", codex: "", opencode: "" }]);
   });
 });

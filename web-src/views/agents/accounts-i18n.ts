@@ -310,6 +310,7 @@ export type AccountsText = {
   /** 起動はしたが、プロジェクトの statusLine を読めず使用量を記録できない。 */
   launchStatusLineFailed: string;
   launchNeedsLogin: string;
+  launchOpencodeNoCredentials: string;
   launchNotSetUp: string;
   launchLoginUnknown: (detail: string) => string;
   launchNoProjects: string;
@@ -429,6 +430,8 @@ export const ACCOUNTS_EN: AccountsText = {
       "The recent codex session logs have no rate-limit entry yet.",
     unreadable:
       "The saved data could not be read (the format is not a public contract).",
+    unsupported:
+      "opencode has no command or file that reports plan limits (opencode stats counts tokens and cost only), so usage cannot be shown.",
   },
   usageCheck: "Check usage",
   usageRefreshAll: "Refresh all",
@@ -483,7 +486,7 @@ export const ACCOUNTS_EN: AccountsText = {
     `An agent runs with ${path}, which is not registered. Register it to name it and see its usage.`,
   sectionTitle: "Sign-in",
   sectionIntro:
-    "One row per account (one settings directory). The state and the email come from the CLI itself: claude auth status, codex login status.",
+    "One row per account (one settings directory). The state and the email come from the CLI itself: claude auth status, codex login status, opencode auth list (it shows providers, not an email). opencode has only its default account.",
   columns: {
     account: "Account",
     email: "Signed in as",
@@ -586,6 +589,7 @@ export const ACCOUNTS_EN: AccountsText = {
     "no-sessions": "No codex session yet",
     "no-token-count": "No rate limits in the session logs yet",
     unreadable: "Could not read the saved data",
+    unsupported: "opencode does not report limits",
   },
   shareShared: "Share (on by default)",
   shareOptional: "Can be shared if you choose (off by default)",
@@ -690,7 +694,7 @@ export const ACCOUNTS_EN: AccountsText = {
   commandsReset: "Restore default launch commands",
   commandsUnsaved: "Unsaved",
   launchButton: "New agent",
-  launchButtonTitle: "Start claude or codex in a new tmux window",
+  launchButtonTitle: "Start claude, codex or opencode in a new tmux window",
   launchProjectTitle: (name) => `Start an agent in ${name}`,
   launchTitle: "New agent",
   launchKind: "Agent",
@@ -722,6 +726,8 @@ export const ACCOUNTS_EN: AccountsText = {
     "Started, but this session will not record usage because the project's statusLine could not be read:",
   launchNeedsLogin:
     "This account is not signed in. The agent will ask you to sign in.",
+  launchOpencodeNoCredentials:
+    "opencode has no provider credentials yet. It can still use models that need no sign-in; add a provider with Sign in (opencode auth login).",
   launchNotSetUp:
     "This account has not been used yet (no settings directory). The agent sets it up and asks you to sign in.",
   launchLoginUnknown: (detail) => `Sign-in could not be checked: ${detail}`,
@@ -823,6 +829,8 @@ export const ACCOUNTS_JA: AccountsText = {
       "最近の codex のセッション記録に上限の情報がまだありません。",
     unreadable:
       "保存されたデータを読めません（公式に約束された書式ではありません）。",
+    unsupported:
+      "opencode には上限の情報を出すコマンドやファイルがありません（opencode stats はトークンと費用の集計だけです）。そのため使用量は出せません。",
   },
   usageCheck: "使用量を確かめる",
   usageRefreshAll: "すべて更新",
@@ -876,7 +884,7 @@ export const ACCOUNTS_JA: AccountsText = {
     `登録していない ${path} で動いているエージェントがあります。登録すると名前が付き、使用量も見られます。`,
   sectionTitle: "ログイン",
   sectionIntro:
-    "1 行が 1 つのアカウント（設定のディレクトリ 1 つ）です。状態とメールアドレスは CLI 自身に訊いています（claude auth status・codex login status）。",
+    "1 行が 1 つのアカウントです。状態とメールアドレスは CLI に訊きます（claude auth status・codex login status・opencode auth list）。opencode は既定だけです。",
   columns: {
     account: "アカウント",
     email: "ログイン中のメールアドレス",
@@ -979,6 +987,7 @@ export const ACCOUNTS_JA: AccountsText = {
     "no-sessions": "codex のセッションがまだありません",
     "no-token-count": "セッション記録に上限の情報がまだありません",
     unreadable: "保存されたデータを読めません",
+    unsupported: "opencode は上限を出しません",
   },
   shareShared: "共有する（既定でオン）",
   shareOptional: "選べば共有できる（既定でオフ）",
@@ -1083,7 +1092,8 @@ export const ACCOUNTS_JA: AccountsText = {
   commandsReset: "起動コマンドを既定に戻す",
   commandsUnsaved: "未保存",
   launchButton: "新しいエージェント",
-  launchButtonTitle: "claude か codex を tmux の新しいウィンドウで起動する",
+  launchButtonTitle:
+    "claude・codex・opencode を tmux の新しいウィンドウで起動する",
   launchProjectTitle: (name) => `${name} でエージェントを起動する`,
   launchTitle: "新しいエージェント",
   launchKind: "種類",
@@ -1117,6 +1127,8 @@ export const ACCOUNTS_JA: AccountsText = {
     "起動しましたが、プロジェクトの statusLine を読めなかったので、このセッションの使用量は記録されません:",
   launchNeedsLogin:
     "このアカウントは未ログインです。起動したエージェントがログインを求めます。",
+  launchOpencodeNoCredentials:
+    "opencode に提供元の資格情報がまだありません。ログインの要らないモデルは使えます。提供元はログイン（opencode auth login）から足せます。",
   launchNotSetUp:
     "このアカウントはまだ使われていません (設定ディレクトリがありません)。起動したエージェントが用意し、ログインを求めます。",
   launchLoginUnknown: (detail) =>

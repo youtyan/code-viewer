@@ -81,6 +81,7 @@ export const CLAUDE_LAUNCH_COMMAND_ID = "agent-accounts-command-claude";
 const DEFAULT_COMMANDS: Record<AccountAgent, string> = {
   claude: "claude",
   codex: "codex",
+  opencode: "opencode",
 };
 
 type Result = { ok: boolean; text: string };
@@ -352,7 +353,11 @@ export function createAccountsSettings(
   /** 起動コマンドの欄を利用者が触った (取り直しで上書きしない)。 */
   let commandsEdited = false;
   /** 起動コマンドの欄の値。 */
-  const commandValues: Record<AccountAgent, string> = { claude: "", codex: "" };
+  const commandValues: Record<AccountAgent, string> = {
+    claude: "",
+    codex: "",
+    opencode: "",
+  };
   let release: (() => void) | null = null;
   const draftListeners = new Set<() => void>();
 
@@ -743,6 +748,7 @@ export function createAccountsSettings(
       await deps.client.savePreferences({
         claude: commandToSave("claude", commandValues.claude),
         codex: commandToSave("codex", commandValues.codex),
+        opencode: commandToSave("opencode", commandValues.opencode),
       });
       commandsEdited = false;
       render();

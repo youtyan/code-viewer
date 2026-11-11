@@ -26,17 +26,95 @@ import { basenameOf } from "./terminal-board";
 import type { TmuxClientWindow, TmuxPaneId } from "./tmux";
 
 /**
- * エージェントの種類。claude / codex はペインで動いているコマンド名か、
+ * エージェントの種類。claude / codex / opencode はペインで動いているコマンド名か、
  * フックが名乗った種類で見分ける。それ以外でも状態を申告してきたもの
  * (フックを入れたエージェント) は other にする。どれにも当たらないペインは
  * ただのシェルなどで、種類は null。
  */
-export const AGENT_KINDS = ["claude", "codex", "other"] as const;
+export const AGENT_KINDS = ["claude", "codex", "opencode", "other"] as const;
 
 export type AgentKind = (typeof AGENT_KINDS)[number];
 
 /** 申告の記録のうち、種類の判定に使う部分。 */
 export type AgentKindReport = Pick<AgentStateRecord, "agent" | "ended">;
+
+/** プロセスの引数から決まる種類 (フックを名乗らないので other は無い)。 */
+export type ProcessAgentKind = Exclude<AgentKind, "other">;
+
+/**
+ * 中のプログラムで種類が決まる前面のコマンド (インタプリタ)。npm で入れた
+ * claude・codex・opencode は `node` などとして動き、tmux の pane_current_command
+ * にはインタプリタの名前が出る。
+ */
+const INTERPRETERS = new Set(["node", "nodejs", "bun", "deno"]);
+
+/** `<シェル> -c '<コマンド>' …` を包みとしてほどくシェル。 */
+const WRAPPING_SHELLS = new Set(["sh", "bash", "zsh", "dash", "fish"]);
+
+export function isInterpreterCommand(command: string): boolean {
+  return INTERPRETERS.has(command.trim().toLowerCase());
+}
+
+/** 実行ファイルの名前だけで決まる種類 (agentKindOf のコマンド名と同じ決まり)。 */
+function kindOfProgramName(name: string): ProcessAgentKind | null {
+  if (name === "claude" || /^\d+\.\d+\.\d+$/.test(name)) return "claude";
+  if (name === "codex") return "codex";
+  if (name === "opencode") return "opencode";
+  return null;
+}
+
+/**
+ * インタプリタが動かしているスクリプトの場所から決める種類。npm の
+ * パッケージの場所 (`…/@anthropic-ai/claude-code/cli.js` など) か、
+ * bin のリンクの名前 (`…/bin/claude`)。
+ */
+function kindOfScript(path: string): ProcessAgentKind | null {
+  if (path.includes("/@anthropic-ai/claude-code/")) return "claude";
+  if (path.includes("/@openai/codex/")) return "codex";
+  if (path.includes("/opencode-ai/")) return "opencode";
+  const name = (path.split("/").pop() ?? "")
+    .toLowerCase()
+    .replace(/\.(c|m)?js$|\.ts$/, "");
+  return name === "claude" || name === "codex" || name === "opencode"
+    ? name
+    : null;
+}
+
+/**
+ * 前面のプロセスの引数 (`ps -o args=` の 1 行。引用符は付かず空白で区切られる)
+ * から種類を決める。インタプリタなら最初のスクリプトの引数、対話シェルの包み
+ * (`zsh -ic 'claude "$@"' zsh …`) なら -c の次の語を見る。決められなければ null。
+ * 引数に空白を含むパスは切れるので決められないことがある (null に倒す)。
+ */
+export function agentKindFromArgs(args: string): ProcessAgentKind | null {
+  let words = args
+    .trim()
+    .split(/\s+/)
+    .map((word) => word.replace(/^['"]+|['"]+$/g, ""))
+    .filter(Boolean);
+  // 包みの中にまた包みがあっても、ほどくのは数段まで。
+  for (let depth = 0; depth < 4 && words.length > 0; depth += 1) {
+    const name = (words[0]?.split("/").pop() ?? "").toLowerCase();
+    const direct = kindOfProgramName(name);
+    if (direct) return direct;
+    if (INTERPRETERS.has(name)) {
+      const script = words
+        .slice(1)
+        .find((word) => !word.startsWith("-") && word !== "run");
+      return script ? kindOfScript(script) : null;
+    }
+    if (WRAPPING_SHELLS.has(name)) {
+      const flag = words.findIndex(
+        (word, index) => index > 0 && /^-[a-z]*c[a-z]*$/i.test(word),
+      );
+      if (flag < 0) return null;
+      words = words.slice(flag + 1);
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
 
 /**
  * コマンド名と申告から種類を決める。
@@ -44,7 +122,8 @@ export type AgentKindReport = Pick<AgentStateRecord, "agent" | "ended">;
  * claude の単体版は、版番号の名前を持つ実行ファイル (`2.1.0` など) として
  * 起動するので、tmux の pane_current_command には版番号がそのまま出る。
  * 数字 3 つの形だけを claude とみなす。npm 版は node として動くので、
- * コマンド名からは分からない。フックが名乗った種類で補う。
+ * コマンド名からは分からない。前面のプロセスの引数から当てた種類
+ * (processKind。agentKindFromArgs) と、フックが名乗った種類で補う。
  *
  * 最後の申告がセッションの終了なら、名乗った種類は使わない (そのペインは
  * もうシェルに戻っている)。
@@ -53,10 +132,15 @@ export function agentKindOf(
   command: string,
   source: AgentStateSource | null,
   report: AgentKindReport | null = null,
+  processKind: ProcessAgentKind | null = null,
 ): AgentKind | null {
   const name = command.trim().toLowerCase();
-  if (name === "claude" || /^\d+\.\d+\.\d+$/.test(name)) return "claude";
-  if (name === "codex") return "codex";
+  // opencode は単体の実行ファイル (`opencode`) として動く。
+  const direct = kindOfProgramName(name);
+  if (direct) return direct;
+  // インタプリタ (node など) の中のプログラムを引数から当てたもの
+  // (server/terminal/process-kind.ts。コマンドがインタプリタのときだけ調べる)。
+  if (processKind && isInterpreterCommand(name)) return processKind;
   if (report?.ended) return null;
   if (report?.agent) return report.agent;
   return source === "hook" ? "other" : null;
@@ -125,8 +209,17 @@ export type AgentPane = {
  */
 const TITLE_STATUS_PREFIX = /^[⠀-⣿✳✻✽✶✢*·•]+\s+/;
 
+/**
+ * opencode が題名の頭に付ける自分の名前 (`OC | <会話の題>`。1.19.5 で観測)。
+ * 種類は別の列で出すので落とす。opencode のペインに限る。
+ */
+const OPENCODE_TITLE_PREFIX = /^OC \| /;
+
 export function paneTaskText(pane: AgentPane): string {
-  const title = pane.title.replace(TITLE_STATUS_PREFIX, "").trim();
+  let title = pane.title.replace(TITLE_STATUS_PREFIX, "");
+  if (pane.kind === "opencode")
+    title = title.replace(OPENCODE_TITLE_PREFIX, "");
+  title = title.trim();
   return title || pane.command;
 }
 
@@ -456,6 +549,26 @@ export function groupAgentPanesByPlace(
     options.includeEmptyRegistered === true,
     comparePanePlace,
   ).sort(compareGroupsByRegistry);
+}
+
+/** 全体ボードの「急ぐ順」の段の順。 */
+export const URGENCY_ORDER = ["waiting", "done", "working", "idle"] as const;
+
+/**
+ * プロジェクトをまたいで状態ごとの段に分ける (全体ボードの「急ぐ順」)。段の
+ * 中は変わったのが新しい順 (変わった瞬間を見ていないものは後ろ)、同じなら
+ * tmux の場所の順。空の段は返さない。左のサイドバーは使わない (行が動くと
+ * 押そうとしたものが逃げる)。
+ */
+export function groupAgentPanesByUrgency(
+  panes: AgentPane[],
+): { state: AgentState; panes: AgentPane[] }[] {
+  return URGENCY_ORDER.map((state) => ({
+    state,
+    panes: panes
+      .filter((pane) => pane.state === state)
+      .sort((a, b) => b.updatedAt - a.updatedAt || comparePanePlace(a, b)),
+  })).filter((group) => group.panes.length > 0);
 }
 
 /**

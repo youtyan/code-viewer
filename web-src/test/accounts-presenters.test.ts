@@ -152,7 +152,7 @@ describe("the accounts settings presenter", () => {
     ]).toEqual([true, true]);
     await section.draft.save();
     expect(calls).toEqual([
-      'savePreferences {"claude":"claude-wrapper","codex":""}',
+      'savePreferences {"claude":"claude-wrapper","codex":"","opencode":""}',
     ]);
   });
 });

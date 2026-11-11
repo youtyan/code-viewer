@@ -10,6 +10,12 @@
 //   `codex app-server generate-json-schema` の GetAccountResponse)。未ログイン
 //   のディレクトリには app-server を起こさない (起こすとそこに状態のファイルを
 //   作るため)
+// - opencode: `opencode auth list` (https://opencode.ai/docs/cli/providers/)。
+//   機械向けの形は無く、人向けの一覧 (「N credentials」「N environment
+//   variables」と、提供元ごとの「● 名前 方式」の行) を読む。メールアドレスは
+//   出さない。保存した資格情報か、資格情報の環境変数が 1 つでもあれば
+//   ログイン済みとし、提供元の名前を「誰として」の欄に出す (opencode の
+//   「誰として」は、どの提供元に繋がっているか)
 //
 // どちらも起動コマンドと同じ対話シェル (launch.ts の agentCommandArgv) を通す
 // ので、シェルの初期化が stdout に端末向けの文字列 (OSC 7 など) を先に出す
@@ -27,6 +33,7 @@
 import type { AccountEntry, AccountLogin } from "../../core/agent-accounts";
 import { ACCOUNT_ENV } from "../../core/agent-accounts";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
+import { stripAnsi } from "../../core/terminal-images";
 import {
   onStdinWriteFailure,
   type RunResult,
@@ -208,6 +215,8 @@ export function accountEnv(
 ): NodeJS.ProcessEnv {
   const env = { ...base };
   const name = ACCOUNT_ENV[account.agent];
+  // 分ける変数が無い種類 (opencode) は既定のアカウントだけで、環境はそのまま。
+  if (name === null) return env;
   if (account.builtin) delete env[name];
   else env[name] = account.configDir;
   return env;
@@ -347,6 +356,76 @@ export function parseCodexLoginStatus(
 }
 
 /**
+ * `opencode auth list` の答え。行の頭の飾り (│ ● └) と色の制御文字を除いて、
+ * 件数の行と提供元の行を読む。件数の行が 1 つも無ければ読めない (unknown)。
+ */
+export function parseOpencodeAuthList(
+  result: RunResult,
+  checkedAt: number,
+  command = "opencode",
+): AccountLogin {
+  const base = blank(checkedAt);
+  const asked = `${command} auth list`;
+  if (result.code !== 0) {
+    if (isNotFound(result)) {
+      return {
+        ...base,
+        state: "unknown",
+        detail: `${asked}: the command was not found (exit ${result.code}${stderrHead(result.stderr) ? `: ${stderrHead(result.stderr)}` : ""})`,
+      };
+    }
+    return {
+      ...base,
+      state: "unknown",
+      detail: describeFailure(asked, result),
+    };
+  }
+  const lines = stripAnsi(result.stdout)
+    .split("\n")
+    .map((line) => line.replace(/^[\s│┌└●◇◆]+/u, "").trim());
+  const count = (pattern: RegExp): number | null => {
+    for (const line of lines) {
+      const match = pattern.exec(line);
+      if (match?.[1]) return Number(match[1]);
+    }
+    return null;
+  };
+  const credentials = count(/^(\d+) credentials?$/);
+  const environment = count(/^(\d+) environment variables?$/);
+  if (credentials === null && environment === null) {
+    return {
+      ...base,
+      state: "unknown",
+      detail: `${describeFailure(asked, result)}; no "N credentials" line in the output`,
+    };
+  }
+  if ((credentials ?? 0) + (environment ?? 0) === 0) {
+    return { ...base, state: "logged-out" };
+  }
+  // 提供元の行は「名前 方式 (api / oauth / 変数名)」。名前だけを残す。
+  const providers: string[] = [];
+  let section = "";
+  for (const line of lines) {
+    if (/^Credentials\b/.test(line)) section = "credentials";
+    else if (/^Environment\b/.test(line)) section = "environment";
+    else if (/^\d+ (credentials?|environment variables?)$/.test(line))
+      section = "";
+    else if (section && line) {
+      const name = line.split(/\s{1,}(?=\S+$)/)[0]?.trim();
+      if (name && !providers.includes(name)) providers.push(name);
+    }
+  }
+  return {
+    ...base,
+    state: "logged-in",
+    who: providers.join(", "),
+    whoDetail: providers.length
+      ? ""
+      : `${asked} counted credentials but listed no provider names`,
+  };
+}
+
+/**
  * app-server の account/read の答えから、メールアドレスとプランだけを取り出す。
  * 取れなければ whoDetail に理由 (出力の中身は載せない)。
  */
@@ -467,6 +546,9 @@ export function createLoginChecker(
         state: "unknown",
         detail: `${args.join(" ")} could not run: ${formatErrorDetail(error)}`,
       };
+    }
+    if (account.agent === "opencode") {
+      return parseOpencodeAuthList(result, deps.now(), command);
     }
     if (account.agent === "claude") {
       const login = parseClaudeAuthStatus(result, deps.now(), command);

@@ -722,8 +722,10 @@ export function checkAgentHooks(
   })),
   launcher: HookLauncher = currentHookLauncher(),
 ): DoctorGroup {
-  const removeHint = (path: string) =>
-    `To remove: Settings > Agent integration > Remove, or delete the hooks whose command contains "${AGENT_HOOK_MARKER}" from ${path}. Earlier content is kept next to it as ${basename(path)}.code-viewer-backup-*.`;
+  const removeHint = (agent: HookAgent, path: string) =>
+    agent === "opencode"
+      ? `To remove: Settings > Agent integration > Remove, or delete ${path} (the opencode plugin code-viewer wrote). Earlier content is kept next to it as ${basename(path)}.code-viewer-backup-*.`
+      : `To remove: Settings > Agent integration > Remove, or delete the hooks whose command contains "${AGENT_HOOK_MARKER}" from ${path}. Earlier content is kept next to it as ${basename(path)}.code-viewer-backup-*.`;
   const rows: DoctorRow[] = targets.map((target) => {
     const status = agentHookStatus(target, launcher);
     const problem =
@@ -737,7 +739,7 @@ export function checkAgentHooks(
       detail: `${status.state}: ${status.path}${status.detail ? `\n${status.detail}` : ""}`,
       ...(status.state === "none" || status.state === "no-config-dir"
         ? {}
-        : { hint: removeHint(status.path) }),
+        : { hint: removeHint(target.agent, status.path) }),
     };
   });
   const health = launcherHealth(launcher);
@@ -798,7 +800,7 @@ export function checkAgentAccounts(
   const accounts = accountEntries(
     read.ok ? read.registry : emptyAccountRegistry(),
     paths.home,
-    { claude: "default", codex: "default" },
+    { claude: "default", codex: "default", opencode: "default" },
   ).filter((account) => account.agent === "claude");
   for (const account of accounts) {
     const status = statusLineStatus(account.configDir, paths.usageDir);

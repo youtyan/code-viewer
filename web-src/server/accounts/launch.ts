@@ -199,8 +199,18 @@ export async function launchedPaneStatus(
 
 /** 種類ごとの公式のサブコマンド (ログインと、ログインの状態)。 */
 const AGENT_SUBCOMMANDS = {
-  login: { claude: ["auth", "login"], codex: ["login"] },
-  status: { claude: ["auth", "status", "--json"], codex: ["login", "status"] },
+  // opencode: https://opencode.ai/docs/cli/providers/ (`opencode auth login`・
+  // `opencode auth list`)。auth は providers の別名 (`opencode --help`)。
+  login: {
+    claude: ["auth", "login"],
+    codex: ["login"],
+    opencode: ["auth", "login"],
+  },
+  status: {
+    claude: ["auth", "status", "--json"],
+    codex: ["login", "status"],
+    opencode: ["auth", "list"],
+  },
 } as const;
 
 /**

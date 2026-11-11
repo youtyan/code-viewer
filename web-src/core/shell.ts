@@ -28,7 +28,7 @@ export const SHELL_ID_PREFIX = "shell-";
 export type ShellPurpose =
   | {
       kind: "sign-in";
-      agent: "claude" | "codex";
+      agent: "claude" | "codex" | "opencode";
       account: string;
     }
   | { kind: "remote-tunnel" };

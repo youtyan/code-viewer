@@ -91,6 +91,33 @@ describe("agentEventForHook", () => {
     ["codex", { hook_event_name: "PostToolUse" }, null],
     ["codex", { hook_event_name: "Notification" }, null],
     ["codex", {}, null],
+    // opencode はプラグインが渡す出来事 (core/agent-hooks.ts の HOOK_SPECS)。
+    ["opencode", { hook_event_name: "code-viewer.start" }, "ready"],
+    [
+      "opencode",
+      { hook_event_name: "session.status", status: "busy" },
+      "progress",
+    ],
+    [
+      "opencode",
+      { hook_event_name: "session.status", status: "retry" },
+      "progress",
+    ],
+    ["opencode", { hook_event_name: "session.status", status: "idle" }, null],
+    ["opencode", { hook_event_name: "session.status" }, null],
+    ["opencode", { hook_event_name: "permission.asked" }, "ask"],
+    ["opencode", { hook_event_name: "permission.updated" }, "ask"],
+    ["opencode", { hook_event_name: "permission.replied" }, "progress"],
+    ["opencode", { hook_event_name: "question.asked" }, "ask"],
+    ["opencode", { hook_event_name: "question.replied" }, "progress"],
+    ["opencode", { hook_event_name: "question.rejected" }, "progress"],
+    ["opencode", { hook_event_name: "session.idle" }, "stop"],
+    ["opencode", { hook_event_name: "code-viewer.dispose" }, "exit"],
+    ["opencode", { hook_event_name: "session.updated" }, null],
+    ["opencode", { hook_event_name: "toString" }, null],
+    // claude・codex の出来事の名前は opencode では申告にしない。
+    ["opencode", { hook_event_name: "Stop" }, null],
+    ["opencode", {}, null],
   ] satisfies [HookAgent, Json, AgentEvent | null][])(
     "%s %j -> %s",
     (agent, input, expected) => {
@@ -98,7 +125,7 @@ describe("agentEventForHook", () => {
     },
   );
 
-  test.each(["claude", "codex"] satisfies HookAgent[])(
+  test.each(["claude", "codex", "opencode"] satisfies HookAgent[])(
     "%s: every installed hook is reported as some event",
     (agent) => {
       for (const spec of HOOK_SPECS[agent]) {
@@ -107,6 +134,7 @@ describe("agentEventForHook", () => {
             hook_event_name: spec.event,
             source: "startup",
             notification_type: "permission_prompt",
+            status: "busy",
           }),
         ).not.toBeNull();
       }

@@ -21,6 +21,7 @@ import {
   emptyAccountRegistry,
   handoffArgs,
   handoffPrompt,
+  handoffSource,
   isAccountAgent,
   type LaunchResponse,
   launchCommandLine,
@@ -174,7 +175,10 @@ function launchLoginHint(
 ): string {
   switch (account?.login.state) {
     case "logged-out":
-      return t.launchNeedsLogin;
+      // opencode は資格情報が無くても、ログインの要らないモデルで動く。
+      return account.agent === "opencode"
+        ? t.launchOpencodeNoCredentials
+        : t.launchNeedsLogin;
     case "no-config-dir":
       return t.launchNotSetUp;
     case "unknown":
@@ -1212,8 +1216,11 @@ export function createAccountDialogs(
     const currentData = () => deps.client.snapshot().data ?? initialData;
     const last = initialData?.lastLaunch ?? null;
     const handoff = options.handoff ?? null;
-    const transcriptPath = handoff?.conversation?.transcriptPath ?? "";
-    if (handoff && !transcriptPath) {
+    const source = handoff
+      ? handoffSource(handoff.kind, handoff.conversation ?? null)
+      : null;
+    const transcriptPath = source?.transcriptPath ?? "";
+    if (handoff && !source) {
       throw new Error(
         `launch dialog: ${handoff.id} has no conversation log to hand over`,
       );
@@ -1326,10 +1333,11 @@ export function createAccountDialogs(
     /** 引き継ぎのときに起動コマンドの後ろに足す引数 (最初の指示など)。 */
     function handoffArgsFor(agent: AccountAgent): string[] {
       if (!fromAgent) return [];
+      if (!source) return [];
       const prompt = handoffPrompt(t.language, {
         agent: fromAgent,
         account: fromAccountName,
-        transcriptPath,
+        ...source,
       });
       return handoffArgs(agent, prompt, transcriptPath);
     }
@@ -1391,8 +1399,13 @@ export function createAccountDialogs(
           ? {
               label: t.handoffLog,
               log: {
-                text: abbreviateHome(transcriptPath, home),
-                title: transcriptPath,
+                // opencode は記録のファイルが無く、セッションを書き出すコマンドを渡す。
+                text: source?.opencodeSession
+                  ? `opencode export ${source.opencodeSession}`
+                  : abbreviateHome(transcriptPath, home),
+                title: source?.opencodeSession
+                  ? `opencode export ${source.opencodeSession}`
+                  : transcriptPath,
               },
               hint: t.handoffLogHint,
             }
@@ -1402,6 +1415,7 @@ export function createAccountDialogs(
           choices: [
             { value: "claude", label: "claude" },
             { value: "codex", label: "codex" },
+            { value: "opencode", label: "opencode" },
           ],
           current: kind,
           onPick(value) {

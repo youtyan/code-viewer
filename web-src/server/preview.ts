@@ -335,8 +335,8 @@ through a tunnel.
 
 Getting started: run code-viewer inside a git repository and open the printed
 URL; the repository is listed under Projects in the left sidebar. New agent
-there starts claude or codex in tmux (tmux must be installed). When something
-is missing (git, tmux, an older code-viewer still running), run
+there starts claude, codex or opencode in tmux (tmux must be installed). When
+something is missing (git, tmux, an older code-viewer still running), run
 code-viewer doctor.
 
 Examples:
