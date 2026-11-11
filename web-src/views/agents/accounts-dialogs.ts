@@ -6,6 +6,7 @@
 // フックの入れ外しと同じ (agent-hooks-dialog-*)。書く前に「どこに何が
 // 作られ、何がどこへリンクされるか」を見せ、見せた計画をそのまま送る。
 
+import { html, type TemplateResult } from "lit/html.js";
 import {
   type AccountAgent,
   type AccountEntry,
@@ -41,6 +42,7 @@ import { CHEVRON_DOWN_16_PATH, COPY_16_PATHS, iconSvg } from "../../core/icons";
 import type { ProjectColor } from "../../core/project-colors";
 import { showFormDialog } from "../ui-dialog";
 import { createAccountTagEditor } from "./account-tags";
+import { templateElement } from "../ui/renderer";
 import type { AccountsClient } from "./accounts-client";
 import type { AccountsText } from "./accounts-i18n";
 import { settingsDiffBlock } from "./settings-diff";
@@ -213,14 +215,22 @@ function notes(lines: string[]): HTMLElement {
 }
 
 /** 操作の結果の 1 文 (成功は status、失敗は alert)。 */
+export function resultLineTemplate(result: {
+  ok: boolean;
+  text: string;
+}): TemplateResult {
+  return html`<p
+    class=${`agent-hooks-result ${result.ok ? "agent-hooks-result-ok" : "agent-hooks-result-error"}`}
+    role=${result.ok ? "status" : "alert"}
+  >${result.text}</p>`;
+}
+
+/**
+ * まだ宣言的に描いていない画面のための、結果の行の要素を返す形。宣言的に描く
+ * 画面は resultLineTemplate を使う。
+ */
 export function resultLine(result: { ok: boolean; text: string }): HTMLElement {
-  const out = el(
-    "p",
-    `agent-hooks-result ${result.ok ? "agent-hooks-result-ok" : "agent-hooks-result-error"}`,
-    result.text,
-  );
-  out.setAttribute("role", result.ok ? "status" : "alert");
-  return out;
+  return templateElement(resultLineTemplate(result));
 }
 
 /** 起動の画面で、選んだアカウントのログインについて先に言っておくこと。 */

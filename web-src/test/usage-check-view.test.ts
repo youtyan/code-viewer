@@ -22,10 +22,28 @@ import { ACCOUNTS_EN, ACCOUNTS_JA } from "../views/agents/accounts-i18n";
 import { createAccountsSettings } from "../views/agents/accounts-settings";
 import {
   type UsageCheckOpeners,
-  usageCheckBlock,
   usageCheckMenuItem,
+  usageCheckBlock as usageCheckTemplate,
 } from "../views/agents/usage-check";
+import { render } from "lit/html.js";
+import { defineUiComponents } from "../views/ui/components";
 import { deferred } from "./_test-helpers";
+
+/**
+ * 欄を画面に置いて描き、その箱を返す (出すものが無ければ null)。欄の中の部品
+ * (cv-usage-check-copy) は画面に置いてから描くので、文書の中に置く。
+ */
+function usageCheckBlock(
+  ...args: Parameters<typeof usageCheckTemplate>
+): HTMLElement | null {
+  const template = usageCheckTemplate(...args);
+  if (!template) return null;
+  defineUiComponents();
+  const host = document.createElement("div");
+  document.body.append(host);
+  render(template, host);
+  return host.querySelector<HTMLElement>(".usage-check");
+}
 
 afterEach(() => {
   document.body.replaceChildren();

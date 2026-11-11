@@ -10,14 +10,66 @@ import {
 import { abbreviateHome } from "../../core/agent-overview";
 import { showCopyFailure } from "../../core/copy-failure";
 import { formatErrorDetail } from "../../core/error-detail";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import type { ContextMenuItem } from "../context-menu";
+import { defineElement } from "../ui/element";
 import type { AccountsClient, UsageCheckState } from "./accounts-client";
-import {
-  type AccountDialogs,
-  accountDisplayName,
-  el,
-} from "./accounts-dialogs";
+import { type AccountDialogs, accountDisplayName } from "./accounts-dialogs";
 import type { AccountsText } from "./accounts-i18n";
+
+export const CV_USAGE_CHECK_COPY = "cv-usage-check-copy";
+
+/**
+ * cv-usage-check-copy: 失敗の全文をコピーするボタンと、その結果の文。結果の文は
+ * この部品が持つ (押してから描き直されるまでの間だけの状態)。
+ */
+export function defineCvUsageCheckCopy(): void {
+  defineElement(
+    CV_USAGE_CHECK_COPY,
+    (Base) =>
+      class extends Base {
+        static props = ["text", "label", "copiedLabel", "failedLabel"];
+        declare text: string;
+        declare label: string;
+        declare copiedLabel: string;
+        declare failedLabel: string;
+        #busy = false;
+        #status = "";
+
+        #copy = async (event: Event) => {
+          const button = event.currentTarget as HTMLButtonElement;
+          this.#busy = true;
+          this.#status = "";
+          this.renderNow();
+          try {
+            await navigator.clipboard.writeText(this.text);
+            this.#status = this.copiedLabel;
+          } catch (error) {
+            showCopyFailure(
+              button,
+              "copying usage error details failed",
+              error,
+              this.label,
+              1500,
+            );
+            this.#status = `${this.failedLabel}: ${formatErrorDetail(error)}`;
+          } finally {
+            this.#busy = false;
+            this.renderNow();
+          }
+        };
+
+        protected template() {
+          return html`<div class="usage-check-actions"><button
+            type="button"
+            class="agents-secondary usage-check-copy"
+            ?disabled=${this.#busy}
+            @click=${this.#copy}
+          >${this.label}</button><span class="usage-check-status" role="status">${this.#status}</span></div>`;
+        }
+      },
+  );
+}
 
 /** 開いている「詳しく」(アカウントの id と中身)。 */
 const openDetails = new Set<string>();
@@ -127,16 +179,14 @@ function failureLines(state: UsageCheckState, t: AccountsText): Failure | null {
  * フォルダの場所。~ で縮め、最後の段を残して前を省略する (真ん中が「…」に
  * なる。CSS の .usage-check-folder)。全文は title。
  */
-function folderLine(folder: string, home: string): HTMLElement {
+function folderLineTemplate(folder: string, home: string): TemplateResult {
   const shown = home ? abbreviateHome(folder, home) : folder;
   const cut = shown.lastIndexOf("/", shown.length - 2) + 1;
-  const line = el("p", "usage-check-folder terminal-mono");
-  line.append(
-    el("span", "usage-check-folder-head", shown.slice(0, cut)),
-    el("span", "usage-check-folder-tail", shown.slice(cut)),
-  );
-  line.title = folder;
-  return line;
+  return html`<p class="usage-check-folder terminal-mono" title=${folder}><span
+      class="usage-check-folder-head"
+    >${shown.slice(0, cut)}</span><span class="usage-check-folder-tail"
+      >${shown.slice(cut)}</span
+    ></p>`;
 }
 
 /**
@@ -158,7 +208,8 @@ export function usageCheckBlock(
   t: AccountsText,
   openers: UsageCheckOpeners,
   options: { name?: string } = {},
-): HTMLElement | null {
+): TemplateResult | null {
+  defineCvUsageCheckCopy();
   const state = client.usageCheck(account.id);
   const running = state?.running === true;
   // 今回の取得失敗は、保存済みの値が新しくても隠さない。
@@ -176,146 +227,106 @@ export function usageCheckBlock(
   const offered = usageCheckOffered(account, now);
   if (!running && !showFailure && !offered) return null;
 
-  const box = el("div", "usage-check");
-  box.dataset.account = account.id;
-  const checkButton = (label: string) => {
-    const button = el("button", "agents-secondary usage-check-button", label);
-    button.type = "button";
-    button.title = t.usageCheckTitle;
-    button.disabled = running;
-    button.addEventListener("click", () => void client.checkUsage(account.id));
-    return button;
-  };
+  const checkButton = (label: string) =>
+    html`<button
+      type="button"
+      class="agents-secondary usage-check-button"
+      title=${t.usageCheckTitle}
+      ?disabled=${running}
+      @click=${() => void client.checkUsage(account.id)}
+    >${label}</button>`;
   // 画面で止まった・起動に失敗したときは、下の「もう一度確かめる」が同じ役をする。
   const startFailed =
     showFailure &&
     state?.response?.status === "failed" &&
     state.response.reason === "start-failed";
-  if (running || ((offered || refreshFailed) && !stop && !startFailed)) {
-    box.appendChild(
-      checkButton(options.name ? t.usageCheckFor(options.name) : t.usageCheck),
-    );
-  }
-  if (running) {
-    const line = el("p", "usage-check-status", t.usageChecking);
-    line.setAttribute("role", "status");
-    box.appendChild(line);
-    return box;
-  }
-  if (!showFailure || !failure) return box;
-  const reason = el("p", "usage-check-failed", failure.reason);
-  reason.setAttribute("role", "alert");
-  box.appendChild(reason);
-  if (stop) {
-    box.appendChild(
-      folderLine(stop.folder, client.snapshot().data?.home ?? ""),
-    );
-    const actions = el("div", "usage-check-actions");
-    const open = el(
-      "button",
-      "agents-secondary usage-check-open",
-      stop.kind === "login" ? t.loginButton : t.usageCheckOpenHere,
-    );
-    open.type = "button";
-    open.title =
-      stop.kind === "login"
-        ? t.loginTitle(accountDisplayName(account, t))
-        : t.usageCheckOpenHereTitle(stop.folder);
-    open.addEventListener("click", async () => {
-      try {
-        let notice = "";
-        if (stop.kind === "login") await openers.login(account);
-        else notice = await openers.openHere(account, stop.folder);
-        client.noteUsageCheckOpened(account.id, "", notice);
-      } catch (error) {
-        console.error("[code-viewer] could not open the account", error);
-        client.noteUsageCheckOpened(account.id, formatErrorDetail(error));
-      }
-    });
-    actions.append(open, checkButton(t.usageCheckAgain));
-    box.appendChild(actions);
-    const opened = state?.opened;
-    if (opened?.error) {
-      box.appendChild(el("p", "usage-check-failed", t.usageCheckOpenFailed));
-      box.appendChild(el("p", "usage-check-next", opened.error));
-    } else if (opened) {
-      box.appendChild(
-        el(
-          "p",
-          "usage-check-next",
-          t.usageCheckAfterOpen(
-            stop.kind === "login"
-              ? "login"
-              : stop.kind === "timeout"
-                ? "look"
-                : "answer",
-            t.usageCheckAgain,
-          ),
-        ),
-      );
-      if (opened.notice) {
-        box.appendChild(el("p", "usage-check-failed", opened.notice));
-      }
-    }
-  }
-  if (failure.next) box.appendChild(el("p", "usage-check-next", failure.next));
-  // 起動コマンドで claude を起こせなかった: その欄へ移るボタン。
-  if (startFailed) {
-    const commands = el(
-      "button",
-      "agents-secondary usage-check-commands",
-      t.usageCheckOpenCommands,
-    );
-    commands.type = "button";
-    commands.addEventListener("click", () => openers.openLaunchCommands());
-    const actions = el("div", "usage-check-actions");
-    actions.append(commands, checkButton(t.usageCheckAgain));
-    box.appendChild(actions);
-  }
-  if (failure.more) {
-    const more = el("details", "usage-check-more");
-    // 一覧の取り直しのたびに描き直すので、開いたことを結果ごとに覚える。
-    const key = `${account.id}\n${failure.more}`;
-    more.open = openDetails.has(key);
-    more.addEventListener("toggle", () => {
-      if (more.open) openDetails.add(key);
-      else openDetails.delete(key);
-    });
-    const copy = el(
-      "button",
-      "agents-secondary usage-check-copy",
-      t.usageCheckCopy,
-    );
-    copy.type = "button";
-    const copied = el("span", "usage-check-status");
-    copied.setAttribute("role", "status");
-    copy.addEventListener("click", async () => {
-      copy.disabled = true;
-      copied.textContent = "";
-      try {
-        await navigator.clipboard.writeText(failure.more);
-        copied.textContent = t.copiedLocation;
-      } catch (error) {
-        showCopyFailure(
-          copy,
-          "copying usage error details failed",
-          error,
-          t.usageCheckCopy,
-          1500,
-        );
-        copied.textContent = `${t.copyLocationFailed}: ${formatErrorDetail(error)}`;
-      } finally {
-        copy.disabled = false;
-      }
-    });
-    const copyRow = el("div", "usage-check-actions");
-    copyRow.append(copy, copied);
-    more.append(
-      el("summary", "", t.usageCheckMore),
-      copyRow,
-      el("pre", "usage-check-detail terminal-mono", failure.more),
-    );
-    box.appendChild(more);
-  }
-  return box;
+  const first =
+    running || ((offered || refreshFailed) && !stop && !startFailed)
+      ? checkButton(options.name ? t.usageCheckFor(options.name) : t.usageCheck)
+      : nothing;
+  if (running)
+    return html`<div class="usage-check" data-account=${account.id}>${first}<p
+        class="usage-check-status"
+        role="status"
+      >${t.usageChecking}</p></div>`;
+  if (!showFailure || !failure)
+    return html`<div class="usage-check" data-account=${account.id}>${first}</div>`;
+  const opened = state?.opened;
+  const stopPart = stop
+    ? html`${folderLineTemplate(stop.folder, client.snapshot().data?.home ?? "")}<div
+          class="usage-check-actions"
+        ><button
+          type="button"
+          class="agents-secondary usage-check-open"
+          title=${stop.kind === "login" ? t.loginTitle(accountDisplayName(account, t)) : t.usageCheckOpenHereTitle(stop.folder)}
+          @click=${async () => {
+            try {
+              let notice = "";
+              if (stop.kind === "login") await openers.login(account);
+              else notice = await openers.openHere(account, stop.folder);
+              client.noteUsageCheckOpened(account.id, "", notice);
+            } catch (error) {
+              console.error("[code-viewer] could not open the account", error);
+              client.noteUsageCheckOpened(account.id, formatErrorDetail(error));
+            }
+          }}
+        >${stop.kind === "login" ? t.loginButton : t.usageCheckOpenHere}</button>${checkButton(
+          t.usageCheckAgain,
+        )}</div>${
+          opened?.error
+            ? html`<p class="usage-check-failed">${t.usageCheckOpenFailed}</p><p
+                  class="usage-check-next"
+                >${opened.error}</p>`
+            : opened
+              ? html`<p class="usage-check-next">${t.usageCheckAfterOpen(
+                  stop.kind === "login"
+                    ? "login"
+                    : stop.kind === "timeout"
+                      ? "look"
+                      : "answer",
+                  t.usageCheckAgain,
+                )}</p>${
+                  opened.notice
+                    ? html`<p class="usage-check-failed">${opened.notice}</p>`
+                    : nothing
+                }`
+              : nothing
+        }`
+    : nothing;
+  // 一覧の取り直しのたびに描き直すので、開いたことを結果ごとに覚える。
+  const key = `${account.id}\n${failure.more}`;
+  return html`<div class="usage-check" data-account=${account.id}>${first}<p
+      class="usage-check-failed"
+      role="alert"
+    >${failure.reason}</p>${stopPart}${
+      failure.next
+        ? html`<p class="usage-check-next">${failure.next}</p>`
+        : nothing
+    }${
+      // 起動コマンドで claude を起こせなかった: その欄へ移るボタン。
+      startFailed
+        ? html`<div class="usage-check-actions"><button
+              type="button"
+              class="agents-secondary usage-check-commands"
+              @click=${() => openers.openLaunchCommands()}
+            >${t.usageCheckOpenCommands}</button>${checkButton(t.usageCheckAgain)}</div>`
+        : nothing
+    }${
+      failure.more
+        ? html`<details
+            class="usage-check-more"
+            .open=${openDetails.has(key)}
+            @toggle=${(event: Event) => {
+              if ((event.currentTarget as HTMLDetailsElement).open)
+                openDetails.add(key);
+              else openDetails.delete(key);
+            }}
+          ><summary class="">${t.usageCheckMore}</summary><cv-usage-check-copy
+            .text=${failure.more}
+            .label=${t.usageCheckCopy}
+            .copiedLabel=${t.copiedLocation}
+            .failedLabel=${t.copyLocationFailed}
+          ></cv-usage-check-copy><pre class="usage-check-detail terminal-mono">${failure.more}</pre></details>`
+        : nothing
+    }</div>`;
 }
