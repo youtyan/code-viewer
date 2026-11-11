@@ -603,6 +603,7 @@ export function createAgentsPresenter(
         kind: "section",
         state: null,
         label: current.board.pinned,
+        count: pinnedPanes.length,
         rows: groupAgentPanesByUrgency(pinnedPanes).flatMap((group) =>
           group.panes.map((pane) => rowProps(pane, projectLabel(pane))),
         ),
@@ -636,6 +637,8 @@ export function createAgentsPresenter(
       kind: "section",
       state: group.state,
       label: current.state[group.state],
+      // 件数はこの状態の行だけ (子の状態で段に入った親は数えない)。
+      count: group.rows.filter(({ pane }) => pane.state === group.state).length,
       rows: group.rows.map(({ pane, depth }) => ({
         ...rowProps(pane, projectLabel(pane)),
         depth,

@@ -137,6 +137,11 @@ export type BoardListEntry =
       /** 状態の段。留めた段は null。 */
       state: AgentPane["state"] | null;
       label: string;
+      /**
+       * 見出しの件数。急ぐ順の段はその状態の行の数 (子の状態で段に入った親は
+       * 数えない)。留めた段は行の数。
+       */
+      count: number;
       rows: BoardRowProps[];
     }
   | { kind: "content"; content: unknown }
@@ -281,7 +286,7 @@ function listEntryTemplate(
         class="agents-project-head"
       ><span class="agents-project-name">${entry.label}</span><span
         class="agents-chip"
-      >${entry.rows.length}</span></div><div class="agents-rows" role="group">${repeat(
+      >${entry.count}</span></div><div class="agents-rows" role="group">${repeat(
         entry.rows,
         (row) => row.id,
         (row) => rowTemplate(props, row),

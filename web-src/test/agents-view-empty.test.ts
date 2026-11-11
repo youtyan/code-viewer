@@ -574,6 +574,41 @@ describe("agents board presenter", () => {
     expect(pinnedRows(again.last())).toEqual(["%2"]);
   });
 
+  test("in the urgency order a section counts only its own state, not the parent lifted in by a child", async () => {
+    const { last } = await mountWithView([
+      agentPane({
+        id: "%1",
+        label: "work:0.1",
+        state: "idle",
+        project: "/work/sample-app",
+        kind: "claude",
+      }),
+      {
+        ...agentPane({
+          id: "%2",
+          label: "work:0.2",
+          state: "waiting",
+          project: "/work/sample-app",
+          kind: "codex",
+        }),
+        parent: "%1",
+      },
+    ]);
+    last().onOrder("urgency");
+    await flushRenders();
+    expect(
+      last().list.flatMap((entry) =>
+        entry.kind === "section"
+          ? [[entry.state, entry.count, entry.rows.map((row) => row.id)]]
+          : [],
+      ),
+    ).toEqual([["waiting", 1, ["%1", "%2"]]]);
+    expect(
+      document.querySelector(".agents-urgency-section .agents-chip")
+        ?.textContent,
+    ).toBe("1");
+  });
+
   test("the chosen order is remembered, and a board opened later starts in it", async () => {
     let stored: BoardOrder | null = null;
     const memory = {
