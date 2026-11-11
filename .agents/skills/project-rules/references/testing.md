@@ -31,7 +31,9 @@ expect(style.includes("max-height: calc(100vh - var(--global-header-h) - 40px);"
 1. **不在の証明** — 機能を削除した後、痕跡が残っていないこと
    （`web-src/test/asset-version-removal.test.ts` が手本。ソースと**焼いたバンドル**の両方を見る）
 2. **ドキュメント整合** — CLI / README / Help の記述と実装の対応
-   （`web-src/test/_documented-cli-fixture.ts` が手本）
+   （`web-src/test/_documented-cli-fixture.ts` が手本。配布スキルと README の
+   `code-viewer <サブコマンド>` の例は全部 `documented-cli-examples.test.ts` が解釈に通す。
+   サブコマンドを足したら、その `parse…Args` を表に足す）
 
 **それ以外、特に CSS の見た目・レイアウト・セレクタの存在を生文字列で主張するのは禁止。**
 「あるはず」を確かめても、「効いている」ことは何も確かめていない。

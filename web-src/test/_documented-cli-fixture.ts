@@ -48,6 +48,8 @@ function shellSplit(s: string): string[] {
       } else buf += c;
       continue;
     }
+    // 引用の外の、語の頭の # から後ろはシェルのコメント (例の説明)。
+    if (c === "#" && buf.length === 0) break;
     if (c === "'") inSingle = true;
     else if (c === '"') inDouble = true;
     else if (c === " " || c === "\t") {
