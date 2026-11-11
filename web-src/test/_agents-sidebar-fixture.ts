@@ -98,6 +98,7 @@ export function fakeMonitor(
     },
     markRead: () => undefined,
     markUnread: async () => undefined,
+    setPinned: async () => undefined,
     latest: () => ({ overview: snapshot.overview, error: snapshot.error }),
     receive: () => undefined,
     permission: () => notify.permission ?? "default",

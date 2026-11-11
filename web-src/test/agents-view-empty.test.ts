@@ -50,13 +50,20 @@ async function mountBoard(
     view?: AgentsBoardView;
     /** 並びを覚える所 (ユーザー単位の設定の代わり)。 */
     boardOrder?: { get(): BoardOrder | null; set(order: BoardOrder): void };
+    /** サーバが覚えているピン (無ければ古い版のサーバ: 画面のメモリで留める)。 */
+    serverPins?: string[];
+    /** 留める・外すをサーバへ送ったとき。 */
+    setPinned?: (pane: string, on: boolean) => void;
   } = {},
 ) {
   document.body.innerHTML = '<main id="content"></main>';
   const calls: string[] = [];
   const base = projects ? overviewWith(panes, projects) : overview(panes);
+  const withTmux = extra.tmux ? { ...base, tmux: extra.tmux } : base;
   const snapshot = {
-    overview: extra.tmux ? { ...base, tmux: extra.tmux } : base,
+    overview: extra.serverPins
+      ? { ...withTmux, pinned: extra.serverPins }
+      : withTmux,
     error: "",
     notifyError: "",
     unread: new Map(),
@@ -70,6 +77,15 @@ async function mountBoard(
     subscribe: () => () => undefined,
     markRead: () => undefined,
     markUnread: async () => undefined,
+    setPinned: async (pane, on) => {
+      extra.setPinned?.(pane, on);
+      const pinned = snapshot.overview.pinned;
+      if (!pinned) return;
+      snapshot.overview = {
+        ...snapshot.overview,
+        pinned: on ? [...pinned, pane] : pinned.filter((item) => item !== pane),
+      };
+    },
     latest: () => ({ overview: snapshot.overview, error: snapshot.error }),
     receive: () => undefined,
     permission: () => extra.permission ?? "granted",
@@ -370,10 +386,15 @@ describe("agents board presenter", () => {
   async function mountWithView(
     panes: AgentPane[],
     boardOrder?: { get(): BoardOrder | null; set(order: BoardOrder): void },
+    pins?: {
+      serverPins: string[];
+      setPinned: (pane: string, on: boolean) => void;
+    },
   ) {
     const seen: AgentsBoardViewProps[] = [];
     const mounted = await mountBoard(panes, "en", undefined, undefined, {
       boardOrder,
+      ...pins,
       view: (props) => {
         seen.push(props);
         return BOARD_DEFAULT_VIEW(props);
@@ -495,6 +516,62 @@ describe("agents board presenter", () => {
       ["waiting", ["%1"]],
       ["idle", ["%2"]],
     ]);
+  });
+
+  test("with a server that keeps pins, pinning goes to the server and a board opened later shows it", async () => {
+    const sent: [string, boolean][] = [];
+    const server: string[] = [];
+    const twoPanes = [
+      agentPane({
+        id: "%1",
+        label: "work:0.1",
+        state: "waiting",
+        project: "/work/sample-app",
+        kind: "claude",
+      }),
+      agentPane({
+        id: "%2",
+        label: "work:0.2",
+        state: "idle",
+        project: "/work/sample-lib",
+        kind: "claude",
+      }),
+    ];
+    const pinnedRows = (props: AgentsBoardViewProps) =>
+      props.list.flatMap((entry) =>
+        entry.kind === "section" && entry.state === null
+          ? entry.rows.map((row) => row.id)
+          : [],
+      );
+    const { last } = await mountWithView(twoPanes, undefined, {
+      serverPins: server,
+      setPinned: (pane, on) => {
+        sent.push([pane, on]);
+        if (on) server.push(pane);
+      },
+    });
+    document
+      .querySelector<HTMLElement>('[data-agent-nav="pane:%2"]')
+      ?.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+    [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        ".gdp-context-menu button",
+      ),
+    ]
+      .find((item) => item.textContent === "Pin to the top")
+      ?.click();
+    await flushRenders();
+    expect(sent).toEqual([["%2", true]]);
+    expect(pinnedRows(last())).toEqual(["%2"]);
+
+    // 別の窓 (読み直した画面) でも、サーバの一覧のピンで留まって見える。
+    const again = await mountWithView(twoPanes, undefined, {
+      serverPins: server,
+      setPinned: () => undefined,
+    });
+    expect(pinnedRows(again.last())).toEqual(["%2"]);
   });
 
   test("the chosen order is remembered, and a board opened later starts in it", async () => {

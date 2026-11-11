@@ -186,6 +186,7 @@ describe("state-changing request bodies", () => {
       path: "/_agent/unread",
       type: "text/plain",
     },
+    { name: "pin without Content-Type", path: "/_agent/pin" },
   ])("rejects $name", async ({ path, type }) => {
     const res = await call(path, {
       method: "POST",

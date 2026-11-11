@@ -63,6 +63,7 @@ const API_ENDPOINTS = {
   },
   agentStatuslinePlan: { path: "/_agent/statusline/plan", zone: "entry" },
   agentUnread: { path: "/_agent/unread", zone: "entry" },
+  agentPin: { path: "/_agent/pin", zone: "entry" },
   annotations: { path: "/_annotations", zone: "project" },
   authors: { path: "/_authors", zone: "project" },
   commits: { path: "/_commits", zone: "project" },

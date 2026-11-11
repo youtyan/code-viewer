@@ -140,6 +140,7 @@ import {
   resetAgentScreenRules,
   saveAgentScreenRules,
 } from "./rules";
+import { noteAgentPins, setAgentPinned } from "./pins";
 import { clearAgentUnread, markAgentUnread, noteAgentUnread } from "./unread";
 
 const MAX_AGENT_ACTION_BODY_BYTES = 16 * 1024;
@@ -689,6 +690,28 @@ async function handleUnreadPost(req: Request): Promise<Response> {
   return json({ ok: true, unread });
 }
 
+/** 全体ボードの「上に留める」・外す (pins.ts。サーバのメモリ)。 */
+async function handlePinPost(req: Request): Promise<Response> {
+  const parsed = await parseBoundedJsonBody(
+    req,
+    MAX_AGENT_ACTION_BODY_BYTES,
+    "agent pin request too large",
+  );
+  if (parsed instanceof Response) return parsed;
+  if (!parsed || typeof parsed !== "object") {
+    return textError("invalid pin request", 400);
+  }
+  const body = parsed as { target?: unknown; pinned?: unknown };
+  if (typeof body.target !== "string" || !terminalKindOf(body.target)) {
+    return textError("invalid target", 400);
+  }
+  if (typeof body.pinned !== "boolean") {
+    return textError("invalid pinned", 400);
+  }
+  setAgentPinned(body.target, body.pinned);
+  return json({ ok: true, pinned: body.pinned });
+}
+
 /** フックの入れ外しの本文上限。種類・動作・ハッシュだけが来る。 */
 const MAX_HOOK_APPLY_BYTES = 4096;
 
@@ -839,6 +862,7 @@ async function handleOverviewGet(
   return json({
     ...overview,
     unread: noteAgentUnread(overview.panes),
+    pinned: noteAgentPins(overview.panes),
   } satisfies AgentOverviewResponse);
 }
 
@@ -1021,6 +1045,12 @@ export function handleAgentRoute(
         methods: ["POST"],
         sideEffect: true,
         handler: () => handleUnreadPost(req),
+      },
+      // 全体ボードの「上に留める」。ピンはサーバのメモリにある (pins.ts)。
+      "/_agent/pin": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handlePinPost(req),
       },
       // ファイルを作るので副作用。同一オリジンからしか通らない。
       "/_agent/paste": {

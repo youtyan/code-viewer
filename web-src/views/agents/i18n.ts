@@ -170,6 +170,8 @@ export type AgentsBoardText = {
   pinned: string;
   pin: string;
   unpin: string;
+  /** 留める・外すのを、サーバが受けなかった。 */
+  pinFailed: string;
 };
 
 export type AgentsSidebarText = {
@@ -663,6 +665,7 @@ const EN: AgentsText = {
     pinned: "Pinned",
     pin: "Pin to the top",
     unpin: "Unpin",
+    pinFailed: "Could not change the pin",
   },
   hookHint: (agents) =>
     `Finish detection is off for ${agents}. Hooks make it reliable.`,
@@ -847,6 +850,7 @@ const JA: AgentsText = {
     pinned: "ピン留め",
     pin: "上に留める",
     unpin: "留めを外す",
+    pinFailed: "留める・外すことができませんでした",
   },
   hookHint: (agents) =>
     `${agents} の完了の検知を有効にできます (フックが未設定です)。`,

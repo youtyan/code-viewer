@@ -52,6 +52,7 @@ import { projectLook } from "../projects/project-looks";
 import { showProjectMenu } from "../projects/project-menu";
 import { emptyStateTemplate } from "../ui/empty-state";
 import { createRenderer, templateElement } from "../ui/renderer";
+import { showAlertDialog } from "../ui-dialog";
 import { accountTagListTemplate } from "./account-tags";
 import type { AccountsBand } from "./accounts-band";
 import { paneAccountName } from "./accounts-dialogs";
@@ -139,10 +140,47 @@ export function createAgentsPresenter(
   const currentOrder = (): BoardOrder =>
     chosenOrder ?? deps.boardOrder?.get() ?? "project";
   /**
-   * 上に留めたペイン (全体ボードだけ。左のサイドバーは行を動かさない)。メモリだけで、
-   * ペインが一覧から消えたら外す。
+   * 上に留めたペイン (全体ボードだけ。左のサイドバーは行を動かさない)。ピンは
+   * サーバのメモリ (一覧の pinned。どの窓・電話でも同じ) にあり、ここは
+   * 押してから一覧に載るまでの見込み (pendingPins) だけを持つ。pinned 欄の無い
+   * 古い版のサーバでは画面のメモリ (localPins) で留め、ペインが消えたら外す。
    */
-  const pinned = new Set<string>();
+  const pendingPins = new Map<string, boolean>();
+  const localPins = new Set<string>();
+  function isPinned(id: string): boolean {
+    const server = deps.monitor.snapshot().overview?.pinned;
+    const pending = pendingPins.get(id);
+    if (pending !== undefined) {
+      // サーバの一覧が押した結果に追いついたら、見込みを捨てる。
+      if (server && server.includes(id) === pending) pendingPins.delete(id);
+      return pending;
+    }
+    return server ? server.includes(id) : localPins.has(id);
+  }
+  async function togglePin(id: string, next: boolean): Promise<void> {
+    if (!deps.monitor.snapshot().overview?.pinned) {
+      if (next) localPins.add(id);
+      else localPins.delete(id);
+      render(true);
+      return;
+    }
+    pendingPins.set(id, next);
+    render(true);
+    try {
+      await deps.monitor.setPinned(id, next);
+    } catch (error) {
+      pendingPins.delete(id);
+      console.error(
+        `[code-viewer] could not ${next ? "pin" : "unpin"} ${id}`,
+        error,
+      );
+      void showAlertDialog({
+        title: text().board.pinFailed,
+        body: formatErrorDetail(error),
+      });
+    }
+    render(true);
+  }
   let selected: string | null = null;
   /** 畳んだプロジェクト (root)。取り直しを跨いで保つ。 */
   const collapsed = new Set<string>();
@@ -556,10 +594,10 @@ export function createAgentsPresenter(
       return entries;
     }
     // 留めたものは並びに関係なく先頭の段へ (その段の中は急ぐ順と同じ並び)。
-    for (const id of [...pinned]) {
-      if (!panes.some((pane) => pane.id === id)) pinned.delete(id);
+    for (const id of [...localPins]) {
+      if (!panes.some((pane) => pane.id === id)) localPins.delete(id);
     }
-    const pinnedPanes = visible.filter((pane) => pinned.has(pane.id));
+    const pinnedPanes = visible.filter((pane) => isPinned(pane.id));
     if (pinnedPanes.length > 0) {
       entries.push({
         kind: "section",
@@ -570,7 +608,7 @@ export function createAgentsPresenter(
         ),
       });
     }
-    const rest = visible.filter((pane) => !pinned.has(pane.id));
+    const rest = visible.filter((pane) => !isPinned(pane.id));
     if (currentOrder() === "urgency") {
       entries.push(...urgencyEntries(rest));
       return entries;
@@ -759,14 +797,10 @@ export function createAgentsPresenter(
           [
             { label: current.openPane, onSelect: () => select(pane) },
             {
-              label: pinned.has(pane.id)
+              label: isPinned(pane.id)
                 ? current.board.unpin
                 : current.board.pin,
-              onSelect: () => {
-                if (pinned.has(pane.id)) pinned.delete(pane.id);
-                else pinned.add(pane.id);
-                render(true);
-              },
+              onSelect: () => void togglePin(pane.id, !isPinned(pane.id)),
             },
             ...markUnreadMenuItems(pane, current, deps.monitor),
             ...handoffMenuItems(pane, current, deps.handoff),

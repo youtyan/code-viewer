@@ -105,6 +105,11 @@ export type AgentMonitor = {
    * いったん見なくなるまでは読んだことにしない。失敗は理由つきで投げる。
    */
   markUnread(pane: TmuxPaneId): Promise<void>;
+  /**
+   * 全体ボードの「上に留める」・外す。サーバのメモリに置き (どの窓でも同じ)、
+   * 取り直して一覧の pinned に載せる。失敗は理由つきで投げる。
+   */
+  setPinned(pane: TmuxPaneId, pinned: boolean): Promise<void>;
   permission(): NotificationPermissionState;
   requestPermission(): Promise<NotificationPermissionState>;
   /** サーバの応答そのもの (外側のページが面へ配る)。 */
@@ -420,6 +425,22 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    async setPinned(pane, pinned) {
+      const res = await fetch(apiUrl("agentPin"), {
+        method: "POST",
+        headers: {
+          ...deps.actionHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ target: pane, pinned }),
+      });
+      if (!res.ok) {
+        throw new Error(
+          await responseErrorMessage(res, pinned ? "pin" : "unpin"),
+        );
+      }
+      await refresh();
     },
     async markUnread(pane) {
       const res = await fetch(apiUrl("agentUnread"), {
