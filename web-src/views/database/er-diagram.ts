@@ -1,3 +1,6 @@
+import { live } from "lit/directives/live.js";
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html, nothing, svg } from "lit/html.js";
 import {
   type ErBox,
   type ErLayoutGap,
@@ -13,6 +16,7 @@ import type {
 import { createDiagramViewport } from "../../core/diagram-viewport";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { isImeComposing } from "../../core/keyboard";
+import { renderOwned, templateElement } from "../ui/renderer";
 import { type DbText, dbText } from "./i18n";
 import { reportDatastoreFailure } from "./report-failure";
 import { formatRowCount } from "./table-list";
@@ -57,6 +61,7 @@ type ErModel = {
 type CardView = {
   name: string;
   el: HTMLElement;
+  head: HTMLElement;
   box: ErBox;
   /** 列の名前 → カードの上端から行の中心までの高さ。 */
   rowY: Map<string, number>;
@@ -86,7 +91,6 @@ const INITIAL_FIT_FLOOR = 0.75;
 // 押してから離すまでにこれより動いたらドラッグ。クリックとして扱わない。
 const CLICK_SLOP = 4;
 const DEFAULT_ASPECT = 1.6;
-const SVG_NS = "http://www.w3.org/2000/svg";
 
 // PostgreSQL の information_schema は型を長い正式名で返す。カードの幅を食うので
 // よく使う短い別名で出す (元の名前は行の title に出す)。
@@ -225,6 +229,230 @@ function buildErMarkup(model: ErModel): string {
   return lines.join("\n");
 }
 
+export type ErToolbarProps = {
+  text: DbText["er"];
+  /** 倍率 (%)。 */
+  zoom: number;
+  /** 検索欄の文字 (入れたまま)。 */
+  find: string;
+  options: Record<ErOption, boolean>;
+  /** 覚えられなかった切替の理由 (title に出す)。 */
+  optionFailures: Record<ErOption, string | null>;
+  copy: {
+    disabled: boolean;
+    copied: boolean;
+    failed: boolean;
+    /** コピーに失敗した理由 (次に文言を当て直すまで title に出す)。 */
+    failure: string | null;
+  };
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onZoomReset: () => void;
+  onFit: () => void;
+  onFind: (value: string) => void;
+  onFindKeydown: (event: KeyboardEvent) => void;
+  onToggle: (key: ErOption) => void;
+  onCopy: () => void;
+};
+
+export type ErCardRowProps = {
+  column: string;
+  primaryKey: boolean;
+  title: string;
+  keys: { key: ErKey; title: string }[];
+  type: string;
+  nullable: boolean;
+  /** コメントの 1 行目。コメントを出さないときは null。 */
+  comment: string | null;
+  rowRef: (element: Element | undefined) => void;
+  onEnter: () => void;
+  onLeave: () => void;
+};
+
+export type ErCardProps = {
+  name: string;
+  title: string;
+  rows: string | null;
+  comment: { text: string; title: string } | null;
+  columns: ErCardRowProps[];
+  /** 「キー列だけ」で隠した列の数の文。 */
+  more: string | null;
+  headRef: Ref<HTMLElement>;
+  onEnter: () => void;
+  onLeave: () => void;
+  onOpen: () => void;
+  onHeadKeydown: (event: KeyboardEvent) => void;
+};
+
+export type ErEdgeProps = {
+  inferred: boolean;
+  lineRef: Ref<SVGPathElement>;
+  marksRef: Ref<SVGPathElement>;
+  dotsRef: Ref<SVGPathElement>;
+};
+
+/**
+ * ER 図の描き方。道具の帯は状態から描き直す。カード・線・置き場は図を組み直す
+ * ときに 1 度だけ作り、強調・位置・線の形は presenter が作った要素へ書き込む
+ * (マウスの動きごとに全部のカードを描き直さない)。
+ */
+export type ErDiagramView = {
+  toolbar: (props: ErToolbarProps) => unknown;
+  stage: (props: { edgesRef: Ref<SVGSVGElement> }) => unknown;
+  card: (props: ErCardProps) => unknown;
+  edge: (props: ErEdgeProps) => unknown;
+};
+
+const ER_OPTIONS: readonly ErOption[] = ["erShowComments", "erKeysOnly"];
+
+// clip: 長い型 (enum の値の一覧など) とコメントは幅を決めて … で切る。表のセル
+// そのものには max-width が効かないので、中の箱で切る。
+function erCell(className: string, value: string, clip = false): unknown {
+  return html`<td class=${className}>${
+    clip && value ? html`<span class="db-er-clip">${value}</span>` : value
+  }</td>`;
+}
+
+export const DEFAULT_VIEW: ErDiagramView = {
+  toolbar: (p) => {
+    const t = p.text;
+    const optionLabel: Record<ErOption, [string, string]> = {
+      erShowComments: [t.showComments, t.showCommentsTitle],
+      erKeysOnly: [t.keysOnly, t.keysOnlyTitle],
+    };
+    return html`<div class="db-er-tool-group"><button
+          type="button"
+          class="db-btn db-btn-sm db-er-tool db-er-zoom-btn"
+          title=${t.zoomOut}
+          @click=${p.onZoomOut}
+        >−</button><span class="db-er-zoom-level" title=${t.zoomLevel}
+          >${p.zoom}%</span
+        ><button
+          type="button"
+          class="db-btn db-btn-sm db-er-tool db-er-zoom-btn"
+          title=${t.zoomIn}
+          @click=${p.onZoomIn}
+        >+</button><button
+          type="button"
+          class="db-btn db-btn-sm db-er-tool db-er-zoom-btn"
+          title=${t.zoomReset}
+          @click=${p.onZoomReset}
+        >1:1</button><button
+          type="button"
+          class="db-btn db-btn-sm db-er-tool db-er-fit"
+          title=${t.fitTitle}
+          @click=${p.onFit}
+        >${t.fit}</button></div
+      ><input
+        type="search"
+        class="db-er-find"
+        spellcheck="false"
+        placeholder=${t.find}
+        aria-label=${t.find}
+        .value=${live(p.find)}
+        @input=${(event: Event) =>
+          p.onFind((event.currentTarget as HTMLInputElement).value)}
+        @keydown=${p.onFindKeydown}
+      /><div class="db-er-tool-group">${ER_OPTIONS.map(
+        (key) =>
+          html`<button
+            type="button"
+            class="db-btn db-btn-sm db-er-tool db-er-toggle"
+            data-option=${key}
+            data-save-failed=${p.optionFailures[key] ? "1" : nothing}
+            aria-pressed=${p.options[key] ? "true" : "false"}
+            title=${p.optionFailures[key] ?? optionLabel[key][1]}
+            @click=${() => p.onToggle(key)}
+          >${optionLabel[key][0]}</button>`,
+      )}</div
+      ><button
+        type="button"
+        class=${p.copy.failed ? "db-btn db-btn-sm db-er-tool db-er-copy failed" : "db-btn db-btn-sm db-er-tool db-er-copy"}
+        title=${p.copy.failure ?? t.copyMermaidTitle}
+        ?disabled=${p.copy.disabled}
+        @click=${p.onCopy}
+      >${p.copy.copied ? t.copied : t.copyMermaid}</button>`;
+  },
+  stage: ({ edgesRef }) =>
+    html`<div class="db-er-stage"><svg
+        class="db-er-edges"
+        aria-hidden="true"
+        ${ref(edgesRef)}
+      ></svg></div>`,
+  card: (c) =>
+    html`<section
+      class="db-er-table"
+      data-table=${c.name}
+      @mouseenter=${c.onEnter}
+      @mouseleave=${c.onLeave}
+    ><header
+        class="db-er-table-head"
+        tabindex="0"
+        title=${c.title}
+        ${ref(c.headRef)}
+        @dblclick=${c.onOpen}
+        @keydown=${c.onHeadKeydown}
+      ><div class="db-er-table-line"><span class="db-er-table-name">${c.name}</span>${
+        c.rows === null
+          ? nothing
+          : html`<span class="db-er-table-rows">${c.rows}</span>`
+      }</div>${
+        c.comment
+          ? html`<span class="db-er-table-comment" title=${c.comment.title}
+              >${c.comment.text}</span
+            >`
+          : nothing
+      }</header
+      >${
+        c.columns.length > 0
+          ? html`<table class="ui-table db-er-columns"><tbody>${c.columns.map(
+              (r) =>
+                html`<tr
+                  class=${r.primaryKey ? "is-pk" : nothing}
+                  data-column=${r.column}
+                  title=${r.title}
+                  ${ref(r.rowRef)}
+                  @mouseenter=${r.onEnter}
+                  @mouseleave=${r.onLeave}
+                ><td class="db-er-col-key">${r.keys.map(
+                  (k) =>
+                    html`<span
+                      class=${`db-er-key db-er-key-${k.key.toLowerCase()}`}
+                      title=${k.title}
+                      >${k.key}</span
+                    >`,
+                )}</td>${erCell("db-er-col-name", r.column)}${erCell(
+                  "db-er-col-type",
+                  r.type,
+                  true,
+                )}${erCell("db-er-col-null", r.nullable ? "NULL" : "")}${
+                  r.comment === null
+                    ? nothing
+                    : erCell("db-er-col-comment", r.comment, true)
+                }</tr>`,
+            )}</tbody></table>`
+          : nothing
+      }${c.more === null ? nothing : html`<div class="db-er-more">${c.more}</div>`}</section
+    >`,
+  edge: (e) =>
+    svg`<g class=${e.inferred ? "db-er-edge is-inferred" : "db-er-edge"}><path
+        class="db-er-edge-line"
+        ${ref(e.lineRef)}
+      ></path><path class="db-er-edge-marks" ${ref(e.marksRef)}></path><path
+        class="db-er-edge-dots"
+        ${ref(e.dotsRef)}
+      ></path></g>`,
+};
+
+/** 「コピーしました」・失敗の印を出しておく時間。 */
+const COPY_MARK_MS = 1500;
+
+function drawn<T extends Element>(target: Ref<T>, what: string): T {
+  const element = target.value;
+  if (!element) throw new Error(`ER diagram: ${what} was not drawn`);
+  return element;
+}
+
 export function createErDiagram(
   deps: {
     getText?: () => DbText;
@@ -235,53 +463,24 @@ export function createErDiagram(
     /** カードの見出しのダブルクリック・Enter でそのテーブルを開く。 */
     onOpenTable?: (table: string) => void;
   } = {},
+  view: ErDiagramView = DEFAULT_VIEW,
 ): ErDiagram {
   const text = (): DbText => deps.getText?.() ?? dbText("en");
-  const el = document.createElement("div");
-  el.className = "db-er-diagram";
-  el.hidden = true;
+  const el = templateElement(html`<div class="db-er-diagram" hidden></div>`);
+  const toolbar = templateElement(html`<div class="db-er-toolbar"></div>`);
 
-  const toolbar = document.createElement("div");
-  toolbar.className = "db-er-toolbar";
-
-  const toolButton = (label: string, extraClass = "") => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `db-btn db-btn-sm db-er-tool ${extraClass}`.trim();
-    button.textContent = label;
-    return button;
+  // viewport は作る途中で倍率を知らせ、道具の帯を描く。帯が読む状態はその前に置く。
+  const options: Record<ErOption, boolean> = { ...OPTION_DEFAULTS };
+  let zoom = 100;
+  let find = "";
+  const optionFailures: Record<ErOption, string | null> = {
+    erShowComments: null,
+    erKeysOnly: null,
   };
-
-  const zoomOut = toolButton("−", "db-er-zoom-btn");
-  const zoomLevel = document.createElement("span");
-  zoomLevel.className = "db-er-zoom-level";
-  const zoomIn = toolButton("+", "db-er-zoom-btn");
-  const zoomReset = toolButton("1:1", "db-er-zoom-btn");
-  const fitBtn = toolButton("", "db-er-fit");
-
-  const findInput = document.createElement("input");
-  findInput.type = "search";
-  findInput.className = "db-er-find";
-  findInput.spellcheck = false;
-
-  const commentsToggle = toolButton("", "db-er-toggle");
-  const keysToggle = toolButton("", "db-er-toggle");
-  const optionButtons: Record<ErOption, HTMLButtonElement> = {
-    erShowComments: commentsToggle,
-    erKeysOnly: keysToggle,
-  };
-  commentsToggle.dataset.option = "erShowComments";
-  keysToggle.dataset.option = "erKeysOnly";
-
-  const copyBtn = toolButton("", "db-er-copy");
-
-  const zoomGroup = document.createElement("div");
-  zoomGroup.className = "db-er-tool-group";
-  zoomGroup.append(zoomOut, zoomLevel, zoomIn, zoomReset, fitBtn);
-  const viewGroup = document.createElement("div");
-  viewGroup.className = "db-er-tool-group";
-  viewGroup.append(commentsToggle, keysToggle);
-  toolbar.append(zoomGroup, findInput, viewGroup, copyBtn);
+  let copyDisabled = true;
+  let copied = false;
+  let copyFailed = false;
+  let copyFailure: string | null = null;
 
   // 図の大きさ (拡大前)。viewport が作られた直後に倍率を知らせてくるので先に置く。
   let stageSize = { width: 0, height: 0 };
@@ -299,7 +498,8 @@ export function createErDiagram(
     containerClassName: "db-er-container",
     contentClassName: "db-er-canvas",
     onScaleChange: (scale) => {
-      zoomLevel.textContent = `${Math.round(scale * 100)}%`;
+      zoom = Math.round(scale * 100);
+      drawToolbar();
       syncCanvasExtent(scale);
     },
   });
@@ -311,10 +511,12 @@ export function createErDiagram(
   let lastSchema: DbSchemaResponse | null = null;
   let lastColumns: Map<string, DbColumn[]> | null = null;
   let model: ErModel | null = null;
-  const options: Record<ErOption, boolean> = { ...OPTION_DEFAULTS };
   let stage: HTMLElement | null = null;
   let edgeLayer: SVGSVGElement | null = null;
   const cards = new Map<string, CardView>();
+  // カードの要素と見出しの要素 → 表の名前 (図の上の押す・クリックを表に結ぶ)。
+  let cardOf = new WeakMap<Element, string>();
+  let headOf = new WeakMap<Element, string>();
   const edges = new Map<string, EdgeView>();
   // 関係を強調する表: クリックで固定 (focused)、固定が無い間はマウスの下 (hovered)。
   let focused: string | null = null;
@@ -343,50 +545,51 @@ export function createErDiagram(
       : OPTION_DEFAULTS[key];
   }
 
-  function syncToggle(key: ErOption): void {
-    const button = optionButtons[key];
-    button.setAttribute("aria-pressed", options[key] ? "true" : "false");
-  }
-
-  function syncLabels(): void {
-    const t = text().er;
-    zoomIn.title = t.zoomIn;
-    zoomOut.title = t.zoomOut;
-    zoomReset.title = t.zoomReset;
-    zoomLevel.title = t.zoomLevel;
-    fitBtn.textContent = t.fit;
-    fitBtn.title = t.fitTitle;
-    findInput.placeholder = t.find;
-    findInput.setAttribute("aria-label", t.find);
-    commentsToggle.textContent = t.showComments;
-    keysToggle.textContent = t.keysOnly;
-    if (!commentsToggle.dataset.saveFailed)
-      commentsToggle.title = t.showCommentsTitle;
-    if (!keysToggle.dataset.saveFailed) keysToggle.title = t.keysOnlyTitle;
-    copyBtn.title = t.copyMermaidTitle;
-    // コピー直後のフィードバック表示中でなければラベルを再適用する。
-    if (copyBtn.textContent !== t.copied) copyBtn.textContent = t.copyMermaid;
-  }
-
-  function span(className: string, value: string): HTMLSpanElement {
-    const node = document.createElement("span");
-    node.className = className;
-    node.textContent = value;
-    return node;
-  }
-
-  // clip: 長い型 (enum の値の一覧など) とコメントは幅を決めて … で切る。表のセル
-  // そのものには max-width が効かないので、中の箱で切る。
-  function cell(
-    className: string,
-    value: string,
-    clip = false,
-  ): HTMLTableCellElement {
-    const node = document.createElement("td");
-    node.className = className;
-    if (clip && value) node.append(span("db-er-clip", value));
-    else node.textContent = value;
-    return node;
+  function drawToolbar(): void {
+    renderOwned(
+      toolbar,
+      view.toolbar({
+        text: text().er,
+        zoom,
+        find,
+        options: { ...options },
+        optionFailures: { ...optionFailures },
+        copy: {
+          disabled: copyDisabled,
+          copied,
+          failed: copyFailed,
+          failure: copyFailure,
+        },
+        onZoomIn: () => viewport.zoomIn(),
+        onZoomOut: () => viewport.zoomOut(),
+        onZoomReset: () => viewport.reset(),
+        onFit: () => fitToView(0),
+        onFind: (value) => {
+          find = value;
+          query = value.trim().toLowerCase();
+          matchCursor = -1;
+          if (query) focused = null;
+          applyEmphasis();
+        },
+        onFindKeydown: (event) => {
+          if (isImeComposing(event)) return;
+          if (event.key === "Enter") {
+            event.preventDefault();
+            revealMatch(event.shiftKey ? -1 : 1);
+          } else if (event.key === "Escape" && find) {
+            event.preventDefault();
+            event.stopPropagation();
+            find = "";
+            query = "";
+            matchCursor = -1;
+            drawToolbar();
+            applyEmphasis();
+          }
+        },
+        onToggle: toggleOption,
+        onCopy: copyMarkup,
+      }),
+    );
   }
 
   function rowTitle(current: ErModel, table: string, column: DbColumn): string {
@@ -409,32 +612,9 @@ export function createErDiagram(
   function buildCard(current: ErModel, table: ErTable): CardView {
     const t = text().er;
     const name = table.info.name;
-    const card = document.createElement("section");
-    card.className = "db-er-table";
-    card.dataset.table = name;
-
-    const head = document.createElement("header");
-    head.className = "db-er-table-head";
-    head.tabIndex = 0;
-    head.title = t.tableTitle(name);
-    const headLine = document.createElement("div");
-    headLine.className = "db-er-table-line";
-    headLine.append(span("db-er-table-name", name));
-    if (table.info.rowCount != null)
-      headLine.append(
-        span("db-er-table-rows", formatRowCount(table.info.rowCount)),
-      );
-    head.append(headLine);
-    const tableComment = table.info.comment?.trim();
-    if (options.erShowComments && tableComment) {
-      const comment = span("db-er-table-comment", firstLine(tableComment));
-      comment.title = tableComment;
-      head.append(comment);
-    }
-    card.append(head);
-
     const rows = new Map<string, HTMLElement>();
-    const body = document.createElement("tbody");
+    const headRef = createRef<HTMLElement>();
+    const columns: ErCardRowProps[] = [];
     let hidden = 0;
     for (const column of table.columns) {
       const keys = columnKeys(current, name, column);
@@ -444,72 +624,77 @@ export function createErDiagram(
         hidden++;
         continue;
       }
-      const row = document.createElement("tr");
-      row.dataset.column = column.name;
-      if (column.primaryKey) row.classList.add("is-pk");
-      row.title = rowTitle(current, name, column);
-
-      const keyCell = cell("db-er-col-key", "");
-      for (const key of keys) {
-        const badge = span(`db-er-key db-er-key-${key.toLowerCase()}`, key);
-        badge.title =
-          key === "PK" ? t.primaryKey : key === "FK" ? t.foreignKey : t.unique;
-        keyCell.append(badge);
-      }
-      row.append(
-        keyCell,
-        cell("db-er-col-name", column.name),
-        cell("db-er-col-type", shownType(column.type), true),
-        cell(
-          "db-er-col-null",
-          column.nullable && !column.primaryKey ? "NULL" : "",
-        ),
-      );
-      if (options.erShowComments) {
-        const comment = column.comment?.trim();
-        row.append(
-          cell("db-er-col-comment", comment ? firstLine(comment) : "", true),
-        );
-      }
-      row.addEventListener("mouseenter", () => setHotRow(name, row));
-      row.addEventListener("mouseleave", () => setHotRow(name, null));
-      body.append(row);
-      rows.set(column.name, row);
+      const comment = column.comment?.trim();
+      columns.push({
+        column: column.name,
+        primaryKey: column.primaryKey,
+        title: rowTitle(current, name, column),
+        keys: keys.map((key) => ({
+          key,
+          title:
+            key === "PK"
+              ? t.primaryKey
+              : key === "FK"
+                ? t.foreignKey
+                : t.unique,
+        })),
+        type: shownType(column.type),
+        nullable: column.nullable && !column.primaryKey,
+        comment: options.erShowComments
+          ? comment
+            ? firstLine(comment)
+            : ""
+          : null,
+        rowRef: (element) => {
+          if (element instanceof HTMLElement) rows.set(column.name, element);
+        },
+        onEnter: () => setHotRow(name, column.name),
+        onLeave: () => setHotRow(name, null),
+      });
     }
-    if (body.childElementCount > 0) {
-      const grid = document.createElement("table");
-      grid.className = "ui-table db-er-columns";
-      grid.append(body);
-      card.append(grid);
-    }
-    if (hidden > 0) {
-      const more = document.createElement("div");
-      more.className = "db-er-more";
-      more.textContent = t.moreColumns(hidden);
-      card.append(more);
-    }
-
-    card.addEventListener("mouseenter", () => {
-      hovered = name;
-      if (!focused) applyEmphasis();
-    });
-    card.addEventListener("mouseleave", () => {
-      if (hovered === name) hovered = null;
-      if (!focused) applyEmphasis();
-    });
-    head.addEventListener("dblclick", () => deps.onOpenTable?.(name));
-    head.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        deps.onOpenTable?.(name);
-      } else if (event.key === " ") {
-        event.preventDefault();
-        toggleFocus(name);
-      }
-    });
+    const tableComment = table.info.comment?.trim();
+    const card = templateElement(
+      view.card({
+        name,
+        title: t.tableTitle(name),
+        rows:
+          table.info.rowCount != null
+            ? formatRowCount(table.info.rowCount)
+            : null,
+        comment:
+          options.erShowComments && tableComment
+            ? { text: firstLine(tableComment), title: tableComment }
+            : null,
+        columns,
+        more: hidden > 0 ? t.moreColumns(hidden) : null,
+        headRef,
+        onEnter: () => {
+          hovered = name;
+          if (!focused) applyEmphasis();
+        },
+        onLeave: () => {
+          if (hovered === name) hovered = null;
+          if (!focused) applyEmphasis();
+        },
+        onOpen: () => deps.onOpenTable?.(name),
+        onHeadKeydown: (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            deps.onOpenTable?.(name);
+          } else if (event.key === " ") {
+            event.preventDefault();
+            toggleFocus(name);
+          }
+        },
+      }),
+    );
+    const head = drawn(headRef, `the header of ${name}`);
+    cardOf.set(card, name);
+    headOf.set(head, name);
     return {
       name,
       el: card,
+      head,
       box: { x: 0, y: 0, width: 0, height: 0 },
       rowY: new Map(),
       rows,
@@ -518,22 +703,27 @@ export function createErDiagram(
   }
 
   function buildEdge(relation: ErRelation): EdgeView {
-    const g = document.createElementNS(SVG_NS, "g");
-    g.classList.add("db-er-edge");
-    if (relation.fk.inferred) g.classList.add("is-inferred");
-    const line = document.createElementNS(SVG_NS, "path");
-    line.classList.add("db-er-edge-line");
-    const marks = document.createElementNS(SVG_NS, "path");
-    marks.classList.add("db-er-edge-marks");
-    const dots = document.createElementNS(SVG_NS, "path");
-    dots.classList.add("db-er-edge-dots");
-    g.append(line, marks, dots);
-    return { relation, g, line, marks, dots };
+    const props: ErEdgeProps = {
+      inferred: !!relation.fk.inferred,
+      lineRef: createRef(),
+      marksRef: createRef(),
+      dotsRef: createRef(),
+    };
+    const g = templateElement<SVGGElement>(view.edge(props));
+    return {
+      relation,
+      g,
+      line: drawn(props.lineRef, "an edge line"),
+      marks: drawn(props.marksRef, "edge marks"),
+      dots: drawn(props.dotsRef, "edge dots"),
+    };
   }
 
   function rebuild(): void {
-    canvas.innerHTML = "";
+    canvas.replaceChildren();
     cards.clear();
+    cardOf = new WeakMap();
+    headOf = new WeakMap();
     edges.clear();
     linkedRows.length = 0;
     hotRow = null;
@@ -542,24 +732,23 @@ export function createErDiagram(
     edgeLayer = null;
     if (!lastSchema || !lastColumns) {
       model = null;
-      copyBtn.disabled = true;
+      copyDisabled = true;
+      drawToolbar();
       return;
     }
     const current = buildModel(lastSchema, lastColumns);
     model = current;
-    copyBtn.disabled = current.tables.length === 0;
+    copyDisabled = current.tables.length === 0;
+    drawToolbar();
     if (current.tables.length === 0) {
       canvas.textContent = text().er.noTables;
       return;
     }
     if (focused && !current.tables.some((t) => t.info.name === focused))
       focused = null;
-    stage = document.createElement("div");
-    stage.className = "db-er-stage";
-    edgeLayer = document.createElementNS(SVG_NS, "svg");
-    edgeLayer.classList.add("db-er-edges");
-    edgeLayer.setAttribute("aria-hidden", "true");
-    stage.append(edgeLayer);
+    const edgesRef = createRef<SVGSVGElement>();
+    stage = templateElement(view.stage({ edgesRef }));
+    edgeLayer = drawn(edgesRef, "the edge layer");
     for (const table of current.tables) {
       const card = buildCard(current, table);
       cards.set(card.name, card);
@@ -599,9 +788,7 @@ export function createErDiagram(
         const rect = row.getBoundingClientRect();
         card.rowY.set(column, (rect.top + rect.height / 2 - top) / scale);
       }
-      const head = card.el.querySelector<HTMLElement>(".db-er-table-head");
-      if (!head) throw new Error(`ER card ${card.name} has no header`);
-      const headRect = head.getBoundingClientRect();
+      const headRect = card.head.getBoundingClientRect();
       card.headY = (headRect.top + headRect.height / 2 - top) / scale;
     }
     const result = layoutErDiagram(
@@ -772,15 +959,16 @@ export function createErDiagram(
     for (const g of raised) edgeLayer?.append(g);
   }
 
-  function setHotRow(table: string, row: HTMLElement | null): void {
+  function setHotRow(table: string, column: string | null): void {
     hotRow?.classList.remove("is-hot");
+    const row =
+      column === null ? null : (cards.get(table)?.rows.get(column) ?? null);
     hotRow = row;
     if (!row) {
       hotRelations = null;
       applyEmphasis();
       return;
     }
-    const column = row.dataset.column;
     const keys = new Set<string>();
     for (const relation of model?.relations ?? []) {
       const { fk } = relation;
@@ -828,86 +1016,76 @@ export function createErDiagram(
 
   // --- 操作 ---
 
-  zoomIn.addEventListener("click", () => viewport.zoomIn());
-  zoomOut.addEventListener("click", () => viewport.zoomOut());
-  zoomReset.addEventListener("click", () => viewport.reset());
-  fitBtn.addEventListener("click", () => fitToView(0));
-
-  findInput.addEventListener("input", () => {
-    query = findInput.value.trim().toLowerCase();
-    matchCursor = -1;
-    if (query) focused = null;
-    applyEmphasis();
-  });
-  findInput.addEventListener("keydown", (event) => {
-    if (isImeComposing(event)) return;
-    if (event.key === "Enter") {
-      event.preventDefault();
-      revealMatch(event.shiftKey ? -1 : 1);
-    } else if (event.key === "Escape" && findInput.value) {
-      event.preventDefault();
-      event.stopPropagation();
-      findInput.value = "";
-      query = "";
-      matchCursor = -1;
-      applyEmphasis();
-    }
-  });
-
-  for (const key of Object.keys(optionButtons) as ErOption[]) {
-    const button = optionButtons[key];
-    button.addEventListener("click", () => {
-      const on = !options[key];
-      options[key] = on;
-      syncToggle(key);
-      delete button.dataset.saveFailed;
-      syncLabels();
-      rebuild();
-      deps.saveOption?.(key, on).catch((error: unknown) => {
-        const detail = reportDatastoreFailure(
-          "SQL",
-          `remember ER diagram option ${key}`,
-          error,
-          on,
-        );
-        button.dataset.saveFailed = "1";
-        button.title = text().er.optionSaveFailed(detail);
-      });
+  function toggleOption(key: ErOption): void {
+    const on = !options[key];
+    options[key] = on;
+    optionFailures[key] = null;
+    // 文言を当て直す (前と同じく、コピーの失敗の title もここで戻す)。
+    copyFailure = null;
+    rebuild();
+    deps.saveOption?.(key, on).catch((error: unknown) => {
+      const detail = reportDatastoreFailure(
+        "SQL",
+        `remember ER diagram option ${key}`,
+        error,
+        on,
+      );
+      optionFailures[key] = text().er.optionSaveFailed(detail);
+      drawToolbar();
     });
   }
 
-  copyBtn.addEventListener("click", () => {
+  function copyMarkup(): void {
     if (!model || model.tables.length === 0) return;
     navigator.clipboard.writeText(buildErMarkup(model)).then(
       () => {
-        copyBtn.textContent = text().er.copied;
+        copied = true;
+        drawToolbar();
         setTimeout(() => {
-          copyBtn.textContent = text().er.copyMermaid;
-        }, 1500);
+          copied = false;
+          drawToolbar();
+        }, COPY_MARK_MS);
       },
       (error) => {
         console.error("Failed to copy Mermaid source", error);
-        const message = text().er.copyFailed(formatErrorDetail(error));
-        copyBtn.classList.add("failed");
-        copyBtn.title = message;
-        setTimeout(() => copyBtn.classList.remove("failed"), 1500);
+        copyFailed = true;
+        copyFailure = text().er.copyFailed(formatErrorDetail(error));
+        drawToolbar();
+        setTimeout(() => {
+          copyFailed = false;
+          drawToolbar();
+        }, COPY_MARK_MS);
       },
     );
-  });
+  }
+
+  /** target から上へたどって、map に載っている要素の名前を返す。 */
+  function nameAbove(
+    target: EventTarget | null,
+    map: WeakMap<Element, string>,
+  ): string | null {
+    for (
+      let node = target instanceof Element ? target : null;
+      node && node !== canvas;
+      node = node.parentElement
+    ) {
+      const name = map.get(node);
+      if (name !== undefined) return name;
+    }
+    return null;
+  }
 
   // 見出しを押したらカードを動かす。本体を押したときは図ごと動かす
   // (viewport のドラッグ) ので、見出しのときだけ viewport へ伝えない。
   canvas.addEventListener("mousedown", (event) => {
     if (event.button !== 0) return;
     pressedAt = { x: event.clientX, y: event.clientY };
-    const target = event.target as Element;
-    const head = target.closest(".db-er-table-head");
-    const name = head?.closest<HTMLElement>(".db-er-table")?.dataset.table;
-    const card = name ? cards.get(name) : undefined;
+    const name = nameAbove(event.target, headOf);
+    const card = name === null ? undefined : cards.get(name);
     if (!card) return;
     event.stopPropagation();
     event.preventDefault();
-    (head as HTMLElement).focus({ preventScroll: true });
+    card.head.focus({ preventScroll: true });
     drag = {
       card,
       startX: event.clientX,
@@ -952,8 +1130,7 @@ export function createErDiagram(
       Math.hypot(event.clientX - start.x, event.clientY - start.y) > CLICK_SLOP
     )
       return;
-    const card = (event.target as Element).closest<HTMLElement>(".db-er-table");
-    toggleFocus(card?.dataset.table ?? null);
+    toggleFocus(nameAbove(event.target, cardOf));
   });
 
   // 画面に出ていない間に描いた図は、出て大きさが付いた時に並べる。
@@ -978,10 +1155,7 @@ export function createErDiagram(
     el.hidden = false;
     lastSchema = schema;
     lastColumns = columnsMap;
-    for (const key of Object.keys(options) as ErOption[]) {
-      options[key] = readOption(key);
-      syncToggle(key);
-    }
+    for (const key of ER_OPTIONS) options[key] = readOption(key);
     focused = null;
     hovered = null;
     matchCursor = -1;
@@ -999,7 +1173,7 @@ export function createErDiagram(
     focused = null;
     hovered = null;
     query = "";
-    findInput.value = "";
+    find = "";
     matchCursor = -1;
     layoutPending = false;
     fitOnLayout = false;
@@ -1016,14 +1190,13 @@ export function createErDiagram(
   }
 
   function localize(): void {
-    syncLabels();
+    copyFailure = null;
+    drawToolbar();
     // カードの title と「ほか n 列」も言語に合わせて組み直す。
     if (model) rebuild();
   }
 
-  syncLabels();
-  for (const key of Object.keys(options) as ErOption[]) syncToggle(key);
-  copyBtn.disabled = true;
+  drawToolbar();
 
   return { el, render, clear, dispose, localize };
 }

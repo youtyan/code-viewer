@@ -189,8 +189,8 @@ describe("global search view", () => {
           totalTables: 2,
           hits: [
             hit("sample_table", "sample_column"),
-            hit("other_table", "sample_column"),
-            hit("sample_table", "other_column"),
+            hit("sample_other_table", "sample_column"),
+            hit("sample_table", "sample_other_column"),
           ],
           done: true,
         });
@@ -215,8 +215,8 @@ describe("global search view", () => {
         table.hits.map((h) => h.column),
       ]),
     ).toEqual([
-      ["sample_table (2)", ["sample_column", "other_column"]],
-      ["other_table (1)", ["sample_column"]],
+      ["sample_table (2)", ["sample_column", "sample_other_column"]],
+      ["sample_other_table (1)", ["sample_column"]],
     ]);
     view.dispose();
   });

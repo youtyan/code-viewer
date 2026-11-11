@@ -1343,8 +1343,7 @@ function createTabPane(
   }
 
   function setTableListStatus(message: string, options?: { error?: boolean }) {
-    const list = tableList.el.querySelector<HTMLElement>(".db-table-list");
-    if (list) setPaneStatus(list, message, options);
+    tableList.setStatus(message, options);
   }
 
   function waitForTableSelectFetch(signal: AbortSignal): Promise<void> {
