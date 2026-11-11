@@ -203,7 +203,11 @@ export type UsageCheckProps = {
     } | null;
     next: string;
     /** 起動コマンドで起こせなかった: その欄へ移るボタン。 */
-    commands: { label: string; onClick(): void; again: UsageCheckButton } | null;
+    commands: {
+      label: string;
+      onClick(): void;
+      again: UsageCheckButton;
+    } | null;
     more: {
       label: string;
       text: string;
