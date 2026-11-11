@@ -6,8 +6,11 @@
 // - 列が多いときは上の欄で列の名前を絞り込める
 // 値ごとのコピーは右端のボタン。開閉やコピーの配線は table-grid.ts。
 
+import { html, nothing } from "lit/html.js";
 import type { DbColumn, DbValue } from "../../core/database/types";
-import { COPY_16_PATHS, iconSvg, LINK_16_PATH } from "../../core/icons";
+import { COPY_16_PATHS, LINK_16_PATH } from "../../core/icons";
+import { iconTemplate } from "../ui/icon";
+import { renderOwned, templateElement } from "../ui/renderer";
 import type { DbText } from "./i18n";
 import { fillNullOrEmpty } from "./query-value";
 
@@ -46,39 +49,45 @@ function prettyJson(value: DbValue): string | null {
   }
 }
 
+/** 値の欄。JSON の色付けは呼び出し側が遅れて行うので、要素を作ってから渡す。 */
 function valueCell(opts: RowDetailOptions, col: number): HTMLElement {
   const value = opts.row[col];
-  const cell = document.createElement("div");
-  cell.className = "db-row-detail-value";
-  if (fillNullOrEmpty(cell, value, opts.text.grid.emptyValue)) return cell;
-  if (value instanceof Uint8Array) {
-    cell.textContent = `BLOB (${value.byteLength} bytes)`;
-    cell.classList.add("is-blob");
-    return cell;
-  }
+  const empty = templateElement(html`<div class="db-row-detail-value"></div>`);
+  if (fillNullOrEmpty(empty, value, opts.text.grid.emptyValue)) return empty;
+  if (value instanceof Uint8Array)
+    return templateElement(
+      html`<div class="db-row-detail-value is-blob"
+        >BLOB (${value.byteLength} bytes)</div
+      >`,
+    );
   const json = prettyJson(value);
   if (json !== null) {
-    const pre = document.createElement("pre");
-    pre.className = "db-grid-detail-json db-row-detail-json";
+    const cell = templateElement(
+      html`<div class="db-row-detail-value"><pre
+          class="db-grid-detail-json db-row-detail-json"
+        ></pre></div>`,
+    );
+    const pre = cell.querySelector<HTMLElement>("pre");
+    if (!pre) throw new Error("row detail: the JSON box was not drawn");
     opts.showJson(pre, json);
-    cell.appendChild(pre);
     return cell;
   }
   const time = opts.time(col);
-  if (time) {
-    const shown = document.createElement("span");
-    shown.className = "db-row-detail-time";
-    shown.textContent = time.shown;
-    const relative = document.createElement("span");
-    relative.className = "db-row-detail-relative";
-    relative.textContent = time.relative;
-    cell.append(shown, relative);
-    cell.title = opts.text.grid.timeZoneCellTitle(String(value));
-    return cell;
-  }
-  cell.textContent =
-    typeof value === "object" ? JSON.stringify(value) : String(value);
-  return cell;
+  if (time)
+    return templateElement(
+      html`<div
+        class="db-row-detail-value"
+        title=${opts.text.grid.timeZoneCellTitle(String(value))}
+      ><span class="db-row-detail-time">${time.shown}</span><span
+          class="db-row-detail-relative"
+          >${time.relative}</span
+        ></div>`,
+    );
+  return templateElement(
+    html`<div class="db-row-detail-value">${
+      typeof value === "object" ? JSON.stringify(value) : String(value)
+    }</div>`,
+  );
 }
 
 export function renderRowDetail(
@@ -86,70 +95,63 @@ export function renderRowDetail(
   opts: RowDetailOptions,
 ): void {
   const t = opts.text.detail;
-  host.textContent = "";
   host.classList.add("db-row-detail");
-  let filter: HTMLInputElement | null = null;
-  if (opts.columns.length > FILTER_MIN_COLUMNS) {
-    filter = document.createElement("input");
-    filter.type = "search";
-    filter.className = "db-row-detail-filter";
-    filter.placeholder = t.filterColumns(opts.columns.length);
-    filter.autocomplete = "off";
-    host.appendChild(filter);
-  }
-  const list = document.createElement("div");
-  list.className = "db-row-detail-list";
-  host.appendChild(list);
-  const items: { name: string; el: HTMLElement }[] = [];
-  opts.columns.forEach((column, col) => {
-    const item = document.createElement("div");
-    item.className = "db-row-detail-item";
-    item.classList.toggle("is-active", col === opts.activeColumn);
-    const key = document.createElement("div");
-    key.className = "db-row-detail-key";
-    const name = document.createElement("span");
-    name.className = "db-row-detail-name";
-    name.textContent = column.name;
-    name.title = column.comment
-      ? `${column.name} — ${column.comment}`
-      : column.name;
-    const type = document.createElement("span");
-    type.className = "db-row-detail-type";
-    type.textContent = column.type;
-    key.append(name, type);
-    if (column.primaryKey) {
-      const pk = document.createElement("span");
-      pk.className = "db-row-detail-pk";
-      pk.textContent = "PK";
-      key.appendChild(pk);
-    }
-    const actions = document.createElement("div");
-    actions.className = "db-row-detail-actions";
-    if (opts.isForeignKey(col) && opts.row[col] !== null) {
-      const related = document.createElement("button");
-      related.type = "button";
-      related.className = "db-row-detail-action";
-      related.innerHTML = iconSvg("octicon-link", LINK_16_PATH);
-      related.title = t.openRelated;
-      related.setAttribute("aria-label", t.openRelated);
-      related.addEventListener("click", () => opts.openRelated(col));
-      actions.appendChild(related);
-    }
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className = "db-row-detail-action";
-    copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-    copy.title = t.copyValue(column.name);
-    copy.setAttribute("aria-label", copy.title);
-    copy.addEventListener("click", () => opts.copy(opts.copyText(col), copy));
-    actions.appendChild(copy);
-    item.append(key, valueCell(opts, col), actions);
-    list.appendChild(item);
-    items.push({ name: column.name.toLowerCase(), el: item });
-  });
-  filter?.addEventListener("input", () => {
-    const query = filter?.value.trim().toLowerCase() ?? "";
-    for (const item of items)
-      item.el.hidden = query !== "" && !item.name.includes(query);
-  });
+  // 列の名前の絞り込み (この欄の中だけの状態)。値の欄は 1 度だけ作って使い回す。
+  let query = "";
+  const values = opts.columns.map((_, col) => valueCell(opts, col));
+  const draw = () =>
+    renderOwned(
+      host,
+
+      html`${
+        opts.columns.length > FILTER_MIN_COLUMNS
+          ? html`<input
+              type="search"
+              class="db-row-detail-filter"
+              placeholder=${t.filterColumns(opts.columns.length)}
+              autocomplete="off"
+              @input=${(event: Event) => {
+                query = (event.currentTarget as HTMLInputElement).value
+                  .trim()
+                  .toLowerCase();
+                draw();
+              }}
+            />`
+          : nothing
+      }<div class="db-row-detail-list">${opts.columns.map((column, col) => {
+        const copyLabel = t.copyValue(column.name);
+        return html`<div
+          class=${col === opts.activeColumn ? "db-row-detail-item is-active" : "db-row-detail-item"}
+          ?hidden=${query !== "" && !column.name.toLowerCase().includes(query)}
+        ><div class="db-row-detail-key"><span
+              class="db-row-detail-name"
+              title=${column.comment ? `${column.name} — ${column.comment}` : column.name}
+            >${column.name}</span><span class="db-row-detail-type"
+              >${column.type}</span
+            >${column.primaryKey ? html`<span class="db-row-detail-pk">PK</span>` : nothing}</div
+          >${values[col]}<div class="db-row-detail-actions">${
+            opts.isForeignKey(col) && opts.row[col] !== null
+              ? html`<button
+                  type="button"
+                  class="db-row-detail-action"
+                  title=${t.openRelated}
+                  aria-label=${t.openRelated}
+                  @click=${() => opts.openRelated(col)}
+                >${iconTemplate(LINK_16_PATH, "octicon-link")}</button>`
+              : nothing
+          }<button
+              type="button"
+              class="db-row-detail-action"
+              title=${copyLabel}
+              aria-label=${copyLabel}
+              @click=${(event: Event) =>
+                opts.copy(
+                  opts.copyText(col),
+                  event.currentTarget as HTMLButtonElement,
+                )}
+            >${iconTemplate(COPY_16_PATHS, "octicon-copy")}</button></div
+          ></div>`;
+      })}</div>`,
+    );
+  draw();
 }
