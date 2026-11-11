@@ -2,6 +2,7 @@
 // 保存」。フォームの実体は views/viewer-settings.ts、使い方の案内はヘルプの
 // ページ (views/help-page.ts) にある。
 
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import type { AppRoute, DiffRange } from "../core/routes";
 import { agentsText } from "./agents/i18n";
 import {
@@ -10,6 +11,7 @@ import {
   helpSectionName,
 } from "./help-page";
 import { createPageShell } from "./page-shell";
+import { templateElement } from "./ui/renderer";
 import type { SettingsCategory } from "./viewer-settings";
 
 export type SettingsPageDeps = {
@@ -80,24 +82,20 @@ const NAV_TOGGLE_TEXT: Record<HelpLanguage, string> = {
 export function createSettingsPage(deps: SettingsPageDeps) {
   const shell = createPageShell();
 
-  function helpLink(category: SettingsCategory, lang: HelpLanguage) {
+  function helpLink(
+    category: SettingsCategory,
+    lang: HelpLanguage,
+  ): TemplateResult | typeof nothing {
     const entry = CATEGORY_HELP_LINKS[category];
-    if (!entry) return null;
-    const note = document.createElement("p");
-    note.className = "gdp-help-shortcut-link";
-    const link = document.createElement("a");
-    link.href = `/help?section=${entry.section}`;
-    link.textContent = `${agentsText(lang).sidebar.help} › ${helpSectionName(lang, entry.section)}`;
-    link.addEventListener("click", (event) => {
-      event.preventDefault();
-      deps.openHelpSection(entry.section);
-    });
-    note.append(
-      entry.before[lang],
-      link,
-      lang === "ja" ? " にあります。" : ".",
-    );
-    return note;
+    if (!entry) return nothing;
+    return html`<p class="gdp-help-shortcut-link">${entry.before[lang]}<a
+        href=${`/help?section=${entry.section}`}
+        @click=${(event: MouseEvent) => {
+          event.preventDefault();
+          deps.openHelpSection(entry.section);
+        }}
+      >${`${agentsText(lang).sidebar.help} › ${helpSectionName(lang, entry.section)}`}</a
+      >${lang === "ja" ? " にあります。" : "."}</p>`;
   }
 
   function renderSettingsPage(options: { openedSection?: boolean } = {}) {
@@ -111,21 +109,24 @@ export function createSettingsPage(deps: SettingsPageDeps) {
     const active = deps.getSettingsCategory();
     const current = categories.find((category) => category.id === active);
 
-    const article = document.createElement("article");
-    article.className = "gdp-help-content";
-    const h2 = document.createElement("h2");
-    h2.textContent = current?.label ?? "";
-    const intro = document.createElement("p");
-    intro.textContent = current?.description ?? "";
-    article.append(h2, intro);
-    const note = helpLink(active, lang);
-    if (note) article.append(note);
+    // 本文の頭 (分類の名前と説明) を描き、その下にフォーム (使い回す要素) を置く。
+    const article = templateElement(
+      html`<article class="gdp-help-content"><h2>${current?.label ?? ""}</h2><p
+          >${current?.description ?? ""}</p
+        >${helpLink(active, lang)}</article>`,
+    );
     deps.mountViewerSettings(article);
 
     // 設定の検索は見出しの下。電話の段の目次 (1 段目) で打ち始めたら、結果を
     // 出す本文 (2 段目) へ。
-    const searchRow = document.createElement("div");
-    searchRow.className = "gdp-help-search-row";
+    const searchRow = templateElement(
+      html`<div
+        class="gdp-help-search-row"
+        @input=${() => {
+          if (view.navOpen()) view.closeNav();
+        }}
+      ></div>`,
+    );
     deps.mountSettingsSearch(searchRow);
     const view = shell.render(deps.$("#diff"), {
       page: "settings",
@@ -144,9 +145,6 @@ export function createSettingsPage(deps: SettingsPageDeps) {
       article,
       toggleText: NAV_TOGGLE_TEXT[lang],
       openedSection: options.openedSection === true,
-    });
-    searchRow.addEventListener("input", () => {
-      if (view.navOpen()) view.closeNav();
     });
   }
 

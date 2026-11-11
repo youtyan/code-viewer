@@ -2,9 +2,10 @@
 // コマンド (ヘルプの本文と同じ部品)、ヘルプの節へのリンク。
 
 import "./_dom";
+import { render } from "lit/html.js";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
-  installHelpBlock,
+  installHelpTemplate,
   NODE_PTY_INSTALL_COMMANDS,
   showInstallDialog,
   TMUX_INSTALL_COMMANDS,
@@ -34,15 +35,19 @@ describe("how to install what is missing", () => {
     },
   ])("$name", async ({ commands, shown }) => {
     const opened: string[] = [];
-    const box = installHelpBlock(
-      {
-        intro: "sample intro",
-        commands,
-        help: { label: "Help › sample", open: () => opened.push("help") },
-      },
-      "en",
-    );
+    const box = document.createElement("div");
     document.body.appendChild(box);
+    render(
+      installHelpTemplate(
+        {
+          intro: "sample intro",
+          commands,
+          help: { label: "Help › sample", open: () => opened.push("help") },
+        },
+        "en",
+      ),
+      box,
+    );
     expect(box.querySelector(".install-help-intro")?.textContent).toBe(
       "sample intro",
     );

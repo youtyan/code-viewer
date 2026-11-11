@@ -6,6 +6,10 @@
 // 操作の名前と分類は help-keybindings.ts の表 (ヘルプの一覧と同じもの)、
 // キーの決まり (既定・効く所・取り合い) は core/keymap.ts、窓のキーは core/pwa.ts。
 
+import { ifDefined } from "lit/directives/if-defined.js";
+import { live } from "lit/directives/live.js";
+import { repeat } from "lit/directives/repeat.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import { formatErrorDetail } from "../core/error-detail";
 import { isImeComposing } from "../core/keyboard";
 import {
@@ -37,6 +41,7 @@ import {
   KEYMAP_GROUPS,
   keymapGroupTitle,
 } from "./help-keybindings";
+import { renderOwned, templateElement } from "./ui/renderer";
 import { showConfirmDialog } from "./ui-dialog";
 import type { SettingsDraft } from "./viewer-settings";
 
@@ -284,19 +289,13 @@ function tidyOverrides(
   return out;
 }
 
-function button(className: string, focusKey: string): HTMLButtonElement {
-  const el = document.createElement("button");
-  el.type = "button";
-  el.className = className;
-  el.dataset.focusKey = focusKey;
-  return el;
-}
-
 type Pending = {
   action: KeymapAction;
   chord: KeyChord;
   users: KeymapAction[];
 };
+
+type KeyLabel = { label: string; pwa: boolean };
 
 export function createShortcutSettings(deps: ShortcutSettingsDeps) {
   const defaults = defaultKeyBindings(deps.mac);
@@ -307,70 +306,19 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
   let pending: Pending | null = null;
   let notice: { action: KeymapAction; text: string } | null = null;
   let jsonOpen = false;
+  let jsonText = "";
   let jsonIssues: KeymapJsonIssue[] = [];
   let jsonReadError = "";
+  let query = "";
   const listeners = new Set<() => void>();
 
-  const element = document.createElement("div");
-  element.className = "scope-settings-section shortcut-settings";
-  element.id = "shortcut-settings";
-  const title = document.createElement("strong");
-  title.className = "scope-settings-section-title";
-  title.id = "shortcut-settings-title";
-  const shared = document.createElement("span");
-  shared.className = "scope-settings-shared";
-  const titleRow = document.createElement("div");
-  titleRow.className = "scope-settings-title-row";
-  titleRow.append(title, shared);
-  const intro = document.createElement("p");
-  intro.className = "scope-settings-help";
-
-  const toolbar = document.createElement("div");
-  toolbar.className = "shortcut-toolbar";
-  const filter = document.createElement("input");
-  filter.type = "search";
-  filter.className = "shortcut-filter";
-  filter.autocomplete = "off";
-  filter.spellcheck = false;
-  const exportButton = button("gdp-btn gdp-btn-sm", "export");
-  const importButton = button("gdp-btn gdp-btn-sm", "import");
-  const jsonButton = button("gdp-btn gdp-btn-sm", "json");
-  const resetAllButton = button("gdp-btn gdp-btn-sm", "reset-all");
-  const fileInput = document.createElement("input");
-  fileInput.type = "file";
-  fileInput.accept = ".json,application/json";
-  fileInput.hidden = true;
-  toolbar.append(
-    filter,
-    exportButton,
-    importButton,
-    jsonButton,
-    resetAllButton,
-    fileInput,
+  // 節の箱。設定のページが置き、中はここが描く。
+  const element = templateElement(
+    html`<div
+      class="scope-settings-section shortcut-settings"
+      id="shortcut-settings"
+    ></div>`,
   );
-
-  const jsonBox = document.createElement("div");
-  jsonBox.className = "shortcut-json";
-  jsonBox.hidden = true;
-  const jsonLabel = document.createElement("label");
-  jsonLabel.htmlFor = "shortcut-json";
-  const jsonHelp = document.createElement("div");
-  const jsonArea = document.createElement("textarea");
-  jsonArea.id = "shortcut-json";
-  jsonArea.rows = 12;
-  jsonArea.spellcheck = false;
-  const jsonErrors = document.createElement("ul");
-  jsonErrors.className = "shortcut-json-issues";
-  jsonErrors.setAttribute("role", "alert");
-  jsonBox.append(jsonLabel, jsonHelp, jsonArea, jsonErrors);
-
-  const filterEmpty = document.createElement("p");
-  filterEmpty.className = "scope-settings-help shortcut-filter-empty";
-  filterEmpty.hidden = true;
-  const list = document.createElement("div");
-  list.className = "shortcut-list";
-
-  element.append(titleRow, intro, toolbar, jsonBox, filterEmpty, list);
 
   function text(): ShortcutText {
     return SHORTCUT_SETTINGS_TEXT[deps.getLanguage()];
@@ -402,10 +350,14 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
     return JSON.stringify(draft, null, pretty ? 2 : undefined);
   }
 
+  function jsonArea(): HTMLTextAreaElement | null {
+    return element.querySelector<HTMLTextAreaElement>("#shortcut-json");
+  }
+
   /** 差分が変わった (画面のどこから変えても)。一覧と JSON の欄を描き直す。 */
   function changed(): void {
-    if (jsonOpen && document.activeElement !== jsonArea) {
-      jsonArea.value = draftJson(true);
+    if (jsonOpen && document.activeElement !== jsonArea()) {
+      jsonText = draftJson(true);
       jsonIssues = [];
       jsonReadError = "";
     }
@@ -471,40 +423,35 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
   }
 
   // ---------- 描画 ----------
-  function whereToggle(
+  function whereToggleTemplate(
     label: string,
     checked: boolean,
     focusKey: string,
     onChange: (checked: boolean) => void,
-    disabled = false,
-  ): HTMLLabelElement {
-    const wrap = document.createElement("label");
-    wrap.className = "shortcut-where";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = checked;
-    input.disabled = disabled;
-    input.dataset.focusKey = focusKey;
-    input.addEventListener("change", () => onChange(input.checked));
-    const span = document.createElement("span");
-    span.textContent = label;
-    wrap.append(input, span);
-    return wrap;
+    options: { disabled?: boolean; className?: string } = {},
+  ): TemplateResult {
+    return html`<label
+      class=${options.className ? `shortcut-where ${options.className}` : "shortcut-where"}
+      ><input
+        type="checkbox"
+        data-focus-key=${focusKey}
+        ?disabled=${options.disabled === true}
+        .checked=${live(checked)}
+        @change=${(event: Event) =>
+          onChange((event.currentTarget as HTMLInputElement).checked)}
+      /><span>${label}</span></label
+    >`;
   }
 
-  function renderChord(
+  function chordTemplate(
     action: KeymapAction,
     chord: KeyChord,
     index: number,
-  ): HTMLElement {
+  ): TemplateResult {
     const t = text();
     const label = chordLabel(action, chord);
     const where = chordWhere(action, chord, defaults);
     const taken = browserTabTakes(chord, deps.mac);
-    const item = document.createElement("li");
-    item.className = "shortcut-chord";
-    const kbd = document.createElement("kbd");
-    kbd.textContent = label;
     const set = (patch: Partial<KeyWhere>) => {
       const chords = chordsOf(action);
       chords[index] = withChordWhere(
@@ -517,206 +464,178 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
       changed();
     };
     const key = `${action}:${keyChordId(chord)}`;
-    const wheres = document.createElement("span");
-    wheres.className = "shortcut-wheres";
-    wheres.append(
-      whereToggle(t.whereInputs, where.inputs, `${key}:inputs`, (inputs) =>
-        set({ inputs }),
-      ),
-      whereToggle(
-        t.whereTerminal,
-        where.terminal,
-        `${key}:terminal`,
-        (terminal) => set({ terminal }),
-      ),
-      whereToggle(
-        t.wherePwa,
-        where.pwa || taken,
-        `${key}:pwa`,
-        (pwa) => set({ pwa }),
-        taken,
-      ),
-    );
-    const remove = button("shortcut-chord-remove", `${key}:remove`);
-    remove.textContent = "×";
-    remove.setAttribute("aria-label", t.removeKey(label));
-    remove.title = t.removeKey(label);
-    remove.addEventListener("click", () => {
-      setChords(
-        action,
-        chordsOf(action).filter((_, at) => at !== index),
-      );
-      changed();
-    });
-    item.append(kbd, wheres, remove);
-    return item;
+    return html`<li class="shortcut-chord"><kbd>${label}</kbd><span
+        class="shortcut-wheres"
+        >${whereToggleTemplate(
+          t.whereInputs,
+          where.inputs,
+          `${key}:inputs`,
+          (inputs) => set({ inputs }),
+        )}${whereToggleTemplate(
+          t.whereTerminal,
+          where.terminal,
+          `${key}:terminal`,
+          (terminal) => set({ terminal }),
+        )}${whereToggleTemplate(
+          t.wherePwa,
+          where.pwa || taken,
+          `${key}:pwa`,
+          (pwa) => set({ pwa }),
+          { disabled: taken },
+        )}</span
+      ><button
+        type="button"
+        class="shortcut-chord-remove"
+        data-focus-key=${`${key}:remove`}
+        aria-label=${t.removeKey(label)}
+        title=${t.removeKey(label)}
+        @click=${() => {
+          setChords(
+            action,
+            chordsOf(action).filter((_, at) => at !== index),
+          );
+          changed();
+        }}
+      >×</button></li>`;
   }
 
-  function renderDetail(action: KeymapAction): HTMLElement {
+  function detailTemplate(action: KeymapAction): TemplateResult {
     const t = text();
-    const detail = document.createElement("div");
-    detail.className = "shortcut-row-detail";
-    detail.id = `shortcut-detail-${action}`;
     const chords = chordsOf(action);
-    if (chords.length) {
-      const items = document.createElement("ul");
-      items.className = "shortcut-chords";
-      items.append(
-        ...chords.map((chord, index) => renderChord(action, chord, index)),
-      );
-      detail.append(items);
-      // ブラウザが先に取るキーの説明は行に 1 回 (キーごとに繰り返さない)。
-      const taken = chords
-        .filter((chord) => browserTabTakes(chord, deps.mac))
-        .map((chord) => chordLabel(action, chord));
-      if (taken.length) {
-        const note = document.createElement("p");
-        note.className = "scope-settings-help shortcut-chord-note";
-        note.textContent = t.browserTakes(
-          taken.join(deps.getLanguage() === "ja" ? "・" : ", "),
-        );
-        detail.append(note);
-      }
-    }
-    const actions = document.createElement("div");
-    actions.className = "shortcut-row-actions";
-    const add = button("gdp-btn gdp-btn-sm shortcut-add", `${action}:add`);
-    add.textContent = recording === action ? t.pressKey : t.addKey;
-    add.setAttribute("aria-pressed", String(recording === action));
-    add.addEventListener("click", () => {
-      if (recording === action) {
-        stopRecording();
-        render();
-        return;
-      }
-      stopRecording();
-      recording = action;
-      pending = null;
-      notice = null;
-      document.addEventListener("keydown", onRecordKeydown, true);
-      render();
-    });
-    // フォーカスが記録のボタンから離れたら記録をやめる (押し損ねたキーが後で
-    // 割り当たらないように)。
-    add.addEventListener("blur", () => {
-      // 描き直しでボタンが差し替わったときの blur (Chrome は外す途中の、まだ
-      // 付いている要素に出す) では止めない。外し終わった後に見て、差し替えなら
-      // 何もしない (フォーカスは render が新しいボタンへ戻す)。
-      queueMicrotask(() => {
-        if (recording !== action || !add.isConnected) return;
-        stopRecording();
-        render();
-      });
-    });
-    const g = whereToggle(t.gFirst, gFirst, `${action}:g`, (checked) => {
-      gFirst = checked;
-    });
-    g.classList.add("shortcut-gfirst");
-    const restore = button("gdp-btn gdp-btn-sm", `${action}:restore`);
-    restore.textContent = t.restore;
-    restore.disabled = draft[action] === undefined;
-    restore.addEventListener("click", () => {
-      const next = { ...draft };
-      delete next[action];
-      draft = next;
-      pending = null;
-      notice = null;
-      changed();
-    });
-    actions.append(add, g, restore);
-    detail.append(actions);
-    if (pending?.action === action) {
-      const prompt = document.createElement("div");
-      prompt.className = "shortcut-conflict";
-      prompt.setAttribute("role", "alert");
-      const message = document.createElement("p");
-      message.textContent = t.conflict(
-        chordLabel(action, pending.chord),
-        pending.users
-          .map((user) => actionLabel(user, deps.getLanguage()))
-          .join(deps.getLanguage() === "ja" ? "」「" : ", "),
-      );
-      const replace = button(
-        "gdp-btn gdp-btn-sm shortcut-conflict-replace",
-        `${action}:replace`,
-      );
-      replace.textContent = t.replace;
-      replace.addEventListener("click", replacePending);
-      const cancel = button(
-        "gdp-btn gdp-btn-sm shortcut-conflict-cancel",
-        `${action}:cancel`,
-      );
-      cancel.textContent = t.cancel;
-      cancel.addEventListener("click", () => {
-        pending = null;
-        render();
-      });
-      prompt.append(message, replace, cancel);
-      detail.append(prompt);
-    }
-    if (notice?.action === action) {
-      const note = document.createElement("p");
-      note.className = "scope-settings-help shortcut-notice";
-      note.setAttribute("role", "status");
-      note.textContent = notice.text;
-      detail.append(note);
-    }
-    return detail;
+    // ブラウザが先に取るキーの説明は行に 1 回 (キーごとに繰り返さない)。
+    const taken = chords
+      .filter((chord) => browserTabTakes(chord, deps.mac))
+      .map((chord) => chordLabel(action, chord));
+    const ja = deps.getLanguage() === "ja";
+    return html`<div class="shortcut-row-detail" id=${`shortcut-detail-${action}`}>${
+      chords.length
+        ? html`<ul class="shortcut-chords">${repeat(
+            chords,
+            (chord) => keyChordId(chord),
+            (chord, index) => chordTemplate(action, chord, index),
+          )}</ul>${
+            taken.length
+              ? html`<p class="scope-settings-help shortcut-chord-note">${t.browserTakes(
+                  taken.join(ja ? "・" : ", "),
+                )}</p>`
+              : nothing
+          }`
+        : nothing
+    }<div class="shortcut-row-actions"><button
+        type="button"
+        class="gdp-btn gdp-btn-sm shortcut-add"
+        data-focus-key=${`${action}:add`}
+        aria-pressed=${String(recording === action)}
+        @click=${() => {
+          if (recording === action) {
+            stopRecording();
+            render();
+            return;
+          }
+          stopRecording();
+          recording = action;
+          pending = null;
+          notice = null;
+          document.addEventListener("keydown", onRecordKeydown, true);
+          render();
+        }}
+        @blur=${(event: FocusEvent) => {
+          // フォーカスが記録のボタンから離れたら記録をやめる (押し損ねたキーが後で
+          // 割り当たらないように)。描き直しでボタンが外れたときの blur (Chrome は
+          // 外す途中の、まだ付いている要素に出す) では止めない。
+          const add = event.currentTarget as HTMLElement;
+          queueMicrotask(() => {
+            if (recording !== action || !add.isConnected) return;
+            stopRecording();
+            render();
+          });
+        }}
+      >${recording === action ? t.pressKey : t.addKey}</button>${whereToggleTemplate(
+        t.gFirst,
+        gFirst,
+        `${action}:g`,
+        (checked) => {
+          gFirst = checked;
+        },
+        { className: "shortcut-gfirst" },
+      )}<button
+        type="button"
+        class="gdp-btn gdp-btn-sm"
+        data-focus-key=${`${action}:restore`}
+        ?disabled=${draft[action] === undefined}
+        @click=${() => {
+          const next = { ...draft };
+          delete next[action];
+          draft = next;
+          pending = null;
+          notice = null;
+          changed();
+        }}
+      >${t.restore}</button></div>${
+        pending?.action === action
+          ? html`<div class="shortcut-conflict" role="alert"><p>${t.conflict(
+              chordLabel(action, pending.chord),
+              pending.users
+                .map((user) => actionLabel(user, deps.getLanguage()))
+                .join(ja ? "」「" : ", "),
+            )}</p><button
+              type="button"
+              class="gdp-btn gdp-btn-sm shortcut-conflict-replace"
+              data-focus-key=${`${action}:replace`}
+              @click=${replacePending}
+            >${t.replace}</button><button
+              type="button"
+              class="gdp-btn gdp-btn-sm shortcut-conflict-cancel"
+              data-focus-key=${`${action}:cancel`}
+              @click=${() => {
+                pending = null;
+                render();
+              }}
+            >${t.cancel}</button></div>`
+          : nothing
+      }${
+        notice?.action === action
+          ? html`<p class="scope-settings-help shortcut-notice" role="status">${notice.text}</p>`
+          : nothing
+      }</div>`;
   }
 
-  function renderRow(action: KeymapAction, keys: KeyLabel[]): HTMLElement {
+  function rowTemplate(action: KeymapAction, keys: KeyLabel[]): TemplateResult {
     const t = text();
-    const row = document.createElement("div");
-    row.className = "shortcut-row ui-table-row";
-    row.dataset.action = action;
-    if (draft[action] !== undefined) row.dataset.changed = "true";
-    const head = button("shortcut-row-head", `${action}:head`);
-    head.setAttribute("aria-expanded", String(expanded === action));
-    head.setAttribute("aria-controls", `shortcut-detail-${action}`);
-    const name = document.createElement("span");
-    name.className = "shortcut-name";
-    name.textContent = actionLabel(action, deps.getLanguage());
-    const mark = document.createElement("span");
-    mark.className = "shortcut-changed";
-    mark.textContent = draft[action] !== undefined ? t.changed : "";
-    const keyList = document.createElement("span");
-    keyList.className = "shortcut-keys";
-    if (!keys.length) {
-      const none = document.createElement("span");
-      none.className = "shortcut-none";
-      none.textContent = t.noKey;
-      keyList.append(none);
-    }
+    const changedAction = draft[action] !== undefined;
     // キーは幅をそろえた升に 1 つずつ入れる (折り返しても列がそろう)。
-    for (const key of keys) {
-      const cell = document.createElement("span");
-      cell.className = "shortcut-key";
-      const kbd = document.createElement("kbd");
-      kbd.textContent = key.label;
-      cell.append(kbd);
-      if (key.pwa) {
-        const tag = document.createElement("span");
-        tag.className = "shortcut-key-pwa";
-        tag.textContent = "PWA";
-        tag.title = t.wherePwa;
-        cell.append(tag);
-      }
-      keyList.append(cell);
-    }
-    head.append(name, mark, keyList);
-    head.addEventListener("click", () => {
-      stopRecording();
-      pending = null;
-      notice = null;
-      expanded = expanded === action ? null : action;
-      render();
-    });
-    row.append(head);
-    if (expanded === action) row.append(renderDetail(action));
-    return row;
+    return html`<div
+      class="shortcut-row ui-table-row"
+      data-action=${action}
+      data-changed=${ifDefined(changedAction ? "true" : undefined)}
+    ><button
+      type="button"
+      class="shortcut-row-head"
+      data-focus-key=${`${action}:head`}
+      aria-expanded=${String(expanded === action)}
+      aria-controls=${`shortcut-detail-${action}`}
+      @click=${() => {
+        stopRecording();
+        pending = null;
+        notice = null;
+        expanded = expanded === action ? null : action;
+        render();
+      }}
+    ><span class="shortcut-name">${actionLabel(action, deps.getLanguage())}</span><span
+      class="shortcut-changed"
+    >${changedAction ? t.changed : ""}</span><span class="shortcut-keys">${
+      keys.length
+        ? nothing
+        : html`<span class="shortcut-none">${t.noKey}</span>`
+    }${keys.map(
+      (key) =>
+        html`<span class="shortcut-key"><kbd>${key.label}</kbd>${
+          key.pwa
+            ? html`<span class="shortcut-key-pwa" title=${t.wherePwa}>PWA</span>`
+            : nothing
+        }</span>`,
+    )}</span></button>${expanded === action ? detailTemplate(action) : nothing}</div>`;
   }
-
-  type KeyLabel = { label: string; pwa: boolean };
 
   /** 行に出すキー。PWA の窓だけで効くキーは印を付ける (文字の後ろに足さない)。 */
   function keyLabels(action: KeymapAction): KeyLabel[] {
@@ -728,16 +647,19 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
     }));
   }
 
-  function render(): void {
+  function sectionTemplate(): TemplateResult {
     const t = text();
-    const focusKey = (document.activeElement as HTMLElement | null)?.dataset
-      ?.focusKey;
-    const focusInside = element.contains(document.activeElement);
-    const query = filter.value.trim().toLocaleLowerCase();
+    const tag = deps.getSharedTag();
+    const needle = query.trim().toLocaleLowerCase();
     let shown = 0;
-    const groups: HTMLElement[] = [];
+    const groups: {
+      group: (typeof KEYMAP_GROUPS)[number];
+      rows: TemplateResult[];
+      actions: KeymapAction[];
+    }[] = [];
     for (const group of KEYMAP_GROUPS) {
-      const rows: HTMLElement[] = [];
+      const rows: TemplateResult[] = [];
+      const actions: KeymapAction[] = [];
       for (const action of actionsInGroup(group)) {
         const keys = keyLabels(action);
         const haystack = [
@@ -747,32 +669,112 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
         ]
           .join("\n")
           .toLocaleLowerCase();
-        if (query && !haystack.includes(query)) continue;
-        rows.push(renderRow(action, keys));
+        if (needle && !haystack.includes(needle)) continue;
+        rows.push(rowTemplate(action, keys));
+        actions.push(action);
       }
       if (!rows.length) continue;
       shown += rows.length;
-      const section = document.createElement("section");
-      section.className = "shortcut-group";
-      // 見出しの行: 分類の名前と、キーの列の名前 (行と同じ列の組み)。
-      const head = document.createElement("div");
-      head.className = "shortcut-group-head ui-table-head";
-      const heading = document.createElement("h4");
-      heading.className = "shortcut-group-title";
-      heading.textContent = keymapGroupTitle(group, deps.getLanguage());
-      const keysColumn = document.createElement("span");
-      keysColumn.className = "shortcut-group-keys";
-      keysColumn.textContent = t.keysColumn;
-      head.append(heading, document.createElement("span"), keysColumn);
-      section.append(head, ...rows);
-      groups.push(section);
+      groups.push({ group, rows, actions });
     }
-    list.replaceChildren(...groups);
-    filterEmpty.hidden = shown > 0;
-    filterEmpty.textContent =
-      shown > 0 ? "" : t.filterEmpty(filter.value.trim());
-    renderJsonIssues();
-    if (focusInside && focusKey) {
+    const issues = jsonReadError
+      ? [jsonReadError]
+      : jsonIssues.map((issue) =>
+          t.jsonIssue(issue, t.issue[issue.code](issue.detail ?? "")),
+        );
+    return html`<div class="scope-settings-title-row"><strong
+        class="scope-settings-section-title"
+        id="shortcut-settings-title"
+      >${t.title}</strong><span class="scope-settings-shared" title=${tag.title}
+        >${tag.text}</span
+      ></div><p class="scope-settings-help">${t.intro}</p><div class="shortcut-toolbar"><input
+        type="search"
+        class="shortcut-filter"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder=${t.filterPlaceholder}
+        aria-label=${t.filterPlaceholder}
+        .value=${live(query)}
+        @input=${(event: Event) => {
+          query = (event.currentTarget as HTMLInputElement).value;
+          render();
+        }}
+      /><button
+        type="button"
+        class="gdp-btn gdp-btn-sm"
+        data-focus-key="export"
+        @click=${() => {
+          deps.download("code-viewer-shortcuts.json", `${draftJson(true)}\n`);
+        }}
+      >${t.exportJson}</button><button
+        type="button"
+        class="gdp-btn gdp-btn-sm"
+        data-focus-key="import"
+        @click=${() =>
+          element
+            .querySelector<HTMLInputElement>(
+              ".shortcut-toolbar input[type=file]",
+            )
+            ?.click()}
+      >${t.importJson}</button><button
+        type="button"
+        class="gdp-btn gdp-btn-sm"
+        data-focus-key="json"
+        aria-pressed=${String(jsonOpen)}
+        @click=${toggleJson}
+      >${t.editJson}</button><button
+        type="button"
+        class="gdp-btn gdp-btn-sm"
+        data-focus-key="reset-all"
+        @click=${resetAll}
+      >${t.resetAll}</button><input
+        type="file"
+        accept=".json,application/json"
+        hidden
+        @change=${importFile}
+      /></div><div class="shortcut-json" ?hidden=${!jsonOpen}><label for="shortcut-json"
+        >${t.jsonLabel}</label
+      ><div>${t.jsonHelp.map(
+        (paragraph) => html`<p class="scope-settings-help">${paragraph}</p>`,
+      )}</div><textarea
+        id="shortcut-json"
+        rows="12"
+        spellcheck="false"
+        aria-invalid=${String(issues.length > 0)}
+        .value=${live(jsonText)}
+        @input=${(event: Event) => {
+          jsonText = (event.currentTarget as HTMLTextAreaElement).value;
+          readJson();
+        }}
+      ></textarea><ul class="shortcut-json-issues" role="alert" ?hidden=${issues.length === 0}>${issues.map(
+        (line) => html`<li>${line}</li>`,
+      )}</ul></div><p
+        class="scope-settings-help shortcut-filter-empty"
+        ?hidden=${shown > 0}
+      >${shown > 0 ? "" : t.filterEmpty(query.trim())}</p><div class="shortcut-list">${repeat(
+        groups,
+        (entry) => entry.group,
+        (entry) =>
+          // 見出しの行: 分類の名前と、キーの列の名前 (行と同じ列の組み)。
+          html`<section class="shortcut-group"><div class="shortcut-group-head ui-table-head"><h4
+                class="shortcut-group-title"
+              >${keymapGroupTitle(entry.group, deps.getLanguage())}</h4><span></span><span
+                class="shortcut-group-keys"
+              >${t.keysColumn}</span></div>${repeat(
+                entry.rows,
+                (_, index) => entry.actions[index],
+                (row) => row,
+              )}</section>`,
+      )}</div>`;
+  }
+
+  function render(): void {
+    const focusKey = (document.activeElement as HTMLElement | null)?.dataset
+      ?.focusKey;
+    const focusInside = element.contains(document.activeElement);
+    renderOwned(element, sectionTemplate());
+    // 押したボタンが描き直しで外れた (行を畳んだなど) ときは、同じ役のボタンへ戻す。
+    if (focusInside && focusKey && !element.contains(document.activeElement)) {
       element
         .querySelector<HTMLElement>(
           `[data-focus-key="${CSS.escape(focusKey)}"]`,
@@ -781,36 +783,16 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
     }
   }
 
-  function renderJsonIssues(): void {
-    const t = text();
-    const lines = jsonReadError
-      ? [jsonReadError]
-      : jsonIssues.map((issue) =>
-          t.jsonIssue(issue, t.issue[issue.code](issue.detail ?? "")),
-        );
-    jsonErrors.replaceChildren(
-      ...lines.map((line) => {
-        const item = document.createElement("li");
-        item.textContent = line;
-        return item;
-      }),
-    );
-    jsonErrors.hidden = lines.length === 0;
-    jsonArea.setAttribute("aria-invalid", String(lines.length > 0));
-  }
-
   // ---------- JSON ----------
   function openJson(value: string): void {
     jsonOpen = true;
-    jsonBox.hidden = false;
-    jsonButton.setAttribute("aria-pressed", "true");
-    jsonArea.value = value;
+    jsonText = value;
   }
 
   /** JSON の欄の文字を読む。正しければ差分にする。誤りがあれば出して差分は変えない。 */
   function readJson(): void {
     jsonReadError = "";
-    const result = parseKeymapJson(jsonArea.value, deps.mac);
+    const result = parseKeymapJson(jsonText, deps.mac);
     if ("issues" in result) jsonIssues = result.issues;
     else {
       jsonIssues = [];
@@ -822,38 +804,10 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
     notify();
   }
 
-  function applyText(): void {
-    const t = text();
-    const tag = deps.getSharedTag();
-    title.textContent = t.title;
-    shared.textContent = tag.text;
-    shared.title = tag.title;
-    intro.textContent = t.intro;
-    filter.placeholder = t.filterPlaceholder;
-    filter.setAttribute("aria-label", t.filterPlaceholder);
-    exportButton.textContent = t.exportJson;
-    importButton.textContent = t.importJson;
-    jsonButton.textContent = t.editJson;
-    resetAllButton.textContent = t.resetAll;
-    jsonLabel.textContent = t.jsonLabel;
-    jsonHelp.replaceChildren(
-      ...t.jsonHelp.map((paragraph) => {
-        const p = document.createElement("p");
-        p.className = "scope-settings-help";
-        p.textContent = paragraph;
-        return p;
-      }),
-    );
-  }
-
-  filter.addEventListener("input", render);
-  exportButton.addEventListener("click", () => {
-    deps.download("code-viewer-shortcuts.json", `${draftJson(true)}\n`);
-  });
-  importButton.addEventListener("click", () => fileInput.click());
-  fileInput.addEventListener("change", () => {
-    const file = fileInput.files?.[0];
-    fileInput.value = "";
+  function importFile(event: Event): void {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
     if (!file) return;
     void file.text().then(
       (content) => {
@@ -862,28 +816,28 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
       },
       (error: unknown) => {
         console.error("[code-viewer] shortcut import failed", error);
-        openJson(jsonArea.value || draftJson(true));
+        openJson(jsonText || draftJson(true));
         jsonReadError = text().importFailed(formatErrorDetail(error));
         render();
       },
     );
-  });
-  jsonButton.addEventListener("click", () => {
+  }
+
+  function toggleJson(): void {
     if (jsonOpen) {
       // 誤りのある間は閉じても直す所を失わないよう、開いたままにする。
       if (jsonIssues.length) return;
       jsonOpen = false;
-      jsonBox.hidden = true;
-      jsonButton.setAttribute("aria-pressed", "false");
       jsonReadError = "";
       render();
       return;
     }
     openJson(draftJson(true));
-    jsonArea.focus();
-  });
-  jsonArea.addEventListener("input", readJson);
-  resetAllButton.addEventListener("click", () => {
+    render();
+    jsonArea()?.focus();
+  }
+
+  function resetAll(): void {
     const t = text();
     void showConfirmDialog({
       title: t.resetAllTitle,
@@ -897,8 +851,7 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
       notice = null;
       changed();
     });
-  });
-  jsonButton.setAttribute("aria-pressed", "false");
+  }
 
   const draftHandle: SettingsDraft = {
     dirty: () => draftJson() !== savedJson(),
@@ -920,18 +873,12 @@ export function createShortcutSettings(deps: ShortcutSettingsDeps) {
   function refresh(): void {
     if (!draftHandle.dirty() && !(jsonOpen && jsonIssues.length)) {
       draft = tidyOverrides(deps.getSaved(), defaults);
-      if (jsonOpen && document.activeElement !== jsonArea)
-        jsonArea.value = draftJson(true);
+      if (jsonOpen && document.activeElement !== jsonArea())
+        jsonText = draftJson(true);
     }
     render();
   }
 
-  function localize(): void {
-    applyText();
-    render();
-  }
-
-  applyText();
   render();
-  return { element, draft: draftHandle, refresh, localize };
+  return { element, draft: draftHandle, refresh, localize: render };
 }

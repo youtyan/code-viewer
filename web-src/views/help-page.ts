@@ -2,6 +2,7 @@
 // 別のページ (views/settings-page.ts)。節の並びと本文は help-guides.ts と
 // help-text-en.ts / help-text-ja.ts、部品の見た目は help-blocks.ts。
 
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import type { KeyBinding } from "../core/keymap";
 import type { InstallOffer } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
@@ -25,6 +26,7 @@ import type { HelpFigure } from "./help-images";
 import { buildHelpKeybindingGroups } from "./help-keybindings";
 import { createPageShell, type PageShellNavItem } from "./page-shell";
 import { quickHelpText } from "./quick-help-i18n";
+import { renderOwned, templateElement } from "./ui/renderer";
 
 export type { HelpSection } from "./help-guides";
 
@@ -165,11 +167,8 @@ export function helpSectionName(
   return HELP_SECTION_NAMES[lang][section];
 }
 
-function renderHelpLink(text: HelpText): HTMLParagraphElement {
-  const p = document.createElement("p");
-  p.className = "gdp-help-shortcut-link";
-  p.append(...helpInline(text));
-  return p;
+function renderHelpLink(text: HelpText): TemplateResult {
+  return html`<p class="gdp-help-shortcut-link">${helpInline(text)}</p>`;
 }
 
 /** 撮っていない画像は描かない (壊れた画像を出さない)。 */
@@ -186,12 +185,10 @@ function capturedFigures(
 function renderHelpBlocks(
   lang: HelpLanguage,
   blocks: readonly HelpBlock[],
-  renderInstall: (
-    block: Extract<HelpBlock, { kind: "install" }>,
-  ) => HTMLElement | null,
-): HTMLElement[] {
+  renderInstall: (block: Extract<HelpBlock, { kind: "install" }>) => unknown,
+): unknown[] {
   const b = helpBlocks(lang);
-  const render = (block: HelpBlock): HTMLElement | null => {
+  const render = (block: HelpBlock): unknown => {
     switch (block.kind) {
       case "paragraph":
         return b.paragraph(block.text);
@@ -206,7 +203,7 @@ function renderHelpBlocks(
           ),
         );
       case "figure":
-        return block.figure.captured ? b.figure(block.figure) : null;
+        return block.figure.captured ? b.figure(block.figure) : nothing;
       case "note":
         return b.note(block.note, block.paragraphs);
       case "command":
@@ -226,34 +223,29 @@ function renderHelpBlocks(
         return renderInstall(block);
     }
   };
-  return blocks.flatMap((block) => render(block) ?? []);
+  return blocks.map(render);
 }
 
 /**
  * インストールの案内の中身。ボタンはブラウザがインストールの画面を出せるときだけ
  * (押すと 1 度きりなので、押した後は手順の文だけになる)。
  */
-function fillInstallBlock(
+function installBlockTemplate(
   lang: HelpLanguage,
-  host: HTMLElement,
   block: Extract<HelpBlock, { kind: "install" }>,
   offer: InstallOffer,
-): void {
-  const children: HTMLElement[] = [];
-  if (offer.state() === "prompt") {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gdp-btn";
-    button.textContent = block.button;
-    button.addEventListener("click", () => {
-      void offer.install();
-    });
-    const row = document.createElement("p");
-    row.append(button);
-    children.push(row);
-  }
-  children.push(helpBlocks(lang).steps(block.steps));
-  host.replaceChildren(...children);
+): TemplateResult {
+  return html`<div class="gdp-help-install">${
+    offer.state() === "prompt"
+      ? html`<p><button
+          type="button"
+          class="gdp-btn"
+          @click=${() => {
+            void offer.install();
+          }}
+        >${block.button}</button></p>`
+      : nothing
+  }${helpBlocks(lang).steps(block.steps)}</div>`;
 }
 
 /** 狭い面で目次を畳んだときの 1 行の見出し (「目次: 今の節」)。 */
@@ -284,7 +276,7 @@ export function createHelpPage(deps: HelpPageDeps) {
   function shortcutSettingsLink(
     lang: HelpLanguage,
     labels: HelpLabels,
-  ): HTMLElement {
+  ): TemplateResult {
     const text = SHORTCUT_SETTINGS_TEXT[lang];
     return renderHelpLink([
       text.before,
@@ -348,69 +340,61 @@ export function createHelpPage(deps: HelpPageDeps) {
       onSelect: () => goToSection(helpSection),
     }));
 
-    const article = document.createElement("article");
-    article.className = "gdp-help-content";
-    // ブラウザがインストールの画面を出せるようになった・出せなくなったら、
-    // 案内だけ描き直す (この画面に案内が無ければ何もしない)。
-    let installBlock: (() => void) | null = null;
+    // 本文の箱。インストールの案内はブラウザの状態で描き直すので、箱の中は
+    // 描き直せるように持つ。
+    const article = templateElement(
+      html`<article class="gdp-help-content"></article>`,
+    );
+    let hasInstall = false;
     const renderInstall = (
       block: Extract<HelpBlock, { kind: "install" }>,
-    ): HTMLElement | null => {
-      if (deps.installOffer.state() === "hidden") return null;
-      const host = document.createElement("div");
-      host.className = "gdp-help-install";
-      fillInstallBlock(lang, host, block, deps.installOffer);
-      installBlock = () =>
-        fillInstallBlock(lang, host, block, deps.installOffer);
-      return host;
+    ): unknown => {
+      if (deps.installOffer.state() === "hidden") return nothing;
+      hasInstall = true;
+      return installBlockTemplate(lang, block, deps.installOffer);
     };
-    const h2 = document.createElement("h2");
-    h2.textContent = current.title;
-    article.append(
-      h2,
-      helpBlocks(lang).paragraph(current.intro),
-      ...renderHelpBlocks(lang, current.lead ?? [], renderInstall),
+    const articleTemplate = () => {
+      hasInstall = false;
+      return html`<h2>${current.title}</h2>${helpBlocks(lang).paragraph(
+        current.intro,
+      )}${renderHelpBlocks(lang, current.lead ?? [], renderInstall)}${
+        section === "keybindings" ? shortcutSettingsLink(lang, labels) : nothing
+      }${sectionGroups.map(
+        (group) =>
+          html`<section class="gdp-help-group"><h3>${group.title}</h3>${renderHelpBlocks(
+            lang,
+            group.blocks,
+            renderInstall,
+          )}</section>`,
+      )}`;
+    };
+    renderOwned(article, articleTemplate());
+    // ブラウザがインストールの画面を出せるようになった・出せなくなったら、
+    // 案内だけ描き直す (この画面に案内が無ければ何もしない)。
+    deps.installOffer.onChange(
+      hasInstall ? () => renderOwned(article, articleTemplate()) : null,
     );
-    if (section === "keybindings")
-      article.append(shortcutSettingsLink(lang, labels));
-    sectionGroups.forEach((group) => {
-      const groupSection = document.createElement("section");
-      groupSection.className = "gdp-help-group";
-      const groupTitle = document.createElement("h3");
-      groupTitle.textContent = group.title;
-      groupSection.append(
-        groupTitle,
-        ...renderHelpBlocks(lang, group.blocks, renderInstall),
-      );
-      article.appendChild(groupSection);
-    });
-    deps.installOffer.onChange(installBlock);
 
     // キーボードショートカットの小窓 (どの画面でも ? で開く) をここからも開く。
-    const shortcuts = document.createElement("button");
-    shortcuts.type = "button";
-    shortcuts.className = "gdp-btn";
-    shortcuts.dataset.quickHelpTrigger = "";
-    shortcuts.textContent = quickHelpText(lang).panelTitle;
-    shortcuts.title = KEYBOARD_SHORTCUTS_TITLE[lang];
-    shortcuts.addEventListener("click", deps.toggleKeyboardShortcuts);
     // 版は小窓の操作の左に並べる (見出しの行は両端寄せなので 1 つの塊にする)。
-    const headerEnd = document.createElement("div");
-    headerEnd.className = "gdp-help-header-end";
     const version = deps.codeViewerVersion();
-    if (version) {
-      const versionText = document.createElement("span");
-      versionText.className = "gdp-help-version";
-      versionText.textContent = `code-viewer ${version}`;
-      headerEnd.append(versionText);
-    }
-    headerEnd.append(shortcuts);
+    const headerEnd = html`<div class="gdp-help-header-end">${
+      version
+        ? html`<span class="gdp-help-version">code-viewer ${version}</span>`
+        : nothing
+    }<button
+      type="button"
+      class="gdp-btn"
+      data-quick-help-trigger=""
+      title=${KEYBOARD_SHORTCUTS_TITLE[lang]}
+      @click=${deps.toggleKeyboardShortcuts}
+    >${quickHelpText(lang).panelTitle}</button></div>`;
 
     shell.render(deps.$("#diff"), {
       page: "help",
       lang,
       title: agentsText(lang).sidebar.help,
-      headerActions: [headerEnd],
+      headerActions: headerEnd,
       nav,
       article,
       toggleText: HELP_NAV_TOGGLE_TEXT[lang],

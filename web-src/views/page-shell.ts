@@ -1,7 +1,15 @@
 // 設定とヘルプのページの枠: 見出し・左の目次・本文。中身は各ページ
 // (views/settings-page.ts・views/help-page.ts) が組む。
+//
+// 枠は箱 (cv-page-shell。箱を作らない要素) の中に描く。本文を出す #diff はほかの
+// 画面も中身を差し替えるので、枠を描くたびに箱が #diff に居るかを確かめ、
+// 居なければ箱を作り直して置く。
 
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import { phoneMediaQuery } from "./shell/workspace";
+import { renderOwned, templateElement } from "./ui/renderer";
+
+export const CV_PAGE_SHELL = "cv-page-shell";
 
 export type PageShellNavItem =
   | { kind: "heading"; label: string }
@@ -17,11 +25,12 @@ export type PageShellParts = {
   lang: "en" | "ja";
   title: string;
   /** 見出しの右に並べるもの (ヘルプの「キーボードショートカット」)。 */
-  headerActions?: HTMLElement[];
+  headerActions?: unknown;
   /** 見出しと本文の間の 1 行 (設定の検索欄)。 */
-  searchRow?: HTMLElement;
+  searchRow?: unknown;
   nav: PageShellNavItem[];
-  article: HTMLElement;
+  /** 本文 (article.gdp-help-content の要素かテンプレート)。 */
+  article: unknown;
   /** 狭い面で目次を畳んだときの 1 行の見出し (「目次: 今の節」)。 */
   toggleText: string;
   /**
@@ -39,85 +48,74 @@ export function createPageShell() {
   // 1 段目から (節を指して開いたときは 2 段目)。
   let navOpen = false;
   const phoneQuery = phoneMediaQuery();
+  let host: HTMLElement | null = null;
+  let parts: PageShellParts | null = null;
+
+  function shellTemplate(current: PageShellParts): TemplateResult {
+    const active = current.nav.find(
+      (item): item is Extract<PageShellNavItem, { kind: "item" }> =>
+        item.kind === "item" && item.active,
+    );
+    return html`<section
+      class="gdp-help-shell"
+      data-page=${current.page}
+      lang=${current.lang}
+    ><header class="gdp-help-header"><h1>${current.title}</h1>${
+      current.headerActions ?? nothing
+    }</header>${current.searchRow ?? nothing}<div
+      class=${navOpen ? "gdp-help-layout gdp-help-nav-open" : "gdp-help-layout"}
+    ><button
+      type="button"
+      class="gdp-help-nav-toggle"
+      aria-controls="gdp-help-nav"
+      aria-expanded=${String(navOpen)}
+      @click=${() => {
+        navOpen = !navOpen;
+        draw();
+      }}
+    ><span class="gdp-help-nav-toggle-label">${current.toggleText}</span><span
+      class="gdp-help-nav-toggle-current"
+    >${active?.label ?? ""}</span></button><nav class="gdp-help-nav" id="gdp-help-nav">${current.nav.map(
+      (item) =>
+        item.kind === "heading"
+          ? html`<div class="gdp-help-nav-heading">${item.label}</div>`
+          : html`<button
+              type="button"
+              class=${item.active ? "active" : ""}
+              @click=${() => {
+                navOpen = false;
+                item.onSelect();
+              }}
+            >${item.label}</button>`,
+    )}</nav>${current.article}</div></section>`;
+  }
+
+  function draw(): void {
+    if (host && parts) renderOwned(host, shellTemplate(parts));
+  }
 
   /** 枠を描いて target の中身と差し替える。返す closeNav は目次の 1 段目を閉じる。 */
   function render(
     target: HTMLElement,
-    parts: PageShellParts,
+    next: PageShellParts,
   ): { closeNav(): void; navOpen(): boolean } {
-    const current = target.firstElementChild;
-    const entering =
-      !(current instanceof HTMLElement) ||
-      !current.classList.contains("gdp-help-shell") ||
-      current.dataset.page !== parts.page;
-    if (phoneQuery.matches && (entering || parts.openedSection))
-      navOpen = !parts.openedSection;
-
-    const shell = document.createElement("section");
-    shell.className = "gdp-help-shell";
-    shell.dataset.page = parts.page;
-    shell.lang = parts.lang;
-    const header = document.createElement("header");
-    header.className = "gdp-help-header";
-    const title = document.createElement("h1");
-    title.textContent = parts.title;
-    header.append(title, ...(parts.headerActions ?? []));
-
-    const layout = document.createElement("div");
-    layout.className = "gdp-help-layout";
-    const nav = document.createElement("nav");
-    nav.className = "gdp-help-nav";
-    nav.id = "gdp-help-nav";
-    let activeLabel = "";
-    for (const item of parts.nav) {
-      if (item.kind === "heading") {
-        const heading = document.createElement("div");
-        heading.className = "gdp-help-nav-heading";
-        heading.textContent = item.label;
-        nav.appendChild(heading);
-        continue;
-      }
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = item.active ? "active" : "";
-      button.textContent = item.label;
-      if (item.active) activeLabel = item.label;
-      button.addEventListener("click", () => {
-        navOpen = false;
-        item.onSelect();
-      });
-      nav.appendChild(button);
+    const placed =
+      host !== null && target.firstElementChild === host
+        ? host.querySelector<HTMLElement>(":scope > .gdp-help-shell")
+        : null;
+    const entering = !placed || placed.dataset.page !== next.page;
+    if (phoneQuery.matches && (entering || next.openedSection))
+      navOpen = !next.openedSection;
+    if (!placed) {
+      host = templateElement(html`<cv-page-shell></cv-page-shell>`);
+      target.replaceChildren(host);
     }
-
-    // 狭い面だけで見える、目次を開閉する 1 行 (広い面では CSS が隠す)。
-    const navToggle = document.createElement("button");
-    navToggle.type = "button";
-    navToggle.className = "gdp-help-nav-toggle";
-    navToggle.setAttribute("aria-controls", nav.id);
-    const syncNavOpen = () => {
-      layout.classList.toggle("gdp-help-nav-open", navOpen);
-      navToggle.setAttribute("aria-expanded", String(navOpen));
-    };
-    const toggleLabel = document.createElement("span");
-    toggleLabel.className = "gdp-help-nav-toggle-label";
-    toggleLabel.textContent = parts.toggleText;
-    const toggleCurrent = document.createElement("span");
-    toggleCurrent.className = "gdp-help-nav-toggle-current";
-    toggleCurrent.textContent = activeLabel;
-    navToggle.append(toggleLabel, toggleCurrent);
-    navToggle.addEventListener("click", () => {
-      navOpen = !navOpen;
-      syncNavOpen();
-    });
-    syncNavOpen();
-
-    layout.append(navToggle, nav, parts.article);
-    shell.append(header, ...(parts.searchRow ? [parts.searchRow] : []), layout);
-    target.replaceChildren(shell);
+    parts = next;
+    draw();
     return {
       closeNav: () => {
         navOpen = false;
-        syncNavOpen();
+        draw();
       },
       navOpen: () => navOpen,
     };

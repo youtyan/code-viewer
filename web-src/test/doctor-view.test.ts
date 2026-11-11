@@ -3,7 +3,6 @@
 
 import "./_dom";
 import { expect, test, vi } from "vitest";
-import { escapeHtml } from "../core/html-escape";
 import { createDoctorView } from "../views/doctor-view";
 
 test("a failed /_doctor shows the status and the whole body, and logs the error", async () => {
@@ -19,7 +18,6 @@ test("a failed /_doctor shows the status and the whole body, and logs the error"
   try {
     await createDoctorView({
       $: (sel) => document.querySelector(sel),
-      escapeHtml: (value) => escapeHtml(String(value)),
       trackLoad: (promise) => promise,
       getLanguage: () => "en",
     }).open();

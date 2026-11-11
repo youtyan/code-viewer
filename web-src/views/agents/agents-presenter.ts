@@ -91,7 +91,8 @@ export type AgentsViewDeps = {
    * tmux が無いときの入れ方 (コピーのボタンつきのコマンドとヘルプへのリンク。
    * views/install-help.ts)。
    */
-  tmuxInstallHelp(): HTMLElement;
+  /** tmux が無いときの入れ方の案内 (テンプレート)。 */
+  tmuxInstallHelp(): unknown;
   /** 一覧の上に出すアカウントの帯。 */
   accountsBand: AccountsBand;
   /** アカウントの一覧 (まだ取っていなければ null)。行の名前に使う。 */

@@ -1,15 +1,20 @@
-import { apiUrl } from "../core/api-url";
-import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 // Doctor screen. Fetches /_doctor and renders OK/WARN/ERROR pills with
 // remediation hints. Uses module-level generation counter to drop stale
 // responses (see AGENTS.md Request Lifecycle Discipline).
+//
+// The sheet (#doctor-sheet in index.html) is drawn from one template; the
+// state is what the last load produced.
 
+import { html, nothing, type TemplateResult } from "lit/html.js";
+import { apiUrl } from "../core/api-url";
 import type {
   DoctorGroup,
   DoctorReport,
   DoctorRow,
   DoctorStatus,
 } from "../core/doctor-types";
+import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
+import { renderOwned } from "./ui/renderer";
 
 export type DoctorLang = "en" | "ja";
 
@@ -55,7 +60,6 @@ const TEXT: Record<DoctorLang, DoctorText> = {
 
 export type DoctorViewDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T | null;
-  escapeHtml(s: unknown): string;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
   getLanguage(): DoctorLang;
   onWorstStatusChange?: (status: DoctorStatus | null) => void;
@@ -72,82 +76,30 @@ function statusLabel(text: DoctorText, status: DoctorStatus): string {
   return text.statusLabels[status];
 }
 
-function renderRow(
-  text: DoctorText,
-  esc: (s: unknown) => string,
-  row: DoctorRow,
-): string {
-  const pill =
-    `<span class="doctor-row-pill doctor-row-pill-${row.status}">` +
-    `${esc(statusLabel(text, row.status))}</span>`;
-  const body =
-    `<div class="doctor-row-body">` +
-    `<div class="doctor-row-title">${esc(row.title)}</div>` +
-    (row.detail
-      ? `<div class="doctor-row-detail">${esc(row.detail)}</div>`
-      : "") +
-    (row.hint ? `<div class="doctor-row-hint">${esc(row.hint)}</div>` : "") +
-    `</div>`;
-  return `<div class="doctor-row ui-table-row" data-status="${esc(row.status)}">${pill}${body}</div>`;
+function rowTemplate(text: DoctorText, row: DoctorRow): TemplateResult {
+  return html`<div class="doctor-row ui-table-row" data-status=${row.status}><span
+      class=${`doctor-row-pill doctor-row-pill-${row.status}`}
+      >${statusLabel(text, row.status)}</span
+    ><div class="doctor-row-body"><div class="doctor-row-title">${row.title}</div>${
+      row.detail
+        ? html`<div class="doctor-row-detail">${row.detail}</div>`
+        : nothing
+    }${row.hint ? html`<div class="doctor-row-hint">${row.hint}</div>` : nothing}</div></div>`;
 }
 
-function renderGroup(
-  text: DoctorText,
-  esc: (s: unknown) => string,
-  group: DoctorGroup,
-): string {
-  if (group.rows.length === 0) return "";
-  const rows = group.rows.map((row) => renderRow(text, esc, row)).join("");
-  return (
-    `<section class="doctor-group" data-group="${esc(group.id)}">` +
-    `<h2 class="doctor-group-title">${esc(group.title)}</h2>` +
-    rows +
-    `</section>`
-  );
+function groupTemplate(text: DoctorText, group: DoctorGroup): unknown {
+  if (group.rows.length === 0) return nothing;
+  return html`<section class="doctor-group" data-group=${group.id}><h2
+      class="doctor-group-title"
+    >${group.title}</h2>${group.rows.map((row) => rowTemplate(text, row))}</section>`;
 }
 
-function renderReport(
-  mount: HTMLElement,
-  report: DoctorReport,
-  text: DoctorText,
-  esc: (s: unknown) => string,
-): void {
-  const summary = mount.querySelector<HTMLElement>(".doctor-summary");
-  if (summary) {
-    const message =
-      report.worstStatus === "error"
-        ? text.worstError
-        : report.worstStatus === "warn"
-          ? text.worstWarn
-          : text.worstOk;
-    summary.textContent = message;
-  }
-  const content = mount.querySelector<HTMLElement>(".doctor-content");
-  if (!content) return;
-  if (!report.groups.length) {
-    content.innerHTML = `<div class="doctor-empty">${esc(text.empty)}</div>`;
-    return;
-  }
-  content.innerHTML = report.groups
-    .map((group) => renderGroup(text, esc, group))
-    .join("");
-}
-
-function ensureSkeleton(
-  mount: HTMLElement,
-  text: DoctorText,
-  esc: (s: unknown) => string,
-): void {
-  if (mount.querySelector(".doctor-header")) return;
-  mount.innerHTML =
-    `<div class="doctor-header">` +
-    `<h1>${esc(text.title)}</h1>` +
-    `<button type="button" class="doctor-refresh">${esc(text.refresh)}</button>` +
-    `<button type="button" class="doctor-close" aria-label="${esc(text.close)}" title="${esc(text.close)}">×</button>` +
-    `</div>` +
-    `<div class="doctor-summary"></div>` +
-    `<div class="doctor-content"></div>`;
-}
+/** 診断の結果の段階。idle はまだ一度も読んでいない。 */
+type DoctorState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "report"; report: DoctorReport }
+  | { kind: "failed"; message: string };
 
 export type DoctorViewHandle = {
   open(): Promise<void>;
@@ -157,6 +109,9 @@ export type DoctorViewHandle = {
 };
 
 export function createDoctorView(deps: DoctorViewDeps): DoctorViewHandle {
+  let state: DoctorState = { kind: "idle" };
+  let busy = false;
+
   function getMount(): HTMLElement | null {
     return deps.$<HTMLElement>("#doctor-sheet");
   }
@@ -165,23 +120,59 @@ export function createDoctorView(deps: DoctorViewDeps): DoctorViewHandle {
     return deps.$<HTMLElement>("#doctor-sheet-overlay");
   }
 
-  function setRefreshState(mount: HTMLElement, busy: boolean): void {
-    const btn = mount.querySelector<HTMLButtonElement>(".doctor-refresh");
-    if (!btn) return;
-    btn.disabled = busy;
+  function sheetTemplate(): TemplateResult {
+    const text = doctorText(deps.getLanguage());
+    const report = state.kind === "report" ? state.report : null;
+    const summary = !report
+      ? ""
+      : report.worstStatus === "error"
+        ? text.worstError
+        : report.worstStatus === "warn"
+          ? text.worstWarn
+          : text.worstOk;
+    const content =
+      state.kind === "loading"
+        ? html`<div class="doctor-empty">${text.refreshing}</div>`
+        : state.kind === "failed"
+          ? html`<div class="doctor-empty">${`${text.loadFailed}: ${state.message}`}</div>`
+          : report && !report.groups.length
+            ? html`<div class="doctor-empty">${text.empty}</div>`
+            : report
+              ? report.groups.map((group) => groupTemplate(text, group))
+              : nothing;
+    return html`<div class="doctor-header"><h1>${text.title}</h1><button
+        type="button"
+        class="doctor-refresh"
+        ?disabled=${busy}
+        @click=${(event: Event) => {
+          event.preventDefault();
+          void load();
+        }}
+      >${text.refresh}</button><button
+        type="button"
+        class="doctor-close"
+        aria-label=${text.close}
+        title=${text.close}
+        @click=${(event: Event) => {
+          event.preventDefault();
+          deps.onCloseRequest?.();
+        }}
+      >×</button></div><div class="doctor-summary">${summary}</div><div
+        class="doctor-content"
+      >${content}</div>`;
   }
 
-  async function load(mount: HTMLElement): Promise<void> {
+  function draw(): void {
+    const mount = getMount();
+    if (mount) renderOwned(mount, sheetTemplate());
+  }
+
+  async function load(): Promise<void> {
     viewGeneration += 1;
     const myGen = viewGeneration;
-    const lang = deps.getLanguage();
-    const text = doctorText(lang);
-    setRefreshState(mount, true);
-    const content = mount.querySelector<HTMLElement>(".doctor-content");
-    if (content)
-      content.innerHTML = `<div class="doctor-empty">${deps.escapeHtml(text.refreshing)}</div>`;
-    const summary = mount.querySelector<HTMLElement>(".doctor-summary");
-    if (summary) summary.textContent = "";
+    busy = true;
+    state = { kind: "loading" };
+    draw();
     try {
       const res = await deps.trackLoad(fetch(apiUrl("doctor")));
       if (myGen !== viewGeneration) return;
@@ -190,7 +181,7 @@ export function createDoctorView(deps: DoctorViewDeps): DoctorViewHandle {
       }
       const data = (await res.json()) as DoctorReport;
       if (myGen !== viewGeneration) return;
-      renderReport(mount, data, text, deps.escapeHtml);
+      state = { kind: "report", report: data };
       deps.onWorstStatusChange?.(data.worstStatus);
     } catch (err) {
       if (myGen !== viewGeneration) return;
@@ -198,45 +189,14 @@ export function createDoctorView(deps: DoctorViewDeps): DoctorViewHandle {
         "[code-viewer] the doctor report could not be loaded:",
         err,
       );
-      if (content) {
-        const message = formatErrorDetail(err);
-        content.innerHTML = `<div class="doctor-empty">${deps.escapeHtml(`${text.loadFailed}: ${message}`)}</div>`;
-      }
+      state = { kind: "failed", message: formatErrorDetail(err) };
       deps.onWorstStatusChange?.(null);
     } finally {
-      if (myGen === viewGeneration) setRefreshState(mount, false);
+      if (myGen === viewGeneration) {
+        busy = false;
+        draw();
+      }
     }
-  }
-
-  function applyLocalizedLabels(mount: HTMLElement, text: DoctorText): void {
-    const title = mount.querySelector<HTMLElement>(".doctor-header h1");
-    if (title) title.textContent = text.title;
-    const refreshBtn =
-      mount.querySelector<HTMLButtonElement>(".doctor-refresh");
-    if (refreshBtn) refreshBtn.textContent = text.refresh;
-    const closeBtn = mount.querySelector<HTMLButtonElement>(".doctor-close");
-    if (closeBtn) {
-      closeBtn.setAttribute("aria-label", text.close);
-      closeBtn.setAttribute("title", text.close);
-    }
-  }
-
-  function bindOnce(mount: HTMLElement): void {
-    if (mount.dataset.bound) return;
-    mount.dataset.bound = "1";
-    const text = doctorText(deps.getLanguage());
-    ensureSkeleton(mount, text, deps.escapeHtml);
-    const refreshBtn =
-      mount.querySelector<HTMLButtonElement>(".doctor-refresh");
-    refreshBtn?.addEventListener("click", (event) => {
-      event.preventDefault();
-      void load(mount);
-    });
-    const closeBtn = mount.querySelector<HTMLButtonElement>(".doctor-close");
-    closeBtn?.addEventListener("click", (event) => {
-      event.preventDefault();
-      deps.onCloseRequest?.();
-    });
   }
 
   function isOpen(): boolean {
@@ -247,8 +207,7 @@ export function createDoctorView(deps: DoctorViewDeps): DoctorViewHandle {
   async function open(): Promise<void> {
     const mount = getMount();
     if (!mount) return;
-    bindOnce(mount);
-    applyLocalizedLabels(mount, doctorText(deps.getLanguage()));
+    draw();
     mount.hidden = false;
     mount.setAttribute("aria-hidden", "false");
     // The drawer keeps display:block while [hidden] for the slide-out
@@ -262,7 +221,7 @@ export function createDoctorView(deps: DoctorViewDeps): DoctorViewHandle {
       overlay.setAttribute("aria-hidden", "false");
     }
     document.body.classList.add("doctor-sheet-open");
-    await load(mount);
+    await load();
   }
 
   function close(): void {
@@ -283,9 +242,8 @@ export function createDoctorView(deps: DoctorViewDeps): DoctorViewHandle {
   }
 
   async function refresh(): Promise<void> {
-    const mount = getMount();
-    if (!mount) return;
-    await load(mount);
+    if (!getMount()) return;
+    await load();
   }
 
   return { open, close, isOpen, refresh };

@@ -259,13 +259,13 @@ import { createAgentMonitor } from "./views/agents/agent-monitor";
 import { createAgentPaneOpener } from "./views/agents/agent-pane-opener";
 import { mountAgentStatus } from "./views/agents/agent-status";
 import {
-  type AgentsSidebar,
-  createAgentsSidebarPresenter,
-} from "./views/agents/agents-sidebar-presenter";
-import {
   type AgentsView,
   createAgentsPresenter,
 } from "./views/agents/agents-presenter";
+import {
+  type AgentsSidebar,
+  createAgentsSidebarPresenter,
+} from "./views/agents/agents-sidebar-presenter";
 import {
   type HandoffMenuActions,
   handoffMenuItems,
@@ -292,7 +292,6 @@ import { createDiffView, type RenderResult } from "./views/diff-view";
 import { DIFF_SCREEN_TEXT, type DiffScreenText } from "./views/diff-view-i18n";
 import { createDoctorView, doctorText } from "./views/doctor-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
-import { renderEmptyState } from "./views/ui/empty-state";
 import {
   removeFileHistoryShell as removeRenderedFileHistoryShell,
   renderFileHistoryShell as renderFileHistoryShellView,
@@ -318,7 +317,7 @@ import { createHunkExpand } from "./views/hunk-expand";
 import { createImageTabView, type ImageTabHandle } from "./views/image-tab";
 import { createImageTabReturn } from "./views/image-tab-return";
 import {
-  installHelpBlock,
+  installHelpTemplate,
   NODE_PTY_INSTALL_COMMANDS,
   showInstallDialog,
   TMUX_INSTALL_COMMANDS,
@@ -355,6 +354,7 @@ import {
 } from "./views/main-tabs/main-tabs-presenter";
 import { pageIconPaths } from "./views/main-tabs/tab-icons";
 import { installMobileShell } from "./views/mobile-shell";
+import { CV_PAGE_SHELL } from "./views/page-shell";
 import { createProjectActions } from "./views/projects/project-actions";
 import {
   PROJECT_LOOKS,
@@ -428,6 +428,7 @@ import { installTitleTooltips } from "./views/title-tooltip";
 import { toolsText } from "./views/tools/i18n";
 import { createToolsPresenter } from "./views/tools/tools-presenter";
 import { mountTopbarMore } from "./views/topbar-more";
+import { renderEmptyState } from "./views/ui/empty-state";
 import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
   createViewerSettings,
@@ -4890,7 +4891,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         STATE.route.view === "history");
     const repoSidebarRoute = STATE.route.screen === "repo" || fileRepoBlobRoute;
     if (STATE.route.screen !== "help" && STATE.route.screen !== "settings") {
-      document.querySelector(".gdp-help-shell")?.remove();
+      document.querySelector(CV_PAGE_SHELL)?.remove();
     }
     // The source view a diff-hosting page keeps open in place ("View File"
     // on the history screen) gets the file-detail chrome too: the topbar
@@ -7190,7 +7191,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   const DOCTOR_VIEW = createDoctorView({
     $: <T extends Element = HTMLElement>(sel: string) =>
       document.querySelector<T>(sel),
-    escapeHtml,
     trackLoad,
     getLanguage: () => STATE.language,
     onWorstStatusChange: (status) => {
@@ -10278,7 +10278,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     openHookSettings: () => openSettingsAt(AGENT_HOOKS_SECTION_ID),
     tmuxInstallHelp: () => {
       const a = agentsText(STATE.language);
-      return installHelpBlock(
+      return installHelpTemplate(
         {
           intro: a.tmuxInstallIntro,
           commands: TMUX_INSTALL_COMMANDS,
