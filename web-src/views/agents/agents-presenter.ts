@@ -35,6 +35,7 @@ import {
   groupAgentPanes,
   groupAgentPanesByUrgency,
   matchesStateFilter,
+  nestAgentPanes,
   notifyPermissionView,
 } from "../../core/agent-overview";
 import { formatErrorDetail } from "../../core/error-detail";
@@ -317,7 +318,11 @@ export function createAgentsPresenter(
       activity: activityProps(group.info.root, group.info.name),
       // エージェントの居ない登録プロジェクトは見出しと「エージェントはいません」。
       noAgents: group.panes.length === 0 ? current.board.noAgents : null,
-      rows: group.panes.map((pane) => rowProps(pane)),
+      // 子エージェント (@agent-parent) は親のすぐ下に字下げして並べる。
+      rows: nestAgentPanes(group.panes).map(({ pane, depth }) => ({
+        ...rowProps(pane),
+        depth,
+      })),
     };
   }
 

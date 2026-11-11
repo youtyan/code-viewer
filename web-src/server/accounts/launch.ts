@@ -22,7 +22,7 @@ import {
 } from "../../core/agent-accounts";
 import { hasControlCharacter } from "../../core/control-chars";
 import { errorWithCause } from "../../core/error-detail";
-import { isTmuxPaneId } from "../../core/tmux";
+import { AGENT_PARENT_OPTION, isTmuxPaneId } from "../../core/tmux";
 import { commandNotFoundDetail } from "../command-resolver";
 import { runTmux, TMUX_FIELD_SEP } from "../tmux/command";
 import { AccountError } from "./registry";
@@ -69,6 +69,30 @@ export async function sessionExists(
 }
 
 /**
+ * 起動したペインに付けるオプション (tmux の 1 回の呼び出し)。失敗して終わっても
+ * 残す remain-on-exit failed と、起こした元が分かれば @agent-parent。親はペイン ID の
+ * 形のものだけ、自分自身は付けない。
+ */
+export function launchedPaneOptionArgs(
+  paneId: string,
+  parent?: string,
+): string[] {
+  const args = ["set-option", "-p", "-t", paneId, "remain-on-exit", "failed"];
+  if (parent && isTmuxPaneId(parent) && parent !== paneId) {
+    args.push(
+      ";",
+      "set-option",
+      "-p",
+      "-t",
+      paneId,
+      AGENT_PARENT_OPTION,
+      parent,
+    );
+  }
+  return args;
+}
+
+/**
  * 新しいウィンドウで argv を動かす。セッションが無ければ作る (tmux の
  * サーバが動いていなければ、それも起動する)。
  */
@@ -79,6 +103,12 @@ export async function openAccountWindow(options: {
   session: string;
   windowName: string;
   argv: string[];
+  /**
+   * 起こした元のエージェントのペイン (分かるときだけ。引き継ぎの元など)。新しい
+   * ペインに tmux のペインのユーザーオプション `@agent-parent` として付け、一覧が
+   * 親の下に並べる。ペインのオプションなのでペインと一緒に消える。
+   */
+  parent?: string;
 }): Promise<LaunchedPane> {
   if (
     hasControlCharacter(options.session) ||
@@ -116,7 +146,7 @@ export async function openAccountWindow(options: {
     );
   }
   const option = await runTmux(
-    ["set-option", "-p", "-t", paneId, "remain-on-exit", "failed"],
+    launchedPaneOptionArgs(paneId, options.parent),
     options.cwd,
   );
   // すぐ終わったペインはもう無い (no-target)。失敗で終わったなら

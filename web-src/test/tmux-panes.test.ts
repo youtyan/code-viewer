@@ -25,6 +25,7 @@ type PaneFields = {
   command: string;
   path: string;
   pid: string;
+  parent: string;
   title: string;
 };
 
@@ -42,6 +43,7 @@ const BASE: PaneFields = {
   command: "shell",
   path: "/tmp/sample",
   pid: "4242",
+  parent: "",
   title: "sample title",
 };
 
@@ -62,6 +64,7 @@ function line(overrides: Partial<PaneFields> = {}): string {
     f.command,
     f.path,
     f.pid,
+    f.parent,
     f.title,
   ].join(SEP);
 }
@@ -331,5 +334,21 @@ describe("findTmuxPane", () => {
 
   test("returns null for an empty list", () => {
     expect(findTmuxPane([], "%1")).toBeNull();
+  });
+});
+
+describe("the parent agent pane (@agent-parent)", () => {
+  test.each([
+    { name: "a pane id is read", parent: "%2", expected: "%2" },
+    { name: "empty means none", parent: "", expected: undefined },
+    {
+      name: "not a pane id is ignored",
+      parent: "main:0.1",
+      expected: undefined,
+    },
+    { name: "the pane itself is ignored", parent: "%1", expected: undefined },
+  ])("$name", ({ parent, expected }) => {
+    const [pane] = flattenTmuxPanes(parseTmuxPanes(line({ id: "%1", parent })));
+    expect(pane?.parent).toBe(expected);
   });
 });

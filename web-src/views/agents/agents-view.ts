@@ -30,6 +30,8 @@ export type BoardRowProps = {
   title: string;
   previewName: string;
   card: TemplateResult;
+  /** 子エージェントの段 (親の下の字下げ。nestAgentPanes)。0 か無ければ字下げしない。 */
+  depth?: number;
 };
 
 export type BoardActivity =

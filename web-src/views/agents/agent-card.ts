@@ -143,6 +143,8 @@ export type AgentRowTemplateOptions = {
   /** 覗き窓の名前 (pane-preview.ts)。 */
   previewName: string;
   card: TemplateResult;
+  /** 子エージェントの段。1 以上なら親の下に字下げする (style.css の data-agent-depth)。 */
+  depth?: number;
   onOpen(event: MouseEvent): void;
   onMenu(event: MouseEvent): void;
 };
@@ -173,6 +175,8 @@ export function agentRowTemplate(
     aria-current=${options.active ? "true" : nothing}
     title=${options.title}
     aria-label=${ifDefined(options.ariaLabel)}
+    data-agent-depth=${options.depth ? String(options.depth) : nothing}
+    style=${options.depth ? `--agent-depth: ${options.depth}` : nothing}
     ${ref((el) => {
       if (el instanceof HTMLElement)
         markPreviewRow(el, options.id, options.previewName);

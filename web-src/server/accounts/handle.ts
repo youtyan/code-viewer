@@ -365,7 +365,7 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
     const account = findAccount(accountId);
     const service = sharedAccountService();
     const command = service.launchCommands()[account.agent];
-    const handoffArgs = handoffLaunchArgs(handoff, account.agent);
+    const handoffLaunch = handoffLaunchArgs(handoff, account.agent);
     // 使用量を記録しているアカウントなら、プロジェクトの statusLine に負けない
     // よう、包んだものを --settings で渡す (project-statusline.ts)。先に置くのは、
     // 引き継ぎの --add-dir が値を複数とるため。
@@ -383,7 +383,12 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
       cwd,
       session: sessionName,
       windowName: accountWindowName(account.agent, account),
-      argv: agentCommandArgv(command, [...statusLine.args, ...handoffArgs]),
+      argv: agentCommandArgv(command, [
+        ...statusLine.args,
+        ...handoffLaunch.args,
+      ]),
+      // 引き継ぎなら元のペインの下に並べる (@agent-parent)。
+      ...(handoffLaunch.pane ? { parent: handoffLaunch.pane } : {}),
     });
     // 次に開いたときの既定。覚えられなくても起動は済んでいるので、理由を
     // 添えて返す (画面に出す)。
@@ -425,8 +430,12 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
  * (terminal/agent-state.ts) から引く。画面から来るのは、どのペインか・
  * 指示文の言語・前の担当のアカウントの表示名だけ。handoff が無ければ空。
  */
-function handoffLaunchArgs(value: unknown, agent: AccountAgent): string[] {
-  if (value === undefined) return [];
+/** 引き継ぎの起動の引数と、引き継ぐ元のペイン (引き継ぎでなければ null)。 */
+function handoffLaunchArgs(
+  value: unknown,
+  agent: AccountAgent,
+): { args: string[]; pane: string | null } {
+  if (value === undefined) return { args: [], pane: null };
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new AccountError("invalid handoff", "invalid");
   }
@@ -475,7 +484,7 @@ function handoffLaunchArgs(value: unknown, agent: AccountAgent): string[] {
     account: fromAccount,
     ...source,
   });
-  return handoffArgs(agent, prompt, transcriptPath);
+  return { args: handoffArgs(agent, prompt, transcriptPath), pane };
 }
 
 function claudeAccount(id: unknown): AccountEntry {

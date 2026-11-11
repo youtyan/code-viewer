@@ -823,6 +823,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               items: [
                 "Select an agent to open its pane in a terminal tab, where you can type your answer.",
                 "Rest the pointer on an agent to see the last lines of its screen.",
+                "An agent started by another agent is indented under it when the tool that starts it sets the tmux option @agent-parent (the parent's pane ID) on the new pane.",
                 [
                   "To come back to one later, right-click it and choose ",
                   ui(l.agents.markUnread),

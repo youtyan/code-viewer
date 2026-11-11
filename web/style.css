@@ -21411,6 +21411,17 @@ button.agents-account-name:hover {
 .agents-row:hover {
   background: var(--color-raised);
 }
+/* 子エージェント (tmux の @agent-parent。agent-card.ts が data-agent-depth と
+   --agent-depth を付ける) は親の行の下に 1 段ずつ字下げする。左のサイドバーと
+   全体ボードの行の、左の余白に段の分を足す。 */
+.nav-agent[data-agent-depth] {
+  padding-left: calc(var(--space-2) + var(--agent-depth, 0) * var(--indent-step));
+}
+.agents-row[data-agent-depth] {
+  padding-left: calc(
+    var(--pad-text) + var(--agent-depth, 0) * var(--indent-step)
+  );
+}
 .agents-row.active {
   background: var(--color-select);
   box-shadow: var(--glow-select);

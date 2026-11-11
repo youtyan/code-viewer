@@ -37,6 +37,8 @@ export type AgentRowProps = {
   previewName: string;
   /** カードの中身 (agent-card.ts の agentCardTemplate)。 */
   card: TemplateResult;
+  /** 子エージェントの段 (親の下の字下げ。nestAgentPanes)。0 か無ければ字下げしない。 */
+  depth?: number;
 };
 
 export type SidebarProjectProps = {

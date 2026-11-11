@@ -315,6 +315,7 @@ export async function buildAgentOverview(
       ...(record?.attention && record.state === "waiting"
         ? { attention: record.attention }
         : {}),
+      ...(pane.parent ? { parent: pane.parent } : {}),
     });
   }
 

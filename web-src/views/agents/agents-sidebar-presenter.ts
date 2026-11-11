@@ -26,6 +26,7 @@ import {
   type AgentProjectGroup,
   type AgentProjectInfo,
   groupAgentPanesByPlace,
+  nestAgentPanes,
   notifyPermissionView,
 } from "../../core/agent-overview";
 import { SOFT_KEYS_MEDIA_QUERY } from "../../core/mobile-layout";
@@ -268,8 +269,12 @@ export function createAgentsSidebarPresenter(
               dismissLabel: current.projects.dismiss,
             }
           : null,
+      // 子エージェント (@agent-parent) は親のすぐ下に字下げして並べる。
       rows: hasAgents
-        ? group.panes.map((pane) => agentRowProps(pane, viewing))
+        ? nestAgentPanes(group.panes).map(({ pane, depth }) => ({
+            ...agentRowProps(pane, viewing),
+            depth,
+          }))
         : [],
     };
   }

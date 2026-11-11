@@ -201,6 +201,11 @@ export type AgentPane = {
    * ペインだけ。古い版のサーバには無い。
    */
   attention?: AgentAttention;
+  /**
+   * このペインを起こしたエージェントのペイン (tmux の `@agent-parent`)。親が
+   * 一覧に居れば、行を親の下に字下げして並べる (nestAgentPanes)。
+   */
+  parent?: TmuxPaneId;
 };
 
 /**
@@ -549,6 +554,51 @@ export function groupAgentPanesByPlace(
     options.includeEmptyRegistered === true,
     comparePanePlace,
   ).sort(compareGroupsByRegistry);
+}
+
+/** 子エージェントの字下げの最大の段。深い入れ子でも行が細くなりすぎないように。 */
+export const MAX_AGENT_DEPTH = 3;
+
+/**
+ * 子エージェント (parent の付いたペイン) を親のすぐ下に並べ、段 (depth) を付ける。
+ * 親が同じ一覧に居ない子・親の輪 (互いに親) は、渡した順のまま 0 段で残す。
+ * 兄弟の順は渡した順。段は MAX_AGENT_DEPTH まで。
+ */
+export function nestAgentPanes<T extends { id: string; parent?: string }>(
+  panes: readonly T[],
+): { pane: T; depth: number }[] {
+  const listed = new Map(panes.map((pane) => [pane.id, pane]));
+  // 親が一覧に居て、たどっても輪にならない子だけを木に入れる。
+  const parentOf = (pane: T): T | null => {
+    const parent = pane.parent ? listed.get(pane.parent) : undefined;
+    if (!parent) return null;
+    const seen = new Set([pane.id]);
+    for (let at: T | undefined = parent; at; ) {
+      if (seen.has(at.id)) return null;
+      seen.add(at.id);
+      at = at.parent ? listed.get(at.parent) : undefined;
+    }
+    return parent;
+  };
+  const children = new Map<string, T[]>();
+  const roots: T[] = [];
+  for (const pane of panes) {
+    const parent = parentOf(pane);
+    if (!parent) {
+      roots.push(pane);
+      continue;
+    }
+    const list = children.get(parent.id) ?? [];
+    list.push(pane);
+    children.set(parent.id, list);
+  }
+  const out: { pane: T; depth: number }[] = [];
+  const walk = (pane: T, depth: number) => {
+    out.push({ pane, depth: Math.min(depth, MAX_AGENT_DEPTH) });
+    for (const child of children.get(pane.id) ?? []) walk(child, depth + 1);
+  };
+  for (const root of roots) walk(root, 0);
+  return out;
 }
 
 /** 全体ボードの「急ぐ順」の段の順。 */
