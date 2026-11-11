@@ -937,6 +937,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ", choose whether to be notified when an agent needs input and when it finishes.",
                 ],
                 "An agent you are looking at in the front tab does not notify you.",
+                "A child agent started by another agent notifies you only when it needs input; its parent takes care of its finish.",
                 "While the code-viewer window is in front, a note appears at the bottom right instead of a system notification. Click it to open that agent.",
                 [
                   ui(l.settings.agentNotifySoundLabel),

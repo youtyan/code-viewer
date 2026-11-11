@@ -25,6 +25,7 @@ import {
   type AgentPane,
   type AgentTransition,
   agentAlertPlace,
+  isChildFinish,
   nextAgentUnread,
   withFinishedAsDone,
 } from "../../core/agent-overview";
@@ -229,6 +230,8 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       ...update.transitions,
       ...serverOnlyTransitions(next, update.transitions),
     ]) {
+      // 子エージェントの完了は親に任せる (知らせない・鳴らさない・未読にしない)。
+      if (isChildFinish(pane, transition, next.panes)) continue;
       if (transition === "waiting") sawWaiting = true;
       // 音は通知の許可に関係なく、見ていないものの変化で鳴らす (1 回の取得で 1 回、
       // 入力待ちを優先)。種類ごとの通知の設定 (入力待ち・完了) に従う。
@@ -265,7 +268,14 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       });
     }
     notifyError = failures.join("\n");
-    unread = next.unread ? serverUnread(next) : update.unread;
+    unread = new Map(
+      [...(next.unread ? serverUnread(next) : update.unread)].filter(
+        ([id, transition]) => {
+          const pane = next.panes.find((item) => item.id === id);
+          return !pane || !isChildFinish(pane, transition, next.panes);
+        },
+      ),
+    );
     previous = new Map(next.panes.map((pane) => [pane.id, pane.state]));
     received = next;
     show();

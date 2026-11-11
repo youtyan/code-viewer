@@ -821,6 +821,23 @@ export function notifyPermissionView(
 }
 
 /**
+ * 子エージェント (一覧に親が居る、@agent-parent のペイン) の完了は親に任せる:
+ * 知らせず (窓の中・OS・音)、未読にもしない (タブの題名の件数・未読の印・`g n` と
+ * 揃える)。入力待ちは人の手が要るので知らせる。親が一覧に居なければ普通に扱う。
+ */
+export function isChildFinish(
+  pane: Pick<AgentPane, "parent">,
+  transition: AgentTransition,
+  panes: readonly Pick<AgentPane, "id">[],
+): boolean {
+  return (
+    transition === "finished" &&
+    pane.parent !== undefined &&
+    panes.some((item) => item.id === pane.parent)
+  );
+}
+
+/**
  * 知らせをどこに出すか。見ているペイン・種類ごとの設定で切ったものは出さない。
  * 窓が前面 (見えていて、キーを受けている) なら窓の中の知らせ (押すとそこへ)。
  * 前面で作業している人に OS の通知の帯は届きにくく、押してもタブを探すため。

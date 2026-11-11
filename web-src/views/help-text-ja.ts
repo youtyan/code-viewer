@@ -921,6 +921,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   " で、入力待ちと作業の終わりのそれぞれについて、通知するかを選べます。",
                 ],
                 "いま前面のタブで見ているエージェントは、通知しません。",
+                "ほかのエージェントが起こした子のエージェントは、入力待ちだけ知らせます (完了は親に任せます)。",
                 "code-viewer の窓が前面のときは、OS の通知の代わりに画面の右下に知らせを出します。押すとそのエージェントを開きます。",
                 [
                   ui(l.settings.agentNotifySoundLabel),

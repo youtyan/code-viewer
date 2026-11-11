@@ -158,3 +158,71 @@ describe("where the monitor puts an alert", () => {
     });
   });
 });
+
+// 子エージェント (@agent-parent) は、入力待ちだけ知らせる。完了は親に任せる。
+describe("a child agent's alerts", () => {
+  const parent = agentPane({ id: "%1", state: "working", kind: "claude" });
+  const child = (state: "working" | "waiting" | "idle") => ({
+    ...agentPane({ id: "%2", state, kind: "codex" }),
+    parent: "%1",
+  });
+  let response: AgentOverviewResponse;
+
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(response))),
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function change(to: "waiting" | "idle") {
+    const toasts: string[] = [];
+    const sounds: string[] = [];
+    const counts: number[] = [];
+    response = overview([parent, child("working")], []);
+    const monitor = createAgentMonitor({
+      getText: () => agentsText("en"),
+      getNotifySettings: () => ({ waiting: true, finished: true }),
+      getSoundEnabled: () => true,
+      playSound: async (kind) => {
+        sounds.push(kind);
+      },
+      isViewing: () => false,
+      onUnreadCountChange: (count) => counts.push(count),
+      onNotificationClick: () => undefined,
+      actionHeaders: () => ({}),
+      showToast: (pane, transition) => toasts.push(`${pane.id}:${transition}`),
+      isWindowInFront: () => true,
+    });
+    await monitor.refresh();
+    response = overview([parent, child(to)], []);
+    await monitor.refresh();
+    return {
+      toasts,
+      sounds,
+      unread: [...monitor.snapshot().unread.keys()],
+      lastCount: counts[counts.length - 1],
+    };
+  }
+
+  test("a child that needs input is told like any agent", async () => {
+    expect(await change("waiting")).toEqual({
+      toasts: ["%2:waiting"],
+      sounds: ["waiting"],
+      unread: ["%2"],
+      lastCount: 1,
+    });
+  });
+
+  test("a child that finished is left to its parent: no toast, no sound, not unread", async () => {
+    expect(await change("idle")).toEqual({
+      toasts: [],
+      sounds: [],
+      unread: [],
+      lastCount: 0,
+    });
+  });
+});
