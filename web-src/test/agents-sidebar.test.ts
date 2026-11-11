@@ -407,10 +407,12 @@ describe("agents sidebar actions", () => {
         ".gdp-context-menu button",
       ),
     ];
-    // 2 つ目からは「別のアカウントで続ける…」(フックの無いペインなので押せず、
+    // 2 つ目は「未読に戻す」(待機しているエージェント。表は agent-mark-unread.test.ts)、
+    // その後に「別のアカウントで続ける…」(フックの無いペインなので押せず、
     // 入れ方の案内が並ぶ。handoff の表は agents-handoff.test.ts)。
     expect(items.map((item) => item.textContent)).toEqual([
       "Open in a tab",
+      "Mark as unread",
       "Continue with another account…",
       "Needs the agent hooks — show how to install",
     ]);
@@ -524,11 +526,14 @@ describe("agents sidebar actions", () => {
         ?.dispatchEvent(
           new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
         );
+      // 「タブで開く」と「未読に戻す」(agent-mark-unread.test.ts) の後ろを見る。
       const buttons = [
         ...document.querySelectorAll<HTMLButtonElement>(
           ".gdp-context-menu button",
         ),
-      ].slice(1);
+      ]
+        .slice(1)
+        .filter((button) => button.textContent !== "Mark as unread");
       expect(
         buttons.map((button) => [button.textContent, button.disabled]),
       ).toEqual(items);

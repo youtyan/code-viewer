@@ -70,6 +70,10 @@ export type AgentsText = {
   /** 見始めて 1 分未満。下限と言えるほどの長さが無い。 */
   elapsedJustWatched: string;
   openPane: string;
+  /** 行の右クリック: 見た印を外して未読に戻す。 */
+  markUnread: string;
+  markUnreadTitle: string;
+  markUnreadFailed: string;
   /** 行・タブの右クリックのメニュー: 別のアカウントで続ける (views/agents/handoff.ts)。 */
   handoff: string;
   handoffTitle: string;
@@ -573,6 +577,10 @@ const EN: AgentsText = {
   elapsedJustWatched:
     "Just started watching: when it entered this state is not known",
   openPane: "Open in a tab",
+  markUnread: "Mark as unread",
+  markUnreadTitle:
+    "Keep it as needing you until you open it again (it stays unread while you keep looking at it now)",
+  markUnreadFailed: "Could not mark the agent as unread",
   handoff: "Continue with another account…",
   handoffTitle:
     "Start claude, codex or opencode with another account in a new window of the same tmux session, and have it read this agent's conversation log and continue",
@@ -748,6 +756,10 @@ const JA: AgentsText = {
     `見始めてから変化なし。少なくとも ${lowerBound} 前からこの状態です`,
   elapsedJustWatched: "見始めたばかりで、この状態になった時刻は分かりません",
   openPane: "タブで開く",
+  markUnread: "未読に戻す",
+  markUnreadTitle:
+    "もう一度開くまで、手が要るものとして残します (いま見ていても、離れるまでは未読のまま)",
+  markUnreadFailed: "未読に戻せませんでした",
   handoff: "別のアカウントで続ける…",
   handoffTitle:
     "同じ tmux のセッションの新しいウィンドウで、別のアカウントの claude・codex・opencode を起動し、このエージェントの会話記録を読んで続きをやらせます",

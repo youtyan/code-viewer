@@ -140,7 +140,7 @@ import {
   resetAgentScreenRules,
   saveAgentScreenRules,
 } from "./rules";
-import { clearAgentUnread, noteAgentUnread } from "./unread";
+import { clearAgentUnread, markAgentUnread, noteAgentUnread } from "./unread";
 
 const MAX_AGENT_ACTION_BODY_BYTES = 16 * 1024;
 /**
@@ -671,11 +671,22 @@ async function handleUnreadPost(req: Request): Promise<Response> {
   if (!parsed || typeof parsed !== "object") {
     return textError("invalid unread request", 400);
   }
-  const body = parsed as { target?: unknown };
+  const body = parsed as { target?: unknown; mark?: unknown };
   if (typeof body.target !== "string" || !terminalKindOf(body.target)) {
     return textError("invalid target", 400);
   }
-  return json({ ok: true, removed: clearAgentUnread(body.target) });
+  if (body.mark !== undefined && body.mark !== true) {
+    return textError("invalid mark", 400);
+  }
+  if (body.mark !== true) {
+    return json({ ok: true, removed: clearAgentUnread(body.target) });
+  }
+  // 未読に戻す: 状態を知らない対象・作業中のものは戻せない。
+  const record = getAgentState(body.target);
+  if (!record) return textError("unknown target", 404);
+  const unread = markAgentUnread(body.target, record.state);
+  if (!unread) return textError("a working agent cannot be marked unread", 409);
+  return json({ ok: true, unread });
 }
 
 /** フックの入れ外しの本文上限。種類・動作・ハッシュだけが来る。 */

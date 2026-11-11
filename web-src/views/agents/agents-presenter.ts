@@ -71,6 +71,7 @@ import { type HandoffMenuActions, handoffMenuItems } from "./handoff";
 import type { AgentsText } from "./i18n";
 import { PANE_PREVIEW, type PanePreview } from "./pane-preview";
 import { paneText } from "./pane-text";
+import { markUnreadMenuItems } from "./unread-menu";
 
 export type AgentsViewDeps = {
   monitor: AgentMonitor;
@@ -717,6 +718,7 @@ export function createAgentsPresenter(
           event.currentTarget as HTMLElement,
           [
             { label: current.openPane, onSelect: () => select(pane) },
+            ...markUnreadMenuItems(pane, current, deps.monitor),
             ...handoffMenuItems(pane, current, deps.handoff),
           ],
           { at: { x: event.clientX, y: event.clientY } },

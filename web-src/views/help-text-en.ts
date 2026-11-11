@@ -823,6 +823,11 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               items: [
                 "Select an agent to open its pane in a terminal tab, where you can type your answer.",
                 "Rest the pointer on an agent to see the last lines of its screen.",
+                [
+                  "To come back to one later, right-click it and choose ",
+                  ui(l.agents.markUnread),
+                  ".",
+                ],
                 "The numbers at the right of the bottom bar count agents that need input and agents that are working. Select them to open the list.",
                 [
                   key("g n"),

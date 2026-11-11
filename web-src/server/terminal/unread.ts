@@ -77,6 +77,24 @@ export function clearAgentUnread(target: string): boolean {
   return remove(agentTargetKey(target));
 }
 
+/**
+ * 利用者が「未読に戻す」を選んだ。今の状態から未読の種類を決める (入力待ちは
+ * 入力待ち、待機・完了は終わった)。作業中は未読にならないので null。
+ */
+export function markAgentUnread(
+  target: string,
+  state: AgentState,
+): AgentTransition | null {
+  const transition: AgentTransition | null =
+    state === "waiting"
+      ? "waiting"
+      : state === "idle" || state === "done"
+        ? "finished"
+        : null;
+  if (transition) set(agentTargetKey(target), transition);
+  return transition;
+}
+
 /** 読み戻した未読を置く (unread-store.ts)。 */
 export function restoreAgentUnread(
   key: string,

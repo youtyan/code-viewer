@@ -41,8 +41,6 @@ import { showProjectMenu } from "../projects/project-menu";
 import { createRenderer } from "../ui/renderer";
 import { agentCardTemplate } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
-import { type HandoffMenuActions, handoffMenuItems } from "./handoff";
-import type { AgentsText } from "./i18n";
 import {
   type AgentRowProps,
   type AgentsSidebarView,
@@ -54,8 +52,11 @@ import {
   type SidebarNote,
   type SidebarProjectProps,
 } from "./agents-sidebar-view";
+import { type HandoffMenuActions, handoffMenuItems } from "./handoff";
+import type { AgentsText } from "./i18n";
 import { PANE_PREVIEW, type PanePreview } from "./pane-preview";
 import { paneText } from "./pane-text";
+import { markUnreadMenuItems } from "./unread-menu";
 
 export type AgentsSidebarDeps = {
   root: HTMLElement;
@@ -551,6 +552,7 @@ export function createAgentsSidebarPresenter(
           event.currentTarget as HTMLElement,
           [
             { label: menuText.openPane, onSelect: () => openHere(id) },
+            ...markUnreadMenuItems(pane, menuText, deps.monitor),
             ...handoffMenuItems(pane, menuText, deps.handoff),
           ],
           { at: { x: event.clientX, y: event.clientY } },

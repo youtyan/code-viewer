@@ -95,6 +95,11 @@ export type AgentMonitor = {
   subscribe(listener: () => void): () => void;
   /** 開いた・選んだ。未読を解く。 */
   markRead(pane: TmuxPaneId): void;
+  /**
+   * 「未読に戻す」(行の右クリック)。サーバの未読に戻し、いま見ていても、
+   * いったん見なくなるまでは読んだことにしない。失敗は理由つきで投げる。
+   */
+  markUnread(pane: TmuxPaneId): Promise<void>;
   permission(): NotificationPermissionState;
   requestPermission(): Promise<NotificationPermissionState>;
   /** サーバの応答そのもの (外側のページが面へ配る)。 */
@@ -122,6 +127,15 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
   let inFlight: Promise<void> | null = null;
   /** サーバに「解いて」を送っている最中のペイン (同じ送信を重ねない)。 */
   const clearing = new Set<TmuxPaneId>();
+  /**
+   * 未読に戻したペイン。見ている間に戻しても、見ていることを理由に解かない。
+   * いったん見なくなった (見ていない取得があった) ら外し、次に見たら読んだことにする。
+   */
+  const keptUnread = new Set<TmuxPaneId>();
+
+  function viewing(pane: AgentPane): boolean {
+    return !keptUnread.has(pane.id) && deps.isViewing(pane);
+  }
   const listeners = new Set<() => void>();
 
   function emit(): void {
@@ -170,9 +184,11 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     if (overview && overview.serverInstance !== next.serverInstance) {
       previous = null;
     }
-    const update = nextAgentUnread(unread, previous, next.panes, (pane) =>
-      deps.isViewing(pane),
-    );
+    for (const pane of next.panes) {
+      if (keptUnread.has(pane.id) && !deps.isViewing(pane))
+        keptUnread.delete(pane.id);
+    }
+    const update = nextAgentUnread(unread, previous, next.panes, viewing);
     const failures: string[] = [];
     const context = {
       settings: deps.getNotifySettings(),
@@ -247,7 +263,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       // 解いている最中のものは、送る前の応答でよみがえらせない。
       if (clearing.has(entry.pane)) continue;
       const pane = panes.get(entry.pane);
-      if (pane && deps.isViewing(pane)) {
+      if (pane && viewing(pane)) {
         clearOnServer(entry.pane);
         continue;
       }
@@ -382,7 +398,31 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    async markUnread(pane) {
+      const res = await fetch(apiUrl("agentUnread"), {
+        method: "POST",
+        headers: {
+          ...deps.actionHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ target: pane, mark: true }),
+      });
+      if (!res.ok) {
+        throw new Error(await responseErrorMessage(res, "mark unread"));
+      }
+      const body = (await res.json()) as { unread?: AgentTransition };
+      if (body.unread !== "waiting" && body.unread !== "finished") {
+        throw new Error(
+          `mark unread: the server answered without the unread mark (${JSON.stringify(body).slice(0, 200)})`,
+        );
+      }
+      keptUnread.add(pane);
+      unread.set(pane, body.unread);
+      show();
+      emit();
+    },
     markRead(pane) {
+      keptUnread.delete(pane);
       // サーバに read を送るのは申告の done だけ (未読から出した完了は、
       // 未読を解けば待機に戻る)。
       const current = received?.panes.find((item) => item.id === pane);
