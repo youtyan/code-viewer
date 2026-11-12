@@ -72,6 +72,7 @@ function plan(overrides: Partial<StatusLinePlanResponse> = {}) {
     writeBlocked: "",
     baseHash: "0".repeat(64),
     fileIdentity: "sample",
+    plannedAt: 1,
     ...overrides,
   } satisfies StatusLinePlanResponse;
 }

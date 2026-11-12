@@ -546,8 +546,8 @@ export async function handleStatusLineApplyPost(
     "statusline request too large",
   );
   if (body instanceof Response) return body;
-  const { account, action, baseHash, realPath, fileIdentity } = (body ??
-    {}) as Record<string, unknown>;
+  const { account, action, baseHash, realPath, fileIdentity, plannedAt } =
+    (body ?? {}) as Record<string, unknown>;
   if (action !== "install" && action !== "uninstall") {
     return textError("invalid action", 400);
   }
@@ -567,7 +567,13 @@ export async function handleStatusLineApplyPost(
         entry.configDir,
         action,
         sharedAccountService().paths.usageDir,
-        { baseHash, realPath, fileIdentity },
+        {
+          baseHash,
+          realPath,
+          fileIdentity,
+          // 確認の画面で見せたバックアップの名前で書く (backupClock)。
+          ...(typeof plannedAt === "number" ? { plannedAt } : {}),
+        },
       ),
     );
   } catch (error) {

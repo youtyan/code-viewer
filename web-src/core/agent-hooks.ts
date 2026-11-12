@@ -664,6 +664,8 @@ export type AgentHookPlanResponse = {
   baseHash: string;
   /** 同じ内容の別ファイルへのリンク差し替えも見分ける不透明な識別子。 */
   fileIdentity: string;
+  /** 計画を作った時刻 (ミリ秒)。実行時にバックアップを backupPath の名前で書く。 */
+  plannedAt: number;
 };
 
 export type AgentHookApplyResponse = {
