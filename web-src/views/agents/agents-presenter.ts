@@ -25,6 +25,9 @@ import type { AccountsResponse } from "../../core/agent-accounts";
 import {
   type AgentHooksResponse,
   agentsNeedingHooks,
+  type HookAgent,
+  hookHintKey,
+  hookHintShown,
 } from "../../core/agent-hooks";
 import {
   AGENT_STATE_FILTERS,
@@ -89,8 +92,18 @@ export type AgentsViewDeps = {
   /** フックの状態。まだ取っていなければ null。 */
   getHookStatus(): AgentHooksResponse | null;
   refreshHookStatus(): Promise<void>;
-  hookHintDismissed(): boolean;
-  dismissHookHint(): void;
+  /**
+   * 一覧の案内を閉じたときの中身 (core/agent-hooks.ts の hookHintKey、古い印は
+   * HOOK_HINT_DISMISSED_LEGACY)。閉じていなければ null。
+   */
+  hookHintDismissed(): string | null;
+  /** 案内を閉じる。key はそのときの中身 (変わったら出し直す)。 */
+  dismissHookHint(key: string): void;
+  /**
+   * その場で入れ直す (設定の「直す」と同じ確認の画面を通す)。設定の行が直せる
+   * 状態でなければ何もせず false (呼んだ側が設定へ案内する)。
+   */
+  repairHooks(agent: HookAgent, trigger: HTMLElement): Promise<boolean>;
   /** 設定画面のエージェント連携の節へ。 */
   openHookSettings(): void;
   /**
@@ -472,20 +485,48 @@ export function createAgentsPresenter(
     };
   }
 
+  function hookHintRows() {
+    const panes = deps.monitor.snapshot().overview?.panes ?? [];
+    return agentsNeedingHooks(
+      panes.map((pane) => pane.kind),
+      deps.getHookStatus(),
+    );
+  }
+
+  async function repairHooks(
+    agent: HookAgent,
+    trigger: HTMLElement,
+  ): Promise<void> {
+    if (!(await deps.repairHooks(agent, trigger))) deps.openHookSettings();
+  }
+
+  /**
+   * 未設定なら「有効にできます」、入っているが古い・呼び先が無いなら「入れ直しが
+   * 要る」と言い、その場で入れ直すボタンを種類ごとに出す。
+   */
   function hookHintProps(): AgentsBoardViewProps["hookHint"] {
     const current = text();
-    const panes = deps.monitor.snapshot().overview?.panes ?? [];
-    const agents = deps.hookHintDismissed()
-      ? []
-      : agentsNeedingHooks(
-          panes.map((pane) => pane.kind),
-          deps.getHookStatus(),
-        );
-    if (agents.length === 0) return null;
+    const rows = hookHintRows();
+    if (!hookHintShown(rows, deps.hookHintDismissed())) return null;
+    const stale = rows
+      .filter((row) => row.state !== "none")
+      .map((row) => row.agent);
+    const missing = rows
+      .filter((row) => row.state === "none")
+      .map((row) => row.agent);
     return {
-      text: current.hookHint(agents.join(" / ")),
+      text: [
+        stale.length > 0 ? current.hookHintStale(stale.join(" / ")) : "",
+        missing.length > 0 ? current.hookHint(missing.join(" / ")) : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
       open: current.hookHintOpen,
       close: current.hookHintClose,
+      repairs: stale.map((agent) => ({
+        label: current.hookHintRepair(agent),
+        onClick: (trigger: HTMLElement) => void repairHooks(agent, trigger),
+      })),
     };
   }
 
@@ -765,7 +806,7 @@ export function createAgentsPresenter(
       onReload: () => deps.reloadPage(),
       onHookOpen: () => deps.openHookSettings(),
       onHookClose() {
-        deps.dismissHookHint();
+        deps.dismissHookHint(hookHintKey(hookHintRows()));
         render(true);
       },
       onFilter(filter) {

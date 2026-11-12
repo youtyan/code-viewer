@@ -142,6 +142,10 @@ export type AgentsText = {
   board: AgentsBoardText;
   /** フックが未設定のときに一覧の上に出す 1 行。 */
   hookHint: (agents: string) => string;
+  /** フックが入っているが古い (一部だけ)・呼び先が無いときの 1 行。 */
+  hookHintStale: (agents: string) => string;
+  /** その場で入れ直すボタン。 */
+  hookHintRepair: (agent: string) => string;
   hookHintOpen: string;
   hookHintClose: string;
   /** 設定画面の「エージェント連携」。 */
@@ -672,6 +676,8 @@ const EN: AgentsText = {
   },
   hookHint: (agents) =>
     `Finish detection is off for ${agents}. Hooks make it reliable.`,
+  hookHintStale: (agents) => `The ${agents} hooks are out of date.`,
+  hookHintRepair: (agent) => `Reinstall for ${agent}`,
   hookHintOpen: "Set up",
   hookHintClose: "Hide this",
   hooks: HOOKS_EN,
@@ -858,6 +864,8 @@ const JA: AgentsText = {
   },
   hookHint: (agents) =>
     `${agents} の完了の検知を有効にできます (フックが未設定です)。`,
+  hookHintStale: (agents) => `${agents} のフックが古くなっています。`,
+  hookHintRepair: (agent) => `${agent} を入れ直す`,
   hookHintOpen: "設定する",
   hookHintClose: "閉じる",
   hooks: HOOKS_JA,

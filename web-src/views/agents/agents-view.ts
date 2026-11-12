@@ -76,7 +76,13 @@ export type AgentsBoardViewProps = {
   launch: { label: string; title: string };
   notify: BoardNotify;
   notifyError: string | null;
-  hookHint: { text: string; open: string; close: string } | null;
+  hookHint: {
+    text: string;
+    open: string;
+    close: string;
+    /** その場で入れ直すボタン (入っているが古い・呼び先が無い種類ごと)。 */
+    repairs: { label: string; onClick(trigger: HTMLElement): void }[];
+  } | null;
   problems: { summary: string; body: string; forceOpen: boolean } | null;
   accountsBand: Element;
   board: {
@@ -371,7 +377,17 @@ export const DEFAULT_VIEW: AgentsBoardView = (props) => {
       >${props.launch.label}</span></button></header><div
       class="agents-hook-hint"
       ?hidden=${!props.hookHint}
-    ><span class="agents-hook-hint-text">${props.hookHint?.text ?? ""}</span><button
+    ><span class="agents-hook-hint-text">${props.hookHint?.text ?? ""}</span>${(
+      props.hookHint?.repairs ?? []
+    ).map(
+      (repair) =>
+        html`<button
+          type="button"
+          class="agents-hook-hint-open agents-hook-hint-repair"
+          @click=${(event: Event) =>
+            repair.onClick(event.currentTarget as HTMLElement)}
+        >${repair.label}</button>`,
+    )}<button
       type="button"
       class="agents-hook-hint-open"
       @click=${() => props.onHookOpen()}

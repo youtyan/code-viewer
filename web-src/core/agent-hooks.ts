@@ -673,8 +673,16 @@ export type AgentHookApplyResponse = {
   launcherWritten: boolean;
 };
 
+/** 一覧の案内に出す 1 種類と、そのフックの状態。 */
+export type HookHintRow = {
+  agent: HookAgent;
+  /** none = 未設定。partial (中身が今の版と違う)・broken (呼び先が無い) = 入れ直しが要る。 */
+  state: "none" | "partial" | "broken";
+};
+
 /**
- * エージェント一覧に「フックを入れられます」の案内を出す種類。
+ * エージェント一覧に「フックを入れられます / 入れ直してください」の案内を
+ * 出す種類。
  *
  * 一覧にその種類のエージェントが居て、フックが入っていない (未設定・
  * 一部だけ・呼び先が無い) ものだけ。使っていない種類や、設定ファイルが
@@ -684,19 +692,49 @@ export type AgentHookApplyResponse = {
 export function agentsNeedingHooks(
   kinds: readonly (string | null)[],
   status: AgentHooksResponse | null,
-): HookAgent[] {
+): HookHintRow[] {
   if (!status) return [];
   const present = new Set(kinds);
-  return status.agents
-    .filter(
-      (row) =>
-        present.has(row.agent) &&
-        !row.writeBlocked &&
-        (row.state === "none" ||
-          row.state === "partial" ||
-          row.state === "broken"),
+  const rows: HookHintRow[] = [];
+  for (const row of status.agents) {
+    if (!present.has(row.agent) || row.writeBlocked) continue;
+    if (
+      row.state === "none" ||
+      row.state === "partial" ||
+      row.state === "broken"
     )
-    .map((row) => row.agent);
+      rows.push({ agent: row.agent, state: row.state });
+  }
+  return rows;
+}
+
+/**
+ * 案内を閉じた古い印 (設定の agentHookHintDismissed が true)。どの状態で
+ * 閉じたかを覚えていなかった頃のもので、未設定の案内を閉じたものとして扱う。
+ */
+export const HOOK_HINT_DISMISSED_LEGACY = "legacy";
+
+/** 閉じたときに覚える、案内の中身 (種類と状態)。 */
+export function hookHintKey(rows: readonly HookHintRow[]): string {
+  return rows
+    .map((row) => `${row.agent}:${row.state}`)
+    .sort()
+    .join(",");
+}
+
+/**
+ * 閉じた案内を出し直すか。閉じたときと中身 (種類か状態) が変われば出す。
+ * たとえば未設定のまま閉じた後に、入れたフックが古くなったら出す。
+ */
+export function hookHintShown(
+  rows: readonly HookHintRow[],
+  dismissed: string | null,
+): boolean {
+  if (rows.length === 0) return false;
+  if (dismissed === null) return true;
+  if (dismissed === HOOK_HINT_DISMISSED_LEGACY)
+    return rows.some((row) => row.state !== "none");
+  return dismissed !== hookHintKey(rows);
 }
 
 /**

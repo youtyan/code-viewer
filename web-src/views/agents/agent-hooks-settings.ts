@@ -67,6 +67,15 @@ export type AgentHooksSettings = {
   localize(): void;
 };
 
+/** エージェント連携の節。ほかの節と同じ形に、一覧の案内からの入れ直しを足す。 */
+export type AgentHooksSection = AgentHooksSettings & {
+  /**
+   * 行の「直す」と同じ確認の画面で入れ直す (エージェント一覧の案内から)。行が
+   * 直せる状態 (hookRowAction が repair) でなければ何もせず false。
+   */
+  repair(agent: HookAgent, trigger: HTMLElement): Promise<boolean>;
+};
+
 /** 節が画面にある間の取り直しの間隔。 */
 const AGENT_HOOKS_POLL_MS = 3000;
 
@@ -272,7 +281,7 @@ function changesJson(changes: HookChange[]): string {
 export function createAgentHooksSettings(
   deps: AgentHooksSettingsDeps,
   view: AgentHooksView = DEFAULT_VIEW,
-): AgentHooksSettings {
+): AgentHooksSection {
   // 節の箱。設定のページが置き、中はここが描く。
   const element = templateElement(
     html`<div class="scope-settings-section agent-hooks-section"></div>`,
@@ -672,10 +681,22 @@ export function createAgentHooksSettings(
     schedulePoll();
   }
 
+  async function repair(
+    agent: HookAgent,
+    trigger: HTMLElement,
+  ): Promise<boolean> {
+    const row = status?.agents.find((item) => item.agent === agent);
+    const choice = row ? hookRowAction(row) : null;
+    if (choice?.kind !== "repair") return false;
+    await review(agent, choice.action, trigger);
+    return true;
+  }
+
   render();
   return {
     element,
     refresh,
     localize: render,
+    repair,
   };
 }

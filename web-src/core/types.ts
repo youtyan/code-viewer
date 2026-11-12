@@ -263,8 +263,16 @@ export type AppSettingsState = {
   terminalOptionAsAlt?: boolean;
   /** 入力待ち・完了のときに短い音を鳴らすか (ブラウザの通知とは別)。未設定なら鳴らさない。 */
   agentNotifySound?: boolean;
-  /** エージェント一覧の「フックを入れられます」の案内を閉じた。 */
+  /**
+   * エージェント一覧の「フックを入れられます」の案内を閉じた (古い印。どの状態で
+   * 閉じたかを覚えていない。agentHookHintDismissedFor があればそちらが効く)。
+   */
   agentHookHintDismissed?: boolean;
+  /**
+   * エージェント一覧のフックの案内を閉じたときの中身 (core/agent-hooks.ts の
+   * hookHintKey)。中身が変わったら (例: 入れたフックが古くなった) 出し直す。
+   */
+  agentHookHintDismissedFor?: string;
   /** 最初の入力待ちで出す「通知を許可すると…」の案内を閉じた (許可を訊いた後も)。 */
   agentNotifyHintDismissed?: boolean;
   /** エージェント一覧のアカウントの帯を畳んだ。 */

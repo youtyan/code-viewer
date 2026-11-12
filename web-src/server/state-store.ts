@@ -330,6 +330,12 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   const agentHookHintDismissed = optionalBoolean(raw.agentHookHintDismissed);
   if (agentHookHintDismissed !== undefined)
     out.agentHookHintDismissed = agentHookHintDismissed;
+  const agentHookHintDismissedFor = optionalString(
+    raw.agentHookHintDismissedFor,
+    200,
+  );
+  if (agentHookHintDismissedFor !== undefined)
+    out.agentHookHintDismissedFor = agentHookHintDismissedFor;
   const agentNotifyHintDismissed = optionalBoolean(
     raw.agentNotifyHintDismissed,
   );

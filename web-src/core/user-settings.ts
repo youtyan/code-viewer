@@ -31,6 +31,7 @@ export const USER_SETTING_KEYS = [
   "agentNotifyDone",
   "agentNotifySound",
   "agentHookHintDismissed",
+  "agentHookHintDismissedFor",
   "agentNotifyHintDismissed",
   "agentAccountsCollapsed",
   "agentsBoardOrder",

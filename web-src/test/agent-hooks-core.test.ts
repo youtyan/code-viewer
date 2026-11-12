@@ -11,6 +11,9 @@ import {
   type AgentHooksResponse,
   agentEventForHook,
   agentsNeedingHooks,
+  HOOK_HINT_DISMISSED_LEGACY,
+  hookHintKey,
+  hookHintShown,
   checkHookShape,
   detectJsonIndent,
   HOOK_SPECS,
@@ -459,13 +462,16 @@ describe("agentsNeedingHooks", () => {
       name: "claude running, not set up",
       kinds: ["claude", null],
       rows: status(row("claude", "none"), row("codex", "none")),
-      expected: ["claude"],
+      expected: [{ agent: "claude", state: "none" }],
     },
     {
       name: "both running, partial and broken",
       kinds: ["codex", "claude"],
       rows: status(row("claude", "partial"), row("codex", "broken")),
-      expected: ["claude", "codex"],
+      expected: [
+        { agent: "claude", state: "partial" },
+        { agent: "codex", state: "broken" },
+      ],
     },
     {
       name: "installed is not hinted",
@@ -487,6 +493,48 @@ describe("agentsNeedingHooks", () => {
     },
   ])("$name", ({ kinds, rows, expected }) => {
     expect(agentsNeedingHooks(kinds, rows)).toEqual(expected);
+  });
+});
+
+describe("hookHintShown", () => {
+  const none = { agent: "opencode" as const, state: "none" as const };
+  const partial = { agent: "opencode" as const, state: "partial" as const };
+  const claude = { agent: "claude" as const, state: "none" as const };
+  test.each([
+    { name: "nothing to say", rows: [], dismissed: null, shown: false },
+    { name: "never hidden", rows: [none], dismissed: null, shown: true },
+    {
+      name: "hidden with the same contents",
+      rows: [claude, partial],
+      dismissed: hookHintKey([partial, claude]),
+      shown: false,
+    },
+    {
+      name: "the state changed since it was hidden",
+      rows: [partial],
+      dismissed: hookHintKey([none]),
+      shown: true,
+    },
+    {
+      name: "another agent appeared since it was hidden",
+      rows: [none, claude],
+      dismissed: hookHintKey([none]),
+      shown: true,
+    },
+    {
+      name: "the old plain dismissal hides only not-set-up hints",
+      rows: [none, claude],
+      dismissed: HOOK_HINT_DISMISSED_LEGACY,
+      shown: false,
+    },
+    {
+      name: "the old plain dismissal does not hide out-of-date hooks",
+      rows: [partial],
+      dismissed: HOOK_HINT_DISMISSED_LEGACY,
+      shown: true,
+    },
+  ])("$name", ({ rows, dismissed, shown }) => {
+    expect(hookHintShown(rows, dismissed)).toBe(shown);
   });
 });
 

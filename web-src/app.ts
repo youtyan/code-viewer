@@ -1,4 +1,7 @@
-import type { AgentHooksResponse } from "./core/agent-hooks";
+import {
+  type AgentHooksResponse,
+  HOOK_HINT_DISMISSED_LEGACY,
+} from "./core/agent-hooks";
 import {
   type AgentPane,
   attentionPanes,
@@ -10313,8 +10316,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       openSettingsAt("agent-notify-section-title"),
     getHookStatus: () => AGENT_HOOK_STATUS,
     refreshHookStatus: AGENT_HOOKS_SETTINGS.refresh,
-    hookHintDismissed: () => APP_SETTINGS.agentHookHintDismissed === true,
-    dismissHookHint: () => patchSettings({ agentHookHintDismissed: true }),
+    hookHintDismissed: () =>
+      APP_SETTINGS.agentHookHintDismissedFor ??
+      (APP_SETTINGS.agentHookHintDismissed === true
+        ? HOOK_HINT_DISMISSED_LEGACY
+        : null),
+    dismissHookHint: (key) => patchSettings({ agentHookHintDismissedFor: key }),
+    repairHooks: (agent, trigger) =>
+      AGENT_HOOKS_SETTINGS.repair(agent, trigger),
     openHookSettings: () => openSettingsAt(AGENT_HOOKS_SECTION_ID),
     tmuxInstallHelp: () => {
       const a = agentsText(STATE.language);
