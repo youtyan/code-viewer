@@ -1,5 +1,6 @@
 import "./_dom";
 import { describe, expect, test } from "vitest";
+import { DIFF_SCREEN_TEXT } from "../views/diff-view-i18n";
 import { showEmptyHistoryDiffPane } from "../views/empty-diff-pane";
 import {
   CHANGES_LIST_DOM,
@@ -78,8 +79,7 @@ function createSidebarForTest(
     prefetchByPath() {
       /* noop */
     },
-    fileBadge: () => document.createElement("span"),
-    fileEntryIcon: () => "",
+    fileStatusTitles: () => DIFF_SCREEN_TEXT.en.fileStatus,
     applyViewedState() {
       /* noop */
     },
@@ -92,7 +92,9 @@ function createSidebarForTest(
     appendScopeParams() {
       /* noop */
     },
-    createOpenPathButton: () => document.createElement("button"),
+    openPathFromButton() {
+      /* noop */
+    },
     normalizeViewerFontSize: () => "regular",
     getSidebarFontSize: () => "regular",
     persistSidebarHidden(hidden) {
@@ -102,9 +104,6 @@ function createSidebarForTest(
       /* noop */
     },
     scheduleMainSurfaceFocus() {
-      /* noop */
-    },
-    setChevronIcon() {
       /* noop */
     },
     trackLoad: (promise) => promise,

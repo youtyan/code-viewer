@@ -1,6 +1,7 @@
 import "./_dom";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
+import { DIFF_SCREEN_TEXT } from "../views/diff-view-i18n";
 import {
   CHANGES_LIST_DOM,
   createSidebar,
@@ -111,13 +112,7 @@ function createSidebarForTest(
     prefetchByPath() {
       /* noop */
     },
-    fileBadge(status) {
-      const badge = document.createElement("span");
-      badge.className = "badge";
-      badge.textContent = status || "";
-      return badge;
-    },
-    fileEntryIcon: () => "",
+    fileStatusTitles: () => DIFF_SCREEN_TEXT.en.fileStatus,
     applyViewedState() {
       /* noop */
     },
@@ -130,14 +125,8 @@ function createSidebarForTest(
     appendScopeParams() {
       /* noop */
     },
-    createOpenPathButton(_path, _kind, title) {
-      const button = document.createElement("button");
-      button.className = "gdp-open-path";
-      if (title) {
-        button.title = title;
-        button.setAttribute("aria-label", title);
-      }
-      return button;
+    openPathFromButton() {
+      /* noop */
     },
     normalizeViewerFontSize: () => "regular",
     getSidebarFontSize: () => "regular",
@@ -149,9 +138,6 @@ function createSidebarForTest(
     },
     scheduleMainSurfaceFocus() {
       /* noop */
-    },
-    setChevronIcon(el) {
-      el.textContent = ">";
     },
     trackLoad: (promise) => promise,
     getRepoSidebarRef: () => null,

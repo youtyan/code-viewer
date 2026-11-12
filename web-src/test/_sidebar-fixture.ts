@@ -3,6 +3,7 @@
 // GlobalRegistrator の登録は呼び出し側のテストが行う。
 
 import "./_dom";
+import { DIFF_SCREEN_TEXT } from "../views/diff-view-i18n";
 import {
   CHANGES_LIST_DOM,
   createSidebar,
@@ -10,6 +11,7 @@ import {
   type SidebarDeps,
   type SidebarDom,
 } from "../views/sidebar";
+import type { SidebarView } from "../views/sidebar-view";
 
 const id = (selector: string) => selector.replace(/^#/, "");
 
@@ -53,7 +55,12 @@ export function installSidebarDom(dom: SidebarDom = CHANGES_LIST_DOM) {
 }
 
 export function createSidebarForTest(
-  options: { dom?: SidebarDom; repository?: boolean } = {},
+  options: {
+    dom?: SidebarDom;
+    repository?: boolean;
+    view?: SidebarView;
+    openPathFromButton?: SidebarDeps["openPathFromButton"];
+  } = {},
 ) {
   const dom = options.dom ?? CHANGES_LIST_DOM;
   const state = {
@@ -67,74 +74,67 @@ export function createSidebarForTest(
     viewedFiles: new Set<string>(),
     lazyExpandedDirs: new Set<string>(),
   };
-  return createSidebar({
-    dom,
-    repository: options.repository ?? dom === FILE_LIST_DOM,
-    STATE: state,
-    openFileAs() {
-      /* noop */
-    },
-    openDiffFile() {
-      /* noop */
-    },
-    sidebarItemHref: () => null,
-    prefetchByPath() {
-      /* noop */
-    },
-    fileBadge(status) {
-      const badge = document.createElement("span");
-      badge.className = `badge ${status || "M"}`;
-      badge.textContent = status || "";
-      return badge;
-    },
-    fileEntryIcon: () => '<svg class="octicon-file"></svg>',
-    applyViewedState() {
-      /* noop */
-    },
-    persistCollapsedDirs() {
-      /* noop */
-    },
-    persistLazyExpandedDirs() {
-      /* noop */
-    },
-    appendScopeParams() {
-      /* noop */
-    },
-    createOpenPathButton() {
-      return document.createElement("button");
-    },
-    normalizeViewerFontSize: () => "regular",
-    getSidebarFontSize: () => "regular",
-    persistSidebarHidden() {
-      /* noop */
-    },
-    persistSidebarWidth() {
-      /* noop */
-    },
-    scheduleMainSurfaceFocus() {
-      /* noop */
-    },
-    setChevronIcon(el) {
-      el.textContent = ">";
-    },
-    trackLoad: (promise) => promise,
-    getRepoSidebarRef: () => null,
-    setRepoSidebarRef() {
-      /* noop */
-    },
-    isTestPath: () => false,
-    filterCountTitle: () => "",
-    fileCountText: (count) => `${count} files`,
-    sidebarToggleTitle: (hidden) => (hidden ? "show sidebar" : "hide sidebar"),
-    openDirectoryInOsTitle: () => "open this folder in OS",
-    omittedDirectoryBadge: () => ({ label: "skipped", title: "skipped" }),
-    commitEntryBadge: () => ({ label: "GIT", title: "Git commit entry" }),
-    $: <T extends Element = HTMLElement>(selector: string): T => {
-      const el = document.querySelector(selector);
-      if (!el) throw new Error(`missing ${selector}`);
-      return el as T;
-    },
-    $$: <T extends Element = HTMLElement>(selector: string): T[] =>
-      Array.from(document.querySelectorAll(selector)) as T[],
-  } satisfies SidebarDeps);
+  return createSidebar(
+    {
+      dom,
+      repository: options.repository ?? dom === FILE_LIST_DOM,
+      STATE: state,
+      openFileAs() {
+        /* noop */
+      },
+      openDiffFile() {
+        /* noop */
+      },
+      sidebarItemHref: () => null,
+      prefetchByPath() {
+        /* noop */
+      },
+      fileStatusTitles: () => DIFF_SCREEN_TEXT.en.fileStatus,
+      applyViewedState() {
+        /* noop */
+      },
+      persistCollapsedDirs() {
+        /* noop */
+      },
+      persistLazyExpandedDirs() {
+        /* noop */
+      },
+      appendScopeParams() {
+        /* noop */
+      },
+      openPathFromButton: options.openPathFromButton ?? (() => undefined),
+      normalizeViewerFontSize: () => "regular",
+      getSidebarFontSize: () => "regular",
+      persistSidebarHidden() {
+        /* noop */
+      },
+      persistSidebarWidth() {
+        /* noop */
+      },
+      scheduleMainSurfaceFocus() {
+        /* noop */
+      },
+      trackLoad: (promise) => promise,
+      getRepoSidebarRef: () => null,
+      setRepoSidebarRef() {
+        /* noop */
+      },
+      isTestPath: () => false,
+      filterCountTitle: () => "",
+      fileCountText: (count) => `${count} files`,
+      sidebarToggleTitle: (hidden) =>
+        hidden ? "show sidebar" : "hide sidebar",
+      openDirectoryInOsTitle: () => "open this folder in OS",
+      omittedDirectoryBadge: () => ({ label: "skipped", title: "skipped" }),
+      commitEntryBadge: () => ({ label: "GIT", title: "Git commit entry" }),
+      $: <T extends Element = HTMLElement>(selector: string): T => {
+        const el = document.querySelector(selector);
+        if (!el) throw new Error(`missing ${selector}`);
+        return el as T;
+      },
+      $$: <T extends Element = HTMLElement>(selector: string): T[] =>
+        Array.from(document.querySelectorAll(selector)) as T[],
+    } satisfies SidebarDeps,
+    options.view,
+  );
 }

@@ -86,7 +86,6 @@ import {
   APPS_16_PATH,
   ARROW_RIGHT_16_PATH,
   BOOK_16_PATH,
-  CHEVRON_DOWN_12_PATH,
   COMMENT_DISCUSSION_16_PATH,
   COPY_16_PATHS,
   DIFF_SPLIT_16_PATH,
@@ -2272,8 +2271,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       );
     },
     prefetchByPath: (path) => DIFF_VIEW.prefetchByPath(path),
-    fileBadge: (status) => DIFF_VIEW.fileBadge(status),
-    fileEntryIcon: () => REPO_VIEW.fileEntryIcon(),
+    fileStatusTitles: () => uiText().diff.fileStatus,
     applyViewedState: () => DIFF_VIEW.applyViewedState(),
     persistCollapsedDirs: ({ added = [], removed = [] }) => {
       if (added.length === 0 && removed.length === 0) return;
@@ -2290,7 +2288,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
     },
     appendScopeParams,
-    createOpenPathButton,
+    openPathFromButton: (path, kind, button) => {
+      void openPathFromButton(path, kind, button);
+    },
     normalizeViewerFontSize,
     getSidebarFontSize: savedSidebarFontSizeSetting,
     persistSidebarHidden: (hidden) => {
@@ -2302,7 +2302,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       return patchSettings({ sidebarWidth: width });
     },
     scheduleMainSurfaceFocus,
-    setChevronIcon,
     trackLoad,
     getRepoSidebarRef: () => REPO_SIDEBAR_REF,
     setRepoSidebarRef: (ref: string | null) => {
@@ -4005,13 +4004,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         scheduleIdleHighlight(card, file);
       });
     WORKTREE_VIEW?.displayOptionsChanged();
-  }
-
-  function setChevronIcon(el: HTMLElement) {
-    fillWith(
-      el,
-      CHROME_VIEW.icon(CHEVRON_DOWN_12_PATH, "octicon-chevron-down", 12),
-    );
   }
 
   function scopeOmitSourceLabel(): string {

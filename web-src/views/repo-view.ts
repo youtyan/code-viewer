@@ -21,7 +21,6 @@ import {
   COPY_16_PATHS,
   FILE_16_PATH,
   GIT_BRANCH_16_PATH,
-  iconSvg,
   LINK_16_PATH,
   PLUS_16_PATH,
   TRASH_16_PATH,
@@ -659,10 +658,6 @@ export function createRepoView(
       (STATE.route.ref || "worktree") === (ref || "worktree") &&
       (STATE.route.path || "") === path
     );
-  }
-
-  function fileEntryIcon(): string {
-    return iconSvg("octicon-file", FILE_16_PATH);
   }
 
   function isWorktreeRef(ref: string): boolean {
@@ -1938,7 +1933,6 @@ export function createRepoView(
     ensureFileList,
     syncRepoTargetInput,
     handleSidebarContextMenu,
-    fileEntryIcon,
     invalidateRepoSidebar,
     resetProject() {
       projectGeneration++;

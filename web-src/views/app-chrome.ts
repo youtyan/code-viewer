@@ -9,10 +9,10 @@ import { html, nothing } from "lit/html.js";
 import {
   GIT_BRANCH_16_PATH,
   NEXT_16_PATHS,
-  OPEN_EXTERNAL_16_PATH,
   PREVIOUS_16_PATHS,
   TRIANGLE_DOWN_16_PATH,
 } from "../core/icons";
+import { openPathButtonTemplate } from "./open-path-button";
 import {
   type ProjectLook,
   projectMarkTemplate,
@@ -122,17 +122,7 @@ export const DEFAULT_VIEW: AppChromeView = {
       /><span class="ref-selector-caret" aria-hidden="true"
         >${iconTemplate(TRIANGLE_DOWN_16_PATH, "octicon-triangle-down")}</span
       ></div>`,
-  openPathButton: (title, onOpen) =>
-    html`<button
-      type="button"
-      class="gdp-file-header-icon gdp-open-path"
-      title=${title}
-      aria-label=${title}
-      @click=${(event: MouseEvent) => {
-        event.stopPropagation();
-        onOpen(event.currentTarget as HTMLButtonElement);
-      }}
-    >${iconTemplate(OPEN_EXTERNAL_16_PATH, "octicon-link-external")}</button>`,
+  openPathButton: (title, onOpen) => openPathButtonTemplate(title, onOpen),
   revisionNav: ({ olderTitle, newerTitle, previous, next, onGo }) => {
     const button = (title: string, paths: IconPaths, sha: string | null) =>
       html`<button

@@ -1,4 +1,4 @@
-import { html, nothing } from "lit/html.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 // Diff view: per-file lazy rendering pipeline (queue + IntersectionObserver),
 // diff2html mounting, viewed-state, scroll spy, route line focus with
 // re-anchoring, idle syntax highlight, and the diff meta header.
@@ -196,12 +196,18 @@ export function fileStatusBadge(
   status: string | undefined,
   titles: Record<FileStatusMark, string>,
 ): HTMLElement {
+  return templateElement(fileStatusBadgeTemplate(status, titles));
+}
+
+/** fileStatusBadge のテンプレート (宣言的に描く一覧の行に置く)。 */
+export function fileStatusBadgeTemplate(
+  status: string | undefined,
+  titles: Record<FileStatusMark, string>,
+): TemplateResult {
   const ch = (status || "M")[0].toUpperCase();
-  return templateElement(
-    html`<span class=${`badge ${ch}`} data-file-status=${ch} title=${fileStatusTitle(ch, titles)}
-      >${ch}</span
-    >`,
-  );
+  return html`<span class=${`badge ${ch}`} data-file-status=${ch} title=${fileStatusTitle(ch, titles)}
+    >${ch}</span
+  >`;
 }
 
 function fileStatusTitle(

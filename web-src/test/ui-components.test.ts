@@ -81,6 +81,8 @@ const DECLARATIVE = [
   "web-src/views/search-palette-ui.ts",
   "web-src/views/search-palette-view.ts",
   "web-src/views/sidebar.ts",
+  "web-src/views/sidebar-view.ts",
+  "web-src/views/open-path-button.ts",
   "web-src/views/list-tree-open.ts",
   "web-src/views/workspace/",
   "web-src/views/agents/",
@@ -192,8 +194,6 @@ const PRESENTER_EXEMPT: Record<string, string> = {
     "重ね合わせの層の土台 (createLayer)。中身は呼び手の view が描く",
   "web-src/views/projects/project-looks.ts":
     "プロジェクトの色と名前の置き場 (描かない)。projectMark は値から札を作るだけ",
-  "web-src/views/sidebar.ts":
-    "左のファイル一覧。行はテンプレートで描くが、view の分け直しは段 4 (app.ts から受け取る描き方の口と一緒に直す)",
 };
 
 const EXPORTS_PRESENTER = /export function (create|mount)[A-Z]\w*\(/;
