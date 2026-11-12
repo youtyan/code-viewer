@@ -13,6 +13,7 @@
 //     Falls through cleanly when no server is registered.
 
 import {
+  notGitRepositoryReason,
   resolveRepoRoot,
   shellSingleQuote,
   takeGlobalCliOption,
@@ -492,6 +493,11 @@ export async function runStatusCli(argv: string[]): Promise<void> {
     process.exit(1);
   }
   const root = resolveRepoRoot(cwd);
+  const notGit = notGitRepositoryReason(root, "status");
+  if (notGit) {
+    console.error(notGit);
+    process.exit(1);
+  }
   const report = await buildStatusReport({
     root,
     ref: command.ref,

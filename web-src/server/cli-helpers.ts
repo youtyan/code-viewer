@@ -187,6 +187,20 @@ export function resolveRepoRootSafe(
   return { ok: true, root: baseReal };
 }
 
+/**
+ * git が要る CLI (file blame・history・diff、status) を git の外のフォルダで
+ * 呼ばれたときの理由。git のリポジトリ (と、git を呼べず決められないとき) は
+ * null: そのまま git を呼び、git の失敗をそのまま出す。git の外では git の
+ * usage の全文ではなく、何が使えず、どうすれば使えるかを言う。
+ */
+export function notGitRepositoryReason(
+  root: string,
+  command: string,
+): string | null {
+  if (git.repoRootResult(root).kind !== "outside") return null;
+  return `code-viewer ${command} needs git, but ${root} is not a git repository. Run "git init" there to use it; "code-viewer file show" and "code-viewer search" read files without git.`;
+}
+
 // `--cwd` 指定 (なければ process.cwd()) から repo root を返す。
 // repo 外なら realpath にフォールバックし、それすら無効なら exit 1。
 export function resolveRepoRoot(cwdOption: string | undefined): string {

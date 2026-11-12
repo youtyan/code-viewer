@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
@@ -222,6 +222,26 @@ describe("runStatusCli help and agent-help", () => {
     expect(io.errs[0]).toBe("unknown option: --bogus");
     expect(io.errs[1]).toBe('Run "code-viewer status --help" for usage.');
   });
+});
+
+// git の外のフォルダでは、git の失敗の全文ではなく使えない理由を返す。
+test("runStatusCli outside a git repository says git is needed", async () => {
+  const folder = realpathSync(
+    mkdtempSync(join(tmpdir(), "code-viewer-status-plain-")),
+  );
+  try {
+    const io = captureIo();
+    await runAndCatchExit(["--cwd", folder]);
+    expect({ exits: io.exits, errs: io.errs, logs: io.logs }).toEqual({
+      exits: [1],
+      errs: [
+        `code-viewer status needs git, but ${folder} is not a git repository. Run "git init" there to use it; "code-viewer file show" and "code-viewer search" read files without git.`,
+      ],
+      logs: [],
+    });
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 });
 
 describe("runStatusCli against a fixture repo", () => {
