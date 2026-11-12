@@ -77,9 +77,11 @@
      (color-themes-contrast.test.ts が 4.5:1 を見る)。
      - 選択中: 窓にフォーカスがある間は --color-select、無い間は
        --color-select-inactive (下の html[data-window-inactive])
-     - 無効: 文字と絵は --color-disabled、面は --color-disabled-surface */
+     - 無効: 文字と絵は --color-disabled、面は --color-disabled-surface。40% では
+       ダークの面で補助の文字 (--color-text-3) とほぼ同じ濃さになり、押せない
+       アイコン (git の外の Diff・History) が押せるものと見分けられなかった */
   --color-select-inactive:  color-mix(in srgb, var(--color-text) 10%, var(--color-doc));
-  --color-disabled:         color-mix(in srgb, var(--color-text) 40%, transparent);
+  --color-disabled:         color-mix(in srgb, var(--color-text) 28%, transparent);
   --color-disabled-surface: color-mix(in srgb, var(--color-text) 7%, transparent);
   --color-warning-surface:  color-mix(in srgb, var(--color-waiting) 14%, transparent);
   --color-warning-line:     color-mix(in srgb, var(--color-waiting) 45%, transparent);
@@ -4936,6 +4938,14 @@ body.gdp-diff-page #diff {
    (#git-unavailable。views/git-unavailable.ts) だけを出す。git が要る入口は
    消さずに押せない印にする (理由は title)。無効の色は名前の層の --color-disabled。 */
 body[data-git-unavailable] #content > :not(#git-unavailable) {
+  display: none;
+}
+/* 差分の画面の道具の帯 (ref の選択・ws・syntax・Split / Unified) も git の部品なので
+   出さない。topbar を隠すページと同じく、chrome の実寸から topbar を外す。 */
+body[data-git-unavailable] {
+  --chrome-h: var(--toolbarless-chrome-h);
+}
+body[data-git-unavailable] #topbar {
   display: none;
 }
 .view-strip-item[aria-disabled="true"],

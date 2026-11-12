@@ -7174,7 +7174,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     // しても URL の ?terminal= で止めたままにしない。失敗は finally の先の拒否として
     // 今までどおり外へ出る (ここで受けない)。
     void restoring.finally(endTabRestore);
-    if (STATE.route.screen === "help") {
+    // git が要る画面を git のリポジトリでないプロジェクトで開いた (URL・読み戻し)。
+    // 画面に入らず案内を出す (画面を切り替えるときの入口と同じ。最初の読み込みの
+    // 入口にだけ無く、履歴と作業ツリーの画面がそのまま出ていた)。
+    if (gitBlockedRoute()) {
+      showGitUnavailablePage();
+    } else if (STATE.route.screen === "help") {
       setStatus("live");
       renderHelpPage();
     } else if (STATE.route.screen === "settings") {

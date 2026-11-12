@@ -242,16 +242,18 @@ describe("the notice on a git-only screen", () => {
     const style = document.createElement("style");
     style.textContent = readFileSync("web/style.css", "utf8");
     document.head.append(style);
-    document.body.innerHTML = `<main id="content"><div id="git-unavailable"></div><div id="diff"></div><div id="empty" class="empty"></div></main>`;
+    // 差分の画面の道具の帯 (#topbar。ref の選択・Split / Unified) も git の部品
+    // なので隠す (案内の上に残っていた)。
+    document.body.innerHTML = `<header id="topbar"></header><main id="content"><div id="git-unavailable"></div><div id="diff"></div><div id="empty" class="empty"></div></main>`;
     const shown = () =>
-      ["#git-unavailable", "#diff", "#empty"].map(
+      ["#git-unavailable", "#diff", "#empty", "#topbar"].map(
         (selector) =>
           getComputedStyle(document.querySelector(selector) as HTMLElement)
             .display !== "none",
       );
-    expect(shown()).toEqual([true, true, true]);
+    expect(shown()).toEqual([true, true, true, true]);
     document.body.setAttribute("data-git-unavailable", "");
-    expect(shown()).toEqual([true, false, false]);
+    expect(shown()).toEqual([true, false, false, false]);
   });
 });
 
