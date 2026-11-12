@@ -86,6 +86,7 @@ export const KNOWN_SNAKE_CASE_IDENTIFIERS: readonly string[] = [
   "force_layout",
   "foreign_key_list",
   "framed_prompt",
+  "git_repository",
   "hard_cap",
   "idle_prompt",
   "idx_example",

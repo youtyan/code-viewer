@@ -511,6 +511,42 @@ describe("palette projects, agents and actions", () => {
     }
   });
 
+  // git のリポジトリでないプロジェクトの Diff など: 行は消さずに出し、補足の欄と
+  // title に理由を出す。選んでも閉じず、実行も記録もしない。
+  test("a disabled action stays listed with its reason and does nothing when chosen", async () => {
+    const ran: string[] = [];
+    const noted: string[] = [];
+    const { palette } = await setup({
+      files: ["src/a.ts"],
+      commands: [
+        {
+          ...command("actions", "Go to diff", "", false, ran),
+          disabledReason: "sample reason",
+        },
+      ],
+      recentActions: { get: () => [], note: (id) => noted.push(id) },
+    });
+    try {
+      palette.openSearchPalette("file");
+      typeQuery("go to diff");
+      await waitFor(() => listing().includes("Go to diff|sample reason *"));
+      const row = document.querySelector<HTMLElement>(
+        ".gdp-palette-row[aria-disabled='true']",
+      );
+      expect(row?.title).toBe("sample reason");
+      key("Enter");
+      row?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect({
+        ran,
+        noted,
+        open: document.querySelector(".gdp-palette-list") !== null,
+      }).toEqual({ ran: [], noted: [], open: true });
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+
   test("choosing a project or agent is not remembered as a recent action", async () => {
     const ran: string[] = [];
     const noted: string[] = [];

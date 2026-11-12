@@ -44,6 +44,7 @@ import { TREE_WITHOUT_COMMIT_DATES } from "../core/types";
 import { fitBreadcrumb } from "./breadcrumb-fit";
 import { type ContextMenuItem, showContextMenu } from "./context-menu";
 import { fileRouteKeepingActiveView } from "./file-shell";
+import { gitUnavailableReason } from "./git-unavailable";
 import {
   type MarkdownLinkNavigationDeps,
   openMarkdownLink,
@@ -233,7 +234,8 @@ export type RepoShellProps = {
   copyPath: ButtonProps | null;
   openPath: HTMLElement;
   webLink: HTMLElement | null;
-  history: { label: string; title: string; onClick(): void };
+  /** フォルダの履歴。git のリポジトリでないプロジェクトでは押せない (title が理由)。 */
+  history: { label: string; title: string; disabled: boolean; onClick(): void };
   newFolder: ButtonProps | null;
   trash: ButtonProps | null;
   readme: {
@@ -390,6 +392,7 @@ export const DEFAULT_VIEW: RepoView = {
         type="button"
         class="gdp-btn gdp-btn-sm gdp-repo-history-btn"
         title=${props.history.title}
+        ?disabled=${props.history.disabled}
         @click=${props.history.onClick}
       >${props.history.label}</button>${
         props.newFolder
@@ -636,6 +639,12 @@ export function createRepoView(
     // 既定 (worktree) のときはツリーの頭で小さなアイコンだけにし、ほかの ref を
     // 選んでいるときは値を出す (style.css のツリーの頭の節)。
     wrap.dataset.defaultRef = String(input.value === "worktree");
+    // git のリポジトリでないプロジェクトでは ref を選べない (作業ツリーだけ)。
+    // 隠さずに押せなくし、理由を title に出す (ref-picker.ts は開かない)。
+    const unavailable = gitUnavailableReason();
+    input.disabled = unavailable !== null;
+    input.title = unavailable ?? input.getAttribute("aria-label") ?? "";
+    wrap.setAttribute("aria-disabled", String(unavailable !== null));
     wrap.hidden = activeRef == null;
     wrap.style.display = activeRef == null ? "none" : "";
     syncSidebarHeaderHeight();
@@ -1321,7 +1330,8 @@ export function createRepoView(
         webLink: createRepositoryWebLink(meta.path || "", meta.ref),
         history: {
           label: folderHistoryLabel(),
-          title: folderHistoryTitle(),
+          title: gitUnavailableReason() ?? folderHistoryTitle(),
+          disabled: gitUnavailableReason() !== null,
           onClick: () => openFolderHistory(meta.ref, meta.path || ""),
         },
         newFolder: trashable

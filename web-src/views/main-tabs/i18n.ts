@@ -120,7 +120,8 @@ const EN: MainTabsText = {
   newAgentHere: "New agent…",
   newAgentHereTitle: (name) => `Start an agent in ${name}`,
   shellNeedsSwitch: "Switch to this project to open a shell in it",
-  notGitProject: "Agents can only be started in a git repository",
+  notGitProject:
+    "Agents can only be started in a git repository or a project you added",
   openScreenInTitle: (name) => `Switch to ${name} and open this screen`,
   switchToProject: "Switch to this project",
   currentProject: "This project is already open",
@@ -182,7 +183,8 @@ const JA: MainTabsText = {
   newAgentHere: "新しいエージェント…",
   newAgentHereTitle: (name) => `${name} でエージェントを起動します`,
   shellNeedsSwitch: "このプロジェクトに切り替えるとシェルを開けます",
-  notGitProject: "エージェントを起動できるのは git のリポジトリだけです",
+  notGitProject:
+    "エージェントを起動できるのは git のリポジトリか、追加したプロジェクトだけです",
   openScreenInTitle: (name) => `${name} に切り替えて、この画面を開きます`,
   switchToProject: "このプロジェクトに切り替える",
   currentProject: "いま見ているプロジェクトです",

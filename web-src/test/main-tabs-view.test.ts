@@ -1244,7 +1244,10 @@ describe("main tabs view: プロジェクトのグループ", () => {
   // タブの ＋ のメニューの頭 (残りのファイル・シェル・エージェントの行は app.ts の
   // newTabMenuItems が足す)。行の形はグループの ▾ の画面の行と同じ。
   describe("＋ のメニューの画面の行", () => {
-    const setupNewTab = async (initial: AppRoute = fileRoute("src/app.ts")) => {
+    const setupNewTab = async (
+      initial: AppRoute = fileRoute("src/app.ts"),
+      extra: Partial<MainTabsDeps> = {},
+    ) => {
       const calls: string[] = [];
       const ctx = setup(
         async () => saved,
@@ -1252,7 +1255,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
         undefined,
         initial,
         APP,
-        groupDeps(calls, {}),
+        groupDeps(calls, extra),
       );
       await ctx.handle.restore();
       return { ...ctx, calls };
@@ -1277,6 +1280,32 @@ describe("main tabs view: プロジェクトのグループ", () => {
         "◆ search",
         "◆ tools",
       ]);
+    });
+
+    // git のリポジトリでないプロジェクト: git が要る画面の行は消さずに押せなくし、
+    // 理由を title に出す。押しても何も開かない。
+    test("git のリポジトリでないプロジェクトでは Diff・History・Worktrees を押せない", async () => {
+      const { handle, calls } = await setupNewTab(fileRoute("src/app.ts"), {
+        gitUnavailable: (root) => (root === APP ? "sample reason" : null),
+      });
+      const items = handle.newTabScreenItems("left");
+      expect(rows(items)).toEqual([
+        "◆ repo ✓",
+        "◆ diff (disabled)",
+        "◆ history (disabled)",
+        "◆ worktree (disabled)",
+        "◆ database",
+        "◆ journal",
+        "◆ agents",
+        "◆ search",
+        "◆ tools",
+      ]);
+      expect(
+        items.flatMap((item) =>
+          item.kind !== "separator" && item.disabled ? [item.title] : [],
+        ),
+      ).toEqual(["sample reason", "sample reason", "sample reason"]);
+      expect(calls).toEqual([]);
     });
 
     test("行の絵はページのタブと同じ絵", async () => {
@@ -1385,7 +1414,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
     const setupWithActions = async (
       facts: ReturnType<NonNullable<MainTabsDeps["groupFacts"]>> = {
         shellUnavailable: null,
-        git: true,
+        openable: true,
       },
       foreignInPlace = true,
     ) => {
@@ -1451,6 +1480,37 @@ describe("main tabs view: プロジェクトのグループ", () => {
         "---",
         "Close this group",
       ]);
+    });
+
+    test("git のリポジトリでないプロジェクトのグループの ▾ は、git が要る画面の行を理由つきで押せない", async () => {
+      const ctx = setup(
+        async () => saved,
+        undefined,
+        undefined,
+        fileRoute("src/app.ts"),
+        APP,
+        groupDeps([], {
+          gitUnavailable: (root) => (root === LIB ? "sample reason" : null),
+        }),
+      );
+      await ctx.handle.restore();
+      const items = openGroupMenu(ctx.mount, LIB).filter((item) =>
+        ["repo", "diff", "history", "worktree"].includes(
+          item.textContent ?? "",
+        ),
+      );
+      expect(
+        items.map(
+          (item) =>
+            `${describeMenu([item])[0]} [${(item as HTMLButtonElement).title}]`,
+        ),
+      ).toEqual([
+        "repo [Switch to sample-lib and open this screen]",
+        "diff (disabled) [sample reason]",
+        "history (disabled) [sample reason]",
+        "worktree (disabled) [sample reason]",
+      ]);
+      closeContextMenu();
     });
 
     test.each([
@@ -1547,7 +1607,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
     test.each([
       {
         name: "シェルが使えない",
-        facts: { shellUnavailable: "node-pty is missing", git: true },
+        facts: { shellUnavailable: "node-pty is missing", openable: true },
         foreignInPlace: true,
         root: LIB,
         expected: [
@@ -1557,7 +1617,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
       },
       {
         name: "1 つで完結するサーバの、別のプロジェクト",
-        facts: { shellUnavailable: null, git: true },
+        facts: { shellUnavailable: null, openable: true },
         foreignInPlace: false,
         root: LIB,
         expected: [
@@ -1567,7 +1627,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
       },
       {
         name: "1 つで完結するサーバの、いま見ているプロジェクト",
-        facts: { shellUnavailable: null, git: true },
+        facts: { shellUnavailable: null, openable: true },
         foreignInPlace: false,
         root: APP,
         expected: [
@@ -1576,18 +1636,18 @@ describe("main tabs view: プロジェクトのグループ", () => {
         ],
       },
       {
-        name: "git でない別のプロジェクト",
-        facts: { shellUnavailable: null, git: false },
+        name: "開けない (git でなく登録もしていない) 別のプロジェクト",
+        facts: { shellUnavailable: null, openable: false },
         foreignInPlace: true,
         root: LIB,
         expected: [
           "New shell [Open a new shell in sample-lib]",
-          "New agent… (disabled) [Agents can only be started in a git repository]",
+          "New agent… (disabled) [Agents can only be started in a git repository or a project you added]",
         ],
       },
       {
-        name: "git でない、いま見ているプロジェクト (起動の画面はこのサーバの根を選べる)",
-        facts: { shellUnavailable: null, git: false },
+        name: "開けない、いま見ているプロジェクト (起動の画面はこのサーバの根を選べる)",
+        facts: { shellUnavailable: null, openable: false },
         foreignInPlace: true,
         root: APP,
         expected: [

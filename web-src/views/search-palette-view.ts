@@ -19,6 +19,8 @@ export type PaletteRowProps =
       status: string | null;
       statusTone: string | undefined;
       shortcut: string | null;
+      /** 押せない理由 (押せるなら null)。 */
+      disabledReason: string | null;
     }
   | {
       kind: "file";
@@ -98,7 +100,7 @@ function rowTemplate(
     row.kind === "command"
       ? html`<span class="gdp-palette-row-icon">${row.icon}</span
           ><span class="gdp-palette-row-title">${highlighted(row.title, row.ranges)}</span
-          ><span class="gdp-palette-row-detail">${row.detail}</span>${
+          ><span class="gdp-palette-row-detail">${row.disabledReason ?? row.detail}</span>${
             row.status
               ? html`<span
                   class="gdp-palette-row-status"
@@ -125,6 +127,8 @@ function rowTemplate(
     class=${`gdp-palette-row gdp-palette-row-${row.kind}`}
     role="option"
     aria-selected=${row.index === props.selected ? "true" : "false"}
+    aria-disabled=${ifDefined(row.kind === "command" && row.disabledReason ? "true" : undefined)}
+    title=${ifDefined((row.kind === "command" && row.disabledReason) || undefined)}
     @mousemove=${(event: MouseEvent) => props.onRowPointer(row.index, event)}
     @mousedown=${(event: MouseEvent) => props.onRowMouseDown(row.index, event)}
     @click=${(event: MouseEvent) => props.onRowOpen(row.index, event)}

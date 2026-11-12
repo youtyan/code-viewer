@@ -1206,6 +1206,74 @@ describe("preview CLI", () => {
     },
   );
 
+  // git の外のフォルダ: 設定が git_repository: "outside" を返し、画面が git の機能を
+  // 押せなくできる。その後 git init すると、要求が来なくても裏が .git の出現に
+  // 気付いて git-state の通知を流し、設定は "inside" に変わる (再起動しない)。
+  runOrSkip(
+    "tells the page it is outside git and announces git init without a request",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-git-state-"));
+      tmpRoots.push(root);
+      writeFileSync(join(root, "sample.txt"), "sample\n");
+      const proc = spawn(
+        process.execPath,
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
+        {
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const exited = new Promise<number | null>((resolve) => {
+        proc.once("exit", (code) => resolve(code));
+      });
+      const events = new AbortController();
+      let cleanupTimedOut = false;
+      try {
+        const url = await Promise.race([
+          waitForPreviewUrl(proc),
+          sleep(15000).then(() => {
+            throw new Error("preview did not start");
+          }),
+        ]);
+        const state = async () =>
+          (
+            (await (
+              await fetchWithTimeout(`${url}_settings`, 5000)
+            ).json()) as { git_repository?: string }
+          ).git_repository;
+        expect(await state()).toBe("outside");
+
+        const stream = await fetch(`${url}events`, { signal: events.signal });
+        const reader = stream.body?.getReader();
+        if (!reader) throw new Error("the events response has no body");
+        const decoder = new TextDecoder();
+        let received = "";
+        const announced = (async () => {
+          while (!/event: git-state\ndata: inside/.test(received)) {
+            const chunk = await reader.read();
+            if (chunk.done) throw new Error(`events ended: ${received}`);
+            received += decoder.decode(chunk.value, { stream: true });
+          }
+        })();
+        git(root, ["init", "-b", "main"]);
+        await Promise.race([
+          announced,
+          sleep(10000).then(() => {
+            throw new Error(`no git-state event within 10s: ${received}`);
+          }),
+        ]);
+        expect(await state()).toBe("inside");
+      } finally {
+        events.abort();
+        proc.kill("SIGKILL");
+        cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
+      }
+      if (cleanupTimedOut) {
+        throw new Error("preview process did not exit after SIGKILL");
+      }
+    },
+  );
+
   runOrSkip("serves ranged raw files from a committed ref", async () => {
     const root = mkdtempSync(join(tmpdir(), "code-viewer-ref-raw-"));
     tmpRoots.push(root);

@@ -1,9 +1,11 @@
+import { ifDefined } from "lit/directives/if-defined.js";
 import { html, nothing, type TemplateResult } from "lit/html.js";
 import { showCopyFailure } from "../core/copy-failure";
 import { filePathClipboardText } from "../core/file-path-copy";
 import { COPY_16_PATHS } from "../core/icons";
 import type { AppRoute, DiffRange, SourceFileTarget } from "../core/routes";
 import { isPreviewableSource, sourceDisplayKind } from "../core/source-meta";
+import { gitUnavailableReason } from "./git-unavailable";
 import { pageLanguage } from "./page-language";
 import { SOURCE_READING_TEXT } from "./source-preview-i18n";
 import { iconTemplate } from "./ui/icon";
@@ -98,7 +100,10 @@ export function fileRouteKeepingActiveView(
   };
 }
 
-/** Blame / History のタブ。押すとそのファイルのその画面へ移る。 */
+/**
+ * Blame / History のタブ。押すとそのファイルのその画面へ移る。git のリポジトリで
+ * ないプロジェクトでは押せず、理由を title に出す。
+ */
 function fileViewTabTemplate(
   deps: FileViewTabDeps,
   target: SourceFileTarget,
@@ -106,13 +111,16 @@ function fileViewTabTemplate(
   label: string,
   active: boolean,
 ): TemplateResult {
+  const unavailable = view === "blob" ? null : gitUnavailableReason();
   return html`<button
     type="button"
     class=${active ? "active" : ""}
     data-file-view=${view}
     data-source-tab=${view === "blob" ? "code" : view}
+    ?disabled=${unavailable !== null}
+    title=${ifDefined(unavailable ?? undefined)}
     @click=${() => {
-      if (active) return;
+      if (active || unavailable !== null) return;
       if (view === "blob") deps.setPreferredSourceTab?.("code");
       deps.setRoute({
         screen: "file",

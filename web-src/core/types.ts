@@ -119,10 +119,22 @@ export type RepoTreeResponse = {
   } | null;
 };
 
+/**
+ * プロジェクトの根が git のリポジトリか。"inside" は中、"outside" は git の外と
+ * 分かっている (git の機能を使えなくする)、"unknown" は git が無い・所有権の
+ * エラーなどで決められない (git を呼んでその失敗を出す)。
+ */
+export type GitRepositoryState = "inside" | "outside" | "unknown";
+
 export type SettingsResponse = {
   project: string;
   branch?: string;
   repo_web_url: string | null;
+  /**
+   * この裏の根が git のリポジトリか。git の外のフォルダで `git init` すると、
+   * 裏は判定し直して `git-state` の通知を流す (画面は設定を取り直す)。
+   */
+  git_repository: GitRepositoryState;
   /** Registry clients use this to prove that a loopback server owns the entry. */
   server: {
     pid: number;

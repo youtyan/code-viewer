@@ -4931,6 +4931,39 @@ body.gdp-diff-page #diff {
 .backend-state .empty-icon.backend-state-spinning .octicon {
   animation: gdp-spin 0.7s linear infinite;
 }
+/* git のリポジトリでないプロジェクト (git の外のフォルダを登録したもの)。
+   git が要る画面を開いたら、本文 (#content) のほかの中身を隠して案内
+   (#git-unavailable。views/git-unavailable.ts) だけを出す。git が要る入口は
+   消さずに押せない印にする (理由は title)。無効の色は名前の層の --color-disabled。 */
+body[data-git-unavailable] #content > :not(#git-unavailable) {
+  display: none;
+}
+.view-strip-item[aria-disabled="true"],
+.view-strip-item[aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--color-disabled);
+  cursor: default;
+}
+.gdp-palette-row[aria-disabled="true"] {
+  cursor: default;
+}
+.gdp-palette-row[aria-disabled="true"] .gdp-palette-row-title,
+.gdp-palette-row[aria-disabled="true"] .gdp-palette-row-icon {
+  color: var(--color-disabled);
+}
+.ref-selector[aria-disabled="true"] {
+  color: var(--color-disabled);
+  cursor: default;
+}
+.ref-selector[aria-disabled="true"] .ref-input {
+  cursor: default;
+}
+#line-ref-pill-history:disabled,
+#line-ref-pill-history:disabled:hover {
+  background: transparent;
+  color: var(--color-disabled);
+  cursor: default;
+}
 
 /* ===== diff2html overrides ===== */
 
@@ -22598,6 +22631,13 @@ button.agents-account-name:hover {
   background: var(--color-raised);
   box-shadow: none;
   color: var(--color-text);
+}
+/* git のリポジトリでないプロジェクトの Blame・History のタブ (押せない。理由は title)。 */
+:is(.gdp-source-tabs, .gdp-file-detail-sticky .gdp-source-tabs) button:where([data-source-tab]):disabled,
+:is(.gdp-source-tabs, .gdp-file-detail-sticky .gdp-source-tabs) button:where([data-source-tab]):disabled:hover {
+  background: transparent;
+  color: var(--color-disabled);
+  cursor: default;
 }
 /* 行数・行へ移る欄は補助の情報。枠の付いた部品に見せず、文字の段階で下げる。 */
 .gdp-file-detail-sticky .gdp-source-line-count {

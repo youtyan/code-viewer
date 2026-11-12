@@ -35,6 +35,7 @@ import type {
 } from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
 import { attachDragResizer } from "../../core/drag-resizer";
+import { pageNeedsGit } from "../../core/git-features";
 import { isImeComposing } from "../../core/keyboard";
 import {
   activate,
@@ -284,13 +285,20 @@ export type MainTabsDeps = {
   /**
    * グループの ▾ の新しいシェル・エージェントを押せるかの材料 (決めるのは
    * groupMenuFor だけ)。shellUnavailable はシェルを開けない理由 (開ける・まだ
-   * 分からないなら null)、git はそのプロジェクトが git のリポジトリか (分から
+   * 分からないなら null)、openable はそのプロジェクトを開ける (git のリポジトリか
+   * 登録したプロジェクト。core/agent-overview.ts の projectOpenable) か (分から
    * なければ null)。
    */
   groupFacts?(root: string): {
     shellUnavailable: string | null;
-    git: boolean | null;
+    openable: boolean | null;
   };
+  /**
+   * そのプロジェクトで git が要る画面 (Diff・History・Worktrees) を開けない理由
+   * (git のリポジトリでない)。開ける・分からないなら null。グループの ▾ と ＋ の
+   * 画面の行を押せなくし、理由を title に出す。
+   */
+  gitUnavailable?(root: string): string | null;
   /**
    * 別のプロジェクトのファイルをその場で出せるか (入口のサーバの下だけ。1 つで
    * 完結するサーバでは、そのプロジェクトへ移って出す)。
@@ -1785,6 +1793,10 @@ export function createMainTabsPresenter(
       !isForeign(tab, currentRoot)
         ? tab.target.path
         : null;
+    const imageHistoryBlocker =
+      repoImage === null || currentRoot === null
+        ? null
+        : (deps.gitUnavailable?.(currentRoot) ?? null);
     return [
       {
         label: current.close,
@@ -1840,6 +1852,10 @@ export function createMainTabsPresenter(
         ? [
             {
               label: current.fileHistory,
+              // git のリポジトリでないプロジェクトには履歴が無い (理由を title に)。
+              ...(imageHistoryBlocker !== null
+                ? { disabled: true, title: imageHistoryBlocker }
+                : {}),
               onSelect: () => {
                 const route = deps.defaultRoute({
                   kind: "file",
@@ -2579,7 +2595,7 @@ export function createMainTabsPresenter(
     const look = lookOf(key);
     const facts = deps.groupFacts?.(key) ?? {
       shellUnavailable: null,
-      git: null,
+      openable: null,
     };
     // 押せない理由 (押せるなら null)。無い口の理由は出さない ("")。
     const shellBlocker = !deps.newShellIn
@@ -2589,19 +2605,26 @@ export function createMainTabsPresenter(
         (here || deps.foreignInPlace?.() ? null : current.shellNeedsSwitch));
     const agentBlocker = !deps.launchAgentIn
       ? ""
-      : facts.git === false && !here
+      : facts.openable === false && !here
         ? current.notGitProject
         : null;
     // 画面の行。別のプロジェクトは移って開く (移れなければ押せない)。印は
-    // いま見ているプロジェクトの、本文に出ている画面だけ。
+    // いま見ているプロジェクトの、本文に出ている画面だけ。git が要る画面は、
+    // git のリポジトリでないプロジェクトでは押せない (理由を title に)。
     const shown = here ? shownScreen() : null;
-    const screens = VIEW_SCREENS.map((screen) =>
-      screenMenuItem(screen, shown, {
-        disabled: !here && !deps.switchProject,
-        ...(here ? {} : { title: current.openScreenInTitle(look.name) }),
+    const gitBlocker = deps.gitUnavailable?.(key) ?? null;
+    const screens = VIEW_SCREENS.map((screen) => {
+      const blocked = gitBlocker !== null && pageNeedsGit(screen);
+      return screenMenuItem(screen, shown, {
+        disabled: blocked || (!here && !deps.switchProject),
+        ...(blocked
+          ? { title: gitBlocker }
+          : here
+            ? {}
+            : { title: current.openScreenInTitle(look.name) }),
         onSelect: () => openScreenIn(key, screen),
-      }),
-    );
+      });
+    });
     return [
       // メニューの頭はプロジェクトの名前 (札には頭文字しか無い)。押せない行。
       {
@@ -2670,14 +2693,20 @@ export function createMainTabsPresenter(
 
   function newTabScreenItems(side: PaneSide): ContextMenuItem[] {
     const shown = shownScreen();
-    return NEW_TAB_SCREENS.map((screen) =>
-      screenMenuItem(screen, shown, {
+    const gitBlocker =
+      currentRoot === null
+        ? null
+        : (deps.gitUnavailable?.(currentRoot) ?? null);
+    return NEW_TAB_SCREENS.map((screen) => {
+      const blocked = gitBlocker !== null && pageNeedsGit(screen);
+      return screenMenuItem(screen, shown, {
+        ...(blocked ? { disabled: true, title: gitBlocker } : {}),
         onSelect: () => {
           focusSide(side);
           openScreenIn(currentRoot, screen);
         },
-      }),
-    );
+      });
+    });
   }
 
   /** 面ごとに、最後に見える所まで送った前面のタブ (render)。 */
