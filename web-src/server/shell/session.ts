@@ -91,7 +91,12 @@ type SessionEntry = {
    */
   ready: boolean;
   /** ready になるまで溜めておく入力と、その書込み結果を待つ呼出側。 */
+  /**
+   * 準備ができる前に頼まれた書き込み。initial は開いた直後にこちらから流す
+   * 1 行 (writeToShellWhenReady)、そうでないものは利用者の入力 (writeToShell)。
+   */
   queued: Array<{
+    initial: boolean;
     data: string;
     resolve(result: ShellWriteResult): void;
   }>;
@@ -609,17 +614,30 @@ export function writeToShellWhenReady(
   if (!entry || entry.meta.exited) return Promise.resolve({ status: "gone" });
   if (entry.ready) return Promise.resolve(writeToShellEntry(entry, data));
   return new Promise((resolve) => {
-    entry.queued.push({ data, resolve });
+    // 先に届いていた利用者の入力より前に並べる (下の writeToShell)。
+    const firstInput = entry.queued.findIndex((item) => !item.initial);
+    const at = firstInput === -1 ? entry.queued.length : firstInput;
+    entry.queued.splice(at, 0, { initial: true, data, resolve });
   });
 }
 
+/**
+ * 利用者の入力を流す。シェルの準備ができる前に届いたものは、開いた直後に
+ * こちらから流す 1 行 (tmux attach) の後ろに並べる。入口が起き直してタブを
+ * 同じ ID で開き直す間も、ブラウザの端末は前の tmux の設定のまま入力
+ * (マウスのクリックの信号など) を送ってくる。それが attach の行より先に
+ * シェルへ入ると、行の頭に混ざって attach が失敗し、ただのシェルが残った。
+ */
 export function writeToShell(
   id: ShellSessionId,
   data: string,
-): ShellWriteResult {
+): Promise<ShellWriteResult> {
   const entry = sessions.get(id);
-  if (!entry || entry.meta.exited) return { status: "gone" };
-  return writeToShellEntry(entry, data);
+  if (!entry || entry.meta.exited) return Promise.resolve({ status: "gone" });
+  if (entry.ready) return Promise.resolve(writeToShellEntry(entry, data));
+  return new Promise((resolve) => {
+    entry.queued.push({ initial: false, data, resolve });
+  });
 }
 
 /** Serialize size and input together, so a second view cannot resize between them. */

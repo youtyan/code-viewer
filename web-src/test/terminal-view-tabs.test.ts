@@ -472,6 +472,28 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
     ]);
   });
 
+  // 繋ぎ直しの応答を待つ間、端末は前の tmux の設定のまま (マウスのクリックを
+  // 信号で送る等) 同じ ID へ入力を送っていた。それが新しいシェルの attach の行に
+  // 混ざって失敗し、ただのシェルが残った。前のサーバのシェルはもう無いので、
+  // 繋ぎ直しを頼む前に面を切り離す。
+  test("頼む前に面を前のシェルから切り離す", async () => {
+    const revived = { ...shell("shell-r4"), tty: "/dev/sample-new" };
+    let attachedWhileAsking: unknown = "not asked";
+    const { view } = await showing("shell-r4", [
+      () => {
+        attachedWhileAsking = terminalScreenState.screens[0]?.attached;
+        return json({ session: revived, action: "attached" });
+      },
+    ]);
+
+    await view.reviveInTab(revived.id, PLACE, "left");
+
+    expect([
+      attachedWhileAsking,
+      terminalScreenState.screens[0]?.attached,
+    ]).toEqual([null, revived]);
+  });
+
   test("場所がもう無い (410) なら gone を返し、付け直さない", async () => {
     const { view, session } = await showing("shell-r2", [
       () => new Response("pane is gone", { status: 410 }),
@@ -480,7 +502,8 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
     await expect(view.reviveInTab(session.id, PLACE, "left")).resolves.toBe(
       "gone",
     );
-    expect(terminalScreenState.screens[0]?.attached).toEqual(session);
+    // 頼む前に切り離している (上のテスト)。新しいシェルにも付け直さない。
+    expect(terminalScreenState.screens[0]?.attached).toBeNull();
   });
 
   test("それ以外の失敗は理由と本文ごと reject する", async () => {

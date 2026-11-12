@@ -176,7 +176,7 @@ async function handleKeys(req: Request): Promise<Response> {
     return textError("invalid viewport", 400);
   const result = isShellViewport(viewport)
     ? await operateShellView(parsed.id, viewport, data)
-    : writeToShell(parsed.id, data);
+    : await writeToShell(parsed.id, data);
   if (result.status === "gone") return textError("shell is gone", 410);
   if (result.status === "error") {
     console.error("[code-viewer] shell write failed", result.error);

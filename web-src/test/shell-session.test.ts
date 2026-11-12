@@ -21,6 +21,7 @@ import {
   resizeShell,
   subscribeShell,
   watchShellOutput,
+  writeToShell,
   writeToShellWhenReady,
 } from "../server/shell/session";
 
@@ -334,6 +335,28 @@ describe("writeToShellWhenReady", () => {
 
     await expect(pending).resolves.toEqual({ status: "ok" });
     expect(pty.write).toHaveBeenCalledWith("sample input");
+  });
+
+  // 入口が起き直してタブを同じ ID で開き直す間も、ブラウザの端末は前の tmux の
+  // 設定のまま入力を送ってくる (マウスのクリックの信号など)。それが最初の
+  // コマンド (tmux attach) より先にシェルへ入ると、コマンドの頭に混ざって失敗した。
+  // 準備の前に届いた入力は、最初のコマンドの後ろに並べる。
+  test("input that arrives before the shell is ready goes after the initial command", async () => {
+    const created = await createShellSession(process.cwd());
+    if (created.status !== "ok") throw new Error("expected a shell session");
+
+    const early = writeToShell(created.session.id, "\x1b[<0;37;34M");
+    const initial = writeToShellWhenReady(created.session.id, "attach\r");
+    expect(pty.write).not.toHaveBeenCalled();
+
+    pty.emitData("$ ");
+
+    await expect(initial).resolves.toEqual({ status: "ok" });
+    await expect(early).resolves.toEqual({ status: "ok" });
+    expect(pty.write.mock.calls.map((call) => call[0])).toEqual([
+      "attach\r",
+      "\x1b[<0;37;34M",
+    ]);
   });
 
   test("returns the complete deferred write error", async () => {

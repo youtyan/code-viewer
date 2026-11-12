@@ -665,6 +665,15 @@ export function createTerminalView(
     // 映す面で測った大きさで繋ぐ。渡さないと仮の大きさ (120×32) で tmux に
     // 繋ぎ、window-size smallest の tmux では PC のウインドウまで縮んだ。
     const size = tabSlot(side, id).screen.measure();
+    // 応答を待つ間に、前の tmux の設定のままの端末 (マウスのクリックを信号で
+    // 送る等) が同じ ID へ入力を送ると、新しいシェルの attach の行の頭に混ざって
+    // attach が失敗し、ただのシェルが残った。前のサーバのシェルはもう無いので、
+    // 頼む前に切り離して入力を止める (付け直すときに端末も作り直す)。
+    for (const s of ["left", "right"] as const) {
+      if (showing[s] !== id) continue;
+      const slot = tabSlot(s, id);
+      if (slot.screen.getAttached()?.id === id) slot.screen.detach();
+    }
     const res = await deps.trackLoad(
       fetch(apiUrl("tmuxOpen"), {
         method: "POST",
