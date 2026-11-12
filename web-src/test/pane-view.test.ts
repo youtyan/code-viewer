@@ -27,7 +27,9 @@ vi.mock("../core/xterm-loader", () => ({
 import { terminalText } from "../views/terminal/i18n";
 import {
   createPaneView,
+  DEFAULT_VIEW,
   type PaneViewHandle,
+  type PaneViewView,
 } from "../views/terminal/pane-view";
 
 type Source = {
@@ -473,6 +475,39 @@ describe("画像の添付", () => {
       field: "",
       posted: expected.posted,
     });
+  });
+});
+
+describe("the pane view's view", () => {
+  test("passes the choices found on the screen to the view", async () => {
+    view.handlePopState();
+    view.dispose();
+    view.el.remove();
+    const drawn: Parameters<PaneViewView["choices"]>[0][] = [];
+    view = createPaneView(
+      {
+        getText: () => terminalText("en"),
+        describePane: () => null,
+        actionHeaders: () => ({ "X-Code-Viewer-Action": "1" }),
+        trackLoad: (promise) => promise,
+        onClose,
+      },
+      {
+        ...DEFAULT_VIEW,
+        choices: (choices) => {
+          drawn.push(choices);
+          return DEFAULT_VIEW.choices(choices);
+        },
+      },
+    );
+    document.body.append(view.el);
+    await openWith("Proceed?\n❯ 1. Yes\n  2. No");
+    expect(
+      drawn[drawn.length - 1]?.map((choice) => [choice.key, choice.label]),
+    ).toEqual([
+      ["1", "Yes"],
+      ["2", "No"],
+    ]);
   });
 });
 

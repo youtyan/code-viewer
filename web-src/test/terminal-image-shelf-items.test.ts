@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { terminalText } from "../views/terminal/i18n";
 import {
   createImageShelf,
+  DEFAULT_VIEW,
   type ShelfOpenMode,
 } from "../views/terminal/image-shelf";
 import type { ShelfEntry } from "../views/terminal/image-shelf-list";
@@ -215,5 +216,38 @@ describe("動画の見本", () => {
         ),
       ].map((menuItem) => menuItem.textContent),
     ).toEqual(expected);
+  });
+});
+
+describe("the image shelf's view", () => {
+  test("builds an item per entry and marks a failed one", () => {
+    document.body.replaceChildren();
+    let items = 0;
+    let failedMarks = 0;
+    const shelf = createImageShelf(
+      {
+        getText: () => terminalText("en"),
+        isCollapsed: () => false,
+        setCollapsed: () => undefined,
+        onOpen: () => undefined,
+        onImageError: () => undefined,
+        onLocate: () => undefined,
+        onReveal: () => undefined,
+      },
+      {
+        ...DEFAULT_VIEW,
+        item: (props) => {
+          items++;
+          return DEFAULT_VIEW.item(props);
+        },
+        failedMark: () => {
+          failedMarks++;
+          return DEFAULT_VIEW.failedMark();
+        },
+      },
+    );
+    document.body.append(shelf.el);
+    shelf.render(ENTRIES);
+    expect([items, failedMarks]).toEqual([ENTRIES.length, 1]);
   });
 });
