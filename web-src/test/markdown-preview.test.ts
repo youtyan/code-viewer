@@ -170,6 +170,22 @@ describe("markdown preview", () => {
     expect(resolveMarkdownLinkTarget(currentPath, href)).toBe(null);
   });
 
+  // markdown-it 15 (linkify-it 6) はスキームの無い URL をリンクにせず、認証の
+  // 部分のある URL を `https://user` で切っていた。14 までと同じく URL 全体を
+  // リンクにする。
+  test("links URLs without a scheme and with credentials whole, as markdown-it 14 did", () => {
+    const html = renderMarkdownHtml(
+      "See www.example.com and https://user:pass@example.org/path.",
+      { path: "README.md", ref: "worktree" },
+      null,
+    );
+    const links = [...html.matchAll(/<a href="([^"]+)"/g)].map((m) => m[1]);
+    expect(links).toEqual([
+      "http://www.example.com",
+      "https://user:pass@example.org/path",
+    ]);
+  });
+
   test("marks directory and non-markdown links for in-app navigation", () => {
     const html = renderMarkdownHtml(
       [

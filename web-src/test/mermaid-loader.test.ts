@@ -23,8 +23,13 @@ const DARK_LOOK: Record<string, string> = {
   "--color-accent": "#9e87dd",
   "--font-ui": "sans-serif",
   "--project-ink": "#16121f",
+  // プロジェクトの色は並びの番号の色 (1 番目が #000001)。mermaid には読める
+  // 色の値しか渡せないので、見本も色の値にする。
   ...Object.fromEntries(
-    PROJECT_COLORS.map((color) => [`--project-${color}`, `#${color}`]),
+    PROJECT_COLORS.map((color, i) => [
+      `--project-${color}`,
+      `#${(i + 1).toString(16).padStart(6, "0")}`,
+    ]),
   ),
 };
 
@@ -37,6 +42,47 @@ function setLook(theme: "light" | "dark", look: Record<string, string>) {
 
 // MutationObserver の知らせはマイクロタスクで届く。
 const flushObservers = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+// アプリの色の名前の値には color-mix() で書いたものがある。mermaid 12 はそれを
+// 読めずに図ごと描けなかったので、塗って読み戻した実際の色にして渡す。
+describe("mermaidColor", () => {
+  const painted =
+    (rgba: readonly [number, number, number, number] | null) => () =>
+      rgba;
+
+  test.each([
+    ["a hex color goes as it is", "#0d1117", null, "#0d1117"],
+    ["rgb() goes as it is", "rgb(1, 2, 3)", null, "rgb(1, 2, 3)"],
+    [
+      "color-mix() becomes the painted color",
+      "color-mix(in srgb, #f0f6fc 20%, #0d1117)",
+      [58, 64, 71, 255] as const,
+      "#3a4047",
+    ],
+    [
+      "a see-through color keeps its alpha",
+      "color-mix(in srgb, #f0f6fc 20%, transparent)",
+      [240, 246, 252, 51] as const,
+      "rgba(240, 246, 252, 0.2)",
+    ],
+  ])("%s", async (_name, value, rgba, expected) => {
+    const { mermaidColor } = await import("../core/mermaid-loader");
+    expect(mermaidColor(value, "--sample", painted(rgba))).toBe(expected);
+  });
+
+  test("names the variable whose color cannot be read", async () => {
+    const { mermaidColor } = await import("../core/mermaid-loader");
+    expect(() =>
+      mermaidColor(
+        "color-mix(in nowhere, red, blue)",
+        "--sample",
+        painted(null),
+      ),
+    ).toThrow(
+      "Mermaid colors: --sample (color-mix(in nowhere, red, blue)) could not be turned into a color mermaid reads",
+    );
+  });
+});
 
 describe("loadMermaid", () => {
   beforeEach(() => {
@@ -69,8 +115,8 @@ describe("loadMermaid", () => {
         edgeLabelBackground: "#101018",
         clusterBkg: "#0a0a10",
         noteBkgColor: "#202030",
-        pie1: "#violet",
-        pie9: "#olive",
+        pie1: "#000001",
+        pie9: "#000009",
         pieSectionTextColor: "#16121f",
         cScaleLabel0: "#16121f",
       },

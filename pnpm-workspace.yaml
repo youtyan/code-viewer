@@ -8,3 +8,12 @@
 allowBuilds:
   better-sqlite3: false
   esbuild: true
+
+# overrides: 間接の依存の版の下限。直接の依存の更新では上がらない脆弱性を塞ぐ。
+# - vite: vitest の中で使う (テストだけ)。8.2.0〜8.2.3 に launch-editor と
+#   server.fs の脆弱性がある (pnpm audit)。範囲で書くと、ロックファイルに残った
+#   8.2.0 のまま上がらなかったので、vitest の peer の範囲 (^8) の中の直った版を
+#   名指しする。上げるときは、公開から日の浅い版を避ける設定 (minimumReleaseAge)
+#   を満たす版にする。
+overrides:
+  vite: "8.3.5"

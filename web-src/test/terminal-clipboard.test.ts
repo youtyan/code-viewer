@@ -89,11 +89,11 @@ const b64 = (text: string) => Buffer.from(text, "utf8").toString("base64");
 
 describe("parseOsc52", () => {
   test.each([
-    ["c;" + b64("hello"), { kind: "write", text: "hello" }],
+    [`c;${b64("hello")}`, { kind: "write", text: "hello" }],
     // tmux は選択を空で送る
-    [";" + b64("日本語"), { kind: "write", text: "日本語" }],
-    ["p;" + b64("x"), { kind: "write", text: "x" }],
-    ["s0;" + b64("x"), { kind: "write", text: "x" }],
+    [`;${b64("日本語")}`, { kind: "write", text: "日本語" }],
+    [`p;${b64("x")}`, { kind: "write", text: "x" }],
+    [`s0;${b64("x")}`, { kind: "write", text: "x" }],
     ["c;?", { kind: "read" }],
     [";?", { kind: "read" }],
   ] satisfies [string, Osc52Request][])("%j", (data, expected) => {

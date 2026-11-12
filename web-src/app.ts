@@ -6156,7 +6156,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const jumpToActiveOrFirstFilteredItem = () => {
       if (list.isVirtualSidebarActive()) {
         const current = list.virtualSidebarActiveIndex();
-        list.selectVirtualSidebarIndex(current >= 0 ? current : 0, {
+        list.selectVirtualSidebarIndex(Math.max(current, 0), {
           open: true,
         });
         input.blur();

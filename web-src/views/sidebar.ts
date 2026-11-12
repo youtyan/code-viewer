@@ -2184,7 +2184,7 @@ export function createSidebar(
         ),
       );
       const current = virtualSidebarActiveIndex();
-      const start = current < 0 ? 0 : current;
+      const start = Math.max(current, 0);
       const row = selectVirtualSidebarIndex(start + direction * halfPageRows);
       if (row?.file) prefetchByPath(row.file.path);
       return;
@@ -2202,7 +2202,7 @@ export function createSidebar(
       Math.floor((sidebar?.clientHeight || window.innerHeight) / 2 / rowHeight),
     );
     const current = items.findIndex((li) => li.classList.contains("active"));
-    const start = current < 0 ? 0 : current;
+    const start = Math.max(current, 0);
     const idx = Math.max(
       0,
       Math.min(items.length - 1, start + direction * halfPageRows),
