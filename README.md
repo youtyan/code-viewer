@@ -43,7 +43,7 @@ One code-viewer serves every project from one port. It listens on `127.0.0.1` on
 
 ## Quick start
 
-1. In a git repository, run:
+1. In a git repository (or any folder), run:
 
    ```sh
    npx @youtyan/code-viewer --open
@@ -191,6 +191,7 @@ Marks in the file list:
 ### Projects
 
 - Add: the **+** next to **Projects**, **Add project…** in the ⌘K box, or `code-viewer` in the folder.
+- A folder that is not a git repository can be a project too. Files, search, terminals, agents, Data, Tools and the work log work as usual; Diff, History, Worktrees, blame, file and line history and other refs are disabled with the reason shown. Run `git init` in the folder and they become available without a restart.
 - Switch: select a project in the sidebar, the project name at the top of the list column (`p`), or ⌘⇧↑ / ⌘⇧↓ (Ctrl+Shift+↑ / ↓). The page does not reload; tabs, terminals and unread marks stay.
 - The sidebar lists registered projects in use (an agent, a shell or its process running) in your order, then **Detected in tmux** (unregistered projects with agents), then **Not running** (folded).
 - A project heading shows its branch when it is not `main` / `master`, and how far it is ahead of / behind its upstream (`feature ↑2 ↓1`). It is read again when an agent there finishes a turn, when you switch to the project, and every 5 minutes.

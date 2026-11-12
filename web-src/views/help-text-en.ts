@@ -213,7 +213,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
     projects: {
       title: "Add and switch projects",
       intro:
-        "A project is a git repository listed in the left sidebar. The repository you start code-viewer in is added by itself.",
+        "A project is a folder listed in the left sidebar, usually a git repository. The folder you start code-viewer in is added by itself.",
       groups: [
         {
           title: "Add one",
@@ -255,6 +255,12 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   "Running ",
                   code("code-viewer"),
                   " in another repository's folder adds it too.",
+                ],
+                "A folder that is not a git repository can be added too. Files, search, terminals and agents work as usual.",
+                [
+                  "There, Diff, History, Worktrees, blame and file history cannot be selected and say why. Run ",
+                  code("git init"),
+                  " in the folder to use them without a restart.",
                 ],
               ],
             },
