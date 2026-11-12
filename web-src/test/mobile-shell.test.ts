@@ -12,6 +12,7 @@ import {
 } from "../core/mobile-layout";
 import type { TabListEntry } from "../views/main-tabs/main-tabs-presenter";
 import {
+  DEFAULT_VIEW,
   installMobileShell,
   type MobileShell,
   type MobileShellDeps,
@@ -73,16 +74,20 @@ function resizeTo(viewport: Viewport): void {
 function install(
   viewport: Viewport,
   extra: Partial<MobileShellDeps> = {},
+  look: typeof DEFAULT_VIEW = DEFAULT_VIEW,
 ): MobileShell {
   setViewport(viewport);
-  shell = installMobileShell({
-    getLanguage: () => language,
-    sendTerminalKey: (key) => sent.push(key),
-    focusTerminal: () => {
-      focused++;
+  shell = installMobileShell(
+    {
+      getLanguage: () => language,
+      sendTerminalKey: (key) => sent.push(key),
+      focusTerminal: () => {
+        focused++;
+      },
+      ...extra,
     },
-    ...extra,
-  });
+    look,
+  );
   return shell;
 }
 
@@ -1060,5 +1065,31 @@ describe("端末の上のピンチで文字の大きさ", () => {
       [250, 300],
     ]);
     expect({ outside, desktop: sizes }).toEqual({ outside: [], desktop: [] });
+  });
+});
+
+describe("the mobile shell's view", () => {
+  test("draws the menu button's content from the shown project", () => {
+    const shown: (string | null)[] = [];
+    const mobile = install(
+      PHONE,
+      {},
+      {
+        ...DEFAULT_VIEW,
+        menuContent: (project) => {
+          shown.push(project?.name ?? null);
+          return DEFAULT_VIEW.menuContent(project);
+        },
+      },
+    );
+    mobile.setProject({
+      name: "sample-app",
+      initials: "SA",
+      color: null,
+    } as Parameters<MobileShell["setProject"]>[0]);
+    expect(shown).toEqual([null, "sample-app"]);
+    expect(
+      document.querySelector("#mobile-nav-open .project-mark")?.textContent,
+    ).toBe("SA");
   });
 });

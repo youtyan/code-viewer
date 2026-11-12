@@ -10,10 +10,12 @@
 // 電話の段かは views/shell/workspace.ts の phoneMediaQuery (CSS の条件 PHONE_MEDIA_QUERY。
 // 外側のページと面の中では電話の段に入らない)。
 
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { html, nothing } from "lit/html.js";
 import {
   CHEVRON_DOWN_12_PATH,
   CHEVRON_LEFT_16_PATH,
-  iconSvg,
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
 } from "../core/icons";
@@ -44,8 +46,13 @@ import {
   mobileShellText,
   SOFT_KEY_CAPS,
 } from "./mobile-shell-i18n";
-import { type ProjectLook, projectMark } from "./projects/project-looks";
+import {
+  type ProjectLook,
+  projectMarkTemplate,
+} from "./projects/project-looks";
 import { phoneMediaQuery } from "./shell/workspace";
+import { iconTemplate } from "./ui/icon";
+import { templateElement, templateFragment } from "./ui/renderer";
 
 export type MobileShellDeps = {
   getLanguage(): MobileShellLang;
@@ -132,7 +139,179 @@ function requireElement(selector: string): HTMLElement {
   return found;
 }
 
-export function installMobileShell(deps: MobileShellDeps): MobileShell {
+/**
+ * 電話の段の部品の描き方。部品は既存の画面 (#app・#topbar・タブ列) の中に
+ * 置かれ、出し分けと文言は presenter が書き込むので、view は形だけを持つ。
+ */
+export type MobileShellView = {
+  menuButton: (onClick: () => void) => unknown;
+  /** 左上のボタンの中身。プロジェクトが分からない間は引き出しの絵。 */
+  menuContent: (project: ProjectLook | null) => unknown;
+  scrim: (onClick: () => void) => unknown;
+  bar: (items: Node[]) => unknown;
+  barButton: (
+    paths: string | readonly string[],
+    onClick: () => void,
+  ) => unknown;
+  agentsBadge: () => unknown;
+  wrapButton: (onClick: () => void) => unknown;
+  historyBackButton: (onClick: () => void) => unknown;
+  /** 端末の操作札。ソフトキーボードに無いキーと、⌨ の出す・しまう。 */
+  keys: (props: {
+    onKey: (key: TerminalSoftKey) => void;
+    onKeyboard: () => void;
+  }) => unknown;
+  /** 開いているタブの一覧の面。 */
+  tabsSheet: (props: {
+    refs: {
+      title: Ref<HTMLElement>;
+      close: Ref<HTMLButtonElement>;
+      list: Ref<HTMLElement>;
+    };
+    onClose: () => void;
+    onListClick: (event: Event) => void;
+  }) => unknown;
+  /** タブの一覧の中身 (プロジェクトごとのまとまり。空なら案内)。 */
+  tabGroups: (props: {
+    text: MobileShellText;
+    groups: { project: ProjectLook | null; entries: TabListEntry[] }[];
+  }) => unknown;
+};
+
+const tabsCloseIcon = () => iconTemplate(CLOSE_ICON_PATH, "mobile-tabs-x-icon");
+
+function tabRowTemplate(entry: TabListEntry, t: MobileShellText): unknown {
+  const closeLabel = t.closeTab(entry.name);
+  return html`<li
+    class=${[
+      "mobile-tabs-row",
+      entry.front ? "is-front" : "",
+      entry.preview ? "is-preview" : "",
+    ]
+      .filter(Boolean)
+      .join(" ")}
+    data-tab-id=${entry.id}
+  ><button
+      type="button"
+      class="mobile-tabs-open"
+      title=${entry.title}
+      aria-current=${entry.front ? "true" : nothing}
+    ><span class="mobile-tabs-icon">${unsafeHTML(entry.iconHtml)}</span><span
+        class="mobile-tabs-name"
+        >${entry.name}</span
+      >${
+        entry.parked
+          ? html`<span class="mobile-tabs-parked" title=${t.tabsParkedTitle}
+              >${t.tabsParked}</span
+            >`
+          : nothing
+      }</button
+    ><button
+      type="button"
+      class="mobile-tabs-x"
+      title=${closeLabel}
+      aria-label=${closeLabel}
+    >${tabsCloseIcon()}</button></li>`;
+}
+
+export const DEFAULT_VIEW: MobileShellView = {
+  // global-icon-action を付けない: その規則は display を決めるので、デスクトップで
+  // hidden にしても場所を取る (タブ列の左が 28px 広がった)。見た目は SP の節だけ。
+  menuButton: (onClick) =>
+    html`<button
+      id="mobile-nav-open"
+      type="button"
+      class="mobile-nav-button"
+      aria-controls="app-nav"
+      @click=${onClick}
+    ></button>`,
+  menuContent: (project) =>
+    project === null
+      ? iconTemplate(SIDEBAR_SHOW_16_PATHS, "mobile-nav-icon")
+      : html`${projectMarkTemplate(project, "mobile-nav-project-mark")}<span
+            class="mobile-nav-project-chevron"
+            >${iconTemplate(CHEVRON_DOWN_12_PATH, "mobile-nav-icon")}</span
+          >`,
+  scrim: (onClick) =>
+    html`<div id="mobile-scrim" class="mobile-scrim" @click=${onClick}></div>`,
+  bar: (items) => html`<nav id="mobile-bar" class="mobile-bar">${items}</nav>`,
+  barButton: (paths, onClick) =>
+    html`<button type="button" class="mobile-bar-item" @click=${onClick}
+      >${iconTemplate(paths, "mobile-bar-icon")}<span
+        class="mobile-bar-label"
+      ></span></button
+    >`,
+  agentsBadge: () =>
+    html`<span class="mobile-bar-badge" aria-hidden="true" hidden></span>`,
+  // .controls の中に置かない: その規則は display を決めるので、デスクトップで
+  // hidden にしても場所を取る。見た目は SP の節だけ。
+  wrapButton: (onClick) =>
+    html`<button type="button" class="mobile-wrap-toggle" @click=${onClick}></button>`,
+  historyBackButton: (onClick) =>
+    html`<button type="button" class="mobile-history-back" @click=${onClick}
+      >${iconTemplate(CHEVRON_LEFT_16_PATH, "mobile-history-back-icon")}</button
+    >`,
+  // 押してもフォーカスを端末から奪わない (キーボードが閉じない)。
+  keys: ({ onKey, onKeyboard }) =>
+    html`<div
+      id="mobile-keys"
+      class="mobile-keys"
+      role="toolbar"
+      @pointerdown=${(event: Event) => {
+        if ((event.target as Element).closest(".mobile-key"))
+          event.preventDefault();
+      }}
+    >${TERMINAL_SOFT_KEYS.map(
+      (key) =>
+        html`<button
+          type="button"
+          class="mobile-key"
+          data-key=${key}
+          @click=${() => onKey(key)}
+        >${SOFT_KEY_CAPS[key]}</button>`,
+    )}<button
+        type="button"
+        class="mobile-key mobile-key-keyboard"
+        @click=${onKeyboard}
+      >⌨</button></div>`,
+  tabsSheet: ({ refs, onClose, onListClick }) =>
+    html`<section
+      id="mobile-tabs"
+      class="mobile-tabs"
+      role="dialog"
+      aria-labelledby="mobile-tabs-title"
+    ><div class="mobile-tabs-head"><h2
+          class="mobile-tabs-title"
+          id="mobile-tabs-title"
+          ${ref(refs.title)}
+        ></h2><button
+          type="button"
+          class="mobile-tabs-x mobile-tabs-dismiss"
+          ${ref(refs.close)}
+          @click=${onClose}
+        >${tabsCloseIcon()}</button></div
+      ><ul class="mobile-tabs-list" ${ref(refs.list)} @click=${onListClick}></ul></section>`,
+  tabGroups: ({ text: t, groups }) =>
+    groups.length === 0
+      ? html`<li class="mobile-tabs-empty">${t.tabsEmpty}</li>`
+      : groups.map(({ project, entries }) => {
+          const name = project?.name ?? t.tabsShared;
+          return html`<li class="mobile-tabs-group"><div
+              class="mobile-tabs-group-head"
+            >${project ? projectMarkTemplate(project) : nothing}<span
+                class="mobile-tabs-group-name"
+                >${name}</span
+              ></div
+            ><ul class="mobile-tabs-group-list" aria-label=${name}>${entries.map(
+              (entry) => tabRowTemplate(entry, t),
+            )}</ul></li>`;
+        }),
+};
+
+export function installMobileShell(
+  deps: MobileShellDeps,
+  view: MobileShellView = DEFAULT_VIEW,
+): MobileShell {
   const app = requireElement("#app");
   const nav = requireElement("#app-nav");
   const lead = requireElement("#tabs-lead");
@@ -152,27 +331,16 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   /** 開く前にフォーカスがあった場所 (閉じたら戻す)。 */
   let returnFocus: HTMLElement | null = null;
 
-  const menuButton = document.createElement("button");
-  menuButton.id = "mobile-nav-open";
-  menuButton.type = "button";
-  // global-icon-action を付けない: その規則は display を決めるので、デスクトップで
-  // hidden にしても場所を取る (タブ列の左が 28px 広がった)。見た目は SP の節だけ。
-  menuButton.className = "mobile-nav-button";
-  menuButton.setAttribute("aria-controls", "app-nav");
-  menuButton.addEventListener("click", () => toggle("drawer"));
+  const menuButton = templateElement<HTMLButtonElement>(
+    view.menuButton(() => toggle("drawer")),
+  );
   lead.prepend(menuButton);
 
-  const scrim = document.createElement("div");
-  scrim.id = "mobile-scrim";
-  scrim.className = "mobile-scrim";
-  scrim.addEventListener("click", () => close());
+  const scrim = templateElement(view.scrim(() => close()));
 
   // 下端の切替の帯。電話で使う 3 場面 (エージェント・Diff とファイル・
   // プロジェクト) の入口だけを置く。画面へ移るものは既存の入口のリンクを
   // 押す (タブの開き方・URL は入口と同じ経路に任せる)。
-  const bar = document.createElement("nav");
-  bar.id = "mobile-bar";
-  bar.className = "mobile-bar";
   const barItems = {
     projects: barButton(SIDEBAR_SHOW_16_PATHS, () => toggle("drawer")),
     files: barButton(pageIconPaths("repo"), () =>
@@ -189,12 +357,9 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   barItems.projects.setAttribute("aria-controls", "app-nav");
   // 面に出すのはファイル一覧か、一覧を出す画面ではその一覧 (style.css の SP の節)。
   barItems.list.setAttribute("aria-controls", "file-list sidebar");
-  bar.append(...Object.values(barItems));
+  const bar = templateElement(view.bar(Object.values(barItems)));
   // 「エージェント」の入力待ちの件数の札 (最下段の件数と同じ数え方。app.ts が渡す)。
-  const agentsBadge = document.createElement("span");
-  agentsBadge.className = "mobile-bar-badge";
-  agentsBadge.setAttribute("aria-hidden", "true");
-  agentsBadge.hidden = true;
+  const agentsBadge = templateElement(view.agentsBadge());
   barItems.agents.append(agentsBadge);
   const pageViews: Record<MobileBarView, HTMLButtonElement> = {
     files: barItems.files,
@@ -208,147 +373,94 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   // 既定は折り返す (幅 390 では長い行を横に送って読むことになった)。印は電話の
   // 段の間だけ付ける (apply)。
   let diffWrap = true;
-  const wrapButton = document.createElement("button");
-  wrapButton.type = "button";
-  wrapButton.className = "mobile-wrap-toggle";
-  wrapButton.addEventListener("click", () => {
-    diffWrap = !diffWrap;
-    syncDiffWrap();
-  });
+  const wrapButton = templateElement<HTMLButtonElement>(
+    view.wrapButton(() => {
+      diffWrap = !diffWrap;
+      syncDiffWrap();
+    }),
+  );
   topbar.append(wrapButton);
 
   // History の選んだコミットの差分から一覧へ戻る ‹ (上の帯の左端)。差分の頭の
   // 「‹ 履歴の一覧」は差分と一緒に流れ、下まで読むと戻る所が無かった。戻り方は
   // その頭のボタン (history-view.ts の backToList) に任せる。出すのはそのボタンが
   // ある間だけ (style.css の SP の節)。
-  const historyBackButton = document.createElement("button");
-  historyBackButton.type = "button";
-  historyBackButton.className = "mobile-history-back";
-  historyBackButton.innerHTML = iconSvg("mobile-history-back-icon", [
-    CHEVRON_LEFT_16_PATH,
-  ]);
-  historyBackButton.addEventListener("click", () =>
-    requireElement("#history-commit-info .hci-back").click(),
+  const historyBackButton = templateElement<HTMLButtonElement>(
+    view.historyBackButton(() =>
+      requireElement("#history-commit-info .hci-back").click(),
+    ),
   );
   topbar.prepend(historyBackButton);
 
   // 端末の操作札。ソフトキーボードに無いキー (Esc・Ctrl+C・矢印) と、確定の
   // Enter。押してもフォーカスを端末から奪わない (キーボードが閉じない)。
-  const keys = document.createElement("div");
-  keys.id = "mobile-keys";
-  keys.className = "mobile-keys";
-  keys.setAttribute("role", "toolbar");
-  const keyButtons = TERMINAL_SOFT_KEYS.map((key) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "mobile-key";
-    button.dataset.key = key;
-    button.textContent = SOFT_KEY_CAPS[key];
-    button.addEventListener("click", () => deps.sendTerminalKey(key));
-    return button;
-  });
-  // ⌨ は出す / しまうの切替。端末に入力が向いていれば (キーボードが出ている)
-  // 外してしまい、向いていなければ端末に向けて出す。
-  const keyboardButton = document.createElement("button");
-  keyboardButton.type = "button";
-  keyboardButton.className = "mobile-key mobile-key-keyboard";
-  keyboardButton.textContent = "⌨";
-  keyboardButton.addEventListener("click", () => {
-    const typing = terminalTyping();
-    if (typing) typing.blur();
-    else deps.focusTerminal();
-    localize();
-  });
-  keys.append(...keyButtons, keyboardButton);
-  keys.addEventListener("pointerdown", (event) => {
-    if ((event.target as Element).closest(".mobile-key"))
-      event.preventDefault();
-  });
+  const keys = templateElement(
+    view.keys({
+      onKey: (key) => deps.sendTerminalKey(key),
+      // ⌨ は出す / しまうの切替。端末に入力が向いていれば (キーボードが出ている)
+      // 外してしまい、向いていなければ端末に向けて出す。
+      onKeyboard: () => {
+        const typing = terminalTyping();
+        if (typing) typing.blur();
+        else deps.focusTerminal();
+        localize();
+      },
+    }),
+  );
+  const keyButtons = [
+    ...keys.querySelectorAll<HTMLButtonElement>(".mobile-key[data-key]"),
+  ];
+  const keyboardButton = keys.querySelector<HTMLButtonElement>(
+    ".mobile-key-keyboard",
+  );
+  if (!keyboardButton)
+    throw new Error("mobile shell: the keyboard key was not drawn");
 
   // 開いているタブの一覧の面 (電話の段)。タブ列の右端の入口 (main-tabs-view.ts
   // の listButton) から開く。行を押すとそのタブを前面に出して閉じ、×でタブを
   // 閉じる (面は開いたまま)。
-  const tabsSheet = deps.tabs ? document.createElement("section") : null;
-  const tabsTitle = document.createElement("h2");
-  const tabsCloseButton = document.createElement("button");
-  const tabsList = document.createElement("ul");
+  const tabsRefs = {
+    title: createRef<HTMLElement>(),
+    close: createRef<HTMLButtonElement>(),
+    list: createRef<HTMLElement>(),
+  };
+  const tabs = deps.tabs;
+  const tabsSheet = tabs
+    ? templateElement(
+        view.tabsSheet({
+          refs: tabsRefs,
+          onClose: () => close(),
+          onListClick: (event) => {
+            const target = event.target as Element;
+            const row = target.closest<HTMLElement>(".mobile-tabs-row");
+            const id = row?.dataset.tabId;
+            if (!id) return;
+            if (target.closest(".mobile-tabs-x")) {
+              tabs.close(id);
+              return;
+            }
+            close();
+            tabs.bringToFront(id);
+          },
+        }),
+      )
+    : null;
   let stopTabsRender: (() => void) | null = null;
-  if (tabsSheet && deps.tabs) {
-    const tabs = deps.tabs;
-    tabsSheet.id = "mobile-tabs";
-    tabsSheet.className = "mobile-tabs";
-    tabsSheet.setAttribute("role", "dialog");
-    const head = document.createElement("div");
-    head.className = "mobile-tabs-head";
-    tabsTitle.className = "mobile-tabs-title";
-    tabsTitle.id = "mobile-tabs-title";
-    tabsSheet.setAttribute("aria-labelledby", tabsTitle.id);
-    tabsCloseButton.type = "button";
-    tabsCloseButton.className = "mobile-tabs-x mobile-tabs-dismiss";
-    tabsCloseButton.innerHTML = iconSvg("mobile-tabs-x-icon", CLOSE_ICON_PATH);
-    tabsCloseButton.addEventListener("click", () => close());
-    head.append(tabsTitle, tabsCloseButton);
-    tabsList.className = "mobile-tabs-list";
-    tabsSheet.append(head, tabsList);
-    tabsList.addEventListener("click", (event) => {
-      const target = event.target as Element;
-      const row = target.closest<HTMLElement>(".mobile-tabs-row");
-      const id = row?.dataset.tabId;
-      if (!id) return;
-      if (target.closest(".mobile-tabs-x")) {
-        tabs.close(id);
-        return;
-      }
-      close();
-      tabs.bringToFront(id);
-    });
+  if (tabs)
     stopTabsRender = tabs.onRender(() => {
       if (open === "tabs") renderTabs();
     });
-  }
 
   app.append(scrim, keys, bar, ...(tabsSheet ? [tabsSheet] : []));
-
-  /** タブの一覧の 1 行 (押すと前面に出す・×で閉じる)。 */
-  function tabRow(entry: TabListEntry, t: MobileShellText): HTMLLIElement {
-    const row = document.createElement("li");
-    row.className = "mobile-tabs-row";
-    row.dataset.tabId = entry.id;
-    row.classList.toggle("is-front", entry.front);
-    row.classList.toggle("is-preview", entry.preview);
-    const openButton = document.createElement("button");
-    openButton.type = "button";
-    openButton.className = "mobile-tabs-open";
-    openButton.title = entry.title;
-    if (entry.front) openButton.setAttribute("aria-current", "true");
-    const icon = document.createElement("span");
-    icon.className = "mobile-tabs-icon";
-    icon.innerHTML = entry.iconHtml;
-    const name = document.createElement("span");
-    name.className = "mobile-tabs-name";
-    name.textContent = entry.name;
-    openButton.append(icon, name);
-    if (entry.parked) {
-      const tag = document.createElement("span");
-      tag.className = "mobile-tabs-parked";
-      tag.textContent = t.tabsParked;
-      tag.title = t.tabsParkedTitle;
-      openButton.append(tag);
-    }
-    const closeButton = document.createElement("button");
-    closeButton.type = "button";
-    closeButton.className = "mobile-tabs-x";
-    closeButton.innerHTML = iconSvg("mobile-tabs-x-icon", CLOSE_ICON_PATH);
-    const closeLabel = t.closeTab(entry.name);
-    closeButton.title = closeLabel;
-    closeButton.setAttribute("aria-label", closeLabel);
-    row.append(openButton, closeButton);
-    return row;
-  }
 
   /** タブの一覧の面の中身を今のタブから組み直す (×の後も面は開いたまま)。 */
   function renderTabs(): void {
     if (!deps.tabs) return;
+    const tabsTitle = tabsRefs.title.value;
+    const tabsCloseButton = tabsRefs.close.value;
+    const tabsList = tabsRefs.list.value;
+    if (!tabsTitle || !tabsCloseButton || !tabsList)
+      throw new Error("mobile shell: the tab list was not drawn");
     const t = text();
     const entries = deps.tabs.list();
     tabsTitle.textContent = t.tabsTitle(entries.length);
@@ -363,10 +475,9 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
           )
         : -1;
     if (entries.length === 0) {
-      const empty = document.createElement("li");
-      empty.className = "mobile-tabs-empty";
-      empty.textContent = t.tabsEmpty;
-      tabsList.replaceChildren(empty);
+      tabsList.replaceChildren(
+        templateFragment(view.tabGroups({ text: t, groups: [] })),
+      );
       return;
     }
     // プロジェクトごとにまとめる (タブ列のグループと同じ)。並びは最初に出てきた
@@ -380,24 +491,15 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     groups.delete(null);
     if (shared) groups.set(null, shared);
     tabsList.replaceChildren(
-      ...[...groups.values()].map((group) => {
-        const project = group[0]?.project ?? null;
-        const item = document.createElement("li");
-        item.className = "mobile-tabs-group";
-        const head = document.createElement("div");
-        head.className = "mobile-tabs-group-head";
-        const name = document.createElement("span");
-        name.className = "mobile-tabs-group-name";
-        name.textContent = project?.name ?? t.tabsShared;
-        if (project) head.append(projectMark(project));
-        head.append(name);
-        const rows = document.createElement("ul");
-        rows.className = "mobile-tabs-group-list";
-        rows.setAttribute("aria-label", name.textContent);
-        rows.append(...group.map((entry) => tabRow(entry, t)));
-        item.append(head, rows);
-        return item;
-      }),
+      templateFragment(
+        view.tabGroups({
+          text: t,
+          groups: [...groups.values()].map((group) => ({
+            project: group[0]?.project ?? null,
+            entries: group,
+          })),
+        }),
+      ),
     );
     if (focusedRow >= 0) {
       const rows = tabsList.querySelectorAll<HTMLElement>(".mobile-tabs-open");
@@ -411,12 +513,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     paths: string | string[],
     onClick: () => void,
   ): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "mobile-bar-item";
-    button.innerHTML = `${iconSvg("mobile-bar-icon", paths)}<span class="mobile-bar-label"></span>`;
-    button.addEventListener("click", onClick);
-    return button;
+    return templateElement<HTMLButtonElement>(view.barButton(paths, onClick));
   }
 
   /** 左の面の端末に入力が向いているなら、その要素 (xterm の入力欄)。 */
@@ -500,19 +597,12 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     if (signature === menuButtonSignature) return;
     menuButtonSignature = signature;
     menuButton.classList.toggle("mobile-nav-project", project !== null);
+    menuButton.replaceChildren(templateFragment(view.menuContent(project)));
     if (!project) {
-      menuButton.innerHTML = iconSvg("mobile-nav-icon", SIDEBAR_SHOW_16_PATHS);
       menuButton.title = t.projects;
       menuButton.setAttribute("aria-label", t.projects);
       return;
     }
-    const chevron = document.createElement("span");
-    chevron.className = "mobile-nav-project-chevron";
-    chevron.innerHTML = iconSvg("mobile-nav-icon", CHEVRON_DOWN_12_PATH);
-    menuButton.replaceChildren(
-      projectMark(project, "mobile-nav-project-mark"),
-      chevron,
-    );
     const label = `${t.projects}: ${project.name}`;
     menuButton.title = label;
     menuButton.setAttribute("aria-label", label);
@@ -570,11 +660,12 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     }
     if (open === "tabs") {
       renderTabs();
+      const tabsList = tabsRefs.list.value;
       (
-        tabsList.querySelector<HTMLElement>(".is-front .mobile-tabs-open") ??
-        tabsList.querySelector<HTMLElement>(".mobile-tabs-open") ??
-        tabsCloseButton
-      ).focus({ preventScroll: true });
+        tabsList?.querySelector<HTMLElement>(".is-front .mobile-tabs-open") ??
+        tabsList?.querySelector<HTMLElement>(".mobile-tabs-open") ??
+        tabsRefs.close.value
+      )?.focus({ preventScroll: true });
     }
     if (!open && wasOpen) {
       if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
