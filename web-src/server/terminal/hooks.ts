@@ -56,6 +56,7 @@ import { shellSingleQuote } from "../cli-helpers";
 import { ROOT } from "../root";
 import { codeViewerStateDir } from "../user-state-dir";
 import {
+  backupClock,
   backupPathFor,
   commitJsonSettingsChange,
   contentHash,
@@ -493,6 +494,7 @@ export function planAgentHooks(
     writeBlocked: writeBlockedReason(path, read),
     baseHash: contentHash(read),
     fileIdentity: settingsFileIdentity(read),
+    plannedAt: now.getTime(),
   };
 }
 
@@ -541,6 +543,7 @@ function planOpencodePlugin(
     writeBlocked: pluginWriteBlocked(target, path, read),
     baseHash: contentHash(read),
     fileIdentity: settingsFileIdentity(read),
+    plannedAt: now.getTime(),
   };
 }
 
@@ -564,7 +567,8 @@ export async function applyAgentHooks(
   expected: Pick<
     AgentHookPlanResponse,
     "baseHash" | "realPath" | "fileIdentity"
-  >,
+  > &
+    Partial<Pick<AgentHookPlanResponse, "plannedAt">>,
   now: Date = new Date(),
   ops: SettingsWriteOps = DEFAULT_WRITE_OPS,
 ): Promise<AgentHookApplyResult> {
@@ -612,7 +616,7 @@ export async function applyAgentHooks(
       parse: parsePluginSource,
       ...expected,
       next: () => nextPluginText(action, launcher),
-      now,
+      now: backupClock(expected.plannedAt, now),
       ops,
       error: (code, message, cause) =>
         new AgentHookError(
@@ -638,7 +642,7 @@ export async function applyAgentHooks(
         ).next,
         text,
       ),
-    now,
+    now: backupClock(expected.plannedAt, now),
     ops,
     error: (code, message, cause) =>
       new AgentHookError(

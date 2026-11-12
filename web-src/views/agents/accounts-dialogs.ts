@@ -39,7 +39,7 @@ import type {
   AgentOverviewResponse,
   AgentPane,
 } from "../../core/agent-overview";
-import { abbreviateHome } from "../../core/agent-overview";
+import { abbreviateHome, projectOpenable } from "../../core/agent-overview";
 import { showCopyFailure } from "../../core/copy-failure";
 import { formatErrorDetail } from "../../core/error-detail";
 import { CHEVRON_DOWN_16_PATH, COPY_16_PATHS } from "../../core/icons";
@@ -1214,7 +1214,7 @@ export function createAccountDialogs(
     const serverName = root.split("/").filter(Boolean).pop() ?? root;
     if (root) out.set(root, t.currentServerProject(serverName));
     for (const project of deps.getOverview()?.projects ?? []) {
-      if (!project.git || out.has(project.root)) continue;
+      if (!projectOpenable(project) || out.has(project.root)) continue;
       out.set(
         project.root,
         `${project.name}  ${abbreviateHome(project.root, home)}`,

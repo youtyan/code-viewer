@@ -38,7 +38,9 @@ describe("node cli package metadata", () => {
       "utf8",
     );
 
-    expect(notices).toContain("\ncluster-key-slot@");
+    // サーバで束ねずに解決する依存 (pg) の、さらに中の依存。前は @redis/client
+    // の cluster-key-slot で見ていたが、@redis/client 6.3 は中の依存を持たない。
+    expect(notices).toContain("\npg-protocol@");
   });
 
   // 依存として入れずに値だけを写したもの (generate-third-party-notices.mjs の

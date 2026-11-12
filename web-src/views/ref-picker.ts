@@ -11,6 +11,7 @@ import { isImeComposing } from "../core/keyboard";
 import { TOUCH_MEDIA_QUERY } from "../core/mobile-layout";
 import type { AppRoute, DiffRange } from "../core/routes";
 import type { RefCommitResponse, RefResponse } from "../core/types";
+import { gitUnavailableReason } from "./git-unavailable";
 import { pageLanguage } from "./page-language";
 import { renderOwned, templateElement } from "./ui/renderer";
 
@@ -448,6 +449,8 @@ export function createRefPicker(
   }
 
   function openPopover(input: HTMLInputElement) {
+    // git のリポジトリでないプロジェクトには ref が無い (選ぶ欄は押せない印で出す)。
+    if (gitUnavailableReason() !== null) return;
     popTarget = input;
     popSearch.value = "";
     if (popTab === "commits") scheduleCommitSearch("");

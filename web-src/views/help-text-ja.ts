@@ -207,7 +207,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
     projects: {
       title: "プロジェクトを足す・切り替える",
       intro:
-        "プロジェクトは、左のサイドバーに並ぶ git のリポジトリです。code-viewer を起動したリポジトリは自動で加わります。",
+        "プロジェクトは、左のサイドバーに並ぶフォルダです (たいていは git のリポジトリ)。code-viewer を起動したフォルダは自動で加わります。",
       groups: [
         {
           title: "足す",
@@ -249,6 +249,12 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   "別のリポジトリのフォルダで ",
                   code("code-viewer"),
                   " を打っても加わります。",
+                ],
+                "git のリポジトリでないフォルダも足せます。ファイル・検索・ターミナル・エージェントはそのまま使えます。",
+                [
+                  "Diff・History・Worktrees・blame・ファイルの履歴は押せなくなり、理由が出ます。そのフォルダで ",
+                  code("git init"),
+                  " すると、再起動せずに使えます。",
                 ],
               ],
             },

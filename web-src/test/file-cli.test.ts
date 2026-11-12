@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
@@ -587,6 +587,48 @@ describe("runFileCli help and agent-help", () => {
     expect(io.exits).toEqual([]);
     expect(io.logs.length).toBe(1);
     expect(io.logs[0].startsWith("code-viewer file — agent guide")).toBe(true);
+  });
+});
+
+// git の外のフォルダ (git の機能だけを使えないプロジェクト): git が要るサブコマンドは
+// git の usage の全文ではなく、使えない理由と次の一手を 1 行で返す。作業ツリーの
+// ファイルを読む show は git 無しで動く。
+describe("runFileCli outside a git repository", () => {
+  let folder: string;
+  beforeAll(() => {
+    folder = realpathSync(
+      mkdtempSync(join(tmpdir(), "code-viewer-file-plain-")),
+    );
+    writeFileSync(join(folder, "notes.txt"), "alpha\nbeta\n");
+  });
+  afterAll(() => {
+    rmSync(folder, { recursive: true, force: true });
+  });
+
+  test.each([
+    ["blame", ["blame", "--path", "notes.txt"]],
+    ["history", ["history", "--path", "notes.txt"]],
+    ["diff", ["diff", "--path", "notes.txt"]],
+    ["show", ["show", "--path", "notes.txt", "--ref", "HEAD"]],
+  ])("%s says git is needed", async (name, args) => {
+    const io = captureIo();
+    await runAndCatchExit([...args, "--cwd", folder]);
+    expect({ exits: io.exits, errs: io.errs, logs: io.logs }).toEqual({
+      exits: [1],
+      errs: [
+        `code-viewer file ${name} needs git, but ${folder} is not a git repository. Run "git init" there to use it; "code-viewer file show" and "code-viewer search" read files without git.`,
+      ],
+      logs: [],
+    });
+  });
+
+  test("show of a worktree file still works", async () => {
+    const io = captureIo();
+    await runAndCatchExit(["show", "--path", "notes.txt", "--cwd", folder]);
+    expect({ exits: io.exits, logs: io.logs }).toEqual({
+      exits: [],
+      logs: ["alpha\nbeta"],
+    });
   });
 });
 

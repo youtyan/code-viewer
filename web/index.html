@@ -530,6 +530,10 @@
   <div id="doctor-sheet-overlay" class="doctor-sheet-overlay" hidden aria-hidden="true"></div>
   <aside id="doctor-sheet" class="doctor-sheet" hidden aria-hidden="true" inert aria-label="environment doctor"></aside>
   <main id="content">
+    <!-- git のリポジトリでないプロジェクトで git が要る画面を開いたときの案内
+         (views/git-unavailable.ts。出している間は body[data-git-unavailable] で
+         本文のほかの中身を隠す)。 -->
+    <div id="git-unavailable"></div>
     <section id="history-commit-info" hidden></section>
     <div id="empty" class="empty hidden">
       <div class="empty-icon" aria-hidden="true">

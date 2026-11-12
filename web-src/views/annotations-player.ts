@@ -216,7 +216,7 @@ export function createAnnotationsPlayer(
       if (state.status === "idle") {
         // Start from the annotation currently shown, when there is one.
         const activeIndex = entryIndexOf(deps.getActiveAnnotationId());
-        core.play(activeIndex >= 0 ? activeIndex : 0);
+        core.play(Math.max(activeIndex, 0));
       } else {
         core.play();
       }

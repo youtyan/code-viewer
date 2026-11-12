@@ -29,6 +29,7 @@ import {
   nestAgentPanes,
   notifyPermissionView,
   projectBranchTail,
+  projectOpenable,
 } from "../../core/agent-overview";
 import { SOFT_KEYS_MEDIA_QUERY } from "../../core/mobile-layout";
 import {
@@ -257,7 +258,7 @@ export function createAgentsSidebarPresenter(
         : info.server.status === "unreachable"
           ? current.serverProblem(info.server.detail)
           : null,
-      open: info.git
+      open: projectOpenable(info)
         ? { title: current.sidebar.openProjectTitle(info.name) }
         : null,
       menuTitle: current.projects.menuTitle(info.name),
@@ -307,7 +308,7 @@ export function createAgentsSidebarPresenter(
     if (!info) return;
     // いま見ているプロジェクトは何もしない (読み直さない)。起こしている
     // 最中の押し直しは project-actions が無視する。
-    if (info.server.status === "current" || !info.git) return;
+    if (info.server.status === "current" || !projectOpenable(info)) return;
     // 同じタブで移る。登録していなければ確かめずに登録してから移る。
     if (deps.switchProject) {
       deps.switchProject(info);

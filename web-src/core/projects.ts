@@ -362,7 +362,7 @@ export function registeredProjectInfos(
  * - navigate: 動いている。その URL へ同じタブで移る
  * - start: 登録済みで動いていない。起こしてから移る
  * - register-first: 登録していない・動いていない。起こさず、先に登録を促す
- * - unavailable: 開けない (git 管理外・確かめられない)。理由を出す
+ * - unavailable: 開けない (git の外で登録していない・確かめられない)。理由を出す
  */
 export type ProjectOpenDecision =
   | { kind: "current" }
@@ -370,6 +370,10 @@ export type ProjectOpenDecision =
   | { kind: "start" }
   | { kind: "register-first" }
   | { kind: "unavailable"; reason: string };
+
+/** git の外で、登録していない作業場所を開こうとしたときの理由。 */
+export const NOT_OPENABLE_REASON =
+  "not a git repository and not added as a project (add it from its ⋯ menu to open it)";
 
 export function decideProjectOpen(input: {
   server: AgentProjectServer;
@@ -379,8 +383,14 @@ export function decideProjectOpen(input: {
   const { server } = input;
   if (server.status === "current") return { kind: "current" };
   if (server.status === "running") return { kind: "navigate", url: server.url };
-  if (!input.git || server.status === "none") {
-    return { kind: "unavailable", reason: "not a git repository" };
+  if (!input.git && !input.registered) {
+    return { kind: "unavailable", reason: NOT_OPENABLE_REASON };
+  }
+  if (server.status === "none") {
+    return {
+      kind: "unavailable",
+      reason: "the project's process was not looked up",
+    };
   }
   if (server.status === "unreachable" || server.status === "invalid") {
     return { kind: "unavailable", reason: server.detail };

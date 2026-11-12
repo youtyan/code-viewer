@@ -77,9 +77,11 @@
      (color-themes-contrast.test.ts が 4.5:1 を見る)。
      - 選択中: 窓にフォーカスがある間は --color-select、無い間は
        --color-select-inactive (下の html[data-window-inactive])
-     - 無効: 文字と絵は --color-disabled、面は --color-disabled-surface */
+     - 無効: 文字と絵は --color-disabled、面は --color-disabled-surface。40% では
+       ダークの面で補助の文字 (--color-text-3) とほぼ同じ濃さになり、押せない
+       アイコン (git の外の Diff・History) が押せるものと見分けられなかった */
   --color-select-inactive:  color-mix(in srgb, var(--color-text) 10%, var(--color-doc));
-  --color-disabled:         color-mix(in srgb, var(--color-text) 40%, transparent);
+  --color-disabled:         color-mix(in srgb, var(--color-text) 28%, transparent);
   --color-disabled-surface: color-mix(in srgb, var(--color-text) 7%, transparent);
   --color-warning-surface:  color-mix(in srgb, var(--color-waiting) 14%, transparent);
   --color-warning-line:     color-mix(in srgb, var(--color-waiting) 45%, transparent);
@@ -4930,6 +4932,47 @@ body.gdp-diff-page #diff {
 .empty.backend-state[hidden] { display: none; }
 .backend-state .empty-icon.backend-state-spinning .octicon {
   animation: gdp-spin 0.7s linear infinite;
+}
+/* git のリポジトリでないプロジェクト (git の外のフォルダを登録したもの)。
+   git が要る画面を開いたら、本文 (#content) のほかの中身を隠して案内
+   (#git-unavailable。views/git-unavailable.ts) だけを出す。git が要る入口は
+   消さずに押せない印にする (理由は title)。無効の色は名前の層の --color-disabled。 */
+body[data-git-unavailable] #content > :not(#git-unavailable) {
+  display: none;
+}
+/* 差分の画面の道具の帯 (ref の選択・ws・syntax・Split / Unified) も git の部品なので
+   出さない。topbar を隠すページと同じく、chrome の実寸から topbar を外す。 */
+body[data-git-unavailable] {
+  --chrome-h: var(--toolbarless-chrome-h);
+}
+body[data-git-unavailable] #topbar {
+  display: none;
+}
+.view-strip-item[aria-disabled="true"],
+.view-strip-item[aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--color-disabled);
+  cursor: default;
+}
+.gdp-palette-row[aria-disabled="true"] {
+  cursor: default;
+}
+.gdp-palette-row[aria-disabled="true"] .gdp-palette-row-title,
+.gdp-palette-row[aria-disabled="true"] .gdp-palette-row-icon {
+  color: var(--color-disabled);
+}
+.ref-selector[aria-disabled="true"] {
+  color: var(--color-disabled);
+  cursor: default;
+}
+.ref-selector[aria-disabled="true"] .ref-input {
+  cursor: default;
+}
+#line-ref-pill-history:disabled,
+#line-ref-pill-history:disabled:hover {
+  background: transparent;
+  color: var(--color-disabled);
+  cursor: default;
 }
 
 /* ===== diff2html overrides ===== */
@@ -22598,6 +22641,13 @@ button.agents-account-name:hover {
   background: var(--color-raised);
   box-shadow: none;
   color: var(--color-text);
+}
+/* git のリポジトリでないプロジェクトの Blame・History のタブ (押せない。理由は title)。 */
+:is(.gdp-source-tabs, .gdp-file-detail-sticky .gdp-source-tabs) button:where([data-source-tab]):disabled,
+:is(.gdp-source-tabs, .gdp-file-detail-sticky .gdp-source-tabs) button:where([data-source-tab]):disabled:hover {
+  background: transparent;
+  color: var(--color-disabled);
+  cursor: default;
 }
 /* 行数・行へ移る欄は補助の情報。枠の付いた部品に見せず、文字の段階で下げる。 */
 .gdp-file-detail-sticky .gdp-source-line-count {

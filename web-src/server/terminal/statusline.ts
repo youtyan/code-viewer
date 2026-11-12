@@ -46,6 +46,7 @@ import { unifiedDiff } from "../../core/text-diff";
 import { shellSingleQuote } from "../cli-helpers";
 import { shellWord } from "./hooks";
 import {
+  backupClock,
   backupPathFor,
   commitJsonSettingsChange,
   contentHash,
@@ -505,6 +506,7 @@ export function planStatusLine(
     writeBlocked: writeBlockedReason(path, file),
     baseHash: contentHash(file),
     fileIdentity: settingsFileIdentity(file),
+    plannedAt: now.getTime(),
   };
 }
 
@@ -515,7 +517,8 @@ export async function applyStatusLine(
   expected: Pick<
     StatusLinePlanResponse,
     "baseHash" | "realPath" | "fileIdentity"
-  >,
+  > &
+    Partial<Pick<StatusLinePlanResponse, "plannedAt">>,
   now: Date = new Date(),
   ops: SettingsWriteOps = DEFAULT_WRITE_OPS,
 ): Promise<StatusLineApplyResponse> {
@@ -561,7 +564,7 @@ export async function applyStatusLine(
     ...expected,
     next: (root, text) =>
       serializeHookFile(planStatusLineChange(root, action, wrapper).next, text),
-    now,
+    now: backupClock(expected.plannedAt, now),
     ops,
     error: (code, message, cause) =>
       new StatusLineError(

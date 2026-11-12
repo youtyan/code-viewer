@@ -246,7 +246,7 @@ describe("the server's errors are shown as they are", () => {
   test("a refused registration keeps the dialog open with the reason", async () => {
     const register = vi.fn(async () => {
       throw new Error(
-        "POST /_agent/projects (HTTP 400): /work/sample-notes is not inside a git repository (invalid)",
+        "POST /_agent/projects (HTTP 400): /work/sample-notes is already registered (conflict)",
       );
     });
     open({ register });
@@ -258,7 +258,7 @@ describe("the server's errors are shown as they are", () => {
     const errors = getOpenDialog().querySelectorAll(".gdp-dialog-error");
     await waitFor(() => errors[errors.length - 1]?.textContent !== "");
     expect(errors[errors.length - 1]?.textContent).toBe(
-      "Error: POST /_agent/projects (HTTP 400): /work/sample-notes is not inside a git repository (invalid)",
+      "Error: POST /_agent/projects (HTTP 400): /work/sample-notes is already registered (conflict)",
     );
   });
 });

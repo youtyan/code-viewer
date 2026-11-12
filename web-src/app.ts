@@ -7,6 +7,7 @@ import {
   attentionPanes,
   headerAgentCounts,
   nextAttentionPane,
+  projectOpenable,
   titleWithUnread,
 } from "./core/agent-overview";
 import {
@@ -80,6 +81,7 @@ import {
   prepareKeyboardPanels,
   setPanelFocusScope,
 } from "./core/focus-scope";
+import { actionNeedsGit, routeNeedsGit } from "./core/git-features";
 import {
   ensureGdscriptHighlightLanguage,
   ensureTerraformHighlightLanguage,
@@ -308,6 +310,13 @@ import {
   fileRouteKeepingActiveView,
   isBlobOrBlameFileRoute,
 } from "./views/file-shell";
+import {
+  createGitUnavailable,
+  GIT_UNAVAILABLE_TEXT,
+  gitUnavailableReason,
+  markGitEntryPoints,
+  setGitRepositoryState,
+} from "./views/git-unavailable";
 import { helpLabels } from "./views/help-guides";
 import { createShortcutSettings } from "./views/help-keybinding-editor";
 import { formatKeyBinding } from "./views/help-keybindings";
@@ -1424,6 +1433,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     setProjectBranch(settings.branch || "");
     REPO_WEB_URL = settings.repo_web_url;
     SERVER_VERSION = settings.server.version;
+    setGitRepositoryState(settings.git_repository);
+    syncGitEntryPoints();
     const repoLink =
       document.querySelector<HTMLAnchorElement>("#repo-web-link");
     if (repoLink) {
@@ -1444,6 +1455,30 @@ window.GdpExpandLogic = GdpExpandLogic;
       SERVER_SCOPE_WATCH_LIMIT_MAX = settings.scope.watch_limit_max;
     if (typeof settings.scope.watch_recursive === "boolean")
       SERVER_SCOPE_WATCH_RECURSIVE = settings.scope.watch_recursive;
+  }
+
+  /**
+   * git のリポジトリでないプロジェクトで、git が要る入口を押せなくし、理由を
+   * title に出す (消さない)。画面の入口の列 (Diff・History・Worktrees) と、
+   * Files の ref の選択。ほかの入口 (タブの ＋・グループの ▾・パレット・ファイルの
+   * タブ) は開くたび・描くたびに gitUnavailableReason を読む。
+   */
+  function syncGitEntryPoints(): void {
+    markGitEntryPoints(
+      document.querySelectorAll<HTMLElement>(".view-strip-item"),
+      gitUnavailableReason(),
+    );
+    syncRepoTargetInput(repoFileTargetForControls() || "worktree");
+  }
+
+  /**
+   * キーで git が要る画面へ移ろうとした: 移らずに理由を出す (画面の入口の列や
+   * メニューの行は押せない印と title で分かるが、キーには見た目が無い)。
+   */
+  function refuseGitScreen(): boolean {
+    const text = GIT_UNAVAILABLE_TEXT[STATE.language];
+    void showAlertDialog({ title: text.title, body: text.hint });
+    return true;
   }
 
   function agentScreenRuleErrorsText(errors: AgentScreenRuleIssue[]): string {
@@ -1869,6 +1904,50 @@ window.GdpExpandLogic = GdpExpandLogic;
     worktree: "worktree-panel",
   } as const;
 
+  /** git が要る画面を git のリポジトリでないプロジェクトで開いたときの案内。 */
+  const GIT_UNAVAILABLE = createGitUnavailable({
+    host: (() => {
+      const host = document.getElementById("git-unavailable");
+      if (!host) throw new Error("#git-unavailable is missing from index.html");
+      return host;
+    })(),
+    text: () => GIT_UNAVAILABLE_TEXT[STATE.language],
+    openFiles: () => MAIN_TABS.showHome(),
+  });
+
+  /**
+   * そのプロジェクトで git が要る画面を開けない理由。いま見ているプロジェクトは
+   * 設定 (/_settings の git_repository)、ほかは一覧の答え (git のリポジトリで
+   * なく、根が在る登録したもの) で決める。分からなければ null (押せる)。
+   */
+  function gitScreensUnavailable(root: string): string | null {
+    if (root === SERVER_ROOT) return gitUnavailableReason();
+    const info = AGENT_MONITOR.snapshot().overview?.projects.find(
+      (item) => item.root === root,
+    );
+    return info && !info.git && info.registered && !info.error
+      ? GIT_UNAVAILABLE_TEXT[STATE.language].reason
+      : null;
+  }
+
+  /**
+   * 設定を取り直して、git のリポジトリかを合わせる (git init の知らせ・繋ぎ直し)。
+   * 案内で塞いでいた画面が使えるようになったら、同じ URL のまま画面を出す。
+   */
+  function refreshGitRepositoryState(): void {
+    const wasBlocked = gitBlockedRoute();
+    loadSettings().then(
+      () => {
+        if (wasBlocked && !gitBlockedRoute()) applyRouteFromLocation();
+      },
+      (error: unknown) =>
+        reportPersistenceError(
+          "read whether this project is a git repository",
+          error,
+        ),
+    );
+  }
+
   const MAIN_TABS = createMainTabsPresenter({
     // 電話の段のタブ列の右端の「開いているタブ」(MOBILE_SHELL は後で作る)。
     onTabList: () => MOBILE_SHELL.openTabs(),
@@ -1965,12 +2044,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       return {
         // 開けないときも押せるようにする (openShellIn が理由と入れ直し方を出す)。
         shellUnavailable: null,
-        git:
-          AGENT_MONITOR.snapshot().overview?.projects.find(
+        openable: (() => {
+          const info = AGENT_MONITOR.snapshot().overview?.projects.find(
             (item) => item.root === root,
-          )?.git ?? null,
+          );
+          return info ? projectOpenable(info) : null;
+        })(),
       };
     },
+    gitUnavailable: (root) => gitScreensUnavailable(root),
     // 別のプロジェクトのファイルを /p/<鍵> から読めるのは入口のサーバの下だけ。
     foreignInPlace: () => projectKey() !== null,
     backupSaved: () =>
@@ -2168,6 +2250,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     githubOpenTitle: () => uiText().global.githubSelectionOpen,
     githubCopyTitle: () => uiText().global.githubSelectionCopy,
     lineHistoryTitle: () => uiText().global.lineHistory,
+    lineHistoryUnavailable: () => gitUnavailableReason(),
     openLineHistory: (path, start, end) => {
       const route = STATE.route;
       const ref =
@@ -3479,6 +3562,9 @@ window.GdpExpandLogic = GdpExpandLogic;
             CHROME_VIEW.icon(pageIconPaths(route), "view-strip-icon"),
           );
       });
+    // 押せない入口の理由も今の言語で書き直す (title を名前で上書きした後に)。
+    syncGitEntryPoints();
+    GIT_UNAVAILABLE.localize();
     MAIN_TABS.localize();
     for (const view of Object.values(IMAGE_VIEWS))
       view?.setLanguage(STATE.language);
@@ -4650,6 +4736,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     route: Extract<AppRoute, { screen: "file" }>,
     options: { refresh?: boolean } = {},
   ): boolean {
+    if (gitBlockedRoute(route)) {
+      showGitUnavailablePage();
+      return true;
+    }
     if (route.view === "blob") {
       setStatus("live");
       removeFileHistoryShell();
@@ -4807,7 +4897,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     STATE.route = nextRoute;
     STATE.from = nextRoute.range.from;
     STATE.to = nextRoute.range.to;
-    if (
+    // git のリポジトリでないプロジェクトの ref は作業ツリーだけ (ファイル一覧を
+    // 別の ref で読まない)。
+    if (gitBlockedRoute(nextRoute)) STATE.repoRef = "worktree";
+    else if (
       nextRoute.screen === "repo" ||
       (nextRoute.screen === "file" &&
         (nextRoute.view === "blob" ||
@@ -4843,6 +4936,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         routeBlobPreview(nextRoute) ? "preview" : "code",
         { updateRoute: false },
       );
+    }
+    if (gitBlockedRoute(nextRoute)) {
+      showGitUnavailablePage();
+      return;
     }
     if (shouldDispatchFileRouteAfterSetRoute(previousRoute, nextRoute)) {
       dispatchFileRoute(nextRoute);
@@ -4896,9 +4993,37 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
   }
 
+  /**
+   * いまの route が git を要るのに、このプロジェクトが git のリポジトリでないか
+   * (core/git-features.ts)。そのときは画面に入らず、本文に理由の案内を出す
+   * (showGitUnavailablePage)。
+   */
+  function gitBlockedRoute(route: AppRoute = STATE.route): boolean {
+    return routeNeedsGit(route) && gitUnavailableReason() !== null;
+  }
+
+  /**
+   * git が要る画面を git のリポジトリでないプロジェクトで開いた (URL・読み戻した
+   * タブ)。画面に入らず (取得を始めない)、画面の印も付けない (一覧の列に履歴・
+   * 作業ツリーの一覧を出さない)。本文には理由と、フォルダ表示へ戻るボタン。
+   */
+  function showGitUnavailablePage(): void {
+    cancelActiveSourceLoad("navigation");
+    removeFileHistoryShell();
+    BLAME_VIEW.removeBlamePage();
+    removeStandaloneSource();
+    setPageMode();
+    GIT_UNAVAILABLE.show();
+    setStatus("live");
+  }
+
   function setPageMode() {
-    const historyPanelRoute = STATE.route.screen === "history";
+    const blocked = gitBlockedRoute();
+    // 印を付けない画面に入るので、案内を出すとき以外は畳む。
+    if (!blocked) GIT_UNAVAILABLE.hide();
+    const historyPanelRoute = !blocked && STATE.route.screen === "history";
     const fileRepoBlobRoute =
+      !blocked &&
       STATE.route.screen === "file" &&
       (STATE.route.view === "blob" ||
         STATE.route.view === "blame" ||
@@ -4915,12 +5040,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       !!STATE.route.source &&
       SOURCE_VIEW.sourceTargetFromRoute() !== null;
     // 画面の印 (core/page-mode.ts。index.html の早いスクリプトも同じ印を付ける)。
-    const pageMode = pageModeClasses(STATE.route, hostedSourceOpen);
+    const pageMode: ReadonlySet<string> = blocked
+      ? new Set()
+      : pageModeClasses(STATE.route, hostedSourceOpen);
     for (const name of PAGE_MODE_CLASSES)
       document.body.classList.toggle(name, pageMode.has(name));
     // 作業ツリーの一覧だけの表示かも同じときに route から (外すのは worktree-view.ts
     // が画面を離れるとき)。
-    if (STATE.route.screen === "worktree")
+    if (blocked) document.body.removeAttribute("data-worktree-overview");
+    else if (STATE.route.screen === "worktree")
       document.body.toggleAttribute(
         "data-worktree-overview",
         worktreeOverview(STATE.route),
@@ -6156,7 +6284,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const jumpToActiveOrFirstFilteredItem = () => {
       if (list.isVirtualSidebarActive()) {
         const current = list.virtualSidebarActiveIndex();
-        list.selectVirtualSidebarIndex(current >= 0 ? current : 0, {
+        list.selectVirtualSidebarIndex(Math.max(current, 0), {
           open: true,
         });
         input.blur();
@@ -6458,6 +6586,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     if (action === "next-hunk" || action === "previous-hunk")
       return DIFF_VIEW.scrollToAdjacentHunk(action === "next-hunk" ? 1 : -1);
+    if (actionNeedsGit(action) && gitUnavailableReason() !== null)
+      return refuseGitScreen();
     if (action === "goto-diff") {
       navigateToPageTab({ screen: "diff", range: currentRange() });
       return true;
@@ -6838,6 +6968,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   function load(
     options: { force?: boolean; changedPaths?: Set<string> | null } = {},
   ): Promise<RenderResult | null> {
+    if (gitBlockedRoute()) {
+      showGitUnavailablePage();
+      return Promise.resolve(null);
+    }
     if (STATE.route.screen === "help" || STATE.route.screen === "settings") {
       setStatus("live");
       if (STATE.route.screen === "help") renderHelpPage();
@@ -7040,7 +7174,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     // しても URL の ?terminal= で止めたままにしない。失敗は finally の先の拒否として
     // 今までどおり外へ出る (ここで受けない)。
     void restoring.finally(endTabRestore);
-    if (STATE.route.screen === "help") {
+    // git が要る画面を git のリポジトリでないプロジェクトで開いた (URL・読み戻し)。
+    // 画面に入らず案内を出す (画面を切り替えるときの入口と同じ。最初の読み込みの
+    // 入口にだけ無く、履歴と作業ツリーの画面がそのまま出ていた)。
+    if (gitBlockedRoute()) {
+      showGitUnavailablePage();
+    } else if (STATE.route.screen === "help") {
       setStatus("live");
       renderHelpPage();
     } else if (STATE.route.screen === "settings") {
@@ -9666,8 +9805,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
     }
     const bindings = shownKeyBindings();
+    const gitReason = gitUnavailableReason();
     for (const action of PALETTE_ACTIONS) {
       const binding = bindings.find((item) => item.action === action.keymap);
+      const gitBlocked = gitReason !== null && actionNeedsGit(action.keymap);
       commands.push({
         group: "actions",
         id: `action:${action.id}`,
@@ -9675,6 +9816,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         icon: CHROME_VIEW.icon(action.icon, "gdp-palette-icon"),
         shortcut: binding ? formatKeyBinding(binding) : "",
         suggested: action.suggested,
+        ...(gitBlocked ? { disabledReason: gitReason } : {}),
         run: () => {
           dispatchKeymapAction(action.keymap, "global", false, null);
         },
@@ -10557,7 +10699,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     STATE.from = STATE.route.range.from;
     STATE.to = STATE.route.range.to;
     ensureSyntaxHighlighterForRoute();
-    if (
+    if (gitBlockedRoute()) STATE.repoRef = "worktree";
+    else if (
       STATE.route.screen === "repo" ||
       (STATE.route.screen === "file" &&
         (STATE.route.view === "blob" ||
@@ -10582,6 +10725,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       )
     ) {
       setStatus("live");
+      return;
+    }
+    if (gitBlockedRoute()) {
+      showGitUnavailablePage();
       return;
     }
     if (STATE.route.screen === "help" || STATE.route.screen === "settings") {
@@ -10724,6 +10871,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       // hijacking them would push their pathname onto the local origin.
       if (link.target === "_blank") return;
       link.addEventListener("click", (e) => {
+        // 押せない入口 (git のリポジトリでないプロジェクトの Diff など)。理由は
+        // title に出ている。新しいタブで開く操作も通さない。
+        if (link.getAttribute("aria-disabled") === "true") {
+          e.preventDefault();
+          return;
+        }
         if (isNativeLinkClick(e)) return;
         e.preventDefault();
         if (leavePaneViewFirst(() => link.click())) return;
@@ -11246,12 +11399,18 @@ window.GdpExpandLogic = GdpExpandLogic;
           );
         }
       }
-      if (isHistoryPanelRoute(STATE.route)) HISTORY_VIEW.notePossibleUpdate();
-      // 作業ツリー一覧は変更数を出しているので、ファイルが動いたら引き直す。
-      // 専用イベントは無い (watcher が見ているのはこのサーバの作業ツリーだけ)。
-      if (STATE.route.screen === "worktree") WORKTREE_VIEW?.handleSse();
+      // git が要る画面を案内で塞いでいる間は、その画面に入っていない。
+      if (!gitBlockedRoute()) {
+        if (isHistoryPanelRoute(STATE.route)) HISTORY_VIEW.notePossibleUpdate();
+        // 作業ツリー一覧は変更数を出しているので、ファイルが動いたら引き直す。
+        // 専用イベントは無い (watcher が見ているのはこのサーバの作業ツリーだけ)。
+        if (STATE.route.screen === "worktree") WORKTREE_VIEW?.handleSse();
+      }
       scheduleSseLoad(paths);
     });
+    // git の外のフォルダで git init された (裏が .git の出現を見て知らせる)。
+    // 設定を取り直して git の入口を押せるようにし、案内で塞いでいた画面を出す。
+    es.addEventListener("git-state", () => refreshGitRepositoryState());
     es.addEventListener("watch-limit", (event) => {
       const raw = (event as MessageEvent).data;
       const limit = Number(raw);
@@ -11487,6 +11646,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function catchUpMissedChanges(reason: CatchUpReason) {
     if (!catchUpGate(reason)) return;
+    // 繋がっていない間に git init されたかもしれない (git-state の通知を逃した)。
+    if (gitUnavailableReason() !== null) refreshGitRepositoryState();
     const historyWorktreeSelected = HISTORY_VIEW.isWorktreeSelected();
     const kind = catchUpKind(STATE.route, { historyWorktreeSelected });
     // 本文を読み直さない画面でも、ファイル一覧は scheduleSseLoad が合わせる。

@@ -782,8 +782,15 @@ async function handleHooksApplyPost(req: Request): Promise<Response> {
   if (!body || typeof body !== "object") {
     return textError("invalid hook request", 400);
   }
-  const { agent, action, baseHash, realPath, fileIdentity, launcherOnly } =
-    body as Record<string, unknown>;
+  const {
+    agent,
+    action,
+    baseHash,
+    realPath,
+    fileIdentity,
+    launcherOnly,
+    plannedAt,
+  } = body as Record<string, unknown>;
   if (!isHookAgent(agent)) return textError("invalid agent", 400);
   if (!isHookAction(action)) return textError("invalid action", 400);
   if (launcherOnly !== undefined && typeof launcherOnly !== "boolean") {
@@ -819,6 +826,8 @@ async function handleHooksApplyPost(req: Request): Promise<Response> {
         baseHash,
         realPath,
         fileIdentity,
+        // 確認の画面で見せたバックアップの名前で書く (backupClock)。
+        ...(typeof plannedAt === "number" ? { plannedAt } : {}),
       }),
     );
   } catch (error) {

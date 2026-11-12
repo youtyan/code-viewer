@@ -170,6 +170,22 @@ describe("markdown preview", () => {
     expect(resolveMarkdownLinkTarget(currentPath, href)).toBe(null);
   });
 
+  // markdown-it 15 (linkify-it 6) はスキームの無い URL をリンクにせず、認証の
+  // 部分のある URL を `https://user` で切っていた。14 までと同じく URL 全体を
+  // リンクにする。
+  test("links URLs without a scheme and with credentials whole, as markdown-it 14 did", () => {
+    const html = renderMarkdownHtml(
+      "See www.example.com and https://user:pass@example.org/path.",
+      { path: "README.md", ref: "worktree" },
+      null,
+    );
+    const links = [...html.matchAll(/<a href="([^"]+)"/g)].map((m) => m[1]);
+    expect(links).toEqual([
+      "http://www.example.com",
+      "https://user:pass@example.org/path",
+    ]);
+  });
+
   test("marks directory and non-markdown links for in-app navigation", () => {
     const html = renderMarkdownHtml(
       [
@@ -396,6 +412,23 @@ describe("markdown preview", () => {
     expect(markdownSlugify("Hello World!")).toBe("hello-world");
     expect(markdownSlugify("日本語 見出し")).toBe("日本語-見出し");
     expect(markdownSlugify("***")).toBe("section");
+  });
+
+  // mermaid 12 が中に持つ ELK の並べ方 (4MB あまり) はバンドルに入れず、図は
+  // dagre で描く。図が `layout: elk` を名指ししたときは理由を出して描き損じる。
+  test("the mermaid bundle replaces the ELK layout with a stub that says why", async () => {
+    const { WEB_BUNDLES } = await import("../../scripts/bundles.mjs");
+    const mermaidBundle = WEB_BUNDLES.find(
+      (bundle: { outfile: string }) => bundle.outfile === "web/mermaid.js",
+    );
+    expect(mermaidBundle?.alias).toEqual({
+      "elkjs/lib/elk.bundled.js": "./web-src/mermaid-elk-unavailable.ts",
+    });
+    const { default: Elk } = await import("../mermaid-elk-unavailable");
+    expect(() => new Elk()).toThrow(
+      "The ELK layout is not included in code-viewer",
+    );
+    expect(mermaidLoader.includes('layout: "dagre"')).toBe(true);
   });
 
   test("mermaid is built as a lazy standalone asset and served by the preview server", () => {

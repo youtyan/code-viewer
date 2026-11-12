@@ -41,6 +41,7 @@ import {
   matchesStateFilter,
   nestAgentPanes,
   notifyPermissionView,
+  projectOpenable,
 } from "../../core/agent-overview";
 import { formatErrorDetail } from "../../core/error-detail";
 import { PLUS_16_PATH } from "../../core/icons";
@@ -318,7 +319,7 @@ export function createAgentsPresenter(
       };
     if (server.status === "unreachable" || server.status === "invalid")
       return { kind: "problem", title: current.serverProblem(server.detail) };
-    if (!info.git) return null;
+    if (!projectOpenable(info)) return null;
     return {
       kind: "open",
       text: current.openServer,
@@ -373,7 +374,7 @@ export function createAgentsPresenter(
       // 失敗は隠さない (hover を待たずに常に出す)。
       error: group.info.error ? current.projectError(group.info.error) : null,
       server: serverProps(group),
-      launchTitle: group.info.git
+      launchTitle: projectOpenable(group.info)
         ? current.accounts.launchProjectTitle(group.info.name)
         : null,
       menuTitle: current.projects.menuTitle(group.info.name),

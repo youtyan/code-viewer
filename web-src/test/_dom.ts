@@ -16,6 +16,20 @@ import { afterAll } from "vitest";
 if (!GlobalRegistrator.isRegistered)
   GlobalRegistrator.register({ url: "http://localhost/" });
 
+// happy-dom の Response には bytes() が無い (21.0.4 でも)。shiki 4.6 は
+// WebAssembly を `new Response(...).bytes()` で読むので、色付けを描くテストが
+// 読み込みの時点で落ちた。本物のブラウザ (Chrome 132・Safari 18・Firefox 128
+// 以降) と Node の Response には bytes() があるので、テストの DOM にだけ足す。
+if (typeof Response.prototype.bytes !== "function") {
+  Object.defineProperty(Response.prototype, "bytes", {
+    configurable: true,
+    writable: true,
+    value: async function bytes(this: Response): Promise<Uint8Array> {
+      return new Uint8Array(await this.arrayBuffer());
+    },
+  });
+}
+
 afterAll(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

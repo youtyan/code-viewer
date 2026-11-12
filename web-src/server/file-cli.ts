@@ -13,6 +13,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import {
+  notGitRepositoryReason,
   resolveRepoRoot,
   takeGlobalCliOption,
   takeValue,
@@ -1078,6 +1079,15 @@ export async function runFileCli(argv: string[]): Promise<void> {
     process.exit(1);
   }
   const root = resolveRepoRoot(cwd);
+  // show は作業ツリーのファイルなら git を使わない。ほかは git が要る。
+  const needsGit = command.kind !== "show" || command.ref !== "worktree";
+  const notGit = needsGit
+    ? notGitRepositoryReason(root, `file ${command.kind}`)
+    : null;
+  if (notGit) {
+    console.error(notGit);
+    process.exit(1);
+  }
   if (command.kind === "blame") return runBlame(root, command);
   if (command.kind === "history") return runHistory(root, command);
   if (command.kind === "show") return runShow(root, command);

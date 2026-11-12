@@ -1,6 +1,8 @@
-import MarkdownIt from "markdown-it";
-import type Renderer from "markdown-it/lib/renderer.mjs";
-import type Token from "markdown-it/lib/token.mjs";
+import markdownit, {
+  type MarkdownIt,
+  type Renderer,
+  type Token,
+} from "markdown-it";
 import markdownItAnchor from "markdown-it-anchor";
 import markdownItFootnote from "markdown-it-footnote";
 import { DEFAULT_VIEW as VIEW } from "../views/markdown-preview-view";
@@ -233,7 +235,7 @@ function createMarkdownIt(
   signal?: AbortSignal,
   resolveAssetUrl?: (path: string, rawSrc: string) => string | null,
 ): MarkdownIt {
-  const md = new MarkdownIt({
+  const md = new markdownit({
     html: false,
     linkify: true,
     typographer: true,
@@ -264,6 +266,11 @@ function createMarkdownIt(
       return `<pre><code>${md.utils.escapeHtml(code)}</code></pre>`;
     },
   });
+  // markdown-it 15 (linkify-it 6) は、スキームの無い URL (www.example.com・
+  // example.com/path) と、認証の部分 (user:pass@) のある URL を既定で扱わなく
+  // なった。前者はリンクにならず、後者は `https://user` で切れた別の行き先の
+  // リンクになった。14 までと同じく、どちらも URL 全体をリンクにする。
+  md.linkify.set({ fuzzyLink: true, urlAuth: true });
   md.use(markdownItAnchor, {
     level: [1, 2, 3, 4, 5, 6],
     slugify: markdownSlugify,
@@ -874,7 +881,7 @@ function markdownAnchorOffset(): number {
       if (style.display === "none" || style.visibility === "hidden") return 0;
       const rect = element.getBoundingClientRect();
       if (rect.height <= 0) return 0;
-      return rect.bottom > 0 ? rect.bottom : 0;
+      return Math.max(rect.bottom, 0);
     })
     .filter((bottom) => Number.isFinite(bottom));
   return Math.max(0, ...bottoms);

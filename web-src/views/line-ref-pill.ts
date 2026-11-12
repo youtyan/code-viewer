@@ -54,6 +54,11 @@ export type LineRefPillDeps = {
   // (git log -L). Optional so hosts without history (e.g. tests) can omit it.
   lineHistoryTitle?: () => string;
   openLineHistory?: (path: string, start: number, end: number) => void;
+  /**
+   * 行の履歴を押せない理由 (git のリポジトリでないプロジェクト)。押せるなら
+   * null。押せないときもボタンは出して、理由を title に出す。
+   */
+  lineHistoryUnavailable?: () => string | null;
 };
 
 /** 札のコピーの絵 (14px。札の文字に合わせて小さく描く)。 */
@@ -162,7 +167,12 @@ export type LineRefPillProps = {
     copied: boolean;
     onCopy(event: MouseEvent): void;
   } | null;
-  history: { title: string; onClick(): void } | null;
+  history: {
+    title: string;
+    /** 押せない理由 (押せるなら null)。 */
+    disabledReason: string | null;
+    onClick(): void;
+  } | null;
   onClose(): void;
 };
 
@@ -216,7 +226,8 @@ export const DEFAULT_VIEW: LineRefPillView = (props) => {
       id="line-ref-pill-history"
       type="button"
       ?hidden=${!props.history}
-      title=${props.history?.title ?? nothing}
+      ?disabled=${!!props.history?.disabledReason}
+      title=${props.history?.disabledReason ?? props.history?.title ?? nothing}
       aria-label=${props.history?.title ?? nothing}
       @click=${() => props.history?.onClick()}
     >${iconTemplate(GIT_BRANCH_16_PATH, "octicon-git-branch")}<span
@@ -385,8 +396,10 @@ export function createLineRefPill(
       history: deps.openLineHistory
         ? {
             title: deps.lineHistoryTitle?.() ?? "Line history",
+            disabledReason: deps.lineHistoryUnavailable?.() ?? null,
             onClick: () => {
               if (!currentPath || !deps.openLineHistory) return;
+              if (deps.lineHistoryUnavailable?.()) return;
               deps.openLineHistory(currentPath, currentStart, currentEnd);
             },
           }

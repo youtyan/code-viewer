@@ -67,6 +67,7 @@ const PLAN: AgentHookPlanResponse = {
   writeBlocked: "",
   baseHash: "0".repeat(64),
   fileIdentity: "sample",
+  plannedAt: 1,
 };
 
 function setup() {

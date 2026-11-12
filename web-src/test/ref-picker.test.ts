@@ -2,6 +2,7 @@ import "./_dom";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 import type { AppRoute } from "../core/routes";
+import { setGitRepositoryState } from "../views/git-unavailable";
 import {
   createRefPicker,
   DEFAULT_VIEW,
@@ -105,6 +106,37 @@ describe("repository ref picker", () => {
 
       expect(requestedUrls).toEqual(["/_refs"]);
     } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  // git のリポジトリでないプロジェクトには ref が無い。選ぶ欄を押しても小窓を
+  // 開かず、枝・コミットも読みに行かない (欄は押せない印で出る。repo-view.ts)。
+  test("does not open outside a git repository", () => {
+    installRefPickerDom();
+    const originalFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    globalThis.fetch = ((input: string | URL | Request) => {
+      requestedUrls.push(String(input));
+      return Promise.reject(new Error("no request is expected"));
+    }) as typeof fetch;
+    setGitRepositoryState("outside");
+    try {
+      const { picker } = createPickerForRoute({
+        screen: "repo",
+        ref: "worktree",
+        path: "",
+        range: { from: "HEAD", to: "worktree" },
+      });
+      const input = document.querySelector<HTMLInputElement>("#repo-target");
+      if (!input) throw new Error("missing repo target");
+      picker.openPopover(input);
+      expect({
+        hidden: document.querySelector<HTMLElement>("#ref-popover")?.hidden,
+        requestedUrls,
+      }).toEqual({ hidden: true, requestedUrls: [] });
+    } finally {
+      setGitRepositoryState("unknown");
       globalThis.fetch = originalFetch;
     }
   });

@@ -39,7 +39,7 @@ export function showProjectMenu(
     items.push({
       label: t.register,
       title: t.registerTitle,
-      disabled: !info.git,
+      // git の外のフォルダも登録できる (git の機能だけが使えないプロジェクトになる)。
       onSelect: () => void actions.registerRoot(info.root),
     });
   } else {

@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.6/schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -11,6 +11,13 @@
   "formatter": {
     "enabled": true,
     "indentStyle": "space"
+  },
+  // biome 2.6 から Markdown も整形・検査するようになった。文書 (README・
+  // スキル・参照の資料) の表は日本語の幅で揃えておらず、整形すると全部の表の
+  // 行が書き換わる。2.5 までと同じく Markdown は対象にしない。
+  "markdown": {
+    "formatter": { "enabled": false },
+    "linter": { "enabled": false }
   },
   "linter": {
     "enabled": true,

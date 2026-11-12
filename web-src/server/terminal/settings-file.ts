@@ -259,6 +259,23 @@ export function backupPathFor(path: string, now: Date): string {
   return join(dirname(path), `${basename(path)}.code-viewer-backup-${stamp}`);
 }
 
+/**
+ * バックアップの名前に使う時刻。確認の画面を作った時刻 (計画の plannedAt) が
+ * 渡されればそれ、無い・おかしければ今。書く時刻で付け直すと、確認の画面を
+ * 開いてから押すまでの間に名前が変わり、確認の画面で見せた場所に
+ * バックアップが無かった (同じ名前が既にあれば writeBackupUnique が -2 を付ける)。
+ */
+export function backupClock(plannedAt: unknown, now: Date): Date {
+  if (
+    typeof plannedAt === "number" &&
+    Number.isInteger(plannedAt) &&
+    plannedAt > 0 &&
+    plannedAt <= now.getTime()
+  )
+    return new Date(plannedAt);
+  return now;
+}
+
 export type SettingsWriteOps = {
   /**
    * source (書き換える実体) をバイト列のまま path に写す。既にあれば失敗

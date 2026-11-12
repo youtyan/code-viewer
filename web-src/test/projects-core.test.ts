@@ -18,6 +18,7 @@ import {
   emptyProjectRegistry,
   matchesProjectQuery,
   moveProject,
+  NOT_OPENABLE_REASON,
   type ProjectRegistry,
   parseProjectRegistry,
   placeProject,
@@ -484,11 +485,29 @@ describe("decideProjectOpen / canStopProjectServer", () => {
       { kind: "register-first" },
     ],
     [
-      "outside git",
+      "outside git and not registered",
       { status: "none" },
+      false,
+      false,
+      { kind: "unavailable", reason: NOT_OPENABLE_REASON },
+    ],
+    // git の外のフォルダも登録すれば開ける (起こしてから移る)。
+    [
+      "outside git and registered, stopped",
+      { status: "absent" },
       true,
       false,
-      { kind: "unavailable", reason: "not a git repository" },
+      { kind: "start" },
+    ],
+    [
+      "a project whose process was not looked up",
+      { status: "none" },
+      true,
+      true,
+      {
+        kind: "unavailable",
+        reason: "the project's process was not looked up",
+      },
     ],
     [
       "registry entry not answering",

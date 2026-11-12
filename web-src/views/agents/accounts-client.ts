@@ -407,6 +407,7 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
           baseHash: plan.baseHash,
           realPath: plan.realPath,
           fileIdentity: plan.fileIdentity,
+          plannedAt: plan.plannedAt,
         },
         "change the statusLine",
       );

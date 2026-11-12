@@ -1,6 +1,6 @@
 {
   "name": "@youtyan/code-viewer",
-  "version": "0.35.0",
+  "version": "0.36.0",
   "description": "Local browser-based code and git diff viewer",
   "type": "module",
   "bin": {
@@ -65,41 +65,40 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
-    "@happy-dom/global-registrator": "^20.14.5",
-    "@types/better-sqlite3": "^7.6.13",
+    "@biomejs/biome": "2.6.6",
+    "@happy-dom/global-registrator": "^21.0.4",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/d3-dsv": "3.0.7",
-    "@types/markdown-it": "14.1.2",
     "@types/pg": "8.23.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
-    "d3-dsv": "3.0.1",
+    "d3-dsv": "3.0.2",
     "esbuild": "^0.28.2",
     "highlight.js": "11.12.0",
-    "jose": "^6.2.12",
-    "lit": "3.3.1",
-    "markdown-it": "14.3.1",
-    "markdown-it-anchor": "9.2.0",
+    "jose": "^6.2.16",
+    "lit": "3.3.3",
+    "markdown-it": "15.0.3",
+    "markdown-it-anchor": "10.1.0",
     "markdown-it-footnote": "4.0.0",
-    "mermaid": "11.16.1",
-    "shiki": "4.4.3",
+    "mermaid": "12.3.0",
+    "shiki": "4.6.0",
     "tsx": "^4.23.15",
     "typescript": "7.0.2",
-    "vitest": "^5.0.2",
+    "vitest": "^5.1.0",
     "yaml": "2.9.1"
   },
   "optionalDependencies": {
-    "@lydell/node-pty": "^1.2.0-beta.14",
-    "better-sqlite3": "13.0.2"
+    "@lydell/node-pty": "^1.2.0-beta.18",
+    "better-sqlite3": "13.0.3"
   },
   "packageManager": "pnpm@10.34.0",
   "engines": {
     "node": ">=22.14.0"
   },
   "dependencies": {
-    "@redis/client": "6.2.1",
-    "mysql2": "3.24.4",
-    "pg": "8.23.0"
+    "@redis/client": "6.3.1",
+    "mysql2": "3.24.6",
+    "pg": "8.23.1"
   }
 }

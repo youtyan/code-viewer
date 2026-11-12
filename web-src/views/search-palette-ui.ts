@@ -91,6 +91,11 @@ export type PaletteCommand = {
   shortcut?: string;
   /** 検索欄が空のときにも出す (最近のプロジェクト・エージェント・セッション、よく使う操作)。 */
   suggested: boolean;
+  /**
+   * 押せない理由 (git のリポジトリでないプロジェクトの Diff など)。行は消さずに
+   * 押せない印で出し、理由を補足の欄と title に出す。選んでも閉じず、何もしない。
+   */
+  disabledReason?: string;
   run(): void;
 };
 
@@ -538,6 +543,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
         status: item.command.status || null,
         statusTone: item.command.statusTone,
         shortcut: item.command.shortcut || null,
+        disabledReason: item.command.disabledReason || null,
       };
     if (item.kind === "file")
       return {
@@ -1414,6 +1420,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     const item = state.items[state.selected];
     if (!item || state.opening) return;
     if (item.kind === "command") {
+      if (item.command.disabledReason) return;
       closeSearchPalette();
       if (item.command.group === "actions")
         deps.recentActions?.note(item.command.id);

@@ -35,6 +35,7 @@ import type {
   FileMeta,
   FileRangeResponse,
   FileSearchListResponse,
+  GitRepositoryState,
   RepoTreeResponse,
   SettingsResponse,
   UndoActionResponse,
@@ -256,7 +257,6 @@ let lastEntryOwnerFailure = "";
 // 状態で、従来どおり git を叩いてその失敗を表に出す (握り潰さない)。
 // "outside" だけが「git を呼んでも失敗すると分かっている」状態で、diff と
 // tmux ペイン一覧の worktree 絞り込みはこれを見て git を呼ばない。
-type GitRepositoryState = "inside" | "outside" | "unknown";
 let gitRepositoryState: GitRepositoryState = "unknown";
 // 最後に判定したときの <cwd>/.git の stat 署名。同じ署名のままなら再判定しない。
 let probedGitDirSignature: string | null = null;
@@ -563,10 +563,21 @@ function currentGitRepositoryState(): GitRepositoryState {
   }
   probedGitDirSignature = signature;
   gitRepositoryState = classifyGitRepository(git.repoRootResult(cwd));
-  // 管理外として答えてきた diff / branch はもう古い。世代を進めて取り直させる。
-  if (gitRepositoryState !== "outside") triggerUpdate();
+  // 管理外として答えてきた diff / branch はもう古い。世代を進めて取り直させ、
+  // 画面には git の機能を使えるようにさせる (設定を取り直す)。
+  if (gitRepositoryState !== "outside") {
+    triggerUpdate();
+    sendSse("git-state", gitRepositoryState);
+  }
   return gitRepositoryState;
 }
+
+/**
+ * git の外のあいだ、`.git` が現れたか (内蔵のターミナルで git init した等) を
+ * 見続ける間隔。stat 1 回だけ。.git は watcher が読み飛ばすので、要求が来ない
+ * 画面 (Files を開いたまま) でも気付けるようにする。
+ */
+const GIT_DIRECTORY_PROBE_INTERVAL_MS = 2000;
 
 // tmux ペイン一覧 (ドロワーの /_tmux/panes と terminal/activity の巡回) が
 // 「このリポジトリの作業ツリー」を引く入口。管理外なら git を叩かず絞り込み
@@ -1494,6 +1505,7 @@ async function handleSettings() {
       currentGitRepositoryState() === "inside"
         ? await git.remoteWebUrlAsync(cwd)
         : null,
+    git_repository: currentGitRepositoryState(),
     server: { pid: process.pid, root: cwd, version: VERSION },
     scope: {
       omit_dirs_effective: scopeOmitDirNames,
@@ -3492,6 +3504,12 @@ const server = await startServer({
 // listenPort=0 を「未バインド」として WARN を出すので、ここで同期しないと
 // npx 既定起動時に常に「port not yet bound」WARN が出てしまう。
 listenPort = server.port;
+
+// git の外のあいだだけ `.git` の出現を見る (中に変わったら currentGitRepositoryState
+// が通知する。中・"unknown" のあいだは stat もしない)。
+setInterval(() => {
+  if (gitRepositoryState === "outside") currentGitRepositoryState();
+}, GIT_DIRECTORY_PROBE_INTERVAL_MS).unref();
 
 if (openAfterStart) {
   await openUrlInOs(`http://127.0.0.1:${server.port}/`, cwd);

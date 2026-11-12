@@ -262,6 +262,28 @@ describe("install and uninstall", () => {
     expect(written.model).toBe("sample-model");
   });
 
+  // 確認の画面を開いてから押すまでの間に時刻が進んでも、確認の画面で見せた
+  // バックアップの名前で書く (書く時刻で付け直していて、見せた場所に無かった)。
+  test("writes the backup under the name shown for confirmation, even later", async () => {
+    writeFileSync(settingsPath(), JSON.stringify(FOREIGN), "utf8");
+    const plan = planAgentHooks(target(), "install", launcher, NOW);
+    const later = new Date(NOW.getTime() + 90_000);
+    const result = await applyAgentHooks(
+      target(),
+      "install",
+      launcher,
+      plan,
+      later,
+    );
+    expect(plan.backupPath).toBe(
+      join(configDir, "settings.json.code-viewer-backup-20260102-030405"),
+    );
+    expect(result.backupPath).toBe(plan.backupPath);
+    expect(backups()).toEqual([
+      "settings.json.code-viewer-backup-20260102-030405",
+    ]);
+  });
+
   test("writes a backup of the previous content before writing", async () => {
     const initial = `${JSON.stringify(FOREIGN, null, 2)}\n`;
     writeFileSync(settingsPath(), initial, "utf8");

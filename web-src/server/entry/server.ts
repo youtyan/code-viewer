@@ -111,8 +111,9 @@ function fail(message: string): never {
 
 /**
  * 起動したディレクトリ。git の中なら作業ツリーの根 (preview.ts と同じ決め方)。
- * git の外・git を呼べないときは、そのまま開くが登録はしないので、原因と
- * 次の一手を 1 行で出す (画面の「登録」が断られる理由をここで先に言う)。
+ * git の外ならそのディレクトリ自身 (プロジェクトとして登録し、git の機能だけを
+ * 使えなくする)。git を呼べないときは、そのまま開くが登録はしないので、原因と
+ * 次の一手を出す。
  */
 function resolveLaunchRoot(cwd: string | null): string {
   let dir: string;
@@ -128,7 +129,7 @@ function resolveLaunchRoot(cwd: string | null): string {
   const result = git.repoRootResult(dir);
   if (result.kind === "outside") {
     console.warn(
-      `code-viewer: ${dir} is not a git repository, so it is not added to the projects (its files are still shown). Run code-viewer inside a repository, or use "Add project" (the + next to Projects) in the left sidebar.`,
+      `code-viewer: ${dir} is not a git repository; it is opened as a project, but diffs, history, worktrees and blame are unavailable until it becomes one (git init).`,
     );
   }
   if (result.kind === "error") {
@@ -523,7 +524,12 @@ function worktreePathsInsideGit(): (root: string) => Promise<string[]> {
   };
 }
 
-/** 起動したディレクトリを登録簿に載せる (git の中なら。載っていればそのまま)。 */
+/**
+ * 起動したディレクトリを登録簿に載せる (git の中か、git の外のディレクトリなら。
+ * 載っていればそのまま)。git を呼べないとき (git が無いなど) は載せない: git の
+ * 外かどうかが分からず、リポジトリの中のサブディレクトリを別のプロジェクトとして
+ * 載せてしまいうる。
+ */
 export async function registerLaunchRoot(
   root: string,
   deps: {
@@ -535,7 +541,7 @@ export async function registerLaunchRoot(
       changeProjects({ action: "add", path: projectRoot }, projectRoot),
   },
 ): Promise<void> {
-  if (deps.repoRootResult(root).kind !== "root") return;
+  if (deps.repoRootResult(root).kind === "error") return;
   try {
     await deps.register(root);
   } catch (error) {
@@ -683,7 +689,7 @@ async function handleEntryOpen(
   }
   const repo = git.repoRootResult(dir);
   const root = repo.kind === "root" ? realpathSync(repo.root) : dir;
-  if (repo.kind === "root") await registerLaunchRoot(root);
+  await registerLaunchRoot(root);
   const key = ctx.projects.allow(root);
   return json({ url: projectUrl(ctx, root, url), key, root });
 }

@@ -124,6 +124,7 @@ const DECLARATIVE = [
   "web-src/views/media-player.ts",
   "web-src/views/media-embed.ts",
   "web-src/views/backend-state.ts",
+  "web-src/views/git-unavailable.ts",
   "web-src/views/text-mark.ts",
   "web-src/views/status-label.ts",
   "web-src/views/ref-picker.ts",

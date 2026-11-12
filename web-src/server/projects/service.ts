@@ -9,8 +9,8 @@
 // プロジェクトごとのポートを覚える理由が無い (以前は通知の許可と画面の寸法を
 // 保つために覚えていた)。
 
-import { realpathSync } from "node:fs";
-import { join } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import { formatErrorDetail } from "../../core/error-detail";
 import type { ProjectColor } from "../../core/project-colors";
 import {
@@ -42,18 +42,30 @@ import {
   updateProjectRegistry,
 } from "./registry";
 
-/** パスから、登録の鍵 (git の本体の作業ツリーのルートの実パス) を求める。 */
+/**
+ * パスから、登録の鍵を求める。git の中なら本体の作業ツリーのルートの実パス、
+ * git の外ならそのフォルダ自身の実パス。無いパス・ディレクトリでないパスは
+ * git を呼ぶ前に理由を付けて断る (git の -C の失敗文は、どちらなのかを言わない)。
+ */
 export async function resolveProjectRoot(
   path: string,
   cwd: string,
 ): Promise<string> {
-  const resolved = await projectRootResultAsync(path, cwd);
-  if (resolved.kind === "outside") {
+  let real: string;
+  try {
+    real = realpathSync(isAbsolute(path) ? path : resolve(cwd, path));
+  } catch (error) {
     throw new ProjectRegistryError(
-      `${path} is not inside a git repository. Register a repository (or a folder inside one), or run code-viewer inside a repository.`,
-      "invalid",
+      `${path} does not exist`,
+      errno(error) === "ENOENT" ? "not-found" : "failed",
+      { cause: error },
     );
   }
+  if (!statSync(real).isDirectory()) {
+    throw new ProjectRegistryError(`${path} is not a directory`, "invalid");
+  }
+  const resolved = await projectRootResultAsync(real, cwd);
+  if (resolved.kind === "outside") return real;
   if (resolved.kind === "error") {
     throw new ProjectRegistryError(
       `cannot find the repository of ${path}:\n${resolved.error}`,
