@@ -94,7 +94,6 @@ import {
   GEAR_16_PATH,
   GIT_BRANCH_16_PATH,
   HISTORY_16_PATH,
-  iconSvg,
   KEBAB_16_PATH,
   MARK_GITHUB_16_PATH,
   MOON_16_PATH,
@@ -357,6 +356,7 @@ import {
   shellGroupOf,
   type ViewScreen,
 } from "./views/main-tabs/main-tabs-presenter";
+import { terminalMarkTemplate } from "./views/main-tabs/main-tabs-view";
 import { pageIconPaths } from "./views/main-tabs/tab-icons";
 import { installMobileShell } from "./views/mobile-shell";
 import { CV_PAGE_SHELL } from "./views/page-shell";
@@ -9611,7 +9611,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         title: info.name,
         detail: info.displayRoot,
         status: current ? t.currentProject : "",
-        iconHtml: iconSvg("gdp-palette-icon", FOLDER_ICON_PATHS.closed),
+        icon: CHROME_VIEW.icon(FOLDER_ICON_PATHS.closed, "gdp-palette-icon"),
         suggested: index < 5,
         run: () => {
           // 左の一覧の見出しと同じく、そのグループで最後に前面だったタブへ。
@@ -9640,7 +9640,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         detail: paneText(pane, agents).detail,
         status: agents.state[pane.state],
         statusTone: pane.state,
-        iconHtml: `<i class="terminal-mark terminal-mark-${pane.state}" aria-hidden="true"></i>`,
+        icon: terminalMarkTemplate(pane.state),
         suggested: pane.kind !== null && index < 5,
         run: () => openAgentPane(pane.id),
       });
@@ -9657,7 +9657,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         title: terminalTabInfo(session.id).label,
         detail: session.cwd,
         status: MAIN_TABS.hasTerminal(session.id) ? terminal.inTab : "",
-        iconHtml: iconSvg("gdp-palette-icon", TERMINAL_16_PATHS),
+        icon: CHROME_VIEW.icon(TERMINAL_16_PATHS, "gdp-palette-icon"),
         suggested: false,
         run: () => MAIN_TABS.openTerminal(session.id),
       });
@@ -9669,7 +9669,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         group: "actions",
         id: `action:${action.id}`,
         title: t.actions[action.id],
-        iconHtml: iconSvg("gdp-palette-icon", action.icon),
+        icon: CHROME_VIEW.icon(action.icon, "gdp-palette-icon"),
         shortcut: binding ? formatKeyBinding(binding) : "",
         suggested: action.suggested,
         run: () => {
@@ -9682,7 +9682,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       group: "actions",
       id: "action:add-project",
       title: agents.projects.addProjectMenu,
-      iconHtml: iconSvg("gdp-palette-icon", PLUS_16_PATH),
+      icon: CHROME_VIEW.icon(PLUS_16_PATH, "gdp-palette-icon"),
       shortcut: "",
       suggested: false,
       run: () => void PROJECT_ACTIONS.registerByPath(),
@@ -9700,7 +9700,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         title: t.chooseTheme(name),
         detail: otherName === name ? "" : otherName,
         status: theme === currentTheme ? t.currentTheme : "",
-        iconHtml: iconSvg("gdp-palette-icon", MOON_16_PATH),
+        icon: CHROME_VIEW.icon(MOON_16_PATH, "gdp-palette-icon"),
         suggested: false,
         run: () => setColorTheme(theme),
       });

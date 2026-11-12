@@ -11,7 +11,6 @@
 // 外側のページと面の中では電話の段に入らない)。
 
 import { createRef, type Ref, ref } from "lit/directives/ref.js";
-import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { html, nothing } from "lit/html.js";
 import {
   CHEVRON_DOWN_12_PATH,
@@ -196,7 +195,7 @@ function tabRowTemplate(entry: TabListEntry, t: MobileShellText): unknown {
       class="mobile-tabs-open"
       title=${entry.title}
       aria-current=${entry.front ? "true" : nothing}
-    ><span class="mobile-tabs-icon">${unsafeHTML(entry.iconHtml)}</span><span
+    ><span class="mobile-tabs-icon">${entry.icon}</span><span
         class="mobile-tabs-name"
         >${entry.name}</span
       >${

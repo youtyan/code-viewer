@@ -3,11 +3,12 @@ import type Renderer from "markdown-it/lib/renderer.mjs";
 import type Token from "markdown-it/lib/token.mjs";
 import markdownItAnchor from "markdown-it-anchor";
 import markdownItFootnote from "markdown-it-footnote";
+import { DEFAULT_VIEW as VIEW } from "../views/markdown-preview-view";
 import { pageLanguage } from "../views/page-language";
 import { MARKDOWN_PREVIEW_TEXT } from "../views/source-preview-i18n";
+import { detachedElement, templateElement } from "../views/ui/renderer";
 import { showCopyFailure } from "./copy-failure";
 import { errorWithCause, formatErrorDetail } from "./error-detail";
-import { CHECK_16_PATHS, COPY_16_PATHS, iconSvg } from "./icons";
 import { isImeComposing } from "./keyboard";
 import { buildRawFileUrl, type SourceFileTarget } from "./routes";
 
@@ -482,25 +483,26 @@ export async function renderMarkdownPreview(
     options.syntaxHighlight && !options.signal?.aborted
       ? await loadMarkdownHighlighter()
       : null;
-  const markdown = document.createElement("div");
-  markdown.className = "gdp-markdown-preview markdown-body";
-  if (options.signal?.aborted) return markdown;
-  markdown.innerHTML = renderMarkdownHtml(
-    textValue,
-    target,
-    highlighter,
-    options.signal,
-    options.resolveAssetUrl,
+  if (options.signal?.aborted) return templateElement(VIEW.body(null));
+  const markdown = templateElement(
+    VIEW.body(
+      renderMarkdownHtml(
+        textValue,
+        target,
+        highlighter,
+        options.signal,
+        options.resolveAssetUrl,
+      ),
+    ),
   );
   if (options.signal?.aborted) return markdown;
   enhanceTaskLists(markdown);
   enhanceCodeBlocks(markdown);
   const tocEntries = buildMarkdownToc(markdown);
   if (tocEntries.length) {
-    const layout = document.createElement("div");
-    layout.className = "gdp-markdown-layout";
-    layout.appendChild(createMarkdownToc(tocEntries));
-    layout.appendChild(markdown);
+    const layout = templateElement(
+      VIEW.layout(createMarkdownToc(tocEntries), markdown),
+    );
     wireMarkdownInteractions(layout, target, options);
     return layout;
   }
@@ -552,11 +554,9 @@ function enhanceTaskLists(root: HTMLElement) {
     const li = inline.closest("li");
     if (!li) return;
     li.classList.add("task-list-item");
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.disabled = true;
-    input.checked = inline.dataset.gdpTask === "checked";
-    li.prepend(input);
+    li.prepend(
+      templateElement(VIEW.taskCheckbox(inline.dataset.gdpTask === "checked")),
+    );
     inline.removeAttribute("data-gdp-task");
   });
 }
@@ -565,31 +565,34 @@ function enhanceCodeBlocks(root: HTMLElement) {
   root.querySelectorAll<HTMLPreElement>("pre").forEach((pre) => {
     const code = pre.querySelector<HTMLElement>("code");
     const text = code?.textContent ?? pre.textContent ?? "";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "mkdp-code-copy";
     const label = MARKDOWN_PREVIEW_TEXT[pageLanguage()].copyCode;
-    button.setAttribute("aria-label", label);
-    button.title = label;
-    button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-    button.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(text);
-        button.innerHTML = iconSvg("octicon-check", CHECK_16_PATHS);
-        window.setTimeout(() => {
-          button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-        }, 1500);
-      } catch (error) {
-        showCopyFailure(
-          button,
-          "copying the code block failed",
-          error,
-          label,
-          1500,
-        );
-      }
-    });
-    pre.appendChild(button);
+    let copied = false;
+    const copy = detachedElement(() =>
+      VIEW.codeCopy({
+        label,
+        copied,
+        onCopy: async (button) => {
+          try {
+            await navigator.clipboard.writeText(text);
+            copied = true;
+            copy.draw();
+            window.setTimeout(() => {
+              copied = false;
+              copy.draw();
+            }, 1500);
+          } catch (error) {
+            showCopyFailure(
+              button,
+              "copying the code block failed",
+              error,
+              label,
+              1500,
+            );
+          }
+        },
+      }),
+    );
+    pre.appendChild(copy.element);
   });
 }
 
@@ -609,26 +612,9 @@ function buildMarkdownToc(root: HTMLElement) {
 function createMarkdownToc(
   entries: ReturnType<typeof buildMarkdownToc>,
 ): HTMLElement {
-  const nav = document.createElement("nav");
-  nav.className = "gdp-markdown-toc table-of-contents";
-  nav.setAttribute(
-    "aria-label",
-    MARKDOWN_PREVIEW_TEXT[pageLanguage()].contents,
+  return templateElement(
+    VIEW.toc(MARKDOWN_PREVIEW_TEXT[pageLanguage()].contents, entries),
   );
-  const list = document.createElement("ul");
-  entries.forEach((entry) => {
-    const item = document.createElement("li");
-    item.className = `level-${entry.level}`;
-    const link = document.createElement("a");
-    link.href = `#${encodeURIComponent(entry.id)}`;
-    link.dataset.target = entry.id;
-    link.textContent = entry.text;
-    link.title = entry.text;
-    item.appendChild(link);
-    list.appendChild(item);
-  });
-  nav.appendChild(list);
-  return nav;
 }
 
 function wireMarkdownInteractions(
@@ -971,50 +957,46 @@ function renderMermaidErrorDetail(node: HTMLElement, failure: Error | string) {
   const detail =
     typeof failure === "string" ? failure : formatErrorDetail(failure);
   const text = MARKDOWN_PREVIEW_TEXT[pageLanguage()];
-  const wrap = document.createElement("div");
-  wrap.className = "mkdp-mermaid-error";
-  const title = document.createElement("div");
-  title.className = "mkdp-mermaid-error-title";
-  title.textContent =
-    typeof failure === "string"
-      ? text.mermaidSyntaxError
-      : text.mermaidLoadFailed;
-  const pre = document.createElement("pre");
-  pre.className = "mkdp-mermaid-error-detail";
-  pre.textContent = detail || text.noDetail;
-  wrap.append(title, pre);
-  if (src) {
-    const details = document.createElement("details");
-    details.className = "mkdp-mermaid-error-srcwrap";
-    const summary = document.createElement("summary");
-    summary.textContent = text.source;
-    const source = document.createElement("pre");
-    source.className = "mkdp-mermaid-error-source";
-    source.textContent = src;
-    details.append(summary, source);
-    wrap.appendChild(details);
-  }
-  node.replaceChildren(wrap);
+  node.replaceChildren(
+    templateElement(
+      VIEW.mermaidError({
+        title:
+          typeof failure === "string"
+            ? text.mermaidSyntaxError
+            : text.mermaidLoadFailed,
+        detail: detail || text.noDetail,
+        source: src,
+        sourceLabel: text.source,
+      }),
+    ),
+  );
 }
 
 function openMermaidLightbox(originalSvg: SVGSVGElement) {
   if (document.querySelector(".mkdp-lightbox")) return;
-  const overlay = document.createElement("div");
-  overlay.className = "mkdp-lightbox";
-  const stage = document.createElement("div");
-  stage.className = "mkdp-lightbox-stage";
   const svg = originalSvg.cloneNode(true) as SVGSVGElement;
   svg.removeAttribute("style");
-  stage.appendChild(svg);
-  overlay.appendChild(stage);
-  const toolbar = document.createElement("div");
-  toolbar.className = "mkdp-lightbox-toolbar";
-  overlay.appendChild(toolbar);
   const text = MARKDOWN_PREVIEW_TEXT[pageLanguage()];
-  const hint = document.createElement("div");
-  hint.className = "mkdp-lightbox-hint";
-  hint.textContent = text.lightboxHint;
-  overlay.appendChild(hint);
+  const overlay = templateElement(
+    VIEW.mermaidLightbox({
+      svg,
+      hint: text.lightboxHint,
+      buttons: [
+        { label: "+", title: text.zoomIn, onPress: () => zoomCentered(1.25) },
+        {
+          label: "-",
+          title: text.zoomOut,
+          onPress: () => zoomCentered(1 / 1.25),
+        },
+        { label: "fit", title: text.fit, onPress: () => fitImage() },
+        { label: "x", title: text.close, onPress: () => close() },
+      ],
+    }),
+  );
+  const stage = overlay.querySelector<HTMLElement>(".mkdp-lightbox-stage");
+  const hint = overlay.querySelector<HTMLElement>(".mkdp-lightbox-hint");
+  if (!stage || !hint)
+    throw new Error("mermaid lightbox: the template has no stage or hint");
   document.body.appendChild(overlay);
 
   const bbox = safeSvgBox(svg);
@@ -1050,28 +1032,6 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
   };
   const zoomCentered = (factor: number) =>
     zoomAt(window.innerWidth / 2, window.innerHeight / 2, factor);
-  const button = (label: string, title: string, fn: () => void) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.textContent = label;
-    b.title = title;
-    b.addEventListener("click", (e) => {
-      e.stopPropagation();
-      fn();
-    });
-    toolbar.appendChild(b);
-  };
-  const close = () => {
-    window.removeEventListener("keydown", onKey);
-    window.removeEventListener("mousemove", onMove);
-    window.removeEventListener("mouseup", onUp);
-    window.removeEventListener("resize", fitImage);
-    overlay.remove();
-  };
-  button("+", text.zoomIn, () => zoomCentered(1.25));
-  button("-", text.zoomOut, () => zoomCentered(1 / 1.25));
-  button("fit", text.fit, fitImage);
-  button("x", text.close, close);
 
   overlay.addEventListener(
     "wheel",

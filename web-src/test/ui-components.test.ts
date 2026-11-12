@@ -23,7 +23,11 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-const VIEW_FILES = [...sourceFiles(VIEWS), "web-src/app.ts"];
+const VIEW_FILES = [
+  ...sourceFiles(VIEWS),
+  ...sourceFiles("web-src/core"),
+  "web-src/app.ts",
+];
 
 /** ソースに書かれた部品の名前 (export const CV_X = "cv-x")。 */
 function componentNames(): string[] {
@@ -130,7 +134,9 @@ const DECLARATIVE = [
   "web-src/views/database/",
   "web-src/views/terminal/",
   "web-src/views/app-chrome.ts",
+  "web-src/views/markdown-preview-view.ts",
   "web-src/app.ts",
+  "web-src/core/",
 ];
 
 /**
@@ -153,10 +159,15 @@ const EXCEPTIONS: Record<string, { count: number; reason: string }> = {
     reason:
       "色付けの道具 (highlight.js) を読む script 要素を head に置く。テンプレートから写した script はブラウザが実行しない",
   },
+  "web-src/core/shiki-loader.ts": {
+    count: 2,
+    reason:
+      "色付けの道具 (shiki) が返した <pre><code> の HTML を template 要素で読み、中身の HTML だけを取り出す (組み立てではなく、外の道具の出力の読み取り)",
+  },
 };
 
 /** まだ書き直していない所も含めた、命令的な組み立ての数の上限。書き直したら下げる。 */
-const IMPERATIVE_LIMIT = 3;
+const IMPERATIVE_LIMIT = 5;
 
 function imperativeCount(file: string): number {
   return [...readFileSync(file, "utf8").matchAll(IMPERATIVE_DOM)].length;
@@ -178,6 +189,86 @@ describe("declarative views", () => {
       0,
     );
     expect(total).toBeLessThanOrEqual(IMPERATIVE_LIMIT);
+  });
+});
+
+/**
+ * 文字列の HTML をそのまま描く所 (unsafeHTML)。外の道具が返した HTML (色付け・
+ * Markdown・別のページが描いた中身) だけに使う。自前の絵や部品を文字列で組んで
+ * 渡さない (テンプレートで描く)。ファイルごとの数と理由。
+ */
+const UNSAFE_HTML = /\bunsafeHTML\(/g;
+const UNSAFE_HTML_USES: Record<string, { count: number; reason: string }> = {
+  "web-src/views/source-view.ts": {
+    count: 2,
+    reason: "ソース表示の行。色付けの道具 (highlight.js) が返した HTML",
+  },
+  "web-src/views/blame-view.ts": {
+    count: 1,
+    reason: "Blame の行。色付けの道具が返した HTML",
+  },
+  "web-src/views/code-preview.ts": {
+    count: 1,
+    reason: "コードの覗き窓の行。色付けの道具 (shiki) が返した HTML",
+  },
+  "web-src/views/help-blocks.ts": {
+    count: 1,
+    reason: "ヘルプのコードの例。色付けの道具 (shiki) が返した HTML",
+  },
+  "web-src/views/tools/json-tool.ts": {
+    count: 1,
+    reason: "JSON の整形の結果。色付けの道具 (shiki) が返した HTML",
+  },
+  "web-src/views/database/table-grid.ts": {
+    count: 1,
+    reason: "セルの詳細の JSON。色付けの道具 (shiki) が返した HTML",
+  },
+  "web-src/views/database/query-editor.ts": {
+    count: 1,
+    reason: "SQL の入力欄の下絵。色付けの道具が返した HTML",
+  },
+  "web-src/views/database/session-log-view.ts": {
+    count: 1,
+    reason: "セッションの記録の SQL。色付けの道具が返した HTML",
+  },
+  "web-src/views/viewer-settings.ts": {
+    count: 1,
+    reason: "判定ルールの JSON。色付けの道具 (shiki) が返した HTML",
+  },
+  "web-src/views/annotations-ui.ts": {
+    count: 3,
+    reason: "注釈の本文。Markdown (markdown-it) が返した HTML",
+  },
+  "web-src/views/annotations/editor.ts": {
+    count: 1,
+    reason: "注釈の下書きのプレビュー。Markdown (markdown-it) が返した HTML",
+  },
+  "web-src/views/markdown-preview-view.ts": {
+    count: 1,
+    reason: "Markdown のプレビューの本文。markdown-it が返した HTML",
+  },
+  "web-src/views/workspace/host.ts": {
+    count: 1,
+    reason:
+      "面のページが描いた中身を、親のページへそのまま写す (別の文書の DOM の写し)",
+  },
+};
+
+describe("string HTML", () => {
+  test("only HTML returned by outside tools is drawn as a string", () => {
+    const found = Object.fromEntries(
+      VIEW_FILES.map(
+        (file) =>
+          [
+            file,
+            [...readFileSync(file, "utf8").matchAll(UNSAFE_HTML)].length,
+          ] as const,
+      ).filter(([, count]) => count > 0),
+    );
+    const allowed = Object.fromEntries(
+      Object.entries(UNSAFE_HTML_USES).map(([file, use]) => [file, use.count]),
+    );
+    expect(found).toEqual(allowed);
   });
 });
 

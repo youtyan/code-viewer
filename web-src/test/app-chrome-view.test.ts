@@ -1,12 +1,18 @@
 // app.ts が作る要素の形 (views/app-chrome.ts)。前は app.ts が要素を 1 つずつ組み、
-// 絵は iconSvg の文字列を innerHTML に入れていた。テンプレートにしても同じ DOM に
+// 絵は SVG の文字列 (iconSvg。今は無い) を innerHTML に入れていた。テンプレートにしても同じ DOM に
 // なること (見た目が変わらないこと) と、押したときに presenter へ渡す値を見る。
 
 import "./_dom";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { CHEVRON_DOWN_12_PATH, iconSvg, SYNC_16_PATH } from "../core/icons";
+import { CHEVRON_DOWN_12_PATH, SYNC_16_PATH } from "../core/icons";
 import { DEFAULT_VIEW, fillWith } from "../views/app-chrome";
 import { templateElement } from "../views/ui/renderer";
+
+/** 前の版の iconSvg が返していた文字列 (比べる元として、ここにだけ残す)。 */
+function iconSvg(className: string, paths: string | string[]): string {
+  const list = Array.isArray(paths) ? paths : [paths];
+  return `<svg class="octicon ${className}" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">${list.map((path) => `<path fill="currentColor" d="${path}"></path>`).join("")}</svg>`;
+}
 
 afterEach(() => {
   document.body.replaceChildren();

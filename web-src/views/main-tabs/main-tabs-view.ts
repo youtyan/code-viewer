@@ -2,11 +2,11 @@
 // だけから、面ごとのタブ列 (#main-tabs の中) と、面の境界・右に分割の落とす先
 // (重ね合わせの層) を描く。並び・前面・畳む・保存はすべて presenter が持つ。
 
-import { html, nothing } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { live } from "lit/directives/live.js";
 import { type RefOrCallback, ref } from "lit/directives/ref.js";
 import { repeat } from "lit/directives/repeat.js";
+import { html, nothing } from "lit/html.js";
 import { CHEVRON_DOWN_12_PATH } from "../../core/icons";
 import type { PaneSide } from "../../core/main-tabs";
 import type { ProjectLook } from "../projects/project-looks";
@@ -107,6 +107,22 @@ export type MainTabsViewProps = {
 
 export type MainTabsView = (props: MainTabsViewProps) => unknown;
 
+/** タブの絵。エージェントを映しているターミナルは、絵の代わりに状態の印 (形で区別する)。
+ * タブ列とタブの一覧 (電話の段) で同じもの。 */
+export function tabIconTemplate(
+  state: string | null | undefined,
+  icon: string | readonly string[],
+): unknown {
+  return state
+    ? terminalMarkTemplate(state)
+    : iconTemplate(icon, "main-tab-svg");
+}
+
+/** エージェントの状態の印 (形で区別する)。 */
+export function terminalMarkTemplate(state: string): unknown {
+  return html`<i class=${`terminal-mark terminal-mark-${state}`} aria-hidden="true"></i>`;
+}
+
 /** 面の境界と、1 面のときに右に分割の落とす先 (body の層)。 */
 export type MainSplitViewProps = {
   dividerLabel: string;
@@ -151,11 +167,7 @@ function tabTemplate(props: MainTabsViewProps, tab: MainTabProps): unknown {
     @contextmenu=${(event: MouseEvent) => props.onTabContextMenu(tab.id, event)}
     @dragstart=${(event: DragEvent) => props.onTabDragStart(tab.id, event)}
     @dragend=${(event: DragEvent) => props.onTabDragEnd(event)}
-  ><span class="main-tab-icon">${
-    tab.state
-      ? html`<i class=${`terminal-mark terminal-mark-${tab.state}`} aria-hidden="true"></i>`
-      : iconTemplate(tab.icon, "main-tab-svg")
-  }</span>${
+  ><span class="main-tab-icon">${tabIconTemplate(tab.state, tab.icon)}</span>${
     tab.project === null
       ? html`<span class="main-tab-name">${tab.name}</span>`
       : // 狭くなったら題より先にプロジェクト名を省略する (style.css の .main-tab-project)。

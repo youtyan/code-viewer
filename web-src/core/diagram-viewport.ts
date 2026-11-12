@@ -3,6 +3,9 @@
 // mermaid プレビューが同じ操作系 (ボタンズーム / ctrl+wheel ズーム / ドラッグ
 // パン) を共有する。クラス名は呼び出し側の CSS に合わせて注入する。
 
+import { html } from "lit/html.js";
+import { templateElement } from "../views/ui/renderer";
+
 export type DiagramViewport = {
   /** スクロールコンテナ。ドラッグパンを受ける。 */
   container: HTMLElement;
@@ -104,18 +107,34 @@ export function attachDiagramViewport(
   };
 }
 
-/** 箱と中身を作ってから attachDiagramViewport を付ける形。まだ宣言的に描いて
- * いない画面 (ER 図・画像の拡大) のためのもの。 */
-export function createDiagramViewport(options: {
-  containerClassName: string;
-  contentClassName: string;
-  onScaleChange?: (scale: number) => void;
-}): DiagramViewport {
-  const container = document.createElement("div");
-  container.className = options.containerClassName;
-  const content = document.createElement("div");
-  content.className = options.contentClassName;
-  container.appendChild(content);
+export type DiagramViewportView = {
+  /** スクロールする箱と、その中の拡大縮小される中身 (最初の子)。 */
+  box(containerClassName: string, contentClassName: string): unknown;
+};
+
+export const DEFAULT_VIEW: DiagramViewportView = {
+  box: (containerClassName, contentClassName) =>
+    html`<div class=${containerClassName}
+      ><div class=${contentClassName}></div
+    ></div>`,
+};
+
+/** 箱と中身を作ってから attachDiagramViewport を付ける形。箱を presenter が
+ * 作る画面 (ER 図・画像の拡大) のためのもの。 */
+export function createDiagramViewport(
+  options: {
+    containerClassName: string;
+    contentClassName: string;
+    onScaleChange?: (scale: number) => void;
+  },
+  view: DiagramViewportView = DEFAULT_VIEW,
+): DiagramViewport {
+  const container = templateElement(
+    view.box(options.containerClassName, options.contentClassName),
+  );
+  const content = container.firstElementChild;
+  if (!(content instanceof HTMLElement))
+    throw new Error("diagram viewport: the template has no content box");
   return {
     container,
     content,

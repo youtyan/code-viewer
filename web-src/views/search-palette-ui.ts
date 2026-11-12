@@ -85,8 +85,8 @@ export type PaletteCommand = {
   status?: string;
   /** status の見た目の種類 (エージェントの状態の名前)。 */
   statusTone?: string;
-  /** 左のアイコン (信頼できる固定の SVG・印の HTML だけを渡す)。 */
-  iconHtml: string;
+  /** 左の絵のテンプレート。 */
+  icon: unknown;
   /** 右端に出すキー。 */
   shortcut?: string;
   /** 検索欄が空のときにも出す (最近のプロジェクト・エージェント・セッション、よく使う操作)。 */
@@ -531,7 +531,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       return {
         kind: "command",
         index,
-        iconHtml: item.command.iconHtml,
+        icon: item.command.icon,
         title: item.command.title,
         ranges: item.ranges,
         detail: item.command.detail ?? "",

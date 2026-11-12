@@ -334,7 +334,7 @@ describe("palette projects, agents and actions", () => {
       id: `${group}:${title}`,
       title,
       detail,
-      iconHtml: "",
+      icon: null,
       suggested,
       run: () => {
         ran.push(title);

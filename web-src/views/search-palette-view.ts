@@ -3,7 +3,6 @@
 
 import { ifDefined } from "lit/directives/if-defined.js";
 import { live } from "lit/directives/live.js";
-import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { html, nothing, type TemplateResult } from "lit/html.js";
 import type { FuzzyRange } from "../core/fuzzy-search";
 import { FILE_16_PATH, SEARCH_16_PATH } from "../core/icons";
@@ -13,7 +12,7 @@ export type PaletteRowProps =
   | {
       kind: "command";
       index: number;
-      iconHtml: string;
+      icon: unknown;
       title: string;
       ranges: FuzzyRange[];
       detail: string;
@@ -97,7 +96,7 @@ function rowTemplate(
 ): TemplateResult {
   const content =
     row.kind === "command"
-      ? html`<span class="gdp-palette-row-icon">${unsafeHTML(row.iconHtml)}</span
+      ? html`<span class="gdp-palette-row-icon">${row.icon}</span
           ><span class="gdp-palette-row-title">${highlighted(row.title, row.ranges)}</span
           ><span class="gdp-palette-row-detail">${row.detail}</span>${
             row.status

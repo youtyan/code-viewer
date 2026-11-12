@@ -35,7 +35,6 @@ import type {
 } from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
 import { attachDragResizer } from "../../core/drag-resizer";
-import { iconSvg } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
 import {
   activate,
@@ -133,6 +132,7 @@ import {
   type MainTabsView,
   type MainTabsViewProps,
   mainSplitTemplate,
+  tabIconTemplate,
 } from "./main-tabs-view";
 import { type PageIconPaths, pageIconPaths } from "./tab-icons";
 
@@ -378,8 +378,8 @@ export type TabListEntry = {
   name: string;
   /** 補足 (ファイルのパスと版。タブの title と同じ)。 */
   title: string;
-  /** タブ列と同じ絵 (エージェントを映す端末は状態の印)。 */
-  iconHtml: string;
+  /** タブ列と同じ絵 (エージェントを映す端末は状態の印) のテンプレート。 */
+  icon: unknown;
   /** 左の面の前面のタブ。 */
   front: boolean;
   preview: boolean;
@@ -2129,15 +2129,13 @@ export function createMainTabsPresenter(
     return { project: null, title, full: title };
   }
 
-  /** タブの絵。エージェントを映しているターミナルは、絵の代わりに状態の印 (形で区別する)。 */
-  function iconMarkup(target: TabTarget): string {
+  /** タブの絵 (tabIconTemplate)。エージェントを映しているターミナルは状態の印。 */
+  function tabIcon(target: TabTarget): unknown {
     const state =
       target.kind === "terminal"
         ? deps.terminalInfo(target.session).state
         : null;
-    return state
-      ? `<i class="terminal-mark terminal-mark-${state}" aria-hidden="true"></i>`
-      : iconSvg("main-tab-svg", iconOf(target));
+    return tabIconTemplate(state, iconOf(target));
   }
 
   /** タブの title (ファイルはパスと版)。 */
@@ -2322,7 +2320,7 @@ export function createMainTabsPresenter(
         id: tab.id,
         name,
         title: titleOf(tab.target, name),
-        iconHtml: iconMarkup(tab.target),
+        icon: tabIcon(tab.target),
         front,
         preview: tab.preview,
         parked: isParked,

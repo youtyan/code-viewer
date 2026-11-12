@@ -731,7 +731,7 @@ describe("開いているタブの一覧の面", () => {
     id,
     name: `${id}.ts`,
     title: `src/${id}.ts`,
-    iconHtml: "<svg></svg>",
+    icon: null,
     front: false,
     preview: false,
     parked: false,

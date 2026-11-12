@@ -1,4 +1,4 @@
-// cv-icon: 絵 1 つ。中は core/icons.ts の iconSvg と同じ形の <svg class="octicon …">。
+// cv-icon: 絵 1 つ。中は <svg class="octicon …"> に core/icons.ts の path を入れたもの。
 // 大きさは web/style.css のアイコンの段 (--icon-*) が決める。
 
 import { html, svg } from "lit/html.js";

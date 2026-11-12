@@ -1,5 +1,4 @@
 import { repeat } from "lit/directives/repeat.js";
-import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 import {
@@ -236,7 +235,7 @@ export type HistoryPanelProps = {
 /** 一覧の 1 行。 */
 export type HistoryRowProps =
   | { kind: "worktree"; key: string; active: boolean; label: string }
-  | { kind: "group"; key: string; label: string; graph: string }
+  | { kind: "group"; key: string; label: string; graph: unknown }
   | {
       kind: "commit";
       key: string;
@@ -250,7 +249,7 @@ export type HistoryRowProps =
       fresh: boolean;
       inRange: boolean;
       /** 枝の線の SVG (history-graph.ts。数だけから作る)。 */
-      graph: string;
+      graph: unknown;
       refs: {
         chips: { className: string; title: string; name: string }[];
         /** 枝の名前を全部 (入りきらない札の分も)。無ければ ""。 */
@@ -308,8 +307,8 @@ export type HistoryViewView = {
   authorOptions(values: readonly string[]): unknown;
 };
 
-const graphCell = (graph: string) =>
-  html`<span class="history-graph-cell">${graph ? unsafeHTML(graph) : nothing}</span>`;
+const graphCell = (graph: unknown) =>
+  html`<span class="history-graph-cell">${graph ?? nothing}</span>`;
 
 function rowTemplate(row: HistoryRowProps): unknown {
   if (row.kind === "group")
@@ -1064,7 +1063,7 @@ export function createHistoryView(
         active: commit.sha === selectedSha,
         fresh: commit.sha === freshSha,
         inRange: inRange.has(commit.sha),
-        graph: row ? historyGraphSvg(row, graph.lanes) : "",
+        graph: row ? historyGraphSvg(row, graph.lanes) : null,
         refs: refChips(commit),
       });
     }

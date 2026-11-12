@@ -33,7 +33,7 @@
 | 作業ツリーの一覧の行 | `views/worktree-view.ts`。何も選んでいないときは一覧だけの画面 (`body[data-worktree-overview]`、列は `--worktree-columns`)。行の「開く」はこのときだけ置き、選んだ後の狭い一覧は「…」だけ (選んだ瞬間にボタンを増やさない) |
 | Data の表の足元 | `views/database/table-grid.ts` の `db-grid-status` (件数) と `db-grid-pager` (見えている行の範囲と 1 画面ずつのページ送り)。表の行の高さは表示密度の値 (`views/shell/row-height.ts` の `currentRowHeight`、CSS は `--ui-row-h`)、列幅は TS が持つので、CSS は色と線だけ |
 | 空の状態の案内 (何も無い場所で次にやること) | `views/empty-state.ts` の `renderEmptyState` (絵・一行・補足・操作 2 つまで・キー 3 つまでをキーキャップで)。形は既存の `.empty` (`.empty-icon`・`h2`・`p`・`.empty-actions` の `.empty-action` / `-primary`) に `.empty-keys` を足したもの。画面の一部に置くときは `compact`。文言は置き場の i18n。実例: 全体ボードのエージェント 0・Search の初期・Tools の入力が空 |
-| アイコン SVG | `core/icons.ts` の path 定数 + `iconSvg(className, paths)` |
+| アイコン SVG | `core/icons.ts` の path 定数 + `views/ui/icon.ts` の `iconTemplate(paths, cls, size)`。絵を HTML の文字列にして入れない（`ui-components.test.ts` が unsafeHTML の使い所を見張る） |
 | ホバーで出る説明 (ツールチップ) | 要素に `title` を書くだけ。`views/title-tooltip.ts` の `installTitleTooltips` (`app.ts` が 1 回だけ取り付ける) が、マウスとペンで約 300ms 後に title の値をそのまま `.title-tooltip` に出す (指では出さない。出している間は title を外して既定の吹き出しと重ねない)。部品ごとに吹き出しを作らない。title に置いた文言がそのまま吹き出しの文言 |
 
 ### ボタンの種類

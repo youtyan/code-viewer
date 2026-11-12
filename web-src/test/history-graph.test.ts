@@ -1,3 +1,5 @@
+import "./_dom";
+import { render } from "lit/html.js";
 import { describe, expect, test } from "vitest";
 import {
   buildHistoryGraph,
@@ -196,9 +198,32 @@ describe("passingLanes", () => {
   });
 });
 
+/** 要素の形 (名前・属性・子)。属性は並びを問わない。lit が残す印 (コメント) は数えない。 */
+type Shape = { tag: string; attrs: string[][]; children: Shape[] };
+function shape(el: Element): Shape {
+  return {
+    tag: el.tagName.toLowerCase(),
+    attrs: [...el.attributes]
+      .map((attr) => [attr.name, attr.value])
+      .sort(([a = ""], [b = ""]) => a.localeCompare(b)),
+    children: [...el.children].map(shape),
+  };
+}
+
+/** テンプレートを描いた svg と、前の版が返していた文字列の svg の形。 */
+function drawnAndBefore(template: unknown, before: string): [Shape, Shape] {
+  const drawn = document.createElement("div");
+  render(template, drawn);
+  const parsed = document.createElement("div");
+  parsed.innerHTML = before;
+  const [a, b] = [drawn.querySelector("svg"), parsed.querySelector("svg")];
+  if (!a || !b) throw new Error("history graph: no svg was drawn");
+  return [shape(a), shape(b)];
+}
+
 describe("history graph svg", () => {
   test("a merge row draws the node, the line below and the diagonal to the new lane", () => {
-    expect(
+    const [drawn, before] = drawnAndBefore(
       historyGraphSvg(
         {
           lane: 0,
@@ -210,21 +235,31 @@ describe("history graph svg", () => {
         },
         2,
       ),
-    ).toBe(
       '<svg class="history-graph" width="24" aria-hidden="true">' +
         '<line class="history-graph-main" x1="6" y1="50%" x2="6" y2="100%"/>' +
         '<line class="history-graph-branch" x1="6" y1="50%" x2="18" y2="100%"/>' +
         '<circle class="history-graph-main history-graph-node" cx="6" cy="50%" r="3"/>' +
         "</svg>",
     );
+    expect(drawn).toEqual(before);
   });
 
   test("a header row only passes lanes through", () => {
-    expect(historyGraphPassSvg([0, 1], 2)).toBe(
+    const [drawn, before] = drawnAndBefore(
+      historyGraphPassSvg([0, 1], 2),
       '<svg class="history-graph" width="24" aria-hidden="true">' +
         '<line class="history-graph-main" x1="6" y1="0" x2="6" y2="100%"/>' +
         '<line class="history-graph-branch" x1="18" y1="0" x2="18" y2="100%"/>' +
         "</svg>",
+    );
+    expect(drawn).toEqual(before);
+  });
+
+  test("draws the lines in the SVG namespace", () => {
+    const drawn = document.createElement("div");
+    render(historyGraphPassSvg([0], 1), drawn);
+    expect(drawn.querySelector("line")?.namespaceURI).toBe(
+      "http://www.w3.org/2000/svg",
     );
   });
 });
