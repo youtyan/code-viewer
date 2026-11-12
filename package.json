@@ -1,6 +1,6 @@
 {
   "name": "@youtyan/code-viewer",
-  "version": "0.34.1",
+  "version": "0.35.0",
   "description": "Local browser-based code and git diff viewer",
   "type": "module",
   "bin": {
@@ -78,6 +78,7 @@
     "esbuild": "^0.28.2",
     "highlight.js": "11.12.0",
     "jose": "^6.2.12",
+    "lit": "3.3.1",
     "markdown-it": "14.3.1",
     "markdown-it-anchor": "9.2.0",
     "markdown-it-footnote": "4.0.0",

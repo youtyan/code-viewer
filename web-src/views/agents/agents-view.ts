@@ -1,1030 +1,451 @@
-// エージェント一覧の画面 (/agents)。
-//
-// このマシンの tmux の全ペインを、ペインの cwd から求めたプロジェクトごとに
-// 束ねて並べる。1 行で「どのプロジェクトの・どの種類が・どの状態で・何を
-// しているか」が読めることを優先し、tmux の入れ子はペインの列に畳む。
-//
-//   Agents                                  [通知] ⟳ [+ New agent]
-//   Accounts                                            Manage
-//   ┌ claude  Default ┐ ┌ claude  Work ┐ ┌ codex ┐ ┌ codex Personal ┐
-//   All agents 3  [All][Needs input 1][Working 1][Idle 1]  □All panes
-//   Status        Agent   Account  Task          Pane      Elapsed
-//   sample-app                                       Open + ⋯
-//   ◆ Needs input claude  Default  Review plan   work:0.0  3m     •
-//
-// 取り直しは agent-monitor が持つ。ここは最新の結果を購読して描くだけ。
-// 描き直しても、選んでいる行・スクロール位置・畳んだプロジェクト・キーボード
-// の位置が飛ばないように、行を鍵で覚えて描き直し後に戻す。
-//
-// 行を押す (Enter) と、既存のターミナルパネルでそのペインを開く
-// (/_tmux/open と同じ経路。新しい接続は作らない)。
+// エージェントの全体ボード (/agents) の表示。agents-presenter.ts が渡す値
+// (AgentsBoardViewProps) だけから描く。
 
-import type { AccountsResponse } from "../../core/agent-accounts";
-import {
-  type AgentHooksResponse,
-  agentsNeedingHooks,
-} from "../../core/agent-hooks";
-import {
-  AGENT_STATE_FILTERS,
-  type AgentPane,
-  type AgentProjectGroup,
-  type AgentStateFilter,
-  filterAgentPanes,
-  groupAgentPanes,
-  matchesStateFilter,
-  notifyPermissionView,
-} from "../../core/agent-overview";
-import { formatErrorDetail } from "../../core/error-detail";
+import { ifDefined } from "lit/directives/if-defined.js";
+import { live } from "lit/directives/live.js";
+import { ref } from "lit/directives/ref.js";
+import { repeat } from "lit/directives/repeat.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
+import type { AgentPane, AgentStateFilter } from "../../core/agent-overview";
 import {
   CHEVRON_DOWN_16_PATH,
-  iconSvg,
   KEBAB_16_PATH,
   PLUS_16_PATH,
   SYNC_16_PATH,
   X_16_PATH,
 } from "../../core/icons";
-import {
-  partitionProjectsByRunning,
-  runningProjectRoots,
-} from "../../core/project-running";
-import { showContextMenu } from "../context-menu";
-import { renderEmptyState } from "../empty-state";
-import type { PageView } from "../page-view";
-import type { ProjectActions } from "../projects/project-actions";
-import { projectLook, projectMark } from "../projects/project-looks";
-import { showProjectMenu } from "../projects/project-menu";
-import { accountTagList } from "./account-tags";
-import type { AccountsBand } from "./accounts-band";
-import { paneAccountName } from "./accounts-dialogs";
-import { fillAgentCard } from "./agent-card";
-import type { AgentMonitor } from "./agent-monitor";
-import { type HandoffMenuActions, handoffMenuItems } from "./handoff";
-import type { AgentsText } from "./i18n";
-import { markPreviewRow, PANE_PREVIEW, type PanePreview } from "./pane-preview";
-import { paneText } from "./pane-text";
-
-export type AgentsViewDeps = {
-  monitor: AgentMonitor;
-  getText(): AgentsText;
-  setPageMode(): void;
-  syncHeaderMenu(): void;
-  /** そのペインを下のターミナルパネルで開く。 */
-  openPane(pane: string): void;
-  /** 設定画面の通知の項目へ。 */
-  openNotificationSettings(): void;
-  /** ページを読み込み直す (通知をブラウザで許可した後)。 */
-  reloadPage(): void;
-  /** フックの状態。まだ取っていなければ null。 */
-  getHookStatus(): AgentHooksResponse | null;
-  refreshHookStatus(): Promise<void>;
-  hookHintDismissed(): boolean;
-  dismissHookHint(): void;
-  /** 設定画面のエージェント連携の節へ。 */
-  openHookSettings(): void;
-  /**
-   * tmux が無いときの入れ方 (コピーのボタンつきのコマンドとヘルプへのリンク。
-   * views/install-help.ts)。
-   */
-  tmuxInstallHelp(): HTMLElement;
-  /** 一覧の上に出すアカウントの帯。 */
-  accountsBand: AccountsBand;
-  /** アカウントの一覧 (まだ取っていなければ null)。行の名前に使う。 */
-  getAccounts(): AccountsResponse | null;
-  /** 「新しいエージェント」の画面を開く。project は選んでおくプロジェクト。 */
-  launch(project?: string): void;
-  /** 行の右クリックのメニューの「別のアカウントで続ける…」(handoff.ts)。 */
-  handoff: HandoffMenuActions;
-  /** 一覧に入った・出たとき (アカウントの取り直しを始める・止める)。 */
-  onVisibilityChange(visible: boolean): void;
-  /** プロジェクトの登録・開く・止める (ヘッダの切替と共通)。 */
-  projects: ProjectActions;
-  /** 行に載せたときの覗き窓 (既定は左のサイドバーと共有の 1 つ)。 */
-  preview?: PanePreview;
-};
-
-export type AgentsView = PageView;
+import type { ProjectLook } from "../projects/project-looks";
+import { projectMarkTemplate } from "../projects/project-looks";
+import { iconTemplate } from "../ui/icon";
+import { agentRowTemplate } from "./agent-card";
 
 /** 描き直しの前後で同じ要素を指すための鍵。 */
-const NAV_ATTR = "data-agent-nav";
+export const NAV_ATTR = "data-agent-nav";
 
-export function createAgentsView(deps: AgentsViewDeps): AgentsView {
-  const root = document.createElement("section");
-  root.className = "agents-page";
+export type BoardRowProps = {
+  id: string;
+  state: AgentPane["state"];
+  active: boolean;
+  unread: boolean;
+  title: string;
+  previewName: string;
+  card: TemplateResult;
+  /** 子エージェントの段 (親の下の字下げ。nestAgentPanes)。0 か無ければ字下げしない。 */
+  depth?: number;
+};
 
-  const header = document.createElement("header");
-  header.className = "agents-header";
-  const title = document.createElement("h1");
-  title.className = "agents-title";
-  const spacer = document.createElement("span");
-  spacer.className = "agents-spacer";
-  const notifyBox = document.createElement("div");
-  notifyBox.className = "agents-notify";
-  const refreshButton = document.createElement("button");
-  refreshButton.type = "button";
-  refreshButton.className = "agents-icon-action agents-refresh";
-  refreshButton.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
-  refreshButton.addEventListener("click", () => void deps.monitor.refresh());
-  const launchButton = document.createElement("button");
-  launchButton.type = "button";
-  launchButton.className = "agents-primary agents-launch";
-  const launchIcon = document.createElement("span");
-  launchIcon.className = "agents-primary-icon";
-  launchIcon.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
-  launchIcon.setAttribute("aria-hidden", "true");
-  const launchLabel = document.createElement("span");
-  launchButton.append(launchIcon, launchLabel);
-  launchButton.addEventListener("click", () => deps.launch());
-  header.append(title, spacer, notifyBox, refreshButton, launchButton);
+export type BoardActivity =
+  | { kind: "starting"; text: string }
+  | { kind: "failed"; title: string; detail: string; dismissLabel: string };
 
-  // フックが未設定のときだけ出す 1 行。通知の許可ボタンとは離して、
-  // ヘッダの下に置く (ヘッダの右端に操作を並べて騒がしくしない)。
-  const hookHint = document.createElement("div");
-  hookHint.className = "agents-hook-hint";
-  hookHint.hidden = true;
-  const hookHintText = document.createElement("span");
-  hookHintText.className = "agents-hook-hint-text";
-  const hookHintOpen = document.createElement("button");
-  hookHintOpen.type = "button";
-  hookHintOpen.className = "agents-hook-hint-open";
-  hookHintOpen.addEventListener("click", () => deps.openHookSettings());
-  const hookHintClose = document.createElement("button");
-  hookHintClose.type = "button";
-  hookHintClose.className = "agents-icon-action agents-hook-hint-close";
-  hookHintClose.innerHTML = iconSvg("octicon-x", X_16_PATH);
-  hookHintClose.addEventListener("click", () => {
-    deps.dismissHookHint();
-    render(true);
-  });
-  hookHint.append(hookHintText, hookHintOpen, hookHintClose);
-
-  const problems = document.createElement("details");
-  problems.className = "agents-problems";
-  const problemsSummary = document.createElement("summary");
-  const problemsBody = document.createElement("pre");
-  problemsBody.className = "terminal-observation-errors";
-  problems.append(problemsSummary, problemsBody);
-  problems.hidden = true;
-
-  // 表の上の 1 行: 見出しと件数・状態の絞り込み・すべてのペイン・キーの案内。
-  const board = document.createElement("section");
-  board.className = "agents-board";
-  const toolbar = document.createElement("div");
-  toolbar.className = "agents-toolbar";
-  const boardTitle = document.createElement("h2");
-  boardTitle.className = "agents-section-title";
-  const boardTitleText = document.createElement("span");
-  const boardCount = document.createElement("span");
-  boardCount.className = "agents-chip";
-  boardTitle.append(boardTitleText, boardCount);
-  const filterGroup = document.createElement("div");
-  filterGroup.className = "agents-filter";
-  filterGroup.role = "group";
-  const filterButtons = new Map<AgentStateFilter, HTMLButtonElement>();
-  for (const filter of AGENT_STATE_FILTERS) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.filter = filter;
-    const label = document.createElement("span");
-    label.className = "agents-filter-label";
-    const count = document.createElement("span");
-    count.className = "agents-chip agents-filter-count";
-    button.append(label, count);
-    button.addEventListener("click", () => {
-      stateFilter = filter;
-      render(true);
-    });
-    filterButtons.set(filter, button);
-    filterGroup.appendChild(button);
-  }
-  const allPanesLabel = document.createElement("label");
-  allPanesLabel.className = "agents-all-panes";
-  const allPanesInput = document.createElement("input");
-  allPanesInput.type = "checkbox";
-  const allPanesText = document.createElement("span");
-  allPanesLabel.append(allPanesInput, allPanesText);
-  allPanesInput.addEventListener("change", () => {
-    allPanes = allPanesInput.checked;
-    render(true);
-  });
-  const toolbarSpacer = document.createElement("span");
-  toolbarSpacer.className = "agents-spacer";
-  const hint = document.createElement("span");
-  hint.className = "agents-hint";
-  toolbar.append(boardTitle, filterGroup, allPanesLabel, toolbarSpacer, hint);
-
-  const list = document.createElement("div");
-  list.className = "agents-list";
-  list.role = "tree";
-  list.addEventListener("keydown", onListKeydown);
-  board.append(toolbar, list);
-
-  root.append(header, hookHint, problems, deps.accountsBand.element, board);
-
-  let mounted = false;
-  let stateFilter: AgentStateFilter = "all";
-  let allPanes = false;
-  let selected: string | null = null;
-  /** 畳んだプロジェクト (root)。取り直しを跨いで保つ。 */
-  const collapsed = new Set<string>();
-  /** 停止中のプロジェクトの節を開いているか (プロジェクトの畳みと同じくメモリだけ。既定は畳む)。 */
-  let stoppedOpen = false;
-  /** 前回描いた中身。同じなら DOM を触らない (hover や選択を乱さない)。 */
-  let lastSignature = "";
-  let unsubscribe: (() => void) | null = null;
-  let notifyRequestError = "";
-
-  function text(): AgentsText {
-    return deps.getText();
-  }
-
-  function filterLabel(filter: AgentStateFilter): string {
-    const current = text();
-    if (filter === "all") return current.filterAll;
-    if (filter === "idle") return current.filterIdle;
-    return current.state[filter];
-  }
-
-  function select(pane: AgentPane): void {
-    selected = pane.id;
-    deps.monitor.markRead(pane.id);
-    deps.openPane(pane.id);
-    render(true);
-  }
-
-  function createRow(pane: AgentPane): HTMLElement {
-    const current = text();
-    const unread = deps.monitor.snapshot().unread.get(pane.id);
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = `agents-row agents-row-${pane.state}`;
-    row.setAttribute(NAV_ATTR, `pane:${pane.id}`);
-    row.role = "treeitem";
-    row.tabIndex = -1;
-    row.classList.toggle("active", pane.id === selected);
-    row.classList.toggle("unread", unread !== undefined);
-    if (pane.id === selected) row.setAttribute("aria-current", "true");
-
-    // 左のサイドバーと同じ 2 行組のカード (agent-card.ts)。この画面は幅が
-    // あるので、補足にアカウントと tmux の場所も足す。
-    const place = document.createElement("span");
-    place.className = "agents-place terminal-mono";
-    place.textContent = pane.label;
-    const card = fillAgentCard(row, pane, current, unread, [
-      accountLabel(pane),
-      place,
-    ]);
-    const shown = paneText(pane, current);
-    markPreviewRow(row, pane.id, shown.row);
-    row.title = [
-      shown.title,
-      pane.path,
-      unread
-        ? unread === "waiting"
-          ? current.unreadWaiting
-          : current.unreadFinished
-        : "",
-      card.ageTitle,
-      current.openPane,
-    ]
-      .filter(Boolean)
-      .join("\n");
-    // 左のサイドバーの行と同じ押し分け (中ボタン・⌘/Ctrl・Alt は 1 回押すと同じ)。
-    const openBy = (event: MouseEvent) => {
-      if (event.button > 1) return;
-      event.preventDefault();
-      select(pane);
-    };
-    row.addEventListener("click", openBy);
-    row.addEventListener("auxclick", openBy);
-    // 左のサイドバーの行と同じメニュー。
-    row.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      showContextMenu(
-        row,
-        [
-          { label: current.openPane, onSelect: () => select(pane) },
-          ...handoffMenuItems(pane, current, deps.handoff),
-        ],
-        { at: { x: event.clientX, y: event.clientY } },
-      );
-    });
-    return row;
-  }
-
-  /** 行に出すアカウント名と、そのアカウントのタグの札。 */
-  function accountLabel(pane: AgentPane): HTMLElement {
-    const t = text().accounts;
-    const label = document.createElement("span");
-    label.className = "agents-account";
-    const account = pane.account;
-    if (!account) return label;
-    const data = deps.getAccounts();
-    label.textContent = paneAccountName(pane, data, t);
-    if (account.kind === "default" || account.kind === "registered") {
-      const entry = data?.accounts.find((item) => item.id === account.id);
-      label.title = t.paneAccountTitle(
-        label.textContent,
-        entry?.configDir ?? "",
-      );
-      const tags = accountTagList(entry?.tags);
-      if (tags) label.appendChild(tags);
-    } else if (account.kind === "unregistered") {
-      label.classList.add("agents-account-unregistered");
-      label.title = t.unregisteredTitle(account.configDir);
-    } else {
-      label.classList.add("agents-account-unknown");
-      label.title = t.unknownAccountTitle(account.reason);
-    }
-    return label;
-  }
-
-  /**
-   * 見出しの「開く」(同じタブで移る)。この画面のサーバなら文字だけ。
-   * 起こしている間もボタンの大きさは変えず、押せなくするだけ (進み具合は
-   * 見出しの下の行に出す)。
-   */
-  function projectServer(group: AgentProjectGroup): HTMLElement | null {
-    const current = text();
-    const info = group.info;
-    const server = info.server;
-    if (server.status === "current") {
-      const here = document.createElement("span");
-      here.className = "agents-server-here";
-      here.textContent = current.currentServer;
-      here.title = current.currentServerTitle;
-      return here;
-    }
-    if (server.status === "unreachable" || server.status === "invalid") {
-      const warn = document.createElement("span");
-      warn.className = "agents-server-problem";
-      warn.textContent = "!";
-      warn.title = current.serverProblem(server.detail);
-      warn.setAttribute("aria-label", warn.title);
-      return warn;
-    }
-    if (!info.git) return null;
-    const open = document.createElement("button");
-    open.type = "button";
-    open.className = "agents-server-link";
-    open.textContent = current.openServer;
-    const starting = deps.projects.activity(info.root)?.kind === "starting";
-    open.disabled = starting;
-    open.setAttribute("aria-busy", String(starting));
-    open.title =
-      server.status === "running"
-        ? current.projects.openTitle(info.name)
-        : info.registered
-          ? current.projects.openStoppedTitle(info.name)
-          : current.projects.openUnregisteredTitle(info.name);
-    if (server.status !== "running") open.classList.add("stopped");
-    // 一覧から移るときは、移り先の既定の画面 (リポジトリ) へ。同じ一覧に
-    // 移っても、見ている中身 (全体のエージェント) は変わらないため。
-    open.addEventListener("click", () => void deps.projects.open(info, "/"));
-    return open;
-  }
-
-  function projectMenu(group: AgentProjectGroup, anchor: HTMLElement): void {
-    showProjectMenu(anchor, group.info, {
-      actions: deps.projects,
-      text: text().projects,
-      registeredCount:
-        deps.monitor.snapshot().overview?.registry.projects.length ?? 0,
-    });
-  }
-
-  /** 起こしている最中・失敗を、見出しのすぐ下に出す (失敗は理由の全文)。 */
-  function projectActivity(root: string, name: string): HTMLElement | null {
-    const t = text().projects;
-    const activity = deps.projects.activity(root);
-    if (!activity) return null;
-    const box = document.createElement("div");
-    box.className = `agents-project-activity agents-project-${activity.kind}`;
-    box.setAttribute("role", activity.kind === "failed" ? "alert" : "status");
-    if (activity.kind === "starting") {
-      box.textContent = t.startingTitle(name);
-      return box;
-    }
-    const head = document.createElement("div");
-    head.className = "agents-project-activity-head";
-    const title = document.createElement("strong");
-    title.textContent = activity.title;
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "agents-icon-action";
-    close.innerHTML = iconSvg("octicon-x", X_16_PATH);
-    close.title = t.dismiss;
-    close.setAttribute("aria-label", t.dismiss);
-    close.addEventListener("click", () => deps.projects.dismiss(root));
-    head.append(title, close);
-    const detail = document.createElement("pre");
-    detail.className = "terminal-observation-errors";
-    detail.textContent = activity.detail;
-    box.append(head, detail);
-    return box;
-  }
-
-  function createProject(group: AgentProjectGroup): HTMLElement {
-    const current = text();
-    const section = document.createElement("section");
-    section.className = "agents-project";
-    const isCollapsed = collapsed.has(group.info.root);
-
-    const head = document.createElement("div");
-    head.className = "agents-project-head";
-    const summary: string[] = [];
-    for (const state of ["waiting", "working", "done", "idle"] as const) {
-      const n = group.counts[state];
-      if (n > 0) summary.push(`${current.state[state]} ${n}`);
-    }
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "agents-project-toggle";
-    toggle.setAttribute(NAV_ATTR, `project:${group.info.root}`);
-    toggle.tabIndex = -1;
-    toggle.setAttribute("aria-expanded", String(!isCollapsed));
-    // 見出しはプロジェクトの色の四角と頭文字・名前だけにする (絵のとおり)。
-    // パス・件数・Git の外かどうかはツールチップに書く。
-    toggle.title = [
-      group.info.git
-        ? group.info.displayRoot
-        : `${group.info.displayRoot} · ${current.outsideGit}`,
-      current.board.projectCounts(summary.join(" · ")),
-      current.toggleProject,
-    ].join("\n");
-    const name = document.createElement("span");
-    name.className = "agents-project-name";
-    name.textContent = group.info.name;
-    const twisty = document.createElement("span");
-    twisty.className = "terminal-tree-twisty agents-project-twisty";
-    twisty.classList.toggle("collapsed", isCollapsed);
-    twisty.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
-    twisty.setAttribute("aria-hidden", "true");
-    toggle.append(
-      projectMark(projectLook(group.info), "agents-project-mark"),
-      name,
-      twisty,
-    );
-    toggle.addEventListener("click", () => {
-      if (collapsed.has(group.info.root)) collapsed.delete(group.info.root);
-      else collapsed.add(group.info.root);
-      render(true);
-    });
-    head.appendChild(toggle);
-    // 失敗は隠さない (hover を待たずに常に出す)。
-    if (group.info.error) {
-      const error = document.createElement("span");
-      error.className = "agents-server-problem";
-      error.textContent = "!";
-      error.title = current.projectError(group.info.error);
-      error.setAttribute("aria-label", error.title);
-      head.appendChild(error);
-    }
-
-    // 開く・起動・⋯ は、見出しに載ったとき (hover・フォーカス) に出す。場所は
-    // 最初から取っておき、出ても名前が動かない (左のサイドバーの見出しと同じ)。
-    const actions = document.createElement("span");
-    actions.className = "agents-project-actions";
-    const server = projectServer(group);
-    if (server) actions.appendChild(server);
-    if (group.info.git) {
-      const launch = document.createElement("button");
-      launch.type = "button";
-      launch.className = "agents-icon-action agents-project-launch";
-      launch.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
-      launch.title = current.accounts.launchProjectTitle(group.info.name);
-      launch.setAttribute("aria-label", launch.title);
-      launch.addEventListener("click", () => deps.launch(group.info.root));
-      actions.appendChild(launch);
-    }
-    const menu = document.createElement("button");
-    menu.type = "button";
-    menu.className = "agents-icon-action agents-project-menu";
-    menu.innerHTML = iconSvg("octicon-kebab-horizontal", KEBAB_16_PATH);
-    menu.title = current.projects.menuTitle(group.info.name);
-    menu.setAttribute("aria-label", menu.title);
-    menu.setAttribute("aria-haspopup", "menu");
-    menu.addEventListener("click", (event) => {
-      // 文書全体の click で閉じる処理 (リポジトリ画面のメニュー) に、開いた
-      // ばかりのメニューを閉じさせない。作業ツリー画面の ⋯ と同じ。
-      event.stopPropagation();
-      projectMenu(group, menu);
-    });
-    actions.appendChild(menu);
-    head.appendChild(actions);
-
-    section.appendChild(head);
-    const activity = projectActivity(group.info.root, group.info.name);
-    if (activity) section.appendChild(activity);
-    // エージェントの居ない登録プロジェクトは見出しと「エージェントはいません」。
-    if (group.panes.length === 0) {
-      section.classList.add("agents-project-empty");
-      const none = document.createElement("div");
-      none.className = "agents-project-none";
-      none.textContent = current.board.noAgents;
-      none.hidden = isCollapsed;
-      section.appendChild(none);
-      return section;
-    }
-    const rows = document.createElement("div");
-    rows.className = "agents-rows";
-    rows.role = "group";
-    rows.hidden = isCollapsed;
-    for (const pane of group.panes) rows.appendChild(createRow(pane));
-    section.appendChild(rows);
-    return section;
-  }
-
-  /** 一覧の中の空の案内 (共通の部品 views/empty-state.ts)。 */
-  function emptyState(
-    heading: string,
-    body: string,
-    action?: { label: string; run(): void },
-  ): HTMLElement {
-    return renderEmptyState({
-      title: heading,
-      ...(body ? { hint: body } : {}),
-      actions: action ? [action] : [],
-      compact: true,
-    });
-  }
-
-  /**
-   * エージェントが 1 つも居ないときの案内: 次にやること (新しいエージェント・
-   * プロジェクトの登録) と、ボードへ戻るキー。ペインはあるがエージェントで
-   * ないだけなら、登録の代わりに「すべてのペインを表示」を出す (今までの操作)。
-   */
-  function noAgentsState(showAllPanes: (() => void) | null): HTMLElement {
-    const current = text();
-    return renderEmptyState({
-      icon: PLUS_16_PATH,
-      title: current.emptyNoAgentsTitle,
-      hint: current.emptyNoAgentsBody,
-      actions: [
-        {
-          label: current.accounts.launchButton,
-          title: current.accounts.launchButtonTitle,
-          primary: true,
-          run: () => deps.launch(),
-        },
-        showAllPanes
-          ? { label: current.emptyNoAgentsAction, run: showAllPanes }
-          : {
-              label: current.emptyRegisterProject,
-              run: () => void deps.projects.registerByPath(),
-            },
-      ],
-      keys: [{ keys: "g a", label: current.emptyKeyBoard }],
-      keysLabel: current.emptyKeysLabel,
-      compact: true,
-    });
-  }
-
-  function renderNotify(): void {
-    const current = text();
-    notifyBox.replaceChildren();
-    const view = notifyPermissionView(
-      deps.monitor.permission(),
-      deps.monitor.snapshot().permissionAsked,
-    );
-    const status = document.createElement("span");
-    status.className = "agents-notify-status";
-    if (view === "ask" || view === "ask-again") {
-      if (view === "ask-again") {
-        status.textContent = current.notifyNotYet;
-        notifyBox.appendChild(status);
+export type BoardProjectProps = {
+  root: string;
+  name: string;
+  look: ProjectLook;
+  collapsed: boolean;
+  toggleTitle: string;
+  error: string | null;
+  server:
+    | { kind: "here"; text: string; title: string }
+    | { kind: "problem"; title: string }
+    | {
+        kind: "open";
+        text: string;
+        title: string;
+        starting: boolean;
+        stopped: boolean;
       }
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "agents-secondary agents-notify-enable";
-      button.textContent =
-        view === "ask" ? current.notifyEnable : current.notifyAskAgain;
-      button.title = current.notifyEnableTitle;
-      button.addEventListener("click", () => {
-        deps.monitor.requestPermission().then(
-          () => {
-            notifyRequestError = "";
-            render(true);
-          },
-          (cause: unknown) => {
-            console.error(
-              "[code-viewer] notification permission failed",
-              cause,
-            );
-            notifyRequestError = `${current.notifyRequestFailed}: ${formatErrorDetail(cause)}`;
-            render(true);
-          },
-        );
-      });
-      notifyBox.appendChild(button);
-    } else if (view === "granted") {
-      const link = document.createElement("button");
-      link.type = "button";
-      link.className = "agents-text-action agents-notify-on";
-      link.textContent = current.notifyOn;
-      link.title = current.notifyOnTitle;
-      link.addEventListener("click", () => deps.openNotificationSettings());
-      notifyBox.appendChild(link);
-    } else if (view === "denied") {
-      status.classList.add("agents-notify-denied");
-      status.textContent = current.notifyDenied;
-      status.title = current.notifyDeniedHelp;
-      const help = document.createElement("span");
-      help.className = "agents-notify-help";
-      help.textContent = current.notifyDeniedHelp;
-      // 許可した後の再読み込み (ブラウザの設定はページからは開けない)。
-      const reload = document.createElement("button");
-      reload.type = "button";
-      reload.className = "agents-text-action agents-notify-reload";
-      reload.textContent = current.notifyReload;
-      reload.addEventListener("click", () => deps.reloadPage());
-      notifyBox.append(status, help, reload);
-    } else {
-      status.textContent = current.notifyUnsupported;
-      notifyBox.appendChild(status);
-    }
-    const failure = notifyRequestError || deps.monitor.snapshot().notifyError;
-    if (failure) {
-      const error = document.createElement("span");
-      error.className = "agents-notify-error";
-      error.textContent = "!";
-      error.title = failure;
-      error.setAttribute("aria-label", failure);
-      notifyBox.appendChild(error);
-    }
-  }
+    | null;
+  launchTitle: string | null;
+  menuTitle: string;
+  activity: BoardActivity | null;
+  noAgents: string | null;
+  rows: BoardRowProps[];
+};
 
-  function renderHookHint(): void {
-    const current = text();
-    const panes = deps.monitor.snapshot().overview?.panes ?? [];
-    const agents = deps.hookHintDismissed()
-      ? []
-      : agentsNeedingHooks(
-          panes.map((pane) => pane.kind),
-          deps.getHookStatus(),
-        );
-    hookHint.hidden = agents.length === 0;
-    if (agents.length === 0) return;
-    hookHintText.textContent = current.hookHint(agents.join(" / "));
-    hookHintOpen.textContent = current.hookHintOpen;
-    hookHintClose.title = current.hookHintClose;
-    hookHintClose.setAttribute("aria-label", current.hookHintClose);
-  }
+export type BoardNotify =
+  | { kind: "ask"; status: string | null; label: string; title: string }
+  | { kind: "granted"; label: string; title: string }
+  | { kind: "denied"; status: string; help: string; reload: string }
+  | { kind: "unsupported"; status: string };
 
-  function renderBody(): void {
-    const current = text();
-    const { overview, error } = deps.monitor.snapshot();
-    const panes = overview?.panes ?? [];
-    const scoped = panes.filter((pane) => allPanes || pane.kind !== null);
-    for (const [filter, button] of filterButtons) {
-      const label = button.querySelector(".agents-filter-label");
-      const count = button.querySelector(".agents-filter-count");
-      if (label) label.textContent = filterLabel(filter);
-      if (count)
-        count.textContent = String(
-          scoped.filter((pane) => matchesStateFilter(pane.state, filter))
-            .length,
-        );
-      button.classList.toggle("active", stateFilter === filter);
-      button.setAttribute("aria-pressed", String(stateFilter === filter));
-    }
-    boardCount.textContent = String(scoped.length);
-
-    const problemLines = [
-      ...(error ? [error] : []),
-      ...(overview?.registry.error
-        ? [current.projects.registryProblem(overview.registry.error)]
-        : []),
-      ...(overview?.tmux.error
-        ? [`${current.tmuxFailed}\n${overview.tmux.error}`]
-        : []),
-      ...(overview?.errors ?? []).map((item) => {
-        const target = item.target ? ` ${item.target}` : "";
-        return `[${item.operation}${target}]\n${item.detail}${
-          item.stack ? `\n${item.stack}` : ""
-        }`;
-      }),
-    ];
-    problems.hidden = problemLines.length === 0;
-    problemsSummary.textContent = current.problems(problemLines.length);
-    problemsBody.textContent = problemLines.join("\n\n");
-    // tmux の一覧そのものが取れないときは、中身を見なくても分かるよう開く。
-    if (overview?.tmux.error || (error && !overview)) problems.open = true;
-
-    list.replaceChildren();
-    // どのプロジェクトにも属さない失敗 (パスを入力しての登録など)。
-    const general = projectActivity("", "");
-    if (general) list.appendChild(general);
-    if (!overview) {
-      if (!error) list.appendChild(emptyState(current.loading, ""));
-      return;
-    }
-    // 登録したプロジェクトは、エージェントが居なくても (tmux が無くても)
-    // 見出しだけで並べる。案内の箱はその上に出す。
-    const registeredOnly = () => {
-      appendGroups(
-        groupAgentPanes([], overview.projects, {
-          includeEmptyRegistered: true,
-        }),
-      );
+export type AgentsBoardViewProps = {
+  ariaLabel: string;
+  title: string;
+  refreshLabel: string;
+  launch: { label: string; title: string };
+  notify: BoardNotify;
+  notifyError: string | null;
+  hookHint: {
+    text: string;
+    open: string;
+    close: string;
+    /** その場で入れ直すボタン (入っているが古い・呼び先が無い種類ごと)。 */
+    repairs: { label: string; onClick(trigger: HTMLElement): void }[];
+  } | null;
+  problems: { summary: string; body: string; forceOpen: boolean } | null;
+  accountsBand: Element;
+  board: {
+    title: string;
+    count: number;
+    filterLabel: string;
+    filters: {
+      filter: AgentStateFilter;
+      label: string;
+      count: number;
+      active: boolean;
+    }[];
+    allPanes: { label: string; title: string; checked: boolean };
+    /** 並びの切替 (プロジェクトごと・急ぐ順)。 */
+    order: {
+      label: string;
+      options: {
+        order: BoardOrder;
+        label: string;
+        title: string;
+        active: boolean;
+      }[];
     };
-    if (overview.tmux.error) {
-      registeredOnly();
-      return;
-    }
-    if (!overview.tmux.available) {
-      list.appendChild(
-        emptyState(
-          current.emptyNotInstalledTitle,
-          current.emptyNotInstalledBody,
-        ),
-      );
-      list.appendChild(deps.tmuxInstallHelp());
-      registeredOnly();
-      return;
-    }
-    if (!overview.tmux.running) {
-      list.appendChild(
-        emptyState(current.emptyNoTmuxTitle, current.emptyNoTmuxBody),
-      );
-      registeredOnly();
-      return;
-    }
-    if (scoped.length === 0) {
-      list.appendChild(
-        noAgentsState(
-          allPanes || panes.length === 0
-            ? null
-            : () => {
-                allPanes = true;
-                render(true);
-              },
-        ),
-      );
-      registeredOnly();
-      return;
-    }
-    const visible = filterAgentPanes(panes, { allPanes, state: stateFilter });
-    if (visible.length === 0) {
-      list.appendChild(
-        emptyState(
-          current.emptyNoMatchTitle(filterLabel(stateFilter)),
-          current.emptyNoMatchBody,
-          {
-            label: current.emptyNoMatchAction,
-            run: () => {
-              stateFilter = "all";
-              render(true);
-            },
-          },
-        ),
-      );
-      return;
-    }
-    // 絞り込み中は、エージェントの居ない登録プロジェクトを出さない
-    // (「入力待ちだけ」を見たいときに、関係の無い見出しが並ばないように)。
-    appendGroups(
-      groupAgentPanes(visible, overview.projects, {
-        includeEmptyRegistered: stateFilter === "all",
-      }),
-    );
-  }
-
-  /**
-   * プロジェクトを並べる。行の無い登録プロジェクトのうち起動中でないもの
-   * (core/project-running.ts。左のサイドバーと同じ判定) は、一覧の下の畳める
-   * 「停止中」の節へ。並びはどちらも渡した順 (登録の順) のまま。
-   */
-  function appendGroups(groups: AgentProjectGroup[]): void {
-    const overview = deps.monitor.snapshot().overview;
-    if (!overview) return;
-    const starting = overview.projects
-      .filter((info) => deps.projects.activity(info.root)?.kind === "starting")
-      .map((info) => info.root);
-    const running = runningProjectRoots(overview, starting);
-    // 行のあるもの (すべてのペインを出しているときのシェルだけのペインも) は
-    // 畳みに入れない。
-    for (const group of groups) {
-      if (group.panes.length > 0) running.add(group.info.root);
-    }
-    const split = partitionProjectsByRunning(
-      groups,
-      (group) => group.info.root,
-      running,
-    );
-    for (const group of split.running) list.appendChild(createProject(group));
-    if (split.stopped.length === 0) return;
-    const current = text();
-    const section = document.createElement("section");
-    section.className = "agents-stopped";
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "agents-stopped-toggle";
-    toggle.setAttribute(NAV_ATTR, "stopped");
-    toggle.tabIndex = -1;
-    toggle.setAttribute("aria-expanded", String(stoppedOpen));
-    toggle.title = current.sidebar.stoppedTitle;
-    const twisty = document.createElement("span");
-    twisty.className = "terminal-tree-twisty agents-project-twisty";
-    twisty.classList.toggle("collapsed", !stoppedOpen);
-    twisty.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
-    twisty.setAttribute("aria-hidden", "true");
-    const label = document.createElement("span");
-    label.textContent = current.sidebar.stopped(split.stopped.length);
-    toggle.append(twisty, label);
-    toggle.addEventListener("click", () => {
-      stoppedOpen = !stoppedOpen;
-      render(true);
-    });
-    const rows = document.createElement("div");
-    rows.className = "agents-stopped-list";
-    rows.hidden = !stoppedOpen;
-    for (const group of split.stopped) rows.appendChild(createProject(group));
-    section.append(toggle, rows);
-    list.appendChild(section);
-  }
-
-  function signature(): string {
-    const snapshot = deps.monitor.snapshot();
-    const now = Date.now();
-    return JSON.stringify([
-      text().title,
-      stateFilter,
-      allPanes,
-      selected,
-      [...collapsed],
-      stoppedOpen,
-      [...snapshot.unread],
-      snapshot.error,
-      snapshot.notifyError,
-      notifyRequestError,
-      deps.monitor.permission(),
-      deps.hookHintDismissed(),
-      deps.getHookStatus(),
-      deps.accountsBand.signature(),
-      deps.projects.signature(),
-      snapshot.overview,
-      // 経過時間は分単位でしか変わらない。
-      Math.floor(now / 60_000),
-    ]);
-  }
-
-  /**
-   * 描き直す。キーボードの位置は鍵で覚えて戻す。スクロール位置は、箱を
-   * 作り直さず中身だけ入れ替えるので、そのまま残る。
-   */
-  function render(force = false): void {
-    if (!mounted) return;
-    const next = signature();
-    if (!force && next === lastSignature) return;
-    lastSignature = next;
-    const current = text();
-    const focusedKey =
-      document.activeElement instanceof HTMLElement &&
-      list.contains(document.activeElement)
-        ? document.activeElement.getAttribute(NAV_ATTR)
-        : null;
-
-    root.setAttribute("aria-label", current.ariaLabel);
-    title.textContent = current.title;
-    boardTitleText.textContent = current.board.allAgents;
-    filterGroup.setAttribute("aria-label", current.filterLabel);
-    allPanesText.textContent = current.allPanes;
-    allPanesLabel.title = current.allPanesTitle;
-    allPanesInput.checked = allPanes;
-    hint.textContent = current.keyboardHint;
-    // 狭いと末尾を省くので、全文はカーソルを置いたときに出す。
-    hint.title = current.keyboardHint;
-    refreshButton.title = current.refresh;
-    refreshButton.setAttribute("aria-label", current.refresh);
-    launchLabel.textContent = current.accounts.launchButton;
-    launchButton.title = current.accounts.launchButtonTitle;
-    hookHintClose.title = current.hookHintClose;
-    hookHintClose.setAttribute("aria-label", current.hookHintClose);
-    renderNotify();
-    deps.accountsBand.render();
-    renderHookHint();
-    renderBody();
-
-    const navs = navItems();
-    const restore =
-      (focusedKey &&
-        navs.find((item) => item.getAttribute(NAV_ATTR) === focusedKey)) ||
-      null;
-    // 行へ Tab で入れるのは 1 つだけ (矢印で動く)。選んでいる行、無ければ
-    // 一番上の行 (先頭のプロジェクトの最も急ぐもの)。Enter 1 回でそこへ行ける。
-    const tabStop =
-      restore ??
-      navs.find((item) => item.classList.contains("active")) ??
-      navs.find((item) => item.classList.contains("agents-row")) ??
-      navs[0];
-    if (tabStop) tabStop.tabIndex = 0;
-    restore?.focus({ preventScroll: true });
-  }
-
-  function navItems(): HTMLElement[] {
-    return [...list.querySelectorAll<HTMLElement>(`[${NAV_ATTR}]`)].filter(
-      (item) => !item.closest("[hidden]"),
-    );
-  }
-
-  function onListKeydown(event: KeyboardEvent): void {
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
-    // Enter は行・見出しを押したのと同じにする。ボタンの既定の動作に任せる
-    // と、キーの届き方によっては click にならないことがあるので、ここで
-    // 1 回だけ押す (既定の動作は止めて二重にしない)。
-    if (event.key === "Enter") {
-      const target = event.target;
-      if (target instanceof HTMLElement && target.hasAttribute(NAV_ATTR)) {
-        event.preventDefault();
-        target.click();
-      }
-      return;
-    }
-    const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
-    if (!keys.includes(event.key)) return;
-    const navs = navItems();
-    if (navs.length === 0) return;
-    const index = navs.indexOf(document.activeElement as HTMLElement);
-    let next = index;
-    if (event.key === "ArrowDown") next = Math.min(navs.length - 1, index + 1);
-    else if (event.key === "ArrowUp") next = Math.max(0, index - 1);
-    else if (event.key === "Home") next = 0;
-    else next = navs.length - 1;
-    const target = navs[next];
-    if (!target) return;
-    event.preventDefault();
-    for (const item of navs) item.tabIndex = -1;
-    target.tabIndex = 0;
-    target.focus();
-    target.scrollIntoView({ block: "nearest" });
-  }
-
-  function mount(): void {
-    if (mounted) return;
-    const content = document.getElementById("content");
-    if (!content) return;
-    document.getElementById("diff")?.setAttribute("hidden", "true");
-    document.getElementById("empty")?.classList.add("hidden");
-    document
-      .getElementById("history-commit-info")
-      ?.setAttribute("hidden", "true");
-    content.appendChild(root);
-    mounted = true;
-    document.body.classList.add("gdp-agents-page");
-    deps.setPageMode();
-    deps.syncHeaderMenu();
-    const offMonitor = deps.monitor.subscribe(() => render());
-    const offProjects = deps.projects.subscribe(() => render());
-    // 行は横に長いので、覗き窓は行の下に重ねる。
-    const offPreview = (deps.preview ?? PANE_PREVIEW).watch(list, {
-      placement: "below",
-      getText: () => text().preview,
-    });
-    unsubscribe = () => {
-      offMonitor();
-      offProjects();
-      offPreview();
-    };
-    deps.onVisibilityChange(true);
-  }
-
-  async function enter(): Promise<void> {
-    const wasMounted = mounted;
-    mount();
-    render(true);
-    if (!wasMounted) {
-      // 画面に入ったらキーボードですぐ動けるように、行へ入る。入力中の
-      // 欄から奪わないよう、どこにもフォーカスが無いときだけ。
-      const active = document.activeElement;
-      if (!active || active === document.body) {
-        list.querySelector<HTMLElement>('[tabindex="0"]')?.focus({
-          preventScroll: true,
-        });
-      }
-    }
-    await Promise.all([deps.monitor.refresh(), deps.refreshHookStatus()]);
-  }
-
-  function suspend(): void {
-    if (mounted) deps.onVisibilityChange(false);
-    unsubscribe?.();
-    unsubscribe = null;
-    root.remove();
-    document.body.classList.remove("gdp-agents-page");
-    document.getElementById("diff")?.removeAttribute("hidden");
-    mounted = false;
-    lastSignature = "";
-  }
-
-  return {
-    enter,
-    suspend,
-    handleSse() {
-      // この一覧はファイルの変更通知では変わらない。取り直しは agent-monitor
-      // の周期に任せる。
-    },
-    localize() {
-      render(true);
-    },
+    hint: string;
   };
+  /** 一覧の中身 (順に並べる)。 */
+  list: BoardListEntry[];
+  onRefresh(): void;
+  onLaunch(project?: string): void;
+  onNotifyEnable(): void;
+  onNotifySettings(): void;
+  onReload(): void;
+  onHookOpen(): void;
+  onHookClose(): void;
+  onFilter(filter: AgentStateFilter): void;
+  onAllPanes(checked: boolean): void;
+  onOrder(order: BoardOrder): void;
+  onListKeydown(event: KeyboardEvent): void;
+  onOpenPane(id: string, event: MouseEvent): void;
+  onPaneMenu(id: string, event: MouseEvent): void;
+  onToggleProject(root: string): void;
+  onOpenProject(root: string): void;
+  onProjectMenu(root: string, anchor: HTMLElement): void;
+  onDismissActivity(root: string): void;
+  onToggleStopped(): void;
+  /** 一覧の箱が描かれたとき (覗き窓を見張る)。 */
+  listRef(el: Element | undefined): void;
+};
+
+/** 全体ボードの並び。 */
+export type BoardOrder = "project" | "urgency";
+
+export type BoardListEntry =
+  | { kind: "activity"; activity: BoardActivity; root: string }
+  | {
+      /** 急ぐ順の 1 段 (状態ごと。プロジェクトをまたぐ)。 */
+      kind: "section";
+      /** 状態の段。留めた段は null。 */
+      state: AgentPane["state"] | null;
+      label: string;
+      /**
+       * 見出しの件数。急ぐ順の段はその状態の行の数 (子の状態で段に入った親は
+       * 数えない)。留めた段は行の数。
+       */
+      count: number;
+      rows: BoardRowProps[];
+    }
+  | { kind: "content"; content: unknown }
+  | { kind: "project"; project: BoardProjectProps }
+  | {
+      kind: "stopped";
+      open: boolean;
+      label: string;
+      title: string;
+      projects: BoardProjectProps[];
+    };
+
+export type AgentsBoardView = (props: AgentsBoardViewProps) => unknown;
+
+function activityTemplate(
+  props: AgentsBoardViewProps,
+  root: string,
+  activity: BoardActivity,
+): TemplateResult {
+  if (activity.kind === "starting")
+    return html`<div class="agents-project-activity agents-project-starting" role="status">${activity.text}</div>`;
+  return html`<div class="agents-project-activity agents-project-failed" role="alert"><div
+      class="agents-project-activity-head"
+    ><strong>${activity.title}</strong><button
+      type="button"
+      class="agents-icon-action"
+      title=${activity.dismissLabel}
+      aria-label=${activity.dismissLabel}
+      @click=${() => props.onDismissActivity(root)}
+    >${iconTemplate(X_16_PATH, "octicon-x")}</button></div><pre
+      class="terminal-observation-errors"
+    >${activity.detail}</pre></div>`;
 }
+
+function rowTemplate(props: AgentsBoardViewProps, row: BoardRowProps): unknown {
+  return agentRowTemplate({
+    base: "agents-row",
+    ...row,
+    onOpen: (event) => props.onOpenPane(row.id, event),
+    onMenu: (event) => props.onPaneMenu(row.id, event),
+  });
+}
+
+function serverTemplate(
+  props: AgentsBoardViewProps,
+  project: BoardProjectProps,
+): unknown {
+  const server = project.server;
+  if (!server) return nothing;
+  if (server.kind === "here")
+    return html`<span class="agents-server-here" title=${server.title}>${server.text}</span>`;
+  if (server.kind === "problem")
+    return html`<span
+      class="agents-server-problem"
+      title=${server.title}
+      aria-label=${server.title}
+    >!</span>`;
+  return html`<button
+    type="button"
+    class=${server.stopped ? "agents-server-link stopped" : "agents-server-link"}
+    ?disabled=${server.starting}
+    aria-busy=${String(server.starting)}
+    title=${server.title}
+    @click=${() => props.onOpenProject(project.root)}
+  >${server.text}</button>`;
+}
+
+function projectTemplate(
+  props: AgentsBoardViewProps,
+  project: BoardProjectProps,
+): TemplateResult {
+  return html`<section
+    class=${project.noAgents !== null ? "agents-project agents-project-empty" : "agents-project"}
+  ><div class="agents-project-head"><button
+    type="button"
+    class="agents-project-toggle"
+    data-agent-nav=${`project:${project.root}`}
+    tabindex=${live("-1")}
+    aria-expanded=${String(!project.collapsed)}
+    title=${project.toggleTitle}
+    @click=${() => props.onToggleProject(project.root)}
+  >${projectMarkTemplate(project.look, "agents-project-mark")}<span
+    class="agents-project-name"
+  >${project.name}</span><span
+    class=${project.collapsed ? "terminal-tree-twisty agents-project-twisty collapsed" : "terminal-tree-twisty agents-project-twisty"}
+    aria-hidden="true"
+  >${iconTemplate(CHEVRON_DOWN_16_PATH, "octicon-chevron-down")}</span></button>${
+    project.error !== null
+      ? html`<span
+          class="agents-server-problem"
+          title=${project.error}
+          aria-label=${project.error}
+        >!</span>`
+      : nothing
+  }<span class="agents-project-actions">${serverTemplate(props, project)}${
+    project.launchTitle !== null
+      ? html`<button
+          type="button"
+          class="agents-icon-action agents-project-launch"
+          title=${project.launchTitle}
+          aria-label=${project.launchTitle}
+          @click=${() => props.onLaunch(project.root)}
+        >${iconTemplate(PLUS_16_PATH, "octicon-plus")}</button>`
+      : nothing
+  }<button
+    type="button"
+    class="agents-icon-action agents-project-menu"
+    title=${project.menuTitle}
+    aria-label=${project.menuTitle}
+    aria-haspopup="menu"
+    @click=${(event: MouseEvent) => {
+      // 文書全体の click で閉じる処理に、開いたばかりのメニューを閉じさせない。
+      event.stopPropagation();
+      props.onProjectMenu(project.root, event.currentTarget as HTMLElement);
+    }}
+  >${iconTemplate(KEBAB_16_PATH, "octicon-kebab-horizontal")}</button></span></div>${
+    project.activity
+      ? activityTemplate(props, project.root, project.activity)
+      : nothing
+  }${
+    project.noAgents !== null
+      ? html`<div class="agents-project-none" ?hidden=${project.collapsed}>${project.noAgents}</div>`
+      : html`<div class="agents-rows" role="group" ?hidden=${project.collapsed}>${repeat(
+          project.rows,
+          (row) => row.id,
+          (row) => rowTemplate(props, row),
+        )}</div>`
+  }</section>`;
+}
+
+function listEntryTemplate(
+  props: AgentsBoardViewProps,
+  entry: BoardListEntry,
+): unknown {
+  switch (entry.kind) {
+    case "activity":
+      return activityTemplate(props, entry.root, entry.activity);
+    case "content":
+      return entry.content;
+    case "section":
+      return html`<section class="agents-project agents-urgency-section"><div
+        class="agents-project-head"
+      ><span class="agents-project-name">${entry.label}</span><span
+        class="agents-chip"
+      >${entry.count}</span></div><div class="agents-rows" role="group">${repeat(
+        entry.rows,
+        (row) => row.id,
+        (row) => rowTemplate(props, row),
+      )}</div></section>`;
+    case "project":
+      return projectTemplate(props, entry.project);
+    case "stopped":
+      return html`<section class="agents-stopped"><button
+        type="button"
+        class="agents-stopped-toggle"
+        data-agent-nav="stopped"
+        tabindex=${live("-1")}
+        aria-expanded=${String(entry.open)}
+        title=${entry.title}
+        @click=${() => props.onToggleStopped()}
+      ><span
+        class=${entry.open ? "terminal-tree-twisty agents-project-twisty" : "terminal-tree-twisty agents-project-twisty collapsed"}
+        aria-hidden="true"
+      >${iconTemplate(CHEVRON_DOWN_16_PATH, "octicon-chevron-down")}</span><span
+      >${entry.label}</span></button><div class="agents-stopped-list" ?hidden=${!entry.open}>${entry.projects.map(
+        (project) => projectTemplate(props, project),
+      )}</div></section>`;
+  }
+}
+
+function notifyTemplate(props: AgentsBoardViewProps): unknown {
+  const notify = props.notify;
+  const error = props.notifyError
+    ? html`<span
+        class="agents-notify-error"
+        title=${props.notifyError}
+        aria-label=${props.notifyError}
+      >!</span>`
+    : nothing;
+  if (notify.kind === "ask")
+    return html`${
+      notify.status !== null
+        ? html`<span class="agents-notify-status">${notify.status}</span>`
+        : nothing
+    }<button
+      type="button"
+      class="agents-secondary agents-notify-enable"
+      title=${notify.title}
+      @click=${() => props.onNotifyEnable()}
+    >${notify.label}</button>${error}`;
+  if (notify.kind === "granted")
+    return html`<button
+      type="button"
+      class="agents-text-action agents-notify-on"
+      title=${notify.title}
+      @click=${() => props.onNotifySettings()}
+    >${notify.label}</button>${error}`;
+  if (notify.kind === "denied")
+    // 許可した後の再読み込み (ブラウザの設定はページからは開けない)。
+    return html`<span class="agents-notify-status agents-notify-denied" title=${notify.help}
+        >${notify.status}</span
+      ><span class="agents-notify-help">${notify.help}</span><button
+        type="button"
+        class="agents-text-action agents-notify-reload"
+        @click=${() => props.onReload()}
+      >${notify.reload}</button>${error}`;
+  return html`<span class="agents-notify-status">${notify.status}</span>${error}`;
+}
+
+/** 既定の表示。 */
+export const DEFAULT_VIEW: AgentsBoardView = (props) => {
+  const { board } = props;
+  return html`<header class="agents-header"><h1 class="agents-title">${props.title}</h1><span
+      class="agents-spacer"
+    ></span><div class="agents-notify">${notifyTemplate(props)}</div><button
+      type="button"
+      class="agents-icon-action agents-refresh"
+      title=${props.refreshLabel}
+      aria-label=${props.refreshLabel}
+      @click=${() => props.onRefresh()}
+    >${iconTemplate(SYNC_16_PATH, "octicon-sync")}</button><button
+      type="button"
+      class="agents-primary agents-launch"
+      title=${props.launch.title}
+      @click=${() => props.onLaunch()}
+    ><span class="agents-primary-icon" aria-hidden="true">${iconTemplate(PLUS_16_PATH, "octicon-plus")}</span><span
+      >${props.launch.label}</span></button></header><div
+      class="agents-hook-hint"
+      ?hidden=${!props.hookHint}
+    ><span class="agents-hook-hint-text">${props.hookHint?.text ?? ""}</span>${(
+      props.hookHint?.repairs ?? []
+    ).map(
+      (repair) =>
+        html`<button
+          type="button"
+          class="agents-hook-hint-open agents-hook-hint-repair"
+          @click=${(event: Event) =>
+            repair.onClick(event.currentTarget as HTMLElement)}
+        >${repair.label}</button>`,
+    )}<button
+      type="button"
+      class="agents-hook-hint-open"
+      @click=${() => props.onHookOpen()}
+    >${props.hookHint?.open ?? ""}</button><button
+      type="button"
+      class="agents-icon-action agents-hook-hint-close"
+      title=${ifDefined(props.hookHint?.close)}
+      aria-label=${ifDefined(props.hookHint?.close)}
+      @click=${() => props.onHookClose()}
+    >${iconTemplate(X_16_PATH, "octicon-x")}</button></div><details
+      class="agents-problems"
+      ?hidden=${!props.problems}
+      ${ref((el) => {
+        // tmux の一覧そのものが取れないときは、中身を見なくても分かるよう開く。
+        if (el instanceof HTMLDetailsElement && props.problems?.forceOpen)
+          el.open = true;
+      })}
+    ><summary>${props.problems?.summary ?? ""}</summary><pre
+      class="terminal-observation-errors"
+    >${props.problems?.body ?? ""}</pre></details>${props.accountsBand}<section
+      class="agents-board"
+    ><div class="agents-toolbar"><h2 class="agents-section-title"><span>${board.title}</span><span
+      class="agents-chip"
+    >${board.count}</span></h2><div class="agents-filter" role="group" aria-label=${board.filterLabel}>${board.filters.map(
+      (item) => html`<button
+        type="button"
+        data-filter=${item.filter}
+        class=${item.active ? "active" : ""}
+        aria-pressed=${String(item.active)}
+        @click=${() => props.onFilter(item.filter)}
+      ><span class="agents-filter-label">${item.label}</span><span
+        class="agents-chip agents-filter-count"
+      >${item.count}</span></button>`,
+    )}</div><label class="agents-all-panes" title=${board.allPanes.title}><input
+      type="checkbox"
+      .checked=${live(board.allPanes.checked)}
+      @change=${(event: Event) =>
+        props.onAllPanes((event.currentTarget as HTMLInputElement).checked)}
+    /><span>${board.allPanes.label}</span></label><div
+      class="agents-filter agents-order"
+      role="group"
+      aria-label=${board.order.label}
+    >${board.order.options.map(
+      (item) => html`<button
+        type="button"
+        data-order=${item.order}
+        class=${item.active ? "active" : ""}
+        aria-pressed=${String(item.active)}
+        title=${item.title}
+        @click=${() => props.onOrder(item.order)}
+      ><span class="agents-filter-label">${item.label}</span></button>`,
+    )}</div><span class="agents-spacer"></span><span
+      class="agents-hint"
+      title=${board.hint}
+    >${board.hint}</span></div><div
+      class="agents-list"
+      role="tree"
+      ${ref((el) => props.listRef(el))}
+      @keydown=${(event: KeyboardEvent) => props.onListKeydown(event)}
+    >${props.list.map((entry) => listEntryTemplate(props, entry))}</div></section>`;
+};

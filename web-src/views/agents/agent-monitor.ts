@@ -24,8 +24,9 @@ import {
   type AgentOverviewResponse,
   type AgentPane,
   type AgentTransition,
+  agentAlertPlace,
+  isChildFinish,
   nextAgentUnread,
-  shouldNotifyAgent,
   withFinishedAsDone,
 } from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
@@ -36,6 +37,7 @@ import {
 import { BACKGROUND_REQUEST_HEADER } from "../../core/network-activity";
 import { projectInitials } from "../../core/project-colors";
 import type { TmuxPaneId } from "../../core/tmux";
+import { playAttentionSound } from "./attention-sound";
 import type { AgentsText } from "./i18n";
 import { paneText } from "./pane-text";
 
@@ -68,11 +70,26 @@ export type AgentMonitorSnapshot = {
 export type AgentMonitorDeps = {
   getText(): AgentsText;
   getNotifySettings(): AgentNotifySettings;
+  /** 入力待ち・完了で短い音を鳴らすか (設定の「短い音も鳴らす」)。無ければ鳴らさない。 */
+  getSoundEnabled?(): boolean;
+  /** 音を鳴らす (テスト用の差し替え。既定は attention-sound.ts)。 */
+  playSound?(transition: AgentTransition): Promise<void>;
   /** タブが前面で、そのペインをいまターミナルで見ているか。 */
   isViewing(pane: AgentPane): boolean;
   onUnreadCountChange(count: number): void;
   /** 通知を押されたとき。そのペインを開く。 */
   onNotificationClick(pane: AgentPane): void;
+  /**
+   * 窓の中の知らせを出す (窓が前面のとき。押すとそのペインを開く)。無ければ
+   * いつも OS の通知 (attention-toast.ts)。
+   */
+  showToast?(
+    pane: AgentPane,
+    transition: AgentTransition,
+    text: { title: string; body: string },
+  ): void;
+  /** 窓が前面か (見えていて、キーを受けている)。 */
+  isWindowInFront?(): boolean;
   actionHeaders(): HeadersInit;
   /**
    * 外側のページが取った一覧を受け取る (面の中。core/workspace-role.ts)。あれば自分
@@ -95,6 +112,16 @@ export type AgentMonitor = {
   subscribe(listener: () => void): () => void;
   /** 開いた・選んだ。未読を解く。 */
   markRead(pane: TmuxPaneId): void;
+  /**
+   * 「未読に戻す」(行の右クリック)。サーバの未読に戻し、いま見ていても、
+   * いったん見なくなるまでは読んだことにしない。失敗は理由つきで投げる。
+   */
+  markUnread(pane: TmuxPaneId): Promise<void>;
+  /**
+   * 全体ボードの「上に留める」・外す。サーバのメモリに置き (どの窓でも同じ)、
+   * 取り直して一覧の pinned に載せる。失敗は理由つきで投げる。
+   */
+  setPinned(pane: TmuxPaneId, pinned: boolean): Promise<void>;
   permission(): NotificationPermissionState;
   requestPermission(): Promise<NotificationPermissionState>;
   /** サーバの応答そのもの (外側のページが面へ配る)。 */
@@ -122,6 +149,15 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
   let inFlight: Promise<void> | null = null;
   /** サーバに「解いて」を送っている最中のペイン (同じ送信を重ねない)。 */
   const clearing = new Set<TmuxPaneId>();
+  /**
+   * 未読に戻したペイン。見ている間に戻しても、見ていることを理由に解かない。
+   * いったん見なくなった (見ていない取得があった) ら外し、次に見たら読んだことにする。
+   */
+  const keptUnread = new Set<TmuxPaneId>();
+
+  function viewing(pane: AgentPane): boolean {
+    return !keptUnread.has(pane.id) && deps.isViewing(pane);
+  }
   const listeners = new Set<() => void>();
 
   function emit(): void {
@@ -134,9 +170,11 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     return api ? api.permission : "unsupported";
   }
 
-  function notify(pane: AgentPane, transition: AgentTransition): void {
-    const api = notificationApi();
-    if (!api) return;
+  /** 知らせの題と本文 (OS の通知と窓の中の知らせで同じ)。 */
+  function alertText(
+    pane: AgentPane,
+    transition: AgentTransition,
+  ): { title: string; body: string } {
     const text = deps.getText();
     // 通知に色は出せないので、プロジェクト名の前に頭文字 (左の一覧の四角と同じ)。
     const info = overview?.projects.find((item) => item.root === pane.project);
@@ -144,13 +182,25 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       ? `${projectInitials(info.name)} ${info.name}`
       : pane.project;
     const title =
-      transition === "waiting"
-        ? text.notifyWaitingTitle(project)
-        : text.notifyFinishedTitle(project);
+      transition !== "waiting"
+        ? text.notifyFinishedTitle(project)
+        : pane.attention
+          ? text.notifyAttentionTitle(
+              text.attention[pane.attention.kind],
+              project,
+            )
+          : text.notifyWaitingTitle(project);
+    return { title, body: `${paneText(pane, text).summary}\n${pane.label}` };
+  }
+
+  function notify(pane: AgentPane, transition: AgentTransition): void {
+    const api = notificationApi();
+    if (!api) return;
+    const { title, body } = alertText(pane, transition);
     // 同じペインの同じ変化は 1 枚に畳む。同じサーバを複数のタブで開いて
     // いても、OS の通知が重ならない。
     const notification = new api(title, {
-      body: `${paneText(pane, text).summary}\n${pane.label}`,
+      body,
       tag: `code-viewer-agent:${pane.id}:${transition}`,
     });
     notification.addEventListener("click", () => {
@@ -165,10 +215,13 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     if (overview && overview.serverInstance !== next.serverInstance) {
       previous = null;
     }
-    const update = nextAgentUnread(unread, previous, next.panes, (pane) =>
-      deps.isViewing(pane),
-    );
+    for (const pane of next.panes) {
+      if (keptUnread.has(pane.id) && !deps.isViewing(pane))
+        keptUnread.delete(pane.id);
+    }
+    const update = nextAgentUnread(unread, previous, next.panes, viewing);
     const failures: string[] = [];
+    let sound: AgentTransition | null = null;
     const context = {
       settings: deps.getNotifySettings(),
       permission: permission(),
@@ -177,24 +230,52 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       ...update.transitions,
       ...serverOnlyTransitions(next, update.transitions),
     ]) {
+      // 子エージェントの完了は親に任せる (知らせない・鳴らさない・未読にしない)。
+      if (isChildFinish(pane, transition, next.panes)) continue;
       if (transition === "waiting") sawWaiting = true;
+      // 音は通知の許可に関係なく、見ていないものの変化で鳴らす (1 回の取得で 1 回、
+      // 入力待ちを優先)。種類ごとの通知の設定 (入力待ち・完了) に従う。
       if (
-        !shouldNotifyAgent(transition, {
-          ...context,
-          viewing: deps.isViewing(pane),
-        })
+        !deps.isViewing(pane) &&
+        (transition === "waiting"
+          ? context.settings.waiting
+          : context.settings.finished) &&
+        sound !== "waiting"
       )
-        continue;
+        sound = transition;
+      const place = agentAlertPlace(transition, {
+        ...context,
+        viewing: deps.isViewing(pane),
+        windowInFront: deps.isWindowInFront?.() === true,
+        canToast: deps.showToast !== undefined,
+      });
+      if (place === null) continue;
       try {
-        notify(pane, transition);
+        if (place === "toast")
+          deps.showToast?.(pane, transition, alertText(pane, transition));
+        else notify(pane, transition);
       } catch (cause) {
         // 通知が出せなくても一覧の更新は止めない。理由は画面に出す。
         console.error("[code-viewer] agent notification failed", cause);
         failures.push(`${pane.label}: ${formatErrorDetail(cause)}`);
       }
     }
+    if (sound && deps.getSoundEnabled?.() === true) {
+      const play = deps.playSound ?? playAttentionSound;
+      const kind = sound;
+      play(kind).catch((cause: unknown) => {
+        console.error(`[code-viewer] could not play the ${kind} sound`, cause);
+      });
+    }
     notifyError = failures.join("\n");
-    unread = next.unread ? serverUnread(next) : update.unread;
+    unread = new Map(
+      [...(next.unread ? serverUnread(next) : update.unread)].filter(
+        ([id, transition]) => {
+          const pane = next.panes.find((item) => item.id === id);
+          return !pane || !isChildFinish(pane, transition, next.panes);
+        },
+      ),
+    );
     previous = new Map(next.panes.map((pane) => [pane.id, pane.state]));
     received = next;
     show();
@@ -242,7 +323,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       // 解いている最中のものは、送る前の応答でよみがえらせない。
       if (clearing.has(entry.pane)) continue;
       const pane = panes.get(entry.pane);
-      if (pane && deps.isViewing(pane)) {
+      if (pane && viewing(pane)) {
         clearOnServer(entry.pane);
         continue;
       }
@@ -377,7 +458,47 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    async setPinned(pane, pinned) {
+      const res = await fetch(apiUrl("agentPin"), {
+        method: "POST",
+        headers: {
+          ...deps.actionHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ target: pane, pinned }),
+      });
+      if (!res.ok) {
+        throw new Error(
+          await responseErrorMessage(res, pinned ? "pin" : "unpin"),
+        );
+      }
+      await refresh();
+    },
+    async markUnread(pane) {
+      const res = await fetch(apiUrl("agentUnread"), {
+        method: "POST",
+        headers: {
+          ...deps.actionHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ target: pane, mark: true }),
+      });
+      if (!res.ok) {
+        throw new Error(await responseErrorMessage(res, "mark unread"));
+      }
+      const body = (await res.json()) as { unread?: AgentTransition };
+      if (body.unread !== "waiting" && body.unread !== "finished") {
+        throw new Error(
+          `mark unread: the server answered without the unread mark (${JSON.stringify(body).slice(0, 200)})`,
+        );
+      }
+      keptUnread.add(pane);
+      unread.set(pane, body.unread);
+      show();
+      emit();
+    },
     markRead(pane) {
+      keptUnread.delete(pane);
       // サーバに read を送るのは申告の done だけ (未読から出した完了は、
       // 未読を解けば待機に戻る)。
       const current = received?.panes.find((item) => item.id === pane);

@@ -1,3 +1,6 @@
+import { html } from "lit/html.js";
+import { templateElement } from "./ui/renderer";
+
 // Wrap a character range of a rendered line in <mark>, even when the cell
 // already holds syntax-highlight markup (the range may span several text
 // nodes). Shared by the code preview of the search palette and the source view
@@ -53,8 +56,7 @@ export function markTextRange(
   for (const part of parts.reverse()) {
     const selected = part.node.splitText(part.start);
     selected.splitText(part.end - part.start);
-    const mark = document.createElement("mark");
-    mark.className = className;
+    const mark = templateElement(html`<mark class=${className}></mark>`);
     const parent = selected.parentNode;
     if (!parent) throw new Error("marked text is detached");
     parent.insertBefore(mark, selected);

@@ -1,17 +1,8 @@
 // 電話の幅の骨格 (views/mobile-shell.ts): 部品の出し分け・引き出しと面の
 // 開け閉め・下端の帯・端末の操作札・言語の切替。配置は CSS (mobile-shell-css.test.ts)。
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   LONG_PRESS_MOVE_TOLERANCE,
   LONG_PRESS_MS,
@@ -19,8 +10,9 @@ import {
   type TerminalSoftKey,
   TOUCH_MEDIA_QUERY,
 } from "../core/mobile-layout";
-import type { TabListEntry } from "../views/main-tabs/main-tabs-view";
+import type { TabListEntry } from "../views/main-tabs/main-tabs-presenter";
 import {
+  DEFAULT_VIEW,
   installMobileShell,
   type MobileShell,
   type MobileShellDeps,
@@ -28,13 +20,6 @@ import {
 import { q } from "./_test-helpers";
 
 type Viewport = { width: number; height: number; coarse: boolean };
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 let shell: MobileShell | null = null;
 let sent: TerminalSoftKey[] = [];
@@ -89,16 +74,20 @@ function resizeTo(viewport: Viewport): void {
 function install(
   viewport: Viewport,
   extra: Partial<MobileShellDeps> = {},
+  look: typeof DEFAULT_VIEW = DEFAULT_VIEW,
 ): MobileShell {
   setViewport(viewport);
-  shell = installMobileShell({
-    getLanguage: () => language,
-    sendTerminalKey: (key) => sent.push(key),
-    focusTerminal: () => {
-      focused++;
+  shell = installMobileShell(
+    {
+      getLanguage: () => language,
+      sendTerminalKey: (key) => sent.push(key),
+      focusTerminal: () => {
+        focused++;
+      },
+      ...extra,
     },
-    ...extra,
-  });
+    look,
+  );
   return shell;
 }
 
@@ -742,7 +731,7 @@ describe("開いているタブの一覧の面", () => {
     id,
     name: `${id}.ts`,
     title: `src/${id}.ts`,
-    iconHtml: "<svg></svg>",
+    icon: null,
     front: false,
     preview: false,
     parked: false,
@@ -1076,5 +1065,31 @@ describe("端末の上のピンチで文字の大きさ", () => {
       [250, 300],
     ]);
     expect({ outside, desktop: sizes }).toEqual({ outside: [], desktop: [] });
+  });
+});
+
+describe("the mobile shell's view", () => {
+  test("draws the menu button's content from the shown project", () => {
+    const shown: (string | null)[] = [];
+    const mobile = install(
+      PHONE,
+      {},
+      {
+        ...DEFAULT_VIEW,
+        menuContent: (project) => {
+          shown.push(project?.name ?? null);
+          return DEFAULT_VIEW.menuContent(project);
+        },
+      },
+    );
+    mobile.setProject({
+      name: "sample-app",
+      initials: "SA",
+      color: null,
+    } as Parameters<MobileShell["setProject"]>[0]);
+    expect(shown).toEqual([null, "sample-app"]);
+    expect(
+      document.querySelector("#mobile-nav-open .project-mark")?.textContent,
+    ).toBe("SA");
   });
 });

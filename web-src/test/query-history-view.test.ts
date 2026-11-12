@@ -1,15 +1,14 @@
 // Query history pane の実DOM挙動を happy-dom 上で検証する。
 // 更新ボタンはサーバの履歴再取得を使い、更新中フィードバックを出す。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { q } from "./_test-helpers";
 
-GlobalRegistrator.register();
-
-const { createQueryHistoryView } = await import(
+const { createQueryHistoryView, DEFAULT_VIEW } = await import(
   "../views/database/query-history-view"
 );
+type QueryHistoryProps = Parameters<typeof DEFAULT_VIEW>[0];
 const { dbText } = await import("../views/database/i18n");
 
 const originalFetch = globalThis.fetch;
@@ -33,10 +32,6 @@ describe("query history view", () => {
     document.body.innerHTML = "";
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
-  });
-
-  afterAll(() => {
-    GlobalRegistrator.unregister();
   });
 
   test("refresh button identifies query history and shows in-flight feedback", async () => {
@@ -481,4 +476,140 @@ describe("query history view", () => {
       );
     },
   );
+});
+
+describe("the query history presenter", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+    globalThis.fetch = originalFetch;
+  });
+
+  test("selects an entry, marks NULL and empty preview values, and arms delete before sending", async () => {
+    const requests: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            entries: [
+              {
+                id: "sample-entry",
+                dbId: "sample.db",
+                sql: "SELECT sample_column FROM sample_table",
+                columns: ["sample_column"],
+                rowsPreview: [[null], [""], ["value"]],
+                rowCount: 3,
+                savedRows: 3,
+                truncated: false,
+                elapsedMs: 5,
+                executedAt: "2026-01-02T03:04:05",
+                executedBy: "user",
+                source: "browser",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }) as typeof fetch;
+    const shown: QueryHistoryProps[] = [];
+    const view = createQueryHistoryView(
+      {
+        getDbId: () => "sample.db",
+        getSchema: () => null,
+        copySqlToQuery: () => undefined,
+        getText: () => dbText("en"),
+      },
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    const last = () => shown[shown.length - 1] as QueryHistoryProps;
+    await view.refresh({ force: true });
+    expect([last().entries.length, last().detail]).toEqual([1, null]);
+
+    last().entries[0]?.onSelect();
+    const detail = last().detail;
+    expect([
+      last().entries[0]?.selected,
+      detail?.preview?.rows.map((row) => [row[0]?.cellClass, row[0]?.text]),
+      detail?.deleteArmed,
+    ]).toEqual([
+      true,
+      [
+        ["is-null", ""],
+        ["is-empty", ""],
+        [null, "value"],
+      ],
+      false,
+    ]);
+
+    detail?.onDelete();
+    expect([last().detail?.deleteArmed, requests.length]).toEqual([true, 1]);
+    view.clear();
+  });
+
+  // SQL のコピーに失敗したら、押したボタンに失敗の印と理由を出し、console に
+  // 全文を出す (黙って捨てない)。
+  test("a failed copy of the SQL marks the button and gives the reason", async () => {
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            entries: [
+              {
+                id: "sample-entry",
+                dbId: "sample.db",
+                sql: "SELECT 1",
+                columns: [],
+                rowsPreview: [],
+                rowCount: 0,
+                savedRows: 0,
+                truncated: false,
+                elapsedMs: 1,
+                executedAt: "2026-01-02T03:04:05",
+                executedBy: "user",
+                source: "browser",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )) as typeof fetch;
+    const failure = new Error("clipboard is not allowed");
+    const write = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockRejectedValue(failure);
+    const logged = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const view = createQueryHistoryView({
+        getDbId: () => "sample.db",
+        getSchema: () => null,
+        copySqlToQuery: () => undefined,
+        getText: () => dbText("en"),
+      });
+      document.body.appendChild(view.el);
+      await view.refresh({ force: true });
+      q<HTMLElement>(view.el, ".db-query-history-entry").click();
+      const copy = view.el.querySelectorAll<HTMLButtonElement>(
+        ".db-query-history-detail-actions button",
+      )[1];
+      if (!copy) throw new Error("the copy button is not rendered");
+      copy.click();
+      await vi.waitFor(() =>
+        expect(copy.classList.contains("failed")).toBe(true),
+      );
+      expect(copy.title).toContain("copy a query from the history");
+      expect(copy.title).toContain("clipboard is not allowed");
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(logged.mock.calls[0]?.[0]).toMatchObject({ cause: failure });
+      view.clear();
+    } finally {
+      write.mockRestore();
+      logged.mockRestore();
+    }
+  });
 });

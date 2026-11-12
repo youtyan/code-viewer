@@ -3,21 +3,13 @@
 // 札は見ていない間に入力待ちになった・終わったものだけで、札があるときは補足に
 // 状態の語を繰り返さない。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import type { AgentTransition } from "../core/agent-overview";
 import type { AgentState } from "../core/agent-state";
 import { fillAgentCard } from "../views/agents/agent-card";
 import { agentsText } from "../views/agents/i18n";
 import { agentPane } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 function card(
   options: {

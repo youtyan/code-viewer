@@ -3,16 +3,8 @@
 // (行ごとに同じ文を繰り返すと名前が読めず、どこのパスか分からなかった)。
 // パス・名前はすべて架空。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type {
   AccountAgent,
   AccountStatus,
@@ -23,12 +15,6 @@ import type { AccountsClient } from "../views/agents/accounts-client";
 import { createAccountDialogs } from "../views/agents/accounts-dialogs";
 import { ACCOUNTS_EN } from "../views/agents/accounts-i18n";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 afterEach(() => {
   document.body.replaceChildren();
 });
@@ -86,7 +72,7 @@ function response(): AccountsResponse {
     ],
     registryError: null,
     registryPath: "/home/sample/.local/state/code-viewer/accounts.json",
-    launchCommands: { claude: "claude", codex: "codex" },
+    launchCommands: { claude: "claude", codex: "codex", opencode: "opencode" },
     lastLaunch: null,
     usageFailures: { total: 0, recent: [], log: "" },
   };
@@ -187,6 +173,7 @@ async function openReview(
   );
   if (!name) throw new Error("the name field is missing");
   name.value = "Work";
+  name.dispatchEvent(new Event("input", { bubbles: true }));
   document
     .querySelector<HTMLButtonElement>(".gdp-dialog .gdp-dialog-confirm")
     ?.click();

@@ -1,5 +1,5 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import type { ShikiHighlighter } from "../core/shiki-loader";
 import type {
   FileRangeResponse,
@@ -8,14 +8,6 @@ import type {
 } from "../core/types";
 import { searchPaletteText } from "../views/search-palette-i18n";
 import { deferred, q, waitFor } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";

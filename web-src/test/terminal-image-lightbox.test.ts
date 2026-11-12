@@ -4,18 +4,14 @@
 // 2 枚目を開いても 1 枚しか残らないこと。拡大縮小そのものは
 // core/diagram-viewport の持ち物なので、ここでは操作と倍率表示の配線を見る。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { terminalText } from "../views/terminal/i18n";
-import { openImageLightbox } from "../views/terminal/image-lightbox";
+import {
+  DEFAULT_VIEW,
+  type ImageLightboxProps,
+  openImageLightbox,
+} from "../views/terminal/image-lightbox";
 
 const IMAGE = {
   url: "/_agent/image?path=%2Ftmp%2Fout.png",
@@ -34,14 +30,6 @@ const text = () => terminalText("en");
 function overlay(): HTMLElement | null {
   return document.querySelector(".terminal-lightbox");
 }
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -290,5 +278,32 @@ describe("棚の並びごと開いたとき", () => {
     expect(() => openImageLightbox({ images: [], index: 0 }, text())).toThrow(
       "openImageLightbox needs at least one image",
     );
+  });
+});
+
+describe("the image lightbox presenter", () => {
+  test("passes the shown image and the move state to the view", () => {
+    const shown: ImageLightboxProps[] = [];
+    const close = openImageLightbox(
+      { images: [IMAGE, OTHER], index: 1 },
+      text(),
+      {
+        ...DEFAULT_VIEW,
+        overlay: (props) => {
+          shown.push(props);
+          return DEFAULT_VIEW.overlay(props);
+        },
+      },
+    );
+    const last = () => shown[shown.length - 1] as ImageLightboxProps;
+    expect([last().image.name, last().canMove, last().canCopy]).toEqual([
+      "other.png",
+      true,
+      true,
+    ]);
+    last().onNext();
+    expect(last().image.name).toBe("out.png");
+    close();
+    expect(document.querySelector(".terminal-lightbox")).toBeNull();
   });
 });

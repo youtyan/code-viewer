@@ -11,7 +11,8 @@
 // 「見ている」かはサーバには分からないので、画面が見ているペインを
 // POST /_agent/unread で解く (開いた・選んだ・前面で映している)。
 //
-// サーバのメモリだけ (状態の記録と同じ。agents.md 2)。再起動すると消える。
+// 本体はサーバのメモリ。再起動を跨ぐ分は unread-store.ts が状態ディレクトリに
+// 保存し、同じペインが同じ状態のまま居るときだけ読み戻す。
 
 import {
   type AgentPane,
@@ -23,6 +24,24 @@ import type { AgentState } from "../../core/agent-state";
 import { agentTargetKey } from "./agent-state";
 
 let unread = new Map<string, AgentTransition>();
+let unreadChanged: (() => void) | null = null;
+
+/** 未読が変わったら呼ぶ。保存する側 (unread-store.ts) が 1 つだけ置く。 */
+export function onAgentUnreadChanged(listener: (() => void) | null): void {
+  unreadChanged = listener;
+}
+
+function set(key: string, transition: AgentTransition): void {
+  if (unread.get(key) === transition) return;
+  unread.set(key, transition);
+  unreadChanged?.();
+}
+
+function remove(key: string): boolean {
+  const removed = unread.delete(key);
+  if (removed) unreadChanged?.();
+  return removed;
+}
 
 /**
  * 状態の記録が from から to に変わった (key は agentTargetKey)。最初の記録
@@ -35,8 +54,8 @@ export function noteAgentStateChange(
   to: AgentState,
 ): void {
   const transition = agentTransition(from, to);
-  if (transition) unread.set(key, transition);
-  else if (to === "working") unread.delete(key);
+  if (transition) set(key, transition);
+  else if (to === "working") remove(key);
 }
 
 /** 今の未読。一覧に居ないペイン・エージェントでないペインの分は捨てる。 */
@@ -46,7 +65,7 @@ export function noteAgentUnread(panes: AgentPane[]): AgentUnreadEntry[] {
       .filter((pane) => pane.kind !== null)
       .map((pane) => agentTargetKey(pane.id)),
   );
-  for (const key of unread.keys()) if (!agents.has(key)) unread.delete(key);
+  for (const key of [...unread.keys()]) if (!agents.has(key)) remove(key);
   return panes.flatMap((pane) => {
     const transition = unread.get(agentTargetKey(pane.id));
     return transition ? [{ pane: pane.id, transition }] : [];
@@ -55,7 +74,38 @@ export function noteAgentUnread(panes: AgentPane[]): AgentUnreadEntry[] {
 
 /** 見た・開いた。解いたら true。 */
 export function clearAgentUnread(target: string): boolean {
-  return unread.delete(agentTargetKey(target));
+  return remove(agentTargetKey(target));
+}
+
+/**
+ * 利用者が「未読に戻す」を選んだ。今の状態から未読の種類を決める (入力待ちは
+ * 入力待ち、待機・完了は終わった)。作業中は未読にならないので null。
+ */
+export function markAgentUnread(
+  target: string,
+  state: AgentState,
+): AgentTransition | null {
+  const transition: AgentTransition | null =
+    state === "waiting"
+      ? "waiting"
+      : state === "idle" || state === "done"
+        ? "finished"
+        : null;
+  if (transition) set(agentTargetKey(target), transition);
+  return transition;
+}
+
+/** 読み戻した未読を置く (unread-store.ts)。 */
+export function restoreAgentUnread(
+  key: string,
+  transition: AgentTransition,
+): void {
+  set(key, transition);
+}
+
+/** 保存する中身 (鍵 → 未読)。 */
+export function agentUnreadSnapshot(): Map<string, AgentTransition> {
+  return new Map(unread);
 }
 
 export function resetAgentUnread(): void {

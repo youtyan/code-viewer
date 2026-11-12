@@ -1,17 +1,13 @@
 // 診断の画面 (views/doctor-view.ts) が /_doctor の失敗の本文を捨てずに出すこと。
 // 裏は 500 の本文に失敗の理由の全文 (cause の連なり) を入れて返す。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, expect, test, vi } from "vitest";
-import { escapeHtml } from "../core/html-escape";
-import { createDoctorView } from "../views/doctor-view";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
+import "./_dom";
+import { expect, test, vi } from "vitest";
+import {
+  createDoctorView,
+  DEFAULT_VIEW,
+  type DoctorSheetProps,
+} from "../views/doctor-view";
 
 test("a failed /_doctor shows the status and the whole body, and logs the error", async () => {
   const body = JSON.stringify({
@@ -26,7 +22,6 @@ test("a failed /_doctor shows the status and the whole body, and logs the error"
   try {
     await createDoctorView({
       $: (sel) => document.querySelector(sel),
-      escapeHtml: (value) => escapeHtml(String(value)),
       trackLoad: (promise) => promise,
       getLanguage: () => "en",
     }).open();
@@ -49,6 +44,69 @@ test("a failed /_doctor shows the status and the whole body, and logs the error"
     });
   } finally {
     log.mockRestore();
+    vi.unstubAllGlobals();
+    document.body.replaceChildren();
+  }
+});
+
+test("the doctor presenter gives the view one group per check group", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({
+        worstStatus: "warn",
+        groups: [
+          {
+            id: "runtime",
+            title: "Runtime",
+            rows: [{ status: "ok", title: "Node.js", detail: "v24", hint: "" }],
+          },
+        ],
+      }),
+    ),
+  );
+  document.body.innerHTML = '<div id="doctor-sheet" hidden></div>';
+  const shown: DoctorSheetProps[] = [];
+  try {
+    await createDoctorView(
+      {
+        $: (sel) => document.querySelector(sel),
+        trackLoad: (promise) => promise,
+        getLanguage: () => "en",
+      },
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    ).open();
+    const last = shown[shown.length - 1];
+    expect({
+      summary: last?.summary,
+      content: last?.content,
+      refresh: last?.refresh.disabled,
+    }).toEqual({
+      summary: "Some checks reported warnings.",
+      content: {
+        kind: "groups",
+        groups: [
+          {
+            id: "runtime",
+            title: "Runtime",
+            rows: [
+              {
+                status: "ok",
+                pill: "OK",
+                title: "Node.js",
+                detail: "v24",
+                hint: "",
+              },
+            ],
+          },
+        ],
+      },
+      refresh: false,
+    });
+  } finally {
     vi.unstubAllGlobals();
     document.body.replaceChildren();
   }

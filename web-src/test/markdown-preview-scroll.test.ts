@@ -1,21 +1,6 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "vitest";
+import "./_dom";
+import { beforeEach, describe, expect, test } from "vitest";
 import { renderMarkdownPreview } from "../core/markdown-preview";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const DOC = ["# First", "", "body", "", "# Second", "", "body", ""].join("\n");
 

@@ -8,7 +8,7 @@
 // 次の項目に書く。フックが入っていればまだ申告が来ていないだけなので
 // 話しかけるよう伝え、入っていない (・まだ分からない) ならフックの入れ方へ送る。
 
-import { isAccountAgent } from "../../core/agent-accounts";
+import { handoffSource, isAccountAgent } from "../../core/agent-accounts";
 import type { AgentHookState, HookAgent } from "../../core/agent-hooks";
 import type { AgentPane } from "../../core/agent-overview";
 import type { ContextMenuItem } from "../context-menu";
@@ -23,13 +23,19 @@ export type HandoffMenuActions = {
   hookState(agent: HookAgent): AgentHookState | null;
 };
 
-/** 引き継げるか: claude / codex で、フックが会話記録の場所を知らせている。 */
+/**
+ * 引き継げるか: claude / codex / opencode で、フックが会話の在りかを知らせて
+ * いる (claude・codex は記録のファイル、opencode はセッション)。
+ */
 export function canHandOff(pane: AgentPane): boolean {
-  return isAccountAgent(pane.kind) && !!pane.conversation?.transcriptPath;
+  return (
+    isAccountAgent(pane.kind) &&
+    handoffSource(pane.kind, pane.conversation ?? null) !== null
+  );
 }
 
 /**
- * メニューに足す項目 (先頭に区切り)。claude / codex でないペインには何も
+ * メニューに足す項目 (先頭に区切り)。claude / codex / opencode でないペインには何も
  * 足さない (引き継ぐ相手がいない)。
  */
 export function handoffMenuItems(

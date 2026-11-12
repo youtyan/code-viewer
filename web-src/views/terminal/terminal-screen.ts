@@ -1,3 +1,5 @@
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../../core/api-url";
 import { makeId } from "../../core/id";
 import { UNINTERRUPTIBLE_REQUEST_HEADER } from "../../core/network-activity";
@@ -28,6 +30,7 @@ import {
   type ShellSession,
   type ShellSessionId,
 } from "../../core/shell";
+import { parseOsc52 } from "../../core/terminal-clipboard";
 import {
   findImagePathLinks,
   findImagePathsNewestFirst,
@@ -60,6 +63,7 @@ import {
   type XtermTheme,
 } from "../../core/xterm-loader";
 import { type LiveSource, openLiveSource } from "../shell/live-hub";
+import { templateElement, templateElements } from "../ui/renderer";
 import type { TerminalText } from "./i18n";
 import { openImageLightbox } from "./image-lightbox";
 import {
@@ -179,6 +183,13 @@ export type TerminalScreenDeps = {
   onTmuxWindowStale(): void;
   /** 人が選んだ文字サイズ (px)。 */
   getFontSize(): number;
+  /** 端末のプログラムが送ったコピー (OSC 52) をクリップボードに書くか。無ければ書く。 */
+  allowClipboardWrite?(): boolean;
+  /**
+   * macOS の Option キーを Alt (Meta) として送るか (設定の「Option キーを Alt として
+   * 送る」)。無ければ送らない (Option はキー配列の字を打つ)。
+   */
+  optionAsAlt?(): boolean;
   /** 画像の棚を畳んでいるか (ユーザー単位の設定)。 */
   isImageShelfCollapsed(): boolean;
   /** 棚を畳んだ・開いた。保存は呼び出し側。 */
@@ -192,6 +203,13 @@ export type TerminalScreenDeps = {
    * 相対パス、line は行)。kept なら固定のタブ。
    */
   onOpenFile?(path: string, line: number | undefined, kept: boolean): void;
+  /**
+   * 画面の文字のペイン ID (`%12`) が、今 tmux に居るペインか (エージェントの
+   * 一覧に載っているか)。無ければペイン ID をリンクにしない。
+   */
+  isLivePane?(pane: string): boolean;
+  /** 画面のペイン ID を押した。そのペインを開く (エージェントの行を押したのと同じ)。 */
+  onOpenPane?(pane: string): void;
   /** 棚の置き場所か大きさを変えた。保存とほかの棚への当て直しは呼び出し側。 */
   setImageShelfLayout?(patch: Partial<ImageShelfLayout>): void;
   /** 棚の画像を画像のタブで開く。無ければ覆いで開く。 */
@@ -251,9 +269,9 @@ export const TERMINAL_MINIMUM_CONTRAST_RATIO = 4.5;
  * 文書から外れていることがあり、外れた箱の計算値は空になる。
  */
 export function terminalTheme(): XtermTheme {
-  const probe = document.createElement("div");
-  probe.dataset.terminalSurface = "";
-  probe.hidden = true;
+  const probe = templateElement(
+    html`<div data-terminal-surface="" hidden></div>`,
+  );
   document.body.append(probe);
   const style = getComputedStyle(probe);
   const read = (name: string) => style.getPropertyValue(name).trim();
@@ -287,15 +305,59 @@ const PASTE_NOTICE_MS = 8000;
  */
 const INPUT_PENDING_NOTICE_MS = 1000;
 
+/**
+ * 端末の画面の描き方。xterm が中身を描くので、view は箱の形だけを持つ。
+ * presenter は作った箱へ xterm と棚を付け、覆いの部分を描き直す。
+ */
+export type TerminalScreenView = {
+  /** 画面の箱と、画面の右の棚。screen は xterm を開く箱。 */
+  body: (props: {
+    shelf: HTMLElement;
+    screen: Ref<HTMLElement>;
+    row: Ref<HTMLElement>;
+  }) => unknown;
+  /** tmux のウィンドウが端末より小さいときの覆い (部分は coverParts)。 */
+  cover: () => unknown;
+  /** 棚の項目の出どころのペインの枠。 */
+  paneFrame: () => unknown;
+  /** 覆いの部分。message のある部分にだけ文を出す。 */
+  coverParts: (
+    parts: {
+      top: number;
+      left: number;
+      rows: number;
+      cols: number;
+      message: string | null;
+    }[],
+  ) => unknown;
+};
+
+export const DEFAULT_VIEW: TerminalScreenView = {
+  body: ({ shelf, screen, row }) =>
+    html`<div class="terminal-pane-body"><div class="terminal-screen-row" ${ref(row)}><div
+          class="terminal-screen"
+          ${ref(screen)}
+        ></div>${shelf}</div></div>`,
+  cover: () => html`<div class="terminal-tmux-cover" hidden></div>`,
+  paneFrame: () => html`<div class="terminal-pane-frame" hidden></div>`,
+  coverParts: (parts) =>
+    parts.map(
+      (part) =>
+        html`<div
+          class="terminal-tmux-cover-part"
+          style=${`--cover-top: ${part.top}; --cover-left: ${part.left}; --cover-rows: ${part.rows}; --cover-cols: ${part.cols};`}
+        >${
+          part.message === null
+            ? nothing
+            : html`<p class="terminal-tmux-cover-message">${part.message}</p>`
+        }</div>`,
+    ),
+};
+
 export function createTerminalScreen(
   deps: TerminalScreenDeps,
+  screenView: TerminalScreenView = DEFAULT_VIEW,
 ): TerminalScreenHandle {
-  const el = document.createElement("div");
-  el.className = "terminal-pane-body";
-
-  const screenEl = document.createElement("div");
-  screenEl.className = "terminal-screen";
-
   // 画像の棚。ターミナルの画面の右に、別の列として場所を取る (文字の上に
   // 重ねない)。出力から拾った画像も、貼り付けた画像もここに並ぶ。棚が出る・
   // 畳まれると画面の幅が変わるので、screenEl を見ている ResizeObserver が
@@ -313,11 +375,15 @@ export function createTerminalScreen(
     setLayout: deps.setImageShelfLayout,
   });
 
-  const screenRow = document.createElement("div");
-  screenRow.className = "terminal-screen-row";
-  screenRow.append(screenEl, shelf.el);
-
-  el.append(screenRow);
+  const screenRef = createRef<HTMLElement>();
+  const rowRef = createRef<HTMLElement>();
+  const el = templateElement(
+    screenView.body({ shelf: shelf.el, screen: screenRef, row: rowRef }),
+  );
+  if (!screenRef.value || !rowRef.value)
+    throw new Error("terminal screen: the screen box was not drawn");
+  const screenEl = screenRef.value;
+  const screenRow = rowRef.value;
 
   let term: XtermTerminal | null = null;
   let fitAddon: XtermFitAddon | null = null;
@@ -414,16 +480,12 @@ export function createTerminalScreen(
    * 操作は通す (pointer-events: none。下の端末がクリック・選択・ホイールを
    * 受ける)。
    */
-  const cover = document.createElement("div");
-  cover.className = "terminal-tmux-cover";
-  cover.hidden = true;
+  const cover = templateElement(screenView.cover());
   /**
    * 棚の項目の出どころのペインの枠。覆いと同じく `.xterm-screen` の中に置き、
    * 行と桁で位置を決める。描くのはペインの縁の線だけ (中の文字は覆わない)。
    */
-  const paneFrame = document.createElement("div");
-  paneFrame.className = "terminal-pane-frame";
-  paneFrame.hidden = true;
+  const paneFrame = templateElement(screenView.paneFrame());
 
   // 画面の中の画像のパス・URL・ファイルのパスの印と操作 (terminal-links-layer.ts)。
   const linkLayer = createTerminalLinkLayer(screenEl, {
@@ -458,6 +520,9 @@ export function createTerminalScreen(
   }
 
   function operate(event: Event): void {
+    // 設定を変えたらすぐ効くように、キーを xterm が読む前 (捕捉) に当て直す。
+    if (event.type === "keydown" && term)
+      term.options.macOptionIsMeta = deps.optionAsAlt?.() === true;
     if (!event.isTrusted || !inputEnabled || !attached || disposed) return;
     hasOperated = true;
     inputEvent = event;
@@ -1058,6 +1123,15 @@ export function createTerminalScreen(
           add({ kind: "url", text: found.candidate, url: found.path }, found);
           continue;
         }
+        if (found.kind === "pane") {
+          // 今 tmux に居るペインだけ (終わったペインや、たまたま同じ形の字は拾わない)。
+          if (deps.isLivePane?.(found.path))
+            add(
+              { kind: "pane", text: found.candidate, pane: found.path },
+              found,
+            );
+          continue;
+        }
         const hit = pathCache.get(found.path);
         if (hit === undefined) unknownPaths.add(found.path);
         if (!hit) continue;
@@ -1173,6 +1247,10 @@ export function createTerminalScreen(
     }
     if (link.kind === "file" && link.file) {
       deps.onOpenFile?.(link.file.path, link.file.line, mode === "kept-tab");
+      return;
+    }
+    if (link.kind === "pane" && link.pane) {
+      deps.onOpenPane?.(link.pane);
       return;
     }
     const entry = shelfEntryByCandidate(shelfEntries, link.text);
@@ -1563,15 +1641,26 @@ export function createTerminalScreen(
     showPasteNotice(deps.getText().pasteSaved(saved.relativePath));
   }
 
-  /** クリップボードから最初の画像を 1 枚取る。無ければ null。 */
-  function firstImage(data: DataTransfer | null): File | null {
+  /** クリップボード・落としたものの中の画像を、並んだ順に全部取る。 */
+  function imageFiles(data: DataTransfer | null): File[] {
+    const files: File[] = [];
     for (const item of data?.items ?? []) {
       if (item.kind !== "file") continue;
       if (!item.type.startsWith("image/")) continue;
       const file = item.getAsFile();
-      if (file) return file;
+      if (file) files.push(file);
     }
-    return null;
+    return files;
+  }
+
+  /** クリップボードから最初の画像を 1 枚取る。無ければ null。 */
+  function firstImage(data: DataTransfer | null): File | null {
+    return imageFiles(data)[0] ?? null;
+  }
+
+  /** ファイルを運んでいるドラッグか (文字や画面の中の要素のドラッグではないか)。 */
+  function carriesFiles(data: DataTransfer | null): boolean {
+    return [...(data?.types ?? [])].includes("Files");
   }
 
   // xterm は textarea で打鍵を受けるので、貼り付けもそこから上がってくる。
@@ -1592,6 +1681,40 @@ export function createTerminalScreen(
     },
     true,
   );
+
+  // 落としたファイル (Finder・macOS のスクショの浮いたサムネイル)。画像は貼り付けと
+  // 同じく保存してパスを打ち込む (ブラウザは元の場所を渡さないので、写すしかない)。
+  // ファイルのドラッグは必ずここで止める: 止めないとブラウザがそのファイルを開き、
+  // 画面ごと離れてしまう。画像の無いドラッグは理由を状態の行に出す。
+  el.addEventListener(
+    "dragover",
+    (event) => {
+      if (!carriesFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    },
+    true,
+  );
+  el.addEventListener(
+    "drop",
+    (event) => {
+      if (!carriesFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const files = imageFiles(event.dataTransfer);
+      if (files.length === 0) {
+        showStatus(deps.getText().dropNotImage);
+        return;
+      }
+      void pasteImagesInOrder(files);
+    },
+    true,
+  );
+
+  /** 落とした順に 1 枚ずつ保存して打ち込む (パスの並びを落とした順に保つ)。 */
+  async function pasteImagesInOrder(files: File[]): Promise<void> {
+    for (const file of files) await pasteImage(file);
+  }
 
   function closeSource(): void {
     source?.close();
@@ -1631,27 +1754,58 @@ export function createTerminalScreen(
     );
     const text = deps.getText();
     cover.replaceChildren(
-      ...shown.rects.map((rect, index) => {
-        const part = document.createElement("div");
-        part.className = "terminal-tmux-cover-part";
-        part.style.setProperty("--cover-top", String(rect.top));
-        part.style.setProperty("--cover-left", String(rect.left));
-        part.style.setProperty("--cover-rows", String(rect.rows));
-        part.style.setProperty("--cover-cols", String(rect.cols));
-        if (index === shown.messageIn) {
-          const message = document.createElement("p");
-          message.className = "terminal-tmux-cover-message";
-          message.textContent = text.tmuxWindowSmaller(
-            window.windowCols,
-            window.windowRows,
-            window.sessionClients > 1,
-          );
-          part.append(message);
-        }
-        return part;
-      }),
+      ...templateElements(
+        screenView.coverParts(
+          shown.rects.map((rect, index) => ({
+            top: rect.top,
+            left: rect.left,
+            rows: rect.rows,
+            cols: rect.cols,
+            message:
+              index === shown.messageIn
+                ? text.tmuxWindowSmaller(
+                    window.windowCols,
+                    window.windowRows,
+                    window.sessionClients > 1,
+                  )
+                : null,
+          })),
+        ),
+      ),
     );
     cover.hidden = false;
+  }
+
+  /**
+   * 端末のプログラムが送った OSC 52 (core/terminal-clipboard.ts)。設定で切って
+   * いれば書かない。読み出しの求めと解けない中身は書かず、理由を console に出す。
+   */
+  function receiveClipboardRequest(data: string): void {
+    const request = parseOsc52(data);
+    if (request.kind === "read") {
+      console.warn(
+        "[code-viewer] a terminal program asked to read the clipboard; refused",
+      );
+      return;
+    }
+    if (request.kind === "invalid") {
+      console.warn(
+        `[code-viewer] ignored a clipboard write from the terminal: ${request.reason}`,
+      );
+      return;
+    }
+    if (deps.allowClipboardWrite?.() === false) return;
+    const text = deps.getText();
+    navigator.clipboard.writeText(request.text).then(
+      () => deps.onStatus(text.clipboardCopied([...request.text].length), true),
+      (error: unknown) => {
+        console.error(
+          "[code-viewer] could not write the terminal's copy to the clipboard",
+          error,
+        );
+        deps.onStatus(text.clipboardCopyFailed(formatErrorDetail(error)), true);
+      },
+    );
   }
 
   function destroyTerminal(): void {
@@ -1675,6 +1829,7 @@ export function createTerminalScreen(
       customGlyphs: true,
       theme: terminalTheme(),
       minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+      macOptionIsMeta: deps.optionAsAlt?.() === true,
     });
     // 明暗・テーマ・ターミナルの明暗 (html の data-theme / data-color-theme /
     // data-terminal-tone) が変わったら色を当て直す。
@@ -1684,6 +1839,12 @@ export function createTerminalScreen(
     themeObserver.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["data-theme", "data-color-theme", "data-terminal-tone"],
+    });
+    // 端末のプログラムが送るコピー (OSC 52)。書くだけで、読み出しは断る。
+    // xterm は既定で何もしないので、ここで受けないと tmux のコピーモードの写しが消える。
+    created.parser.registerOscHandler(52, (data) => {
+      receiveClipboardRequest(data);
+      return true;
     });
     const fit = new api.FitAddon();
     created.loadAddon(fit);

@@ -99,14 +99,17 @@ Commands:
             history) is left as it is, and running agents keep running.
 
 Options:
-  --agent <agent>     ${HOOK_AGENTS.join(" | ")}
+  --agent <agent>     ${HOOK_AGENTS.join(" | ")}. opencode has only its default
+                      account (opencode:default): create and register refuse
+                      it, because no opencode setting keeps a sign-in in
+                      another directory.
   --name <name>       Display name. Use one no other account of the agent has.
   --share <entry>     Also link this entry of the default settings directory
                       (only entries plan lists as optional). Repeatable.
   --config-dir <dir>  Existing settings directory (register only).
   --account <id>      Account id from list or create. The default accounts
-                      (claude:default, codex:default) cannot be renamed or
-                      removed.
+                      (claude:default, codex:default, opencode:default)
+                      cannot be renamed or removed.
   --timeout <seconds> How long wait waits. Default ${DEFAULT_WAIT_SECONDS}.
   --refresh           Ask every CLI for its sign-in state again (list only).
   --json              Machine-readable output.

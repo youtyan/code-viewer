@@ -1,14 +1,6 @@
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { RepoTreeResponse, SidebarItem } from "../core/types";
 import {
@@ -16,7 +8,13 @@ import {
   isContextMenuOpen,
   showContextMenu,
 } from "../views/context-menu";
-import { createRepoView, type RepoViewDeps } from "../views/repo-view";
+import {
+  createRepoView,
+  DEFAULT_VIEW,
+  type RepoListProps,
+  type RepoView,
+  type RepoViewDeps,
+} from "../views/repo-view";
 
 const markdownPreview = vi.hoisted(() => ({ failWith: null as Error | null }));
 
@@ -39,14 +37,6 @@ import { deferred } from "./_test-helpers";
 const range = { from: "HEAD", to: "worktree" };
 
 const originalFetch = globalThis.fetch;
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -84,6 +74,7 @@ function makeRepoView(
       | "openRepositoryWebLabel"
     >
   > = {},
+  repoView?: RepoView,
 ) {
   const state: RepoViewDeps["STATE"] = {
     route,
@@ -96,138 +87,141 @@ function makeRepoView(
     standaloneSources: [] as string[],
     openedAs: [] as string[][],
   };
-  const view = createRepoView({
-    STATE: state,
-    openTreeFileAs(path, intent) {
-      calls.openedAs.push([path, intent]);
+  const view = createRepoView(
+    {
+      STATE: state,
+      openTreeFileAs(path, intent) {
+        calls.openedAs.push([path, intent]);
+      },
+      setRoute(nextRoute) {
+        state.route = nextRoute;
+      },
+      setPageMode() {
+        /* noop */
+      },
+      setStatus() {
+        /* noop */
+      },
+      setProjectName() {
+        /* noop */
+      },
+      currentRange: () => range,
+      appendScopeParams() {
+        /* noop */
+      },
+      markActive() {
+        /* noop */
+      },
+      applyFilter() {
+        /* noop */
+      },
+      renderSidebar(files) {
+        calls.renderedFiles.push(files);
+      },
+      refreshRepoSidebarTree: async () => undefined,
+      rerenderVirtualSidebar() {
+        /* noop */
+      },
+      ensureVirtualSidebarDirLoaded: async () => undefined,
+      scrollVirtualSidebarPathIntoView() {
+        /* noop */
+      },
+      shouldLazyLoadSidebarDir: () => false,
+      setFolderIcon(el) {
+        el.textContent = "folder";
+      },
+      isRepositorySidebarMode: () => true,
+      placeSidebarToggle() {
+        /* noop */
+      },
+      createOpenPathButton: () => document.createElement("button"),
+      removeStandaloneSource() {
+        /* noop */
+      },
+      renderStandaloneSource: async (target) => {
+        calls.standaloneSources.push(target.path);
+      },
+      repoFileTargetFromRoute: () => null,
+      filesColumnRef: () => null,
+      trackLoad: (promise) => promise,
+      isAbortError: () => false,
+      setRepoSidebarRef() {
+        /* noop */
+      },
+      getSidebarOnFileClick: () => () => undefined,
+      syncHeaderMenu() {
+        /* noop */
+      },
+      getSidebarRowByPath: () => undefined,
+      getSidebarVirtualActivePath: () => null,
+      pushUndo() {
+        /* noop */
+      },
+      getRepoSidebarRef: () => "worktree",
+      getProjectName: () => "sample-repo",
+      clearLoadQueue() {
+        /* noop */
+      },
+      syncSidebarHeaderHeight() {
+        /* noop */
+      },
+      newFolderButtonTitle: () => "new folder",
+      openDirectoryInOsTitle: () => "open this folder in OS",
+      moveToTrashTitle: (kind) => `move ${kind} to Trash`,
+      uploadButtonLabel: () => "Upload files",
+      dropFilesIntoCopy: (target) => `Drop files into ${target}`,
+      uploadFailedMessage: () => "Upload failed",
+      emptyDirectoryLabel: () => "No files in this directory.",
+      uploadConfirmText: (count, target) => ({
+        title: "Upload files?",
+        body: `Upload ${count} file(s) into ${target}?`,
+        confirmLabel: "Upload",
+      }),
+      sortColumnLabels: () => ({
+        name: "Name",
+        updated: "Updated",
+        committed: "Last committed",
+        committedHint: "Last commit at the selected revision",
+        updatedHint: "Local filesystem time",
+        noCommit: "No commit history",
+        filterPlaceholder: "Filter this folder…",
+        clearFilter: "Clear filter",
+        noMatches: "No matches",
+        entryCount: (visible, total) => `${visible} / ${total} items`,
+        size: "Size",
+      }),
+      repositoryFallback: () => "repository",
+      repositoryRootFallback: () => "repository root",
+      commitEntryMeta: (submodule) =>
+        submodule
+          ? {
+              label: "submodule",
+              title: "Git submodule pinned to a commit",
+            }
+          : {
+              label: "gitlink",
+              title: "Git commit entry is not directly browsable at this ref",
+            },
+      repositoryWebTarget: () => null,
+      openGithubLabel: () => "Open on GitHub",
+      openRepositoryWebLabel: () => "Open repository web page",
+      folderHistoryLabel: () => "",
+      folderHistoryTitle: () => "",
+      openFolderHistory: () => undefined,
+      fileBadge: (status) => {
+        const span = document.createElement("span");
+        span.className = `badge ${status || "M"}`;
+        return span;
+      },
+      $: <T extends Element = HTMLElement>(selector: string): T => {
+        const element = document.querySelector<T>(selector);
+        if (!element) throw new Error(`missing ${selector}`);
+        return element;
+      },
+      ...overrides,
     },
-    setRoute(nextRoute) {
-      state.route = nextRoute;
-    },
-    setPageMode() {
-      /* noop */
-    },
-    setStatus() {
-      /* noop */
-    },
-    setProjectName() {
-      /* noop */
-    },
-    currentRange: () => range,
-    appendScopeParams() {
-      /* noop */
-    },
-    markActive() {
-      /* noop */
-    },
-    applyFilter() {
-      /* noop */
-    },
-    renderSidebar(files) {
-      calls.renderedFiles.push(files);
-    },
-    refreshRepoSidebarTree: async () => undefined,
-    rerenderVirtualSidebar() {
-      /* noop */
-    },
-    ensureVirtualSidebarDirLoaded: async () => undefined,
-    scrollVirtualSidebarPathIntoView() {
-      /* noop */
-    },
-    shouldLazyLoadSidebarDir: () => false,
-    setFolderIcon(el) {
-      el.textContent = "folder";
-    },
-    isRepositorySidebarMode: () => true,
-    placeSidebarToggle() {
-      /* noop */
-    },
-    createOpenPathButton: () => document.createElement("button"),
-    removeStandaloneSource() {
-      /* noop */
-    },
-    renderStandaloneSource: async (target) => {
-      calls.standaloneSources.push(target.path);
-    },
-    repoFileTargetFromRoute: () => null,
-    filesColumnRef: () => null,
-    trackLoad: (promise) => promise,
-    isAbortError: () => false,
-    setRepoSidebarRef() {
-      /* noop */
-    },
-    getSidebarOnFileClick: () => () => undefined,
-    syncHeaderMenu() {
-      /* noop */
-    },
-    getSidebarRowByPath: () => undefined,
-    getSidebarVirtualActivePath: () => null,
-    pushUndo() {
-      /* noop */
-    },
-    getRepoSidebarRef: () => "worktree",
-    getProjectName: () => "sample-repo",
-    clearLoadQueue() {
-      /* noop */
-    },
-    syncSidebarHeaderHeight() {
-      /* noop */
-    },
-    newFolderButtonTitle: () => "new folder",
-    openDirectoryInOsTitle: () => "open this folder in OS",
-    moveToTrashTitle: (kind) => `move ${kind} to Trash`,
-    uploadButtonLabel: () => "Upload files",
-    dropFilesIntoCopy: (target) => `Drop files into ${target}`,
-    uploadFailedMessage: () => "Upload failed",
-    emptyDirectoryLabel: () => "No files in this directory.",
-    uploadConfirmText: (count, target) => ({
-      title: "Upload files?",
-      body: `Upload ${count} file(s) into ${target}?`,
-      confirmLabel: "Upload",
-    }),
-    sortColumnLabels: () => ({
-      name: "Name",
-      updated: "Updated",
-      committed: "Last committed",
-      committedHint: "Last commit at the selected revision",
-      updatedHint: "Local filesystem time",
-      noCommit: "No commit history",
-      filterPlaceholder: "Filter this folder…",
-      clearFilter: "Clear filter",
-      noMatches: "No matches",
-      entryCount: (visible, total) => `${visible} / ${total} items`,
-      size: "Size",
-    }),
-    repositoryFallback: () => "repository",
-    repositoryRootFallback: () => "repository root",
-    commitEntryMeta: (submodule) =>
-      submodule
-        ? {
-            label: "submodule",
-            title: "Git submodule pinned to a commit",
-          }
-        : {
-            label: "gitlink",
-            title: "Git commit entry is not directly browsable at this ref",
-          },
-    repositoryWebTarget: () => null,
-    openGithubLabel: () => "Open on GitHub",
-    openRepositoryWebLabel: () => "Open repository web page",
-    folderHistoryLabel: () => "",
-    folderHistoryTitle: () => "",
-    openFolderHistory: () => undefined,
-    fileBadge: (status) => {
-      const span = document.createElement("span");
-      span.className = `badge ${status || "M"}`;
-      return span;
-    },
-    $: <T extends Element = HTMLElement>(selector: string): T => {
-      const element = document.querySelector<T>(selector);
-      if (!element) throw new Error(`missing ${selector}`);
-      return element;
-    },
-    ...overrides,
-  });
+    repoView,
+  );
   return { view, state, calls };
 }
 
@@ -1364,5 +1358,45 @@ describe("repo view keeps failure reasons", () => {
       "src",
       failure,
     );
+  });
+});
+
+describe("the repo view presenter", () => {
+  test("gives the list view the rows, and narrows them when the filter is typed", async () => {
+    setupDom();
+    globalThis.fetch = (async () =>
+      response({
+        ref: "HEAD",
+        path: "",
+        project: "sample-repo",
+        entries: ["Alpha.ts", "beta.ts"].map((name) => ({
+          name,
+          path: name,
+          type: "blob",
+        })),
+      })) as typeof fetch;
+    const lists: RepoListProps[] = [];
+    const { view } = makeRepoView(
+      { screen: "repo", ref: "HEAD", path: "", range },
+      {},
+      {
+        ...DEFAULT_VIEW,
+        list: (props) => {
+          lists.push(props);
+          return DEFAULT_VIEW.list(props);
+        },
+      },
+    );
+    await view.loadRepo();
+    const last = () => lists[lists.length - 1];
+    expect(last()?.rows.map((row) => row.name.text)).toEqual([
+      "Alpha.ts",
+      "beta.ts",
+    ]);
+    last()?.filter.onInput("beta");
+    expect([
+      last()?.rows.map((row) => row.name.text),
+      last()?.filter.clear.disabled,
+    ]).toEqual([["beta.ts"], false]);
   });
 });

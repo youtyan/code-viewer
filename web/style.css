@@ -71,6 +71,50 @@
   --color-idle:         #726b7b;
   --color-backdrop:     rgba(33, 29, 43, 0.18);
   --color-shadow:       rgba(33, 29, 43, 0.16);
+  /* 状態の面と線。部品はここの名前だけを読み、状態の色を自分で薄めない。値は上の
+     状態の色から作るので、テーマは状態の色を変えるだけで全部が追従する。
+     文字は状態の色そのもの (--color-waiting など) を面の上に置く
+     (color-themes-contrast.test.ts が 4.5:1 を見る)。
+     - 選択中: 窓にフォーカスがある間は --color-select、無い間は
+       --color-select-inactive (下の html[data-window-inactive])
+     - 無効: 文字と絵は --color-disabled、面は --color-disabled-surface */
+  --color-select-inactive:  color-mix(in srgb, var(--color-text) 10%, var(--color-doc));
+  --color-disabled:         color-mix(in srgb, var(--color-text) 40%, transparent);
+  --color-disabled-surface: color-mix(in srgb, var(--color-text) 7%, transparent);
+  --color-warning-surface:  color-mix(in srgb, var(--color-waiting) 14%, transparent);
+  --color-warning-line:     color-mix(in srgb, var(--color-waiting) 45%, transparent);
+  --color-error-surface:    color-mix(in srgb, var(--color-failed) 12%, transparent);
+  --color-error-line:       color-mix(in srgb, var(--color-failed) 40%, transparent);
+  --color-success-surface:  color-mix(in srgb, var(--color-working) 14%, transparent);
+  --color-success-line:     color-mix(in srgb, var(--color-working) 40%, transparent);
+  --color-info-surface:     color-mix(in srgb, var(--color-accent) 12%, transparent);
+  --color-info-line:        color-mix(in srgb, var(--color-accent) 35%, transparent);
+  --color-done-surface:     color-mix(in srgb, var(--color-done) 14%, transparent);
+  --color-done-line:        color-mix(in srgb, var(--color-done) 40%, transparent);
+  /* 状態の面の上の文字。状態の色は本文の面で 4.5:1 ちょうどに合わせてあり、面を
+     敷くと下回るので、本文の文字の色を混ぜて一段強める。 */
+  --color-on-warning-surface: color-mix(in srgb, var(--color-waiting) 65%, var(--color-text));
+  --color-on-error-surface:   color-mix(in srgb, var(--color-failed) 65%, var(--color-text));
+  --color-on-success-surface: color-mix(in srgb, var(--color-working) 65%, var(--color-text));
+  --color-on-done-surface:    color-mix(in srgb, var(--color-done) 65%, var(--color-text));
+  --color-on-info-surface:    color-mix(in srgb, var(--color-accent) 65%, var(--color-text));
+  /* 部品だけの色 (アプリの層)。テーマで変えない決まった色で、明暗の両方で同じ値を
+     使うもの。写真・動画を見せる暗い幕と、その上の白い操作。 */
+  --app-scrim:          rgba(12, 14, 20, 0.88);
+  --app-scrim-control:  rgba(24, 28, 38, 0.88);
+  --app-scrim-control-hover: rgba(44, 52, 70, 0.95);
+  --app-on-scrim:       #ffffff;
+  --app-on-scrim-2:     rgba(255, 255, 255, 0.7);
+  --app-on-scrim-line:  rgba(255, 255, 255, 0.3);
+  /* 利用者の HTML・図を描く白い紙 (ブラウザで開いたときと同じ地)。 */
+  --app-paper:          #ffffff;
+  /* Blame の古さの段階 (新しいほど濃い)。明暗で値が違う。 */
+  --blame-bin-0: #ffeedf;
+  --blame-bin-1: #ffd9b8;
+  --blame-bin-2: #ffb47a;
+  --blame-bin-3: #ff8c3b;
+  --blame-bin-4: #d9590a;
+  --blame-uncommitted: #ffa50066;
   /* コードの面 (ソース表示・差分)。本文の面より一段沈める。 */
   --color-code:         #f6f3f9;
   /* 構文の色。種類ごとに色相を分ける (キーワードとタグ = 紫・関数名とクラス名 = 青・
@@ -315,6 +359,11 @@
   --diff-del-word-bg:   #642b2f;
   --diff-del-fg:        #ffb3ad;
   --diff-hunk-fg:       #a898cc;
+  --blame-bin-0: #4a2f1c;
+  --blame-bin-1: #6b3e1d;
+  --blame-bin-2: #8a4d1f;
+  --blame-bin-3: #b95f1f;
+  --blame-bin-4: #f08a3a;
 }
 /* ---- テーマ (配色) ----
    既定 (上の :root と [data-theme="dark"]) のほかのテーマ。明暗と組み合わせて使う
@@ -1343,6 +1392,14 @@
   --diff-del-fg:         #ffdcd7;
 }
 
+/* 窓にフォーカスが無い間 (views/shell/window-active.ts) の選択は中立の面。どのテーマの
+   塊より後ろに置き、詳細度もテーマのダーク ([data-color-theme][data-theme]) より
+   1 つ高くする。 */
+html:root[data-window-inactive] {
+  --color-select: var(--color-select-inactive);
+  --glow-select: inset 0 0 0 1px var(--color-line-strong);
+}
+
 /* 畳んだファイル一覧の縦の帯の幅 (--view-rail-w。下の html, body で --space-unit の倍数)
    は長さとして登録する。画面 (app.ts の listColumnLayoutFor・index.html の
    #first-screen) が getComputedStyle で px として読むため。登録しない変数は calc()
@@ -1402,8 +1459,14 @@ html, body {
   --pad-doc: var(--space-5);                     /* 文書の面の内側 */
   --indent-step: var(--space-4);                 /* 一覧の字下げ 1 段 */
   /* 小さな絵の大きさ。 */
+  /* 小さな絵の大きさは 5 段だけ (12・14・16・18・20。既定の密度の値)。部品は段の
+     名前を読み、段の外の大きさにしない (icon-sizes.test.ts)。空の状態の大きな絵
+     (.empty-icon など) は挿し絵で、この段の外。 */
   --icon-sm: calc(var(--space-unit) * 3);        /* 12 */
   --icon-md: calc(var(--space-unit) * 3.5);      /* 14 */
+  --icon-lg: calc(var(--space-unit) * 4);        /* 16 */
+  --icon-xl: calc(var(--space-unit) * 4.5);      /* 18 */
+  --icon-2xl: calc(var(--space-unit) * 5);       /* 20 */
   --mark-size: calc(var(--space-unit) * 2.5);    /* 10: 状態の印 */
   --dot-size: calc(var(--space-unit) * 1.5);     /* 6:  未読・いま見ているの点 */
   --project-mark-size: calc(var(--space-unit) * 4.5); /* 18: プロジェクトの色の四角 */
@@ -1489,6 +1552,18 @@ html, body {
   --listcol-shown: calc(var(--files-shown) + var(--list-shown) + var(--list-tree-w));
   --page-left: calc(var(--chrome-left) + var(--listcol-shown));
   --page-right: var(--chrome-right);
+  /* 一覧の列の頭が一覧の列より右へはみ出している間の、タブ列の下に出ている頭の
+     高さ。はみ出していなければ 0。頭の幅は密度で広がり (--listcol-head-w)、ファイル
+     一覧の幅は広がらないので、大きい密度では頭の 2 段目が本文の上に重なる。上に
+     余白を持たない本文 (フォルダ表示・ファイル表示) は、この分だけ下げる。
+     はみ出しの幅を大きく掛けて、1px でもはみ出せば上限 (頭の高さ) に張り付かせる。 */
+  --head-overhang-h: clamp(calc(var(--view-head-h) * 0), calc((var(--column-head-w) - var(--listcol-shown)) * 1000), calc(var(--panel-body-top) - var(--main-tabs-h)));
+  /* ツールバー (#topbar) を隠す画面の chrome の高さ。本文はタブ列のすぐ下から
+     始まるので、頭がはみ出している間 (左のサイドバーを畳んだとき・大きい密度) は
+     その分だけ下げる (頭の 2 段目が本文の上端を隠していた。全体ボードの見出し)。
+     本文の箱ごと下げるので、高さいっぱいの画面 (ワークログ・データストア) も
+     --content-h が一緒に縮み、スクロールが出ない。 */
+  --toolbarless-chrome-h: calc(var(--global-header-h) + var(--head-overhang-h));
 
 
   --code-font-size: 13px;
@@ -1607,15 +1682,11 @@ body[data-code-font-size="xlarge"] {
   position: fixed;
   inset: 0;
   z-index: 500;
-  background: rgba(31, 35, 40, 0.18);
+  background: var(--color-backdrop);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding-top: min(12vh, 96px);
-}
-
-[data-theme="dark"] .gdp-palette-backdrop {
-  background: rgba(1, 4, 9, 0.45);
 }
 
 .gdp-palette {
@@ -1628,7 +1699,7 @@ body[data-code-font-size="xlarge"] {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 16px 48px rgba(31, 35, 40, 0.28);
+  box-shadow: var(--shadow-pop);
 }
 
 .gdp-palette-backdrop-wide {
@@ -1683,7 +1754,6 @@ body[data-code-font-size="xlarge"] {
   color: var(--fg-muted);
   font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
 }
 
 .gdp-palette-input {
@@ -1904,7 +1974,7 @@ body[data-code-font-size="xlarge"] {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
-  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.18);
+  box-shadow: var(--shadow-context-menu);
   pointer-events: none;
 }
 
@@ -1977,16 +2047,10 @@ body[data-code-font-size="xlarge"] {
   justify-content: center;
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
   text-decoration: none;
-  transition: background 0.12s, border-color 0.12s;
 }
 .global-icon-link:hover {
-  background: var(--bg-mute);
-  border-color: var(--border-strong);
   text-decoration: none;
 }
 .global-icon-link:focus-visible {
@@ -2015,9 +2079,6 @@ body[data-code-font-size="xlarge"] {
   justify-content: center;
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--fg-muted);
   border-radius: 6px;
   cursor: pointer;
   font-size: var(--ui-font-md);
@@ -2027,29 +2088,12 @@ body[data-code-font-size="xlarge"] {
 .global-icon-action svg {
   display: block;
 }
-.global-actions #theme:hover,
-.global-icon-action:hover {
-  background: var(--bg-mute);
-  border-color: var(--border-strong);
-}
 /* 最下段 (窓の下端) とタブ列の左 (上端) に置くので、輪は内側
    (外の輪が窓の端で切れる。focus-ring-contrast.test.ts)。 */
 .global-actions #theme:focus-visible,
 .global-icon-action:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring-inset);
-}
-.global-icon-action.copied {
-  color: var(--success);
-  border-color: var(--success);
-}
-.global-icon-action.failed {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-.global-icon-action.warn {
-  color: var(--attn);
-  border-color: var(--attn);
 }
 .goi-feedback {
   position: absolute;
@@ -2061,7 +2105,7 @@ body[data-code-font-size="xlarge"] {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--shadow-context-menu);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
@@ -2082,6 +2126,85 @@ body[data-code-font-size="xlarge"] {
 .goi-feedback.warn {
   color: var(--attn);
   border-color: var(--attn);
+}
+/* 窓の中の知らせ (views/agents/attention-toast.ts)。見ていないペインが入力待ち・
+   完了になったとき、窓が前面なら右下に重ねる。場所は取らない (本文の寸法を
+   変えない) ので、最下段の上に浮かせるだけ。押すとそのペインを開く。 */
+.attention-toasts {
+  position: fixed;
+  right: var(--space-3);
+  bottom: calc(var(--chrome-bottom) + var(--space-3));
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  max-width: min(360px, calc(100vw - 2 * var(--space-3)));
+}
+.attention-toast {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  border: 1px solid var(--color-line-strong);
+  border-left: 3px solid var(--color-done);
+  border-radius: var(--radius-md);
+  background: var(--color-overlay);
+  box-shadow: var(--shadow-context-menu);
+  animation: gdp-banner-slide 0.15s ease;
+}
+.attention-toast[data-transition="waiting"] {
+  border-left-color: var(--color-waiting);
+}
+.attention-toast-open {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: none;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+.attention-toast-open:hover {
+  background: var(--color-select);
+}
+.attention-toast-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attention-toast-body {
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.attention-toast-close {
+  flex: none;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  margin: var(--space-1);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+.attention-toast-close:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.attention-toast-close svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 #auto-update.active {
   background: var(--success-subtle);
@@ -2120,17 +2243,17 @@ body[data-code-font-size="xlarge"] {
 }
 #meta .chip {
   /* Meta chips are READ-ONLY stats: plain text, no pill. The single
-     actionable control (.chip-next-unviewed below) keeps a real button
-     outline so clickable vs static is obvious at a glance. */
+     actionable control (.chip-next-unviewed below) takes its colors from
+     the button kinds (text button), so the stat color below skips buttons. */
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--fg-muted);
   font-size: var(--ui-font-sm);
   line-height: 1;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+#meta .chip:where(:not(button)) { color: var(--fg-muted); }
 #meta .chip-files { color: var(--fg); font-weight: 600; }
 #meta .chip-add { color: var(--success); font-weight: 600; }
 #meta .chip-del { color: var(--danger); font-weight: 600; }
@@ -2150,23 +2273,12 @@ body[data-code-font-size="xlarge"] {
   font-weight: 600;
   line-height: 1;
   cursor: pointer;
-  color: var(--accent);
-  background: var(--bg);
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   border-radius: 999px;
   padding: 3px 10px;
   white-space: nowrap;
 }
-#meta .chip-next-unviewed:hover:not(:disabled) {
-  background: var(--accent-subtle);
-  border-color: var(--accent);
-}
 #meta .chip-next-unviewed:disabled {
   cursor: default;
-  opacity: 0.5;
-  color: var(--fg-muted);
-  border-color: var(--border);
-  background: transparent;
 }
 .ref-pickers {
   display: flex;
@@ -2211,8 +2323,8 @@ body[data-code-font-size="xlarge"] {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
   color: var(--fg-muted);
 }
 .ref-selector .ref-input {
@@ -2255,8 +2367,8 @@ body.gdp-diff-page #repo-target-wrap {
 }
 .ref-dots svg {
   display: block;
-  width: 14px;
-  height: 14px;
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 .ref-pickers > button {
   width: var(--ui-control-sm); height: var(--ui-control-sm);
@@ -2274,12 +2386,12 @@ body.gdp-diff-page #repo-target-wrap {
 }
 .ref-pickers > button svg {
   display: block;
-  width: 14px;
-  height: 14px;
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 .ref-pickers > button:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--color-on-accent);
   border-color: var(--accent);
 }
 #ref-reset:hover { background: var(--bg-mute); color: var(--danger); border-color: var(--danger); }
@@ -2315,7 +2427,7 @@ body.gdp-diff-page #repo-target-wrap {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 12px 28px rgba(31,35,40,0.20);
+  box-shadow: var(--shadow-context-menu);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2368,7 +2480,7 @@ body.gdp-diff-page #repo-target-wrap {
   /* The selected value is the ONE strong element in the popover header:
      solid accent with white text, everything else stays quiet. */
   background: var(--accent);
-  color: #fff;
+  color: var(--color-on-accent);
   border-color: var(--accent);
   font-weight: 600;
 }
@@ -2553,21 +2665,11 @@ body.gdp-diff-page #repo-target-wrap {
   display: flex; gap: 6px; align-items: center;
 }
 .controls input[type="search"] {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--fg);
   font: inherit;
   font-size: 13px;
-  padding: 5px 10px;
+  padding: 0 10px;
   width: 220px;
-  outline: none;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
-}
-.controls input[type="search"]::placeholder { color: var(--fg-subtle); }
-.controls input[type="search"]:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-muted);
 }
 .seg {
   display: inline-flex;
@@ -2675,11 +2777,11 @@ body.gdp-diff-page #repo-target-wrap {
 /* 繋がっている間は止まった点。点滅させると、繋がっている間ずっとページが毎秒 60 回
    描き直され、打鍵が画面に出るまでが遅れた (端末の打鍵の往復の中央値 27ms の大半)。 */
 #status.live::before {
-  background: #2ea043;
-  box-shadow: 0 0 0 3px rgba(46,160,67,0.20);
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--color-success-surface);
 }
-#status.refreshing::before { background: #d29922; box-shadow: 0 0 0 3px rgba(210,153,34,0.25); }
-#status.error::before { background: var(--danger); box-shadow: 0 0 0 3px rgba(207,34,46,0.20); }
+#status.refreshing::before { background: var(--attn); box-shadow: 0 0 0 3px var(--color-warning-surface); }
+#status.error::before { background: var(--danger); box-shadow: 0 0 0 3px var(--color-error-surface); }
 #status.live { color: var(--success); }
 #status.refreshing { color: var(--attn); }
 #status.error { color: var(--danger); }
@@ -2739,7 +2841,7 @@ body.gdp-diff-page #repo-target-wrap {
   background: var(--accent-subtle);
   border: 1px solid var(--accent-muted);
   border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.16);
+  box-shadow: var(--shadow-context-menu);
   font-size: 13px;
   color: var(--fg);
   animation: gdp-banner-slide 0.2s ease;
@@ -2790,14 +2892,10 @@ body.gdp-diff-page #repo-target-wrap {
   width: 30px;
   height: 30px;
   padding: 0;
-  border: none;
-  background: none;
-  color: var(--fg-muted);
   font-size: 16px;
   cursor: pointer;
   line-height: 1;
 }
-.gdp-banner-dismiss:hover { color: var(--fg); }
 
 /* ===== Commit history panel ===== */
 /* 作業ツリー画面の 2 枚のパネルも同じ箱を使う。位置だけ Worktrees セクションで
@@ -3027,15 +3125,8 @@ body.gdp-history-page #topbar .ref-pickers {
   min-width: var(--ui-control-sm);
   height: var(--ui-control-sm);
   padding: 0;
-  border: 1px solid transparent;
   border-radius: 4px;
-  background: transparent;
-  color: var(--fg-muted);
   cursor: pointer;
-}
-.history-refresh:hover {
-  background: var(--bg);
-  color: var(--fg);
 }
 .history-refresh:focus-visible {
   outline: 2px solid var(--accent);
@@ -3043,13 +3134,9 @@ body.gdp-history-page #topbar .ref-pickers {
 }
 .history-refresh[disabled] {
   cursor: default;
-  opacity: 0.7;
 }
 .history-refresh.spinning svg {
   animation: gdp-spin 0.7s linear infinite;
-}
-.history-refresh.has-update {
-  color: var(--fg-muted);
 }
 .history-refresh.has-update::after {
   content: "";
@@ -3063,8 +3150,8 @@ body.gdp-history-page #topbar .ref-pickers {
   box-shadow: 0 0 0 2px var(--bg-soft);
 }
 .history-refresh svg {
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
   flex: 0 0 auto;
   pointer-events: none;
 }
@@ -3122,15 +3209,10 @@ body.gdp-history-page #topbar .ref-pickers {
   box-sizing: border-box;
   width: 100%;
   height: var(--ui-control-md);
-  background: color-mix(in srgb, var(--bg) 78%, var(--bg-soft));
-  border: 1px solid var(--border);
-  color: var(--fg);
-  border-radius: 8px;
   font: inherit;
   font-size: var(--ui-font-md);
   line-height: calc(var(--ui-control-md) - 2px);
   padding: 0 60px 0 34px;
-  outline: none;
   transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
 }
 .history-filter-clear,
@@ -3144,10 +3226,7 @@ body.gdp-history-page #topbar .ref-pickers {
   height: 22px;
   min-width: 42px;
   padding: 0 8px;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg-muted);
   font: inherit;
   font-size: 11px;
   font-weight: 600;
@@ -3159,34 +3238,11 @@ body.gdp-history-page #topbar .ref-pickers {
 .db-table-filter-clear[hidden] {
   display: none;
 }
-.history-filter-clear:hover,
-.sb-filter-clear:hover,
-.db-table-filter-clear:hover {
-  color: var(--fg);
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent-muted) 42%, var(--bg));
-}
 .history-filter-clear:focus-visible,
 .sb-filter-clear:focus-visible,
 .db-table-filter-clear:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-muted);
-}
-#history-filter:hover,
-.history-filter:hover {
-  border-color: var(--border);
-  background: var(--bg);
-}
-#history-filter:focus,
-.history-filter:focus {
-  border-color: var(--accent);
-  background: var(--bg);
-  box-shadow: 0 0 0 3px var(--accent-muted);
-}
-#history-filter::placeholder,
-.history-filter::placeholder {
-  color: var(--fg-subtle);
-  opacity: 1;
 }
 #history-filter::-webkit-search-decoration,
 #history-filter::-webkit-search-cancel-button,
@@ -3219,8 +3275,6 @@ body.gdp-history-page #topbar .ref-pickers {
   color: var(--accent);
   font-size: var(--ui-font-sm);
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
 }
 .history-group::before {
   content: "";
@@ -3301,8 +3355,8 @@ body.gdp-history-page #topbar .ref-pickers {
   color: var(--accent);
 }
 .history-ref-tag {
-  border-color: color-mix(in srgb, var(--warning, #9a6700) 55%, var(--border));
-  color: var(--warning, #9a6700);
+  border-color: color-mix(in srgb, var(--attn) 55%, var(--border));
+  color: var(--attn);
 }
 .history-ref-merge {
   font-style: italic;
@@ -3320,12 +3374,7 @@ body.gdp-history-page #topbar .ref-pickers {
   margin-left: 6px;
 }
 .gdp-file-revision-btn:disabled {
-  opacity: 0.35;
   cursor: default;
-}
-.gdp-file-revision-btn:disabled:hover {
-  background: transparent;
-  color: var(--fg-muted);
 }
 /* 一覧へ戻るボタン (history-view.ts の renderBack)。一覧と差分が別のページになる
    電話の段だけ出す (SP の節)。 */
@@ -3350,12 +3399,6 @@ body.gdp-history-page #topbar .ref-pickers {
 .history-commit-info .hci-copy.copied { color: var(--success, var(--accent)); }
 #history-commit-info .hci-copy.failed,
 .history-commit-info .hci-copy.failed { color: var(--danger); }
-#history-commit-info .hci-parent[aria-pressed="true"],
-.history-commit-info .hci-parent[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent-subtle);
-  color: var(--accent);
-}
 #history-commit-info .hci-compare-label,
 .history-commit-info .hci-compare-label {
   color: var(--fg-muted);
@@ -3688,23 +3731,15 @@ body[data-focus-scope="main"] #content {
   flex: 0 0 auto;
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
-  border: 1px solid transparent;
   border-radius: 6px;
-  background: transparent;
-  color: var(--fg-muted);
   padding: 0;
   cursor: pointer;
-}
-.sb-icon-action:hover:not(:disabled) {
-  background: var(--bg-mute);
-  color: var(--fg);
 }
 .sb-icon-action:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
 .sb-icon-action:disabled {
-  opacity: 0.38;
   cursor: default;
 }
 .sb-actions .sb-tree-action:first-of-type {
@@ -3751,33 +3786,11 @@ body[data-focus-scope="main"] #content {
   box-sizing: border-box;
   width: 100%;
   height: var(--ui-control-md);
-  background: color-mix(in srgb, var(--bg) 78%, var(--bg-soft));
-  border: 1px solid var(--border);
-  color: var(--fg);
-  border-radius: 8px;
   font: inherit;
   font-size: var(--ui-font-md);
   line-height: calc(var(--ui-control-md) - 2px);
   padding: 0 60px 0 34px;
-  outline: none;
   transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
-}
-:is(#sb-filter, #file-list-filter):hover {
-  border-color: var(--border);
-  background: var(--bg);
-}
-:is(#sb-filter, #file-list-filter):focus {
-  border-color: var(--accent);
-  background: var(--bg);
-  box-shadow: 0 0 0 3px var(--accent-muted);
-}
-:is(#sb-filter, #file-list-filter)[aria-invalid="true"] {
-  border-color: var(--danger);
-  box-shadow: 0 0 0 3px rgba(207,34,46,0.20);
-}
-:is(#sb-filter, #file-list-filter)::placeholder {
-  color: var(--fg-subtle);
-  opacity: 1;
 }
 :is(#sb-filter, #file-list-filter)::-webkit-search-decoration,
 :is(#sb-filter, #file-list-filter)::-webkit-search-cancel-button {
@@ -3861,35 +3874,17 @@ body.gdp-history-resizing * {
 /* 設定のページの選択の欄は全部この見た目 (欄を足しても id を並べ足さずに済むよう、
    ページの中の select 全部に当てる。viewer-settings.test.ts が確かめる)。 */
 .scope-settings select {
-  appearance: none;
   box-sizing: border-box;
   width: 100%;
   height: 36px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background:
-    linear-gradient(45deg, transparent 50%, var(--fg-muted) 50%) right 17px center / 5px 5px no-repeat,
-    linear-gradient(135deg, var(--fg-muted) 50%, transparent 50%) right 12px center / 5px 5px no-repeat,
-    var(--bg-soft);
-  color: var(--fg);
   padding: 0 36px 0 10px;
   font: inherit;
   font-size: 13px;
   line-height: 34px;
   cursor: pointer;
 }
-.scope-settings select:hover {
-  border-color: var(--border-strong);
-  background-color: var(--bg-mute);
-}
-.scope-settings select:focus {
-  border-color: var(--accent);
-  outline: none;
-  box-shadow: 0 0 0 3px var(--accent-muted);
-}
 .scope-settings select:disabled {
   cursor: not-allowed;
-  opacity: 0.65;
 }
 #scope-omit-dirs,
 #scope-exclude-names {
@@ -3897,10 +3892,6 @@ body.gdp-history-resizing * {
   width: 100%;
   min-height: 110px;
   resize: vertical;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-soft);
-  color: var(--fg);
   padding: 8px;
   font: 13px/19px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -4062,6 +4053,11 @@ html[data-theme="dark"] .agent-screen-rules-highlight span[style] {
   gap: 8px;
   margin-top: 10px;
 }
+/* 欄のすぐ下に置く小さな操作 (音を試す)。欄の頭にそろえる。 */
+.scope-settings-actions-inline {
+  justify-content: flex-start;
+  margin-top: var(--space-2);
+}
 .scope-watch-limit-row {
   display: flex;
   align-items: center;
@@ -4070,7 +4066,6 @@ html[data-theme="dark"] .agent-screen-rules-highlight span[style] {
 .scope-watch-limit-row input[type="range"] {
   flex: 1;
   min-width: 0;
-  accent-color: var(--accent, #2b6cb0);
 }
 .scope-watch-limit-row input[type="number"] {
   width: 88px;
@@ -4079,12 +4074,7 @@ html[data-theme="dark"] .agent-screen-rules-highlight span[style] {
 .scope-settings-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
   margin-top: 4px;
-  cursor: pointer;
-}
-.scope-settings-toggle input[type="checkbox"] {
-  margin: 0;
 }
 .scope-settings-footer {
   margin-top: 12px;
@@ -4099,16 +4089,9 @@ html[data-theme="dark"] .agent-screen-rules-highlight span[style] {
   color: var(--fg-muted);
 }
 .scope-settings-actions button {
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg-soft);
-  color: var(--fg);
   padding: 4px 10px;
   cursor: pointer;
-}
-.scope-settings-actions button:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-mute);
 }
 .scope-settings-actions button:disabled {
   cursor: not-allowed;
@@ -4116,15 +4099,7 @@ html[data-theme="dark"] .agent-screen-rules-highlight span[style] {
 }
 .scope-settings-actions .scope-settings-primary-action {
   inline-size: 12em;
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-fg, #fff);
-  font-weight: 600;
   white-space: nowrap;
-}
-.scope-settings-actions .scope-settings-primary-action:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 88%, var(--fg));
 }
 
 #quick-help-popover {
@@ -4180,19 +4155,14 @@ html[data-theme="dark"] .agent-screen-rules-highlight span[style] {
   background: var(--bg);
 }
 .quick-help-foot a {
-  color: var(--accent);
   font-size: 12px;
-  text-decoration: none;
-}
-.quick-help-foot a:hover {
-  text-decoration: underline;
 }
 
 /* topbar を隠すページなので、chrome の実寸から topbar を外す。
    これを書かないと --chrome-h / --content-h が隠れているツールバー分だけ
    大きいままになり、消費側を 1 つずつ手当てする羽目になる。 */
 body.gdp-help-page {
-  --chrome-h: var(--global-header-h);
+  --chrome-h: var(--toolbarless-chrome-h);
 }
 body.gdp-help-page #topbar {
   display: none;
@@ -4263,9 +4233,6 @@ body.gdp-help-page #content {
   color: var(--color-text-2);
   font-size: var(--ui-font-base);
 }
-.gdp-help-shortcut-link a {
-  color: var(--color-accent);
-}
 .shortcut-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -4279,10 +4246,6 @@ body.gdp-help-page #content {
   min-width: 0;
   height: var(--ui-control-sm);
   padding: 0 var(--space-2);
-  border: 1px solid var(--color-line-soft);
-  border-radius: var(--radius-md);
-  background: var(--color-inset);
-  color: var(--color-text);
   font: inherit;
   font-size: var(--ui-font-base);
 }
@@ -4295,20 +4258,12 @@ body.gdp-help-page #content {
   min-height: calc(var(--space-unit) * 50);
   margin-top: var(--space-1);
   padding: var(--space-2);
-  border: 1px solid var(--color-line-soft);
-  border-radius: var(--radius-md);
-  background: var(--color-inset);
-  color: var(--color-text);
   font: var(--ui-font-base) / 1.5 var(--font-mono);
   resize: vertical;
-}
-.shortcut-json textarea[aria-invalid="true"] {
-  border-color: var(--color-failed);
 }
 .shortcut-json-issues {
   margin: var(--space-2) 0 0;
   padding-left: var(--space-4);
-  color: var(--color-failed);
   font-size: var(--ui-font-sm);
 }
 .shortcut-group + .shortcut-group {
@@ -4426,18 +4381,9 @@ body.gdp-help-page #content {
 .scope-settings label.shortcut-where {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
   margin: 0;
   color: var(--color-text-2);
   font-size: var(--ui-font-sm);
-  cursor: pointer;
-}
-.scope-settings label.shortcut-where:has(input:disabled) {
-  cursor: default;
-}
-.shortcut-where input {
-  margin: 0;
-  accent-color: var(--color-accent);
 }
 .shortcut-chord-remove {
   width: var(--ui-control-sm);
@@ -4577,8 +4523,8 @@ body.gdp-help-page #content {
 :is(#filelist, #file-list-rows).tree .tree-dir:hover .chev { color: var(--fg-muted); }
 :is(#filelist, #file-list-rows).tree .tree-dir .chev .octicon {
   display: block;
-  width: 12px;
-  height: 12px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 :is(#filelist, #file-list-rows).tree .tree-dir .chev-spacer {
   width: 16px;
@@ -4631,8 +4577,8 @@ body.gdp-help-page #content {
   /* Match the repo listing's folder color (.gdp-repo-row .dir-icon). */
   color: var(--accent);
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
   display: grid;
   align-items: center;
   justify-content: center;
@@ -4806,22 +4752,15 @@ body.gdp-help-page #content {
   letter-spacing: 0;
   flex-shrink: 0;
 }
-.kind-tag.heavy { background: #fff8c5; color: var(--attn); }
-.kind-tag.binary { background: #ddf4ff; color: var(--accent-emph); }
+.kind-tag.heavy { background: var(--color-warning-surface); color: var(--color-on-warning-surface); }
+.kind-tag.binary { background: var(--color-info-surface); color: var(--color-on-info-surface); }
 .kind-tag.submodule,
 .kind-tag.gitlink {
   width: auto;
   min-width: 22px;
   padding: 0 4px;
-  background: #ddf4ff;
-  color: var(--accent-emph);
-}
-[data-theme="dark"] .kind-tag.heavy { background: rgba(210,153,34,0.15); color: var(--attn); }
-[data-theme="dark"] .kind-tag.binary { background: rgba(56,139,253,0.15); color: var(--accent-emph); }
-[data-theme="dark"] .kind-tag.submodule,
-[data-theme="dark"] .kind-tag.gitlink {
-  background: rgba(56,139,253,0.15);
-  color: var(--accent-emph);
+  background: var(--color-info-surface);
+  color: var(--color-on-info-surface);
 }
 
 /* "→ target" sublabel next to a symlink name in the sidebar tree, and the
@@ -4925,8 +4864,8 @@ body.gdp-diff-page #diff {
   color: var(--fg-muted);
 }
 .empty .empty-icon .octicon {
-  width: 22px;
-  height: 22px;
+  width: var(--icon-2xl);
+  height: var(--icon-2xl);
 }
 .empty h2 { color: var(--fg); margin: 0 0 4px; font-size: 18px; font-weight: 600; }
 .empty.empty-with-actions p {
@@ -4949,42 +4888,25 @@ body.gdp-diff-page #diff {
   justify-content: center;
   gap: 6px;
   padding: 0 12px;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
   font: inherit;
   font-size: 13px;
   line-height: 1;
   text-decoration: none;
   cursor: pointer;
-  box-shadow: var(--shadow-sm);
-}
-.empty-action:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-soft);
 }
 .empty-action:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.empty-action-primary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--fg-onemphasis);
-}
-.empty-action-primary:hover {
-  border-color: var(--accent-emph);
-  background: var(--accent-emph);
-}
 .empty-action-icon {
   display: inline-flex;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 .empty-action-icon .octicon {
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 .empty-action.spinning .empty-action-icon {
   animation: gdp-spin 0.7s linear infinite;
@@ -5037,12 +4959,12 @@ body.gdp-diff-page #diff {
 }
 .d2h-code-wrapper::-webkit-scrollbar-thumb,
 .gdp-hscroll-lane::-webkit-scrollbar-thumb {
-  background: #d0d7de;
+  background: var(--bg-emph);
   border: 0;
   border-radius: 4px;
 }
 .d2h-file-side-diff::-webkit-scrollbar-thumb {
-  background: #d0d7de;
+  background: var(--bg-emph);
   border: 0;
   border-radius: 4px;
 }
@@ -5055,10 +4977,10 @@ body.gdp-diff-page #diff {
 }
 [data-theme="dark"] .d2h-code-wrapper::-webkit-scrollbar-thumb,
 [data-theme="dark"] .gdp-hscroll-lane::-webkit-scrollbar-thumb {
-  background: #6e7681;
+  background: var(--color-text-3);
 }
 [data-theme="dark"] .d2h-file-side-diff::-webkit-scrollbar-thumb {
-  background: #6e7681;
+  background: var(--color-text-3);
 }
 [data-theme="dark"] .d2h-code-wrapper::-webkit-scrollbar-track,
 [data-theme="dark"] .gdp-hscroll-lane::-webkit-scrollbar-track {
@@ -5112,12 +5034,8 @@ body.gdp-diff-page #diff {
 .d2h-file-list-wrapper { display: none !important; }
 
 .d2h-file-wrapper {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
   margin: 0 0 16px;
   isolation: isolate;
-  box-shadow: var(--shadow-sm);
   /* サイドバー・次の未閲覧から送ったときの、箱の上端との間。本文は自分の箱
      (#content) でスクロールし、固定の帯はその箱の外 (上) にあるので、帯の高さ
      (--chrome-h) は足さない (足すとカードが箱の上端から 98px 下に止まり、前の
@@ -5127,17 +5045,9 @@ body.gdp-diff-page #diff {
 
 .d2h-file-header,
 .d2h-file-header.d2h-sticky-header {
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: 6px 6px 0 0;
   /* -1px on top/left/right: the header's own border overlaps the wrapper's
      border instead of painting a 2px band inside it. */
   margin: -1px -1px 0;
-  padding: 6px 8px;
-  min-height: var(--ui-file-header-h);
-  display: flex;
-  align-items: center;
-  gap: 8px;
   /* 本文の箱 (#content) の中の sticky。箱の中の基準は「箱の内側の余白の内」
      なので、上の余白 (--content-top-gap) の分だけ上へ出して箱の上端に貼る
      (出さないと、見出しの上の隙間に次の行がのぞく)。箱の外 (右の面の
@@ -5355,7 +5265,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   font: inherit;
   font-size: var(--ui-font-base);
   font-weight: 600;
-  box-shadow: 0 8px 28px rgba(31, 35, 40, 0.35);
+  box-shadow: var(--shadow-context-menu);
 }
 #line-ref-pill-copy {
   display: inline-flex;
@@ -5367,7 +5277,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   border: none;
   border-radius: 7px;
   background: var(--accent);
-  color: #fff;
+  color: var(--color-on-accent);
   font: inherit;
   cursor: pointer;
 }
@@ -5437,7 +5347,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   background: color-mix(in srgb, var(--success) 10%, transparent);
 }
 #line-ref-pill-github-copy.failed {
-  color: #fff;
+  color: var(--color-on-accent);
   background: var(--danger);
 }
 #line-ref-pill-close {
@@ -5474,7 +5384,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   text-overflow: ellipsis;
   padding: 2px 8px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.18);
+  background: color-mix(in srgb, var(--color-on-accent) 18%, transparent);
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: var(--ui-font-sm);
   font-weight: 400;
@@ -5486,12 +5396,12 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   flex: 0 0 auto;
   padding: 2px 6px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.18);
+  background: color-mix(in srgb, var(--color-on-accent) 18%, transparent);
   font-size: 11px;
   font-weight: 700;
 }
 #line-ref-pill .lrp-count-warn {
-  background: #fff;
+  background: var(--color-on-accent);
   color: var(--attn);
 }
 #line-ref-pill.pop {
@@ -5526,9 +5436,6 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   width: 100%;
   height: var(--code-line-height);
   min-height: 0;
-  border: 0;
-  background: var(--accent-subtle);
-  color: var(--accent);
   cursor: pointer;
   padding: 0;
   margin: 0;
@@ -5537,11 +5444,6 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 }
 .gdp-expand-btn svg {
   display: block;
-}
-.gdp-expand-btn + .gdp-expand-btn { border-top: 1px solid var(--bg); }
-.gdp-expand-btn:hover {
-  background: var(--accent);
-  color: #fff;
 }
 .gdp-inserted-ctx td { background: var(--bg) !important; }
 
@@ -5554,10 +5456,8 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.gdp-stat-text .a { color: #1a7f37; }
-.gdp-stat-text .d { color: #d1242f; }
-[data-theme="dark"] .gdp-stat-text .a { color: #3fb950; }
-[data-theme="dark"] .gdp-stat-text .d { color: #f85149; }
+.gdp-stat-text .a { color: var(--success); }
+.gdp-stat-text .d { color: var(--danger); }
 
 .gdp-file-header-icon {
   appearance: none;
@@ -5565,25 +5465,10 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   place-items: center;
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--fg-muted);
   border-radius: 6px;
   padding: 0 8px;
   cursor: pointer;
   flex: 0 0 var(--ui-control-sm);
-}
-.gdp-file-header-icon:hover {
-  color: var(--fg);
-  background: var(--bg-mute);
-}
-.gdp-open-path {
-  color: var(--accent);
-}
-.gdp-open-path:hover {
-  color: var(--accent-emph);
-  background: var(--accent-subtle);
-  border-color: var(--accent-muted);
 }
 .gdp-file-header-icon svg {
   display: block;
@@ -5597,49 +5482,29 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-copy-source.failed { color: var(--danger); }
 .gdp-open-path.opened { color: var(--success); }
 .gdp-open-path.failed { color: var(--danger); }
-.gdp-file-unfold[aria-pressed="true"] {
-  color: var(--accent);
-  background: var(--accent-subtle);
-}
 .gdp-btn {
   appearance: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
   text-decoration: none;
 }
+/* 小 (ボタンの種類の節): 行の中の小さな操作。文字は --ui-font-sm。 */
 .gdp-btn-sm {
   height: var(--ui-control-sm);
-  padding: 0 10px;
-  font-size: var(--ui-font-base);
+  padding: 0 var(--space-2);
+  font-size: var(--ui-font-sm);
   line-height: calc(var(--ui-control-sm) - 2px);
 }
 .gdp-btn:hover {
-  background: var(--bg-mute);
   text-decoration: none;
 }
-.gdp-btn[aria-pressed="true"] {
-  background: var(--bg-mute);
-  color: var(--fg);
-  border-color: var(--border-strong);
-}
 .gdp-btn:disabled {
-  color: var(--fg-subtle);
   cursor: not-allowed;
-  opacity: 0.65;
-}
-.d2h-file-collapse-input {
-  width: calc(var(--ui-font-sm) + 2px);
-  height: calc(var(--ui-font-sm) + 2px);
-  margin: 0;
-  accent-color: var(--accent);
 }
 
 /* GitHub-style diff squares appended to the file header. */
@@ -5654,13 +5519,11 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   width: calc(var(--ui-font-sm) - 3px);
   height: calc(var(--ui-font-sm) - 3px);
   border-radius: 2px;
-  background: #d0d7de; /* fallback / neutral */
+  background: var(--bg-emph);
 }
-.gdp-stat-squares .sq.add { background: #1f883d; } /* Primer success-emphasis */
-.gdp-stat-squares .sq.del { background: #cf222e; } /* Primer danger-emphasis */
+.gdp-stat-squares .sq.add { background: var(--success); }
+.gdp-stat-squares .sq.del { background: var(--danger); }
 .gdp-stat-squares .sq.nu  { background: var(--bg-emph); }
-[data-theme="dark"] .gdp-stat-squares .sq.add { background: #2ea043; }
-[data-theme="dark"] .gdp-stat-squares .sq.del { background: #da3633; }
 [data-theme="dark"] .gdp-stat-squares .sq.nu  { background: var(--border-strong); }
 
 .gdp-source-viewer {
@@ -5822,7 +5685,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
-.gdp-source-tabs button {
+.gdp-source-tabs button:where([data-source-tab]) {
   appearance: none;
   border: 0;
   border-bottom: 2px solid transparent;
@@ -5834,10 +5697,10 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   font-weight: 600;
   cursor: pointer;
 }
-.gdp-source-tabs button:hover {
+.gdp-source-tabs button:where([data-source-tab]):hover {
   color: var(--fg);
 }
-.gdp-source-tabs button.active {
+.gdp-source-tabs button:where([data-source-tab]).active {
   color: var(--accent);
   background: var(--accent-subtle);
   border-radius: 6px 6px 0 0;
@@ -5849,7 +5712,6 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   width: 28px;
   height: 28px;
   padding: 0;
-  border: 1px solid transparent;
   border-radius: 6px;
 }
 .gdp-source-virtual-copy {
@@ -6035,10 +5897,10 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-source-virtual-badge {
   flex: 0 0 auto;
   padding: 2px 7px;
-  border: 1px solid rgba(9, 105, 218, .35);
+  border: 1px solid var(--color-info-line);
   border-radius: 999px;
-  color: #0969da;
-  background: rgba(9, 105, 218, .08);
+  color: var(--color-on-info-surface);
+  background: var(--color-info-surface);
   font-weight: 700;
 }
 .gdp-source-virtual-summary {
@@ -6062,10 +5924,6 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   min-width: 120px;
   height: 28px;
   padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
 }
 /* 帯が狭いときに「前へ」「次へ」「閉じる」が 1 文字ずつ折れないよう、ボタンと件数は
    縮めない (縮むのは左の説明の文)。 */
@@ -6077,10 +5935,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-source-virtual-search button {
   height: 28px;
   padding: 0 8px;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg-subtle);
-  color: var(--fg);
   cursor: pointer;
 }
 .gdp-source-virtual-search-count {
@@ -6098,19 +5953,12 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   align-items: center;
   min-height: 24px;
   padding: 0 8px;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--fg);
-  background: var(--bg);
   font: inherit;
   line-height: 1;
   text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
-}
-.gdp-source-virtual-action:hover {
-  border-color: var(--accent);
-  color: var(--accent);
 }
 .gdp-source-virtual-copy:hover {
   border-color: var(--border);
@@ -6294,11 +6142,9 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 }
 .gdp-file-detail-header .gdp-copy-path {
   flex-shrink: 0;
-  color: var(--fg-muted);
 }
 .gdp-file-detail-header .gdp-trash-path {
   flex-shrink: 0;
-  color: var(--danger);
 }
 .gdp-file-detail-header .gdp-create-dir {
   flex-shrink: 0;
@@ -6384,28 +6230,23 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   flex: 0 0 16px;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
   color: var(--fg-muted);
 }
 .gdp-csv-search-icon svg {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 .gdp-csv-search {
   width: min(360px, 34vw);
   min-width: 180px;
   height: var(--ui-control-md);
   padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
   font: inherit;
   font-size: var(--ui-font-md);
 }
-.gdp-csv-search:focus,
 .gdp-csv-column-filter:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
@@ -6425,28 +6266,18 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   width: 88px;
   height: var(--ui-control-md);
   padding: 0 10px;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg-muted);
   font: inherit;
   font-size: var(--ui-font-sm);
   font-weight: 600;
   cursor: pointer;
-}
-.gdp-csv-reset:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--accent-subtle);
-  color: var(--fg);
 }
 .gdp-csv-reset:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 .gdp-csv-reset:disabled {
-  color: var(--fg-subtle);
   cursor: default;
-  opacity: 0.58;
 }
 .gdp-csv-table {
   width: 100%;
@@ -6544,8 +6375,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   font-size: var(--ui-font-sm);
   font-weight: 400;
 }
-.gdp-csv-column-filter::placeholder,
-.gdp-csv-search::placeholder {
+.gdp-csv-column-filter::placeholder {
   color: var(--fg-subtle);
 }
 .gdp-csv-table tbody tr:nth-child(2n) td {
@@ -6602,7 +6432,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   width: 100%;
   min-height: calc(var(--content-h) - var(--file-detail-head-h));
   border: 0;
-  background: #fff;
+  background: var(--app-paper);
 }
 .gdp-markdown-layout {
   display: grid;
@@ -6642,8 +6472,6 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   color: var(--fg-subtle);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 .gdp-markdown-toc ul {
   list-style: none;
@@ -6914,8 +6742,6 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   background: var(--bg-soft);
 }
 .gdp-markdown-preview a {
-  color: var(--accent);
-  text-decoration: none;
   border-bottom: 1px solid transparent;
 }
 .gdp-markdown-preview a:hover {
@@ -6934,7 +6760,6 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 }
 .gdp-markdown-preview input[type="checkbox"] {
   margin: 0 0.5em 0 -1.5em;
-  accent-color: var(--accent);
 }
 .gdp-markdown-preview img {
   max-width: 100%;
@@ -6981,8 +6806,8 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   margin: 0;
   padding: 10px 14px;
   border-radius: 6px;
-  background: #1f1f1f;
-  color: #ff7b72;
+  background: var(--color-error-surface);
+  color: var(--color-on-error-surface);
 }
 .mkdp-mermaid-error-srcwrap {
   margin-top: 10px;
@@ -6998,7 +6823,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(15, 20, 30, 0.86);
+  background: var(--app-scrim);
   cursor: grab;
 }
 .mkdp-lightbox.dragging { cursor: grabbing; }
@@ -7015,8 +6840,8 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   max-height: none !important;
   transform-origin: 0 0;
   border-radius: 8px;
-  background: #fff !important;
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  background: var(--app-paper) !important;
+  box-shadow: var(--shadow-pop);
   user-select: none;
 }
 .mkdp-lightbox-toolbar {
@@ -7030,22 +6855,22 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .mkdp-lightbox-toolbar button {
   min-width: 36px;
   height: 36px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid var(--app-on-scrim-line);
   border-radius: 6px;
-  background: rgba(20, 25, 35, 0.85);
-  color: #fff;
+  background: var(--app-scrim-control);
+  color: var(--color-on-accent);
   cursor: pointer;
   font-weight: 600;
 }
 .mkdp-lightbox-toolbar button:hover {
-  background: rgba(40, 50, 70, 0.95);
+  background: var(--app-scrim-control-hover);
 }
 .mkdp-lightbox-hint {
   position: fixed;
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--app-on-scrim-2);
   font-size: 12px;
   letter-spacing: 0.04em;
   pointer-events: none;
@@ -7105,12 +6930,16 @@ body.gdp-file-detail-page #topbar {
 body.gdp-repo-page #topbar {
   display: none;
 }
-body.gdp-repo-page #content {
-  --content-top-gap: 24px;
+/* フォルダ表示とファイル表示は、面を本文の箱の端まで敷く (浮いたカードにしない)。
+   余白は面の中 (--pad-doc) が持ち、箱は余白を持たない (上は一覧の列の頭が本文の
+   上にはみ出している間だけ、その高さを空ける)。 */
+body.gdp-repo-page #content,
+body.gdp-file-detail-page #content {
+  --content-top-gap: var(--head-overhang-h);
+  --content-pad-x: 0px;
+  --content-pad-bottom: 0px;
   margin-left: 0;
-  /* 左右はファイル表示と同じ本文の余白 (--content-pad-x)。32px にしていたので
-     フォルダ表示とファイル表示で本文の左端が 8px ずれていた。 */
-  padding: var(--content-top-gap) var(--content-pad-x) 48px;
+  padding: var(--content-top-gap) 0 0;
 }
 /* ファイル一覧を畳んだ (手・幅が足りないときの自動) 間は隠す。頭の行は残る。 */
 body.gdp-sidebar-hidden #file-list,
@@ -7184,16 +7013,8 @@ body.gdp-file-detail-page #empty {
   min-width: 12ch;
   height: var(--ui-control-md);
   padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-soft);
-  color: var(--fg);
   font: inherit;
   font-size: var(--ui-font-base);
-}
-.gdp-repo-filter:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 .gdp-repo-result-count {
   min-width: 12ch;
@@ -7231,14 +7052,9 @@ body.gdp-file-detail-page #empty {
 .gdp-source-line-jump input {
   width: 9ch;
   min-height: var(--ui-control-sm);
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  padding: 0 6px;
   font: inherit;
-  color: var(--fg);
-  background: var(--bg);
 }
-.gdp-source-line-jump input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .gdp-source-line-count { font-variant-numeric: tabular-nums; padding-right: 8px; border-right: 1px solid var(--border); }
 .gdp-repo-sort-header {
   display: grid;
@@ -7309,8 +7125,8 @@ body.gdp-file-detail-page #empty {
      dark mode (previously a single hardcoded mid-blue for both). */
   color: var(--accent);
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
   display: grid;
   align-items: center;
   justify-content: center;
@@ -7396,39 +7212,15 @@ body.gdp-file-detail-page #empty {
 .gdp-context-menu {
   position: fixed;
   z-index: 1000;
-  box-sizing: border-box;
   width: var(--context-menu-w);
   max-height: 60vh;
   overflow-y: auto;
-  padding: var(--space-1);
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-md);
-  background: var(--color-overlay);
-  box-shadow: var(--shadow-context-menu);
 }
 .gdp-context-menu button {
-  width: 100%;
-  height: var(--ui-row-h);
-  padding: 0
-    calc(var(--context-menu-inline-pad) - var(--space-1));
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text);
-  font: inherit;
-  font-size: var(--ui-font-md);
-  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
-}
-.gdp-context-menu button:hover,
-.gdp-context-menu button:focus-visible {
-  background: var(--color-select);
-}
-.gdp-context-menu .danger {
-  color: var(--color-failed);
 }
 /* 文字の前に絵を置く項目 (プロジェクトの色の一覧)。今の値は印と太さで示す
    (色だけに頼らない)。 */
@@ -7436,9 +7228,6 @@ body.gdp-file-detail-page #empty {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-.gdp-context-menu button[aria-checked="true"] {
-  font-weight: 600;
 }
 .gdp-context-menu button.gdp-context-menu-leading[role="menuitemradio"]::after {
   content: "";
@@ -7466,15 +7255,6 @@ body.gdp-file-detail-page #empty {
 .gdp-context-menu button:disabled .gdp-context-menu-icon {
   color: inherit;
 }
-/* 右端のキー (見た目はパレットのキーと共有)。印の列があればその左。 */
-.gdp-context-menu-key {
-  flex: none;
-  margin-left: auto;
-}
-.gdp-context-menu
-  button.gdp-context-menu-leading[role="menuitemradio"]:has(> .gdp-context-menu-key)::after {
-  margin-left: 0;
-}
 /* 絵の無い選び方の一覧 (棚の置き場所など): 印は左の固定の列。選んでいない行も
    同じ幅を空けて、文字の頭をそろえる。 */
 .gdp-context-menu button[role="menuitemradio"]:not(.gdp-context-menu-leading) {
@@ -7494,14 +7274,6 @@ body.gdp-file-detail-page #empty {
   content: "✓";
 }
 /* 押せない項目 (理由は title)。危険な操作の色より優先して、押せないと分かる色に。 */
-.gdp-context-menu button:disabled {
-  color: var(--color-text-3);
-  cursor: default;
-}
-.gdp-context-menu button:disabled:hover,
-.gdp-context-menu button:disabled:focus-visible {
-  background: transparent;
-}
 body.gdp-def-mod #content .gdp-source-line-code:hover,
 body.gdp-def-mod #content .gdp-source-virtual-line-code:hover,
 body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
@@ -7536,10 +7308,7 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   margin-top: 4px;
 }
 .db-connection-form input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
   margin-top: 8px;
-  padding: 0;
 }
 .db-connection-required {
   color: var(--danger);
@@ -7590,15 +7359,10 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   border: 1px solid transparent;
   line-height: 1.4;
 }
-.d2h-changed-tag { background: #fff8c5; border-color: #d4a72c80; color: var(--attn); }
-.d2h-added-tag   { background: #ccffd866; border-color: #2da44e44; color: var(--success); }
-.d2h-deleted-tag { background: #ffebe9; border-color: #cf222e44; color: var(--danger); }
-.d2h-moved-tag   { background: #d8b9ff44; border-color: #8250df44; color: var(--done); }
-
-[data-theme="dark"] .d2h-changed-tag { background: rgba(210,153,34,0.15); border-color: rgba(210,153,34,0.40); color: var(--attn); }
-[data-theme="dark"] .d2h-added-tag   { background: rgba(46,160,67,0.15);  border-color: rgba(46,160,67,0.40);  color: var(--success); }
-[data-theme="dark"] .d2h-deleted-tag { background: rgba(248,81,73,0.15);  border-color: rgba(248,81,73,0.40);  color: var(--danger); }
-[data-theme="dark"] .d2h-moved-tag   { background: rgba(163,113,247,0.15);border-color: rgba(163,113,247,0.40);color: var(--done); }
+.d2h-changed-tag { background: var(--color-warning-surface); border-color: var(--color-warning-line); color: var(--color-on-warning-surface); }
+.d2h-added-tag   { background: var(--color-success-surface); border-color: var(--color-success-line); color: var(--color-on-success-surface); }
+.d2h-deleted-tag { background: var(--color-error-surface); border-color: var(--color-error-line); color: var(--color-on-error-surface); }
+.d2h-moved-tag   { background: var(--color-done-surface); border-color: var(--color-done-line); color: var(--color-on-done-surface); }
 
 /* ===== Diff body / table ===== */
 .d2h-file-wrapper .d2h-file-diff,
@@ -7896,10 +7660,8 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   margin-left: 8px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   font-size: var(--ui-font-base);
   color: var(--fg-muted);
-  cursor: pointer;
 }
 
 /* ===== Scrollbars ===== */
@@ -8121,7 +7883,7 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   /* 帯の高さは足さない (.d2h-file-wrapper と同じ理由)。 */
   scroll-margin-top: var(--space-2);
   isolation: isolate;
-  box-shadow: 0 1px 0 rgba(31,35,40,0.04);
+  box-shadow: var(--shadow-sm);
   content-visibility: auto;
   contain-intrinsic-size: auto 200px;
 }
@@ -8152,10 +7914,10 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   background: var(--bg-mute);
   color: var(--fg-muted);
 }
-.gdp-shell-header .status-pill.M { background: #f9d97a55; color: #7d4e00; }
-.gdp-shell-header .status-pill.A { background: #ccffd866; color: var(--success); }
-.gdp-shell-header .status-pill.D { background: #ffd7d566; color: var(--danger); }
-.gdp-shell-header .status-pill.R { background: #d8b9ff66; color: var(--done); }
+.gdp-shell-header .status-pill.M { background: var(--color-warning-surface); color: var(--color-on-warning-surface); }
+.gdp-shell-header .status-pill.A { background: var(--color-success-surface); color: var(--color-on-success-surface); }
+.gdp-shell-header .status-pill.D { background: var(--color-error-surface); color: var(--color-on-error-surface); }
+.gdp-shell-header .status-pill.R { background: var(--color-done-surface); color: var(--color-on-done-surface); }
 .gdp-shell-header .path {
   color: var(--fg);
   font-weight: 600;
@@ -8183,17 +7945,12 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 }
 .gdp-shell-header .size-tag.large,
 .gdp-shell-header .size-tag.huge {
-  background: #fff8c5;
-  color: var(--attn);
-}
-[data-theme="dark"] .gdp-shell-header .size-tag.large,
-[data-theme="dark"] .gdp-shell-header .size-tag.huge {
-  background: rgba(210,153,34,0.15);
-  color: var(--attn);
+  background: var(--color-warning-surface);
+  color: var(--color-on-warning-surface);
 }
 .gdp-shell-header .size-tag.binary {
-  background: #ddf4ff;
-  color: var(--accent-emph);
+  background: var(--color-info-surface);
+  color: var(--color-on-info-surface);
 }
 .gdp-shell-header .loading-indicator {
   font-family: -apple-system, sans-serif;
@@ -8250,9 +8007,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   margin-right: auto;
 }
 .gdp-show-full {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--fg);
   padding: 6px 14px;
   border-radius: 6px;
   font: inherit;
@@ -8260,10 +8014,7 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
 }
-.gdp-show-full:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
-.gdp-show-full.secondary { background: transparent; color: var(--fg-muted); }
-.gdp-show-full.secondary:hover { color: var(--fg); border-color: var(--border-strong); background: var(--bg); }
-.gdp-show-full:disabled { opacity: 0.6; cursor: wait; }
+.gdp-show-full:disabled { cursor: wait; }
 
 .gdp-manual-load {
   padding: 14px;
@@ -8285,9 +8036,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 }
 .gdp-error .retry {
   margin-left: 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--fg);
   padding: 3px 10px;
   border-radius: 5px;
   cursor: pointer;
@@ -8326,12 +8074,12 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 }
 .gdp-media .media-label.add {
   background: var(--diff-add-bg);
-  border-color: rgba(46,160,67,0.4);
+  border-color: var(--color-success-line);
   color: var(--success);
 }
 .gdp-media .media-label.del {
   background: var(--diff-del-bg);
-  border-color: rgba(207,34,46,0.4);
+  border-color: var(--color-error-line);
   color: var(--danger);
 }
 .gdp-media img,
@@ -8396,18 +8144,11 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   width: 28px;
   height: 28px;
   padding: 0;
-  border: 0;
   border-radius: 6px;
-  background: transparent;
-  color: var(--fg-muted);
   cursor: pointer;
   transition:
     background-color 0.12s ease,
     color 0.12s ease;
-}
-.gdp-media-control:hover {
-  background: var(--bg-emph);
-  color: var(--fg);
 }
 .gdp-media-control:focus-visible {
   outline: 2px solid var(--accent);
@@ -8427,22 +8168,17 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   flex: 1 1 auto;
   min-width: 60px;
   margin: 0;
-  accent-color: var(--accent);
 }
 .gdp-media-volume {
   width: 72px;
   margin: 0;
-  accent-color: var(--accent);
 }
 .gdp-media-speed {
   flex: 0 0 auto;
   min-width: 44px;
   height: 28px;
   padding: 0 6px;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg-muted);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -8450,10 +8186,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
     background-color 0.12s ease,
     border-color 0.12s ease,
     color 0.12s ease;
-}
-.gdp-media-speed:hover {
-  background: var(--bg-emph);
-  color: var(--fg);
 }
 .gdp-media-speed:focus-visible {
   outline: 2px solid var(--accent);
@@ -8549,7 +8281,7 @@ body.annotation-panel-open #content {
   flex-direction: column;
   border-top: 1px solid var(--border);
   background: var(--bg);
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-md);
 }
 #query-history-panel[hidden] {
   display: none !important;
@@ -8616,18 +8348,11 @@ body.query-history-panel-open #content {
 }
 .db-history-dock-close {
   appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--fg-muted);
   font-family: inherit;
   font-size: 14px;
   line-height: 1;
   padding: 0 10px;
   cursor: pointer;
-}
-.db-history-dock-close:hover {
-  background: var(--bg-mute);
-  color: var(--fg);
 }
 /* pane が閉じてるときは close ボタンも意味が無いので隠す。 */
 .db-history-dock:not(.open) .db-history-dock-close {
@@ -8659,27 +8384,15 @@ body.query-history-panel-open #content {
   border-bottom: 1px solid var(--border);
 }
 .db-session-log-action {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
+  padding: var(--space-1) var(--space-2);
   border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
-  font-size: var(--ui-font-base);
+  font-size: var(--ui-font-sm);
   cursor: pointer;
   font-family: inherit;
 }
-.db-session-log-action:hover {
-  background: var(--bg-mute);
-}
 /* 自動追従トグル ON 中の active 状態 (db-tool-btn.active と同じ accent 配色)。 */
 .db-session-log-action.active {
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
-  color: var(--accent);
-  border-color: var(--accent);
   font-weight: 600;
-}
-.db-session-log-danger {
-  color: var(--danger, #d32f2f);
 }
 .db-session-log-body-split {
   flex: 1;
@@ -8744,14 +8457,14 @@ body.query-history-panel-open #content {
   border: 1px solid transparent;
 }
 .db-session-log-badge-ok {
-  background: rgba(46, 160, 67, 0.15);
-  border-color: rgba(46, 160, 67, 0.4);
-  color: var(--success, #2da44e);
+  background: var(--color-success-surface);
+  border-color: var(--color-success-line);
+  color: var(--color-on-success-surface);
 }
 .db-session-log-badge-error {
-  background: rgba(207, 34, 46, 0.15);
-  border-color: rgba(207, 34, 46, 0.4);
-  color: var(--danger, #cf222e);
+  background: var(--color-error-surface);
+  border-color: var(--color-error-line);
+  color: var(--color-on-error-surface);
 }
 .db-session-log-kind {
   font-size: var(--ui-font-xs);
@@ -8808,9 +8521,9 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   word-break: break-word;
 }
 .db-session-log-message-error {
-  background: rgba(207, 34, 46, 0.08);
-  border: 1px solid rgba(207, 34, 46, 0.4);
-  color: var(--danger, #cf222e);
+  background: var(--color-error-surface);
+  border: 1px solid var(--color-error-line);
+  color: var(--color-on-error-surface);
 }
 .db-session-log-message-ok {
   background: var(--bg-soft);
@@ -8829,28 +8542,21 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   border-bottom: 1px solid var(--border);
 }
 .db-query-history-action {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
+  padding: var(--space-1) var(--space-2);
   border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
-  font-size: var(--ui-font-base);
+  font-size: var(--ui-font-sm);
   cursor: pointer;
   font-family: inherit;
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
-.db-query-history-action:hover {
-  background: var(--bg-mute);
-}
 .db-query-history-action[disabled] {
   cursor: default;
-  opacity: 0.7;
 }
 .db-query-history-action svg {
-  width: 14px;
-  height: 14px;
+  width: var(--icon-md);
+  height: var(--icon-md);
   flex: 0 0 auto;
 }
 .db-query-history-refresh-result {
@@ -8859,9 +8565,6 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 }
 .db-query-history-refresh.spinning svg {
   animation: gdp-spin 0.7s linear infinite;
-}
-.db-query-history-danger {
-  color: var(--danger, #d32f2f);
 }
 .db-query-history-body-split {
   flex: 1;
@@ -8998,17 +8701,13 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   justify-content: center;
   gap: 5px;
   flex: none;
-  border: 1px solid var(--accent-emph);
-  background: var(--accent-emph);
-  color: #fff;
   padding: 6px 10px;
   font-family: inherit;
   font-size: var(--ui-font-sm);
   line-height: 1.4;
   white-space: nowrap;
 }
-#annotation-panel .annotation-primary:hover { filter: brightness(.92); }
-#annotation-panel .annotation-primary svg { width: 14px; height: 14px; }
+#annotation-panel .annotation-primary svg { width: var(--icon-md); height: var(--icon-md); }
 .annotation-panel-options {
   display: flex;
   padding: 8px 12px;
@@ -9019,12 +8718,9 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 .annotation-follow-label {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   font-size: var(--ui-font-sm);
   color: var(--fg-muted);
-  cursor: pointer;
 }
-.annotation-follow-label input { accent-color: var(--accent); margin: 0; }
 #annotation-clear {
   border: 0;
   border-radius: 6px;
@@ -9049,7 +8745,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   color: var(--fg-muted);
 }
 .annotation-search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-subtle); }
-.annotation-search-box > svg { width: 14px; height: 14px; flex: none; }
+.annotation-search-box > svg { width: var(--icon-md); height: var(--icon-md); flex: none; }
 #annotation-search {
   width: 100%; min-width: 0; border: 0; outline: 0; padding: 4px 0;
   background: transparent; color: var(--fg); font: inherit; font-size: var(--ui-font-sm);
@@ -9115,8 +8811,8 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 }
 #annotation-player .octicon {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 #annotation-player-progress {
   margin-left: auto;
@@ -9128,19 +8824,10 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   border-color: var(--accent);
 }
 #annotation-player-rate {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-soft);
-  color: var(--fg);
   font: inherit;
   font-size: 12px;
-  padding: 2px 4px;
+  padding: 0 4px;
   cursor: pointer;
-}
-#annotation-player-rate:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-muted);
 }
 /* ---- end annotation playback toolbar ---- */
 #annotation-sessions {
@@ -9193,7 +8880,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 .annotation-entry-summary { grid-column: 2; font-size: var(--ui-font-sm); font-weight: 500; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .annotation-entry-time { grid-column: 2; font-size: var(--ui-font-xs); color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
 .annotation-session-head .annotation-icon-btn,
-.annotation-entries li .annotation-icon-btn { opacity: .55; border-color: transparent; background: transparent; }
+.annotation-entries li .annotation-icon-btn { opacity: .55; }
 .annotation-session-head:hover .annotation-icon-btn,
 .annotation-entries li:hover .annotation-icon-btn,
 .annotation-icon-btn:focus-visible { opacity: 1; }
@@ -9311,20 +8998,13 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
      walkthrough order is visible right inside the code, and doubles as
      the button that opens the entry in the detail dock. */
   flex: none;
-  border: 1px solid var(--accent);
   border-radius: 999px;
-  background: var(--accent-subtle);
-  color: var(--accent);
   font-family: inherit;
   font-size: 11px;
   font-weight: 600;
   line-height: 1;
   padding: 3px 8px;
   cursor: pointer;
-}
-.gdp-annotation-step:hover {
-  background: var(--accent);
-  color: #fff;
 }
 .gdp-annotation-row.active .gdp-annotation-step,
 .gdp-db-annotation-inline.active .gdp-annotation-step {
@@ -9335,7 +9015,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 .gdp-annotation-row.active .gdp-annotation-step:hover,
 .gdp-db-annotation-inline.active .gdp-annotation-step:hover {
   background: var(--attn);
-  color: #fff;
+  color: var(--color-on-accent);
 }
 .gdp-annotation-inline-body pre {
   max-width: 100%;
@@ -9347,10 +9027,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 
 /* Annotation editing + AI-ready reference copy */
 .annotation-icon-btn {
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg-muted);
   line-height: 1;
   padding: 3px 6px;
   cursor: pointer;
@@ -9358,13 +9035,9 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   align-items: center;
 }
 .annotation-icon-btn svg {
-  width: 13px;
-  height: 13px;
+  width: var(--icon-md);
+  height: var(--icon-md);
   display: block;
-}
-.annotation-icon-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
 }
 .annotation-icon-btn.copied {
   color: var(--success);
@@ -9385,25 +9058,20 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   outline-offset: 2px;
 }
 .gdp-annotation-inline .gdp-annotation-step {
-  border-color: var(--border);
   border-radius: 5px;
-  background: var(--accent-subtle);
-  color: var(--accent);
   font-size: var(--ui-font-sm);
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
 }
-.gdp-annotation-inline .gdp-annotation-step:hover { background: var(--bg-mute); }
 .gdp-annotation-inline-copy { flex: none; }
 .annotation-edit-form { display: flex; flex-direction: column; gap: 12px; min-height: 100%; }
 .annotation-edit-fields { display: flex; flex-direction: column; gap: 12px; padding: 0; margin: 0; border: 0; flex: 1; min-width: 0; }
 .annotation-edit-fields label { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: var(--ui-font-xs); color: var(--fg-muted); }
-.annotation-edit-fields :is(input, textarea, select) { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: var(--ui-font-sm); padding: 8px 10px; }
-.annotation-edit-fields :is(input, textarea, select):focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.annotation-edit-fields :is(input, textarea, select) { width: 100%; box-sizing: border-box; font: inherit; font-size: var(--ui-font-sm); padding: 8px 10px; }
 .annotation-line-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 .annotation-editor-content { display: flex; flex-direction: column; flex: 1; min-height: 220px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .annotation-editor-tabs { display: flex; gap: 4px; padding: 5px; border-bottom: 1px solid var(--border); background: var(--bg-soft); }
-.annotation-edit-fields textarea { flex: 1; resize: vertical; border: 0; border-radius: 0; min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.65; }
+.annotation-edit-fields textarea { flex: 1; resize: vertical; border: 0; min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.65; }
 .annotation-editor-preview { flex: 1; padding: 10px; overflow-wrap: anywhere; font-size: var(--ui-font-sm); }
 .annotation-edit-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: flex-end; position: sticky; bottom: -14px; margin: 0 -14px -14px; padding: 10px 14px; background: var(--bg); border-top: 1px solid var(--border); }
 .annotation-edit-buttons small { flex-basis: 100%; font-size: var(--ui-font-xs); color: var(--fg-muted); }
@@ -9483,7 +9151,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 }
 
 body.gdp-database-page {
-  --chrome-h: var(--global-header-h);
+  --chrome-h: var(--toolbarless-chrome-h);
 }
 
 
@@ -9661,25 +9329,10 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 0;
   border-radius: 4px;
-  background: none;
-  color: var(--fg-muted);
   cursor: pointer;
-  /* 行を選んでも消えない。位置が動かないので押し間違えない。 */
-  opacity: 0.55;
-  transition: opacity 0.12s, background 0.12s;
 }
 
-.worktree-row-menu:hover,
-.worktree-row-menu:focus-visible {
-  opacity: 1;
-  background: var(--bg-soft);
-}
-
-.history-item.active .worktree-row-menu {
-  opacity: 1;
-}
 
 /* ヘッダのプロジェクトの切替 (views/projects/project-switcher.ts)。ヘッダの
    上に浮く overlay なので、寸法は画面基準でよい (ui-layout.md の例外)。 */
@@ -9694,7 +9347,7 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
-  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.18);
+  box-shadow: var(--shadow-context-menu);
   font-size: var(--ui-font-base);
 }
 .project-switcher-head {
@@ -9808,26 +9461,13 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 }
 .project-switcher-action {
   padding: 4px 8px;
-  border: 0;
   border-radius: 4px;
-  background: transparent;
-  color: var(--accent);
   font: inherit;
   cursor: pointer;
-}
-.project-switcher-action:hover,
-.project-switcher-action:focus-visible {
-  background: var(--accent-subtle);
 }
 /* メニューの区切り。取り返しのつかない操作を、よく使う操作と続けて置かない。
    線は表の行の区切りと同じ (浮く面にも 1.5:1 以上。--color-line はダークで浮く面と
    ほぼ同じ色で、区切りが見えなかった)。 */
-.gdp-context-menu-sep {
-  margin: calc(var(--space-1) / 2)
-    calc(var(--context-menu-inline-pad) - var(--space-1));
-  border: 0;
-  border-top: 1px solid var(--color-line-row);
-}
 
 /* 変更がまだ無い作業ツリーの案内 (右ペイン)。次にやることをその場に置く。 */
 .worktree-empty-diff .worktree-empty-diff-actions {
@@ -9949,7 +9589,6 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 .worktree-check {
   display: flex;
   align-items: center;
-  gap: 6px;
   font-size: 12px;
 }
 
@@ -9963,7 +9602,7 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 }
 
 body.gdp-journal-page {
-  --chrome-h: var(--global-header-h);
+  --chrome-h: var(--toolbarless-chrome-h);
 }
 
 
@@ -10003,13 +9642,7 @@ body.gdp-journal-page {
   margin-left: 4px;
 }
 
-.journal-icon-action {
-  color: var(--fg-muted);
-}
 
-.journal-icon-action:hover {
-  color: var(--fg);
-}
 
 .journal-status {
   min-width: 0;
@@ -10049,12 +9682,14 @@ body.gdp-journal-page {
   background: var(--bg);
 }
 
-.journal-section-head,
-.journal-task-column-head {
+.journal-section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+.journal-task-column-head {
+  justify-content: space-between;
 }
 
 .journal-section-head button,
@@ -10065,10 +9700,7 @@ body.gdp-journal-page {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
@@ -10086,16 +9718,10 @@ body.gdp-journal-page {
 .journal-markdown-toolbar button svg {
   display: block;
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 
-.journal-section-head button:hover,
-.journal-editor-actions button:hover,
-.journal-markdown-toolbar button:hover {
-  background: var(--bg-mute);
-  border-color: var(--border-strong);
-}
 
 .journal-editor {
   min-width: 0;
@@ -10143,13 +9769,16 @@ body.gdp-journal-page {
 .journal-task-toolbar input {
   width: 100%;
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
   font: inherit;
   font-size: 13px;
   padding: 7px 9px;
+}
+/* 1 行の欄は高さを入力欄の節が決めるので、縦の余白は 0 (複数行の欄だけ縦の余白)。 */
+.journal-title-input,
+.journal-task-fields select,
+.journal-task-fields input,
+.journal-task-toolbar input {
+  padding-block: 0;
 }
 
 .journal-field {
@@ -10331,8 +9960,8 @@ body.gdp-journal-page {
 }
 
 .journal-label-editor-remove svg {
-  width: 12px;
-  height: 12px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   fill: currentColor;
 }
 
@@ -10348,12 +9977,7 @@ body.gdp-journal-page {
   min-height: 260px;
 }
 
-.journal-title-input:focus,
 .journal-label-editor:focus-within,
-.journal-body-input:focus,
-.journal-task-fields select:focus,
-.journal-task-fields input:focus,
-.journal-task-toolbar input:focus,
 .journal-label-filter:focus-visible,
 .journal-task-card:focus-visible,
 .journal-icon-action:focus-visible,
@@ -10373,16 +9997,9 @@ body.gdp-journal-page {
 }
 
 .journal-primary-action {
-  background: var(--accent) !important;
-  color: var(--fg-onemphasis) !important;
-  border-color: var(--accent) !important;
   padding: 0 12px;
-  font-weight: 600;
 }
 
-.journal-danger-action {
-  color: var(--danger) !important;
-}
 
 .journal-related {
   padding: 12px;
@@ -10488,10 +10105,7 @@ body.gdp-journal-page {
   align-items: center;
   gap: 6px;
   justify-self: end;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
@@ -10500,13 +10114,9 @@ body.gdp-journal-page {
   padding: 0 10px;
 }
 
-.journal-github-toggle:hover,
-.journal-github-toggle:focus-visible,
-.journal-github-toggle.active {
-  border-color: var(--accent);
-  background: var(--accent-subtle);
-  color: var(--accent);
+.journal-github-toggle:focus-visible {
   outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .journal-github-toggle-count {
@@ -10539,7 +10149,7 @@ body.gdp-journal-page {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
-  box-shadow: 0 16px 48px rgba(31, 35, 40, 0.22);
+  box-shadow: var(--shadow-pop);
   z-index: 30;
 }
 
@@ -10559,19 +10169,14 @@ body.gdp-journal-page {
   height: 30px;
   display: inline-grid;
   place-items: center;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg-muted);
   cursor: pointer;
   padding: 0;
 }
 
-.journal-github-close:hover,
 .journal-github-close:focus-visible {
-  color: var(--fg);
-  border-color: var(--accent);
   outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .journal-github-controls {
@@ -10595,13 +10200,17 @@ body.gdp-journal-page {
   width: 100%;
 }
 
-.journal-github-controls select,
 .journal-github-controls button {
   min-height: 30px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
   color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+.journal-github-controls select {
+  min-height: 30px;
   font: inherit;
   font-size: 12px;
 }
@@ -10621,26 +10230,20 @@ body.gdp-journal-page {
 .journal-github-load-more {
   flex: 0 0 auto;
   min-height: 30px;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--accent);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
   font-weight: 600;
 }
 
-.journal-github-load-more:hover,
 .journal-github-load-more:focus-visible {
-  border-color: var(--accent);
-  background: var(--accent-subtle);
   outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .journal-github-load-more:disabled {
   cursor: default;
-  opacity: 0.65;
 }
 
 .journal-github-hint {
@@ -10727,10 +10330,7 @@ body.gdp-journal-page {
   justify-self: end;
   align-self: center;
   min-height: 26px;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--accent);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
@@ -10739,16 +10339,13 @@ body.gdp-journal-page {
   padding: 0 8px;
 }
 
-.journal-github-issue-action:hover,
 .journal-github-issue-action:focus-visible {
-  border-color: var(--accent);
-  background: var(--accent-subtle);
   outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .journal-github-issue-action:disabled {
   cursor: default;
-  opacity: 0.65;
 }
 
 .journal-github-issue-head span,
@@ -10850,11 +10447,6 @@ body.gdp-journal-page {
 .journal-task-column {
   min-width: 0;
   min-height: 360px;
-  /* Border stays 1px (transparent) so the drop-target accent border does
-     not shift the column box when it appears. */
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
   overflow: hidden;
 }
 
@@ -10867,8 +10459,6 @@ body.gdp-journal-page {
    no box or divider line. The dot color comes from the column's status
    class, so no JS change is needed. */
 .journal-task-column-head {
-  min-height: 36px;
-  padding: 8px 10px 6px;
   font-size: 12px;
   color: var(--fg-muted);
 }
@@ -10950,7 +10540,7 @@ body.gdp-journal-page {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--bg) 84%, var(--accent-subtle));
   box-shadow:
-    0 16px 34px rgba(15, 23, 42, 0.24),
+    var(--shadow-pop),
     0 0 0 2px var(--accent-subtle);
   cursor: grabbing;
   z-index: 2;
@@ -11001,7 +10591,7 @@ body.gdp-journal-page {
 .journal-task-card.dragging.selected {
   border-color: var(--accent);
   box-shadow:
-    0 16px 34px rgba(15, 23, 42, 0.24),
+    var(--shadow-pop),
     0 0 0 2px var(--accent-subtle);
 }
 
@@ -11067,8 +10657,8 @@ body.gdp-journal-page {
 
 .journal-task-drag-handle svg {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 
 .journal-task-card:hover .journal-task-drag-handle,
@@ -11202,16 +10792,8 @@ body.journal-task-editor-resizing * {
   min-width: 30px;
   padding: 0 8px;
   font-weight: 600;
-  border-color: transparent;
-  background: transparent;
-  color: var(--fg-muted);
 }
 
-.journal-markdown-toolbar > button:hover {
-  border-color: transparent;
-  background: var(--bg-mute);
-  color: var(--fg);
-}
 
 .journal-editor-mode {
   margin-left: auto;
@@ -11451,20 +11033,9 @@ body.journal-task-editor-resizing * {
   align-items: center;
   gap: 6px;
   padding: 3px 8px;
-  border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--bg);
-  color: var(--fg-muted);
   cursor: pointer;
   font-size: var(--db-font-sm);
-}
-.db-pref-toggle:hover {
-  background: var(--bg-hover, var(--bg-soft));
-}
-.db-pref-toggle.active {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
 }
 .db-pref-toggle svg {
   flex: 0 0 auto;
@@ -11480,20 +11051,12 @@ body.journal-task-editor-resizing * {
   width: 30px;
   height: 28px;
   padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--fg-muted);
   border-radius: 4px;
   cursor: pointer;
   font-size: var(--db-font-base);
   transition: background-color 0.12s, color 0.12s;
 }
-.db-icon-btn:hover {
-  background: var(--bg-soft);
-  color: var(--fg);
-}
 .db-icon-btn.active {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
 }
 .db-icon-btn:focus-visible {
@@ -11502,8 +11065,8 @@ body.journal-task-editor-resizing * {
 }
 .db-icon-btn svg {
   pointer-events: none;
-  width: 1.25em;
-  height: 1.25em;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 /* ---------- [hidden] 属性を効かせる ---------- */
 /* `.db-*` クラスの多くが `display: flex` を主張しており、ブラウザ標準の
@@ -11586,23 +11149,18 @@ body.journal-task-editor-resizing * {
   width: 30px;
   min-width: 30px;
   padding: 0;
-  border: 1px solid var(--border);
-  background: var(--bg);
   font-weight: 500;
 }
 .db-connection-action {
   flex: 0 0 30px;
   width: 30px;
   min-width: 30px;
-  border: 1px solid var(--border);
-  background: var(--bg);
 }
 .db-connection-action[hidden] {
   display: none !important;
 }
 .db-refresh-btn[disabled] {
   cursor: default;
-  opacity: 0.7;
 }
 .db-refresh-btn.spinning svg {
   animation: gdp-spin 0.7s linear infinite;
@@ -11664,24 +11222,13 @@ body.journal-task-editor-resizing * {
 
 .db-file-select {
   width: 100%;
-  padding: 5px 24px 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
+  padding: 0 24px 0 8px;
   font-size: var(--db-font-base);
   font-family: inherit;
   cursor: pointer;
   text-overflow: ellipsis;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M3 4.5L6 8l3-3.5H3z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 6px center;
-}
-.db-file-select:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
 }
 
 .db-table-filter-wrap {
@@ -11690,21 +11237,12 @@ body.journal-task-editor-resizing * {
 }
 .db-table-filter {
   width: 100%;
-  padding: 4px 34px 4px 24px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
+  padding: 0 34px 0 24px;
   font-size: var(--db-font-base);
   font-family: inherit;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: 6px center;
-}
-.db-table-filter:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-  border-color: var(--accent);
 }
 .db-table-filter-clear {
   right: 12px;
@@ -11718,8 +11256,8 @@ body.journal-task-editor-resizing * {
   justify-content: center;
 }
 .db-table-filter-clear svg {
-  width: 12px;
-  height: 12px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   display: block;
 }
 .db-table-list {
@@ -11743,8 +11281,6 @@ body.journal-task-editor-resizing * {
   font-size: var(--db-font-sm);
   font-weight: 600;
   color: var(--fg-subtle);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 
 .db-table-node {
@@ -11846,20 +11382,15 @@ body.journal-task-editor-resizing * {
   width: 18px;
   height: 18px;
   border-radius: 4px;
-  opacity: 0.48;
-  color: var(--fg-subtle);
   transition: background-color 0.12s, color 0.12s, opacity 0.12s;
 }
 .db-table-col-copy svg {
-  width: 12px;
-  height: 12px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 .db-table-col-item:hover .db-table-col-copy,
 .db-table-col-copy:focus-visible {
   opacity: 1;
-}
-.db-table-col-copy:hover {
-  color: var(--accent);
 }
 .db-table-col-copy.copied {
   opacity: 1;
@@ -11898,8 +11429,8 @@ body.journal-task-editor-resizing * {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: var(--icon-xl);
+  height: var(--icon-xl);
   border-radius: 3px;
   font-size: var(--db-font-sm);
   font-weight: 700;
@@ -11985,45 +11516,26 @@ body.journal-task-editor-resizing * {
 /* ---------- Shared Button Base ---------- */
 .db-btn {
   padding: 3px 10px;
-  border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
   font-size: var(--db-font-base);
   font-family: inherit;
   cursor: pointer;
   transition: background 0.15s;
   white-space: nowrap;
 }
-.db-btn:hover {
-  background: var(--bg-mute);
-}
 .db-btn:disabled {
-  opacity: 0.6;
   cursor: default;
 }
 .db-btn-primary {
-  border: none;
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
 }
-.db-btn-primary:hover {
-  background: var(--accent-emph);
-}
+/* 小 (ボタンの種類の節)。文字は --db-font-sm (= --ui-font-sm)。 */
 .db-btn-sm {
-  padding: 2px 8px;
+  padding: calc(var(--space-1) / 2) var(--space-2);
   font-size: var(--db-font-sm);
 }
 .db-btn-icon {
   padding: 0 4px;
-  border: none;
-  background: none;
   line-height: 1;
-}
-.db-btn-icon:hover {
-  color: var(--accent);
-  background: none;
 }
 
 /* ---------- Data Grid ---------- */
@@ -12168,11 +11680,11 @@ body.journal-task-editor-resizing * {
   color: var(--fg-subtle);
 }
 .db-grid-cell.copied {
-  background: rgba(46, 160, 67, 0.15);
+  background: var(--color-success-surface);
   transition: background 0.1s;
 }
 .db-grid-cell:not(.db-grid-rownum):hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--color-row-alt);
 }
 
 .db-grid-rownum-header,
@@ -12228,7 +11740,7 @@ body.journal-task-editor-resizing * {
 }
 .db-grid-cell-edit.db-grid-cell-display.readonly {
   color: var(--fg-subtle);
-  background: rgba(128, 128, 128, 0.06);
+  background: var(--color-disabled-surface);
 }
 /* NULL 状態の入力欄は placeholder "NULL" を斜体・淡色で示す。 */
 .db-grid-cell-input.is-null::placeholder {
@@ -12242,18 +11754,11 @@ body.journal-task-editor-resizing * {
   top: 50%;
   right: 2px;
   transform: translateY(-50%);
-  border: none;
-  background: transparent;
-  color: var(--fg-subtle);
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
   padding: 2px 4px;
   border-radius: 3px;
-}
-.db-grid-cell-null-btn:hover {
-  color: var(--fg);
-  background: var(--bg-soft);
 }
 .db-grid-cell-input {
   width: 100%;
@@ -12265,6 +11770,11 @@ body.journal-task-editor-resizing * {
   font: inherit;
   padding: 4px 8px;
 }
+/* 入力欄の節から外した Data の欄 (表の見出しの絞り込み・全面の編集の欄) のフォーカス。 */
+.db-root :is(.db-grid-col-filter, .s3-edit-textarea, .es-doc-edit-textarea, .redis-value-edit-textarea):focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
 .db-grid-cell-input:focus {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -12272,12 +11782,12 @@ body.journal-task-editor-resizing * {
 }
 .db-grid-cell-input.readonly {
   color: var(--fg-subtle);
-  background: rgba(128, 128, 128, 0.06);
+  background: var(--color-disabled-surface);
 }
 
 /* 削除マーク済みの行は取り消し線+赤系で示す。 */
 .db-grid-row-deleted {
-  background: rgba(207, 34, 46, 0.08);
+  background: var(--color-error-surface);
   text-decoration: line-through;
   opacity: 0.7;
 }
@@ -12288,17 +11798,17 @@ body.journal-task-editor-resizing * {
 /* 値を編集 (未コミット) した行は黄系の薄背景。delete マークが優先するため
    :not で除外。draft 行とも干渉しないよう個別 selector で十分。 */
 .db-grid-row-edited:not(.db-grid-row-deleted) {
-  background: rgba(210, 153, 34, 0.10);
+  background: var(--color-warning-surface);
 }
 /* 編集したセル単体は同系のやや濃い背景 + 左端に縦バーで「ここを変更」と
    示す。display モードと input モードの両方で適用する。 */
 .db-grid-cell-edited {
-  background: rgba(210, 153, 34, 0.22);
+  background: color-mix(in srgb, var(--color-waiting) 26%, transparent);
   box-shadow: inset 2px 0 0 var(--attn);
 }
 .db-grid-rownum-deletable:hover {
-  color: var(--danger);
-  background: rgba(207, 34, 46, 0.12);
+  color: var(--color-on-error-surface);
+  background: var(--color-error-surface);
 }
 .db-grid-rownum-draft {
   color: var(--accent);
@@ -12410,15 +11920,8 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   height: var(--ui-control-sm);
   margin-left: auto;
   padding: 0;
-  border: 0;
   border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--fg-muted);
   cursor: pointer;
-}
-.db-query-collapse:hover {
-  background: var(--bg-mute);
-  color: var(--fg);
 }
 .db-query-collapse:focus-visible {
   outline: 2px solid var(--accent);
@@ -12668,34 +12171,25 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
   color: var(--fg-muted);
 }
 .db-grid-filter-icon svg {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 
 .db-grid-filter-input {
   flex: 1;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
+  padding: 0 8px;
   font-size: var(--db-font-base);
   font-family: inherit;
   /* 横の操作 (新しい行・保存・更新・書き出し) に押されて潰れない (2 面の左の面で
      18px になり、「Search all columns…」が読めなかった)。入らない分は下の
      @container db-pane で操作を次の行へ折る。 */
   min-width: min(100%, 12em);
-}
-.db-grid-filter-input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-  border-color: var(--accent);
 }
 
 .db-grid-filter-actions {
@@ -12709,25 +12203,15 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 .db-grid-filter-clear {
   flex: 0 0 auto;
   height: 24px;
-  border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
-  background: color-mix(in srgb, var(--danger) 8%, var(--bg));
-  color: var(--fg-muted);
   font-size: var(--db-font-sm);
   padding: 0 8px;
-}
-.db-grid-filter-clear:hover {
-  background: color-mix(in srgb, var(--danger) 14%, var(--bg));
-  color: var(--danger);
 }
 .db-grid-refresh {
   width: 30px;
   min-width: 30px;
   height: 24px;
   padding: 0;
-  border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg-muted);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -12735,22 +12219,9 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
   font-size: var(--db-font-base);
   font-weight: 500;
 }
-.db-grid-refresh:hover {
-  color: var(--fg);
-  border-color: var(--accent);
-  background: var(--bg);
-}
-.db-grid-refresh.has-filters {
-  border-color: color-mix(in srgb, var(--accent) 56%, var(--border));
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
-  color: var(--fg);
-}
-.db-grid-refresh.has-filters:hover {
-  background: color-mix(in srgb, var(--accent) 16%, var(--bg));
-}
 .db-grid-refresh svg {
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
   display: block;
   flex: 0 0 auto;
 }
@@ -12761,7 +12232,6 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 }
 .db-grid-refresh[disabled] {
   cursor: default;
-  opacity: 0.7;
 }
 .db-grid-refresh.spinning svg {
   animation: gdp-spin 0.7s linear infinite;
@@ -12863,8 +12333,6 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
   width: calc(var(--space-unit) * 48);
   height: var(--ui-control-sm);
   padding: 0 var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
   font: inherit;
   font-size: var(--db-font-sm);
 }
@@ -13085,21 +12553,12 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 
 .db-grid-detail-close {
   font-size: 14px;
-  color: var(--fg-muted);
-}
-.db-grid-detail-close:hover {
-  color: var(--danger);
-  background: none;
 }
 .db-grid-detail-copy {
   font-size: 11px;
   padding: 2px 8px;
   margin-left: auto;
   margin-right: 8px;
-  color: var(--fg-muted);
-}
-.db-grid-detail-copy:hover {
-  color: var(--fg);
 }
 
 .db-grid-detail-content {
@@ -13149,18 +12608,18 @@ html[data-theme="dark"] .db-grid-detail-json span[style] {
   align-items: center;
   justify-content: center;
   margin-left: 4px;
-  width: 12px;
-  height: 12px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   opacity: 0.7;
 }
 .db-grid-header-fk-icon svg {
   display: block;
-  width: 12px;
-  height: 12px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 
 .db-grid-cell-fk {
-  color: var(--accent, var(--link, #2563eb));
+  color: var(--accent);
 }
 .db-grid-cell-fk:hover {
   text-decoration: underline;
@@ -13219,17 +12678,12 @@ html[data-theme="dark"] .db-grid-detail-json span[style] {
 }
 .db-related-title svg {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 
 .db-related-close {
   font-size: 14px;
-  color: var(--fg-muted);
-}
-.db-related-close:hover {
-  color: var(--danger);
-  background: none;
 }
 
 .db-related-body {
@@ -13290,21 +12744,14 @@ html[data-theme="dark"] .db-grid-detail-json span[style] {
   justify-content: center;
   width: 30px;
   height: 24px;
-  border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg-muted);
   padding: 0;
   cursor: pointer;
 }
 .db-grid-export-toggle svg {
   display: block;
-  width: 16px;
-  height: 16px;
-}
-.db-grid-export-toggle:hover {
-  color: var(--fg);
-  border-color: var(--accent);
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 
 .db-grid-export-menu[hidden] {
@@ -13316,29 +12763,13 @@ html[data-theme="dark"] .db-grid-detail-json span[style] {
   top: calc(100% + 4px);
   right: 0;
   min-width: 92px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
-  padding: 4px;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
 .db-grid-export-item {
-  border: none;
-  background: none;
-  color: var(--fg);
-  text-align: left;
-  font-size: var(--db-font-base);
   font-family: inherit;
-  padding: 5px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.db-grid-export-item:hover {
-  background: var(--bg-mute);
 }
 
 /* Related-panel header: breadcrumb (drill path). */
@@ -13373,7 +12804,7 @@ html[data-theme="dark"] .db-grid-detail-json span[style] {
   font: inherit;
   padding: 1px 4px;
   border-radius: 4px;
-  color: var(--accent, var(--link, #2563eb));
+  color: var(--accent);
   cursor: pointer;
 }
 .db-related-crumb:hover {
@@ -13391,10 +12822,6 @@ html[data-theme="dark"] .db-grid-detail-json span[style] {
   font-size: 11px;
   padding: 2px 8px;
   margin-right: 8px;
-  color: var(--fg-muted);
-}
-.db-related-copy:hover {
-  color: var(--fg);
 }
 
 /* ---------- Query History ---------- */
@@ -13417,7 +12844,7 @@ html[data-theme="dark"] .db-grid-detail-json span[style] {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-context-menu);
   margin-top: 4px;
 }
 
@@ -13446,14 +12873,6 @@ html[data-theme="dark"] .db-grid-detail-json span[style] {
 }
 
 /* ---------- Explain Button ---------- */
-.db-query-explain {
-  background: var(--bg-mute);
-  color: var(--fg);
-  border: 1px solid var(--border);
-}
-.db-query-explain:hover {
-  background: var(--bg-soft);
-}
 
 /* ---------- Query Input (relative positioning for history dropdown) ---------- */
 .db-query-input {
@@ -13493,8 +12912,6 @@ body.db-resizing * {
   font-size: var(--db-font-base);
   font-weight: 700;
   color: var(--fg-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   border-bottom: 1px solid var(--border);
   margin-top: 16px;
 }
@@ -13592,26 +13009,15 @@ body.db-resizing {
 }
 .db-global-search-input {
   flex: 1;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
+  padding: 0 10px;
   font-size: var(--db-font-base);
 }
 .db-global-search-btn,
 .db-global-search-cancel {
   padding: 6px 14px;
-  border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg-soft);
-  color: var(--fg);
   cursor: pointer;
   font-size: var(--db-font-base);
-}
-.db-global-search-btn:hover,
-.db-global-search-cancel:hover {
-  background: var(--bg-mute);
 }
 .db-global-search-options {
   margin-bottom: 8px;
@@ -13619,10 +13025,8 @@ body.db-resizing {
   color: var(--fg-muted);
 }
 .db-global-search-options label {
-  cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 4px;
 }
 .db-global-search-progress {
   padding: 8px;
@@ -13726,24 +13130,16 @@ body.db-resizing {
 }
 /* tableSelector が開いている時、上の Take snapshot ボタンの「もう一回押せそう感」を消す。 */
 .db-snapshot-create-btn.is-active-dialog {
-  opacity: 0.5;
   cursor: not-allowed;
+  color: var(--color-disabled);
 }
 .db-snapshot-create-btn,
 .db-snapshot-refresh-btn,
 .db-snapshot-job-cancel-btn {
   padding: 6px 14px;
-  border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg-soft);
-  color: var(--fg);
   cursor: pointer;
   font-size: var(--db-font-base);
-}
-.db-snapshot-create-btn:hover,
-.db-snapshot-refresh-btn:hover,
-.db-snapshot-job-cancel-btn:hover {
-  background: var(--bg-mute);
 }
 .db-snapshot-progress-area {
   margin-bottom: 12px;
@@ -13762,8 +13158,8 @@ body.db-resizing {
   font-size: var(--db-font-base);
 }
 .db-snapshot-progress-row.running {
-  border-color: color-mix(in srgb, var(--warning, #d29922) 40%, var(--border));
-  background: color-mix(in srgb, var(--warning, #d29922) 8%, var(--bg-soft));
+  border-color: color-mix(in srgb, var(--attn) 40%, var(--border));
+  background: color-mix(in srgb, var(--attn) 8%, var(--bg-soft));
 }
 .db-snapshot-progress-row.error {
   border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
@@ -13978,7 +13374,7 @@ body.db-resizing {
   color: var(--success);
 }
 .db-snapshot-diff-stat.upd {
-  color: var(--warning, #d29922);
+  color: var(--attn);
 }
 .db-snapshot-diff-stat.del {
   color: var(--danger);
@@ -14103,12 +13499,8 @@ body.db-resizing {
 }
 .db-snapshot-table-filter-input {
   width: 100%;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  padding: 0 10px;
   font-size: var(--db-font-base);
-  background: var(--bg);
-  color: var(--fg);
   box-sizing: border-box;
 }
 .db-snapshot-table-checkboxes {
@@ -14124,10 +13516,8 @@ body.db-resizing {
 .db-snapshot-table-row {
   display: flex;
   align-items: center;
-  gap: 8px;
   padding: 6px 10px;
   font-size: var(--db-font-base);
-  cursor: pointer;
   border-bottom: 1px solid var(--border);
 }
 .db-snapshot-table-row:last-child {
@@ -14176,7 +13566,6 @@ body.db-resizing {
   align-items: center;
 }
 .db-snapshot-confirm-btn:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
 }
 .db-snapshot-select-actions {
@@ -14188,22 +13577,12 @@ body.db-resizing {
 }
 .db-snapshot-select-actions button {
   padding: 4px 10px;
-  border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
   cursor: pointer;
   font-size: var(--db-font-base);
 }
-.db-snapshot-select-actions button:hover {
-  background: var(--bg-mute);
-}
 .db-snapshot-note-input {
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
+  padding: 0 8px;
   font-size: var(--db-font-base);
   flex: 1;
   min-width: 120px;
@@ -14215,23 +13594,13 @@ body.db-resizing {
 .db-snapshot-cancel-btn,
 .db-snapshot-diff-btn {
   padding: 6px 14px;
-  border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg-soft);
-  color: var(--fg);
   cursor: pointer;
   font-size: var(--db-font-base);
 }
 .db-snapshot-confirm-btn:not(:disabled),
 .db-snapshot-diff-btn:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-  color: var(--accent);
   font-weight: 500;
-}
-.db-snapshot-confirm-btn:hover:not(:disabled),
-.db-snapshot-cancel-btn:hover,
-.db-snapshot-diff-btn:hover:not(:disabled) {
-  background: var(--bg-mute);
 }
 .db-snapshot-section-title {
   font-size: calc(var(--db-font-base) + 1px);
@@ -14276,8 +13645,8 @@ body.db-resizing {
   color: var(--success);
 }
 .db-snapshot-status.running {
-  background: color-mix(in srgb, var(--warning, #d29922) 15%, var(--bg));
-  color: var(--warning, #d29922);
+  background: color-mix(in srgb, var(--attn) 15%, var(--bg));
+  color: var(--attn);
 }
 .db-snapshot-status.error {
   background: color-mix(in srgb, var(--danger) 15%, var(--bg));
@@ -14298,15 +13667,9 @@ body.db-resizing {
 }
 .db-snapshot-actions button {
   padding: 3px 8px;
-  border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
   cursor: pointer;
   font-size: calc(var(--db-font-base) - 1px);
-}
-.db-snapshot-actions button:hover {
-  background: var(--bg-mute);
 }
 .db-snapshot-diff-create {
   display: flex;
@@ -14320,11 +13683,7 @@ body.db-resizing {
   font-size: var(--db-font-base);
 }
 .db-snapshot-diff-select {
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
+  padding: 0 8px;
   font-size: var(--db-font-base);
 }
 .db-snapshot-diff-summary {
@@ -14584,24 +13943,14 @@ body.db-resizing {
 .redis-key-filter {
   flex: 1;
   min-width: 0;
-  padding: 5px 7px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
+  padding: 0 7px;
   font: inherit;
 }
 .redis-key-filter-btn {
   padding: 5px 8px;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
   cursor: pointer;
   font: inherit;
-}
-.redis-key-filter-btn:hover {
-  background: var(--bg-hover, var(--bg));
 }
 .redis-key-list {
   flex: 1;
@@ -14649,19 +13998,11 @@ body.db-resizing {
 }
 .redis-key-more-btn {
   padding: 6px;
-  border: none;
-  border-top: 1px solid var(--border);
-  background: var(--bg-soft);
   cursor: pointer;
   font-size: var(--db-font-sm);
-  color: var(--fg);
-}
-.redis-key-more-btn:hover {
-  background: var(--bg-hover, var(--bg));
 }
 .redis-key-more-btn:disabled {
   cursor: default;
-  color: var(--fg-muted);
 }
 .redis-main-pane {
   flex: 1;
@@ -14713,8 +14054,7 @@ body.db-resizing {
   font-size: var(--db-font-sm);
   color: var(--fg-muted);
 }
-.redis-value-edit-textarea,
-.redis-new-key-value {
+.redis-value-edit-textarea {
   width: 100%;
   min-height: 160px;
   box-sizing: border-box;
@@ -14727,17 +14067,22 @@ body.db-resizing {
   color: var(--fg);
   resize: vertical;
 }
+.redis-new-key-value {
+  width: 100%;
+  min-height: 160px;
+  box-sizing: border-box;
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  padding: 8px;
+  resize: vertical;
+}
 .redis-new-key-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 .redis-new-key-name {
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
+  padding: 0 8px;
   font-family: var(--mono, monospace);
 }
 .redis-value-body {
@@ -14763,9 +14108,9 @@ body.db-resizing {
   color: var(--fg-muted);
 }
 .datastore-value-truncation {
-  background: #fff4e0;
-  color: #8a5a22;
-  border: 1px solid #f0d8a0;
+  background: var(--color-warning-surface);
+  color: var(--color-on-warning-surface);
+  border: 1px solid var(--color-warning-line);
 }
 .redis-binary-badge {
   display: inline-block;
@@ -14775,9 +14120,9 @@ body.db-resizing {
   font-size: var(--db-font-sm);
   font-family: var(--mono, monospace);
   text-transform: uppercase;
-  background: #f0e8f8;
-  color: #5a228a;
-  border: 1px solid #d0c0e0;
+  background: var(--color-done-surface);
+  color: var(--color-on-done-surface);
+  border: 1px solid var(--color-done-line);
   vertical-align: middle;
 }
 .redis-value-string,
@@ -14836,7 +14181,7 @@ body.db-resizing {
 }
 .db-pane-error {
   padding: 8px 12px;
-  color: var(--error, #c00);
+  color: var(--danger);
   font-size: var(--db-font-sm);
 }
 /* explorer の詳細/プレビュー pane に出す「未選択」空状態。中央寄せの
@@ -14958,25 +14303,15 @@ body.db-resizing {
 }
 .es-search-input {
   flex: 1;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
+  padding: 0 8px;
   font-family: var(--mono, monospace);
   font-size: var(--db-font-mono);
 }
 .es-search-btn {
   padding: 4px 10px;
-  border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
   cursor: pointer;
   font-size: var(--db-font-base);
-}
-.es-search-btn:hover {
-  background: var(--bg-hover, var(--bg-soft));
 }
 .es-doc-list {
   flex: 1;
@@ -15017,19 +14352,11 @@ body.db-resizing {
 }
 .es-doc-more-btn {
   padding: 6px;
-  border: none;
-  border-top: 1px solid var(--border);
-  background: var(--bg-soft);
   cursor: pointer;
   font-size: var(--db-font-sm);
-  color: var(--fg);
-}
-.es-doc-more-btn:hover {
-  background: var(--bg-hover, var(--bg));
 }
 .es-doc-more-btn:disabled {
   cursor: default;
-  color: var(--fg-muted);
 }
 /* .db-detail-* は es-explorer (mapping/doc) と dynamodb-explorer
    (structure/item) が共有する詳細ペイン/タブ切替/テーブルの共通スタイル。
@@ -15119,11 +14446,7 @@ body.db-resizing {
   gap: 8px;
 }
 .es-new-doc-id {
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
+  padding: 0 8px;
   font-family: var(--mono, monospace);
 }
 .es-doc-detail-meta {
@@ -15237,34 +14560,24 @@ body.db-resizing {
 .s3-sort-select,
 .s3-search-input {
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
   font: inherit;
 }
 .s3-bucket-select {
   flex: 1;
-  padding: 4px 8px;
+  padding: 0 8px;
 }
 .s3-search-input {
   flex: 1;
-  padding: 5px 8px;
+  padding: 0 8px;
   font-family: var(--mono, monospace);
   font-size: var(--db-font-mono);
-}
-.s3-search-input:focus,
-.s3-bucket-select:focus,
-.s3-sort-select:focus {
-  border-color: var(--accent);
-  outline: none;
 }
 .s3-mode-seg {
   flex-shrink: 0;
 }
 .s3-sort-select {
   flex: 1;
-  padding: 4px 8px;
+  padding: 0 8px;
 }
 /* 並び順の名前 (「更新が新しい順」など) を削らない。収まらなければ
    .s3-options-row の折り返しで次の行へ送る。 */
@@ -15279,8 +14592,8 @@ body.db-resizing {
   flex-shrink: 0;
 }
 .s3-object-status.warn {
-  color: #8a5a22;
-  background: #fff4e0;
+  color: var(--color-on-warning-surface);
+  background: var(--color-warning-surface);
 }
 /* sidebarSlot 内で残り高さを取り、スクロール可能にする。横の負 margin で
    sidebarSlot の左右 padding を相殺してフルブリードにする (アイテムの border
@@ -15354,7 +14667,7 @@ body.db-resizing {
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-context-menu);
   pointer-events: none;
   font-size: var(--db-font-sm);
 }
@@ -15395,19 +14708,11 @@ body.db-resizing {
 .s3-object-more-btn {
   padding: 6px;
   margin: 0 -8px -8px;
-  border: none;
-  border-top: 1px solid var(--border);
-  background: var(--bg-soft);
-  color: var(--fg);
   cursor: pointer;
   font-size: var(--db-font-sm);
 }
-.s3-object-more-btn:hover {
-  background: var(--bg-hover, var(--bg));
-}
 .s3-object-more-btn:disabled {
   cursor: default;
-  color: var(--fg-muted);
 }
 
 /* ファイル種別がひと目で分かる色付きバッジ (List / Explorer 共通)。 */
@@ -15519,14 +14824,14 @@ body.db-resizing {
   transform: rotate(-90deg);
 }
 .s3-tree .tree-dir .chev .octicon {
-  width: 12px;
-  height: 12px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   display: block;
 }
 .s3-tree .tree-dir .dir-icon {
-  color: #54aeff;
-  width: 16px;
-  height: 16px;
+  color: var(--accent);
+  width: var(--icon-lg);
+  height: var(--icon-lg);
   display: grid;
   align-items: center;
   justify-content: center;
@@ -15583,20 +14888,13 @@ body.db-resizing {
   width: calc(100% - 12px);
   margin: 2px 6px;
   padding: 4px 6px 4px var(--lvl-pad, 12px);
-  border: none;
   border-radius: 6px;
-  background: var(--bg-soft);
-  color: var(--accent);
   font-size: var(--db-font-sm);
   text-align: left;
   cursor: pointer;
 }
-.s3-tree .s3-tree-more:hover {
-  background: var(--bg-hover, var(--bg));
-}
 .s3-tree .s3-tree-more:disabled {
   cursor: default;
-  color: var(--fg-muted);
 }
 .s3-tree .s3-tree-empty,
 .s3-tree .s3-tree-loading,
@@ -15679,11 +14977,7 @@ body.db-resizing {
   padding: 12px;
 }
 .s3-new-object-key {
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
+  padding: 0 8px;
   font-family: var(--mono, monospace);
 }
 .s3-preview-body {
@@ -15788,20 +15082,12 @@ body.db-resizing {
 }
 .dynamodb-key-condition-input,
 .dynamodb-filter-input {
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
+  padding: 0 8px;
   font-family: var(--mono, monospace);
   font-size: var(--db-font-mono);
 }
 .dynamodb-attribute-values-input {
   padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
   font-family: var(--mono, monospace);
   font-size: var(--db-font-mono);
   resize: vertical;
@@ -15848,19 +15134,11 @@ body.db-resizing {
 }
 .dynamodb-item-more-btn {
   padding: 6px;
-  border: none;
-  border-top: 1px solid var(--border);
-  background: var(--bg-soft);
   cursor: pointer;
   font-size: var(--db-font-sm);
-  color: var(--fg);
-}
-.dynamodb-item-more-btn:hover {
-  background: var(--bg-hover, var(--bg));
 }
 .dynamodb-item-more-btn:disabled {
   cursor: default;
-  color: var(--fg-muted);
 }
 .dynamodb-table-info-header,
 .dynamodb-item-detail-header {
@@ -16049,18 +15327,10 @@ body.db-resizing {
   color: var(--fg);
 }
 .db-tabs-new-btn {
-  border: none;
-  border-left: 1px solid var(--border);
-  background: var(--bg-soft);
   cursor: pointer;
   padding: 0 12px;
   font-size: var(--db-font-md);
-  color: var(--fg-muted);
   min-width: 36px;
-}
-.db-tabs-new-btn:hover {
-  background: var(--bg-hover, var(--bg));
-  color: var(--fg);
 }
 .db-tab-host {
   flex: 1;
@@ -16078,23 +15348,9 @@ body.db-resizing {
 
 /* ---------- Blame view (web-src/views/blame-view.ts) ---------- */
 .gdp-standalone-blame.gdp-file-shell {
-  --blame-bin-0: #ffeedf;
-  --blame-bin-1: #ffd9b8;
-  --blame-bin-2: #ffb47a;
-  --blame-bin-3: #ff8c3b;
-  --blame-bin-4: #d9590a;
-  --blame-uncommitted: #ffa50066;
   content-visibility: visible;
   contain: none;
   contain-intrinsic-size: auto;
-}
-:root.dark .gdp-standalone-blame,
-.gdp-standalone-blame.dark {
-  --blame-bin-0: #4a2f1c;
-  --blame-bin-1: #6b3e1d;
-  --blame-bin-2: #8a4d1f;
-  --blame-bin-3: #b95f1f;
-  --blame-bin-4: #f08a3a;
 }
 .gdp-blame-legend {
   display: inline-flex;
@@ -16257,7 +15513,7 @@ body.db-resizing {
   font-size: 13px;
 }
 .gdp-blame-error {
-  color: var(--danger, #c33);
+  color: var(--danger);
   white-space: pre-wrap;
 }
 
@@ -16269,9 +15525,9 @@ body.db-resizing {
   bottom: 0;
   width: min(560px, 92vw);
   max-width: 100vw;
-  background: var(--bg, #fff);
-  border-left: 1px solid var(--border, #d0d7de);
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-pop);
   z-index: 60;
   overflow-y: auto;
   padding: 16px 20px 32px;
@@ -16289,7 +15545,7 @@ body.db-resizing {
 .doctor-sheet-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.28);
+  background: var(--color-backdrop);
   z-index: 55;
   opacity: 0;
   transition: opacity 200ms ease;
@@ -16309,7 +15565,7 @@ body.db-resizing {
   align-items: center;
   gap: 12px;
   padding: 8px 0 16px;
-  border-bottom: 1px solid var(--border, #d0d7de);
+  border-bottom: 1px solid var(--border);
   margin-bottom: 16px;
 }
 .doctor-close {
@@ -16319,14 +15575,7 @@ body.db-resizing {
   width: 28px;
   height: 28px;
   border-radius: 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--fg-muted, #57606a);
   cursor: pointer;
-}
-.doctor-close:hover {
-  background: var(--bg-mute, #eaeef2);
-  color: var(--fg, #1f2328);
 }
 .doctor-header h1 {
   font-size: 18px;
@@ -16338,17 +15587,10 @@ body.db-resizing {
   font-size: 12px;
   padding: 4px 12px;
   border-radius: 6px;
-  border: 1px solid var(--border, #d0d7de);
-  background: var(--bg-soft, #f6f8fa);
-  color: var(--fg);
   cursor: pointer;
-}
-.doctor-refresh:hover {
-  background: var(--bg-mute, #eaeef2);
 }
 .doctor-refresh[disabled] {
   cursor: progress;
-  opacity: 0.6;
 }
 .doctor-summary {
   font-size: 12px;
@@ -16356,19 +15598,17 @@ body.db-resizing {
   margin-bottom: 16px;
 }
 .doctor-group {
-  border: 1px solid var(--border, #d0d7de);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px 16px;
   margin-bottom: 12px;
-  background: var(--bg, #fff);
+  background: var(--bg);
 }
 .doctor-group-title {
   font-size: 13px;
   font-weight: 600;
   margin: 0 0 8px 0;
   color: var(--fg-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 .doctor-row {
   display: grid;
@@ -16390,19 +15630,19 @@ body.db-resizing {
   min-width: 56px;
 }
 .doctor-row-pill-ok {
-  background: rgba(46, 160, 67, 0.15);
-  border-color: rgba(46, 160, 67, 0.4);
-  color: var(--success, #2da44e);
+  background: var(--color-success-surface);
+  border-color: var(--color-success-line);
+  color: var(--color-on-success-surface);
 }
 .doctor-row-pill-warn {
-  background: rgba(212, 167, 44, 0.18);
-  border-color: rgba(212, 167, 44, 0.45);
-  color: var(--attn, #9a6700);
+  background: var(--color-warning-surface);
+  border-color: var(--color-warning-line);
+  color: var(--color-on-warning-surface);
 }
 .doctor-row-pill-error {
-  background: rgba(207, 34, 46, 0.15);
-  border-color: rgba(207, 34, 46, 0.4);
-  color: var(--danger, #cf222e);
+  background: var(--color-error-surface);
+  border-color: var(--color-error-line);
+  color: var(--color-on-error-surface);
 }
 .doctor-row-body {
   display: flex;
@@ -16424,8 +15664,8 @@ body.db-resizing {
 .doctor-row-hint {
   font-size: 12px;
   color: var(--fg);
-  background: rgba(151, 119, 0, 0.08);
-  border-left: 3px solid var(--attn, #9a6700);
+  background: var(--color-warning-surface);
+  border-left: 3px solid var(--attn);
   padding: 8px 10px;
   border-radius: 4px;
   margin-top: 4px;
@@ -16433,8 +15673,8 @@ body.db-resizing {
   word-break: break-word;
 }
 .doctor-row-pill-error ~ .doctor-row-body .doctor-row-hint {
-  background: rgba(207, 34, 46, 0.08);
-  border-left-color: var(--danger, #cf222e);
+  background: var(--color-error-surface);
+  border-left-color: var(--color-on-error-surface);
 }
 .doctor-empty {
   padding: 32px;
@@ -16457,13 +15697,13 @@ body.db-resizing {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--danger, #cf222e);
+  background: var(--danger);
 }
 .doctor-badge[hidden] {
   display: none;
 }
 .doctor-badge[data-level="warn"] {
-  background: var(--attn, #9a6700);
+  background: var(--attn);
 }
 
 /* Tools と Search のタブの中身 (/tools・/search)。本文 (#content) の中に置き、
@@ -16474,7 +15714,7 @@ body.db-resizing {
   height: var(--content-h);
   min-width: 0;
   min-height: 0;
-  background: var(--bg, #fff);
+  background: var(--bg);
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -16497,18 +15737,9 @@ body.db-resizing {
   flex: 1 1 auto;
   min-width: 0;
   height: var(--ui-control-md);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--fg);
   font: inherit;
   font-size: var(--ui-font-md);
   padding: 0 10px;
-  outline: none;
-}
-.search-results-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-muted);
 }
 /* 一覧が長くても、切替と件数の行は潰れない (潰れて切替が件数に重なった)。 */
 .search-results-controls { flex: none; padding: 6px 10px 0; }
@@ -16528,7 +15759,7 @@ body.db-resizing {
   gap: 8px;
   flex: 0 0 auto;
   padding: 4px 10px;
-  border-bottom: 1px solid var(--border, #d0d7de);
+  border-bottom: 1px solid var(--border);
 }
 .tools-header h1 {
   font-size: 16px;
@@ -16559,7 +15790,7 @@ body.db-resizing {
   min-height: 0;
 }
 .tools-pane-output {
-  border-left: 1px solid var(--border, #d0d7de);
+  border-left: 1px solid var(--border);
 }
 .tools-pane-head {
   display: flex;
@@ -16567,8 +15798,8 @@ body.db-resizing {
   gap: 8px;
   flex: 0 0 auto;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--border, #d0d7de);
-  background: var(--bg-soft, #f6f8fa);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
 }
 .tools-pane-title {
   /* 見出しは折り返さない (狭い面で「プレビュー」が 3 行に折れた)。 */
@@ -16576,9 +15807,7 @@ body.db-resizing {
   white-space: nowrap;
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--fg-muted, #57606a);
+  color: var(--fg-muted);
 }
 .tools-pane-actions {
   display: flex;
@@ -16594,25 +15823,14 @@ body.db-resizing {
   min-width: 32px;
   padding: 0 8px;
   border-radius: 6px;
-  border: 1px solid var(--border, #d0d7de);
-  background: var(--bg, #fff);
-  color: var(--fg);
   cursor: pointer;
 }
 /* 入力側ヘッダは clear ボタンが直下に 1 つだけなので、それを右端に寄せる。
    出力側はボタン群を .tools-pane-actions がまとめて右に送る。 */
-.tools-pane-head > .tools-pane-action {
+.tools-pane-head > cv-button > .tools-pane-action {
   margin-left: auto;
 }
-.tools-pane-action:hover:not([disabled]) {
-  background: var(--bg-mute, #eaeef2);
-}
-.tools-pane-action.active {
-  background: var(--bg-mute, #eaeef2);
-  border-color: var(--accent, #0969da);
-}
 .tools-pane-action[disabled] {
-  opacity: 0.5;
   cursor: default;
 }
 /* 幅を固定しておかないと、文言が出た瞬間に隣のボタンがずれる。 */
@@ -16621,13 +15839,13 @@ body.db-resizing {
   width: 168px;
   text-align: right;
   font-size: 11px;
-  color: var(--fg-muted, #57606a);
+  color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .tools-pane-status-error {
-  color: var(--danger, #cf222e);
+  color: var(--danger);
 }
 .tools-textarea {
   flex: 1 1 auto;
@@ -16638,7 +15856,7 @@ body.db-resizing {
   border: 0;
   outline: none;
   padding: 12px;
-  background: var(--bg, #fff);
+  background: var(--bg);
   color: var(--fg);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     monospace;
@@ -16656,10 +15874,10 @@ body.db-resizing {
   margin: 0;
   padding: 24px 8px;
   font-size: 13px;
-  color: var(--fg-muted, #57606a);
+  color: var(--fg-muted);
 }
 .tools-pane-error {
-  color: var(--danger, #cf222e);
+  color: var(--danger);
   white-space: pre-wrap;
 }
 /* 解釈はできたが注意点がある場合 (YAML の警告)。出力の上に添える。 */
@@ -16667,23 +15885,23 @@ body.db-resizing {
   margin: 0 0 12px 0;
   padding: 8px 10px;
   border-radius: 6px;
-  background: var(--bg-mute, #eaeef2);
-  color: var(--attn, #9a6700);
+  background: var(--bg-mute);
+  color: var(--attn);
   font-size: 12px;
   white-space: pre-wrap;
 }
 .tools-pane-resizer {
   cursor: col-resize;
-  background: var(--border, #d0d7de);
+  background: var(--border);
   opacity: 0.35;
 }
 .tools-pane-resizer:hover,
 .tools-pane-resizing .tools-pane-resizer {
   opacity: 1;
-  background: var(--accent, #0969da);
+  background: var(--accent);
 }
 .tools-pane-resizer:focus-visible {
-  outline: 2px solid var(--accent, #0969da);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 /* 面が狭いとき (2 面の左の面など): 入力と結果を縦に積む。横に並べたままだと
@@ -16699,7 +15917,7 @@ body.db-resizing {
   }
   .tools-pane-output {
     border-left: 0;
-    border-top: 1px solid var(--border, #d0d7de);
+    border-top: 1px solid var(--border);
   }
   .tools-pane-status {
     flex: 1 1 auto;
@@ -16766,21 +15984,13 @@ html[data-theme="dark"] .tools-code span[style] {
   appearance: none;
   width: 22px;
   height: 22px;
-  border: 1px solid var(--border, #d0d7de);
   border-radius: 6px;
-  background: transparent;
-  color: var(--fg-muted, #57606a);
   font: inherit;
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
 }
-.terminal-font-btn:hover:not(:disabled) {
-  background: var(--bg-mute, #eaeef2);
-  color: var(--fg, #1f2328);
-}
 .terminal-font-btn:disabled {
-  opacity: 0.4;
   cursor: default;
 }
 /* ドロワーの中のスクロールは、端まで来ても後ろのページへ渡さない。パネルは
@@ -16829,15 +16039,15 @@ html[data-theme="dark"] .tools-code span[style] {
   transform: rotate(45deg);
 }
 .terminal-mark-done {
-  background: var(--done, #8250df);
+  background: var(--done);
   border-radius: 2px;
 }
 .terminal-mark-working {
-  background: var(--success, #1a7f37);
+  background: var(--success);
   border-radius: 50%;
 }
 .terminal-mark-idle {
-  border: 1.5px solid var(--fg-muted, #57606a);
+  border: 1.5px solid var(--fg-muted);
   border-radius: 50%;
 }
 .terminal-tree-twisty {
@@ -16846,7 +16056,7 @@ html[data-theme="dark"] .tools-code span[style] {
   display: inline-grid;
   place-items: center;
   border-radius: 4px;
-  color: var(--fg-muted, #57606a);
+  color: var(--fg-muted);
   transition:
     transform 120ms ease,
     background-color 120ms ease,
@@ -16877,7 +16087,7 @@ html[data-theme="dark"] .tools-code span[style] {
   z-index: 9999;
   display: flex;
   flex-direction: column;
-  background: rgba(15, 20, 30, 0.86);
+  background: var(--app-scrim);
 }
 .terminal-lightbox-bar {
   flex: 0 0 auto;
@@ -16885,7 +16095,7 @@ html[data-theme="dark"] .tools-code span[style] {
   align-items: center;
   gap: 12px;
   padding: 10px 16px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--app-on-scrim-2);
 }
 .terminal-lightbox-path {
   flex: 1 1 auto;
@@ -16906,14 +16116,14 @@ html[data-theme="dark"] .tools-code span[style] {
 .terminal-lightbox .terminal-font-btn {
   min-width: 36px;
   height: 36px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid var(--app-on-scrim-line);
   border-radius: 6px;
-  background: rgba(20, 25, 35, 0.85);
-  color: #fff;
+  background: var(--app-scrim-control);
+  color: var(--color-on-accent);
   font-weight: 600;
 }
 .terminal-lightbox .terminal-font-btn:hover {
-  background: rgba(40, 50, 70, 0.95);
+  background: var(--app-scrim-control-hover);
 }
 /* 閉じる: 拡大縮小の塊から離し、明るい枠と「閉じる」「Esc」で押せば閉じると分かる形。 */
 .terminal-lightbox .terminal-lightbox-close {
@@ -16922,18 +16132,18 @@ html[data-theme="dark"] .tools-code span[style] {
   gap: 6px;
   margin-left: 12px;
   padding: 0 12px;
-  border-color: rgba(255, 255, 255, 0.55);
-  background: rgba(255, 255, 255, 0.14);
+  border-color: var(--app-on-scrim-2);
+  background: color-mix(in srgb, var(--app-on-scrim) 14%, transparent);
 }
 .terminal-lightbox .terminal-lightbox-close:hover {
-  background: rgba(255, 255, 255, 0.24);
+  background: color-mix(in srgb, var(--app-on-scrim) 24%, transparent);
 }
 .terminal-lightbox-close kbd {
   padding: 1px 5px;
-  border: 1px solid rgba(255, 255, 255, 0.45);
+  border: 1px solid var(--app-on-scrim-line);
   border-radius: 4px;
   font: 500 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--app-on-scrim-2);
 }
 .terminal-lightbox-view {
   flex: 1 1 auto;
@@ -16948,7 +16158,7 @@ html[data-theme="dark"] .tools-code span[style] {
 .terminal-lightbox-stage img {
   display: block;
   max-width: none;
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-pop);
   user-select: none;
 }
 .terminal-lightbox-hint {
@@ -16956,7 +16166,7 @@ html[data-theme="dark"] .tools-code span[style] {
   margin: 0;
   padding: 8px 16px 14px;
   text-align: center;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--app-on-scrim-2);
   font-size: 12px;
   letter-spacing: 0.04em;
   pointer-events: none;
@@ -16975,15 +16185,15 @@ html[data-theme="dark"] .tools-code span[style] {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #000;
+  background: var(--color-term);
 }
 .terminal-status {
   flex: 0 0 auto;
   margin: 0;
   padding: 6px 12px;
   font-size: 12px;
-  color: var(--fg-muted, #57606a);
-  border-top: 1px solid var(--border, #d0d7de);
+  color: var(--fg-muted);
+  border-top: 1px solid var(--border);
 }
 
 .terminal-observation-errors {
@@ -17065,13 +16275,10 @@ html[data-theme="dark"] .tools-code span[style] {
 }
 .db-root .db-tabs-chip-close { border-radius: 4px; }
 .db-root .db-tabs-new-btn {
-  border: 1px solid var(--db-glass-border);
   border-radius: 6px;
   margin: 4px 8px 4px 4px;
   align-self: center;
   min-height: var(--ui-control-sm);
-  background: var(--bg);
-  color: var(--fg-muted);
 }
 .db-root .db-sidebar { background: var(--bg-soft); }
 .db-root .db-toolbar,
@@ -17081,47 +16288,19 @@ html[data-theme="dark"] .tools-code span[style] {
   border-bottom-color: var(--db-glass-border);
   background: transparent;
 }
-.db-root .db-file-select,
-.db-root .db-table-filter,
-.db-root .s3-bucket-select,
-.db-root .s3-sort-select,
-.db-root .s3-search-input,
-.db-root .s3-edit-textarea,
-.db-root .s3-new-object-key,
-.db-root .db-grid-filter-input {
+.db-root .s3-edit-textarea {
   border: 1px solid var(--db-glass-border);
   border-radius: 6px;
   background: var(--bg);
 }
-.db-root :is(input, select, textarea):focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-}
-.db-root .db-btn,
-.db-root .db-icon-btn,
 .db-root .db-refresh-btn,
 .db-root .db-connection-action {
-  border: 1px solid var(--db-glass-border);
   border-radius: 6px;
-  background: var(--bg);
-  box-shadow: var(--shadow-sm);
-}
-.db-root :is(.db-btn, .db-icon-btn, .db-refresh-btn, .db-connection-action, .db-tabs-new-btn):hover {
-  background: var(--accent-subtle);
-  color: var(--accent);
 }
 .db-root button:focus-visible,
 .app-menu-item:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-}
-.db-root .db-btn.db-btn-primary {
-  background: var(--accent-emph);
-  color: var(--fg-onemphasis);
-  border-color: var(--accent-emph);
-}
-.db-root .db-btn.db-btn-primary:hover {
-  background: color-mix(in srgb, var(--accent-emph) 88%, var(--fg));
 }
 .db-root .seg {
   border: 1px solid var(--db-glass-border);
@@ -17492,7 +16671,7 @@ html[data-theme="dark"] .tools-code span[style] {
 body.gdp-agents-page,
 body.gdp-tools-page,
 body.gdp-search-page {
-  --chrome-h: var(--global-header-h);
+  --chrome-h: var(--toolbarless-chrome-h);
 }
 
 .gdp-agents-page #content,
@@ -17878,22 +17057,16 @@ body.gdp-search-page {
   /* 長い名前は省略し、全体 (リンク元のパス) はツールチップ。 */
   grid-template-columns: auto minmax(0, 1fr);
   align-items: baseline;
-  column-gap: 8px;
   padding: 2px 0;
   color: var(--fg);
   font-size: 12px;
   line-height: 18px;
-  cursor: pointer;
 }
 .agent-accounts-share-item .terminal-mono {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.agent-accounts-share-item input {
-  margin: 0;
-  accent-color: var(--accent);
 }
 /* まとまりの見出しの下の理由と、一覧の前の説明。本文と同じ濃さで読める字にする。 */
 .agent-accounts-share-why,
@@ -18121,17 +17294,12 @@ html[data-workspace="pane"] :is(#app-nav, #statusbar) {
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
   padding: 0;
-  border: 0;
   border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-3);
   cursor: pointer;
   text-decoration: none;
   transition: background var(--motion-fast), color var(--motion-fast);
 }
 .nav-icon-action:hover {
-  background: var(--color-raised);
-  color: var(--color-text);
   text-decoration: none;
 }
 .nav-icon-action.active {
@@ -18149,8 +17317,6 @@ html[data-workspace="pane"] :is(#app-nav, #statusbar) {
   color: var(--color-text-3);
   font-size: var(--ui-font-sm);
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 .nav-projects {
   flex: 1 1 auto;
@@ -18321,6 +17487,18 @@ html[data-workspace="pane"] :is(#app-nav, #statusbar) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 名前の後ろの主でないブランチと上流との差。名前より先に縮み、狭ければ消える
+   (場所を取らない補足。core/agent-overview.ts の projectBranchTail)。 */
+.nav-project-branch {
+  flex: 0 10000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  font-weight: normal;
+}
 /* プロジェクトの色と頭文字 (views/projects/project-looks.ts)。色を付けた要素の
    子孫は var(--project-color) で読む (タブのグループ・ファイル一覧の頭も)。
    四角は色だけに頼らないよう頭文字をいつも載せる。 */
@@ -18426,8 +17604,8 @@ html[data-workspace="pane"] :is(#app-nav, #statusbar) {
   opacity: 1;
 }
 .account-tag-remove-icon {
-  width: calc(var(--space-unit) * 3);
-  height: calc(var(--space-unit) * 3);
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 .account-tag-pick:focus-visible,
 .account-tag-remove:focus-visible {
@@ -18630,22 +17808,14 @@ html[data-workspace="pane"] :is(#app-nav, #statusbar) {
   width: calc(var(--ui-row-h) - var(--space-2));
   height: calc(var(--ui-row-h) - var(--space-2));
   padding: 0;
-  border: 0;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-2);
   cursor: pointer;
 }
 .nav-project-actions .nav-row-action {
   width: var(--space-5);
 }
-.nav-row-action:hover {
-  background: var(--color-select);
-  color: var(--color-text);
-}
 .nav-row-action:disabled {
   cursor: progress;
-  opacity: 0.5;
 }
 .nav-project-activity {
   margin: calc(var(--space-1) / 2) 0 var(--space-1)
@@ -19078,21 +18248,12 @@ body.main-split .main-tabs-pane[data-side="left"] {
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
   padding: 0;
-  border: 0;
   border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-2);
   cursor: pointer;
-}
-.main-tabs-action:hover:not([aria-disabled="true"]) {
-  background: var(--color-raised);
-  color: var(--color-text);
 }
 /* 押せない分割のボタンは disabled にせず aria-disabled (Tab で届き、押せない
    理由の title を読める)。 */
 .main-tabs-action[aria-disabled="true"] {
-  color: var(--color-text-3);
-  opacity: 0.5;
   cursor: default;
 }
 /* 窓が狭くて右の面を隠している間の印 (分割のボタン。説明は title)。押せないが
@@ -19435,12 +18596,6 @@ body.main-split-resizing {
 }
 /* 見出しの Viewed はチェックの箱に輪を描くと箱だけが囲まれるので、文字ごと
    (label) を囲む。 */
-.d2h-file-collapse-input:focus-visible {
-  outline: none;
-}
-.d2h-file-collapse:has(> .d2h-file-collapse-input:focus-visible) {
-  box-shadow: var(--focus-ring);
-}
 /* 隠れた行を出すボタンは行番号の列の幅いっぱいに縦に積まれ、外の輪は隣の
    ボタンと列の端で切れるので、内側に描く。 */
 .gdp-expand-btn:focus-visible {
@@ -19522,6 +18677,26 @@ body.main-split-resizing {
    --nav-expand-w = ボタンと間)。 */
 #project-head > #nav-expand {
   flex: none;
+}
+/* 畳んだサイドバーの「サイドバーを表示」に、手が要るエージェントの印 (入力待ちか
+   完了。app.ts の syncNavExpandMark が data-attention を付ける)。畳んでも気付ける
+   ように、ボタンの右上に未読の点と同じ大きさで重ねる (箱の寸法は変えない)。 */
+#nav-expand[data-attention] {
+  position: relative;
+}
+#nav-expand[data-attention]::after {
+  content: "";
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  width: var(--dot-size);
+  height: var(--dot-size);
+  border-radius: 50%;
+  background: var(--attn);
+  pointer-events: none;
+}
+#nav-expand[data-attention="done"]::after {
+  background: var(--done);
 }
 /* 名前と ▾ (プロジェクトの切替)。四角・名前・▾ を 1 つのボタンにし、押せることは
    hover の面で示す。箱の寸法は状態で変えない。 */
@@ -19721,17 +18896,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 .global-icon-link {
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
-  border: 0;
   border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-3);
-}
-.global-actions #theme:hover,
-.global-icon-action:hover,
-.global-icon-link:hover {
-  border-color: transparent;
-  background: var(--color-raised);
-  color: var(--color-text);
 }
 .global-actions #theme svg,
 .global-icon-action svg,
@@ -19893,15 +19058,8 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   height: calc(var(--statusbar-h) - var(--space-1));
   min-width: calc(var(--statusbar-h) - var(--space-1));
   padding: 0 var(--space-1);
-  border: 0;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-3);
   cursor: pointer;
-}
-.statusbar-icon-action:hover {
-  background: var(--color-raised);
-  color: var(--color-text);
 }
 .statusbar-icon-action svg {
   width: var(--icon-sm);
@@ -20229,7 +19387,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   border-radius: var(--radius-md);
   background: var(--color-inset);
 }
-.gdp-file-detail-sticky .gdp-source-tabs button {
+.gdp-file-detail-sticky .gdp-source-tabs button:where([data-source-tab]) {
   height: var(--ui-control-sm);
   padding: 0 var(--space-3);
   border-bottom: 0;
@@ -20238,10 +19396,10 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   font-size: var(--ui-font-base);
   font-weight: 500;
 }
-.gdp-file-detail-sticky .gdp-source-tabs button:hover {
+.gdp-file-detail-sticky .gdp-source-tabs button:where([data-source-tab]):hover {
   color: var(--color-text);
 }
-.gdp-file-detail-sticky .gdp-source-tabs button.active {
+.gdp-file-detail-sticky .gdp-source-tabs button:where([data-source-tab]).active {
   border-bottom: 0;
   background: var(--color-select);
   color: var(--color-text);
@@ -20517,9 +19675,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   color: var(--color-text-3);
   font-size: var(--ui-font-sm);
   font-weight: 600;
-  letter-spacing: 0.06em;
   text-overflow: ellipsis;
-  text-transform: uppercase;
   white-space: nowrap;
 }
 /* 見出しの行が狭いとき (日本語・大きい密度) に詰めるのは件数だけ (… で省く)。
@@ -20592,12 +19748,8 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 .view-head-row > #sidebar-toggle {
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
-  border: 0;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-3);
 }
-:is(#sidebar, #file-list) .sb-head .sb-icon-action:hover,
 .view-head-row > #sidebar-toggle:hover {
   background: var(--color-raised);
   color: var(--color-text);
@@ -20859,15 +20011,9 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   gap: var(--space-1);
   height: var(--ui-control-md);
   padding: 0 var(--space-2);
-  border: 0;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text);
   font: inherit;
   cursor: pointer;
-}
-.terminal-link-action:hover {
-  background: var(--color-raised);
 }
 .terminal-link-action:focus-visible {
   outline: none;
@@ -21021,10 +20167,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   place-items: center;
   height: var(--ui-control-sm);
   padding: 0;
-  border: 0;
   border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-2);
   font: inherit;
   cursor: pointer;
 }
@@ -21047,11 +20190,6 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   .terminal-image-shelf-expand {
   width: auto;
   padding: 0 var(--space-2);
-}
-.terminal-image-shelf-toggle:hover,
-.terminal-image-shelf-expand:hover {
-  background: var(--color-raised);
-  color: var(--color-text);
 }
 .terminal-image-shelf-toggle:focus-visible,
 .terminal-image-shelf-expand:focus-visible,
@@ -21417,10 +20555,7 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 .image-tab-scale {
   flex: none;
   height: var(--ui-control-sm);
-  border: 1px solid var(--color-line-soft);
   border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-2);
   font: inherit;
   font-size: var(--ui-font-sm);
   line-height: 1;
@@ -21444,16 +20579,11 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
   min-width: var(--space-7);
   font-variant-numeric: tabular-nums;
 }
-.image-tab-button:hover:not(:disabled) {
-  background: var(--color-raised);
-  color: var(--color-text);
-}
 .image-tab-button:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
 .image-tab-button:disabled {
-  opacity: 0.4;
   cursor: default;
 }
 .image-tab-button[data-active="true"] {
@@ -21467,8 +20597,6 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 /* 閉じる: パスの操作から離し、強い枠・本来の文字色・「閉じる」「Esc」で閉じると分かる形。 */
 .image-tab-button.image-tab-close {
   margin-left: var(--space-2);
-  border-color: var(--color-line-strong);
-  color: var(--color-text);
 }
 /* hover の面 (--color-raised) はキーの面と同じ色なので、キーを上の段の地の色に替えて形を残す。 */
 .image-tab-close:hover:not(:disabled) kbd {
@@ -21545,7 +20673,6 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 }
 .image-tab[data-narrow="true"] .image-tab-secondary .image-tab-button {
   height: var(--image-tab-aux-h);
-  border-color: transparent;
 }
 :is(#sidebar, #file-list) .sb-head .sb-view-seg {
   align-self: center;
@@ -21637,7 +20764,6 @@ button.agents-section-title:focus-visible {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  border: 0;
   border-radius: var(--radius-md);
   font: inherit;
   font-size: var(--ui-font-md);
@@ -21647,12 +20773,6 @@ button.agents-section-title:focus-visible {
 .agents-primary {
   height: var(--ui-control-md);
   padding: 0 var(--space-4);
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-  font-weight: 600;
-}
-.agents-primary:hover {
-  background: var(--color-accent-strong);
 }
 .agents-primary-icon svg {
   display: block;
@@ -21663,38 +20783,19 @@ button.agents-section-title:focus-visible {
 .agents-secondary {
   height: var(--ui-control-sm);
   padding: 0 var(--space-3);
-  background: var(--color-inset);
-  box-shadow: inset 0 0 0 1px var(--color-line-strong);
-  color: var(--color-text);
-}
-.agents-secondary:hover {
-  background: var(--color-raised);
 }
 .agents-secondary:disabled,
 .agents-primary:disabled {
-  opacity: 0.55;
   cursor: default;
 }
 .agents-text-action {
   height: var(--ui-control-sm);
   padding: 0 var(--space-2);
-  background: none;
-  color: var(--color-text-2);
-}
-.agents-text-action:hover {
-  background: var(--color-raised);
-  color: var(--color-text);
 }
 .agents-icon-action {
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
   padding: 0;
-  background: none;
-  color: var(--color-text-2);
-}
-.agents-icon-action:hover {
-  background: var(--color-raised);
-  color: var(--color-text);
 }
 /* コピーの失敗 (`showCopyFailure`)。押した直後はポインタが乗ったままなので、
    :hover より後ろに置いて失敗の色を勝たせる。 */
@@ -21785,16 +20886,10 @@ button.agents-section-title:focus-visible {
   padding: 0 var(--space-2);
   height: var(--ui-control-sm);
   white-space: nowrap;
-  border: 0;
   border-radius: var(--radius-md);
-  background: none;
-  color: var(--color-accent);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-}
-.agents-hook-hint-open:hover {
-  background: var(--color-raised);
 }
 .agents-problems {
   margin: 0 var(--pad-doc) var(--space-4);
@@ -21868,9 +20963,6 @@ button.agents-section-title:focus-visible {
   gap: var(--space-3);
   min-width: 0;
   min-height: calc(var(--space-unit) * 38);
-  padding: var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--color-doc);
 }
 .agents-account-kind {
   flex: none;
@@ -21888,9 +20980,6 @@ button.agents-section-title:focus-visible {
 }
 /* 1 行目: 種類・利用者が付けた名前・プラン・⋯。 */
 .agents-account-card-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
   min-width: 0;
 }
 .agents-account-name {
@@ -22124,12 +21213,8 @@ button.agents-account-name:hover {
    ように下線を引く (灰色の字では文と見分けられなかった)。 */
 .install-help-link {
   align-self: flex-start;
-  color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 3px;
-}
-.install-help-link:hover {
-  color: var(--accent);
 }
 /* アカウントを作る画面の「選べば共有できる」の行の［場所をコピー］。 */
 .agent-accounts-share-row {
@@ -22180,9 +21265,6 @@ button.agents-account-name:hover {
 /* 検索の「もう一度検索」・コードの見本の「再読み込み」: 文の横の小さな操作。 */
 .gdp-palette-status-action {
   padding: 0;
-  border: 0;
-  background: none;
-  color: var(--color-accent);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -22308,14 +21390,8 @@ button.agents-account-name:hover {
 .agents-all-panes {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
   color: var(--color-text-2);
   white-space: nowrap;
-  cursor: pointer;
-}
-.agents-all-panes input {
-  margin: 0;
-  accent-color: var(--color-accent);
 }
 .agents-hint {
   /* 1280px の窓では絞り込みの行に収まらず、行ごと横に溢れていた。縮むのは
@@ -22421,19 +21497,11 @@ button.agents-account-name:hover {
 .agents-server-link {
   height: calc(var(--ui-row-h) - var(--space-1));
   padding: 0 var(--space-2);
-  border: 0;
   border-radius: var(--radius-md);
-  background: none;
-  color: var(--color-text-2);
   font: inherit;
   cursor: pointer;
 }
-.agents-server-link:hover {
-  background: var(--color-raised);
-  color: var(--color-text);
-}
 .agents-server-link:disabled {
-  opacity: 0.55;
   cursor: progress;
 }
 .agents-server-here {
@@ -22464,6 +21532,17 @@ button.agents-account-name:hover {
 }
 .agents-row:hover {
   background: var(--color-raised);
+}
+/* 子エージェント (tmux の @agent-parent。agent-card.ts が data-agent-depth と
+   --agent-depth を付ける) は親の行の下に 1 段ずつ字下げする。左のサイドバーと
+   全体ボードの行の、左の余白に段の分を足す。 */
+.nav-agent[data-agent-depth] {
+  padding-left: calc(var(--space-2) + var(--agent-depth, 0) * var(--indent-step));
+}
+.agents-row[data-agent-depth] {
+  padding-left: calc(
+    var(--pad-text) + var(--agent-depth, 0) * var(--indent-step)
+  );
 }
 .agents-row.active {
   background: var(--color-select);
@@ -22634,19 +21713,12 @@ button.agents-account-name:hover {
 .usage-popover-link {
   height: var(--ui-control-sm);
   padding: 0 var(--space-2);
-  border: 0;
   border-radius: var(--radius-md);
-  background: none;
-  color: var(--color-accent);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
 }
-.usage-popover-link:hover {
-  background: var(--color-raised);
-}
 .usage-popover-link:disabled {
-  opacity: 0.55;
   cursor: default;
 }
 .usage-popover-error,
@@ -22735,15 +21807,8 @@ button.agents-account-name:hover {
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
   padding: 0;
-  border: 0;
   border-radius: var(--radius-md);
-  background: none;
-  color: var(--color-text-2);
   cursor: pointer;
-}
-.gdp-dialog-close:hover {
-  background: var(--color-raised);
-  color: var(--color-text);
 }
 .gdp-dialog-close svg {
   width: var(--icon-md);
@@ -22771,7 +21836,6 @@ button.agents-account-name:hover {
   min-width: calc(var(--space-unit) * 22);
   height: calc(var(--space-unit) * 9);
   padding: 0 var(--space-5);
-  border: 0;
   border-radius: var(--radius-md);
   font: inherit;
   font-size: var(--ui-font-md);
@@ -22779,29 +21843,14 @@ button.agents-account-name:hover {
   white-space: nowrap;
   cursor: pointer;
 }
-.gdp-dialog-cancel {
-  background: var(--color-raised);
-  color: var(--color-text);
-}
-.gdp-dialog-cancel:hover {
-  background: var(--color-select);
-}
-.gdp-dialog-confirm {
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-}
-.gdp-dialog-confirm:hover {
-  background: var(--color-accent-strong);
-}
 .gdp-dialog-confirm.gdp-dialog-danger {
   background: var(--color-failed);
   color: var(--color-on-accent);
 }
-.gdp-dialog-confirm.gdp-dialog-danger:hover {
+.gdp-dialog-confirm.gdp-dialog-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-failed) 85%, var(--color-text));
 }
 .gdp-dialog-button:disabled {
-  opacity: 0.55;
   cursor: default;
 }
 .gdp-dialog-button:focus-visible,
@@ -22817,15 +21866,7 @@ button.agents-account-name:hover {
   margin-top: var(--space-3);
   padding: 0 var(--space-3);
   border: 0;
-  border-radius: var(--radius-md);
-  background: var(--color-inset);
-  box-shadow: inset 0 0 0 1px var(--color-line-strong);
-  color: var(--color-text);
   font: inherit;
-}
-.gdp-dialog-input:focus {
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--color-accent), var(--focus-ring);
 }
 .gdp-dialog-error {
   margin-top: var(--space-2);
@@ -22921,11 +21962,9 @@ button.agents-account-name:hover {
   display: inline-flex;
   align-self: flex-start;
   align-items: center;
-  gap: var(--space-2);
   margin-top: var(--space-2);
   color: var(--color-text-2);
   font-size: var(--ui-font-sm);
-  cursor: pointer;
 }
 .project-directory-list {
   height: min(calc(var(--space-unit) * 90), 50vh);
@@ -23271,10 +22310,11 @@ button.agents-account-name:hover {
    文書の面 (ファイルの表示) と同じ決まり: 1 枚の面 (--color-doc) の中に、
    パンくずの行・絞り込みの行・一覧・README を縦に並べる。文字の線は --pad-doc、
    行の hover・フォーカスの面はそこから --pad-face だけ外へ描く。一覧は枠線を
-   引かず、行の高さは --ui-row-h。README の目次は本文の右の細い列 (上の節)。 */
+   引かず、行の高さは --ui-row-h。README の目次は本文の右の細い列 (上の節)。
+   面は本文の箱の端まで敷き、箱の高さより短くても下まで同じ面にする。 */
 .gdp-repo-shell {
+  min-height: calc(var(--content-h) - var(--content-top-gap));
   padding: var(--space-4) 0 var(--space-6);
-  border-radius: var(--radius-lg);
   background: var(--color-doc);
 }
 .gdp-repo-shell > .gdp-repo-toolbar {
@@ -23317,15 +22357,7 @@ button.agents-account-name:hover {
   height: var(--ui-control-sm);
   padding: 0 var(--space-3);
   border: 0;
-  border-radius: var(--radius-md);
-  background: var(--color-inset);
-  box-shadow: inset 0 0 0 1px var(--color-line);
-  color: var(--color-text);
   font-size: var(--ui-font-md);
-}
-.gdp-repo-shell .gdp-repo-filter:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--color-accent), var(--focus-ring);
 }
 .gdp-repo-shell .gdp-repo-result-count {
   min-width: 0;
@@ -23488,18 +22520,12 @@ button.agents-account-name:hover {
   margin-top: var(--space-2);
   height: var(--ui-control-sm);
   padding: 0 var(--space-3);
-  border: 0;
   border-radius: var(--radius-md);
-  background: var(--color-accent);
-  color: var(--color-on-accent);
   font: inherit;
   font-size: var(--ui-font-md);
   font-weight: 600;
   text-decoration: none;
   cursor: pointer;
-}
-.nav-empty-action:hover {
-  background: var(--color-accent-strong);
 }
 .nav-empty-action:focus-visible {
   outline: none;
@@ -23507,41 +22533,48 @@ button.agents-account-name:hover {
 }
 
 /* ---- B-1: ソース表示 (Code / Blame / History。views/source-view.ts・blame-view.ts・file-history-shell.ts) ----
-   絵 (round3/code.png): コードの面は本文の箱の端まで敷く (浮いた面にしない)。
-   文書 (Markdown の表示) は浮いた面のまま。パンくずの行は同じ面の上に置き、
-   下に細い線を 1 本。行番号の列は右寄せで補助の色、列の右に細い線。
+   コードの面も文書 (Markdown の表示) の面も、本文の箱の端まで敷く (浮いた面に
+   しない)。フォルダの中のファイル (.gdp-repo-blob-layout) もファイルの表示
+   (body.gdp-file-detail-page の #diff) も同じ。パンくずの行は同じ面の上に置き、
+   下に細い線を 1 本 (文書の面には引かない)。行番号の列は右寄せで補助の色、列の右に細い線。
    今いる行は選択の面を行の端まで薄く敷く。構文の色は名前の層 (--syntax-*)。 */
-.gdp-repo-blob-layout > .gdp-standalone-blame,
-.gdp-repo-blob-layout > .gdp-standalone-file-history,
-.gdp-repo-blob-layout > .gdp-standalone-source:not(:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden]))) {
-  margin: calc(var(--content-top-gap) * -1) calc(var(--content-pad-x) * -1) 0;
-  min-height: var(--content-h);
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-blame,
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-file-history,
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source:not(:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden]))) {
+  min-height: calc(var(--content-h) - var(--content-top-gap));
   background: var(--color-code);
 }
-.gdp-repo-blob-layout > .gdp-standalone-blame .gdp-file-detail-sticky,
-  .gdp-repo-blob-layout > .gdp-standalone-file-history .gdp-file-detail-sticky,
-  .gdp-repo-blob-layout > .gdp-standalone-source .gdp-file-detail-sticky {
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-blame .gdp-file-detail-sticky,
+  :is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-file-history .gdp-file-detail-sticky,
+  :is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source .gdp-file-detail-sticky {
   background: var(--color-code);
 }
-.gdp-repo-blob-layout > .gdp-standalone-blame > .gdp-file-detail-wrapper > .gdp-file-detail-sticky,
-  .gdp-repo-blob-layout > .gdp-standalone-file-history > .gdp-file-detail-wrapper > .gdp-file-detail-sticky,
-  .gdp-repo-blob-layout > .gdp-standalone-source > .gdp-file-detail-wrapper > .gdp-file-detail-sticky {
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-blame > .gdp-file-detail-wrapper > .gdp-file-detail-sticky,
+  :is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-file-history > .gdp-file-detail-wrapper > .gdp-file-detail-sticky,
+  :is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source > .gdp-file-detail-wrapper > .gdp-file-detail-sticky {
   /* 下の線は内側の影で描く (線で箱を 1px 伸ばすと、見出しの高さを引いて
      決めている箱 (--file-detail-head-h の消費側) がずれる)。 */
   border-bottom: 0;
   border-radius: 0;
   box-shadow: inset 0 -1px 0 var(--color-line-soft);
 }
-/* 文書の面 (Markdown) は今までどおり浮いた面。パンくずの下の線は引かない。 */
-.gdp-repo-blob-layout > .gdp-standalone-source:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden]))
+/* 文書の面 (Markdown) はパンくずの下の線を引かない。 */
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden]))
   > .gdp-file-detail-wrapper > .gdp-file-detail-sticky {
   border-bottom: 0;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-radius: 0;
   background: var(--color-doc);
 }
-.gdp-repo-blob-layout > .gdp-standalone-blame .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))),
-  .gdp-repo-blob-layout > .gdp-standalone-file-history .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))),
-  .gdp-repo-blob-layout > .gdp-standalone-source .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))) {
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden])) {
+  min-height: calc(var(--content-h) - var(--content-top-gap));
+  background: var(--color-doc);
+}
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source .gdp-source-viewer:has(> .gdp-markdown-layout:not([hidden])) {
+  border-radius: 0;
+}
+:is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-blame .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))),
+  :is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-file-history .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))),
+  :is(.gdp-repo-blob-layout, body.gdp-file-detail-page #diff) > .gdp-standalone-source .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))) {
   border-radius: 0;
   background: var(--color-code);
 }
@@ -23553,15 +22586,15 @@ button.agents-account-name:hover {
   gap: var(--space-1);
   background: transparent;
 }
-.gdp-file-detail-sticky .gdp-source-tabs button {
+.gdp-file-detail-sticky .gdp-source-tabs button:where([data-source-tab]) {
   padding: 0 var(--space-2);
   color: var(--color-text-2);
 }
-.gdp-file-detail-sticky .gdp-source-tabs button:hover {
+.gdp-file-detail-sticky .gdp-source-tabs button:where([data-source-tab]):hover {
   background: color-mix(in srgb, var(--color-raised) 70%, transparent);
   color: var(--color-text);
 }
-.gdp-file-detail-sticky .gdp-source-tabs button.active {
+.gdp-file-detail-sticky .gdp-source-tabs button:where([data-source-tab]).active {
   background: var(--color-raised);
   box-shadow: none;
   color: var(--color-text);
@@ -23574,19 +22607,6 @@ button.agents-account-name:hover {
 .gdp-file-detail-sticky .gdp-source-line-jump label {
   color: var(--color-text-3);
   font-size: var(--ui-font-sm);
-}
-.gdp-file-detail-sticky .gdp-source-line-jump input {
-  border-color: transparent;
-  background: var(--color-inset);
-}
-.gdp-file-detail-sticky .gdp-source-line-jump .gdp-btn {
-  border-color: transparent;
-  background: transparent;
-  color: var(--color-text-2);
-}
-.gdp-file-detail-sticky .gdp-source-line-jump .gdp-btn:hover {
-  background: var(--color-raised);
-  color: var(--color-text);
 }
 /* 2 段目は 1 行に保つ。狭い面 (1280px の左右 2 面など) では補助の文字 (行数と
    「行へ移動」) を畳み、行へ移る欄と移動のボタンは残す (操作を無くさない)。
@@ -23680,16 +22700,6 @@ button.agents-account-name:hover {
   color: var(--color-text-3);
 }
 /* 右上のアイコンは補助の色。削除は hover したときだけ失敗の色 (常に赤く置かない)。 */
-.gdp-repo-blob-layout .gdp-file-detail-sticky .gdp-file-header-icon {
-  color: var(--color-text-3);
-}
-.gdp-repo-blob-layout .gdp-file-detail-sticky .gdp-file-header-icon:hover:not(:disabled) {
-  background: var(--color-raised);
-  color: var(--color-text);
-}
-.gdp-repo-blob-layout .gdp-file-detail-sticky .gdp-trash-path:hover:not(:disabled) {
-  color: var(--color-failed);
-}
 /* 開いた行 (URL の line / 行の選択): 面は --line-hit-bg (名前の層で選択の面)。
    行番号はアクセントの文字。 */
 .gdp-source-table tr.gdp-source-line-target .gdp-source-line-number,
@@ -23894,20 +22904,8 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 #topbar #meta .chip-next-unviewed {
   height: var(--ui-control-sm);
   padding: 0 var(--space-2);
-  border: 0;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-accent);
   font-size: var(--ui-font-sm);
-}
-#topbar #meta .chip-next-unviewed:hover:not(:disabled) {
-  background: var(--color-raised);
-  color: var(--color-accent-strong);
-}
-#topbar #meta .chip-next-unviewed:disabled {
-  border: 0;
-  background: transparent;
-  color: var(--color-text-3);
 }
 /* Split / Unified: 右の主役の切替。Split を先に並べ、今の方は選択の面。 */
 #topbar .seg {
@@ -24137,32 +23135,15 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 }
 /* ファイルの箱: 線と影を消し、コードの面を角丸で置く。箱の間は間隔で分ける。 */
 .d2h-file-wrapper {
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--color-code);
-  box-shadow: none;
   margin-bottom: var(--space-4);
 }
 .d2h-file-header,
 .d2h-file-header.d2h-sticky-header {
   margin: 0;
-  border: 0;
-  border-bottom: 1px solid var(--color-line-soft);
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
-  background: var(--color-code);
-  padding: 0 var(--space-2);
-  gap: var(--space-2);
 }
 .d2h-file-header .d2h-file-name {
   color: var(--color-text);
   font-weight: 500;
-}
-.d2h-file-header .gdp-file-header-icon {
-  color: var(--color-text-3);
-}
-.d2h-file-header .gdp-file-header-icon:hover:not(:disabled) {
-  background: var(--color-raised);
-  color: var(--color-text);
 }
 /* 変更の種類: 札ではなく 1 文字 (A / M / D / R)。文字そのものは読み上げ用に
    残し、見た目だけ 1 文字にする。 */
@@ -24205,16 +23186,6 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
   color: var(--color-text-2);
 }
 .d2h-file-header .d2h-file-collapse:hover {
-  background: var(--color-raised);
-  color: var(--color-text);
-}
-.d2h-file-header .gdp-view-file {
-  border-color: transparent;
-  background: transparent;
-  color: var(--color-text-2);
-}
-.d2h-file-header .gdp-view-file:hover {
-  border-color: transparent;
   background: var(--color-raised);
   color: var(--color-text);
 }
@@ -24553,29 +23524,6 @@ body.gdp-history-page #diff {
   background: transparent;
   border-bottom: 0;
 }
-#history-panel #history-filter,
-#history-panel .history-filter,
-.gdp-file-history-panel #history-filter,
-.gdp-file-history-panel .history-filter {
-  border-color: transparent;
-  border-radius: var(--radius-md);
-  background: var(--color-inset);
-}
-#history-panel #history-filter:hover,
-#history-panel .history-filter:hover,
-.gdp-file-history-panel #history-filter:hover,
-.gdp-file-history-panel .history-filter:hover {
-  border-color: transparent;
-  background: var(--color-raised);
-}
-#history-panel #history-filter:focus,
-#history-panel .history-filter:focus,
-.gdp-file-history-panel #history-filter:focus,
-.gdp-file-history-panel .history-filter:focus {
-  border-color: transparent;
-  background: var(--color-raised);
-  box-shadow: var(--focus-ring);
-}
 
 /* コミットの詳細: 件名を大きく先頭に、その下にハッシュ・作者・日時と操作。
    枠で囲まず、本文の面の上に置く。 */
@@ -24643,15 +23591,7 @@ body.gdp-history-page #history-commit-info:not([hidden]),
   font-weight: 600;
 }
 .gdp-source-virtual-action {
-  border-color: transparent;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-2);
-}
-.gdp-source-virtual-action:hover {
-  border-color: transparent;
-  background: var(--color-raised);
-  color: var(--color-text);
 }
 .gdp-source-virtual-line-code {
   padding: 0 var(--space-4);
@@ -24675,7 +23615,8 @@ body.gdp-history-page #history-commit-info:not([hidden]),
    絵 (round2/settings.png): 見出しの下に設定の検索、左に分類の列 (210px)、
    32px 空けて右に選んだ分類の中身。分類の行は --ui-control-md、選んでいる
    分類は強い選択。節は枠で囲まず、見出しと間隔で区切る。切り替えは面の色と
-   形だけ (箱の寸法を変えない)。トグルはスイッチの形 (中身は checkbox のまま)。 */
+   形だけ (箱の寸法を変えない)。トグルは標準のチェックボックス (見た目はチェック
+   ボックスの節。スイッチの形にしない)。 */
 body.gdp-help-page #content {
   --content-top-gap: var(--space-5);
   /* 下の余白は枠 (.gdp-help-shell) が持つ。設定の「変更を保存」を箱の下端に置くため。 */
@@ -24724,20 +23665,8 @@ body.gdp-help-page #content {
   height: var(--ui-control-md);
   /* 文字はアイコン (左 12・幅 16) の右に 8 空けて置く。 */
   padding: 0 var(--space-3) 0 calc(var(--space-3) + var(--space-4) + var(--space-2));
-  border: 1px solid var(--color-line-soft);
-  border-radius: var(--radius-md);
-  background: var(--color-inset);
-  color: var(--color-text);
   font: inherit;
   font-size: var(--ui-font-md);
-}
-.scope-settings-search::placeholder {
-  color: var(--color-text-3);
-}
-.scope-settings-search:focus {
-  border-color: var(--color-accent);
-  outline: none;
-  box-shadow: var(--focus-ring);
 }
 .gdp-help-layout {
   grid-template-columns: calc(var(--space-unit) * 52) minmax(0, 1fr);
@@ -24757,8 +23686,6 @@ body.gdp-help-page #content {
   color: var(--color-text-3);
   font-size: var(--ui-font-xs);
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 .gdp-help-nav-heading + button {
   margin-top: var(--space-1);
@@ -24918,10 +23845,6 @@ body.gdp-help-page #content {
 }
 .gdp-help-group p {
   margin: 0 0 var(--space-4);
-}
-.gdp-help-content a:not(.gdp-help-figure) {
-  color: var(--color-accent);
-  text-underline-offset: 0.2em;
 }
 .gdp-help-content :not(pre) > code {
   padding: 0 var(--space-1);
@@ -25089,15 +24012,8 @@ body.gdp-help-page #content {
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
   padding: 0;
-  border: 0;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-2);
   cursor: pointer;
-}
-.gdp-help-command-copy:hover {
-  background: var(--color-raised);
-  color: var(--color-text);
 }
 .gdp-help-command-copy:focus-visible {
   outline: none;
@@ -25295,13 +24211,6 @@ body.gdp-help-page #content {
 .scope-settings .scope-settings-help + .scope-settings-toggle {
   margin-top: var(--space-4);
 }
-.scope-settings select,
-#scope-omit-dirs,
-#scope-exclude-names {
-  border-color: var(--color-line-soft);
-  background-color: var(--color-inset);
-  color: var(--color-text);
-}
 .scope-settings select {
   width: min(calc(var(--space-unit) * 110), 100%);
   height: var(--ui-control-md);
@@ -25378,11 +24287,8 @@ body.gdp-help-page #content {
 .theme-choice-name {
   padding: 0 var(--space-1);
 }
-/* トグル: 文字が左、スイッチが右 (絵の通知の行)。 */
+/* トグル: チェックボックスと文字の行 (見た目はチェックボックスの節)。 */
 .scope-settings-toggle {
-  flex-direction: row-reverse;
-  justify-content: space-between;
-  gap: var(--space-4);
   min-height: var(--ui-control-md);
   margin-top: 0;
 }
@@ -25394,39 +24300,6 @@ body.gdp-help-page #content {
 }
 .scope-settings-toggle + .scope-settings-toggle {
   border-top: 1px solid var(--color-line-soft);
-}
-.scope-settings-toggle input[type="checkbox"] {
-  flex: 0 0 auto;
-  position: relative;
-  width: calc(var(--space-unit) * 9);
-  height: calc(var(--space-unit) * 5);
-  border-radius: calc(var(--space-unit) * 2.5);
-  background: var(--color-line-strong);
-  cursor: pointer;
-  appearance: none;
-  transition: background var(--motion-fast);
-}
-.scope-settings-toggle input[type="checkbox"]::before {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: calc(var(--space-unit) * 4);
-  height: calc(var(--space-unit) * 4);
-  border-radius: 50%;
-  background: var(--color-text);
-  transition: transform var(--motion-fast);
-}
-.scope-settings-toggle input[type="checkbox"]:checked {
-  background: var(--color-accent);
-}
-.scope-settings-toggle input[type="checkbox"]:checked::before {
-  background: var(--color-on-accent);
-  transform: translateX(calc(var(--space-unit) * 4));
-}
-.scope-settings-toggle input[type="checkbox"]:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
 }
 /* 「変更を保存」はいつも本文の箱の下端 (短い分類でも長い分類でも同じ場所)。枠を
    箱の高さまで伸ばし、足元を最後に押し下げて、長いときは下端に貼り付ける。 */
@@ -25568,7 +24441,6 @@ body.gdp-help-page #content {
 }
 .gdp-palette-input-key,
 .gdp-palette-row-key,
-.gdp-context-menu-key,
 .gdp-palette-footer kbd,
 .empty-key kbd,
 .image-tab-close kbd,
@@ -25786,9 +24658,6 @@ body[data-worktree-overview] #worktree-panel .history-status {
 }
 body[data-worktree-overview] #worktree-panel .worktree-head-btn:last-of-type {
   grid-area: add;
-  border-color: transparent;
-  background: var(--color-accent);
-  color: var(--color-on-accent);
 }
 /* 虫眼鏡 (::before / ::after) の縦の位置は元の欄と同じ (上の余白 7px のまま)。
    横は欄を面の線から始めるので、元の欄の左端からの距離 (11 / 22) にそろえる。 */
@@ -25803,11 +24672,6 @@ body[data-worktree-overview] #worktree-panel .history-filter-wrap::before {
 }
 body[data-worktree-overview] #worktree-panel .history-filter-wrap::after {
   left: calc(var(--space-5) - 2px);
-}
-body[data-worktree-overview] #worktree-panel .history-filter {
-  border-color: transparent;
-  border-radius: var(--radius-md);
-  background: var(--color-inset);
 }
 .worktree-columns {
   display: none;
@@ -25837,10 +24701,6 @@ body[data-worktree-overview] #worktree-panel .history-item {
   column-gap: var(--space-5);
   row-gap: var(--space-1);
   min-height: calc(var(--space-unit) * 22);
-  padding: var(--space-4);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--color-doc);
 }
 body[data-worktree-overview] #worktree-panel .history-item:hover {
   background: color-mix(in srgb, var(--color-raised) 60%, var(--color-doc));
@@ -25987,13 +24847,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-actions {
   width: calc(var(--space-unit) * 22);
   height: var(--ui-control-md);
   justify-content: center;
-  border-color: var(--color-line);
-  background: transparent;
-  color: var(--color-text);
   font-size: var(--ui-font-md);
-}
-.worktree-row-open:hover:not(:disabled) {
-  background: var(--color-raised);
 }
 body[data-worktree-overview] #worktree-panel .worktree-row-menu {
   display: none;
@@ -26391,10 +25245,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   width: min(100%, calc(var(--space-unit) * 64));
   height: var(--ui-control-sm);
   padding: 0 var(--space-2);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-sm);
-  background: var(--color-inset);
-  color: var(--color-text);
   font: inherit;
   font-size: var(--db-font-sm);
 }
@@ -26484,19 +25334,12 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   place-items: center;
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
-  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: none;
-  color: var(--color-text-3);
   cursor: pointer;
 }
 .db-root .db-row-detail-action svg {
   width: var(--icon-sm);
   height: var(--icon-sm);
-}
-.db-root .db-row-detail-action:hover {
-  border-color: var(--color-line);
-  color: var(--color-text);
 }
 .db-root .db-row-detail-action.copied {
   color: var(--diff-add-fg);
@@ -26585,7 +25428,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   gap: var(--space-1);
   height: var(--ui-control-sm);
   padding: 0 var(--space-2);
-  color: var(--color-text-2);
   font-size: var(--db-font-sm);
   white-space: nowrap;
 }
@@ -26596,11 +25438,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   flex: none;
   width: var(--icon-sm);
   height: var(--icon-sm);
-}
-.db-root :is(.db-grid-newest, .db-er-toggle)[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-doc));
-  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-line));
-  color: var(--color-accent-strong);
 }
 .db-root :is(.db-grid-newest, .db-er-toggle)[data-save-failed] {
   color: var(--color-failed);
@@ -26623,7 +25460,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   width: calc(var(--space-unit) * 32);
   height: var(--ui-control-sm);
   padding: 0 var(--space-2);
-  color: var(--color-text);
   font-size: var(--db-font-sm);
 }
 .db-root .db-grid-tz-current {
@@ -26669,10 +25505,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   flex: none;
   height: var(--ui-control-sm);
   padding: 0 var(--space-2);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-sm);
-  background: var(--color-inset);
-  color: var(--color-text);
   font: inherit;
   font-size: var(--db-font-base);
 }
@@ -26810,20 +25642,12 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
   padding: 0;
-  border: 0;
   border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-2);
   font-size: var(--ui-font-title);
   cursor: pointer;
 }
-.db-grid-pager-btn:hover:not(:disabled) {
-  background: var(--color-raised);
-  color: var(--color-text);
-}
 .db-grid-pager-btn:disabled {
   cursor: default;
-  opacity: 0.4;
 }
 .db-root .db-history-pane,
 .db-root .db-history-dock {
@@ -27000,11 +25824,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 .db-root :is(.db-er-zoom-level, .db-er-table-rows, .db-er-col-null, .db-er-more) {
   color: var(--color-text-3);
 }
-.db-root .db-er-find {
-  border-color: var(--color-line);
-  background: var(--color-inset);
-  color: var(--color-text);
-}
 .db-root .db-er-table {
   border-color: var(--color-line-strong);
   background: var(--color-doc);
@@ -27117,17 +25936,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   border-left: 1px solid var(--color-line-soft);
   background: var(--color-nav);
 }
-.journal-section-head button,
-.journal-editor-actions button {
-  border-color: var(--color-line-soft);
-  background: transparent;
-  color: var(--color-text);
-}
-.journal-section-head button:hover,
-.journal-editor-actions button:hover {
-  border-color: var(--color-line);
-  background: var(--color-raised);
-}
 .journal-editor {
   gap: var(--space-3);
   padding: var(--space-4) var(--pad-doc);
@@ -27148,11 +25956,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   box-shadow: var(--glow-select);
   color: var(--color-text);
 }
-.journal-title-input,
-.journal-body-input,
-.journal-task-fields select,
-.journal-task-fields input,
-.journal-task-toolbar input,
 .journal-label-editor {
   border-color: transparent;
   border-radius: var(--radius-md);
@@ -27162,11 +25965,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 .journal-field-label {
   color: var(--color-text-2);
   font-weight: 600;
-}
-.journal-primary-action {
-  border-color: transparent;
-  background: var(--color-accent);
-  color: var(--color-on-accent);
 }
 /* 編集欄 (右の列) の中身は縮ませない。縮むと札の欄が 1 段分の高さに潰れ、
    2 段目の札が下の書式の行に重なった (高さが足りなければ列ごとスクロール)。 */
@@ -27204,10 +26002,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 .journal-task-board-wrap {
   padding: var(--space-4) var(--pad-text);
 }
-.journal-task-column {
-  border-radius: var(--radius-lg);
-  background: var(--color-tree);
-}
 .journal-task-column-head {
   color: var(--color-text-2);
 }
@@ -27226,9 +26020,339 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   background: var(--color-select);
   box-shadow: var(--glow-select);
 }
-.journal-github-toggle {
-  border-color: var(--color-line-soft);
+
+/* ======================================================================
+   部品の外側の要素 (cv-*)。部品は Shadow DOM を使わず、中に標準の要素
+   (button・input・select・a・div) を描く。外側の要素は箱を作らず、中身を親の
+   並び (flex・grid) にそのまま並べる。外側の要素に hidden を付けない (この規則が
+   既定の display: none に勝つ)。隠すのは中の要素。部品を足したらここに名前を足す
+   (ui-components.test.ts が見る)。決まりは
+   .agents/skills/project-rules/references/ui-components.md。
+   ====================================================================== */
+:where(cv-account-tags-editor, cv-button, cv-diagram-viewport, cv-empty-state, cv-help-command-copy, cv-icon, cv-layer, cv-menu, cv-page-shell, cv-resizer, cv-scratchpad-pane, cv-segmented, cv-usage-check-copy) {
+  display: contents;
+}
+
+/* ======================================================================
+   ボタンの種類。目立つ順に 主 > 薄塗り > 枠線 > 文字だけ、それと小とアイコン。
+   色と状態 (地・文字・枠・hover・押されている間・無効) はここだけで決め、寸法
+   (高さ・余白・角丸) は部品の規則が持つ。部品の規則に地・文字・枠の色や hover の
+   面を書かない (button-variants.test.ts)。種類は使い道で選ぶ:
+   - 主: その画面でいちばん勧める操作 1 つ (起動・ダイアログの確定・保存・実行)
+   - 薄塗り: 主の次に勧める、取り消しでない操作 (差分の行を広げる・注釈の次へ)
+   - 枠線: 既定。ふつうの操作と、ダイアログの取り消し
+   - 小: 行の中に置く小さな操作 (.gdp-btn-sm・.db-btn-sm)。色は枠線と同じで、
+     文字は --ui-font-sm (大きさは部品の規則)
+   - 文字だけ: 枠線では騒がしい所の操作 (見出しの横の「すべて更新」・続きを読む)
+   - アイコン: 帯の上の、場所を取らない操作。絵は補足の色、hover で本文の色
+   押されている間 ([aria-pressed="true"]・.active) の枠線とアイコンは薄塗りの面。
+   無効はどれも --color-disabled の文字 (主と薄塗りは面も --color-disabled-surface)。
+   並びは 枠線 → 文字だけ → アイコン → 薄塗り → 主 の順で、2 つの種類のクラスを
+   持つボタン (.gdp-btn.gdp-view-file・.db-btn.db-btn-icon) は後の種類になる。
+   選択子に要素名を足して (:is(button, a)) 部品の「.親 button」の規則に勝たせる。
+   ====================================================================== */
+:is(button, a):is(.agents-secondary, .gdp-dialog-cancel, .gdp-btn, .tools-pane-action, .db-global-search-btn, .db-global-search-cancel, .db-snapshot-create-btn, .db-snapshot-refresh-btn, .db-snapshot-job-cancel-btn, .db-snapshot-cancel-btn, .db-snapshot-diff-btn, .redis-key-filter-btn, .journal-github-issue-action, .journal-danger-action, .journal-github-toggle, .journal-github-load-more, .image-tab-close, .doctor-refresh, .gdp-csv-reset, .retry, .history-filter-clear, .sb-filter-clear, .db-table-filter-clear, .gdp-media-speed, .gdp-btn-sm, .db-btn-sm, .db-query-history-action, .db-session-log-action, .db-pref-toggle, .empty-action:not(:where(.empty-action-primary)), .db-btn:not(:where(.db-btn-primary, .db-btn-icon)), .gdp-show-full:not(:where(.secondary))) {
+  border: 1px solid var(--color-line-strong);
   background: transparent;
+  color: var(--color-accent);
+}
+:is(button, a):is(.agents-secondary, .gdp-dialog-cancel, .gdp-btn, .tools-pane-action, .db-global-search-btn, .db-global-search-cancel, .db-snapshot-create-btn, .db-snapshot-refresh-btn, .db-snapshot-job-cancel-btn, .db-snapshot-cancel-btn, .db-snapshot-diff-btn, .redis-key-filter-btn, .journal-github-issue-action, .journal-danger-action, .journal-github-toggle, .journal-github-load-more, .image-tab-close, .doctor-refresh, .gdp-csv-reset, .retry, .history-filter-clear, .sb-filter-clear, .db-table-filter-clear, .gdp-media-speed, .gdp-btn-sm, .db-btn-sm, .db-query-history-action, .db-session-log-action, .db-pref-toggle, .empty-action:not(:where(.empty-action-primary)), .db-btn:not(:where(.db-btn-primary, .db-btn-icon)), .gdp-show-full:not(:where(.secondary))):hover:not(:disabled, [aria-disabled="true"]) {
+  background: var(--color-info-surface);
+  color: var(--color-on-info-surface);
+}
+
+:is(button, a):is(.agents-text-action, .project-switcher-action, .gdp-palette-status-action, .chip-next-unviewed, .dynamodb-item-more-btn, .es-doc-more-btn, .redis-key-more-btn, .s3-object-more-btn, .s3-tree-more, .agents-hook-hint-open, .usage-popover-link, .gdp-show-full.secondary) {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-accent);
+}
+:is(button, a):is(.agents-text-action, .project-switcher-action, .gdp-palette-status-action, .chip-next-unviewed, .dynamodb-item-more-btn, .es-doc-more-btn, .redis-key-more-btn, .s3-object-more-btn, .s3-tree-more, .agents-hook-hint-open, .usage-popover-link, .gdp-show-full.secondary):hover:not(:disabled, [aria-disabled="true"]) {
+  background: var(--color-info-surface);
+  color: var(--color-on-info-surface);
+}
+
+:is(button, a):is(.global-icon-action, .global-icon-link, .nav-icon-action, .nav-row-action, .statusbar-icon-action, .agents-icon-action, .main-tabs-action, .sb-icon-action, .db-icon-btn, .annotation-icon-btn, .db-refresh-btn, .db-connection-action, .db-tabs-new-btn, .db-grid-pager-btn, .db-row-detail-action, .db-btn-icon, .db-history-dock-close, .db-grid-cell-null-btn, .doctor-close, .gdp-dialog-close, .gdp-banner-dismiss, .gdp-help-command-copy, .gdp-file-header-icon, .gdp-source-virtual-action, .gdp-view-file, .gdp-media-control, .history-refresh, .db-query-collapse, .worktree-row-menu, .terminal-image-shelf-toggle, .terminal-image-shelf-expand, .agents-server-link, .image-tab-button:not(:where(.image-tab-close)), .terminal-font-btn, .terminal-link-action, .journal-github-close, .journal-toolbar-action) {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-2);
+}
+:is(button, a):is(.global-icon-action, .global-icon-link, .nav-icon-action, .nav-row-action, .statusbar-icon-action, .agents-icon-action, .main-tabs-action, .sb-icon-action, .db-icon-btn, .annotation-icon-btn, .db-refresh-btn, .db-connection-action, .db-tabs-new-btn, .db-grid-pager-btn, .db-row-detail-action, .db-btn-icon, .db-history-dock-close, .db-grid-cell-null-btn, .doctor-close, .gdp-dialog-close, .gdp-banner-dismiss, .gdp-help-command-copy, .gdp-file-header-icon, .gdp-source-virtual-action, .gdp-view-file, .gdp-media-control, .history-refresh, .db-query-collapse, .worktree-row-menu, .terminal-image-shelf-toggle, .terminal-image-shelf-expand, .agents-server-link, .image-tab-button:not(:where(.image-tab-close)), .terminal-font-btn, .terminal-link-action, .journal-github-close, .journal-toolbar-action):hover:not(:disabled, [aria-disabled="true"]) {
+  background: var(--color-raised);
+}
+/* 状態の印 (コピーした・失敗した・注意・開いた) の色は hover でも残す。 */
+:is(button, a):is(.global-icon-action, .global-icon-link, .nav-icon-action, .nav-row-action, .statusbar-icon-action, .agents-icon-action, .main-tabs-action, .sb-icon-action, .db-icon-btn, .annotation-icon-btn, .db-refresh-btn, .db-connection-action, .db-tabs-new-btn, .db-grid-pager-btn, .db-row-detail-action, .db-btn-icon, .db-history-dock-close, .db-grid-cell-null-btn, .doctor-close, .gdp-dialog-close, .gdp-banner-dismiss, .gdp-help-command-copy, .gdp-file-header-icon, .gdp-source-virtual-action, .gdp-view-file, .gdp-media-control, .history-refresh, .db-query-collapse, .worktree-row-menu, .terminal-image-shelf-toggle, .terminal-image-shelf-expand, .agents-server-link, .image-tab-button:not(:where(.image-tab-close)), .terminal-font-btn, .terminal-link-action, .journal-github-close, .journal-toolbar-action):hover:not(:disabled, [aria-disabled="true"], .copied, .failed, .warn, .opened, [data-copied]) {
+  color: var(--color-text);
+}
+
+/* 危険な操作 (消す) は枠線・アイコンのまま、文字と絵だけ失敗の色 (hover でも)。 */
+:is(button, a):is(.journal-danger-action, .db-query-history-danger, .db-session-log-danger, .gdp-trash-path):not(:disabled, [aria-disabled="true"]),
+:is(button, a):is(.journal-danger-action, .db-query-history-danger, .db-session-log-danger, .gdp-trash-path):hover:not(:disabled, [aria-disabled="true"]) {
+  color: var(--color-failed);
+}
+
+/* 薄塗りと、押されている間の枠線・アイコン。縁は透明 (枠線のボタンが押されても
+   箱の寸法は変わらない)。 */
+:is(button, a):is(.gdp-expand-btn, .gdp-annotation-step),
+:is(button, a):is(.agents-secondary, .gdp-dialog-cancel, .gdp-btn, .tools-pane-action, .db-global-search-btn, .db-global-search-cancel, .db-snapshot-create-btn, .db-snapshot-refresh-btn, .db-snapshot-job-cancel-btn, .db-snapshot-cancel-btn, .db-snapshot-diff-btn, .redis-key-filter-btn, .journal-github-issue-action, .journal-danger-action, .journal-github-toggle, .journal-github-load-more, .image-tab-close, .doctor-refresh, .gdp-csv-reset, .retry, .history-filter-clear, .sb-filter-clear, .db-table-filter-clear, .gdp-media-speed, .gdp-btn-sm, .db-btn-sm, .db-query-history-action, .db-session-log-action, .db-pref-toggle, .empty-action:not(:where(.empty-action-primary)), .db-btn:not(:where(.db-btn-primary, .db-btn-icon)), .gdp-show-full:not(:where(.secondary)), .global-icon-action, .global-icon-link, .nav-icon-action, .nav-row-action, .statusbar-icon-action, .agents-icon-action, .main-tabs-action, .sb-icon-action, .db-icon-btn, .annotation-icon-btn, .db-refresh-btn, .db-connection-action, .db-tabs-new-btn, .db-grid-pager-btn, .db-row-detail-action, .db-btn-icon, .db-history-dock-close, .db-grid-cell-null-btn, .doctor-close, .gdp-dialog-close, .gdp-banner-dismiss, .gdp-help-command-copy, .gdp-file-header-icon, .gdp-source-virtual-action, .gdp-view-file, .gdp-media-control, .history-refresh, .db-query-collapse, .worktree-row-menu, .terminal-image-shelf-toggle, .terminal-image-shelf-expand, .agents-server-link, .image-tab-button:not(:where(.image-tab-close)), .terminal-font-btn, .terminal-link-action, .journal-github-close, .journal-toolbar-action):is([aria-pressed="true"], .active) {
+  border-color: transparent;
+  background: var(--color-info-surface);
+  color: var(--color-on-info-surface);
+}
+:is(button, a):is(.gdp-expand-btn, .gdp-annotation-step):hover:not(:disabled, [aria-disabled="true"]),
+:is(button, a):is(.agents-secondary, .gdp-dialog-cancel, .gdp-btn, .tools-pane-action, .db-global-search-btn, .db-global-search-cancel, .db-snapshot-create-btn, .db-snapshot-refresh-btn, .db-snapshot-job-cancel-btn, .db-snapshot-cancel-btn, .db-snapshot-diff-btn, .redis-key-filter-btn, .journal-github-issue-action, .journal-danger-action, .journal-github-toggle, .journal-github-load-more, .image-tab-close, .doctor-refresh, .gdp-csv-reset, .retry, .history-filter-clear, .sb-filter-clear, .db-table-filter-clear, .gdp-media-speed, .gdp-btn-sm, .db-btn-sm, .db-query-history-action, .db-session-log-action, .db-pref-toggle, .empty-action:not(:where(.empty-action-primary)), .db-btn:not(:where(.db-btn-primary, .db-btn-icon)), .gdp-show-full:not(:where(.secondary)), .global-icon-action, .global-icon-link, .nav-icon-action, .nav-row-action, .statusbar-icon-action, .agents-icon-action, .main-tabs-action, .sb-icon-action, .db-icon-btn, .annotation-icon-btn, .db-refresh-btn, .db-connection-action, .db-tabs-new-btn, .db-grid-pager-btn, .db-row-detail-action, .db-btn-icon, .db-history-dock-close, .db-grid-cell-null-btn, .doctor-close, .gdp-dialog-close, .gdp-banner-dismiss, .gdp-help-command-copy, .gdp-file-header-icon, .gdp-source-virtual-action, .gdp-view-file, .gdp-media-control, .history-refresh, .db-query-collapse, .worktree-row-menu, .terminal-image-shelf-toggle, .terminal-image-shelf-expand, .agents-server-link, .image-tab-button:not(:where(.image-tab-close)), .terminal-font-btn, .terminal-link-action, .journal-github-close, .journal-toolbar-action):is([aria-pressed="true"], .active):hover:not(:disabled, [aria-disabled="true"]) {
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  color: var(--color-on-info-surface);
+}
+
+:is(button, a):is(.agents-primary, .empty-action-primary, .gdp-dialog-confirm, .db-btn-primary, .journal-primary-action, .scope-settings-primary-action, .annotation-primary, .nav-empty-action, .db-snapshot-confirm-btn, .es-search-btn, .worktree-head-add) {
+  border: 1px solid transparent;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: 600;
+}
+:is(button, a):is(.agents-primary, .empty-action-primary, .gdp-dialog-confirm, .db-btn-primary, .journal-primary-action, .scope-settings-primary-action, .annotation-primary, .nav-empty-action, .db-snapshot-confirm-btn, .es-search-btn, .worktree-head-add):hover:not(:disabled, [aria-disabled="true"]) {
+  background: var(--color-accent-strong);
+  color: var(--color-on-accent);
+}
+
+/* 無効。主と薄塗りは面も無効の面にする。 */
+:is(button, a):is(.agents-secondary, .gdp-dialog-cancel, .gdp-btn, .tools-pane-action, .db-global-search-btn, .db-global-search-cancel, .db-snapshot-create-btn, .db-snapshot-refresh-btn, .db-snapshot-job-cancel-btn, .db-snapshot-cancel-btn, .db-snapshot-diff-btn, .redis-key-filter-btn, .journal-github-issue-action, .journal-danger-action, .journal-github-toggle, .journal-github-load-more, .image-tab-close, .doctor-refresh, .gdp-csv-reset, .retry, .history-filter-clear, .sb-filter-clear, .db-table-filter-clear, .gdp-media-speed, .gdp-btn-sm, .db-btn-sm, .db-query-history-action, .db-session-log-action, .db-pref-toggle, .empty-action:not(:where(.empty-action-primary)), .db-btn:not(:where(.db-btn-primary, .db-btn-icon)), .gdp-show-full:not(:where(.secondary)), .agents-text-action, .project-switcher-action, .gdp-palette-status-action, .chip-next-unviewed, .dynamodb-item-more-btn, .es-doc-more-btn, .redis-key-more-btn, .s3-object-more-btn, .s3-tree-more, .agents-hook-hint-open, .usage-popover-link, .gdp-show-full.secondary, .global-icon-action, .global-icon-link, .nav-icon-action, .nav-row-action, .statusbar-icon-action, .agents-icon-action, .main-tabs-action, .sb-icon-action, .db-icon-btn, .annotation-icon-btn, .db-refresh-btn, .db-connection-action, .db-tabs-new-btn, .db-grid-pager-btn, .db-row-detail-action, .db-btn-icon, .db-history-dock-close, .db-grid-cell-null-btn, .doctor-close, .gdp-dialog-close, .gdp-banner-dismiss, .gdp-help-command-copy, .gdp-file-header-icon, .gdp-source-virtual-action, .gdp-view-file, .gdp-media-control, .history-refresh, .db-query-collapse, .worktree-row-menu, .terminal-image-shelf-toggle, .terminal-image-shelf-expand, .agents-server-link, .image-tab-button:not(:where(.image-tab-close)), .terminal-font-btn, .terminal-link-action, .journal-github-close, .journal-toolbar-action):is(:disabled, [aria-disabled="true"]) {
+  color: var(--color-disabled);
+  cursor: default;
+}
+:is(button, a):is(.gdp-expand-btn, .gdp-annotation-step, .agents-primary, .empty-action-primary, .gdp-dialog-confirm, .db-btn-primary, .journal-primary-action, .scope-settings-primary-action, .annotation-primary, .nav-empty-action, .db-snapshot-confirm-btn, .es-search-btn, .worktree-head-add):is(:disabled, [aria-disabled="true"]) {
+  border-color: transparent;
+  background: var(--color-disabled-surface);
+  color: var(--color-disabled);
+  cursor: default;
+}
+
+/* ======================================================================
+   チェックボックス・ラジオ・スライダー。ブラウザ標準の <input> のまま、
+   色 (accent-color)・大きさ (アイコンの段)・ラベルとの間・フォーカス・無効を
+   ここだけで決める。部品の規則に accent-color・大きさ・ラベルとの間を書かない
+   (form-controls.test.ts)。設定のトグルもチェックボックスの見た目 (スイッチの
+   形にしない)。
+   ====================================================================== */
+input:is([type="checkbox"], [type="radio"]) {
+  flex: none;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+input[type="range"] {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+input:is([type="checkbox"], [type="radio"], [type="range"]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+input:is([type="checkbox"], [type="radio"], [type="range"]):disabled {
+  accent-color: var(--color-disabled);
+  cursor: default;
+}
+/* ラベルとの間。並べ方 (flex / grid・寄せ方) は置き場所の規則が決める。 */
+label:has(> input:is([type="checkbox"], [type="radio"])) {
+  column-gap: var(--space-2);
+  cursor: pointer;
+}
+label:has(> input:is([type="checkbox"], [type="radio"]):disabled) {
+  color: var(--color-disabled);
+  cursor: default;
+}
+
+/* ======================================================================
+   入力欄と選ぶ欄。1 行の欄・検索の欄・複数行の欄・標準の date などの欄と
+   <select> の、地・縁・角丸・文字・プレースホルダ・フォーカス・誤り
+   (aria-invalid)・無効・選ぶ欄の矢印をここだけで決める。高さと余白の既定も
+   ここ (:where で詳細度 0。置き場所の規則が寸法だけを上書きする)。部品の規則に
+   地・縁・角丸・文字の色・フォーカスの見た目を書かない (form-controls.test.ts)。
+   入力欄の形をしていないもの (パレット・切替の小窓・ブランチの選択の検索、
+   表のセルや見出しの中の欄、全面の編集の欄、端末の裏の欄) は外す。
+   ====================================================================== */
+:where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="hidden"], [type="submit"], [type="button"], [type="reset"], [type="image"]), select) {
+  box-sizing: border-box;
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+}
+:where(textarea) {
+  box-sizing: border-box;
+  padding: var(--space-2);
+}
+:is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="hidden"], [type="submit"], [type="button"], [type="reset"], [type="image"]), textarea, select):not(:where(.gdp-palette-input, .project-switcher-input, .rp-search, .ref-input, .db-grid-cell-input, .db-grid-col-filter, .gdp-csv-column-filter, .xterm-helper-textarea, .tools-textarea, .db-query-textarea, .journal-label-editor-input, .s3-edit-textarea, .es-doc-edit-textarea, .redis-value-edit-textarea, .pane-view-input, .account-tags-input)) {
+  border: 1px solid var(--field-edge, var(--color-line));
+  border-radius: var(--radius-md);
+  background-color: var(--color-inset);
+  color: var(--color-text);
+  font-family: inherit;
+}
+:is(input, textarea)::placeholder {
+  color: var(--color-text-3);
+  opacity: 1;
+}
+:is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="hidden"], [type="submit"], [type="button"], [type="reset"], [type="image"]), textarea, select):not(:where(.gdp-palette-input, .project-switcher-input, .rp-search, .ref-input, .db-grid-cell-input, .db-grid-col-filter, .gdp-csv-column-filter, .xterm-helper-textarea, .tools-textarea, .db-query-textarea, .journal-label-editor-input, .s3-edit-textarea, .es-doc-edit-textarea, .redis-value-edit-textarea, .pane-view-input, .account-tags-input)):focus {
+  outline: none;
+  border-color: var(--field-focus-edge, var(--color-accent));
+  box-shadow: inset 0 0 0 1px var(--field-focus-edge, var(--color-accent));
+}
+/* 誤り: 縁の色の名前を替える (フォーカスの間も誤りの色のまま)。 */
+[aria-invalid="true"]:is(input, textarea, select) {
+  --field-edge: var(--color-error-line);
+  --field-focus-edge: var(--color-error-line);
+}
+:is(input:disabled:not([type="checkbox"], [type="radio"], [type="range"]), textarea:disabled, select:disabled) {
+  background-color: var(--color-disabled-surface);
+  color: var(--color-disabled);
+  cursor: default;
+}
+/* 選ぶ欄の矢印: 標準の矢印は色を変えられないので、補足の色の山形を描く。 */
+select:not([multiple], [size]) {
+  appearance: none;
+  padding-right: calc(var(--space-2) * 2 + var(--icon-sm));
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--color-text-2) 50%),
+    linear-gradient(135deg, var(--color-text-2) 50%, transparent 50%);
+  background-position:
+    right calc(var(--space-2) + var(--space-1) + 1px) center,
+    right calc(var(--space-2) + 1px) center;
+  background-size: var(--space-1) var(--space-1);
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+select:not([multiple], [size]):disabled {
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--color-disabled) 50%),
+    linear-gradient(135deg, var(--color-disabled) 50%, transparent 50%);
+}
+
+/* ======================================================================
+   右クリックのメニュー (views/context-menu.ts の .gdp-context-menu) と同じ形の
+   浮くメニュー (Data の書き出し)。面・項目・区切り・見出し・無効・危険・チェック
+   つきの項目をここだけで決める。項目にキーの割り当ては出さない (OS や環境で
+   キーが違う。キーはパレット・ヘルプ・title が示す)。
+   ====================================================================== */
+:is(.gdp-context-menu, .db-grid-export-menu) {
+  box-sizing: border-box;
+  padding: var(--space-1);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-overlay);
+  box-shadow: var(--shadow-context-menu);
+}
+:is(.gdp-context-menu, .db-grid-export-menu) > button {
+  width: 100%;
+  height: var(--ui-row-h);
+  padding: 0 calc(var(--context-menu-inline-pad) - var(--space-1));
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  text-align: left;
+  cursor: pointer;
+}
+:is(.gdp-context-menu, .db-grid-export-menu) > button:is(:hover, :focus-visible):not(:disabled) {
+  outline: none;
+  background: var(--color-select);
+}
+:is(.gdp-context-menu, .db-grid-export-menu) > button.danger:not(:disabled) {
+  color: var(--color-failed);
+}
+:is(.gdp-context-menu, .db-grid-export-menu) > button:disabled {
+  background: transparent;
+  color: var(--color-disabled);
+  cursor: default;
+}
+:is(.gdp-context-menu, .db-grid-export-menu) > button[aria-checked="true"] {
+  font-weight: 600;
+}
+:is(.gdp-context-menu, .db-grid-export-menu) > :is(hr, .gdp-context-menu-sep) {
+  margin: calc(var(--space-1) / 2) calc(var(--context-menu-inline-pad) - var(--space-1));
+  border: 0;
+  border-top: 1px solid var(--color-line-row);
+}
+:is(.gdp-context-menu, .db-grid-export-menu) > :is([role="presentation"], .gdp-context-menu-head) {
+  padding: var(--space-1) calc(var(--context-menu-inline-pad) - var(--space-1));
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  font-weight: 600;
+}
+
+/* ======================================================================
+   カード。同じ形の物が並ぶ一覧の 1 件 (差分のファイル・全体ボードのアカウント・
+   一覧だけの作業ツリーの行・作業記録のかんばんの列) だけに使う。面・縁・角丸・
+   中の余白・見出しの行 (名前が左、操作が右端) をここだけで決める。1 つの文書の
+   面はカードにしない (ui-surface.md の「余白と基準線」の 8)。状態の印 (選んで
+   いる・いまのフォルダ・衝突・落とせる所) の面と線は部品の規則に残す。
+   ====================================================================== */
+.d2h-file-wrapper,
+.agents-account-card,
+.journal-task-column,
+body[data-worktree-overview] #worktree-panel .history-item {
+  --card-pad: var(--space-4);
+  /* 縁は表の行の線と同じ名前 (どの面の上でも 1.5:1 以上。table-rules-css.test.ts)。 */
+  border: 1px solid var(--color-line-row);
+  border-radius: var(--radius-md);
+  background: var(--color-doc);
+  box-shadow: none;
+}
+.agents-account-card,
+body[data-worktree-overview] #worktree-panel .history-item {
+  padding: var(--card-pad);
+}
+.d2h-file-header,
+.d2h-file-header.d2h-sticky-header,
+.agents-account-card-head,
+.journal-task-column-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--ui-control-md);
+}
+/* 面の端まで中身を敷くカード (差分の表・かんばんの札の並び) は、見出しの行が
+   中の余白を持つ。 */
+.d2h-file-header,
+.d2h-file-header.d2h-sticky-header,
+.journal-task-column-head {
+  padding: 0 var(--card-pad);
+  border: 0;
+  border-bottom: 1px solid var(--color-line-row);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  /* 差分の見出しは上に貼り付くので、カードと同じ面で下の行を隠す。 */
+  background: var(--color-doc);
+}
+
+/* ======================================================================
+   リンクと押せる文字。文の中のリンク (class の無い a) は強調色で下線つき、
+   並びの多い所 (目次・一覧の足元) は hover だけ下線。画面の入口・行・ボタンの a
+   (class のある a) には下線を付けない (色は部品と種類が決める)。押せるものは
+   指の形のカーソル。
+   ====================================================================== */
+a:where(:not([class])) {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+a:where(:not([class])):hover {
+  color: var(--color-accent-strong);
+}
+:where(.gdp-markdown-toc, .quick-help-foot) a:where(:not([class])) {
+  text-decoration: none;
+}
+:where(.gdp-markdown-toc, .quick-help-foot) a:where(:not([class])):hover {
+  text-decoration: underline;
+}
+a:where([class]),
+a:where([class]):hover {
+  text-decoration: none;
+}
+:where(button:not(:disabled), a[href], summary, [role="button"], [role="link"]) {
+  cursor: pointer;
 }
 
 /* ======================================================================
@@ -27631,7 +26755,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     transform: translateX(-100%);
     visibility: hidden;
     transition: transform var(--motion-fast), visibility var(--motion-fast);
-    box-shadow: var(--shadow-lg, 0 8px 24px rgb(0 0 0 / 0.3));
+    box-shadow: var(--shadow-pop);
   }
   body.mobile-nav-open #app-nav {
     transform: none;
@@ -28131,7 +27255,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     flex-basis: 100%;
   }
   #topbar {
-    mask-image: linear-gradient(to right, #000 calc(100% - var(--space-6)), transparent);
+    mask-image: linear-gradient(to right, black calc(100% - var(--space-6)), transparent);
   }
   /* エージェントの画面のアカウントのカードは 1 列 (1 枚の最小幅 320px で、320px の
      画面ではプランの名前・件数・⋯ が切れ、画面ごと横に送れた)。 */

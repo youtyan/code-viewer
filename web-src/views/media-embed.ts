@@ -1,9 +1,11 @@
+import { html } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 // Media (image / video / audio) embedding for binary file diffs.
 // Pure helpers extracted from app.ts — no app state involved.
 
 import type { FileMeta } from "../core/types";
 import { createMediaPlayer } from "./media-player";
+import { templateElement } from "./ui/renderer";
 
 const MEDIA_RE =
   /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
@@ -35,25 +37,24 @@ function fileURL(path: string, side: MediaCardSide): string {
   return `${apiUrl("file")}?path=${encodeURIComponent(path)}&ref=${ref}`;
 }
 
-function createMediaElement(
+function mediaTemplate(
   path: string,
   side: MediaCardSide,
   options?: MediaCardOptions,
-): HTMLElement {
+): unknown {
   const url = options?.fileUrl(side) ?? fileURL(path, side);
   const onMediaError = options?.onMediaError;
-  if (isImage(path)) {
-    const img = document.createElement("img");
-    img.src = url;
-    img.alt = "";
-    img.loading = "lazy";
-    if (onMediaError) {
-      img.addEventListener("error", () => onMediaError(side, img), {
+  if (isImage(path))
+    return html`<img
+      src=${url}
+      alt=""
+      loading="lazy"
+      @error=${{
+        handleEvent: (event: Event) =>
+          onMediaError?.(side, event.currentTarget as HTMLElement),
         once: true,
-      });
-    }
-    return img;
-  }
+      }}
+    />`;
   const kind = isVideo(path) ? "video" : "audio";
   const player = createMediaPlayer(url, kind, path);
   const media = player.querySelector<HTMLMediaElement>(kind);
@@ -65,28 +66,20 @@ function createMediaElement(
   return player;
 }
 
-function createMediaSide(
+function mediaSideTemplate(
   path: string | null,
   mediaSide: MediaCardSide | null,
   label: string,
   labelType: "add" | "del",
   options?: MediaCardOptions,
-): HTMLElement {
-  const side = document.createElement("div");
-  side.className = "media-side";
-  const labelEl = document.createElement("div");
-  labelEl.className = `media-label ${labelType}`;
-  labelEl.textContent = label;
-  side.appendChild(labelEl);
-  if (path && mediaSide) {
-    side.appendChild(createMediaElement(path, mediaSide, options));
-  } else {
-    const empty = document.createElement("div");
-    empty.className = "media-empty";
-    empty.textContent = label;
-    side.appendChild(empty);
-  }
-  return side;
+): unknown {
+  return html`<div class="media-side"><div class=${`media-label ${labelType}`}
+      >${label}</div
+    >${
+      path && mediaSide
+        ? mediaTemplate(path, mediaSide, options)
+        : html`<div class="media-empty">${label}</div>`
+    }</div>`;
 }
 
 // Per-card media enhancer (replaces the global walk; only touches this card)
@@ -103,32 +96,24 @@ export function enhanceMediaCard(
     wrapper.querySelector(".d2h-files-diff") ||
     wrapper.querySelector(".d2h-file-diff");
   if (!body) return;
-  const container = document.createElement("div");
-  container.className = "gdp-media";
-
-  if (file.status === "A") {
-    container.appendChild(
-      createMediaSide(null, null, "Not in HEAD", "del", options),
-    );
-    container.appendChild(
-      createMediaSide(path, "after", "After", "add", options),
-    );
-  } else if (file.status === "D") {
-    container.appendChild(
-      createMediaSide(path, "before", "Before", "del", options),
-    );
-    container.appendChild(
-      createMediaSide(null, null, "Deleted", "add", options),
-    );
-  } else {
-    container.appendChild(
-      createMediaSide(path, "before", "Before", "del", options),
-    );
-    container.appendChild(
-      createMediaSide(path, "after", "After", "add", options),
-    );
-  }
-  body.replaceWith(container);
+  const sides =
+    file.status === "A"
+      ? [
+          mediaSideTemplate(null, null, "Not in HEAD", "del", options),
+          mediaSideTemplate(path, "after", "After", "add", options),
+        ]
+      : file.status === "D"
+        ? [
+            mediaSideTemplate(path, "before", "Before", "del", options),
+            mediaSideTemplate(null, null, "Deleted", "add", options),
+          ]
+        : [
+            mediaSideTemplate(path, "before", "Before", "del", options),
+            mediaSideTemplate(path, "after", "After", "add", options),
+          ];
+  body.replaceWith(
+    templateElement(html`<div class="gdp-media">${sides}</div>`),
+  );
 }
 
 // Scrollspy: pick the file whose wrapper contains a scan line just below

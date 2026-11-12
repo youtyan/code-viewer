@@ -8,6 +8,8 @@
 // - 面の並び・URL・タブの配置は窓ごとに保存する (views/workspace/store.ts)
 // - どの面も最小の大きさで並ばない窓では、フォーカスのある面だけを出す
 
+import { html } from "lit/html.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { attachDragResizer } from "../../core/drag-resizer";
 import {
   closePane,
@@ -44,6 +46,7 @@ import {
   type WorkspaceAction,
 } from "../../core/workspace-bridge";
 import { PANE_FRAME_ATTRIBUTE } from "../../core/workspace-role";
+import { renderOwned, templateElement } from "../ui/renderer";
 import { mirroredElement } from "./bridge";
 import type { WorkspaceStore } from "./store";
 
@@ -141,11 +144,19 @@ export function startWorkspaceHost(deps: {
   }
 
   function createFrame(id: PaneId, url: string): PaneRuntime {
-    const frame = document.createElement("iframe");
-    frame.setAttribute(PANE_FRAME_ATTRIBUTE, id);
-    frame.setAttribute("allow", "clipboard-read; clipboard-write; fullscreen");
-    frame.title = "code viewer";
-    frame.src = url;
+    const frame = templateElement<HTMLIFrameElement>(
+      html`<iframe
+        data-cv-pane=${id}
+        allow="clipboard-read; clipboard-write; fullscreen"
+        title="code viewer"
+        src=${url}
+      ></iframe>`,
+    );
+    if (frame.getAttribute(PANE_FRAME_ATTRIBUTE) !== id)
+      throw new Error(
+        `workspace: the pane frame attribute is not ${PANE_FRAME_ATTRIBUTE}`,
+      );
+    // 面の iframe は足すだけで並べ替えない (iframe を動かすと読み直しになる)。
     root?.append(frame);
     return adopt(frame);
   }
@@ -497,15 +508,15 @@ export function startWorkspaceHost(deps: {
   }
 
   function createDivider(key: string, path: SplitPath, dir: SplitDir) {
-    const el = document.createElement("div");
-    el.className = "workspace-divider";
-    el.dataset.dir = dir;
-    el.setAttribute("role", "separator");
-    el.setAttribute(
-      "aria-orientation",
-      dir === "row" ? "vertical" : "horizontal",
+    const el = templateElement(
+      html`<div
+        class="workspace-divider"
+        data-dir=${dir}
+        role="separator"
+        aria-orientation=${dir === "row" ? "vertical" : "horizontal"}
+        tabindex="0"
+      ></div>`,
     );
-    el.tabIndex = 0;
     root?.append(el);
     const divider = {
       el,
@@ -552,12 +563,13 @@ export function startWorkspaceHost(deps: {
     for (const runtime of panes.values()) {
       if (runtime.id === from || runtime.frame.style.visibility === "hidden")
         continue;
-      const target = document.createElement("div");
-      target.className = "workspace-drop-target";
-      const mark = document.createElement("div");
-      mark.className = "workspace-drop-mark";
-      mark.hidden = true;
-      target.append(mark);
+      const target = templateElement(
+        html`<div class="workspace-drop-target"><div
+          class="workspace-drop-mark"
+          hidden
+        ></div></div>`,
+      );
+      const mark = target.firstElementChild as HTMLElement;
       for (const side of ["left", "top", "width", "height"] as const)
         target.style[side] = runtime.frame.style[side];
       const zoneOf = (event: DragEvent): DropZone | null => {
@@ -864,5 +876,6 @@ function applyMirror(item: MirroredItem): void {
     if (!wanted.has(name)) el.removeAttribute(name);
   for (const [name, value] of wanted)
     if (el.getAttribute(name) !== value) el.setAttribute(name, value);
-  if (el.innerHTML !== item.html) el.innerHTML = item.html;
+  // 中身は面のページが描いたもの (面から届いた HTML をそのまま写す)。
+  renderOwned(el, unsafeHTML(item.html));
 }

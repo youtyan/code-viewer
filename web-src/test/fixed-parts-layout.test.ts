@@ -7,8 +7,8 @@
 // - JS が後から絵を差し込む箱は、最初から絵と同じ大きさを持つこと
 // - 後から出入りする印は、ボタンの流れの外 (角に重ねる) に置くこと
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import { currentStatusLabel, renderStatusLabel } from "../views/status-label";
 import {
   baseRules,
@@ -18,14 +18,6 @@ import {
 } from "./_css-fixture";
 
 const rules = baseRules(loadStyleSheet());
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 /** 箱の大きさに効く宣言 (色や影は幅を変えないので見ない)。 */
 const BOX_PROPERTIES = [

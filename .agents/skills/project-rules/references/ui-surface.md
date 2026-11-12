@@ -29,12 +29,68 @@
 | 全体ボードの操作 | 主の操作は `agents-primary`、枠つきの小さな操作は `agents-secondary`、文字だけは `agents-text-action`、アイコンは `agents-icon-action` (28px 角)。プロジェクトの見出しの開く・起動・⋯ は hover / フォーカスで出し、場所は最初から取る |
 | 設定の節 (設定のページ `/settings`) | `views/viewer-settings.ts`、文言は `views/viewer-settings-i18n.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: appearance / agents / accounts / shortcuts / files / advanced。よく使うものが先、最初のものが開いたときの分類) を 1 つ付ける (付けないと全部の分類に出る。並びは分類の並びに合わせる。検索の結果もこの順)。読む人は使う人: 節は見出し → 何のための設定かを 1 文 → 操作。内部の仕組み・ファイルの場所・判定の細部は畳んだ `details` かヘルプへのリンクに回す (判定ルールの JSON は畳み、誤りと「適用中」は畳んだ外に置く)。説明文の 1 段落は日本語 120 文字・英語 240 文字まで (`settings-text-length.test.ts` が設定・フック・アカウント・ショートカットの文言の表をすべて測る。長くなるなら段落を配列で分ける。例外は理由つきでそのテストの `EXCEPTIONS` に)。めったに触らないものは advanced へ。見出しの id は変えずに分類を移す (送り先は見出しを含む分類になる。`viewer-settings.test.ts` の見出しの移し先の表)。左の列・検索欄・見出しは `views/settings-page.ts` が描く (枠は `views/page-shell.ts`、ヘルプのページと共通)。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (設定のページを開き、分類も切り替わる。畳んだ `details` の中の id なら開く。実体は `settings-page.ts`)。設定とヘルプが 1 つのページだった頃の `/help?section=settings` は `core/routes.ts` の `parseRoute` が、`/help#<設定の見出し>` は起動時に `headingInHash` が設定のページへ移す。分類の説明の下にヘルプの節への 1 行を置くなら `settings-page.ts` の `CATEGORY_HELP_LINKS` (文字はヘルプの節の名前 `helpSectionName`)。選ぶ欄 (選択の欄・トグル・テーマの見本) は選んだ時点で当てて保存する (`onChoose`。明暗・テーマは `setTheme` / `setColorTheme`。全プロジェクト共通の項目は別の窓にも当てる: app の `refreshLookFromServer` の `SHARED_CHOICE_KEYS`)。説明は「選ぶとすぐ効きます」にそろえる (テーマを選んだのに「変更を保存」が押せず、帯の「押すまで適用されません」と食い違った)。保存が要るのは打ち込む欄 (途中の値がありうるもの: 除外の一覧・監視の上限・判定ルールの JSON・起動コマンド・ショートカット) だけで、保存はページの下の「変更を保存」1 つ: 節が下書きを持つなら `SettingsDraft` を `drafts` に渡し、節の中に「保存」を置かない (アカウントの節で保存が 2 つになり、利用者が迷った)。保存の帯は、保存する欄のある節 (`viewer-settings.ts` の `savedSections`) が出ている間と、未保存の変更が残っている間だけ出す (表示・エージェントの分類には出さない)。未保存が無い間は保存の横に「保存の要る変更はありません」(`data-state="clean"`) を出す (押せないボタンだけを置かない)。保存できない間 (JSON の誤りなど) は `problem()` で理由を返し、ページはどの節も保存しない。節の中の「既定に戻す」も下書きを変えるだけで、保存はページの「変更を保存」(判定ルールの「組み込みルールに戻す」も)。未保存は保存の横の文言 (`data-state="unsaved"`) で示す。分類に節が 1 つだけのときは、その節の見出しを出さない (ページの見出しと同じ役。`scope-settings-section-sole`。検索中は出す) |
 | キーの割り当て (設定の「ショートカット」・ヘルプのキーの一覧・キーボードショートカットの小窓 (`?`、`views/quick-help.ts`)・パレットのキー) | 操作の名前と分類は `views/help-keybindings.ts` の `KEYMAP_ACTION_INFO` だけに書く (Record なので操作を足すと書き忘れが型で落ちる)。既定のキーは `core/keymap.ts` (`DEFAULT_KEY_BINDINGS` と、PWA の窓の `pwaKeyBindings`)、利用者の差分を重ねるのは `resolveKeyBindings`、画面に出すのは app の `activeKeyBindings` (ヘルプ) / `shownKeyBindings` (この窓で効くものだけ: title・パレット)。キーの効く所 (入力欄・端末・PWA の窓) は押し方ごと (`KeyChord` の inputs / terminal / pwa)。編集の画面は `views/help-keybinding-editor.ts` |
-| ⌘K のパレットの行き先 (ファイル以外) | `views/search-palette-ui.ts` の `PaletteCommand` (群 = projects / agents / sessions / actions。エージェントでないペインとシェルは sessions)。中身は `app.ts` の `paletteCommands()`、操作は `PALETTE_ACTIONS` (キー割り当てのある操作は `keymap` を書けばキーが右に出て、実行も同じ `dispatchKeymapAction`)。ファイルの絞り込み・grep の側には足さない |
+| ⌘K のパレットの行き先 (ファイル以外) | `views/search-palette-ui.ts` の `PaletteCommand` (群 = projects / agents / sessions / actions。エージェントでないペインとシェルは sessions)。中身は `app.ts` の `paletteCommands()`、操作は `PALETTE_ACTIONS` (キー割り当てのある操作は `keymap` を書けばキーが右に出て、実行も同じ `dispatchKeymapAction`)。検索欄が空のときの操作は、最近使ったもの (ユーザー単位の設定 `paletteRecentActions`、`core/search-palette.ts` の `emptyQueryActions`) を決め打ちの `suggested` より先に出す。ファイルの絞り込み・grep の側には足さない |
 | 作業ツリーの一覧の行 | `views/worktree-view.ts`。何も選んでいないときは一覧だけの画面 (`body[data-worktree-overview]`、列は `--worktree-columns`)。行の「開く」はこのときだけ置き、選んだ後の狭い一覧は「…」だけ (選んだ瞬間にボタンを増やさない) |
 | Data の表の足元 | `views/database/table-grid.ts` の `db-grid-status` (件数) と `db-grid-pager` (見えている行の範囲と 1 画面ずつのページ送り)。表の行の高さは表示密度の値 (`views/shell/row-height.ts` の `currentRowHeight`、CSS は `--ui-row-h`)、列幅は TS が持つので、CSS は色と線だけ |
 | 空の状態の案内 (何も無い場所で次にやること) | `views/empty-state.ts` の `renderEmptyState` (絵・一行・補足・操作 2 つまで・キー 3 つまでをキーキャップで)。形は既存の `.empty` (`.empty-icon`・`h2`・`p`・`.empty-actions` の `.empty-action` / `-primary`) に `.empty-keys` を足したもの。画面の一部に置くときは `compact`。文言は置き場の i18n。実例: 全体ボードのエージェント 0・Search の初期・Tools の入力が空 |
-| アイコン SVG | `core/icons.ts` の path 定数 + `iconSvg(className, paths)` |
+| アイコン SVG | `core/icons.ts` の path 定数 + `views/ui/icon.ts` の `iconTemplate(paths, cls, size)`。絵を HTML の文字列にして入れない（`ui-components.test.ts` が unsafeHTML の使い所を見張る） |
 | ホバーで出る説明 (ツールチップ) | 要素に `title` を書くだけ。`views/title-tooltip.ts` の `installTitleTooltips` (`app.ts` が 1 回だけ取り付ける) が、マウスとペンで約 300ms 後に title の値をそのまま `.title-tooltip` に出す (指では出さない。出している間は title を外して既定の吹き出しと重ねない)。部品ごとに吹き出しを作らない。title に置いた文言がそのまま吹き出しの文言 |
+
+### ボタンの種類
+
+ボタンは種類で選ぶ。色と状態 (地・文字・枠・hover・無効) は `web/style.css` の「ボタンの種類」の節
+だけが決め、部品の規則は寸法 (高さ・余白・角丸) だけを持つ。新しいボタンのクラスはその節の種類の
+並びに足す (並びに無いボタンは種類の色にならない)。`button-variants.test.ts` が、実際に置かれる
+場所 (親の `.x button` の規則が効く所) でも種類の色になることを見る。
+
+| 種類 | 使う所 | 見た目 |
+|---|---|---|
+| 主 | その画面でいちばん勧める操作 1 つ (起動・ダイアログの確定・保存・問い合わせの実行・作業ツリーの追加)。1 画面に 1 つ | 強調色の面に `--color-on-accent`。危険な確定だけは `gdp-dialog-danger` で状態の色 |
+| 薄塗り | 主の次に勧める、取り消しでない操作 (差分の行を広げる `gdp-expand-btn`・注釈の次へ `gdp-annotation-step`) と、押されている間の枠線・アイコン (`[aria-pressed="true"]`・`.active`) | 面 `--color-info-surface`・文字 `--color-on-info-surface`・縁は透明。hover は面を一段濃く |
+| 枠線 | 既定。ふつうの操作と、ダイアログの取り消し | 地なし・`--color-line-strong` の縁・強調色の文字。消す操作は文字だけ `--color-failed` (`journal-danger-action` など、節の「危険な操作」の並び) |
+| 小 | 行の中・帯の中に置く小さな操作 (`gdp-btn-sm`・`db-btn-sm`・Data の履歴の行の操作) | 色は枠線と同じ。文字は `--ui-font-sm`、高さと余白は部品の規則が T0 の名前 (`--ui-control-sm`・`--space-*`) で持つ |
+| 文字だけ | 枠線では騒がしい所 (見出しの横の「すべて更新」・一覧の末尾の「続きを読む」・次の未読へ) | 地も縁もなし・強調色の文字 |
+| アイコン | 帯の上の、場所を取らない操作 (閉じる・コピー・再読み込み・道具の列) | 地なし・絵は `--color-text-2`、hover で `--color-raised` の面と本文の色。状態の印 (`.copied` `.failed` `.warn` `.opened` `[data-copied]`) の色は hover でも残す |
+
+主・枠線・文字だけの hover は案内の面 (`--color-info-surface`)。無効は `--color-disabled` (主と薄塗りは面も
+`--color-disabled-surface`)。`opacity` で薄めない。
+
+- **2 つの種類のクラスを持つボタンは、節の後ろの種類になる** (並びは 枠線・小 → 文字だけ → アイコン → 薄塗り → 主)。
+  `.gdp-btn.gdp-view-file` はアイコン、`.db-btn.db-btn-icon` はアイコン、`.gdp-btn-sm.worktree-head-add` は主
+- **クラスの無い `<button>` を親の規則 (`.x button`) で塗らない。** 種類のクラスを TS で付ける
+  (作業記録の「新規」・スナップショットの操作・ソースの検索の帯は `gdp-btn gdp-btn-sm` / `db-btn db-btn-sm`)。
+  親の規則のボタン向けの色は、同じ親の中の別の種類のボタン (保存の主など) にも当たっていた
+- **タブ・切替の規則は、そのタブのボタンだけに当てる** (`.gdp-source-tabs button:where([data-source-tab])`)。
+  `.x button` で書くと、同じ列に置いた「Go」やコピーのボタンがタブの色と寸法になっていた
+- タブ・切替 (`.seg`)・絞り込みの札・ツリーやメニューの行・パンくず・選ぶ欄・電話の節の部品は種類に
+  しない (行や札の面で選択を示す)
+- happy-dom は `:is(` の中の改行と `color-mix()` を読めない。節の並びは 1 行に書き、薄塗りの検査は
+  `button-variants.test.ts` が名前を計算できる色に差し替えて見る
+
+### 部品の節 (チェックボックス・入力欄・メニュー・カード・リンク)
+
+ボタンと同じく、部品の見た目は `web/style.css` の「ボタンの種類」の後ろの部品ごとの節だけが決め、
+部品の規則に残すのは状態の印と置き場所ごとの寸法だけ。`form-controls.test.ts` が、実際の置き場所
+(親の規則が効く所) でも節の見た目になることを見る。新しい置き場所を作ったら、そのテストの表に足す。
+
+| 部品 | 使うもの | 節が決めること |
+|---|---|---|
+| チェックボックス・ラジオ・スライダー | 標準の `<input type="checkbox\|radio\|range">`。ラベルは `<label>` の直下に置く | 色 (`accent-color: --color-accent`)・大きさ (`--icon-md`)・ラベルとの間 (`column-gap: --space-2`。並べ方の flex / grid は置き場所)・フォーカスの輪 (`--focus-ring`)・無効 (`--color-disabled`。ラベルの文字も)。**設定のトグルもチェックボックス** (`appearance: none` で描くスイッチの形にしない) |
+| 入力欄・選ぶ欄 | 標準の `<input>` (1 行・search・date など)・`<textarea>`・`<select>` (`<option>` / `<optgroup>`) | 地 `--color-inset`・縁 `--color-line`・角丸 `--radius-md`・文字・プレースホルダ (`--color-text-3`)・フォーカス (縁と内側の 1px を強調色)・誤り (`aria-invalid="true"` で縁を `--color-error-line`。縁の色は `--field-edge` で受ける)・無効 (`--color-disabled` と面 `--color-disabled-surface`)・選ぶ欄の矢印。高さ (`--ui-control-sm`) と余白の既定は `:where()` で詳細度 0、置き場所が `--ui-control-md` などに上書きしてよい。**1 行の欄に縦の余白を書かない** (高さの中で文字が切れた) |
+| 右クリックのメニュー | `views/context-menu.ts` の `showContextMenu` (`.gdp-context-menu`)。同じ形の浮くメニューは節の並びに足す (Data の書き出し `.db-grid-export-menu`) | 面 (`--color-overlay`・`--color-line-strong` の縁・`--shadow-context-menu`)・項目 (行の高さ `--ui-row-h`・hover とフォーカスは `--color-select`)・区切り (`--color-line-row`)・見出し・無効 (`--color-disabled`)・危険 (`.danger` は `--color-failed`)・チェックつき (`aria-checked`) |
+| カード | 同じ形の物が並ぶ一覧の 1 件だけ (差分のファイル・全体ボードのアカウント・一覧だけの作業ツリーの行・作業記録のかんばんの列) | 面 `--color-doc`・縁 `--color-line-row`・角丸 `--radius-md`・中の余白 `--card-pad`・見出しの行 (名前が左、操作が右端。高さ `--ui-control-md`、下に `--color-line-row`)。状態の印 (選んでいる・いまのフォルダ・衝突・落とせる所) は部品の規則 |
+| リンク | 文の中のリンクは class の無い `<a>` | 強調色で下線つき。並びの多い所 (目次・一覧の足元) は hover だけ下線。class のある `<a>` (画面の入口・行・ボタン) には下線を付けない。押せるものは指の形のカーソル |
+
+- **文字を打って絞り込む部品は選ぶ欄にしない** (ブランチの選択・プロジェクトの切替・パレット・Data の
+  タイムゾーン)。これらの検索の欄と、表のセルや見出しの中の欄・全面の編集の欄・端末の裏の欄は、入力欄の
+  節の並びの外 (`:not(:where(…))` の一覧)。足すときは理由をその一覧の上のコメントに書く
+- **右クリックのメニューにキーの割り当てを出さない** (OS や環境でキーが違い、OS の決まりともぶつかる)。
+  キーはパレット・ヘルプのキーの一覧・title が示す。`context-menu.ts` の項目はキーを受け取らない
+  (`context-menu.test.ts` が項目に kbd が無いことを見る)
+- 決まった選択肢から 1 つ選ぶだけの部品は `<select>`。独自の一覧の窓を作らない。排他の切替を横に並べて
+  見せる所は `.seg` (選ぶ欄ではない)
+- happy-dom は `:is(a, b)` の後ろに続く `:disabled`・`:not()` を読み違えて (当たらない要素にも当てる)、
+  検査が素通りする。状態の条件は `:is(input:disabled, …)` のように `:is()` の中に書く
 
 `alert` / `confirm` / `prompt` は `biome.jsonc` が **error で落とす**ので、そもそも書けない。
 `views/ui-dialog.ts` を使う。
@@ -134,7 +190,9 @@
 
 - 面の中のタブ列に出すのは、その面のプロジェクトのグループとプロジェクトの無いタブだけ
   (`main-tabs-view.ts` の `paneMode`)。ほかのプロジェクトのタブは配置に残し、面がそのプロジェクトへ
-  移ると出る (前面はそのグループの最後の前面)。次・前のタブと n 番目は見えているタブの中だけを動く
+  移ると出る (前面はそのグループの最後の前面)。次・前のタブと n 番目は見えているタブの中だけを動く。
+  **前面のタブだけは隠さない** (`tabsInStrip`): シェルのグループは tmux の前面のペインで変わるので、
+  別のプロジェクトのペインへ移ると、本文に出したままタブ列からだけ消えていた
 - 左の一覧で選ぶプロジェクト = フォーカスのある面のプロジェクト。サイドバー・最下段・キーは
   フォーカスのある面に頼む (`views/workspace/host.ts`)。エージェントの行は、そのシェルを出している面が
   あればその面へ移って開く
@@ -222,6 +280,11 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
 | 文字の段階 | `--color-text` / `--color-text-2` / `--color-text-3` / `--color-on-accent` |
 | 線 | `--color-line` / `--color-line-soft` / `--color-line-strong`。**線は最後の手段。** 面の明るさの差で分けられるなら線を引かない。表の行の区切りだけは `--color-line-row` (上の「表」) |
 | アクセントと状態 | `--color-accent` / `--color-accent-strong`、`--color-waiting` `--color-working` `--color-done` `--color-failed` `--color-idle` |
+| 状態の面と線と文字 | 警告・エラー・成功・完了・案内の帯や札は `--color-<warning\|error\|success\|done\|info>-surface` (面)・`-line` (縁)・`--color-on-<…>-surface` (面の上の文字。状態の色そのものは面の上で 4.5:1 に届かない)。部品で状態の色を `color-mix` で薄めない。下限は `color-themes-contrast.test.ts` |
+| 選択・無効 | 窓にフォーカスがある間の選択は `--color-select`、無い間は `--color-select-inactive` (`html[data-window-inactive]` が `--color-select` を差し替える。付けるのは `views/shell/window-active.ts`)。無効は文字と絵が `--color-disabled`、面が `--color-disabled-surface`。`opacity` で薄めない |
+| 部品だけの色 | `--app-*` (写真・動画の暗い幕とその上の操作、利用者の HTML を描く白い紙)、Blame の段階 `--blame-*`。テーマで変えない色も名前の層に置く |
+| 影 | `--shadow-sm` / `--shadow-md` (小さく浮く札) / `--shadow-context-menu` (メニュー・ポップオーバー) / `--shadow-pop` (ダイアログ・パレット・横から出る面) |
+| 絵の大きさ | `--icon-sm` 12 / `--icon-md` 14 / `--icon-lg` 16 / `--icon-xl` 18 / `--icon-2xl` 20 の 5 段だけ (既定の密度の値)。空の状態の大きな絵は挿し絵で段の外 (`icon-sizes.test.ts`) |
 | プロジェクトの色 | `--project-<色>` (`core/project-colors.ts` の `PROJECT_COLORS` と `none`)・頭文字の `--project-ink`。部品は `data-project-color` の下で `--project-color` を読む。どのテーマでもライト・ダークの 1 組ずつ (テーマで変えない) |
 | 選んでいる行の光 | `--glow-select` (内側の box-shadow。箱の寸法を変えない) |
 | 余白 / 角丸 | `--space-1`〜`--space-6` (4〜32px) / `--radius-sm` `--radius-md` `--radius-lg` |
@@ -233,6 +296,9 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
   テーマの塊は 16 進で持つ色の名前を全部書き、下限は全部のテーマ × 明暗で確かめる
   (`web-src/test/_color-themes.ts` を回すテスト。新しい色の下限のテストもこれで回す)
   古い `[data-theme="dark"] .x { color: #... }` を見つけたら、名前へ寄せる (触ったら直す)
+- **生の色を書いてよいのは色の名前を決める塊 (`:root`・明暗・テーマ・ターミナルの明暗) だけ**
+  (`color-literal-scope.test.ts`)。`var(--x, #fff)` の予備の色も書かない: 以前は定義の無い名前
+  (`--warning` `--error` `--link` `--accent-fg`) の予備の色が全テーマで出ていた
 - 古い名前 (`--bg` `--fg` `--accent` `--border` …) は互換の層で、中身は名前の層への参照だけ。
   新しい部品は名前の層を読む。互換の層に 16 進を書き戻さない
 - 差分の色 (`--diff-*`) は追加 = 緑・削除 = 赤の色相をどのテーマでも保つ (意味を保つ)
@@ -292,7 +358,13 @@ Search / Data / Work log はそのプロジェクト、シェルはそのシェ�
      一覧の行より一段ゆったりさせ、列の文字が詰まって見えないようにする。仮想表示に使わないので
      出所は `style.css` の `html, body` ブロックだけ (`--space-unit` から作るので密度に比例する)。
      仮想表示で使うことになったら、`--ui-row-h` と同じく TS を出所にする
-8. **選択の強さは 2 段。** 強い選択 (`--color-select` + `--glow-select`) は画面の同じ列に 1 つだけ
+8. **本文の面は箱の端まで敷く。浮いたカードにしない。** フォルダ表示・ファイル表示 (コードも
+   Markdown も) は、本文の箱 (`#content`) が余白を持たず (`body.gdp-repo-page` と
+   `body.gdp-file-detail-page` の `#content`)、面が箱の幅と高さいっぱいに広がる。余白は面の中の
+   `--pad-doc` が持つ。面と周りの列の区切りは面の明るさの差で (線を足さない)。カードの形は、
+   同じ形のものが並ぶ一覧の 1 件 (差分のファイル・全体ボードのアカウント) にだけ使う
+   (`pane-fit-css.test.ts` が 2 つの画面の箱の余白がそろうことを見る)
+9. **選択の強さは 2 段。** 強い選択 (`--color-select` + `--glow-select`) は画面の同じ列に 1 つだけ
    (いまターミナルで開いている行など)。「いまここ」を示すだけのもの (いま見ているプロジェクト) は
    控えめな面だけにする
 
@@ -340,6 +412,9 @@ disabled / updated のすべてで箱の寸法を保つ。**
 - 言語切替時のライブ反映は各 view の `localize()` が担当する。**テーブルに足したら
   `localize()` で反映されるか確認する**（足しただけでは切替時に古い文言が残ることがある）
 - 新しい画面を足すなら、同じ形で `i18n.ts` を作る
+- **見出しと部品の名前は文頭だけ大文字** (`Changed files`・`Not running`。Title Case にしない)。
+  CSS の `text-transform: uppercase` で見出しを全部大文字にしない (字間も広げない)。全部大文字で
+  よいのは、型や種類を示す短い札 (`.d2h-tag`・`.redis-type-badge` など) だけ
 
 ## Help ページと README への反映
 

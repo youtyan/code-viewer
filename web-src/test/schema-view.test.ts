@@ -1,13 +1,10 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
-GlobalRegistrator.register();
-
-const { createSchemaView } = await import("../views/database/schema-view");
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
+const { createSchemaView, DEFAULT_VIEW } = await import(
+  "../views/database/schema-view"
+);
+type SchemaViewProps = Parameters<typeof DEFAULT_VIEW>[0];
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -97,5 +94,73 @@ describe("database schema view", () => {
       expect.stringContaining("DDL"),
       failure,
     );
+  });
+});
+
+describe("the schema view presenter", () => {
+  test("keeps only this table's keys and indexes, and blocks refresh while busy", () => {
+    const shown: SchemaViewProps[] = [];
+    let refreshes = 0;
+    const view = createSchemaView(
+      {
+        onRefresh: () => {
+          refreshes++;
+        },
+      },
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    const last = () => shown[shown.length - 1] as SchemaViewProps;
+    view.render(
+      "sample_table",
+      [],
+      [
+        {
+          name: "sample_idx",
+          table: "sample_table",
+          columns: ["id"],
+          unique: true,
+        },
+        {
+          name: "sample_other_idx",
+          table: "sample_other",
+          columns: ["id"],
+          unique: false,
+        },
+      ],
+      {
+        foreignKeys: [
+          {
+            fromTable: "sample_table",
+            fromColumn: "sample_other_id",
+            toTable: "sample_other",
+            toColumn: "id",
+          },
+          {
+            fromTable: "sample_other",
+            fromColumn: "sample_table_id",
+            toTable: "sample_table",
+            toColumn: "id",
+          },
+        ],
+      },
+    );
+    const body = last().body;
+    if (body.kind !== "table") throw new Error(`unexpected body ${body.kind}`);
+    expect([
+      body.indexes.map((idx) => idx.name),
+      body.foreignKeys.map((fk) => fk.fromColumn),
+    ]).toEqual([["sample_idx"], ["sample_other_id"]]);
+
+    view.setRefreshBusy(true);
+    const busy = last().body;
+    if (busy.kind !== "table") throw new Error(`unexpected body ${busy.kind}`);
+    busy.refresh?.onClick();
+    expect([busy.refresh?.busy, refreshes]).toEqual([true, 0]);
+
+    view.showError("sample failure");
+    expect(last().body).toEqual({ kind: "error", message: "sample failure" });
   });
 });

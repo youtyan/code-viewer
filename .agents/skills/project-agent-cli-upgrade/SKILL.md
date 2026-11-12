@@ -1,11 +1,11 @@
 ---
 name: project-agent-cli-upgrade
-description: Use when the installed Claude Code (claude) or Codex (codex) CLI version differs from the version this project recorded as checked, or before recording a new checked version. Compares installed vs recorded versions, walks the checklist of every place code-viewer relies on CLI behavior (hooks, statusLine, screen rules, sign-in, usage, launch, skill install, MCP), fixes or reports what broke, then updates CHECKED_AGENT_CLI_VERSIONS. Triggers on "Claude Codeのバージョンが上がった", "Codexのバージョンが変わった", "CLIの版の点検", "準拠バージョンの更新", "agent CLI upgrade check", "claude version changed", "codex version changed".
+description: Use when the installed Claude Code (claude), Codex (codex) or opencode CLI version differs from the version this project recorded as checked, or before recording a new checked version. Compares installed vs recorded versions, walks the checklist of every place code-viewer relies on CLI behavior (hooks, statusLine, screen rules, sign-in, usage, launch, skill install, MCP), fixes or reports what broke, then updates CHECKED_AGENT_CLI_VERSIONS. Triggers on "Claude Codeのバージョンが上がった", "Codexのバージョンが変わった", "CLIの版の点検", "準拠バージョンの更新", "agent CLI upgrade check", "claude version changed", "codex version changed", "opencodeのバージョンが変わった", "opencode version changed".
 ---
 
-# Claude Code / Codex の版が変わったときの点検
+# Claude Code / Codex / opencode の版が変わったときの点検
 
-code-viewer は claude と codex の外から見える振る舞い（フックの出来事と欄・statusLine の JSON・
+code-viewer は claude・codex・opencode の外から見える振る舞い（フックの出来事と欄・statusLine の JSON・
 画面の文言・ログインと使用量のコマンドの出力・設定ファイルの場所）に頼っている。
 どれも版が上がると**黙って外れる**（状態が「待機」のまま・使用量が「取得できません」・
 フックが呼ばれない）。このスキルは、版が変わったときに頼っている所を 1 つずつ確かめ、
@@ -32,6 +32,7 @@ code-viewer は claude と codex の外から見える振る舞い（フック�
 ```sh
 claude --version   # 例: 2.1.286 (Claude Code)
 codex --version    # 例: codex-cli 0.159.3
+opencode --version # 例: 1.19.5
 grep -n "version" web-src/core/agent-cli-versions.ts
 ```
 
@@ -39,12 +40,12 @@ grep -n "version" web-src/core/agent-cli-versions.ts
 `code-viewer doctor` の Agent CLIs の行で見る（設定の起動コマンドを対話シェルで動かす）。
 `code-viewer` が PATH に無ければ、リポジトリで `pnpm run build` の後に `node dist/code-viewer.js doctor`。
 ビルドできないときは、doctor と同じ形で手で訊く（起動コマンドは `<状態>/accounts.json` の
-`.launchCommands`、無ければ `claude` / `codex`）:
+`.launchCommands`、無ければ `claude` / `codex` / `opencode`）:
 `"$SHELL" -i -c '<起動コマンド> "$@"' "$SHELL" --version`
 
 | 状況 | 点検する範囲 | 手順 2 で読む資料 |
 |---|---|---|
-| 手元の版が記録と違う | 違う種類（claude / codex）の全行 | 記録の版から手元の版までの変更履歴 |
+| 手元の版が記録と違う | 違う種類（claude / codex / opencode）の全行 | 記録の版から手元の版までの変更履歴 |
 | 記録と同じ版で、記録がまだ点検を通っていない（初めて置いた・利用者に確かめ直しを頼まれた） | その種類の全行 | 変更履歴の範囲ではなく、各行の公式ドキュメントの**今の**記述（過去の版で入った変化も拾うため） |
 | 記録と同じ版で、点検を通している | なし（このスキルは要らない） | — |
 
@@ -53,11 +54,11 @@ grep -n "version" web-src/core/agent-cli-versions.ts
 推測で「変わっていないはず」と決めない。読むのは次の 3 つだけ（第三者の記事・別の AI の
 回答だけで判断しない）。
 
-| 資料 | claude | codex |
-|---|---|---|
-| 変更履歴 | https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md | https://github.com/openai/codex/releases |
-| 公式ドキュメント | 点検表の各行に書いた URL | 点検表の各行に書いた URL |
-| CLI 自身 | `claude --help`・`claude <サブコマンド> --help` | `codex --help`・`codex features list` |
+| 資料 | claude | codex | opencode |
+|---|---|---|---|
+| 変更履歴 | https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md | https://github.com/openai/codex/releases | https://opencode.ai/changelog（GitHub は https://github.com/anomalyco/opencode/releases ） |
+| 公式ドキュメント | 点検表の各行に書いた URL | 点検表の各行に書いた URL | 点検表の各行に書いた URL（https://opencode.ai/docs/ は V1 と V2 の文書が混ざる。手元の版の `--help` と照らす） |
+| CLI 自身 | `claude --help`・`claude <サブコマンド> --help` | `codex --help`・`codex features list` | `opencode --help`・`opencode <サブコマンド> --help`・`opencode debug paths` |
 
 **要約を通さずに読む。** 変更履歴は数百 KB あり、WebFetch のような要約する道具では途中で切れたり
 項目が抜けたりする（実際に抜けた）。原文を手元に落とし、版の見出しで切り出してから grep する。

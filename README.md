@@ -1,14 +1,14 @@
 # code-viewer
 
 A local, browser-based viewer for your repository's code and git diffs, with a
-place to run and watch AI coding agents (claude, codex) in tmux.
+place to run and watch AI coding agents (claude, codex, opencode) in tmux.
 
 English | [日本語](README_ja.md)
 
 ![code-viewer: projects and agents on the left, the file list and changed files in the middle, a diff on the right](web/help-images/overview.en.webp)
 
 - Read files, diffs, commit history, blame and every worktree of a repository.
-- Start claude or codex in tmux, see which ones need input, and answer them in a terminal tab.
+- Start claude, codex or opencode in tmux, see which ones need input, and answer them in a terminal tab.
 - Keep several claude / codex accounts and see their usage.
 - Browse SQLite, PostgreSQL, MySQL, Redis, Elasticsearch, DynamoDB, S3-compatible storage and Cloudflare D1.
 - Let AI agents use it through a CLI, an MCP server and bundled skills.
@@ -36,7 +36,7 @@ One code-viewer serves every project from one port. It listens on `127.0.0.1` on
 |---|---|
 | Node.js 22.14 or newer, git | Everything |
 | [tmux](https://github.com/tmux/tmux) | Agents, account sign-in and tmux panes (shells work without it) |
-| claude and / or codex CLI | Running agents |
+| claude, codex and / or opencode CLI | Running agents |
 | `better-sqlite3` (optional dependency, installed with the package) | SQLite viewer, snapshots and `code-viewer query` |
 | `@lydell/node-pty` (optional dependency, installed with the package) | Terminal tabs (shells, and agents opened in a tab) |
 | Chrome | Installing it as an app (optional) |
@@ -54,7 +54,7 @@ One code-viewer serves every project from one port. It listens on `127.0.0.1` on
 3. Install tmux (`brew install tmux`, or your package manager on Linux).
 4. **Settings → Accounts**: select **Sign in** on the claude or codex row.
 5. (Recommended) **Settings → Agents → Agent integration**: select **Set up** to install hooks, so agent states are reliable.
-6. **New agent** at the bottom of the sidebar: choose claude or codex, the account and the project, then **Launch**.
+6. **New agent** at the bottom of the sidebar: choose claude, codex or opencode, the account and the project, then **Launch**.
 7. (Optional) **Enable notifications** on the **All agents** screen (`g a`).
 8. (Optional) Give your AI the bundled skills: `npx @youtyan/code-viewer skill install`.
 
@@ -193,19 +193,24 @@ Marks in the file list:
 - Add: the **+** next to **Projects**, **Add project…** in the ⌘K box, or `code-viewer` in the folder.
 - Switch: select a project in the sidebar, the project name at the top of the list column (`p`), or ⌘⇧↑ / ⌘⇧↓ (Ctrl+Shift+↑ / ↓). The page does not reload; tabs, terminals and unread marks stay.
 - The sidebar lists registered projects in use (an agent, a shell or its process running) in your order, then **Detected in tmux** (unregistered projects with agents), then **Not running** (folded).
+- A project heading shows its branch when it is not `main` / `master`, and how far it is ahead of / behind its upstream (`feature ↑2 ↓1`). It is read again when an agent there finishes a turn, when you switch to the project, and every 5 minutes.
 - Reorder by dragging a project heading or with Alt+↑ / Alt+↓.
 - Each project has a color and two initials (`code-viewer` → CV). The heading's ⋯ menu changes the color, renames it or removes it from the list (the repository is not touched).
 - Theme, language, key bindings and notifications are shared by all projects.
 
 ### Agents
 
-- **New agent**: starts claude or codex in a new tmux window, with the account and project you choose. The dialog shows the exact command and each account's 5-hour and weekly usage.
+- **New agent**: starts claude, codex or opencode in a new tmux window, with the account and project you choose. The dialog shows the exact command and each account's 5-hour and weekly usage.
 - The launch commands can be edited in **Settings → Accounts → Launch commands**.
 - claude started from code-viewer uses the classic renderer even if fullscreen (`"tui": "fullscreen"`) is set, so its earlier output stays in tmux for the phone to read.
 - Agents are listed under their project in the sidebar, on every screen. Select one to open its pane in a terminal tab. Rest the pointer on it to see the last lines of its screen.
-- **All agents** (`g a`): every agent in tmux on this machine, grouped by project, agents that need input first. **All panes** also lists plain shells.
+- **All agents** (`g a`): every agent in tmux on this machine, grouped by project, agents that need input first. **All panes** also lists plain shells. **Needs you first** lists all projects together: needs input, then finished, working and idle (the choice is remembered).
+- `g n` / `g N` open the next / previous agent that needs you (needs input, then finished · unread).
+- A needs-input row says why: permission, a question, or stopped on an error (for example a rate limit). An agent that fails right after **New agent** starts is reported with its exit code and last lines.
+- Right-click an agent row: **Mark as unread**, and on **All agents** **Pin to the top**.
+- An agent started by another agent is indented under it when its tmux pane has the user option `@agent-parent` (the parent pane id, for example `%2`). code-viewer sets it on agents it starts for a hand-over; other tools can set it with `tmux set-option -p -t <pane> @agent-parent <parent pane>`. A child only notifies you when it needs input.
 - The bottom bar counts agents that need input and agents that are working. The browser tab title shows the unread count.
-- **Enable notifications** on **All agents** turns on desktop notifications. Choose what notifies you in **Settings → Agents → Agent notifications**. Notifications need https or localhost.
+- **Enable notifications** on **All agents** turns on desktop notifications. While the window is in front, the same events show as notices inside it instead (select one to open the pane). Choose what notifies you in **Settings → Agents → Agent notifications**, where a short sound can also be turned on. Notifications need https or localhost.
 - Right-click an agent → **Continue with another account…** starts an agent with another account in a new window of the same tmux session. It continues from the previous agent's conversation log. It needs the hooks, and the previous agent must have received one message since. The previous agent keeps running.
 
 | State | Meaning |
@@ -217,13 +222,13 @@ Marks in the file list:
 
 How the state is decided, strongest first:
 
-1. Hooks: claude and codex report it themselves. **Set up** in **Settings → Agents → Agent integration** shows the file and the diff before writing, backs up the file, and keeps your other hooks. If the settings file is generated (for example from dotfiles), it shows the hooks to add to the source instead. codex runs new hooks only after you trust them in `/hooks`.
+1. Hooks: claude, codex and opencode report it themselves (for opencode, a plugin file in `~/.config/opencode/plugins/`; restart a running opencode, and start opencode 2 with `--standalone` when you start it yourself, since its shared background service cannot tell the pane — opencode started from code-viewer gets it). **Set up** in **Settings → Agents → Agent integration** shows the file and the diff before writing, backs up the file, and keeps your other hooks. If the settings file is generated (for example from dotfiles), it shows the hooks to add to the source instead. codex runs new hooks only after you trust them in `/hooks`. Start codex yourself with `--no-daemon`: in its shared background server the hooks run with the first terminal's pane, so every codex reports to that pane (codex started from code-viewer gets it). When code-viewer's hooks change in a new version, **All agents** says they are out of date and **Reinstall** updates them in place.
 2. Screen text: rules match what the agent shows. Edit them as JSON in **Settings → Advanced**.
 3. Screen motion: whether the screen keeps changing.
 
 ### Accounts
 
-- An account is one claude or codex settings directory (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`).
+- An account is one claude or codex settings directory (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`). opencode has only its default account: no opencode setting keeps a sign-in in another directory. Its sign-in state comes from `opencode auth list`, and it has no usage limits to show.
 - **Settings → Accounts → Add account…**: create a new directory that links your settings from the default one, or register one you already have. It shows what will be created first. Sign-in details and history are never shared.
 - **Sign in** runs the official login command in a new tmux window.
 - Sign-in state and email come from `claude auth status`, `codex login status` and `codex app-server`. code-viewer does not read tokens.
@@ -233,15 +238,17 @@ How the state is decided, strongest first:
 
 ### Terminal
 
-- The **+** after the last tab (Ctrl+\`) opens **New shell**, existing shells and tmux panes, **Tools**, **Search** and more.
+- The **+** after the last tab (Ctrl+\`) opens a screen (Files, Diff, History, Worktrees, Data, Work log, Agents, Search, Tools), **Open a file…**, **New shell** or **New agent…**. Shells and agents are opened from the sidebar, the ⌘K box or **All agents**.
 - A shell runs your `$SHELL` on a PTY (not as a login shell), drawn with xterm.js. Opening shells needs `@lydell/node-pty`.
 - Shells end when code-viewer stops; tmux tabs reconnect. Run long work in tmux.
 - Each tmux session gets one tab; opening another pane of that session selects it in the same tab (and in tmux, so your own terminal attached to that session switches too). The tab closes when the tmux window ends or you detach.
 - Closing a tab never stops the shell or the agent. **Stop session** in the tab's right-click menu does.
 - **Read only** in the right-click menu turns input off; the same menu changes the text size.
 - Images and videos whose paths appear in the terminal are listed on a shelf next to it. Select one to open it in an image tab; the arrow keys move to the next or previous one.
-- Paste an image (⌘V / Ctrl+V) to hand it to the agent: it is saved under `.code-viewer/pasted/` and its path is typed without sending.
-- URLs and file paths on the screen are links (hold ⌘/Ctrl when tmux handles the mouse).
+- Paste an image (⌘V / Ctrl+V) or drop one onto the terminal to hand it to the agent: it is saved under `.code-viewer/pasted/` and its path is typed without sending.
+- URLs, file paths and tmux pane ids (`%12`) on the screen are links (hold ⌘/Ctrl when tmux handles the mouse).
+- Text a program in the terminal copies (OSC 52, for example tmux copy mode) goes to the clipboard; reading the clipboard is never allowed. Turn it off in **Settings**. For programs inside tmux, add `set -g set-clipboard on` to the tmux config.
+- **Settings → Display** can send macOS Option as Alt to the terminal (off by default, so Option+¥ still types a backslash on a JIS keyboard).
 - The terminal size follows the screen you are operating (PC or phone).
 - `?terminal=<shell>` on any URL brings that shell's tab to the front.
 - Powerline symbols and file icons show when a Nerd Font is installed where the browser runs.
@@ -368,6 +375,7 @@ Open **Data** (`g b`).
 | `search` | Search code (`code`) and file names (`files`) | Yes |
 | `query` | Read-only datastore queries, cross-table search, snapshots and diffs | Yes |
 | `annotate` | Post notes on code lines for the viewer | Yes |
+| `show` | Open a file (and line) or its diff in a new tab of the open viewer — only when the user asks | Yes |
 | `journal` | Work log entries and the task queue | Yes (except `github-issues` and `--dry-run`) |
 | `terminal` | List terminals and their states, read a pane's text, report state | Yes |
 | `accounts` | Add and sign in claude / codex accounts | Yes |
@@ -541,7 +549,7 @@ npx -y @youtyan/code-viewer skill install --agent claude,codex   # several agent
 npx -y @youtyan/code-viewer skill install --agent all --global   # every agent, in your home directory
 ```
 
-- `--agent`: `claude`, `codex`, `gemini`, `cursor`, `agents` (`.agents/skills`) or `all`.
+- `--agent`: `claude`, `codex`, `gemini`, `cursor`, `agents` (`.agents/skills`), `opencode` (`.opencode/skills`, `--global`: `~/.config/opencode/skills`) or `all`.
 - Run it at the repository root: without `--global` it installs into the current directory. `--global` installs into `~/.claude/skills/`, `~/.codex/skills/` and so on; `--cwd <dir>` picks another directory.
 - Running it again updates the installed skills.
 

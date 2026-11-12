@@ -5,8 +5,8 @@
 // フォーカスは選んだ行へ移る。作業ツリーの一覧と変更ファイルは
 // worktree-view.test.ts。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import type { AppRoute } from "../core/routes";
 import {
   createHistoryView,
@@ -30,14 +30,6 @@ import {
 } from "./_css-fixture";
 import { createSidebarForTest, installSidebarDom } from "./_sidebar-fixture";
 import { waitFor } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const originalFetch = globalThis.fetch;
 const OriginalIntersectionObserver = globalThis.IntersectionObserver;
@@ -378,11 +370,6 @@ async function mountHistory() {
       if (!found) throw new Error(`missing ${selector}`);
       return found;
     },
-    escapeHtml: (value) =>
-      String(value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/"/g, "&quot;"),
     getRoute: () => route,
     setRoute: (next) => {
       route = next;

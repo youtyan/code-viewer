@@ -32,7 +32,16 @@ export type TmuxPane = {
    * 絞り込めないことを理由に何も出さないより、全部見せるほうがまし。
    */
   inRepo: boolean;
+  /**
+   * このペインを起こしたエージェントのペイン (tmux のペインのユーザーオプション
+   * `@agent-parent`。起こした側が付ける。code-viewer は読むだけ)。ペイン ID の形の
+   * 値だけ。無ければ無い。
+   */
+  parent?: TmuxPaneId;
 };
+
+/** 子エージェントの親を書く tmux のペインのユーザーオプション。 */
+export const AGENT_PARENT_OPTION = "@agent-parent";
 
 export type TmuxWindow = {
   index: number;

@@ -1,18 +1,15 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DbColumn } from "../core/database/types";
 
-GlobalRegistrator.register();
-
-const { createTableList } = await import("../views/database/table-list");
+const { createTableList, DEFAULT_VIEW } = await import(
+  "../views/database/table-list"
+);
+type TableListProps = Parameters<typeof DEFAULT_VIEW>[0];
 const { closeContextMenu, showContextMenu } = await import(
   "../views/context-menu"
 );
 const { dbText } = await import("../views/database/i18n");
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -470,5 +467,62 @@ describe("table list keyboard navigation", () => {
     expect(input.value).toBe("");
     expect(view.el.querySelectorAll(".db-table-item")).toHaveLength(2);
     view.dispose();
+  });
+});
+
+describe("the table list presenter", () => {
+  test("groups tables and views, expands with loaded columns and moves the tab stop", async () => {
+    const shown: TableListProps[] = [];
+    const expanded: [string, boolean][] = [];
+    const list = createTableList(
+      {
+        onSelectTable: () => undefined,
+        getColumns: async () => [column("id", "character varying")],
+        onExpandedTableChange: (table, open) => expanded.push([table, open]),
+      },
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    document.body.append(list.el);
+    const last = () => shown[shown.length - 1] as TableListProps;
+    list.render([
+      { name: "sample_view", type: "view", rowCount: null },
+      { name: "sample_table", type: "table", rowCount: 1500 },
+    ]);
+    expect(
+      last().groups.map((group) => [
+        group.label,
+        group.tables.map((t) => [t.name, t.count, t.tabStop]),
+      ]),
+    ).toEqual([
+      ["Tables · 1", [["sample_table", "1.5K", true]]],
+      ["Views · 1", [["sample_view", "", false]]],
+    ]);
+
+    last().groups[0]?.tables[0]?.onToggle();
+    await waitFor(() => {
+      const columns = last().groups[0]?.tables[0]?.columns;
+      return Array.isArray(columns) && columns.length === 1;
+    });
+    const table = last().groups[0]?.tables[0];
+    expect([
+      expanded,
+      table?.expanded,
+      Array.isArray(table?.columns) &&
+        table.columns.map((c) => [c.name, c.shortType, c.primaryKey]),
+    ]).toEqual([[["sample_table", true]], true, [["id", "varchar", true]]]);
+
+    list.setActive("sample_view");
+    expect(
+      last().groups.flatMap((group) =>
+        group.tables.map((t) => [t.name, t.active, t.tabStop]),
+      ),
+    ).toEqual([
+      ["sample_table", false, false],
+      ["sample_view", true, true],
+    ]);
+    list.dispose();
   });
 });

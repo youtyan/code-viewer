@@ -14,17 +14,15 @@
 // 書くので、書くときはロックの中で読み直してから自分の記録で置き換える。
 // どのサーバも同じペインの申告を受けるので、中身は揃う。
 
-import { existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { agentKindOf } from "../../core/agent-overview";
 import {
   type AgentStateObservationError,
   isAgentConversation,
   isReportedAgent,
 } from "../../core/agent-state";
-import { formatErrorDetail } from "../../core/error-detail";
 import { isTmuxPaneId } from "../../core/tmux";
-import { withFileLock } from "../file-lock";
 import { type RegistryFileRead, readRegistryFile } from "../registry-file";
 import { codeViewerStateDir } from "../user-state-dir";
 import {
@@ -34,7 +32,7 @@ import {
   onAgentConversationsChanged,
   restoreAgentConversations,
 } from "./agent-state";
-import { writeFileAtomic } from "./settings-file";
+import { createSavedStoreErrors, writeSavedStore } from "./saved-store";
 
 const FILE_VERSION = 1;
 
@@ -175,20 +173,16 @@ export function savedConversationsText(
 }
 
 /** ロックの中で読み直し、読めれば置き換える。読めない保存は上書きしない。 */
-export async function writeSavedConversations(
+export function writeSavedConversations(
   path: string,
   text: string,
 ): Promise<void> {
-  mkdirSync(dirname(path), { recursive: true });
-  await withFileLock(`${path}.lock`, () => {
-    const current = readSavedConversations(path);
-    if (current.ok === false) {
-      throw new Error(
-        `the saved conversation locations cannot be read, so they were not overwritten (remove the file to start over).\n${current.error}`,
-      );
-    }
-    writeFileAtomic(path, text, 0o600);
-  });
+  return writeSavedStore(
+    path,
+    text,
+    readSavedConversations,
+    "the saved conversation locations",
+  );
 }
 
 // ---- サーバの中の保存と読み戻し (巡回するサーバだけが使う) ----
@@ -202,28 +196,17 @@ type Persistence = {
 };
 
 let persistence: Persistence | null = null;
-const errors = new Map<string, AgentStateObservationError>();
-
-function setError(
-  operation: "restore_conversations" | "save_conversations",
-  cause: unknown,
-): void {
-  console.error(
-    `[code-viewer] ${operation === "restore_conversations" ? "could not restore" : "could not save"} the conversation locations of the agents`,
-    cause,
-  );
-  errors.set(operation, {
-    operation,
-    target: persistence?.path ?? "",
-    at: Date.now(),
-    detail: formatErrorDetail(cause),
-    stack: cause instanceof Error ? (cause.stack ?? "") : "",
-  });
-}
+const errors = createSavedStoreErrors({
+  what: "the conversation locations of the agents",
+  restore: "restore_conversations",
+  save: "save_conversations",
+  path: () => persistence?.path ?? "",
+});
+const setError = errors.set;
 
 /** 一覧の errors に載せる、保存と読み戻しの失敗。 */
 export function getConversationStoreErrors(): AgentStateObservationError[] {
-  return [...errors.values()].map((error) => ({ ...error }));
+  return errors.list();
 }
 
 function scheduleSave(): void {

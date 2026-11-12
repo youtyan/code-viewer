@@ -8,9 +8,9 @@
 //   勝っていない)
 // - キーキャップはどれも同じ形 (縁の線がその線、文字は本文の色)
 // - 行の多い表は 1 行おきに面が付く
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import { themeVariants } from "./_color-themes";
 import {
   baseRules,
@@ -77,22 +77,21 @@ describe("the row line of tables", () => {
 // メニューの区切りも同じ線 (浮く面の上で 1.5:1 以上は上の表で見ている)。
 // --color-line はダークで浮く面とほぼ同じ色 (#28242f と #28232f) で、区切りが消えていた。
 test("the separator of menus is drawn with the row line", () => {
+  // メニューの節の区切りの規則 (区切りは hr か .gdp-context-menu-sep)。
   expect(
-    cascadedDeclarations(rules, (s) => s === ".gdp-context-menu-sep").get(
-      "border-top",
-    ),
+    cascadedDeclarations(rules, (s) =>
+      /^:is\(\.gdp-context-menu, [^)]*\) > :is\(hr, \.gdp-context-menu-sep\)$/.test(
+        s,
+      ),
+    ).get("border-top"),
   ).toBe("1px solid var(--color-line-row)");
 });
 
 describe("tables drawn with the rule", () => {
   beforeAll(() => {
-    GlobalRegistrator.register();
     const style = document.createElement("style");
     style.textContent = readFileSync("web/style.css", "utf8");
     document.head.append(style);
-  });
-  afterAll(() => {
-    GlobalRegistrator.unregister();
   });
 
   function computed(html: string, selector: string): CSSStyleDeclaration {

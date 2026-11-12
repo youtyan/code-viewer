@@ -261,6 +261,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               kind: "list",
               items: [
                 "サイドバーのプロジェクト名を押すと、そのプロジェクトに移ります。",
+                "名前の後ろに、main 以外のブランチと、上流との差 (↑ 進んでいる・↓ 遅れている) が出ます。",
                 [
                   "一覧の列の上のプロジェクト名を押す（",
                   key("p"),
@@ -663,7 +664,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
     "start-agent": {
       title: "エージェントを起動する",
       intro:
-        "エージェントは、tmux のウィンドウで動く claude か codex です。プロジェクトとアカウントを選んで起動します。",
+        "エージェントは、tmux のウィンドウで動く claude・codex・opencode です。プロジェクトとアカウントを選んで起動します。",
       groups: [
         {
           title: "左のサイドバーから",
@@ -750,6 +751,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   " で保存します。",
                 ],
                 "起動の画面には、実行するコマンドがそのまま出ます。",
+                "起動してすぐ終わったとき（コマンドの打ち間違い・ログイン切れなど）は、終了コードと画面の最後の行を知らせます。ウインドウは残るので、開いて理由を読めます。",
                 "claude は全画面表示の設定があっても通常の表示で起動します。全画面表示では過去の出力が tmux に残らず、スマホで読めないためです。",
               ],
             },
@@ -782,6 +784,18 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 [ui(l.agents.state.idle), "何もしていません"],
               ],
             },
+            {
+              kind: "paragraph",
+              text: [
+                "フックを入れていると、入力待ちの代わりに理由が出ます（",
+                ui(l.agents.attention.permission),
+                "・",
+                ui(l.agents.attention.question),
+                "・",
+                ui(l.agents.attention.error),
+                "）。エラーで止まったもの（利用の上限・認証切れなど）は、返事をするまで手が要るものとして残ります。",
+              ],
+            },
             w.see("agent-hooks"),
           ],
         },
@@ -793,7 +807,19 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               items: [
                 "エージェントを押すと、そのペインがターミナルのタブで開き、そのまま返事を打てます。",
                 "エージェントにポインタを少し置くと、画面の最後の数行が出ます。",
+                "エージェントが起こした別のエージェントは、親の下に字下げして並びます。起こす側が新しいペインに tmux のオプション @agent-parent（親のペイン ID）を付けると、そうなります。",
+                [
+                  "後で片付けたいものは、右クリックの ",
+                  ui(l.agents.markUnread),
+                  " で、手が要るものに戻せます。",
+                ],
                 "最下段の右の数は、入力待ちと作業中のエージェントの数です。押すと一覧に移ります。",
+                [
+                  key("g n"),
+                  " で、手が要るエージェント（入力待ち → 完了）を順に開きます。",
+                  key("g N"),
+                  " で前に戻ります。",
+                ],
               ],
             },
             {
@@ -818,6 +844,15 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   "）は、このマシンの tmux で動くエージェントを全部並べます。",
                 ],
                 "各プロジェクトの中は入力待ちが先頭なので、上から順に片付けられます。",
+                [
+                  ui(l.agents.board.orderByUrgency),
+                  " に切り替えると、全プロジェクトをまとめて入力待ち・完了・作業中・待機の順に並べます。",
+                ],
+                [
+                  "見張りたいものは、行の右クリックの ",
+                  ui(l.agents.board.pin),
+                  " で一番上に置けます。",
+                ],
               ],
             },
             {
@@ -887,6 +922,12 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   " で、入力待ちと作業の終わりのそれぞれについて、通知するかを選べます。",
                 ],
                 "いま前面のタブで見ているエージェントは、通知しません。",
+                "ほかのエージェントが起こした子のエージェントは、入力待ちだけ知らせます (完了は親に任せます)。",
+                "code-viewer の窓が前面のときは、OS の通知の代わりに画面の右下に知らせを出します。押すとそのエージェントを開きます。",
+                [
+                  ui(l.settings.agentNotifySoundLabel),
+                  " を入れると、通知の許可に関係なく短い音でも知らせます（既定は鳴らしません）。",
+                ],
               ],
             },
           ],
@@ -908,7 +949,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
     "agent-hooks": {
       title: "エージェントの状態を正しく出す（フックを入れる）",
       intro:
-        "フックを入れると、claude と codex が自分で「作業中・入力待ち・完了」を code-viewer に知らせます。入れないと、状態は画面の見た目からの推測だけになり、エージェントの表示が変わると外れます。",
+        "フックを入れると、claude・codex・opencode が自分で「作業中・入力待ち・完了」を code-viewer に知らせます。入れないと、状態は画面の見た目からの推測だけになり、エージェントの表示が変わると外れます。",
       groups: [
         {
           title: "入れ方",
@@ -934,7 +975,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 },
                 {
                   text: [
-                    "claude か codex の行の ",
+                    "claude・codex・opencode の行の ",
                     ui(hooks.action.install),
                     " を押します。",
                   ],
@@ -959,6 +1000,29 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                     " で開いたタブの ",
                     code("/hooks"),
                     " で、code-viewer のフックを信頼します。信頼するまで動きません。",
+                  ],
+                },
+                {
+                  text: [
+                    "自分で起こす codex には ",
+                    code("--no-daemon"),
+                    " を付けます。付けないと共有の裏のサーバの中でフックが走り、状態が最初に起こした codex のペインに付きます (code-viewer から起こす codex には自動で付けます)。",
+                  ],
+                },
+                {
+                  text: [
+                    "opencode には、プラグインのファイル ",
+                    code(
+                      "~/.config/opencode/plugins/code-viewer-agent-hook.js",
+                    ),
+                    " を書きます。動いている opencode は起動し直します。",
+                  ],
+                },
+                {
+                  text: [
+                    "自分で起動する opencode 2 には ",
+                    code("--standalone"),
+                    " を付けます。付けないとプラグインが共有の裏のサーバで動き、知らせません (code-viewer から起こすものには付けます)。",
                   ],
                 },
               ],
@@ -1033,7 +1097,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
     "add-account": {
       title: "アカウントを追加する",
       intro:
-        "アカウントは、claude か codex の設定ディレクトリ 1 つです。仕事用と個人用を分けたいとき、別の契約でログインしたいときに足します。",
+        "アカウントは、claude か codex の設定ディレクトリ 1 つです。仕事用と個人用を分けたいとき、別の契約でログインしたいときに足します。opencode は既定のアカウントだけです。",
       groups: [
         {
           title: "画面で追加する",
@@ -1242,7 +1306,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 [
                   "タブ列の ＋ を押し、",
                   ui(l.terminal.newShell),
-                  " か、並んでいるセッションを選びます（",
+                  " を選びます（",
                   key("Ctrl+`"),
                   "）。",
                 ],
@@ -1265,11 +1329,38 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
             {
               kind: "list",
               items: [
-                "タブを閉じても、シェルやエージェントは止まりません。＋ から開き直せます。",
+                "タブを閉じても、シェルやエージェントは止まりません。左のサイドバー・パレット・エージェントの画面から開き直せます。",
                 [
                   "止めるときは、タブを右クリックして ",
                   ui(l.mainTabs.stopSession),
                   " を選びます。",
+                ],
+              ],
+            },
+          ],
+        },
+        {
+          title: "コピーと新しいシェル",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                "新しいシェルは、前面のタブが映している tmux のペインの作業場所で開きます（別の作業ツリーで作業中のときなど）。",
+                "tmux のコピーモードでコピーした文字は、そのままクリップボードに入ります。",
+                "claude など tmux の中のプログラムのコピーも入れるには、tmux の設定に set -g set-clipboard on を足します。",
+                [
+                  "止めるときは ",
+                  settings,
+                  " → ",
+                  ui(cat.appearance.label),
+                  " の ",
+                  ui(l.settings.terminalClipboardWriteLabel),
+                  " を外します。クリップボードを読ませることはしません。",
+                ],
+                [
+                  "macOS で claude の Option+Enter (改行) などを使うには、同じ所の ",
+                  ui(l.settings.terminalOptionAsAltLabel),
+                  " を入れます。",
                 ],
               ],
             },
@@ -1294,6 +1385,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 ],
                 "棚は見出しの ⋯ で右・左・下・上へ移せ、端末の側の縁をドラッグして大きさを変えられます。",
                 "画面の URL・ファイルのパス・画像のパスは、カーソルを載せると開く・コピーの帯が出て、押すと開きます。tmux のマウスが有効なときも ⌘/Ctrl を押しながらなら開けます。",
+                "画面に出た tmux のペイン ID (%12 など。エージェントが作業役を名指ししたとき) も、今あるペインなら押すとそのペインを開きます。",
                 [
                   "ターミナルの中は、画面がライトでもダークで描きます。変えるときは ",
                   settings,
@@ -1306,7 +1398,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               ],
             },
             more(
-              "画像を貼り付ける (⌘V / Ctrl+V) とエージェントに渡せます。プロジェクトの .code-viewer/pasted/ に日時の名前で保存し (git には入りません)、そのパスを送信せずに入力します。",
+              "画像を貼り付ける (⌘V / Ctrl+V) か、ターミナルへ落とすとエージェントに渡せます。.code-viewer/pasted/ に日時の名前で保存し (git には入りません)、パスを送信せずに入力します。",
               [
                 "画面に合わせて明るくして読みにくい色が残るときは、エージェントの側の配色もライト向けに替えてください (claude なら ",
                 code("/theme"),
@@ -1358,11 +1450,11 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                 "面のタブ列には、その面のプロジェクトのタブだけが並びます。面を別のプロジェクトに替えて戻すと、そのタブが戻ります。",
                 "左のサイドバーで選んだプロジェクトやエージェントは、フォーカスのある面 (最後に押した面) で開きます。もうどこかの面に出ているエージェントは、その面で出します。",
                 [
-                  "タブ列の ＋ から ",
+                  "タブ列の ＋ から、そのプロジェクトの画面（ファイル・差分・履歴など）と ",
                   ui(l.terminal.newShell),
                   "・",
                   ui(l.mainTabs.newAgentHere),
-                  " を開けます。そのプロジェクトの画面は、一覧の列の頭のアイコンから開きます。",
+                  " を開けます。画面は、一覧の列の頭のアイコンからも開けます。",
                 ],
               ],
             },
@@ -1412,6 +1504,11 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
               kind: "list",
               items: [
                 "ファイル一覧は、一覧の列の上のボタンで畳めます。",
+                [
+                  "左のサイドバーを畳んでも、左上の ",
+                  ui(l.agents.sidebar.expand),
+                  " に、手が要るエージェントがいれば色の点が付きます。",
+                ],
                 "窓が狭いと、一覧の列が細くなり、それでも足りなければ畳まれます。",
               ],
             },
@@ -2429,7 +2526,7 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
             {
               kind: "command",
               title:
-                "入れるエージェントを選ぶ（claude・codex・gemini・cursor・agents、または all）",
+                "入れるエージェントを選ぶ（claude・codex・gemini・cursor・agents・opencode、または all）",
               command: "code-viewer skill install --agent claude,codex",
             },
             {
@@ -2508,6 +2605,10 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                   " で、データベースへの読むだけの問い合わせ・テーブルを横断した検索・スナップショットの比較ができます。",
                 ],
                 "結果は画面の問い合わせの履歴にも残るので、あとで画面で見直せます。",
+                [
+                  code("code-viewer show <パス>[:行]"),
+                  " で、AI があなたの画面にファイル (--diff で差分) を新しいタブで開けます。頼んだときだけ使う決まりです。",
+                ],
                 "使い方の全部は、次のコマンドで出ます。",
               ],
             },

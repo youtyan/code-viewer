@@ -7,7 +7,10 @@
 //   ときに戻す。出している間にほかのコードが title を書いたら、その値を出して、
 //   消すときもその値を残す
 // - body 直下の position: fixed (親の overflow で切れない)。見た目は style.css の
-//   「title の吹き出し」の節
+//   「title の吹き出し」の節。重ね合わせの層 (views/ui/layer.ts) に描く
+
+import { html } from "lit/html.js";
+import { createLayer } from "./ui/layer";
 
 export const TITLE_TOOLTIP_DELAY_MS = 300;
 
@@ -54,31 +57,42 @@ type Hover = {
 export function installTitleTooltips(doc: Document = document): () => void {
   const win = doc.defaultView;
   if (!win) throw new Error("installTitleTooltips: document has no window");
-  let tip: HTMLElement | null = null;
   let hover: Hover | null = null;
+  /** 吹き出しの中身と位置。描くのは層。 */
+  const tip = { text: "", hidden: true, left: 0, top: 0 };
+  const layer = createLayer("title-tooltip");
 
   function tipElement(): HTMLElement {
-    if (tip?.isConnected) return tip;
-    tip = doc.createElement("div");
-    tip.className = "title-tooltip";
-    tip.setAttribute("role", "tooltip");
-    tip.hidden = true;
-    doc.body.append(tip);
-    return tip;
+    let element = layer.host()?.querySelector<HTMLElement>(".title-tooltip");
+    if (!element?.isConnected) {
+      layer.show(
+        () =>
+          html`<div
+            class="title-tooltip"
+            role="tooltip"
+            ?hidden=${tip.hidden}
+            style=${`left: ${tip.left}px; top: ${tip.top}px;`}
+          >${tip.text}</div>`,
+      );
+      element = layer.host()?.querySelector<HTMLElement>(".title-tooltip");
+    }
+    if (!element) throw new Error("title tooltip: the tooltip was not drawn");
+    return element;
   }
 
-  function place(anchor: Element, element: HTMLElement): void {
+  /** 文言を入れて出し、要素のすぐ下 (入らなければ上) に置く。 */
+  function showTip(anchor: Element, text: string): void {
+    const element = tipElement();
     // 前の位置のまま測ると、窓の右端の近くでは折り返して幅が狭く測れる。
-    element.style.left = "0px";
-    element.style.top = "0px";
-    const tipRect = element.getBoundingClientRect();
+    Object.assign(tip, { text, hidden: false, left: 0, top: 0 });
+    layer.update();
     const { left, top } = placeTooltip(
       anchor.getBoundingClientRect(),
-      tipRect,
+      element.getBoundingClientRect(),
       { width: win?.innerWidth ?? 0, height: win?.innerHeight ?? 0 },
     );
-    element.style.left = `${left}px`;
-    element.style.top = `${top}px`;
+    Object.assign(tip, { left, top });
+    layer.update();
   }
 
   function hide(): void {
@@ -86,7 +100,10 @@ export function installTitleTooltips(doc: Document = document): () => void {
     hover = null;
     if (!current) return;
     if (current.timer !== null) clearTimeout(current.timer);
-    if (tip) tip.hidden = true;
+    if (!tip.hidden) {
+      tip.hidden = true;
+      layer.update();
+    }
     const shown = current.shown;
     if (!shown) return;
     // まだ届いていない書き直しを先に読む (disconnect は捨てるので)。
@@ -111,9 +128,7 @@ export function installTitleTooltips(doc: Document = document): () => void {
       hide();
       return;
     }
-    const element = tipElement();
-    element.textContent = written;
-    place(current.anchor, element);
+    showTip(current.anchor, written);
   }
 
   function show(current: Hover): void {
@@ -129,10 +144,7 @@ export function installTitleTooltips(doc: Document = document): () => void {
     current.shown = { title, observer };
     current.anchor.removeAttribute("title");
     observer.observe(current.anchor, { attributeFilter: ["title"] });
-    const element = tipElement();
-    element.textContent = title;
-    element.hidden = false;
-    place(current.anchor, element);
+    showTip(current.anchor, title);
   }
 
   function onPointerOver(event: PointerEvent): void {
@@ -181,7 +193,6 @@ export function installTitleTooltips(doc: Document = document): () => void {
     for (const [target, type, listener] of listeners) {
       target.removeEventListener(type, listener, { capture: true });
     }
-    tip?.remove();
-    tip = null;
+    layer.hide();
   };
 }

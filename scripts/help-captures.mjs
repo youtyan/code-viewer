@@ -316,6 +316,11 @@ if (args[0] === "--version") {
   console.log(kind === "claude" ? "0.0.0 (Claude Code)" : "codex-cli 0.0.0");
   process.exit(0);
 }
+// code-viewer は codex を起こす前に --help を訊く (--no-daemon を知っているか)。
+if (args[0] === "--help") {
+  console.log(kind === "codex" ? "Options:\\n      --no-daemon" : "Options:");
+  process.exit(0);
+}
 if (kind === "claude" && args[0] === "auth" && args[1] === "status") {
   console.log(JSON.stringify(signedIn
     ? { loggedIn: true, email, authMethod: "claude.ai", subscriptionType: "max" }

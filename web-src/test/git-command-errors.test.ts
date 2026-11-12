@@ -283,7 +283,7 @@ describe("git command failures", () => {
     const timedOut = await worktreeListResultAsync(cwd, { timeout: 10 });
     // 時間切れを「git が無い」にせず、コマンド・上限・かかった時間を出す。
     expect(timedOut.error).toMatch(
-      /^\S+\/git worktree list --porcelain -z timed out after 10 ms \(ETIMEDOUT; stopped at \d+ ms\)$/,
+      /^\S+\/git -c core\.fsmonitor=false -c diff\.autoRefreshIndex=false worktree list --porcelain -z timed out after 10 ms \(ETIMEDOUT; stopped at \d+ ms\)$/,
     );
     expect(timedOut.status).toBe(503);
   });

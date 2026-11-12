@@ -9,43 +9,29 @@
 // 画面が動いたら閉じる。閉じたらフォーカスは既定で開いたボタンへ戻す
 // (キーボードで辿ってきた人が、メニューを閉じた瞬間に居場所を失わないように)。
 
-/** メニュー 1 項目。区切りは `separator` で表す。 */
-export type ContextMenuItem =
-  | {
-      kind?: "item";
-      label: string;
-      /** ホバーで出す説明。何が起きるかを 1 文で。 */
-      title?: string;
-      /** 取り返しのつかない操作。`.danger` が付いて色が変わる。 */
-      danger?: boolean;
-      disabled?: boolean;
-      /** 文字の前に置く絵 (プロジェクトの色の四角など)。 */
-      leading?: HTMLElement;
-      /** 右端に出すキー (割り当ての表記。絵のある項目だけ)。 */
-      hint?: string;
-      /**
-       * 選び方の一覧 (色など) の今の値か。持つ項目は role=menuitemradio に
-       * なり、aria-checked で今の値を伝える。
-       */
-      checked?: boolean;
-      onSelect(): void;
-    }
-  | { kind: "separator" };
+//
+// 中身は部品 cv-menu、置き場所は重ね合わせの層 (views/ui/layer.ts) が描く。
+
+import { html } from "lit/html.js";
+import { createLayer } from "./ui/layer";
+import type { MenuItem } from "./ui/menu";
+
+export type { MenuItem as ContextMenuItem } from "./ui/menu";
 
 type OpenMenu = {
-  element: HTMLElement;
   cleanup(): void;
   onClose?(): void;
 };
 
 let open: OpenMenu | null = null;
+const layer = createLayer("context-menu");
 
 export function closeContextMenu(): void {
   if (!open) return;
   const closing = open;
   open = null;
   closing.cleanup();
-  closing.element.remove();
+  layer.hide();
   closing.onClose?.();
 }
 
@@ -60,7 +46,7 @@ export function isContextMenuOpen(): boolean {
  */
 export function showContextMenu(
   anchor: HTMLElement,
-  items: ContextMenuItem[],
+  items: MenuItem[],
   options: {
     at?: { x: number; y: number };
     focusReturn?: HTMLElement | null;
@@ -70,51 +56,18 @@ export function showContextMenu(
 ): HTMLElement {
   closeContextMenu();
 
-  const menu = document.createElement("div");
-  menu.className = "gdp-context-menu";
-  menu.setAttribute("role", "menu");
-
-  items.forEach((item, index) => {
-    if (item.kind === "separator") {
-      const line = document.createElement("hr");
-      line.className = "gdp-context-menu-sep";
-      menu.appendChild(line);
-      return;
-    }
-    const button = document.createElement("button");
-    button.type = "button";
-    button.setAttribute(
-      "role",
-      item.checked === undefined ? "menuitem" : "menuitemradio",
-    );
-    if (item.checked !== undefined) {
-      button.setAttribute("aria-checked", String(item.checked));
-    }
-    if (item.leading) {
-      button.classList.add("gdp-context-menu-leading");
-      button.append(item.leading, item.label);
-    } else {
-      button.textContent = item.label;
-    }
-    if (item.hint) {
-      const key = document.createElement("kbd");
-      key.className = "gdp-context-menu-key";
-      key.textContent = item.hint;
-      button.append(key);
-    }
-    if (item.title) button.title = item.title;
-    if (item.danger) button.classList.add("danger");
-    button.disabled = !!item.disabled;
-    button.addEventListener("focus", () => options.onHighlight?.(index));
-    button.addEventListener("pointerenter", () => options.onHighlight?.(index));
-    button.addEventListener("click", () => {
-      closeContextMenu();
-      item.onSelect();
-    });
-    menu.appendChild(button);
-  });
-
-  document.body.appendChild(menu);
+  let position: { left: number; top: number } | null = null;
+  layer.show(
+    () =>
+      html`<cv-menu
+        .items=${items}
+        .position=${position}
+        .onHighlight=${options.onHighlight}
+        .onChoose=${closeContextMenu}
+      ></cv-menu>`,
+  );
+  const menu = layer.host()?.querySelector<HTMLElement>(".gdp-context-menu");
+  if (!menu) throw new Error("context menu: the menu box was not drawn");
 
   // 置いてから測る。幅も高さも中身で決まるので、先に測れない。
   const rect = menu.getBoundingClientRect();
@@ -123,8 +76,8 @@ export function showContextMenu(
   const originTop = options.at?.y ?? from.bottom + 4;
   const left = Math.min(originLeft, window.innerWidth - rect.width - 8);
   const top = Math.min(originTop, window.innerHeight - rect.height - 8);
-  menu.style.left = `${Math.max(8, left)}px`;
-  menu.style.top = `${Math.max(8, top)}px`;
+  position = { left: Math.max(8, left), top: Math.max(8, top) };
+  layer.update();
 
   const focusReturn =
     options.focusReturn === undefined ? anchor : options.focusReturn;
@@ -201,7 +154,6 @@ export function showContextMenu(
   window.addEventListener("resize", onScroll);
 
   open = {
-    element: menu,
     cleanup() {
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown, true);

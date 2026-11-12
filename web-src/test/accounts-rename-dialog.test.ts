@@ -2,8 +2,8 @@
 // 押す前の検査はサーバと同じ規則 (renameAccount・checkAccountTags) で理由を出し、
 // サーバが断ったときはその理由をダイアログに出す (閉じない)。パス・名前はすべて架空。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import type {
   AccountStatus,
   AccountsResponse,
@@ -15,12 +15,6 @@ import { createAccountDialogs } from "../views/agents/accounts-dialogs";
 import { ACCOUNTS_EN } from "../views/agents/accounts-i18n";
 import { q } from "./_test-helpers";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 afterEach(() => {
   document.body.replaceChildren();
 });
@@ -79,7 +73,7 @@ function response(): AccountsResponse {
     ],
     registryError: null,
     registryPath: "/home/sample/.local/state/code-viewer/accounts.json",
-    launchCommands: { claude: "claude", codex: "codex" },
+    launchCommands: { claude: "claude", codex: "codex", opencode: "opencode" },
     lastLaunch: null,
     usageFailures: { total: 0, recent: [], log: "" },
   };
@@ -140,7 +134,9 @@ function nameInput(): HTMLInputElement {
 }
 
 async function submitWith(value: string): Promise<string> {
+  // 打ったときと同じく input を送る (画面は打った値を input で受け取る)。
   nameInput().value = value;
+  nameInput().dispatchEvent(new Event("input", { bubbles: true }));
   document
     .querySelector<HTMLButtonElement>(".gdp-dialog .gdp-dialog-confirm")
     ?.click();

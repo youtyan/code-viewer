@@ -2,9 +2,9 @@
 // 絵・保存したタブ・キーの割り当て・最初の描画の印。ページの中身は
 // help-page.test.ts。
 
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import { GEAR_16_PATH, QUESTION_16_PATH } from "../core/icons";
 import { DEFAULT_KEY_BINDINGS } from "../core/keymap";
 import {
@@ -16,19 +16,11 @@ import {
 import { pageModeClasses } from "../core/page-mode";
 import type { AppRoute } from "../core/routes";
 import { KEYMAP_ACTION_INFO } from "../views/help-keybindings";
-import { routeTarget } from "../views/main-tabs/main-tabs-view";
+import { routeTarget } from "../views/main-tabs/main-tabs-presenter";
 import { pageIconPaths } from "../views/main-tabs/tab-icons";
 import { searchPaletteText } from "../views/search-palette-i18n";
 
 const range = { from: "HEAD", to: "worktree" };
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 function indexDocument(): Document {
   return new DOMParser().parseFromString(

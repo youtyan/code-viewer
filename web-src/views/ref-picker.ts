@@ -1,3 +1,4 @@
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 
 // Ref picker popover (branch / tag / commit selector), extracted from app.ts.
@@ -11,10 +12,10 @@ import { TOUCH_MEDIA_QUERY } from "../core/mobile-layout";
 import type { AppRoute, DiffRange } from "../core/routes";
 import type { RefCommitResponse, RefResponse } from "../core/types";
 import { pageLanguage } from "./page-language";
+import { renderOwned, templateElement } from "./ui/renderer";
 
 export type RefPickerDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
-  escapeHtml(s: unknown): string;
   currentRange(): DiffRange;
   setRange(from: string, to: string): void;
   setRoute(route: AppRoute, replace?: boolean): void;
@@ -45,7 +46,83 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
-export function createRefPicker(deps: RefPickerDeps) {
+/** 候補の欄の 1 行。current は入力欄の今の値と同じもの。 */
+export type RefPopEntry =
+  | { kind: "empty"; text: string; alert: boolean }
+  | {
+      kind: "commit";
+      val: string;
+      shortSha: string;
+      subject: string;
+      author: string;
+      when: string;
+      current: boolean;
+    }
+  | {
+      kind: "ref";
+      val: string;
+      name: string;
+      badge: { text: string; current: boolean };
+      when: string | null;
+      current: boolean;
+    };
+
+/** ref を選ぶ小窓 (createRefPicker) の描き方。 */
+export type RefPickerView = {
+  body(entries: readonly RefPopEntry[]): unknown;
+  /** 前に選んだ ref (新しい順)。 */
+  recent(props: {
+    refs: { val: string; current: boolean; onPick(): void }[];
+    title: string;
+  }): unknown;
+};
+
+export const DEFAULT_VIEW: RefPickerView = {
+  body: (entries) =>
+    entries.map((entry) => {
+      if (entry.kind === "empty")
+        return html`<div class="rp-empty" role=${entry.alert ? "alert" : nothing}
+          >${entry.text}</div
+        >`;
+      if (entry.kind === "commit")
+        return html`<div
+          class=${entry.current ? "rp-item-commit current" : "rp-item-commit"}
+          data-val=${entry.val}
+        ><div class="row1"><span class="sha">${entry.shortSha}</span><span
+              class="subject"
+              title=${entry.subject}
+            >${entry.subject}</span></div
+          ><div class="row2"><span class="author">${entry.author}</span><span
+              class="when"
+            >${entry.when}</span></div></div>`;
+      return html`<div
+        class=${entry.current ? "rp-item-ref current" : "rp-item-ref"}
+        data-val=${entry.val}
+      ><div class="row1"><span class="name">${entry.name}</span><span
+            class=${entry.badge.current ? "badge cur" : "badge"}
+          >${entry.badge.text}</span></div
+        >${
+          entry.when
+            ? html`<div class="row2"><span class="when">${entry.when}</span></div>`
+            : nothing
+        }</div>`;
+    }),
+  recent: (props) =>
+    props.refs.map(
+      (ref) => html`<button
+        type="button"
+        class=${ref.current ? "rp-chip rp-chip-recent current" : "rp-chip rp-chip-recent"}
+        data-val=${ref.val}
+        title=${props.title || nothing}
+        @click=${ref.onPick}
+      >${ref.val}</button>`,
+    ),
+};
+
+export function createRefPicker(
+  deps: RefPickerDeps,
+  view: RefPickerView = DEFAULT_VIEW,
+) {
   function wireRefSelectorInput(
     input: HTMLInputElement,
     onPick?: (ref: string) => void,
@@ -83,26 +160,23 @@ export function createRefPicker(deps: RefPickerDeps) {
       .filter((ref) => ref && !QUICK_REF_VALUES.has(ref))
       .reverse();
     if (!row) {
-      row = document.createElement("div");
-      row.className = "rp-recent";
+      row = templateElement(html`<div class="rp-recent"></div>`);
       const quick = popover.querySelector<HTMLElement>(".rp-quick");
       if (quick) quick.after(row);
       else popover.prepend(row);
     }
-    row.replaceChildren();
     row.hidden = recent.length === 0;
-    const title = deps.recentRefTitle?.() ?? "";
-    for (const ref of recent) {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "rp-chip rp-chip-recent";
-      chip.dataset.val = ref;
-      chip.textContent = ref;
-      if (title) chip.title = title;
-      chip.classList.toggle("current", ref === current);
-      chip.addEventListener("click", () => handlePicked(ref));
-      row.appendChild(chip);
-    }
+    renderOwned(
+      row,
+      view.recent({
+        refs: recent.map((ref) => ({
+          val: ref,
+          current: ref === current,
+          onPick: () => handlePicked(ref),
+        })),
+        title: deps.recentRefTitle?.() ?? "",
+      }),
+    );
   }
 
   // ---- Ref picker popover ----
@@ -284,150 +358,93 @@ export function createRefPicker(deps: RefPickerDeps) {
     return `${relative} (${absolute})`;
   }
 
-  function buildPopBody(query: string) {
+  function popEntries(query: string): RefPopEntry[] {
     const q = (query || "").toLowerCase().trim();
     const m = (s: string) => !q || String(s).toLowerCase().includes(q);
-    const html: string[] = [];
+    const cur = (popTarget?.value || "").trim();
+    const isCurrent = (val: string) => !!cur && val === cur;
+    const empty = (text: string, alert = false): RefPopEntry => ({
+      kind: "empty",
+      text,
+      alert,
+    });
     if (popTab === "commits") {
-      if (commitSearchLoading) {
-        html.push('<div class="rp-empty">loading commits...</div>');
-        popBody.innerHTML = html.join("");
-        highlightCurrentInPopover();
-        return;
-      }
+      if (commitSearchLoading) return [empty("loading commits...")];
       const commits = (REFS.commits || []).filter((commit) =>
         m(`${commit.sha} ${commit.subject} ${commit.author}`),
       );
-      if (!commits.length && !commitSearchError) {
-        html.push('<div class="rp-empty">no commits</div>');
-      }
+      const entries: RefPopEntry[] =
+        !commits.length && !commitSearchError ? [empty("no commits")] : [];
       for (const commit of commits) {
         if (!commit.sha) continue;
-        const shortSha = commit.sha.slice(0, 7);
-        html.push(
-          '<div class="rp-item-commit" data-val="' +
-            escapeAttr(commit.sha) +
-            '">' +
-            '<div class="row1">' +
-            '<span class="sha">' +
-            deps.escapeHtml(shortSha) +
-            "</span>" +
-            '<span class="subject" title="' +
-            escapeAttr(commit.subject || "") +
-            '">' +
-            deps.escapeHtml(commit.subject || "") +
-            "</span>" +
-            "</div>" +
-            '<div class="row2">' +
-            '<span class="author">' +
-            deps.escapeHtml(commit.author || "") +
-            "</span>" +
-            '<span class="when">' +
-            deps.escapeHtml(commit.when ? displayWhen(commit.when) : "") +
-            "</span>" +
-            "</div>" +
-            "</div>",
+        entries.push({
+          kind: "commit",
+          val: commit.sha,
+          shortSha: commit.sha.slice(0, 7),
+          subject: commit.subject || "",
+          author: commit.author || "",
+          when: commit.when ? displayWhen(commit.when) : "",
+          current: isCurrent(commit.sha),
+        });
+      }
+      if (commitSearchError)
+        entries.push(
+          empty(`failed to search commits: ${commitSearchError}`, true),
         );
-      }
-      if (commitSearchError) {
-        html.push(
-          '<div class="rp-empty" role="alert">' +
-            deps.escapeHtml(`failed to search commits: ${commitSearchError}`) +
-            "</div>",
-        );
-      } else if (commitAppendLoading) {
-        html.push('<div class="rp-empty">loading more commits...</div>');
-      } else if (commitHasMore) {
-        html.push('<div class="rp-empty">scroll for more commits...</div>');
-      }
-    } else if (refsLoading) {
-      html.push('<div class="rp-empty">loading refs...</div>');
-    } else if (refsError !== null) {
-      html.push(
-        '<div class="rp-empty" role="alert">' +
-          deps.escapeHtml(`failed to load refs: ${refsError}`) +
-          "</div>",
-      );
-    } else if (popTab === "branches") {
-      const branches = (REFS.branches || []).filter((b) => m(b.name));
-      if (!branches.length) {
-        html.push('<div class="rp-empty">no branches</div>');
-      }
-      for (const branch of branches) {
-        const cur = branch.name === REFS.current;
-        html.push(
-          '<div class="rp-item-ref" data-val="' +
-            escapeAttr(branch.name) +
-            '">' +
-            '<div class="row1">' +
-            '<span class="name">' +
-            deps.escapeHtml(branch.name) +
-            "</span>" +
-            (cur
-              ? '<span class="badge cur">current</span>'
-              : '<span class="badge">branch</span>') +
-            "</div>" +
-            (branch.when
-              ? '<div class="row2"><span class="when">' +
-                deps.escapeHtml(branch.when) +
-                "</span></div>"
-              : "") +
-            "</div>",
-        );
-      }
-    } else if (popTab === "tags") {
-      const tags = (REFS.tags || []).filter((t) => m(t.name));
-      if (!tags.length) {
-        html.push('<div class="rp-empty">no tags</div>');
-      }
-      for (const tag of tags) {
-        html.push(
-          '<div class="rp-item-ref" data-val="' +
-            escapeAttr(tag.name) +
-            '">' +
-            '<div class="row1">' +
-            '<span class="name">' +
-            deps.escapeHtml(tag.name) +
-            "</span>" +
-            '<span class="badge">tag</span>' +
-            "</div>" +
-            (tag.when
-              ? '<div class="row2"><span class="when">' +
-                deps.escapeHtml(tag.when) +
-                "</span></div>"
-              : "") +
-            "</div>",
-        );
-      }
+      else if (commitAppendLoading)
+        entries.push(empty("loading more commits..."));
+      else if (commitHasMore) entries.push(empty("scroll for more commits..."));
+      return entries;
     }
-    popBody.innerHTML = html.join("");
-    highlightCurrentInPopover();
+    if (refsLoading) return [empty("loading refs...")];
+    if (refsError !== null)
+      return [empty(`failed to load refs: ${refsError}`, true)];
+    if (popTab === "branches") {
+      const branches = (REFS.branches || []).filter((b) => m(b.name));
+      if (!branches.length) return [empty("no branches")];
+      return branches.map((branch) => {
+        const cur = branch.name === REFS.current;
+        return {
+          kind: "ref",
+          val: branch.name,
+          name: branch.name,
+          badge: { text: cur ? "current" : "branch", current: cur },
+          when: branch.when || null,
+          current: isCurrent(branch.name),
+        };
+      });
+    }
+    if (popTab === "tags") {
+      const tags = (REFS.tags || []).filter((t) => m(t.name));
+      if (!tags.length) return [empty("no tags")];
+      return tags.map((tag) => ({
+        kind: "ref",
+        val: tag.name,
+        name: tag.name,
+        badge: { text: "tag", current: false },
+        when: tag.when || null,
+        current: isCurrent(tag.name),
+      }));
+    }
+    return [];
   }
 
-  // Mark the item matching the focused input's current value, so the user
-  // sees what's currently selected when re-opening the picker.
-  function highlightCurrentInPopover() {
-    if (!popTarget) return;
-    const cur = (popTarget.value || "").trim();
-    if (!cur) return;
-    const items = popBody.querySelectorAll<HTMLElement>("[data-val]");
-    let match: HTMLElement | null = null;
-    items.forEach((it) => {
-      if (it.dataset.val === cur) match = it;
-    });
-    if (match) {
-      match.classList.add("current");
-      // Bring into view inside the popover only (not the page scroll)
-      const ph = popBody;
-      const r = match.getBoundingClientRect();
-      const pr = ph.getBoundingClientRect();
-      if (r.top < pr.top || r.bottom > pr.bottom) {
-        ph.scrollTop = match.offsetTop - ph.clientHeight / 2;
-      }
-    }
+  function buildPopBody(query: string) {
+    renderOwned(popBody, view.body(popEntries(query)));
+    scrollToCurrent();
   }
-  function escapeAttr(s: unknown): string {
-    return deps.escapeHtml(s).replace(/"/g, "&quot;");
+
+  // The item matching the focused input's current value is marked (current),
+  // so the user sees what's currently selected when re-opening the picker.
+  // Bring it into view inside the popover only (not the page scroll).
+  function scrollToCurrent() {
+    const match = popBody.querySelector<HTMLElement>("[data-val].current");
+    if (!match) return;
+    const r = match.getBoundingClientRect();
+    const pr = popBody.getBoundingClientRect();
+    if (r.top < pr.top || r.bottom > pr.bottom) {
+      popBody.scrollTop = match.offsetTop - popBody.clientHeight / 2;
+    }
   }
 
   function openPopover(input: HTMLInputElement) {

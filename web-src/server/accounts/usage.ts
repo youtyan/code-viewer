@@ -22,6 +22,7 @@ import type {
   AccountUsage,
   UsageWindow,
 } from "../../core/agent-accounts";
+import { usageSupported } from "../../core/agent-accounts";
 import { usageWindowsConflict } from "../../core/agent-accounts";
 import { formatErrorDetail } from "../../core/error-detail";
 import { errno } from "../terminal/settings-file";
@@ -502,6 +503,14 @@ export function readAccountUsage(
   options: { usageDir: string; claudeEnvValues: string[]; wrapped: boolean },
 ): AccountUsage {
   if (agent === "codex") return readCodexUsage(configDir);
+  if (!usageSupported(agent)) {
+    return {
+      status: "unavailable",
+      reason: "unsupported",
+      detail: `${agent} has no command or file that reports its plan limits (opencode stats counts tokens and cost only).`,
+      observedAt: 0,
+    };
+  }
   return readClaudeUsage(
     options.usageDir,
     options.claudeEnvValues,

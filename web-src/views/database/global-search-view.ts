@@ -1,6 +1,9 @@
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../../core/api-url";
 import type { GlobalSearchHit } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
+import { detachedElement } from "../ui/renderer";
 import { type DbText, dbText } from "./i18n";
 import { reportDatastoreFailure, requireOkResponse } from "./report-failure";
 
@@ -21,51 +24,151 @@ export type GlobalSearchView = {
   localize: () => void;
 };
 
+/** 1 つの表で並べる当たりの数。残りは「ほか N 件」と書く。 */
+const HITS_PER_TABLE = 100;
+
+export type GlobalSearchProps = {
+  labels: {
+    placeholder: string;
+    searchButton: string;
+    cancelButton: string;
+    includeNonText: string;
+  };
+  /** 探している間は欄と［検索］を止め、［中止］を出す。 */
+  running: boolean;
+  /** 進み具合の文 (探し始めるまでは出さない)。 */
+  progress: string | null;
+  /** 表ごとの当たり。 */
+  tables: {
+    label: string;
+    hits: { column: string; value: string }[];
+    more: string | null;
+  }[];
+  /** 語の欄と「文字でない列も」の欄。中身は欄が持つ。 */
+  inputRef: Ref<HTMLInputElement>;
+  nonTextRef: Ref<HTMLInputElement>;
+  onSearch: () => void;
+  onCancel: () => void;
+  onKeydown: (event: KeyboardEvent) => void;
+};
+
+export type GlobalSearchViewView = (props: GlobalSearchProps) => unknown;
+
+export const DEFAULT_VIEW: GlobalSearchViewView = (p) =>
+  html`<div class="db-global-search"><div class="db-global-search-header"><input
+        type="text"
+        class="db-global-search-input"
+        placeholder=${p.labels.placeholder}
+        ?disabled=${p.running}
+        ${ref(p.inputRef)}
+        @keydown=${p.onKeydown}
+      /><button
+        type="button"
+        class="db-global-search-btn"
+        ?disabled=${p.running}
+        @click=${p.onSearch}
+      >${p.labels.searchButton}</button><button
+        type="button"
+        class="db-global-search-cancel"
+        ?hidden=${!p.running}
+        @click=${p.onCancel}
+      >${p.labels.cancelButton}</button></div
+    ><div class="db-global-search-options"><label><input
+          type="checkbox"
+          ${ref(p.nonTextRef)}
+        />${p.labels.includeNonText}</label></div
+    ><div class="db-global-search-progress" ?hidden=${p.progress === null}>${
+      p.progress ?? nothing
+    }</div
+    ><div class="db-global-search-results">${p.tables.map(
+      (table) =>
+        html`<div class="db-search-table-section"><div
+            class="db-search-table-header"
+          >${table.label}</div><div class="db-search-hits-list">${table.hits.map(
+            (hit) =>
+              html`<div class="db-search-hit-row"><span class="db-search-hit-col"
+                  >${hit.column}</span
+                ><span class="db-search-hit-val">${hit.value}</span></div>`,
+          )}${
+            table.more === null
+              ? nothing
+              : html`<div class="db-search-more">${table.more}</div>`
+          }</div></div>`,
+    )}</div></div
+  >`;
+
 export function createGlobalSearchView(
   deps: GlobalSearchViewDeps,
+  view: GlobalSearchViewView = DEFAULT_VIEW,
 ): GlobalSearchView {
   const text = (): DbText => deps.getText?.() ?? dbText("en");
-  const el = document.createElement("div");
-  el.className = "db-global-search";
+  const inputRef = createRef<HTMLInputElement>();
+  const nonTextRef = createRef<HTMLInputElement>();
+  const field = (fieldRef: Ref<HTMLInputElement>, name: string) => {
+    const element = fieldRef.value;
+    if (!element)
+      throw new Error(`global search: the ${name} field was not drawn`);
+    return element;
+  };
+  const input = () => field(inputRef, "term");
+  const nonTextCheck = () => field(nonTextRef, "non-text");
 
-  const header = document.createElement("div");
-  header.className = "db-global-search-header";
+  const labelsNow = () => {
+    const t = text().search;
+    return {
+      placeholder: t.placeholder,
+      searchButton: t.searchButton,
+      cancelButton: t.cancelButton,
+      includeNonText: t.includeNonText,
+    };
+  };
+  let labels = labelsNow();
+  let running = false;
+  let progress: string | null = null;
+  let hits: GlobalSearchHit[] = [];
 
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "db-global-search-input";
-  input.placeholder = text().search.placeholder;
+  function tables(): GlobalSearchProps["tables"] {
+    const grouped = new Map<string, GlobalSearchHit[]>();
+    for (const h of hits) {
+      const key = h.schema ? `${h.schema}.${h.table}` : h.table;
+      const existing = grouped.get(key) || [];
+      existing.push(h);
+      grouped.set(key, existing);
+    }
+    return [...grouped].map(([tableLabel, tableHits]) => ({
+      label: text().search.tableSection(tableLabel, tableHits.length),
+      hits: tableHits
+        .slice(0, HITS_PER_TABLE)
+        .map((hit) => ({ column: hit.column, value: hit.valuePreview })),
+      more:
+        tableHits.length > HITS_PER_TABLE
+          ? text().search.moreHits(tableHits.length - HITS_PER_TABLE)
+          : null,
+    }));
+  }
 
-  const searchBtn = document.createElement("button");
-  searchBtn.type = "button";
-  searchBtn.className = "db-global-search-btn";
-  searchBtn.textContent = text().search.searchButton;
-
-  const cancelBtn = document.createElement("button");
-  cancelBtn.type = "button";
-  cancelBtn.className = "db-global-search-cancel";
-  cancelBtn.textContent = text().search.cancelButton;
-  cancelBtn.hidden = true;
-
-  const optionsRow = document.createElement("div");
-  optionsRow.className = "db-global-search-options";
-  const nonTextLabel = document.createElement("label");
-  const nonTextCheck = document.createElement("input");
-  nonTextCheck.type = "checkbox";
-  const nonTextText = document.createTextNode(text().search.includeNonText);
-  nonTextLabel.append(nonTextCheck, nonTextText);
-  optionsRow.appendChild(nonTextLabel);
-
-  header.append(input, searchBtn, cancelBtn);
-
-  const progress = document.createElement("div");
-  progress.className = "db-global-search-progress";
-  progress.hidden = true;
-
-  const results = document.createElement("div");
-  results.className = "db-global-search-results";
-
-  el.append(header, optionsRow, progress, results);
+  const box = detachedElement(() =>
+    view({
+      labels,
+      running,
+      progress,
+      tables: tables(),
+      inputRef,
+      nonTextRef,
+      onSearch: () => void startSearch(),
+      onCancel: () => void cancelSearch(),
+      onKeydown: (e) => {
+        if (isImeComposing(e)) return;
+        if (e.key === "Enter") void startSearch();
+      },
+    }),
+  );
+  const el = box.element;
+  const draw = () => box.draw();
+  const showProgress = (message: string) => {
+    progress = message;
+    draw();
+  };
 
   let currentJobId: string | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -76,9 +179,8 @@ export function createGlobalSearchView(
       clearInterval(pollTimer);
       pollTimer = null;
     }
-    cancelBtn.hidden = true;
-    searchBtn.disabled = false;
-    input.disabled = false;
+    running = false;
+    draw();
   }
 
   async function startSearch() {
@@ -86,15 +188,13 @@ export function createGlobalSearchView(
     const dbId = deps.getDbId();
     const schema = deps.getSchema();
     if (!dbId) return;
-    const term = input.value.trim();
+    const term = input().value.trim();
     if (!term) return;
 
-    results.innerHTML = "";
-    progress.hidden = false;
-    progress.textContent = text().search.starting;
-    searchBtn.disabled = true;
-    input.disabled = true;
-    cancelBtn.hidden = false;
+    hits = [];
+    progress = text().search.starting;
+    running = true;
+    draw();
 
     try {
       const res = await fetch(apiUrl("dbSearchStart"), {
@@ -107,7 +207,7 @@ export function createGlobalSearchView(
           db: dbId,
           ...(schema ? { schema } : {}),
           term,
-          includeNonText: nonTextCheck.checked,
+          includeNonText: nonTextCheck().checked,
         }),
       });
       await requireOkResponse(res, text().failure.searchStart);
@@ -119,12 +219,8 @@ export function createGlobalSearchView(
       currentJobId = data.jobId;
       pollTimer = setInterval(() => pollStatus(), 500);
     } catch (err) {
-      progress.textContent = reportDatastoreFailure(
-        "SQL",
-        "search start",
-        err,
-        dbId,
-        term,
+      showProgress(
+        reportDatastoreFailure("SQL", "search start", err, dbId, term),
       );
       stopPolling();
     }
@@ -150,12 +246,7 @@ export function createGlobalSearchView(
     } catch (err) {
       stopPolling();
       if (disposed) return;
-      progress.textContent = reportDatastoreFailure(
-        "SQL",
-        "search status",
-        err,
-        jobId,
-      );
+      showProgress(reportDatastoreFailure("SQL", "search status", err, jobId));
       return;
     }
     try {
@@ -170,7 +261,7 @@ export function createGlobalSearchView(
       if (disposed) return;
 
       if (data.error) {
-        progress.textContent = text().search.error(data.error);
+        showProgress(text().search.error(data.error));
         stopPolling();
         return;
       }
@@ -179,7 +270,7 @@ export function createGlobalSearchView(
         data.totalTables > 0
           ? Math.round((data.scannedTables / data.totalTables) * 100)
           : 0;
-      progress.textContent = data.done
+      progress = data.done
         ? text().search.done(data.scannedTables, data.hits.length)
         : text().search.progress(
             data.currentTable || text().search.checkingTable,
@@ -188,13 +279,10 @@ export function createGlobalSearchView(
             data.totalTables,
             data.hits.length,
           );
+      hits = data.hits;
+      draw();
 
-      renderHits(data.hits);
-
-      if (data.done) {
-        stopPolling();
-        progress.hidden = false;
-      }
+      if (data.done) stopPolling();
     } catch (err) {
       // 読めなかった応答も次の周期で取り直す。理由は毎回 console に残す。
       reportDatastoreFailure("SQL", "search status", err, jobId);
@@ -210,17 +298,12 @@ export function createGlobalSearchView(
     } catch (err) {
       stopPolling();
       if (disposed) return;
-      progress.textContent = reportDatastoreFailure(
-        "SQL",
-        "search cancel",
-        err,
-        jobId,
-      );
+      showProgress(reportDatastoreFailure("SQL", "search cancel", err, jobId));
       return;
     }
     stopPolling();
     if (disposed) return;
-    progress.textContent = text().search.cancelled;
+    showProgress(text().search.cancelled);
   }
 
   async function cancelJob(jobId: string): Promise<void> {
@@ -242,82 +325,20 @@ export function createGlobalSearchView(
     });
   }
 
-  function renderHits(hits: GlobalSearchHit[]) {
-    results.innerHTML = "";
-    if (hits.length === 0) return;
-
-    const grouped = new Map<string, GlobalSearchHit[]>();
-    for (const h of hits) {
-      const key = h.schema ? `${h.schema}.${h.table}` : h.table;
-      const existing = grouped.get(key) || [];
-      existing.push(h);
-      grouped.set(key, existing);
-    }
-
-    for (const [tableLabel, tableHits] of grouped) {
-      const section = document.createElement("div");
-      section.className = "db-search-table-section";
-
-      const tableHeader = document.createElement("div");
-      tableHeader.className = "db-search-table-header";
-      tableHeader.textContent = text().search.tableSection(
-        tableLabel,
-        tableHits.length,
-      );
-      section.appendChild(tableHeader);
-
-      const hitsList = document.createElement("div");
-      hitsList.className = "db-search-hits-list";
-
-      for (const hit of tableHits.slice(0, 100)) {
-        const row = document.createElement("div");
-        row.className = "db-search-hit-row";
-
-        const colSpan = document.createElement("span");
-        colSpan.className = "db-search-hit-col";
-        colSpan.textContent = hit.column;
-
-        const valSpan = document.createElement("span");
-        valSpan.className = "db-search-hit-val";
-        valSpan.textContent = hit.valuePreview;
-
-        row.append(colSpan, valSpan);
-        hitsList.appendChild(row);
-      }
-
-      if (tableHits.length > 100) {
-        const more = document.createElement("div");
-        more.className = "db-search-more";
-        more.textContent = text().search.moreHits(tableHits.length - 100);
-        hitsList.appendChild(more);
-      }
-
-      section.appendChild(hitsList);
-      results.appendChild(section);
-    }
-  }
-
-  searchBtn.addEventListener("click", startSearch);
-  input.addEventListener("keydown", (e) => {
-    if (isImeComposing(e)) return;
-    if (e.key === "Enter") startSearch();
-  });
-  cancelBtn.addEventListener("click", cancelSearch);
-
   function setSearch(
     term: string,
     options: { includeNonText?: boolean; autoRun?: boolean } = {},
   ): void {
-    input.value = term;
-    nonTextCheck.checked = !!options.includeNonText;
+    input().value = term;
+    nonTextCheck().checked = !!options.includeNonText;
     if (options.autoRun && term.trim()) void startSearch();
   }
 
   function getSearch(): { term?: string; includeNonText?: boolean } {
-    const term = input.value.trim();
+    const term = input().value.trim();
     return {
       ...(term ? { term } : {}),
-      ...(nonTextCheck.checked ? { includeNonText: true } : {}),
+      ...(nonTextCheck().checked ? { includeNonText: true } : {}),
     };
   }
 
@@ -335,11 +356,8 @@ export function createGlobalSearchView(
   }
 
   function localize(): void {
-    const t = text().search;
-    input.placeholder = t.placeholder;
-    searchBtn.textContent = t.searchButton;
-    cancelBtn.textContent = t.cancelButton;
-    nonTextText.textContent = t.includeNonText;
+    labels = labelsNow();
+    draw();
   }
 
   return { el, setSearch, getSearch, dispose, localize };

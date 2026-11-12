@@ -8,16 +8,8 @@
 //   登録してから移る
 // - 畳む / 開くは山形だけ (名前を押しても畳まない)
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { AgentHookState, HookAgent } from "../core/agent-hooks";
 import type { AgentOverviewResponse, AgentPane } from "../core/agent-overview";
 import type { AgentState } from "../core/agent-state";
@@ -26,8 +18,13 @@ import { PANE_PREVIEW_DELAY_MS } from "../core/pane-preview";
 import { PROJECT_COLORS, type ProjectColor } from "../core/project-colors";
 import {
   type AgentsSidebarDeps,
-  mountAgentsSidebar,
-} from "../views/agents/agents-sidebar";
+  createAgentsSidebarPresenter,
+} from "../views/agents/agents-sidebar-presenter";
+import {
+  type AgentsSidebarView,
+  type AgentsSidebarViewProps,
+  DEFAULT_VIEW as SIDEBAR_DEFAULT_VIEW,
+} from "../views/agents/agents-sidebar-view";
 import { agentsText } from "../views/agents/i18n";
 import { PANE_PREVIEW } from "../views/agents/pane-preview";
 import { closeContextMenu } from "../views/context-menu";
@@ -43,14 +40,6 @@ import {
 } from "./_agents-sidebar-fixture";
 import { closeOpenDialog } from "./_dialog-helpers";
 import { agentPane } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   closeContextMenu();
@@ -137,6 +126,8 @@ function mount(
     hookStates?: Partial<Record<HookAgent, AgentHookState>>;
     /** 外側のページの左の一覧 (面を分けて開ける)。 */
     splitProject?: AgentsSidebarDeps["splitProject"];
+    /** 表示を差し替える (presenter のテスト)。 */
+    view?: AgentsSidebarView;
   } = {},
 ) {
   document.body.innerHTML =
@@ -150,33 +141,36 @@ function mount(
   const projectMenus: { root: string; anchor: HTMLElement }[] = [];
   let dismissed = notify.dismissed ?? false;
   let stoppedOpen = false;
-  mountAgentsSidebar({
-    root,
-    monitor,
-    projects: actions,
-    getText: () => agentsText("en"),
-    openPane,
-    ...(notify.splitProject ? { splitProject: notify.splitProject } : {}),
-    viewingPane: () => null,
-    openProjectMenu: (root, anchor) => projectMenus.push({ root, anchor }),
-    handoff: {
-      handoff: (target) => handoffs.push(`handoff:${target.id}`),
-      openHookHelp: () => handoffs.push("hook-help"),
-      hookState: (agent) => notify.hookStates?.[agent] ?? null,
+  createAgentsSidebarPresenter(
+    {
+      root,
+      monitor,
+      projects: actions,
+      getText: () => agentsText("en"),
+      openPane,
+      ...(notify.splitProject ? { splitProject: notify.splitProject } : {}),
+      viewingPane: () => null,
+      openProjectMenu: (root, anchor) => projectMenus.push({ root, anchor }),
+      handoff: {
+        handoff: (target) => handoffs.push(`handoff:${target.id}`),
+        openHookHelp: () => handoffs.push("hook-help"),
+        hookState: (agent) => notify.hookStates?.[agent] ?? null,
+      },
+      openBoard: () => undefined,
+      getCollapsed: () => [],
+      currentName: () => "sample-app",
+      saveCollapsed: (roots) => saved.push(roots),
+      isStoppedOpen: () => stoppedOpen,
+      setStoppedOpen: (open) => {
+        stoppedOpen = open;
+      },
+      notifyHintDismissed: () => dismissed,
+      dismissNotifyHint: () => {
+        dismissed = true;
+      },
     },
-    openBoard: () => undefined,
-    getCollapsed: () => [],
-    currentName: () => "sample-app",
-    saveCollapsed: (roots) => saved.push(roots),
-    isStoppedOpen: () => stoppedOpen,
-    setStoppedOpen: (open) => {
-      stoppedOpen = open;
-    },
-    notifyHintDismissed: () => dismissed,
-    dismissNotifyHint: () => {
-      dismissed = true;
-    },
-  });
+    notify.view,
+  );
   return {
     root,
     projectMenus,
@@ -413,10 +407,12 @@ describe("agents sidebar actions", () => {
         ".gdp-context-menu button",
       ),
     ];
-    // 2 つ目からは「別のアカウントで続ける…」(フックの無いペインなので押せず、
+    // 2 つ目は「未読に戻す」(待機しているエージェント。表は agent-mark-unread.test.ts)、
+    // その後に「別のアカウントで続ける…」(フックの無いペインなので押せず、
     // 入れ方の案内が並ぶ。handoff の表は agents-handoff.test.ts)。
     expect(items.map((item) => item.textContent)).toEqual([
       "Open in a tab",
+      "Mark as unread",
       "Continue with another account…",
       "Needs the agent hooks — show how to install",
     ]);
@@ -530,11 +526,14 @@ describe("agents sidebar actions", () => {
         ?.dispatchEvent(
           new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
         );
+      // 「タブで開く」と「未読に戻す」(agent-mark-unread.test.ts) の後ろを見る。
       const buttons = [
         ...document.querySelectorAll<HTMLButtonElement>(
           ".gdp-context-menu button",
         ),
-      ].slice(1);
+      ]
+        .slice(1)
+        .filter((button) => button.textContent !== "Mark as unread");
       expect(
         buttons.map((button) => [button.textContent, button.disabled]),
       ).toEqual(items);
@@ -615,6 +614,35 @@ describe("agents sidebar heading marks", () => {
       ["sample-docs", "SD", "orange", "orange", false],
       ["other-repo", "OR", "none", "none", false],
     ]);
+  });
+
+  test("a project row shows a branch that is not main and how far it is from its upstream", () => {
+    const { root } = mount(
+      overview(
+        [],
+        [
+          {
+            ...info("/work/sample-app", 0, { status: "current" }),
+            branch: {
+              branch: "feature/x",
+              ahead: 2,
+              behind: 1,
+              upstream: true,
+            },
+          },
+          {
+            ...info("/work/sample-lib", 1, RUNNING),
+            branch: { branch: "main", ahead: 0, behind: 0, upstream: true },
+          },
+        ],
+      ),
+    );
+    expect(
+      [...root.querySelectorAll<HTMLElement>(".nav-project-head")].map(
+        (head) =>
+          head.querySelector(".nav-project-branch")?.textContent ?? null,
+      ),
+    ).toEqual(["feature/x ↑2 ↓1", null]);
   });
 
   test("the menu's Color… lists the palette and saves the chosen color", () => {
@@ -904,14 +932,9 @@ describe("agents sidebar focus across redraws", () => {
     before?.focus();
     expect(document.activeElement).toBe(before);
     publish({ ...data(), serverInstance: "restarted" });
+    // 描き直しでボタンの要素が替わっても替わらなくても、同じ役目のボタンにいる。
     const after = root.querySelector<HTMLElement>(selector);
-    expect({
-      replaced: after !== before,
-      focused: document.activeElement,
-    }).toEqual({
-      replaced: true,
-      focused: after,
-    });
+    expect(document.activeElement).toBe(after);
   });
 
   test("a new observation time alone does not redraw", () => {
@@ -1253,9 +1276,10 @@ describe("agents sidebar reordering projects", () => {
       ["sample-app", "sample-lib", "sample-docs"],
     ]);
     drag(head, "dragend");
-    expect([head.isConnected, layout(root).registered]).toEqual([
-      false,
-      ["sample-lib", "sample-app", "sample-docs"],
+    expect(layout(root).registered).toEqual([
+      "sample-lib",
+      "sample-app",
+      "sample-docs",
     ]);
   });
 });
@@ -1324,5 +1348,62 @@ describe("agents sidebar screen preview", () => {
     );
     row.click();
     expect([opened, box?.hidden]).toEqual([["%1"], true]);
+  });
+});
+
+// presenter (agents-sidebar-presenter.ts) を、表示を差し替えて確かめる。presenter は
+// 描いた後にフォーカスの戻し先を読むので、差し替える view は渡された値を記録して
+// から既定の表示に渡す。見るのは view に渡す値と、畳む・開く・移るの呼び出し。
+describe("agents sidebar presenter", () => {
+  function mountWithView() {
+    const seen: AgentsSidebarViewProps[] = [];
+    const mounted = mount(
+      overview(
+        [pane("%1", "claude", "/work/sample-lib", "waiting")],
+        REGISTERED,
+      ),
+      fakeActions(),
+      () => undefined,
+      {
+        view: (props) => {
+          seen.push(props);
+          return SIDEBAR_DEFAULT_VIEW(props);
+        },
+      },
+    );
+    return { ...mounted, last: () => seen[seen.length - 1] };
+  }
+
+  test("passes the running projects with their agents to the view", () => {
+    const { last } = mountWithView();
+    expect(
+      last().running.map((project) => [
+        project.name,
+        project.here,
+        project.rows.map((row) => [row.id, row.state]),
+      ]),
+    ).toEqual([
+      ["sample-app", true, []],
+      ["sample-lib", false, [["%1", "waiting"]]],
+      ["sample-docs", false, []],
+    ]);
+  });
+
+  test("collapsing from the view saves the collapsed project and redraws it collapsed", () => {
+    const { last, saved } = mountWithView();
+    last().onToggleCollapsed("/work/sample-lib");
+    expect({
+      saved,
+      collapsed: last().running.find((p) => p.root === "/work/sample-lib")
+        ?.collapsed,
+    }).toEqual({ saved: [["/work/sample-lib"]], collapsed: true });
+  });
+
+  test("picking another project in the view opens it", () => {
+    const { last, actions } = mountWithView();
+    last().onSwitchProject("/work/sample-lib");
+    expect(actions.opened.map((item) => item.root)).toEqual([
+      "/work/sample-lib",
+    ]);
   });
 });

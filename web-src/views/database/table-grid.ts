@@ -1,3 +1,6 @@
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../../core/api-url";
 import { relativeTimeText } from "../../core/blame";
 import { showCopyFailure } from "../../core/copy-failure";
@@ -19,7 +22,6 @@ import { isEditableKeyTarget } from "../../core/focus-scope";
 import {
   DOWNLOAD_16_PATHS,
   HISTORY_16_PATH,
-  iconSvg,
   LINK_16_PATH,
   SEARCH_16_PATH,
   SYNC_16_PATH,
@@ -39,6 +41,12 @@ import type { AnnotationDatabaseDataState } from "../../core/types";
 import { pageLanguage } from "../page-language";
 import { currentRowHeight } from "../shell/row-height";
 import { phoneMediaQuery } from "../shell/workspace";
+import { iconTemplate } from "../ui/icon";
+import {
+  templateElement,
+  templateElements,
+  templateFragment,
+} from "../ui/renderer";
 import { showConfirmDialog } from "../ui-dialog";
 import { createDetailTabs } from "./detail-tabs";
 import { createGridRangeSelect } from "./grid-range-select";
@@ -48,7 +56,7 @@ import {
   RECENCY_COLUMN_WIDTH,
 } from "./grid-recency";
 import { type DbText, dbText } from "./i18n";
-import { fillNullOrEmpty } from "./query-value";
+import { nullOrEmptyMark } from "./query-value";
 import {
   type RelatedCount,
   type RelatedEntry,
@@ -244,73 +252,653 @@ export type TableGrid = {
   onEditModeChange: (listener: (on: boolean) => void) => () => void;
 };
 
+const SHELL_PARTS = [
+  "filterInput",
+  "filterClear",
+  "refreshBtn",
+  "refreshLabel",
+  "refreshResult",
+  "exportWrap",
+  "exportBtn",
+  "exportMenu",
+  "exportCsv",
+  "exportJson",
+  "editWrap",
+  "newRowBtn",
+  "commitBtn",
+  "discardBtn",
+  "editStatus",
+  "newestBtn",
+  "newestLabel",
+  "headerRow",
+  "filterRow",
+  "viewport",
+  "spacer",
+  "body",
+  "filteredEmpty",
+  "filteredEmptyTitle",
+  "filteredEmptyHint",
+  "filteredEmptyActions",
+  "filteredEmptyReloadAction",
+  "filteredEmptyAction",
+  "detailPanel",
+  "detailResize",
+  "head",
+] as const;
+
+/** 外枠の中で、表が後から書き込む要素。 */
+export type TableGridShellRefs = Record<
+  (typeof SHELL_PARTS)[number],
+  Ref<HTMLElement>
+>;
+
+function createShellRefs(): TableGridShellRefs {
+  return Object.fromEntries(
+    SHELL_PARTS.map((name) => [name, createRef<HTMLElement>()]),
+  ) as TableGridShellRefs;
+}
+
+function shellPart<T extends HTMLElement = HTMLElement>(
+  part: Ref<HTMLElement>,
+): T {
+  const element = part.value;
+  if (!element)
+    throw new Error("table grid: a part of the shell was not drawn");
+  return element as T;
+}
+
+/**
+ * 表の描き方。表は仮想スクロールで行を組み直し、選択・編集・列幅の変更の
+ * たびに要素へ直接書き込むので、view は要素の形 (テンプレート) だけを持つ。
+ * presenter (createTableGrid) は作った要素を受け取り、中身を書き換える。
+ */
+export type TableGridView = {
+  /** 検索の行・見出し・本文・詳細の欄の外枠。 */
+  shell: (props: {
+    text: DbText;
+    timeZone: HTMLElement;
+    refs: TableGridShellRefs;
+  }) => unknown;
+  /** 関連の行を出す下のパネルの箱 (中身は relatedParts)。 */
+  relatedPanel: (height: number) => unknown;
+  /** 関連パネルの中身: 上端のつまみ・見出し・一覧と表。 */
+  relatedParts: (props: {
+    text: DbText;
+    /** 関連の行を出す埋め込みの表。 */
+    grid: HTMLElement;
+    refs: {
+      crumbs: Ref<HTMLElement>;
+      copy: Ref<HTMLButtonElement>;
+      list: Ref<HTMLElement>;
+      listResize: Ref<HTMLElement>;
+      gridHost: Ref<HTMLElement>;
+      head: Ref<HTMLElement>;
+      empty: Ref<HTMLElement>;
+    };
+    onResizeStart: (event: MouseEvent) => void;
+    onCopy: (button: HTMLButtonElement) => void;
+    onClose: () => void;
+  }) => unknown;
+  /** ドリルの経路。最後の段は今の表、ほかは押すとその段へ戻る。 */
+  relatedCrumbs: (props: {
+    origin: string;
+    levels: { table: string; onClick: () => void }[];
+  }) => unknown;
+  relatedEmptyNote: (note: string) => unknown;
+  /** 列幅を中身に合わせるときに文字の幅を測る、見えない箱。 */
+  measure: () => unknown;
+  /** セルの詳細の見出し (タブ・題・コピー・閉じる) と、コピーの結果の行。 */
+  detailHeader: (props: {
+    text: DbText["detail"];
+    tabs: HTMLElement;
+    title: string;
+    copyStatusRef: Ref<HTMLElement>;
+    onCopy: () => void;
+    onClose: () => void;
+  }) => unknown;
+  /** セルの詳細の JSON の欄 (色付けは後から入れる)。 */
+  detailJson: () => unknown;
+  /** 列の見出しの行の中身。 */
+  header: (props: {
+    text: DbText;
+    /** 「変更」の列の見出し (出さないときは null)。 */
+    recency: HTMLElement | null;
+    columns: {
+      name: string;
+      width: number;
+      sort: DbOrderDirection | null;
+      /** 日時の列を出し直しているタイムゾーンの短い名前。 */
+      zone: string | null;
+      foreignKey: boolean;
+      onSort: () => void;
+      onResizeStart: (event: MouseEvent) => void;
+      onAutoFit: (event: MouseEvent) => void;
+    }[];
+  }) => unknown;
+  /** 列ごとの絞り込みの行の中身。 */
+  filterRow: (props: {
+    recency: HTMLElement | null;
+    columns: {
+      width: number;
+      placeholder: string;
+      value: string;
+      onInput: (input: HTMLInputElement) => void;
+      onKeydown: (input: HTMLInputElement, event: KeyboardEvent) => void;
+    }[];
+  }) => unknown;
+  /** 編集モードの表示のセル (ダブルクリックで入力の欄にする)。 */
+  displayCell: (props: {
+    width: number;
+    value: string | null;
+    emptyLabel: string;
+    readonly: boolean;
+    /** 編集できるセルの案内 (読み取り専用なら null で、ダブルクリックも無し)。 */
+    editHint: string | null;
+    onActivate: (event: MouseEvent) => void;
+    onEnterEdit: (event: MouseEvent) => void;
+  }) => unknown;
+  /** 編集モードの入力のセル。nullTitle があれば NULL を入れるボタンも出す。 */
+  inputCell: (props: {
+    width: number;
+    value: string | null;
+    readonly: boolean;
+    rowIndex: number;
+    colIndex: number;
+    inputRef: Ref<HTMLInputElement>;
+    nullTitle: string | null;
+    onInput: () => void;
+    onBlur: (event: FocusEvent) => void;
+    onKeydown: (event: KeyboardEvent) => void;
+    onSetNull: (event: MouseEvent) => void;
+  }) => unknown;
+  /** 行 (行番号と「変更」の列まで。セルは後から足す)。 */
+  row: (props: {
+    className: string;
+    rowNum: {
+      className: string;
+      label: string;
+      title: string | null;
+      ref: Ref<HTMLElement>;
+    };
+    recency: HTMLElement | null;
+  }) => unknown;
+  /** まだ読み込んでいない行のセル。 */
+  loadingCells: (widths: number[]) => unknown;
+  /** 読み取りの行のセル。 */
+  dataCells: (props: {
+    emptyLabel: string;
+    cells: {
+      width: number;
+      value: DbValue;
+      text: string;
+      timeTitle: string | null;
+      blob: boolean;
+      inRange: boolean;
+      foreignKey: boolean;
+      active: boolean;
+      onClick: (event: MouseEvent) => void;
+    }[];
+  }) => unknown;
+  /** 書き出しを落とすためのリンク (押した後に外す)。 */
+  exportLink: (props: { href: string; download: string }) => unknown;
+  /** 足元のページ送り。 */
+  pager: (props: {
+    refs: {
+      range: Ref<HTMLElement>;
+      prev: Ref<HTMLButtonElement>;
+      next: Ref<HTMLButtonElement>;
+    };
+    onPage: (direction: 1 | -1) => void;
+  }) => unknown;
+  /** 足元の状態の行 (message があれば失敗の文)。 */
+  status: (message: string | null) => unknown;
+};
+
+const cellStyle = (width: number) => `width: ${width}px; cursor: pointer;`;
+
+const editButtonStyle = "visibility: hidden";
+
+export const DEFAULT_VIEW: TableGridView = {
+  relatedPanel: (height) =>
+    html`<div class="db-related-panel" hidden style=${`height: ${height}px;`}></div>`,
+  relatedParts: (p) =>
+    html`<div class="db-related-resize" @mousedown=${p.onResizeStart}></div
+      ><div class="db-related-header"><span class="db-related-title" aria-hidden="true"
+          >${iconTemplate(LINK_16_PATH, "octicon-link")}</span
+        ><span class="db-related-crumbs" ${ref(p.refs.crumbs)}></span><button
+          type="button"
+          class="db-btn db-grid-detail-copy db-related-copy"
+          ${ref(p.refs.copy)}
+          @click=${(event: Event) =>
+            p.onCopy(event.currentTarget as HTMLButtonElement)}
+        >${p.text.detail.copy}</button><button
+          type="button"
+          class="db-btn db-btn-icon db-related-close"
+          @click=${p.onClose}
+        >×</button></div
+      ><div class="db-related-body"><div class="db-related-list" ${ref(p.refs.list)}></div
+        ><div
+          class="db-related-list-resize"
+          tabindex="0"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label=${p.text.grid.relatedListResize}
+          ${ref(p.refs.listResize)}
+        ></div
+        ><div class="db-related-grid-host" ${ref(p.refs.gridHost)}><div
+            class="db-related-head"
+            ${ref(p.refs.head)}
+          ></div>${p.grid}<div class="db-related-empty" hidden ${ref(p.refs.empty)}
+            >${p.text.grid.relatedEmpty}</div
+          ></div
+        ></div
+      >`,
+  relatedCrumbs: ({ origin, levels }) =>
+    html`<span class="db-related-crumb-origin">${origin}</span>${levels.map(
+      (level, i) =>
+        html`<span class="db-related-crumb-sep">▸</span>${
+          i === levels.length - 1
+            ? html`<span class="db-related-crumb active">${level.table}</span>`
+            : html`<button
+                type="button"
+                class="db-related-crumb"
+                @click=${level.onClick}
+              >${level.table}</button>`
+        }`,
+    )}`,
+  relatedEmptyNote: (note) =>
+    html`<span class="db-related-empty-note">${note}</span>`,
+  measure: () =>
+    html`<span
+      style="position:absolute;visibility:hidden;white-space:nowrap;font:inherit;padding:0 8px;"
+    ></span>`,
+  detailHeader: (p) =>
+    html`<div class="db-grid-detail-header">${p.tabs}<span
+          class="db-grid-detail-title"
+          title=${p.title}
+          >${p.title}</span
+        ><button type="button" class="db-btn db-grid-detail-copy" @click=${p.onCopy}
+          >${p.text.copy}</button
+        ><button
+          type="button"
+          class="db-btn db-btn-icon db-grid-detail-close"
+          title=${p.text.close}
+          aria-label=${p.text.close}
+          @click=${p.onClose}
+        >×</button></div
+      ><span
+        class="db-grid-detail-copy-status"
+        role="status"
+        ${ref(p.copyStatusRef)}
+      ></span>`,
+  detailJson: () => html`<pre class="db-grid-detail-json"></pre>`,
+  displayCell: (p) => {
+    const shown = nullOrEmptyMark(p.value, p.emptyLabel);
+    return html`<div
+      class=${[
+        "db-grid-cell db-grid-cell-edit db-grid-cell-display",
+        shown?.cellClass ?? "",
+        p.readonly ? "readonly" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      style=${cellStyle(p.width)}
+      title=${p.editHint ?? nothing}
+      @click=${p.onActivate}
+      @dblclick=${p.editHint === null ? nothing : p.onEnterEdit}
+    >${shown ? shown.mark : (p.value ?? "")}</div>`;
+  },
+  inputCell: (p) =>
+    html`<div
+      class="db-grid-cell db-grid-cell-edit"
+      style=${`width: ${p.width}px;`}
+    ><input
+        type="text"
+        class=${[
+          "db-grid-cell-input",
+          p.value === null ? "is-null" : "",
+          p.readonly ? "readonly" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        data-edit-row=${p.rowIndex}
+        data-edit-col=${p.colIndex}
+        placeholder=${p.value === null ? "NULL" : ""}
+        ?readonly=${p.readonly}
+        .value=${p.value ?? ""}
+        ${ref(p.inputRef)}
+        @input=${p.onInput}
+        @click=${(event: Event) => event.stopPropagation()}
+        @blur=${p.onBlur}
+        @keydown=${p.onKeydown}
+      />${
+        p.nullTitle === null
+          ? nothing
+          : // NULL ボタンを mousedown で抑止すると button へのフォーカス移譲が
+            // 起きず input の blur が走らないので、editing が解除されない。
+            html`<button
+              type="button"
+              class="db-grid-cell-null-btn"
+              title=${p.nullTitle}
+              @mousedown=${(event: Event) => event.preventDefault()}
+              @click=${p.onSetNull}
+            >∅</button>`
+      }</div>`,
+  row: ({ className, rowNum, recency }) =>
+    html`<div class=${className}><div
+        class=${rowNum.className}
+        title=${rowNum.title ?? nothing}
+        ${ref(rowNum.ref)}
+      >${rowNum.label}</div>${recency ?? nothing}</div>`,
+  loadingCells: (widths) =>
+    widths.map(
+      (width) =>
+        html`<div class="db-grid-cell loading" style=${`width: ${width}px;`}
+          >…</div
+        >`,
+    ),
+  dataCells: ({ emptyLabel, cells }) =>
+    cells.map((cell) => {
+      const shown = nullOrEmptyMark(cell.value, emptyLabel);
+      return html`<div
+        class=${[
+          "db-grid-cell",
+          shown?.cellClass ?? "",
+          cell.timeTitle === null ? "" : "db-grid-cell-time",
+          cell.blob ? "blob" : "",
+          cell.inRange ? "in-range" : "",
+          cell.foreignKey ? "db-grid-cell-fk" : "",
+          cell.active ? "db-grid-cell-active" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        style=${cellStyle(cell.width)}
+        title=${cell.timeTitle ?? nothing}
+        @click=${cell.onClick}
+      >${shown ? shown.mark : cell.text}</div>`;
+    }),
+  exportLink: ({ href, download }) =>
+    html`<a href=${href} download=${download}></a>`,
+  pager: ({ refs, onPage }) =>
+    html`<span class="db-grid-pager"><span
+        class="db-grid-pager-range"
+        ${ref(refs.range)}
+      ></span><button
+        type="button"
+        class="db-grid-pager-btn db-grid-pager-prev"
+        ${ref(refs.prev)}
+        @click=${() => onPage(-1)}
+      >‹</button><button
+        type="button"
+        class="db-grid-pager-btn db-grid-pager-next"
+        ${ref(refs.next)}
+        @click=${() => onPage(1)}
+      >›</button></span>`,
+  status: (message) =>
+    message === null
+      ? html`<div class="db-grid-status"></div>`
+      : html`<div class="db-grid-status db-pane-error">${message}</div>`,
+  header: ({ text, recency, columns }) =>
+    html`<div class="db-grid-cell db-grid-rownum-header">#</div>${
+      recency ?? nothing
+    }${columns.map((col) => {
+      const onResizeHandle = (event: Event) =>
+        (event.target as HTMLElement).classList.contains(
+          "db-grid-resize-handle",
+        );
+      return html`<div
+        class=${[
+          "db-grid-cell db-grid-header-cell",
+          col.sort ? "sorted" : "",
+          col.foreignKey ? "db-grid-header-fk" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        data-dir=${col.sort ?? nothing}
+        style=${`width: ${col.width}px;`}
+        @click=${(event: Event) => {
+          // 幅を変えるつまみを押したときは並べ替えない。
+          if (!onResizeHandle(event)) col.onSort();
+        }}
+        @dblclick=${(event: MouseEvent) => {
+          if (onResizeHandle(event)) col.onAutoFit(event);
+        }}
+      ><span class="db-grid-header-label">${col.name}${
+        col.zone === null
+          ? nothing
+          : html`<span class="db-grid-header-tz">${col.zone}</span>`
+      }${
+        col.foreignKey
+          ? html`<span
+              class="db-grid-header-fk-icon"
+              title=${text.grid.foreignKeyHint}
+              >${iconTemplate(LINK_16_PATH, "octicon-link")}</span
+            >`
+          : nothing
+      }</span><span class="db-grid-sort-icon">${
+        col.sort === null ? "" : col.sort === "asc" ? "▲" : "▼"
+      }</span><div
+          class="db-grid-resize-handle"
+          @mousedown=${col.onResizeStart}
+        ></div></div>`;
+    })}`,
+  filterRow: ({ recency, columns }) =>
+    html`<div
+        class="db-grid-cell db-grid-rownum-header db-grid-filter-spacer"
+      ></div>${recency ?? nothing}${columns.map(
+        (col) =>
+          html`<div
+          class="db-grid-cell db-grid-filter-cell"
+          style=${`width: ${col.width}px;`}
+        ><input
+            type="search"
+            class="db-grid-col-filter"
+            placeholder=${col.placeholder}
+            autocomplete="off"
+            .value=${col.value}
+            @input=${(event: Event) =>
+              col.onInput(event.currentTarget as HTMLInputElement)}
+            @keydown=${(event: KeyboardEvent) =>
+              col.onKeydown(event.currentTarget as HTMLInputElement, event)}
+          /></div>`,
+      )}`,
+  shell: ({ text, timeZone, refs }) => {
+    const g = text.grid;
+    return html`<div class="db-grid"><div class="db-grid-filter-bar"><span
+          class="db-grid-filter-icon"
+          aria-hidden="true"
+          >${iconTemplate(SEARCH_16_PATH, "octicon-search")}</span
+        ><input
+          type="search"
+          class="db-grid-filter-input"
+          placeholder=${g.searchPlaceholder}
+          autocomplete="off"
+          ${ref(refs.filterInput)}
+        /><button
+          type="button"
+          class="db-btn db-btn-sm db-grid-filter-clear"
+          hidden
+          ${ref(refs.filterClear)}
+        >${g.clearFiltersLabel}</button><div
+          class="db-grid-edit-controls"
+          hidden
+          ${ref(refs.editWrap)}
+        ><button
+            type="button"
+            class="db-btn db-grid-edit-newrow"
+            style=${editButtonStyle}
+            ${ref(refs.newRowBtn)}
+          >${text.edit.newRow}</button><button
+            type="button"
+            class="db-btn db-btn-primary db-grid-edit-commit"
+            style=${editButtonStyle}
+            ${ref(refs.commitBtn)}
+          >${text.edit.commit}</button><button
+            type="button"
+            class="db-btn db-grid-edit-discard"
+            style=${editButtonStyle}
+            ${ref(refs.discardBtn)}
+          >${text.edit.discard}</button><span
+            class="db-grid-edit-status"
+            ${ref(refs.editStatus)}
+          ></span></div
+        ><div class="db-grid-filter-actions">${timeZone}<button
+            type="button"
+            class="db-btn db-btn-sm db-grid-newest"
+            hidden
+            aria-pressed="false"
+            ${ref(refs.newestBtn)}
+          >${iconTemplate(HISTORY_16_PATH, "octicon-history")}<span
+              class="db-grid-newest-label"
+              ${ref(refs.newestLabel)}
+            ></span></button
+          ><button
+            type="button"
+            class="db-btn db-btn-icon db-grid-refresh"
+            title=${g.refreshAction}
+            aria-label=${g.refreshAction}
+            aria-busy="false"
+            ${ref(refs.refreshBtn)}
+          >${iconTemplate(SYNC_16_PATH, "octicon-sync")}<span
+              class="db-grid-refresh-label"
+              ${ref(refs.refreshLabel)}
+            ></span></button
+          ><span
+            class="db-refresh-result db-grid-refresh-result"
+            aria-live="polite"
+            hidden
+            ${ref(refs.refreshResult)}
+          ></span
+          ><div class="db-grid-export" ${ref(refs.exportWrap)}><button
+              type="button"
+              class="db-btn db-btn-icon db-grid-export-toggle"
+              title=${g.exportAction}
+              aria-label=${g.exportAction}
+              ${ref(refs.exportBtn)}
+            >${iconTemplate(DOWNLOAD_16_PATHS, "octicon-download")}</button
+            ><div class="db-grid-export-menu" hidden ${ref(refs.exportMenu)}
+              ><button
+                type="button"
+                class="db-grid-export-item"
+                ${ref(refs.exportCsv)}
+              >CSV</button><button
+                type="button"
+                class="db-grid-export-item"
+                ${ref(refs.exportJson)}
+              >JSON</button></div
+            ></div
+          ></div
+        ></div
+      ><div class="db-grid-viewport" tabindex="0" ${ref(refs.viewport)}><div
+          class="db-grid-head"
+          ${ref(refs.head)}
+        ><div class="db-grid-header-wrap"><div
+              class="db-grid-header"
+              ${ref(refs.headerRow)}
+            ></div></div
+          ><div class="db-grid-filter-row-wrap"><div
+              class="db-grid-filter-row"
+              ${ref(refs.filterRow)}
+            ></div></div
+        ></div
+        ><div class="db-grid-rows"><div class="db-grid-spacer" ${ref(refs.spacer)}></div
+          ><div class="db-grid-body" ${ref(refs.body)}></div></div
+        ><div class="db-pane-empty" hidden ${ref(refs.filteredEmpty)}><div
+            class="db-pane-empty-title"
+            ${ref(refs.filteredEmptyTitle)}
+          ></div><div class="db-pane-empty-hint" ${ref(refs.filteredEmptyHint)}></div
+          ><div
+            class="db-pane-empty-actions"
+            hidden
+            ${ref(refs.filteredEmptyActions)}
+          ><button
+              type="button"
+              class="db-btn db-btn-icon db-grid-refresh"
+              hidden
+              disabled
+              ${ref(refs.filteredEmptyReloadAction)}
+            >${iconTemplate(SYNC_16_PATH, "octicon-sync")}</button><button
+              type="button"
+              class="db-btn db-btn-sm"
+              hidden
+              disabled
+              ${ref(refs.filteredEmptyAction)}
+            ></button></div></div
+      ></div
+      ><div class="db-grid-detail-panel" hidden ${ref(refs.detailPanel)}><div
+          class="db-grid-detail-resize"
+          ${ref(refs.detailResize)}
+        ></div></div
+    ></div>`;
+  },
+};
+
 export function createTableGrid(
   callbacks: TableGridCallbacks,
   options: TableGridOptions = {},
+  view: TableGridView = DEFAULT_VIEW,
 ): TableGrid {
   const embedded = options.embedded === true;
   // ローカライズ文言。未指定時は英語にフォールバックする。
   const text = (): DbText => callbacks.getText?.() ?? dbText("en");
-  const el = document.createElement("div");
-  el.className = "db-grid";
+  // 最近の変化: 行番号の右の「変更」の列と、再読み込みで変わった行の印。
+  const recency = createGridRecency({ text });
+  const refreshMarks = createRefreshMarks();
+  // 日時の列を出し直すタイムゾーン。関連パネルの表は設定を読むだけで、
+  // 選択欄は出さない。
+  const timeZone = createTimeZonePicker({
+    text,
+    get: () => callbacks.getTimeZone?.() ?? "",
+    set: (pref) => callbacks.setTimeZone?.(pref) ?? Promise.resolve(),
+    onChange: () => {
+      timeZone.sync();
+      renderHeader();
+      renderViewport();
+    },
+  });
 
-  const filterBar = document.createElement("div");
-  filterBar.className = "db-grid-filter-bar";
-  const filterIcon = document.createElement("span");
-  filterIcon.className = "db-grid-filter-icon";
-  filterIcon.setAttribute("aria-hidden", "true");
-  filterIcon.innerHTML = iconSvg("octicon-search", SEARCH_16_PATH);
-  const filterInput = document.createElement("input");
-  filterInput.type = "search";
-  filterInput.className = "db-grid-filter-input";
-  filterInput.placeholder = text().grid.searchPlaceholder;
-  filterInput.autocomplete = "off";
-  const filterClear = document.createElement("button");
-  filterClear.type = "button";
-  filterClear.className = "db-btn db-btn-sm db-grid-filter-clear";
-  filterClear.textContent = text().grid.clearFiltersLabel;
-  filterClear.hidden = true;
-
-  const refreshBtn = document.createElement("button");
-  refreshBtn.type = "button";
-  refreshBtn.className = "db-btn db-btn-icon db-grid-refresh";
-  refreshBtn.title = text().grid.refreshAction;
-  refreshBtn.setAttribute("aria-label", text().grid.refreshAction);
-  refreshBtn.setAttribute("aria-busy", "false");
-  refreshBtn.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
-  const refreshLabel = document.createElement("span");
-  refreshLabel.className = "db-grid-refresh-label";
-  refreshLabel.textContent = "";
-  refreshBtn.appendChild(refreshLabel);
-  const refreshResult = document.createElement("span");
-  refreshResult.className = "db-refresh-result db-grid-refresh-result";
-  refreshResult.setAttribute("aria-live", "polite");
-  refreshResult.hidden = true;
+  // 外枠 (検索の行・見出し・本文・詳細の欄) は 1 度だけ作り、以後は要素へ
+  // 直接書き込む (仮想スクロールで行を組み直すので、全体を描き直さない)。
+  const shell = createShellRefs();
+  const el = templateElement(
+    view.shell({ text: text(), timeZone: timeZone.el, refs: shell }),
+  );
+  const filterInput = shellPart<HTMLInputElement>(shell.filterInput);
+  const filterClear = shellPart<HTMLButtonElement>(shell.filterClear);
+  const refreshBtn = shellPart<HTMLButtonElement>(shell.refreshBtn);
+  const refreshLabel = shellPart(shell.refreshLabel);
+  const refreshResult = shellPart(shell.refreshResult);
+  const exportWrap = shellPart(shell.exportWrap);
+  const exportBtn = shellPart<HTMLButtonElement>(shell.exportBtn);
+  const exportMenu = shellPart(shell.exportMenu);
+  const editWrap = shellPart(shell.editWrap);
+  const newRowBtn = shellPart<HTMLButtonElement>(shell.newRowBtn);
+  const commitBtn = shellPart<HTMLButtonElement>(shell.commitBtn);
+  const discardBtn = shellPart<HTMLButtonElement>(shell.discardBtn);
+  const editStatus = shellPart(shell.editStatus);
+  const newestBtn = shellPart<HTMLButtonElement>(shell.newestBtn);
+  const newestLabel = shellPart(shell.newestLabel);
+  const headerRow = shellPart(shell.headerRow);
+  const filterRow = shellPart(shell.filterRow);
+  const viewport = shellPart(shell.viewport);
+  const spacer = shellPart(shell.spacer);
+  const body = shellPart(shell.body);
+  const filteredEmpty = shellPart(shell.filteredEmpty);
+  const filteredEmptyTitle = shellPart(shell.filteredEmptyTitle);
+  const filteredEmptyHint = shellPart(shell.filteredEmptyHint);
+  const filteredEmptyActions = shellPart(shell.filteredEmptyActions);
+  const filteredEmptyReloadAction = shellPart<HTMLButtonElement>(
+    shell.filteredEmptyReloadAction,
+  );
+  const filteredEmptyAction = shellPart<HTMLButtonElement>(
+    shell.filteredEmptyAction,
+  );
+  const detailPanel = shellPart(shell.detailPanel);
+  const detailResize = shellPart(shell.detailResize);
+  const head = shellPart(shell.head);
 
   // エクスポートは検索バー右端のアイコン+メニューに集約する。これにより
   // 「どのグリッドのエクスポートか」が見た目で分かる（メイン/関連で別々）。
-  const exportWrap = document.createElement("div");
-  exportWrap.className = "db-grid-export";
-  const exportBtn = document.createElement("button");
-  exportBtn.type = "button";
-  exportBtn.className = "db-btn db-btn-icon db-grid-export-toggle";
-  exportBtn.title = text().grid.exportAction;
-  exportBtn.setAttribute("aria-label", text().grid.exportAction);
-  exportBtn.innerHTML = iconSvg("octicon-download", DOWNLOAD_16_PATHS);
-  const exportMenu = document.createElement("div");
-  exportMenu.className = "db-grid-export-menu";
-  exportMenu.hidden = true;
-  const exportCsv = document.createElement("button");
-  exportCsv.type = "button";
-  exportCsv.className = "db-grid-export-item";
-  exportCsv.textContent = "CSV";
-  const exportJson = document.createElement("button");
-  exportJson.type = "button";
-  exportJson.className = "db-grid-export-item";
-  exportJson.textContent = "JSON";
-  exportMenu.append(exportCsv, exportJson);
-  exportWrap.append(exportBtn, exportMenu);
-
   const closeExportMenu = () => {
     exportMenu.hidden = true;
     document.removeEventListener("click", onDocClickForExport);
@@ -327,118 +915,22 @@ export function createTableGrid(
       closeExportMenu();
     }
   });
-  exportCsv.addEventListener("click", () => {
+  shellPart(shell.exportCsv).addEventListener("click", () => {
     closeExportMenu();
     triggerExport("csv");
   });
-  exportJson.addEventListener("click", () => {
+  shellPart(shell.exportJson).addEventListener("click", () => {
     closeExportMenu();
     triggerExport("json");
   });
 
-  // --- 行編集ツールバー (コミット/破棄/新規行) ---
-  // embedded (関連パネルの埋め込みグリッド) では編集 UI を出さない。
-  // 編集モード ON/OFF のトグルはサイドバー prefs バーに集約 (#16)。
-  // ここのコントロールは「編集モード ON 中だけ」表示する。
-  // editWrap 自体は editable 判定で hidden 切替 (refreshEditButtons)。
-  // 子要素は editMode で visibility 切替する (場所は確保 = レイアウトシフト
-  // 回避)。初期は editMode OFF 相当に visibility:hidden 固定で組み立てる。
-  const editWrap = document.createElement("div");
-  editWrap.className = "db-grid-edit-controls";
-  editWrap.hidden = true;
-  const newRowBtn = document.createElement("button");
-  newRowBtn.type = "button";
-  newRowBtn.className = "db-btn db-grid-edit-newrow";
-  newRowBtn.textContent = text().edit.newRow;
-  newRowBtn.style.visibility = "hidden";
-  const commitBtn = document.createElement("button");
-  commitBtn.type = "button";
-  commitBtn.className = "db-btn db-btn-primary db-grid-edit-commit";
-  commitBtn.textContent = text().edit.commit;
-  commitBtn.style.visibility = "hidden";
-  const discardBtn = document.createElement("button");
-  discardBtn.type = "button";
-  discardBtn.className = "db-btn db-grid-edit-discard";
-  discardBtn.textContent = text().edit.discard;
-  discardBtn.style.visibility = "hidden";
-  const editStatus = document.createElement("span");
-  editStatus.className = "db-grid-edit-status";
-  editWrap.append(newRowBtn, commitBtn, discardBtn, editStatus);
-
-  // 最近の変化: 行番号の右の「変更」の列と、再読み込みで変わった行の印。
-  const recency = createGridRecency({ text });
-  const refreshMarks = createRefreshMarks();
-  // 「新しい順」。押せるかどうかは表の列で決まる (時刻の列か整数の主キー)。
-  const newestBtn = document.createElement("button");
-  newestBtn.type = "button";
-  newestBtn.className = "db-btn db-btn-sm db-grid-newest";
-  newestBtn.hidden = true;
-  newestBtn.setAttribute("aria-pressed", "false");
-  newestBtn.innerHTML = iconSvg("octicon-history", HISTORY_16_PATH);
-  const newestLabel = document.createElement("span");
-  newestLabel.className = "db-grid-newest-label";
-  newestBtn.appendChild(newestLabel);
-
-  // 日時の列を出し直すタイムゾーン。関連パネルの表は設定を読むだけで、
-  // 選択欄は出さない。
-  const timeZone = createTimeZonePicker({
-    text,
-    get: () => callbacks.getTimeZone?.() ?? "",
-    set: (pref) => callbacks.setTimeZone?.(pref) ?? Promise.resolve(),
-    onChange: () => {
-      timeZone.sync();
-      renderHeader();
-      renderViewport();
-    },
-  });
-
-  const filterActions = document.createElement("div");
-  filterActions.className = "db-grid-filter-actions";
-  filterActions.append(
-    timeZone.el,
-    newestBtn,
-    refreshBtn,
-    refreshResult,
-    exportWrap,
-  );
-
-  filterBar.append(
-    filterIcon,
-    filterInput,
-    filterClear,
-    editWrap,
-    filterActions,
-  );
-
-  const headerWrap = document.createElement("div");
-  headerWrap.className = "db-grid-header-wrap";
-
-  const headerRow = document.createElement("div");
-  headerRow.className = "db-grid-header";
-  headerWrap.appendChild(headerRow);
-
-  const filterRowWrap = document.createElement("div");
-  filterRowWrap.className = "db-grid-filter-row-wrap";
-  const filterRow = document.createElement("div");
-  filterRow.className = "db-grid-filter-row";
-  filterRowWrap.appendChild(filterRow);
-
-  const viewport = document.createElement("div");
-  viewport.className = "db-grid-viewport";
-  // 矢印キーでセルを移動するために、viewport 自体をフォーカス対象にする。
-  // セルは div なので、セルをクリックするとフォーカスはここへ上がってくる。
-  viewport.tabIndex = 0;
-  // 足元のページ送りの「見えている行の範囲」は、表の高さが変わったとき
-  // (セルの詳細を開く・下のパネルを動かす) にも合わせる。ResizeObserver の
+  // 表の高さが変わったとき (窓を縦に広げる・セルの詳細を開く・下のパネルを
+  // 動かす) は、見えるようになった行を描き、要るページを読み、足元のページ送りの
+  // 「見えている行の範囲」も合わせる (renderViewport が両方やる)。描いた範囲より
+  // 広く伸びると、スクロールするまで下が空いたままだった。ResizeObserver の
   // 無い DOM (テストの一部の環境) では、スクロールしたときにだけ合わせる。
   if (typeof ResizeObserver === "function")
-    new ResizeObserver(() => syncPager()).observe(viewport);
-
-  const spacer = document.createElement("div");
-  spacer.className = "db-grid-spacer";
-
-  const body = document.createElement("div");
-  body.className = "db-grid-body";
+    new ResizeObserver(() => renderViewport("scroll")).observe(viewport);
 
   // 幅不足で省略 (…) されたセルだけ、ホバー時に全文をネイティブ tooltip で
   // 見せる。セルごとに title を仕込むとノイズ＆再描画コストになるので、
@@ -461,56 +953,9 @@ export function createTableGrid(
     }
   });
 
-  const filteredEmpty = document.createElement("div");
-  filteredEmpty.className = "db-pane-empty";
-  filteredEmpty.hidden = true;
-  const filteredEmptyTitle = document.createElement("div");
-  filteredEmptyTitle.className = "db-pane-empty-title";
-  const filteredEmptyHint = document.createElement("div");
-  filteredEmptyHint.className = "db-pane-empty-hint";
-  const filteredEmptyActions = document.createElement("div");
-  filteredEmptyActions.className = "db-pane-empty-actions";
-  filteredEmptyActions.hidden = true;
-  const filteredEmptyReloadAction = document.createElement("button");
-  filteredEmptyReloadAction.type = "button";
-  filteredEmptyReloadAction.className = "db-btn db-btn-icon db-grid-refresh";
-  filteredEmptyReloadAction.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
-  filteredEmptyReloadAction.hidden = true;
-  filteredEmptyReloadAction.disabled = true;
-  const filteredEmptyAction = document.createElement("button");
-  filteredEmptyAction.type = "button";
-  filteredEmptyAction.className = "db-btn db-btn-sm";
-  filteredEmptyAction.hidden = true;
-  filteredEmptyAction.disabled = true;
-  filteredEmptyActions.append(filteredEmptyReloadAction, filteredEmptyAction);
-  filteredEmpty.append(
-    filteredEmptyTitle,
-    filteredEmptyHint,
-    filteredEmptyActions,
-  );
-
-  const detailPanel = document.createElement("div");
-  detailPanel.className = "db-grid-detail-panel";
-  detailPanel.hidden = true;
-  // 上端ドラッグハンドル。関連パネル (.db-related-resize) と同じ構造で、
-  // ドラッグ確定時にコールバック経由でタブ状態へ保存する。
-  const detailResize = document.createElement("div");
-  detailResize.className = "db-grid-detail-resize";
+  // 詳細の欄の上端のドラッグハンドル。関連パネル (.db-related-resize) と同じ
+  // 構造で、ドラッグ確定時にコールバック経由でタブ状態へ保存する。
   detailResize.addEventListener("mousedown", startDetailResize);
-  detailPanel.appendChild(detailResize);
-
-  // 列の見出しと絞り込みの行は、本文と同じスクロールの箱の中で上に貼り付ける
-  // (style.css の .db-grid-head)。別の箱にして本文の scroll のたびに JS で
-  // scrollLeft を合わせていた頃は、iPhone の Safari で横に送ると見出しが遅れて
-  // 引っかかり、遅かった。行 (spacer と body) は頭の下の箱に置く。
-  const head = document.createElement("div");
-  head.className = "db-grid-head";
-  head.append(headerWrap, filterRowWrap);
-  const rowsArea = document.createElement("div");
-  rowsArea.className = "db-grid-rows";
-  rowsArea.append(spacer, body);
-  viewport.append(head, rowsArea, filteredEmpty);
-  el.append(filterBar, viewport, detailPanel);
 
   /** 行が見える高さ (本文の箱から、上に貼り付けた頭の高さを引く)。 */
   function rowsViewHeight(): number {
@@ -840,8 +1285,8 @@ export function createTableGrid(
     moveActiveCell(nextRow, nextCol);
   }
 
-  // detailPanel.innerHTML = "" を直に呼ぶと resize handle まで消えてしまう
-  // ので、resize 以外の子だけ削除するヘルパを通す。
+  // 詳細の欄の子を全部消すと resize handle まで消えてしまうので、resize
+  // 以外の子だけ削除するヘルパを通す。
   function clearDetailContent() {
     for (const child of Array.from(detailPanel.children)) {
       if (child !== detailResize) child.remove();
@@ -1053,10 +1498,7 @@ export function createTableGrid(
   }
 
   if (!embedded) {
-    relatedPanel = document.createElement("div");
-    relatedPanel.className = "db-related-panel";
-    relatedPanel.hidden = true;
-    relatedPanel.style.height = `${relatedHeight}px`;
+    relatedPanel = templateElement(view.relatedPanel(relatedHeight));
     el.appendChild(relatedPanel);
   }
 
@@ -1128,9 +1570,7 @@ export function createTableGrid(
   }
 
   function autoFitColumn(colName: string, colIndex: number) {
-    const measure = document.createElement("span");
-    measure.style.cssText =
-      "position:absolute;visibility:hidden;white-space:nowrap;font:inherit;padding:0 8px;";
+    const measure = templateElement(view.measure());
     document.body.appendChild(measure);
     const headerLabel = columns[colIndex]?.name || colName;
     measure.textContent = `${headerLabel}  ▲`;
@@ -1231,8 +1671,9 @@ export function createTableGrid(
     filteredEmptyTitle.textContent = t.filteredEmptyTitle(count);
     filteredEmptyHint.textContent = t.filteredEmptyHint;
     filteredEmptyReloadAction.classList.toggle("spinning", isRefreshing);
-    filteredEmptyReloadAction.textContent = "";
-    filteredEmptyReloadAction.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+    filteredEmptyReloadAction.replaceChildren(
+      templateElement(iconTemplate(SYNC_16_PATH, "octicon-sync")),
+    );
     filteredEmptyReloadAction.title = reloadAction;
     filteredEmptyReloadAction.setAttribute("aria-label", reloadAction);
     filteredEmptyReloadAction.setAttribute(
@@ -1373,14 +1814,14 @@ export function createTableGrid(
     filterInput.value = "";
     syncFilterClearButton();
     syncRefreshButton();
-    filterRow.innerHTML = "";
+    filterRow.replaceChildren();
     pageCache = new Map();
     pendingPages = new Map();
     startNewLoadGeneration();
     cancelAnimationFrame(rafId);
     if (filterTimer) clearTimeout(filterTimer);
-    headerRow.innerHTML = "";
-    body.innerHTML = "";
+    headerRow.replaceChildren();
+    body.replaceChildren();
     spacer.style.height = "0px";
     statusEl?.remove();
     statusEl = null;
@@ -1515,86 +1956,7 @@ export function createTableGrid(
   function ensureRelatedDom() {
     if (!relatedPanel || relatedListEl) return;
 
-    const resizer = document.createElement("div");
-    resizer.className = "db-related-resize";
-    resizer.addEventListener("mousedown", startRelatedResize);
-
-    const header = document.createElement("div");
-    header.className = "db-related-header";
-    const title = document.createElement("span");
-    title.className = "db-related-title";
-    title.setAttribute("aria-hidden", "true");
-    title.innerHTML = iconSvg("octicon-link", LINK_16_PATH);
-    // ドリル経路を示すパンくず。各セグメントのクリックでその階層へ戻る。
-    relatedCrumbEl = document.createElement("span");
-    relatedCrumbEl.className = "db-related-crumbs";
-    const copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "db-btn db-grid-detail-copy db-related-copy";
-    copyBtn.textContent = text().detail.copy;
-    relatedCopyBtn = copyBtn;
-    copyBtn.addEventListener("click", () => {
-      const target = currentRelatedTarget();
-      if (!target) return;
-      navigator.clipboard.writeText(target.value).then(
-        () => {
-          copyBtn.textContent = text().detail.copied;
-          setTimeout(() => {
-            copyBtn.textContent = text().detail.copy;
-          }, 800);
-        },
-        // 詳細の欄のコピーと同じく、失敗の理由を出す。
-        (error: unknown) => {
-          console.error(error);
-          copyBtn.textContent = `${text().detail.copyFailed}: ${formatErrorDetail(error)}`;
-        },
-      );
-    });
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "db-btn db-btn-icon db-related-close";
-    closeBtn.textContent = "×";
-    closeBtn.addEventListener("click", () => {
-      hideRelatedPanel();
-      clearActiveCell();
-    });
-    header.append(title, relatedCrumbEl, copyBtn, closeBtn);
-
-    const bodyRow = document.createElement("div");
-    bodyRow.className = "db-related-body";
-    relatedListEl = document.createElement("div");
-    relatedListEl.className = "db-related-list";
-    // リストは幅が固定だとテーブル名 + 条件が読めないので、右端を掴んで
-    // 広げられるようにする (ドラッグの配線は core/drag-resizer と共有)。
-    const listResize = document.createElement("div");
-    listResize.className = "db-related-list-resize";
-    listResize.tabIndex = 0;
-    listResize.setAttribute("role", "separator");
-    listResize.setAttribute("aria-orientation", "vertical");
-    listResize.setAttribute("aria-label", text().grid.relatedListResize);
-    relatedListResizeEl = listResize;
-    applyRelatedListWidth(relatedListWidth);
-    relatedListResizeDetach = attachDragResizer({
-      handle: listResize,
-      getSize: () => relatedListWidth,
-      applySize: applyRelatedListWidth,
-      direction: 1,
-      axis: "x",
-      onEnd: () =>
-        reportStoredSizeFailure(
-          writeStoredSize(RELATED_LIST_WIDTH_KEY, relatedListWidth),
-          "saving the related-record list width failed",
-        ),
-      activeClassTarget: relatedPanel,
-      activeClassName: "db-related-list-resizing",
-    });
-    relatedGridHost = document.createElement("div");
-    relatedGridHost.className = "db-related-grid-host";
-    relatedHeadEl = document.createElement("div");
-    relatedHeadEl.className = "db-related-head";
-    relatedGridHost.appendChild(relatedHeadEl);
-
-    embeddedGrid = createTableGrid(
+    const embedded = createTableGrid(
       {
         fetchPage: (table, offset, limit, s, filters, signal) =>
           callbacks.fetchRelatedPage
@@ -1621,17 +1983,76 @@ export function createTableGrid(
         onFocusParentGrid: () => viewport.focus({ preventScroll: true }),
       },
       { embedded: true },
+      view,
     );
-    relatedGridHost.appendChild(embeddedGrid.el);
-
-    relatedEmptyEl = document.createElement("div");
-    relatedEmptyEl.className = "db-related-empty";
-    relatedEmptyEl.textContent = text().grid.relatedEmpty;
-    relatedEmptyEl.hidden = true;
-    relatedGridHost.appendChild(relatedEmptyEl);
-
-    bodyRow.append(relatedListEl, listResize, relatedGridHost);
-    relatedPanel.append(resizer, header, bodyRow);
+    embeddedGrid = embedded;
+    const refs = {
+      crumbs: createRef<HTMLElement>(),
+      copy: createRef<HTMLButtonElement>(),
+      list: createRef<HTMLElement>(),
+      listResize: createRef<HTMLElement>(),
+      gridHost: createRef<HTMLElement>(),
+      head: createRef<HTMLElement>(),
+      empty: createRef<HTMLElement>(),
+    };
+    relatedPanel.append(
+      ...templateElements(
+        view.relatedParts({
+          text: text(),
+          grid: embedded.el,
+          refs,
+          onResizeStart: startRelatedResize,
+          onCopy: (button) => {
+            const target = currentRelatedTarget();
+            if (!target) return;
+            navigator.clipboard.writeText(target.value).then(
+              () => {
+                button.textContent = text().detail.copied;
+                setTimeout(() => {
+                  button.textContent = text().detail.copy;
+                }, 800);
+              },
+              // 詳細の欄のコピーと同じく、失敗の理由を出す。
+              (error: unknown) => {
+                console.error(error);
+                button.textContent = `${text().detail.copyFailed}: ${formatErrorDetail(error)}`;
+              },
+            );
+          },
+          onClose: () => {
+            hideRelatedPanel();
+            clearActiveCell();
+          },
+        }),
+      ),
+    );
+    // ドリル経路を示すパンくず。各セグメントのクリックでその階層へ戻る。
+    relatedCrumbEl = shellPart(refs.crumbs);
+    relatedCopyBtn = shellPart<HTMLButtonElement>(refs.copy);
+    relatedListEl = shellPart(refs.list);
+    relatedGridHost = shellPart(refs.gridHost);
+    relatedHeadEl = shellPart(refs.head);
+    relatedEmptyEl = shellPart(refs.empty);
+    // リストは幅が固定だとテーブル名 + 条件が読めないので、右端を掴んで
+    // 広げられるようにする (ドラッグの配線は core/drag-resizer と共有)。
+    const listResize = shellPart(refs.listResize);
+    relatedListResizeEl = listResize;
+    applyRelatedListWidth(relatedListWidth);
+    const panel = relatedPanel;
+    relatedListResizeDetach = attachDragResizer({
+      handle: listResize,
+      getSize: () => relatedListWidth,
+      applySize: applyRelatedListWidth,
+      direction: 1,
+      axis: "x",
+      onEnd: () =>
+        reportStoredSizeFailure(
+          writeStoredSize(RELATED_LIST_WIDTH_KEY, relatedListWidth),
+          "saving the related-record list width failed",
+        ),
+      activeClassTarget: panel,
+      activeClassName: "db-related-list-resizing",
+    });
   }
 
   function startRelatedResize(e: MouseEvent) {
@@ -1812,34 +2233,19 @@ export function createTableGrid(
 
   function renderRelatedCrumbs() {
     if (!relatedCrumbEl) return;
-    relatedCrumbEl.innerHTML = "";
-    if (relatedStack.length === 0) return;
-    const origin = document.createElement("span");
-    origin.className = "db-related-crumb-origin";
-    origin.textContent = relatedStack[0].sourceTable;
-    relatedCrumbEl.appendChild(origin);
-    relatedStack.forEach((level, i) => {
-      const sep = document.createElement("span");
-      sep.className = "db-related-crumb-sep";
-      sep.textContent = "▸";
-      relatedCrumbEl?.appendChild(sep);
-      const target = level.targets[level.selectedIndex];
-      const isLast = i === relatedStack.length - 1;
-      const tableLabel = relatedDrillTable(target);
-      if (isLast) {
-        const seg = document.createElement("span");
-        seg.className = "db-related-crumb active";
-        seg.textContent = tableLabel;
-        relatedCrumbEl?.appendChild(seg);
-      } else {
-        const seg = document.createElement("button");
-        seg.type = "button";
-        seg.className = "db-related-crumb";
-        seg.textContent = tableLabel;
-        seg.addEventListener("click", () => goToRelatedLevel(i));
-        relatedCrumbEl?.appendChild(seg);
-      }
-    });
+    relatedCrumbEl.replaceChildren(
+      templateFragment(
+        relatedStack.length === 0
+          ? nothing
+          : view.relatedCrumbs({
+              origin: relatedStack[0].sourceTable,
+              levels: relatedStack.map((level, i) => ({
+                table: relatedDrillTable(level.targets[level.selectedIndex]),
+                onClick: () => goToRelatedLevel(i),
+              })),
+            }),
+      ),
+    );
   }
 
   function renderRelatedList() {
@@ -1900,12 +2306,10 @@ export function createTableGrid(
           target.direction === "outgoing"
             ? t.relatedEmpty
             : t.relatedEmptyIncoming;
-        if (target.fk.inferred) {
-          const note = document.createElement("span");
-          note.className = "db-related-empty-note";
-          note.textContent = t.relatedInferredNote;
-          relatedEmptyEl.appendChild(note);
-        }
+        if (target.fk.inferred)
+          relatedEmptyEl.appendChild(
+            templateElement(view.relatedEmptyNote(t.relatedInferredNote)),
+          );
       }
     } catch (err) {
       if (gen !== relatedGen || isAbortError(err)) return;
@@ -1936,7 +2340,7 @@ export function createTableGrid(
     if (json.length > DETAIL_JSON_HIGHLIGHT_MAX_CHARS) return false;
     const inner = highlightToInnerHtml(json, "json", jsonHighlighter);
     if (!inner) return false;
-    pre.innerHTML = inner;
+    pre.replaceChildren(templateFragment(unsafeHTML(inner)));
     return true;
   }
 
@@ -1995,16 +2399,10 @@ export function createTableGrid(
     detailPanel.hidden = false;
     clearDetailContent();
 
-    const header = document.createElement("div");
-    header.className = "db-grid-detail-header";
-
-    const title = document.createElement("span");
-    title.className = "db-grid-detail-title";
-    title.textContent =
+    const titleText =
       detailMode === "row"
         ? t.rowTitle(activeCellRowIndex + 1)
         : `${colName} (${colType})`;
-    title.title = title.textContent;
     const tabs = createDetailTabs(
       [
         { id: "cell", label: t.cell },
@@ -2017,44 +2415,39 @@ export function createTableGrid(
         viewport.focus({ preventScroll: true });
       },
     );
-
-    const copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "db-btn db-grid-detail-copy";
-    copyBtn.textContent = t.copy;
     const copyText =
       detailMode === "row"
         ? // 列名が重複するクエリ結果でも、列と値の対応を欠かさずコピーする。
           JSON.stringify({ columns: columnNames, values: row }, null, 2)
         : formatValueForCopy(value);
-    const copyStatus = document.createElement("span");
-    copyStatus.className = "db-grid-detail-copy-status";
-    copyStatus.setAttribute("role", "status");
-    copyBtn.addEventListener("click", () => {
-      navigator.clipboard.writeText(copyText).then(
-        () => {
-          copyStatus.textContent = t.copied;
+    const copyStatusRef = createRef<HTMLElement>();
+    const [header, copyStatus] = templateElements(
+      view.detailHeader({
+        text: t,
+        tabs: tabs.tabsEl,
+        title: titleText,
+        copyStatusRef,
+        onCopy: () => {
+          navigator.clipboard.writeText(copyText).then(
+            () => {
+              shellPart(copyStatusRef).textContent = t.copied;
+            },
+            (error: unknown) => {
+              console.error(error);
+              shellPart(copyStatusRef).textContent =
+                `${t.copyFailed}: ${formatErrorDetail(error)}`;
+            },
+          );
         },
-        (error: unknown) => {
-          console.error(error);
-          copyStatus.textContent = `${t.copyFailed}: ${formatErrorDetail(error)}`;
+        onClose: () => {
+          detailPanel.hidden = true;
+          // 関連パネルも閉じていればフッタ表示中のセル色も落とす。
+          if (!relatedPanel || relatedPanel.hidden) clearActiveCell();
         },
-      );
-    });
-
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "db-btn db-btn-icon db-grid-detail-close";
-    closeBtn.textContent = "×";
-    closeBtn.title = t.close;
-    closeBtn.setAttribute("aria-label", t.close);
-    closeBtn.addEventListener("click", () => {
-      detailPanel.hidden = true;
-      // 関連パネルも閉じていればフッタ表示中のセル色も落とす。
-      if (!relatedPanel || relatedPanel.hidden) clearActiveCell();
-    });
-
-    header.append(tabs.tabsEl, title, copyBtn, closeBtn);
+      }),
+    );
+    if (!header || !copyStatus)
+      throw new Error("table grid: the detail header was not drawn");
 
     const content = tabs.bodies[detailMode];
     content.classList.add("db-grid-detail-content");
@@ -2123,8 +2516,7 @@ export function createTableGrid(
         }
       }
       if (isJson) {
-        const pre = document.createElement("pre");
-        pre.className = "db-grid-detail-json";
+        const pre = templateElement(view.detailJson());
         showJsonDetail(pre, JSON.stringify(parsed, null, 2));
         content.appendChild(pre);
       } else {
@@ -2136,77 +2528,35 @@ export function createTableGrid(
   }
 
   function renderHeader() {
-    headerRow.innerHTML = "";
-    const rowNum = document.createElement("div");
-    rowNum.className = "db-grid-cell db-grid-rownum-header";
-    rowNum.textContent = "#";
-    headerRow.appendChild(rowNum);
-    if (recency.shown())
-      headerRow.appendChild(recency.headerCell(ROWNUM_WIDTH));
-    for (let i = 0; i < columns.length; i++) {
-      const col = columns[i];
-      const cell = document.createElement("div");
-      cell.className = "db-grid-cell db-grid-header-cell";
-      cell.style.width = `${getColWidth(col.name)}px`;
-      if (sort?.column === col.name) {
-        cell.classList.add("sorted");
-        cell.dataset.dir = sort.direction;
-      }
-
-      const label = document.createElement("span");
-      label.className = "db-grid-header-label";
-      label.textContent = col.name;
-      if (timeZone.zone() && recency.isTimeColumn(i)) {
-        const zoneBadge = document.createElement("span");
-        zoneBadge.className = "db-grid-header-tz";
-        zoneBadge.textContent = timeZone.shortName();
-        label.appendChild(zoneBadge);
-      }
-
-      if (fkColumns.has(col.name)) {
-        cell.classList.add("db-grid-header-fk");
-        const fkIcon = document.createElement("span");
-        fkIcon.className = "db-grid-header-fk-icon";
-        fkIcon.innerHTML = iconSvg("octicon-link", LINK_16_PATH);
-        fkIcon.title = text().grid.foreignKeyHint;
-        label.appendChild(fkIcon);
-      }
-
-      const sortIcon = document.createElement("span");
-      sortIcon.className = "db-grid-sort-icon";
-      sortIcon.textContent =
-        sort?.column === col.name ? (sort.direction === "asc" ? "▲" : "▼") : "";
-
-      /* ---- Resize handle ---- */
-      const resizeHandle = document.createElement("div");
-      resizeHandle.className = "db-grid-resize-handle";
-      const colIndex = i;
-      resizeHandle.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        startResize(colIndex, e);
-      });
-
-      cell.append(label, sortIcon, resizeHandle);
-      cell.addEventListener("click", (e) => {
-        // Don't sort when clicking on resize handle
-        if (
-          (e.target as HTMLElement).classList.contains("db-grid-resize-handle")
-        )
-          return;
-        handleSort(col.name);
-      });
-      cell.addEventListener("dblclick", (e) => {
-        if (
-          (e.target as HTMLElement).classList.contains("db-grid-resize-handle")
-        ) {
-          e.preventDefault();
-          e.stopPropagation();
-          autoFitColumn(col.name, colIndex);
-        }
-      });
-      headerRow.appendChild(cell);
-    }
+    headerRow.replaceChildren(
+      ...templateElements(
+        view.header({
+          text: text(),
+          recency: recency.shown() ? recency.headerCell(ROWNUM_WIDTH) : null,
+          columns: columns.map((col, i) => ({
+            name: col.name,
+            width: getColWidth(col.name),
+            sort: sort?.column === col.name ? sort.direction : null,
+            zone:
+              timeZone.zone() && recency.isTimeColumn(i)
+                ? timeZone.shortName()
+                : null,
+            foreignKey: fkColumns.has(col.name),
+            onSort: () => handleSort(col.name),
+            onResizeStart: (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              startResize(i, e);
+            },
+            onAutoFit: (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              autoFitColumn(col.name, i);
+            },
+          })),
+        }),
+      ),
+    );
     renderFilterRow();
     syncContentWidth();
   }
@@ -2247,52 +2597,43 @@ export function createTableGrid(
   }
 
   function renderFilterRow() {
-    filterRow.innerHTML = "";
-    const rowNumSpacer = document.createElement("div");
-    rowNumSpacer.className =
-      "db-grid-cell db-grid-rownum-header db-grid-filter-spacer";
-    filterRow.appendChild(rowNumSpacer);
-    if (recency.shown())
-      filterRow.appendChild(
-        recency.spacerCell(ROWNUM_WIDTH, "db-grid-filter-spacer"),
-      );
-    for (let i = 0; i < columns.length; i++) {
-      const col = columns[i];
-      const cell = document.createElement("div");
-      cell.className = "db-grid-cell db-grid-filter-cell";
-      cell.style.width = `${getColWidth(col.name)}px`;
-      const input = document.createElement("input");
-      input.type = "search";
-      input.className = "db-grid-col-filter";
-      input.placeholder = text().grid.columnFilterPlaceholder(col.name);
-      input.autocomplete = "off";
-      input.value = columnFilters.get(col.name) || "";
-      input.addEventListener("input", () => {
-        const val = input.value.trim();
-        if (val) {
-          columnFilters.set(col.name, val);
-        } else {
-          columnFilters.delete(col.name);
-        }
-        clearRefreshResult();
-        syncFilterClearButton();
-        syncRefreshButton();
-        scheduleFilter();
-      });
-      input.addEventListener("keydown", (e) => {
-        if (isImeComposing(e)) return;
-        if (e.key === "Escape") {
-          input.value = "";
-          columnFilters.delete(col.name);
-          clearRefreshResult();
-          syncFilterClearButton();
-          syncRefreshButton();
-          scheduleFilter();
-        }
-      });
-      cell.appendChild(input);
-      filterRow.appendChild(cell);
-    }
+    filterRow.replaceChildren(
+      ...templateElements(
+        view.filterRow({
+          recency: recency.shown()
+            ? recency.spacerCell(ROWNUM_WIDTH, "db-grid-filter-spacer")
+            : null,
+          columns: columns.map((col) => ({
+            width: getColWidth(col.name),
+            placeholder: text().grid.columnFilterPlaceholder(col.name),
+            value: columnFilters.get(col.name) || "",
+            onInput: (input) => {
+              const val = input.value.trim();
+              if (val) {
+                columnFilters.set(col.name, val);
+              } else {
+                columnFilters.delete(col.name);
+              }
+              clearRefreshResult();
+              syncFilterClearButton();
+              syncRefreshButton();
+              scheduleFilter();
+            },
+            onKeydown: (input, e) => {
+              if (isImeComposing(e)) return;
+              if (e.key === "Escape") {
+                input.value = "";
+                columnFilters.delete(col.name);
+                clearRefreshResult();
+                syncFilterClearButton();
+                syncRefreshButton();
+                scheduleFilter();
+              }
+            },
+          })),
+        }),
+      ),
+    );
   }
 
   function scheduleFilter() {
@@ -2481,96 +2822,79 @@ export function createTableGrid(
       onExitEdit?: () => void;
     },
   ): HTMLElement {
-    const cell = document.createElement("div");
-    cell.className = "db-grid-cell db-grid-cell-edit";
-    cell.style.width = `${getColWidth(columnNames[colIndex])}px`;
+    const width = getColWidth(columnNames[colIndex]);
 
     // ---- 表示モード: read-only 風のテキスト表示。ダブルクリックで input 化。
-    if (!opts.editing) {
-      cell.classList.add("db-grid-cell-display");
-      if (!fillNullOrEmpty(cell, value, text().grid.emptyValue))
-        cell.textContent = value ?? "";
-      if (opts.readonly) {
-        cell.classList.add("readonly");
-      }
-      cell.style.cursor = "pointer";
-      cell.addEventListener("click", (e) => {
-        e.stopPropagation();
-        opts.onActivate?.();
-      });
-      // 読み取り専用 (PK/blob) はダブルクリックしても編集できないので、
-      // 編集 hint を出さず dblclick もバインドしない。
-      if (!opts.readonly) {
-        cell.title = text().edit.dblclickToEdit;
-        cell.addEventListener("dblclick", (e) => {
-          e.stopPropagation();
-          opts.onEnterEdit?.();
-        });
-      }
-      return cell;
-    }
+    if (!opts.editing)
+      return templateElement(
+        view.displayCell({
+          width,
+          value,
+          emptyLabel: text().grid.emptyValue,
+          readonly: opts.readonly,
+          // 読み取り専用 (PK/blob) はダブルクリックしても編集できないので、
+          // 編集 hint を出さず dblclick もバインドしない。
+          editHint: opts.readonly ? null : text().edit.dblclickToEdit,
+          onActivate: (e) => {
+            e.stopPropagation();
+            opts.onActivate?.();
+          },
+          onEnterEdit: (e) => {
+            e.stopPropagation();
+            opts.onEnterEdit?.();
+          },
+        }),
+      );
 
     // ---- 入力モード: input (NULL は placeholder "NULL" + is-null クラス)。
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "db-grid-cell-input";
-    input.dataset.editRow = String(opts.rowIndex);
-    input.dataset.editCol = String(colIndex);
     // value===null は SQL NULL。空入力の "" (空文字列) と視覚的に区別するため、
     // placeholder "NULL" + is-null クラスで表現する。
+    const inputRef = createRef<HTMLInputElement>();
+    const input = () => shellPart<HTMLInputElement>(inputRef);
     const applyNullVisual = (isNull: boolean) => {
-      input.classList.toggle("is-null", isNull);
-      input.placeholder = isNull ? "NULL" : "";
+      input().classList.toggle("is-null", isNull);
+      input().placeholder = isNull ? "NULL" : "";
     };
-    input.value = value === null ? "" : value;
-    applyNullVisual(value === null);
-    if (opts.readonly) {
-      input.readOnly = true;
-      input.classList.add("readonly");
-    }
-    input.addEventListener("input", () => {
-      // テキスト入力したら NULL 状態は解除 (空文字列 "" は NULL ではない)。
-      applyNullVisual(false);
-      opts.onChange(input.value);
-    });
-    // 行選択/セル詳細クリックと衝突させない。
-    input.addEventListener("click", (e) => e.stopPropagation());
-    // 入力確定で表示モードへ戻す。NULL ボタンに focus が移るケースを除く。
-    input.addEventListener("blur", (e) => {
-      const next = (e as FocusEvent).relatedTarget as Node | null;
-      if (next && cell.contains(next)) return;
-      opts.onExitEdit?.();
-    });
-    // Enter / Escape で編集を抜けて表示モードへ戻す (値は input イベントで
-    // すでに反映済み。Escape でも保留中変更を消したりはしない)。
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === "Escape") {
-        e.preventDefault();
-        opts.onExitEdit?.();
-      }
-    });
-    cell.appendChild(input);
-    // nullable 列には NULL ボタンを出し、明示的に SQL NULL を入れられるように
-    // する (NULL→"" の暗黙変換や NULL 設定不可の問題への対処)。
-    if (opts.nullable && !opts.readonly) {
-      const nullBtn = document.createElement("button");
-      nullBtn.type = "button";
-      nullBtn.className = "db-grid-cell-null-btn";
-      nullBtn.textContent = "∅";
-      nullBtn.title = text().edit.setNull;
-      // NULL ボタンを mousedown で抑止すると button へのフォーカス移譲が起き
-      // ず input の blur が走らないので、editing が解除されない。
-      nullBtn.addEventListener("mousedown", (e) => e.preventDefault());
-      nullBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        input.value = "";
-        applyNullVisual(true);
-        opts.onChange(null);
-        // クリック後も入力モードを維持するため、明示的に input へ戻す。
-        input.focus();
-      });
-      cell.appendChild(nullBtn);
-    }
+    const cell = templateElement(
+      view.inputCell({
+        width,
+        value,
+        readonly: opts.readonly,
+        rowIndex: opts.rowIndex,
+        colIndex,
+        inputRef,
+        // nullable 列には NULL ボタンを出し、明示的に SQL NULL を入れられるように
+        // する (NULL→"" の暗黙変換や NULL 設定不可の問題への対処)。
+        nullTitle: opts.nullable && !opts.readonly ? text().edit.setNull : null,
+        onInput: () => {
+          // テキスト入力したら NULL 状態は解除 (空文字列 "" は NULL ではない)。
+          applyNullVisual(false);
+          opts.onChange(input().value);
+        },
+        // 入力確定で表示モードへ戻す。NULL ボタンに focus が移るケースを除く。
+        onBlur: (e) => {
+          const next = e.relatedTarget as Node | null;
+          if (next && cell.contains(next)) return;
+          opts.onExitEdit?.();
+        },
+        // Enter / Escape で編集を抜けて表示モードへ戻す (値は input イベントで
+        // すでに反映済み。Escape でも保留中変更を消したりはしない)。
+        onKeydown: (e) => {
+          if (e.key === "Enter" || e.key === "Escape") {
+            e.preventDefault();
+            opts.onExitEdit?.();
+          }
+        },
+        onSetNull: (e) => {
+          e.stopPropagation();
+          input().value = "";
+          applyNullVisual(true);
+          opts.onChange(null);
+          // クリック後も入力モードを維持するため、明示的に input へ戻す。
+          input().focus();
+        },
+      }),
+    );
     return cell;
   }
 
@@ -2626,42 +2950,46 @@ export function createTableGrid(
     const pageRows = getCachedPage(pageStart);
     const rowData = pageRows ? pageRows[i - pageStart] : null;
 
-    const row = document.createElement("div");
-    row.className = "db-grid-row";
-    if (i % 2 === 1) row.classList.add("alt");
-    if (i === selectedRowIndex) {
-      row.classList.add("selected");
-      selectedRowElement = row;
-    }
     const rowIndex = i;
-
-    const rowNum = document.createElement("div");
-    rowNum.className = "db-grid-cell db-grid-rownum";
-    rowNum.textContent = String(i + 1);
-    row.appendChild(rowNum);
-    if (recency.shown())
-      row.appendChild(
-        rowData
-          ? recency.cell(rowData, ROWNUM_WIDTH)
-          : recency.spacerCell(ROWNUM_WIDTH, "loading"),
-      );
     const refreshMark = rowData ? refreshMarks.markOf(rowData) : null;
-    if (refreshMark) {
-      row.classList.add("db-grid-row-refreshed", `is-${refreshMark}`);
-      rowNum.title =
-        refreshMark === "added"
-          ? text().grid.refreshMarkAdded
-          : text().grid.refreshMarkChanged;
-    }
+    const rowNumRef = createRef<HTMLElement>();
+    const row = templateElement(
+      view.row({
+        className: [
+          "db-grid-row",
+          i % 2 === 1 ? "alt" : "",
+          i === selectedRowIndex ? "selected" : "",
+          refreshMark ? `db-grid-row-refreshed is-${refreshMark}` : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+        rowNum: {
+          className: "db-grid-cell db-grid-rownum",
+          label: String(i + 1),
+          title:
+            refreshMark === null
+              ? null
+              : refreshMark === "added"
+                ? text().grid.refreshMarkAdded
+                : text().grid.refreshMarkChanged,
+          ref: rowNumRef,
+        },
+        recency: recency.shown()
+          ? rowData
+            ? recency.cell(rowData, ROWNUM_WIDTH)
+            : recency.spacerCell(ROWNUM_WIDTH, "loading")
+          : null,
+      }),
+    );
+    if (i === selectedRowIndex) selectedRowElement = row;
+    const rowNum = shellPart(rowNumRef);
 
     if (!rowData) {
-      for (let c = 0; c < columnNames.length; c++) {
-        const cell = document.createElement("div");
-        cell.className = "db-grid-cell loading";
-        cell.style.width = `${getColWidth(columnNames[c])}px`;
-        cell.textContent = "…";
-        row.appendChild(cell);
-      }
+      row.append(
+        ...templateElements(
+          view.loadingCells(columnNames.map((name) => getColWidth(name))),
+        ),
+      );
       return row;
     }
 
@@ -2676,7 +3004,7 @@ export function createTableGrid(
         rowNum.classList.add("db-grid-rownum-deletable");
         rowNum.title = text().edit.deleteRow;
         rowNum.style.cursor = "pointer";
-        rowNum.addEventListener("click", (e) => {
+        rowNum.addEventListener("click", (e: MouseEvent) => {
           e.stopPropagation();
           const deleted = toggleDelete(rowData);
           row.classList.toggle("db-grid-row-deleted", deleted);
@@ -2800,85 +3128,92 @@ export function createTableGrid(
       setSelectedRow(rowIndex, row);
     });
     const range = rangeSelect.multiRange();
-    for (let c = 0; c < columnNames.length; c++) {
-      const cell = document.createElement("div");
-      cell.className = "db-grid-cell";
-      cell.style.width = `${getColWidth(columnNames[c])}px`;
-      const val = rowData[c];
-      const zone = timeZone.zone();
-      const shownTime = zone ? recency.displayTime(rowData, c, zone) : null;
-      // NULL と空文字は札にする (以前はどちらも本文と同じ色で、空文字は共通の
-      // .empty (空の画面の案内) の規則まで当たって真ん中に寄っていた)。
-      if (!fillNullOrEmpty(cell, val, text().grid.emptyValue))
-        cell.textContent = shownTime ?? formatValue(val);
-      if (shownTime !== null) {
-        cell.classList.add("db-grid-cell-time");
-        cell.title = text().grid.timeZoneCellTitle(String(val));
-      }
-      if (val instanceof Uint8Array) cell.classList.add("blob");
-      if (range && inCellRange(range, i, c)) cell.classList.add("in-range");
-      cell.style.cursor = "pointer";
-      const cellValue = val;
-      const cellColIndex = c;
-      const cellColName = columnNames[c];
-      const rowValues = rowData;
-      // FK セルはメイン/埋め込みの両方で「辿れる」セルにする。埋め込み側は
-      // 親から渡された onForeignKeyCellClick が無ければ通常セル扱い。
-      const fkClickable =
-        fkColumns.has(cellColName) &&
-        (!embedded || !!callbacks.onForeignKeyCellClick);
-      if (fkClickable) {
-        cell.classList.add("db-grid-cell-fk");
-      }
-      cell.addEventListener("click", (e) => {
-        e.stopPropagation();
-        // Shift+クリックは範囲を伸ばすだけ (mousedown で済んでいる)。詳細も
-        // 関連パネルも開かない。
-        if (e.shiftKey) return;
-        // 詳細フッタ / 関連パネルに表示する対象セルを覚えておく。
-        focusCell(rowIndex, row, cellColIndex);
-        // FK セルは関連テーブルをパネルに開く（埋め込みは親へ通知して
-        // 1 段潜る）。それ以外は従来どおり単一値の詳細を表示する。
-        if (fkClickable) {
-          if (embedded) {
-            callbacks.onForeignKeyCellClick?.(
-              currentTable,
-              columnNames,
-              rowValues,
-              cellColName,
-            );
-          } else {
-            openRelatedForRow(
-              currentTable,
-              columnNames,
-              rowValues,
-              cellColName,
-            );
-          }
-        } else {
-          showCellDetail(cellColIndex, cellValue);
-        }
-      });
-      // virtualized 再描画でも色が残るよう、render 時に state と
-      // 突合せてクラスを付ける。
-      if (i === activeCellRowIndex && c === activeCellColIndex) {
-        cell.classList.add("db-grid-cell-active");
-        activeCellElement = cell;
-      }
-      row.appendChild(cell);
-    }
+    const zone = timeZone.zone();
+    const cells = templateElements(
+      view.dataCells({
+        emptyLabel: text().grid.emptyValue,
+        cells: columnNames.map((cellColName, c) => {
+          const val = rowData[c];
+          const shownTime = zone ? recency.displayTime(rowData, c, zone) : null;
+          // FK セルはメイン/埋め込みの両方で「辿れる」セルにする。埋め込み側は
+          // 親から渡された onForeignKeyCellClick が無ければ通常セル扱い。
+          const fkClickable =
+            fkColumns.has(cellColName) &&
+            (!embedded || !!callbacks.onForeignKeyCellClick);
+          return {
+            width: getColWidth(cellColName),
+            value: val,
+            // NULL と空文字は札にする (以前はどちらも本文と同じ色で、空文字は
+            // 共通の .empty (空の画面の案内) の規則まで当たって真ん中に寄っていた)。
+            text: shownTime ?? formatValue(val),
+            timeTitle:
+              shownTime === null
+                ? null
+                : text().grid.timeZoneCellTitle(String(val)),
+            blob: val instanceof Uint8Array,
+            inRange: !!range && inCellRange(range, i, c),
+            foreignKey: fkClickable,
+            // virtualized 再描画でも色が残るよう、render 時に state と
+            // 突合せてクラスを付ける。
+            active: i === activeCellRowIndex && c === activeCellColIndex,
+            onClick: (e: MouseEvent) => {
+              e.stopPropagation();
+              // Shift+クリックは範囲を伸ばすだけ (mousedown で済んでいる)。詳細も
+              // 関連パネルも開かない。
+              if (e.shiftKey) return;
+              // 詳細フッタ / 関連パネルに表示する対象セルを覚えておく。
+              focusCell(rowIndex, row, c);
+              // FK セルは関連テーブルをパネルに開く（埋め込みは親へ通知して
+              // 1 段潜る）。それ以外は従来どおり単一値の詳細を表示する。
+              if (fkClickable) {
+                if (embedded) {
+                  callbacks.onForeignKeyCellClick?.(
+                    currentTable,
+                    columnNames,
+                    rowData,
+                    cellColName,
+                  );
+                } else {
+                  openRelatedForRow(
+                    currentTable,
+                    columnNames,
+                    rowData,
+                    cellColName,
+                  );
+                }
+              } else {
+                showCellDetail(c, val);
+              }
+            },
+          };
+        }),
+      }),
+    );
+    if (i === activeCellRowIndex && cells[activeCellColIndex])
+      activeCellElement = cells[activeCellColIndex] as HTMLElement;
+    row.append(...cells);
     return row;
   }
 
   // 新規行ドラフト (編集モード時のみ、データ行の下に表示) を組み立てる。
   function buildDraftRow(draftIndex: number): HTMLElement {
     const draft = draftRows[draftIndex];
-    const row = document.createElement("div");
-    row.className = "db-grid-row db-grid-row-draft";
-    const rowNum = document.createElement("div");
-    rowNum.className = "db-grid-cell db-grid-rownum db-grid-rownum-draft";
-    rowNum.textContent = "＋";
-    rowNum.title = text().edit.newRow;
+    const rowNumRef = createRef<HTMLElement>();
+    const row = templateElement(
+      view.row({
+        className: "db-grid-row db-grid-row-draft",
+        rowNum: {
+          className: "db-grid-cell db-grid-rownum db-grid-rownum-draft",
+          label: "＋",
+          title: text().edit.newRow,
+          ref: rowNumRef,
+        },
+        recency: recency.shown()
+          ? recency.spacerCell(ROWNUM_WIDTH, "db-grid-recency-draft")
+          : null,
+      }),
+    );
+    const rowNum = shellPart(rowNumRef);
     rowNum.style.cursor = "pointer";
     rowNum.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -2888,11 +3223,6 @@ export function createTableGrid(
       showPendingStatus();
       renderViewport();
     });
-    row.appendChild(rowNum);
-    if (recency.shown())
-      row.appendChild(
-        recency.spacerCell(ROWNUM_WIDTH, "db-grid-recency-draft"),
-      );
     for (let c = 0; c < columnNames.length; c++) {
       const dv: string | null = draft.has(c)
         ? (draft.get(c) as string | null)
@@ -3000,7 +3330,7 @@ export function createTableGrid(
         };
       }
 
-      body.innerHTML = "";
+      body.replaceChildren();
       selectedRowElement = null;
       activeCellElement = null;
       body.style.transform = `translateY(${startRow * rowHeight}px)`;
@@ -3049,36 +3379,41 @@ export function createTableGrid(
     if (baseEq.length > 0) {
       params.set("eq", JSON.stringify(baseEq));
     }
-    const a = document.createElement("a");
-    a.href = `${apiUrl("dbExport")}?${params}`;
-    a.download = `${currentTable}.${format}`;
+    const a = templateElement(
+      view.exportLink({
+        href: `${apiUrl("dbExport")}?${params}`,
+        download: `${currentTable}.${format}`,
+      }),
+    );
     document.body.appendChild(a);
     a.click();
     a.remove();
   }
 
   function createPager(): NonNullable<typeof pagerEl> {
-    const root = document.createElement("span");
-    root.className = "db-grid-pager";
-    const range = document.createElement("span");
-    range.className = "db-grid-pager-range";
-    const button = (className: string, glyph: string, direction: 1 | -1) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = `db-grid-pager-btn ${className}`;
-      b.textContent = glyph;
-      b.addEventListener("click", () => {
-        // 1 画面ぶん (見えている最後の行が次の画面の先頭に残るよう 1 行引く)。
-        viewport.scrollTop +=
-          direction *
-          Math.max(currentRowHeight(), rowsViewHeight() - currentRowHeight());
-      });
-      return b;
+    const refs = {
+      range: createRef<HTMLElement>(),
+      prev: createRef<HTMLButtonElement>(),
+      next: createRef<HTMLButtonElement>(),
     };
-    const prev = button("db-grid-pager-prev", "‹", -1);
-    const next = button("db-grid-pager-next", "›", 1);
-    root.append(range, prev, next);
-    return { root, range, prev, next, shown: "" };
+    const root = templateElement(
+      view.pager({
+        refs,
+        onPage: (direction) => {
+          // 1 画面ぶん (見えている最後の行が次の画面の先頭に残るよう 1 行引く)。
+          viewport.scrollTop +=
+            direction *
+            Math.max(currentRowHeight(), rowsViewHeight() - currentRowHeight());
+        },
+      }),
+    );
+    return {
+      root,
+      range: shellPart(refs.range),
+      prev: shellPart<HTMLButtonElement>(refs.prev),
+      next: shellPart<HTMLButtonElement>(refs.next),
+      shown: "",
+    };
   }
 
   /**
@@ -3123,8 +3458,7 @@ export function createTableGrid(
 
   function updateStatus() {
     if (!statusEl) {
-      statusEl = document.createElement("div");
-      statusEl.className = "db-grid-status";
+      statusEl = templateElement(view.status(null));
       el.appendChild(statusEl);
     }
     if (!pagerEl) {
@@ -3158,9 +3492,7 @@ export function createTableGrid(
 
   function showError(message: string) {
     clear();
-    statusEl = document.createElement("div");
-    statusEl.className = "db-grid-status db-pane-error";
-    statusEl.textContent = message;
+    statusEl = templateElement(view.status(message));
     el.appendChild(statusEl);
   }
 

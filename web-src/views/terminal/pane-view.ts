@@ -13,18 +13,20 @@
 // - 送るのは 1 本ずつ順に (打った順が入れ替わらない)。失敗は理由を出す
 // - 流しが切れたら繋ぎ直し (views/shell/live-hub.ts)、サーバが今の画面を送り直す
 
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html, nothing } from "lit/html.js";
 import type { AgentState } from "../../core/agent-state";
 import { apiUrl } from "../../core/api-url";
 import {
   formatErrorDetail,
   responseErrorMessage,
 } from "../../core/error-detail";
-import { escapeHtml } from "../../core/html-escape";
-import { IMAGE_16_PATH, iconSvg } from "../../core/icons";
+import { IMAGE_16_PATH } from "../../core/icons";
 import {
   pinchFontSize,
   softKeySequence,
   TERMINAL_SOFT_KEYS,
+  type TerminalSoftKey,
 } from "../../core/mobile-layout";
 import { UNINTERRUPTIBLE_REQUEST_HEADER } from "../../core/network-activity";
 import {
@@ -62,6 +64,8 @@ import {
 } from "../../core/xterm-loader";
 import { SOFT_KEY_CAPS } from "../mobile-shell-i18n";
 import { type LiveSource, openLiveSource } from "../shell/live-hub";
+import { iconTemplate } from "../ui/icon";
+import { templateElement, templateFragment } from "../ui/renderer";
 import type { TerminalText } from "./i18n";
 import { uploadPastedImage } from "./paste-upload";
 import {
@@ -158,155 +162,250 @@ type LineUrl = { index: number; length: number; path: string };
  * この塊の行の中の位置)。ログインのペインの承認の URL をスマホのブラウザで開くのに
  * 要った (文字のままでは押せず、長くて選べなかった)。
  */
-function runHtml(text: string, offset: number, urls: LineUrl[]): string {
-  let html = "";
+function runTemplate(text: string, offset: number, urls: LineUrl[]): unknown[] {
+  const parts: unknown[] = [];
   let at = 0;
   for (const url of urls) {
     const start = Math.max(url.index - offset, at);
     const end = Math.min(url.index + url.length - offset, text.length);
     if (end <= start) continue;
-    const href = escapeHtml(url.path).replace(/"/g, "&quot;");
-    html += `${escapeHtml(text.slice(at, start))}<a class="pane-link" href="${href}" target="_blank" rel="noopener noreferrer">${escapeHtml(text.slice(start, end))}</a>`;
+    parts.push(
+      text.slice(at, start),
+      html`<a
+        class="pane-link"
+        href=${url.path}
+        target="_blank"
+        rel="noopener noreferrer"
+        >${text.slice(start, end)}</a
+      >`,
+    );
     at = end;
   }
-  return html + escapeHtml(text.slice(at));
+  parts.push(text.slice(at));
+  return parts;
 }
 
-function lineHtml(line: ReflowLine, colors: ReflowColors): string {
+function lineTemplate(line: ReflowLine, colors: ReflowColors): unknown {
   const urls = matchTextLinks(lineText(line)).filter(
     (link) => link.kind === "url",
   );
   let offset = 0;
-  const body = line.runs
-    .map((run) => {
-      const html = runHtml(run.text, offset, urls);
-      offset += run.text.length;
-      return plain(run)
-        ? html
-        : `<span style="${runCss(run.style, colors)}">${html}</span>`;
-    })
-    .join("");
+  const body = line.runs.map((run) => {
+    const parts = runTemplate(run.text, offset, urls);
+    offset += run.text.length;
+    return plain(run)
+      ? parts
+      : html`<span style=${runCss(run.style, colors)}>${parts}</span>`;
+  });
   // 折り返した 2 行目以降を文の始まり (箇条書きなら頭の後ろ) に揃える。
-  const hang = line.hang ? ` style="--pane-hang: ${line.hang}ch"` : "";
-  return `<div class="pane-line${line.rule ? " pane-line-rule" : ""}"${hang}>${body}</div>`;
+  return html`<div
+    class=${line.rule ? "pane-line pane-line-rule" : "pane-line"}
+    style=${line.hang ? `--pane-hang: ${line.hang}ch` : nothing}
+  >${body}</div>`;
 }
 
-export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
-  const text = () => deps.getText().paneView;
+const PANE_PARTS = [
+  "mark",
+  "title",
+  "detail",
+  "modes",
+  "readMode",
+  "screenMode",
+  "body",
+  "older",
+  "read",
+  "readStable",
+  "readLive",
+  "screen",
+  "latest",
+  "status",
+  "choices",
+  "keys",
+  "compose",
+  "input",
+  "sendButton",
+  "attach",
+  "picker",
+] as const;
 
-  const el = document.createElement("section");
-  el.className = "pane-view";
-  // 中の色は端末と同じ (ターミナルの明暗の設定に従う)。
-  el.dataset.terminalSurface = "";
-  el.hidden = true;
+/** ペインの表示の外枠の中で、表示が後から書き込む要素。 */
+export type PaneViewRefs = Record<
+  (typeof PANE_PARTS)[number],
+  Ref<HTMLElement>
+>;
 
+/**
+ * ペインの表示 (電話の段) の描き方。端末の続きが来るたびに行と画面を書き換える
+ * ので、view は外枠・行・選択肢の形だけを持ち、presenter が中身を入れる。
+ */
+export type PaneViewView = {
+  shell: (props: {
+    refs: PaneViewRefs;
+    pasteTypes: string;
+    onMode: (mode: PaneViewMode) => void;
+    onSoftKey: (key: TerminalSoftKey) => void;
+  }) => unknown;
+  /** 読みの形の行。 */
+  lines: (lines: ReflowLine[], colors: ReflowColors) => unknown;
+  /** 端末に出た選択肢のボタン。 */
+  choices: (
+    choices: { key: string; label: string; onChoose: () => void }[],
+  ) => unknown;
+};
+
+// 押しても返事の欄から焦点を奪わない (ソフトキーボードを閉じない)。
+const keepFocus = (event: Event) => event.preventDefault();
+
+export const DEFAULT_VIEW: PaneViewView = {
   // 戻るのボタンは置かない: 表示はタブ列と下端の帯の間にあり、ほかの画面へは
   // タブと帯で移る (押すと表示を閉じてから移る。app.ts)。ブラウザの戻るでも閉じる。
-  const head = document.createElement("header");
-  head.className = "pane-view-head";
-  const mark = document.createElement("i");
-  mark.setAttribute("aria-hidden", "true");
-  const titles = document.createElement("div");
-  titles.className = "pane-view-titles";
-  const title = document.createElement("div");
-  title.className = "pane-view-title";
-  const detail = document.createElement("div");
-  detail.className = "pane-view-detail";
-  titles.append(title, detail);
-  const modes = document.createElement("div");
-  modes.className = "seg pane-view-mode";
-  modes.setAttribute("role", "group");
-  const modeButtons = new Map<PaneViewMode, HTMLButtonElement>();
-  for (const mode of ["read", "screen"] as const) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.mode = mode;
-    button.addEventListener("click", () => setMode(mode));
-    modeButtons.set(mode, button);
-    modes.append(button);
-  }
-  head.append(mark, titles, modes);
+  // 中の色は端末と同じ (ターミナルの明暗の設定に従う)。読みの形は、確定した行
+  // (端末の過去の行) と、まだ書き換わる行 (端末の画面) に分け、続きが来たときに
+  // 描き直すのは後者だけ。画像の添付 (写真・スクショ) は、PC のターミナルに貼った
+  // ときと同じ場所に保存してもらい、パスを返事の欄に足す。
+  shell: ({ refs, pasteTypes, onMode, onSoftKey }) =>
+    html`<section class="pane-view" data-terminal-surface="" hidden><header
+        class="pane-view-head"
+      ><i aria-hidden="true" ${ref(refs.mark)}></i><div class="pane-view-titles"
+          ><div class="pane-view-title" ${ref(refs.title)}></div><div
+            class="pane-view-detail"
+            ${ref(refs.detail)}
+          ></div></div
+        ><div class="seg pane-view-mode" role="group" ${ref(refs.modes)}><button
+            type="button"
+            data-mode="read"
+            ${ref(refs.readMode)}
+            @click=${() => onMode("read")}
+          ></button><button
+            type="button"
+            data-mode="screen"
+            ${ref(refs.screenMode)}
+            @click=${() => onMode("screen")}
+          ></button></div
+      ></header
+      ><div class="pane-view-body" ${ref(refs.body)}><button
+          type="button"
+          class="pane-view-older"
+          hidden
+          ${ref(refs.older)}
+        ></button><div class="pane-view-read" ${ref(refs.read)}><div
+            ${ref(refs.readStable)}
+          ></div><div ${ref(refs.readLive)}></div></div
+        ><div class="pane-view-screen" hidden ${ref(refs.screen)}></div><button
+          type="button"
+          class="pane-view-latest"
+          hidden
+          ${ref(refs.latest)}
+        ></button><div
+          class="pane-view-status"
+          role="status"
+          hidden
+          ${ref(refs.status)}
+        ></div></div
+      ><div
+        class="pane-view-choices"
+        role="group"
+        hidden
+        ${ref(refs.choices)}
+      ></div><div class="pane-view-keys" role="toolbar" ${ref(refs.keys)}>${TERMINAL_SOFT_KEYS.map(
+        (key) =>
+          html`<button
+            type="button"
+            class="mobile-key"
+            data-key=${key}
+            @pointerdown=${keepFocus}
+            @click=${() => onSoftKey(key)}
+          >${SOFT_KEY_CAPS[key]}</button>`,
+      )}</div
+      ><form class="pane-view-compose" ${ref(refs.compose)}><button
+          type="button"
+          class="pane-view-attach"
+          ${ref(refs.attach)}
+        >${iconTemplate(IMAGE_16_PATH, "pane-view-attach-icon")}</button><input
+          type="file"
+          class="pane-view-picker"
+          accept=${pasteTypes}
+          multiple
+          hidden
+          ${ref(refs.picker)}
+        /><textarea
+          class="pane-view-input"
+          rows="1"
+          ${ref(refs.input)}
+        ></textarea><button
+          type="submit"
+          class="pane-view-send"
+          ${ref(refs.sendButton)}
+          @pointerdown=${keepFocus}
+        ></button></form
+    ></section>`,
+  lines: (lines, colors) => lines.map((line) => lineTemplate(line, colors)),
+  choices: (choices) =>
+    choices.map(
+      (choice) =>
+        html`<button
+          type="button"
+          class="pane-view-choice"
+          @pointerdown=${keepFocus}
+          @click=${choice.onChoose}
+        ><span class="pane-view-choice-key">${choice.key}</span><span
+            class="pane-view-choice-label"
+            >${choice.label}</span
+          ></button>`,
+    ),
+};
 
-  const body = document.createElement("div");
-  body.className = "pane-view-body";
-  const older = document.createElement("button");
-  older.type = "button";
-  older.className = "pane-view-older";
-  older.hidden = true;
-  const read = document.createElement("div");
-  read.className = "pane-view-read";
-  // 確定した行 (端末の過去の行) と、まだ書き換わる行 (端末の画面)。続きが
-  // 来たときに描き直すのは後者だけ。
-  const readStable = document.createElement("div");
-  const readLive = document.createElement("div");
-  read.append(readStable, readLive);
-  const screen = document.createElement("div");
-  screen.className = "pane-view-screen";
-  screen.hidden = true;
-  const latest = document.createElement("button");
-  latest.type = "button";
-  latest.className = "pane-view-latest";
-  latest.hidden = true;
-  const status = document.createElement("div");
-  status.className = "pane-view-status";
-  status.setAttribute("role", "status");
-  status.hidden = true;
-  body.append(older, read, screen, latest, status);
+function drawnPart<T extends Element>(part: Ref<T>): T {
+  if (!part.value) throw new Error("pane view: a part was not drawn");
+  return part.value;
+}
 
-  const choices = document.createElement("div");
-  choices.className = "pane-view-choices";
-  choices.setAttribute("role", "group");
-  choices.hidden = true;
+export function createPaneView(
+  deps: PaneViewDeps,
+  view: PaneViewView = DEFAULT_VIEW,
+): PaneViewHandle {
+  const text = () => deps.getText().paneView;
 
-  const keys = document.createElement("div");
-  keys.className = "pane-view-keys";
-  keys.setAttribute("role", "toolbar");
-  for (const key of TERMINAL_SOFT_KEYS) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "mobile-key";
-    button.textContent = SOFT_KEY_CAPS[key];
-    button.dataset.key = key;
-    // 押しても返事の欄から焦点を奪わない (ソフトキーボードを閉じない)。
-    button.addEventListener("pointerdown", (event) => event.preventDefault());
-    button.addEventListener(
-      "click",
-      () =>
+  const refs = Object.fromEntries(
+    PANE_PARTS.map((name) => [name, createRef<HTMLElement>()]),
+  ) as PaneViewRefs;
+  const el = templateElement(
+    view.shell({
+      refs,
+      pasteTypes: Object.keys(PASTE_IMAGE_TYPES).join(","),
+      onMode: (next) => setMode(next),
+      onSoftKey: (key) =>
         void send({
           keys: softKeySequence(
             key,
             term?.modes.applicationCursorKeysMode ?? false,
           ),
         }),
-    );
-    keys.append(button);
-  }
-
-  const compose = document.createElement("form");
-  compose.className = "pane-view-compose";
-  const input = document.createElement("textarea");
-  input.className = "pane-view-input";
-  input.rows = 1;
-  const sendButton = document.createElement("button");
-  sendButton.type = "submit";
-  sendButton.className = "pane-view-send";
-  // 押しても返事の欄から焦点を外さない (ソフトキーボードを閉じない)。
-  sendButton.addEventListener("pointerdown", (event) => event.preventDefault());
-  // 画像の添付 (写真・スクショ)。選んだ画像は PC のターミナルに貼ったときと
-  // 同じ場所に保存してもらい、パスを返事の欄に足す。
-  const attach = document.createElement("button");
-  attach.type = "button";
-  attach.className = "pane-view-attach";
-  attach.innerHTML = iconSvg("pane-view-attach-icon", IMAGE_16_PATH);
-  const picker = document.createElement("input");
-  picker.type = "file";
-  picker.className = "pane-view-picker";
-  picker.accept = Object.keys(PASTE_IMAGE_TYPES).join(",");
-  picker.multiple = true;
-  picker.hidden = true;
-  compose.append(attach, picker, input, sendButton);
-
-  el.append(head, body, choices, keys, compose);
+    }),
+  );
+  const mark = drawnPart(refs.mark);
+  const title = drawnPart(refs.title);
+  const detail = drawnPart(refs.detail);
+  const modes = drawnPart(refs.modes);
+  const modeButtons = new Map<PaneViewMode, HTMLButtonElement>([
+    ["read", drawnPart(refs.readMode) as HTMLButtonElement],
+    ["screen", drawnPart(refs.screenMode) as HTMLButtonElement],
+  ]);
+  const body = drawnPart(refs.body);
+  const older = drawnPart(refs.older) as HTMLButtonElement;
+  const read = drawnPart(refs.read);
+  const readStable = drawnPart(refs.readStable);
+  const readLive = drawnPart(refs.readLive);
+  const screen = drawnPart(refs.screen);
+  const latest = drawnPart(refs.latest) as HTMLButtonElement;
+  const status = drawnPart(refs.status);
+  const choices = drawnPart(refs.choices);
+  const keys = drawnPart(refs.keys);
+  const compose = drawnPart(refs.compose) as HTMLFormElement;
+  const input = drawnPart(refs.input) as HTMLTextAreaElement;
+  const sendButton = drawnPart(refs.sendButton) as HTMLButtonElement;
+  const attach = drawnPart(refs.attach) as HTMLButtonElement;
+  const picker = drawnPart(refs.picker) as HTMLInputElement;
 
   let pane: TmuxPaneId | null = null;
   let generation = 0;
@@ -412,18 +511,12 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     }, wait);
   }
 
-  function linesHtml(lines: ReflowLine[], palette: ReflowColors): string {
-    return lines.map((line) => lineHtml(line, palette)).join("");
-  }
-
   /** 行の並びを 1 つの断片にする (前にも後ろにも、並びのまま入れられる)。 */
   function linesFragment(
     lines: ReflowLine[],
     palette: ReflowColors,
   ): DocumentFragment {
-    const template = document.createElement("template");
-    template.innerHTML = linesHtml(lines, palette);
-    return template.content;
+    return templateFragment(view.lines(lines, palette));
   }
 
   function placeMarker(buffer: XtermBuffer): void {
@@ -445,7 +538,7 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     if (!term) return;
     stable?.marker?.dispose();
     const lines = historyLinesIn(buffer, from, end);
-    readStable.innerHTML = linesHtml(lines, palette);
+    readStable.replaceChildren(linesFragment(lines, palette));
     stable = {
       term,
       type: buffer.type,
@@ -579,9 +672,11 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     const live = linesIn(buffer, liveStart, buffer.length);
     while (live.length > 0 && live[live.length - 1].runs.length === 0)
       live.pop();
-    readLive.innerHTML = linesHtml(
-      currentView === "read" ? collapseBlankLines(live) : live,
-      palette,
+    readLive.replaceChildren(
+      linesFragment(
+        currentView === "read" ? collapseBlankLines(live) : live,
+        palette,
+      ),
     );
     scrollToBottom();
   }
@@ -594,23 +689,15 @@ export function createPaneView(deps: PaneViewDeps): PaneViewHandle {
     if (choices.dataset.signature === signature) return;
     choices.dataset.signature = signature;
     choices.replaceChildren(
-      ...found.map((choice) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "pane-view-choice";
-        const key = document.createElement("span");
-        key.className = "pane-view-choice-key";
-        key.textContent = choice.key;
-        const label = document.createElement("span");
-        label.className = "pane-view-choice-label";
-        label.textContent = choice.label;
-        button.append(key, label);
-        button.addEventListener("pointerdown", (event) =>
-          event.preventDefault(),
-        );
-        button.addEventListener("click", () => void send({ keys: choice.key }));
-        return button;
-      }),
+      templateFragment(
+        view.choices(
+          found.map((choice) => ({
+            key: choice.key,
+            label: choice.label,
+            onChoose: () => void send({ keys: choice.key }),
+          })),
+        ),
+      ),
     );
     choices.hidden = found.length === 0;
   }

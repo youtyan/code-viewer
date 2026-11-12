@@ -5,31 +5,15 @@
 // 1 枚も無く、フォルダ表示 (route の repo) で開く。フォルダ表示はタブにしないので、
 // 札も出なかった。エージェントの居るプロジェクトは、そのシェルのタブがグループを
 // 作るので出ていた。
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { TabTarget } from "../core/main-tabs";
 import type { AppRoute } from "../core/routes";
 import { closeContextMenu } from "../views/context-menu";
 import {
-  createMainTabsView,
+  createMainTabsPresenter,
   type MainTabsDeps,
-} from "../views/main-tabs/main-tabs-view";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
+} from "../views/main-tabs/main-tabs-presenter";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -141,7 +125,7 @@ async function open(saved: unknown, root: string, route: AppRoute) {
     newShellIn: () => undefined,
     launchAgentIn: () => undefined,
   };
-  const handle = createMainTabsView(deps);
+  const handle = createMainTabsPresenter(deps);
   handle.syncRoute(current);
   await handle.restore();
   return { mount, handle };

@@ -31,6 +31,8 @@
 // 確認の画面はフックの入れ外しと同じ部品・同じ作法 (書く前に差分を見せ、
 // そのときの中身のハッシュを添えて書かせる)。
 
+import { live } from "lit/directives/live.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import type {
   AccountAgent,
   AccountLogin,
@@ -39,20 +41,25 @@ import type {
 import { HOOK_AGENTS } from "../../core/agent-hooks";
 import { abbreviateHome } from "../../core/agent-overview";
 import { formatErrorDetail } from "../../core/error-detail";
-import { CHECK_16_PATHS, iconSvg } from "../../core/icons";
+import { CHECK_16_PATHS } from "../../core/icons";
+import { iconTemplate } from "../ui/icon";
+import { renderOwned, templateElement } from "../ui/renderer";
 import type { SettingsDraft } from "../viewer-settings";
-import { accountTagList } from "./account-tags";
+import { accountTagListTemplate } from "./account-tags";
 import type { AccountsClient } from "./accounts-client";
 import {
   type AccountDialogs,
   accountDisplayName,
-  el,
   planLabel,
-  resultLine,
+  resultLineTemplate,
 } from "./accounts-dialogs";
 import type { AccountsText } from "./accounts-i18n";
 import type { AgentHooksSettings } from "./agent-hooks-settings";
-import { usageCheckBlock } from "./usage-check";
+import {
+  type UsageCheckProps,
+  usageCheckProps,
+  usageCheckTemplate,
+} from "./usage-check";
 
 export type AccountsSettingsDeps = {
   client: AccountsClient;
@@ -74,6 +81,7 @@ export const CLAUDE_LAUNCH_COMMAND_ID = "agent-accounts-command-claude";
 const DEFAULT_COMMANDS: Record<AccountAgent, string> = {
   claude: "claude",
   codex: "codex",
+  opencode: "opencode",
 };
 
 type Result = { ok: boolean; text: string };
@@ -93,86 +101,248 @@ function commandToSave(agent: AccountAgent, value: string): string {
   return trimmed === DEFAULT_COMMANDS[agent] ? "" : trimmed;
 }
 
+type ActionProps = { label: string; title: string; onClick(): void };
+
+/** ログインの表の 1 行。 */
+export type AccountsSettingsRowProps = {
+  id: string;
+  agent: AccountAgent;
+  display: string;
+  tags: AccountStatus["tags"];
+  login: "in" | "out" | "unknown";
+  stateLabel: string;
+  email: { text: string; title: string; plan: string | null };
+  checked: { text: string; title: string | null };
+  actions: ActionProps[];
+  path: { text: string; title: string };
+  reason: { problem: boolean; text: string } | null;
+  result: Result | null;
+};
+
+/** 使用量の 1 行 (実際に書く設定ファイルごと)。 */
+export type AccountsUsageRowProps = {
+  tone: "problem" | "on" | "waiting" | "off";
+  who: string;
+  line: { text: string; title: string | null };
+  action: ActionProps | null;
+  checks: UsageCheckProps[];
+  problems: string | null;
+  result: Result | null;
+};
+
+export type AccountsSettingsViewProps = {
+  title: string;
+  intro: string;
+  registryError: string | null;
+  table: { head: string[]; rows: AccountsSettingsRowProps[] } | null;
+  loading: string | null;
+  /** 操作の最中 (行のボタンと追加を押させない)。 */
+  busy: boolean;
+  add: { label: string; onClick(): void };
+  sectionMessage: Result | null;
+  usage: {
+    title: string;
+    refresh: {
+      label: string;
+      title: string;
+      disabled: boolean;
+      onClick(): void;
+    };
+    rows: AccountsUsageRowProps[];
+    howLabel: string;
+    paragraphs: string[];
+    facts: string[];
+    failures: {
+      hidden: boolean;
+      summary: string;
+      lines: string;
+      log: string;
+      clearLabel: string;
+      onClear(): void;
+    };
+  };
+  commands: {
+    title: string;
+    unsaved: { label: string; shown: boolean };
+    intro: string;
+    items: {
+      agent: AccountAgent;
+      value: string;
+      onInput(value: string): void;
+    }[];
+    reset: { label: string; disabled: boolean; onClick(): void };
+  };
+  error: string | null;
+};
+
+export type AccountsSettingsView = (
+  props: AccountsSettingsViewProps,
+) => unknown;
+
+function actionButtonTemplate(
+  action: ActionProps,
+  busy: boolean,
+): TemplateResult {
+  return html`<button
+    type="button"
+    class="gdp-btn gdp-btn-sm"
+    title=${action.title}
+    ?disabled=${busy}
+    @click=${action.onClick}
+  >${action.label}</button>`;
+}
+
+function accountRowTemplate(
+  row: AccountsSettingsRowProps,
+  busy: boolean,
+): TemplateResult {
+  return html`<div
+    class="agent-accounts-row ui-table-row"
+    role="row"
+    data-account=${row.id}
+    data-login=${row.login}
+  ><span class="agent-accounts-name-cell" role="cell"><span class="agent-accounts-kind"
+    >${row.agent}</span
+  ><span class="agent-accounts-name">${row.display}</span>${accountTagListTemplate(row.tags)}</span
+  ><span class="agent-accounts-email" role="cell"><span
+    class="agent-accounts-address"
+    title=${row.email.title}
+  >${row.email.text}</span>${
+    row.email.plan
+      ? html`<span class="agent-accounts-plan">${row.email.plan}</span>`
+      : nothing
+  }</span><span
+    class=${`agent-accounts-state agent-accounts-state-${row.login}`}
+    role="cell"
+  ><span class="agent-accounts-mark" aria-hidden="true">${
+    row.login === "in"
+      ? iconTemplate(CHECK_16_PATHS, "agent-accounts-mark-icon")
+      : row.login === "unknown"
+        ? "?"
+        : nothing
+  }</span><span class="agent-accounts-state-label">${row.stateLabel}</span></span><span
+    class="agent-accounts-checked"
+    role="cell"
+    title=${row.checked.title ?? nothing}
+  >${row.checked.text}</span><span class="agent-accounts-actions" role="cell">${row.actions.map(
+    (action) => actionButtonTemplate(action, busy),
+  )}</span><span class="agent-accounts-path terminal-mono" title=${row.path.title}
+    >${row.path.text}</span
+  >${
+    row.reason
+      ? html`<p
+          class=${row.reason.problem ? "agent-hooks-detail agent-hooks-detail-problem" : "agent-hooks-detail"}
+        >${row.reason.text}</p>`
+      : nothing
+  }${row.result ? resultLineTemplate(row.result) : nothing}</div>`;
+}
+
+function usageRowTemplate(
+  row: AccountsUsageRowProps,
+  busy: boolean,
+): TemplateResult {
+  return html`<div class="agent-accounts-usage-row ui-table-row" data-usage=${row.tone}><span
+    class="agent-accounts-usage-who"
+  >${row.who}</span><span class="agent-accounts-usage-line" title=${row.line.title ?? nothing}
+    >${row.line.text}</span
+  ><span class="agent-accounts-actions">${
+    row.action ? actionButtonTemplate(row.action, busy) : nothing
+  }</span>${row.checks.map(usageCheckTemplate)}${
+    row.problems
+      ? html`<p class="agent-hooks-detail agent-hooks-detail-problem">${row.problems}</p>`
+      : nothing
+  }${row.result ? resultLineTemplate(row.result) : nothing}</div>`;
+}
+
+export const DEFAULT_VIEW: AccountsSettingsView = (props) => html`<strong
+    class="agent-accounts-subtitle"
+    id=${ACCOUNTS_SECTION_ID}
+    >${props.title}</strong
+  ><p class="scope-settings-help">${props.intro}</p><p
+    class="scope-settings-help scope-settings-refresh-error"
+    ?hidden=${!props.registryError}
+  >${props.registryError ?? ""}</p><div class="agent-accounts-table" role="table">${
+    props.table
+      ? html`<div class="agent-accounts-row agent-accounts-head ui-table-head" role="row">${props.table.head.map(
+          (label) =>
+            html`<span class="agent-accounts-head-cell" role="columnheader">${label}</span>`,
+        )}</div>${props.table.rows.map((row) => accountRowTemplate(row, props.busy))}`
+      : props.loading
+        ? html`<p class="scope-settings-help">${props.loading}</p>`
+        : nothing
+  }</div><div class="agent-accounts-add"><button
+    type="button"
+    class="gdp-btn gdp-btn-sm"
+    ?disabled=${props.busy}
+    @click=${props.add.onClick}
+  >${props.add.label}</button></div><p
+    class=${`agent-hooks-result ${props.sectionMessage?.ok === false ? "agent-hooks-result-error" : "agent-hooks-result-ok"}`}
+    ?hidden=${!props.sectionMessage}
+  >${props.sectionMessage?.text ?? ""}</p><div class="agent-accounts-subtitle-row"><strong
+    class="agent-accounts-subtitle"
+  >${props.usage.title}</strong><button
+    type="button"
+    class="gdp-btn gdp-btn-sm agents-usage-refresh"
+    title=${props.usage.refresh.title}
+    ?disabled=${props.usage.refresh.disabled}
+    @click=${props.usage.refresh.onClick}
+  >${props.usage.refresh.label}</button></div><div class="agent-accounts-usage">${props.usage.rows.map(
+    (row) => usageRowTemplate(row, props.busy),
+  )}</div><details class="agent-accounts-how"><summary class="">${props.usage.howLabel}</summary
+    ><div class="agent-accounts-how-body">${props.usage.paragraphs.map(
+      (paragraph) => html`<p class="scope-settings-help">${paragraph}</p>`,
+    )}${props.usage.facts.map(
+      (fact) =>
+        html`<p class="agent-accounts-how-fact terminal-mono">${fact}</p>`,
+    )}</div></details
+  ><details class="agent-hooks-failures" ?hidden=${props.usage.failures.hidden}><summary
+      class=""
+      >${props.usage.failures.summary}</summary
+    ><pre class="terminal-observation-errors">${props.usage.failures.lines}</pre><div
+      class="agent-hooks-failures-footer"
+    ><p class="scope-settings-help">${props.usage.failures.log}</p><button
+      type="button"
+      class="gdp-btn gdp-btn-sm"
+      @click=${props.usage.failures.onClear}
+    >${props.usage.failures.clearLabel}</button></div></details
+  ><div class="agent-accounts-subtitle-row"><strong class="agent-accounts-subtitle"
+      >${props.commands.title}</strong
+    ><span class="agent-accounts-unsaved" ?hidden=${!props.commands.unsaved.shown}
+      >${props.commands.unsaved.label}</span
+    ></div
+  ><p class="scope-settings-help">${props.commands.intro}</p><div class="agent-accounts-commands">${props.commands.items.map(
+    (
+      item,
+    ) => html`<label class="agent-accounts-command"><span class="agent-hooks-name"
+        >${item.agent}</span
+      ><input
+        class="gdp-dialog-input"
+        id=${item.agent === "claude" ? CLAUDE_LAUNCH_COMMAND_ID : nothing}
+        type="text"
+        spellcheck="false"
+        data-agent=${item.agent}
+        .value=${live(item.value)}
+        @input=${(event: Event) =>
+          item.onInput((event.currentTarget as HTMLInputElement).value)}
+      /></label>`,
+  )}<button
+    type="button"
+    class="gdp-btn gdp-btn-sm"
+    ?disabled=${props.commands.reset.disabled}
+    @click=${props.commands.reset.onClick}
+  >${props.commands.reset.label}</button></div><p
+    class="scope-settings-help scope-settings-refresh-error"
+    ?hidden=${!props.error}
+  >${props.error ?? ""}</p>`;
+
 export function createAccountsSettings(
   deps: AccountsSettingsDeps,
+  view: AccountsSettingsView = DEFAULT_VIEW,
 ): AccountsSettings {
   const now = deps.now ?? Date.now;
-  const element = el("div", "scope-settings-section agent-accounts-section");
-  const title = el("strong", "agent-accounts-subtitle");
-  title.id = ACCOUNTS_SECTION_ID;
-  const intro = el("p", "scope-settings-help");
-  const registryError = el(
-    "p",
-    "scope-settings-help scope-settings-refresh-error",
-  );
-  const table = el("div", "agent-accounts-table");
-  table.setAttribute("role", "table");
-  const addRow = el("div", "agent-accounts-add");
-  const addButton = el("button", "gdp-btn gdp-btn-sm");
-  addButton.type = "button";
-  addRow.appendChild(addButton);
-  const usageTitle = el("strong", "agent-accounts-subtitle");
-  const usageHead = el("div", "agent-accounts-subtitle-row");
-  const refreshUsage = el("button", "gdp-btn gdp-btn-sm agents-usage-refresh");
-  refreshUsage.type = "button";
-  refreshUsage.addEventListener(
-    "click",
-    () => void deps.client.checkAllUsage(),
-  );
-  usageHead.append(usageTitle, refreshUsage);
-  const usageRows = el("div", "agent-accounts-usage");
-  const usageHow = el("details", "agent-accounts-how");
-  const usageHowSummary = el("summary");
-  const usageHowBody = el("div", "agent-accounts-how-body");
-  usageHow.append(usageHowSummary, usageHowBody);
-  const failures = el("details", "agent-hooks-failures");
-  const failuresSummary = el("summary");
-  const failuresBody = el("pre", "terminal-observation-errors");
-  const failuresFooter = el("div", "agent-hooks-failures-footer");
-  const failuresLog = el("p", "scope-settings-help");
-  const failuresClear = el("button", "gdp-btn gdp-btn-sm");
-  failuresClear.type = "button";
-  failuresFooter.append(failuresLog, failuresClear);
-  failures.append(failuresSummary, failuresBody, failuresFooter);
-  const commandsHead = el("div", "agent-accounts-subtitle-row");
-  const commandsTitle = el("strong", "agent-accounts-subtitle");
-  const commandsUnsaved = el("span", "agent-accounts-unsaved");
-  commandsHead.append(commandsTitle, commandsUnsaved);
-  const commandsIntro = el("p", "scope-settings-help");
-  const commandsRow = el("div", "agent-accounts-commands");
-  const commandInputs: Record<AccountAgent, HTMLInputElement> = {
-    claude: el("input", "gdp-dialog-input"),
-    codex: el("input", "gdp-dialog-input"),
-  };
-  const commandsReset = el("button", "gdp-btn gdp-btn-sm");
-  commandsReset.type = "button";
-  commandInputs.claude.id = CLAUDE_LAUNCH_COMMAND_ID;
-  for (const [agent, input] of Object.entries(commandInputs)) {
-    input.type = "text";
-    input.spellcheck = false;
-    input.dataset.agent = agent;
-    const wrap = el("label", "agent-accounts-command");
-    wrap.append(el("span", "agent-hooks-name", agent), input);
-    commandsRow.appendChild(wrap);
-  }
-  commandsRow.appendChild(commandsReset);
-  const loadError = el("p", "scope-settings-help scope-settings-refresh-error");
-  const sectionResult = el("p", "agent-hooks-result");
-  element.append(
-    title,
-    intro,
-    registryError,
-    table,
-    addRow,
-    sectionResult,
-    usageHead,
-    usageRows,
-    usageHow,
-    failures,
-    commandsHead,
-    commandsIntro,
-    commandsRow,
-    loadError,
+  // 節の箱。設定のページが置き、中はここが描く。
+  const element = templateElement(
+    html`<div class="scope-settings-section agent-accounts-section"></div>`,
   );
 
   const results = new Map<string, Result>();
@@ -182,6 +352,12 @@ export function createAccountsSettings(
   let busy = false;
   /** 起動コマンドの欄を利用者が触った (取り直しで上書きしない)。 */
   let commandsEdited = false;
+  /** 起動コマンドの欄の値。 */
+  const commandValues: Record<AccountAgent, string> = {
+    claude: "",
+    codex: "",
+    opencode: "",
+  };
   let release: (() => void) | null = null;
   const draftListeners = new Set<() => void>();
 
@@ -194,13 +370,13 @@ export function createAccountsSettings(
     if (!commandsEdited || !saved) return false;
     return HOOK_AGENTS.some(
       (agent) =>
-        commandToSave(agent, commandInputs[agent].value) !==
+        commandToSave(agent, commandValues[agent]) !==
         commandToSave(agent, saved[agent]),
     );
   }
 
   function commandsChanged(): void {
-    commandsUnsaved.hidden = !commandsDirty();
+    render();
     for (const listener of draftListeners) listener();
   }
 
@@ -229,112 +405,27 @@ export function createAccountsSettings(
       : t.checkedAgo(t.duration(elapsed));
   }
 
-  function stateCell(account: AccountStatus): HTMLElement {
-    const t = text();
-    const shown = shownLoginState(account.login);
-    const cell = el(
-      "span",
-      `agent-accounts-state agent-accounts-state-${shown}`,
-    );
-    cell.setAttribute("role", "cell");
-    let mark: HTMLElement;
-    if (shown === "in") {
-      const holder = el("span", "agent-accounts-mark");
-      holder.innerHTML = iconSvg("agent-accounts-mark-icon", CHECK_16_PATHS);
-      mark = holder;
-    } else {
-      mark = el("span", "agent-accounts-mark", shown === "unknown" ? "?" : "");
-    }
-    mark.setAttribute("aria-hidden", "true");
-    cell.append(
-      mark,
-      el("span", "agent-accounts-state-label", t.loginShown[shown]),
-    );
-    return cell;
-  }
-
-  function emailCell(account: AccountStatus): HTMLElement {
-    const t = text();
-    const cell = el("span", "agent-accounts-email");
-    cell.setAttribute("role", "cell");
-    const login = account.login;
-    const who = login.state === "logged-in" ? login.who : "";
-    const address = el("span", "agent-accounts-address", who || t.noEmail);
-    address.title = [who, login.method].filter(Boolean).join("\n");
-    cell.appendChild(address);
-    if (login.state === "logged-in" && login.plan) {
-      cell.appendChild(
-        el("span", "agent-accounts-plan", planLabel(login.plan)),
-      );
-    }
-    return cell;
-  }
-
-  function checkedCell(account: AccountStatus): HTMLElement {
-    const t = text();
-    const pending = checking.has(account.id);
-    const cell = el(
-      "span",
-      "agent-accounts-checked",
-      pending ? t.checking : agoText(account.login.checkedAt),
-    );
-    cell.setAttribute("role", "cell");
-    if (!pending)
-      cell.title = new Date(account.login.checkedAt).toLocaleString();
-    return cell;
-  }
-
   /** 2 段目の下に出す理由。無ければ null。 */
   function reasonLine(
     account: AccountStatus,
     home: string,
-  ): HTMLElement | null {
+  ): AccountsSettingsRowProps["reason"] {
     const t = text();
     const login = account.login;
-    if (login.state === "unknown") {
-      return el(
-        "p",
-        "agent-hooks-detail agent-hooks-detail-problem",
-        t.unknownWhy(login.detail),
-      );
-    }
-    if (login.state === "no-config-dir") {
+    if (login.state === "unknown")
+      return { problem: true, text: t.unknownWhy(login.detail) };
+    if (login.state === "no-config-dir")
       return account.builtin
-        ? el(
-            "p",
-            "agent-hooks-detail",
-            t.defaultNotSetUp(abbreviateHome(account.configDir, home)),
-          )
-        : el(
-            "p",
-            "agent-hooks-detail agent-hooks-detail-problem",
-            t.noConfigDir(account.configDir),
-          );
-    }
-    if (login.state === "logged-in" && login.setupDetail) {
-      return el(
-        "p",
-        "agent-hooks-detail agent-hooks-detail-problem",
-        t.onboardingMarkFailed(login.setupDetail),
-      );
-    }
-    if (login.state === "logged-in" && !login.who && login.whoDetail) {
-      return el("p", "agent-hooks-detail", t.noEmailWhy(login.whoDetail));
-    }
+        ? {
+            problem: false,
+            text: t.defaultNotSetUp(abbreviateHome(account.configDir, home)),
+          }
+        : { problem: true, text: t.noConfigDir(account.configDir) };
+    if (login.state === "logged-in" && login.setupDetail)
+      return { problem: true, text: t.onboardingMarkFailed(login.setupDetail) };
+    if (login.state === "logged-in" && !login.who && login.whoDetail)
+      return { problem: false, text: t.noEmailWhy(login.whoDetail) };
     return null;
-  }
-
-  function actionButton(
-    label: string,
-    title: string,
-    onClick: () => void,
-  ): HTMLButtonElement {
-    const button = el("button", "gdp-btn gdp-btn-sm", label);
-    button.type = "button";
-    button.title = title;
-    button.disabled = busy;
-    button.addEventListener("click", onClick);
-    return button;
   }
 
   function recheck(account: AccountStatus): void {
@@ -353,135 +444,115 @@ export function createAccountsSettings(
     });
   }
 
-  function headRow(): HTMLElement {
-    const t = text();
-    const row = el(
-      "div",
-      "agent-accounts-row agent-accounts-head ui-table-head",
-    );
-    row.setAttribute("role", "row");
-    for (const label of [
-      t.columns.account,
-      t.columns.email,
-      t.columns.state,
-      t.columns.checked,
-    ]) {
-      const cell = el("span", "agent-accounts-head-cell", label);
-      cell.setAttribute("role", "columnheader");
-      row.appendChild(cell);
-    }
-    return row;
+  /** 結果の文を節の下に出す操作 (追加・タグ・名前の変更・外す)。 */
+  function runForSection(
+    key: string,
+    action: () => Promise<string | null>,
+  ): void {
+    void run(key, async () => {
+      const out = await action();
+      if (out) sectionMessage = { ok: true, text: out };
+      return null;
+    });
   }
 
-  function accountRow(account: AccountStatus, home: string): HTMLElement {
+  function accountRowProps(
+    account: AccountStatus,
+    home: string,
+  ): AccountsSettingsRowProps {
     const t = text();
     const shown = shownLoginState(account.login);
-    const row = el("div", "agent-accounts-row ui-table-row");
-    row.setAttribute("role", "row");
-    row.dataset.account = account.id;
-    row.dataset.login = shown;
-    const name = el("span", "agent-accounts-name-cell");
-    name.setAttribute("role", "cell");
-    name.append(
-      el("span", "agent-accounts-kind", account.agent),
-      el("span", "agent-accounts-name", accountDisplayName(account, t)),
-    );
-    const tags = accountTagList(account.tags);
-    if (tags) name.appendChild(tags);
-    const actions = el("span", "agent-accounts-actions");
-    actions.setAttribute("role", "cell");
     const display = accountDisplayName(account, t);
-    actions.appendChild(
-      actionButton(t.recheck, t.recheckTitle(display), () => recheck(account)),
-    );
+    const login = account.login;
+    const who = login.state === "logged-in" ? login.who : "";
+    const pending = checking.has(account.id);
+    const actions: ActionProps[] = [
+      {
+        label: t.recheck,
+        title: t.recheckTitle(display),
+        onClick: () => recheck(account),
+      },
+    ];
     // 既定のアカウントは設定ディレクトリが無くてもログインで作られる。
-    if (shown === "out" && (account.exists || account.builtin)) {
-      actions.appendChild(
-        actionButton(
-          t.loginButton,
-          t.loginTitle(display),
-          () => void run(account.id, () => deps.dialogs.login(account)),
-        ),
+    if (shown === "out" && (account.exists || account.builtin))
+      actions.push({
+        label: t.loginButton,
+        title: t.loginTitle(display),
+        onClick: () => void run(account.id, () => deps.dialogs.login(account)),
+      });
+    actions.push({
+      label: t.tags,
+      title: t.tagsTitle(display),
+      onClick: () =>
+        runForSection(account.id, () => deps.dialogs.tags(account)),
+    });
+    if (!account.builtin)
+      actions.push(
+        {
+          label: t.rename,
+          title: t.renameTitle(account.name),
+          onClick: () =>
+            runForSection(account.id, () => deps.dialogs.rename(account)),
+        },
+        {
+          label: t.remove,
+          title: t.removeTitle(account.name),
+          onClick: () =>
+            runForSection(account.id, () => deps.dialogs.remove(account)),
+        },
       );
-    }
-    actions.appendChild(
-      actionButton(
-        t.tags,
-        t.tagsTitle(display),
-        () =>
-          void run(account.id, async () => {
-            const out = await deps.dialogs.tags(account);
-            if (out) sectionMessage = { ok: true, text: out };
-            return null;
-          }),
-      ),
-    );
-    if (!account.builtin) {
-      actions.appendChild(
-        actionButton(
-          t.rename,
-          t.renameTitle(account.name),
-          () =>
-            void run(account.id, async () => {
-              const out = await deps.dialogs.rename(account);
-              if (out) sectionMessage = { ok: true, text: out };
-              return null;
-            }),
-        ),
-      );
-      actions.appendChild(
-        actionButton(
-          t.remove,
-          t.removeTitle(account.name),
-          () =>
-            void run(account.id, async () => {
-              const out = await deps.dialogs.remove(account);
-              if (out) sectionMessage = { ok: true, text: out };
-              return null;
-            }),
-        ),
-      );
-    }
-    const path = el(
-      "span",
-      "agent-accounts-path terminal-mono",
-      abbreviateHome(account.configDir, home),
-    );
-    path.title = account.configDir;
-    row.append(
-      name,
-      emailCell(account),
-      stateCell(account),
-      checkedCell(account),
+    return {
+      id: account.id,
+      agent: account.agent,
+      display,
+      tags: account.tags,
+      login: shown,
+      stateLabel: t.loginShown[shown],
+      email: {
+        text: who || t.noEmail,
+        title: [who, login.method].filter(Boolean).join("\n"),
+        plan:
+          login.state === "logged-in" && login.plan
+            ? planLabel(login.plan)
+            : null,
+      },
+      checked: {
+        text: pending ? t.checking : agoText(login.checkedAt),
+        title: pending ? null : new Date(login.checkedAt).toLocaleString(),
+      },
       actions,
-      path,
-    );
-    const reason = reasonLine(account, home);
-    if (reason) row.appendChild(reason);
-    const result = results.get(account.id);
-    if (result) row.appendChild(resultLine(result));
-    return row;
+      path: {
+        text: abbreviateHome(account.configDir, home),
+        title: account.configDir,
+      },
+      reason: reasonLine(account, home),
+      result: results.get(account.id) ?? null,
+    };
   }
+
+  /** 使用量を確かめるの開く操作。起動コマンドの欄は同じページにある。 */
+  const openers = {
+    ...deps.dialogs,
+    openLaunchCommands() {
+      const input = element.querySelector<HTMLInputElement>(
+        `#${CLAUDE_LAUNCH_COMMAND_ID}`,
+      );
+      input?.scrollIntoView({ block: "center" });
+      input?.focus();
+    },
+  };
 
   /**
    * claude の設定ファイル (実際に書くファイル) ごとに 1 行。受け取れているかと
    * 最後に受け取った時刻だけを出し、仕組みと書き換えるファイルは「仕組み」の欄へ。
    */
-  /** 使用量を確かめるの開く操作。起動コマンドの欄は同じページにある。 */
-  const openers = {
-    ...deps.dialogs,
-    openLaunchCommands() {
-      commandInputs.claude.scrollIntoView({ block: "center" });
-      commandInputs.claude.focus();
-    },
-  };
-
-  function renderUsage(accounts: AccountStatus[], home: string): void {
+  function usageParts(
+    accounts: AccountStatus[],
+    home: string,
+  ): { rows: AccountsUsageRowProps[]; facts: string[] } {
     const t = text();
-    usageRows.replaceChildren();
-    const how: HTMLElement[] = t.usageIntro.map((paragraph) =>
-      el("p", "scope-settings-help", paragraph),
-    );
+    const rows: AccountsUsageRowProps[] = [];
+    const facts: string[] = [];
     const groups = new Map<string, AccountStatus[]>();
     for (const account of accounts) {
       if (account.agent !== "claude" || !account.statusLine) continue;
@@ -507,168 +578,164 @@ export function createAccountsSettings(
               ? "on"
               : "waiting"
             : "off";
-      const box = el("div", "agent-accounts-usage-row ui-table-row");
-      box.dataset.usage = tone;
-      const names = el(
-        "span",
-        "agent-accounts-usage-who",
-        `claude · ${members.map((member) => accountDisplayName(member, t)).join(", ")}`,
-      );
-      const line = el(
-        "span",
-        "agent-accounts-usage-line",
-        status.state === "unreadable"
-          ? t.statusLine.unreadable
-          : status.state === "no-config-dir"
-            ? t.statusLine["no-config-dir"]
-            : !on
-              ? t.usageOff
-              : received > 0
-                ? t.usageReceiving(agoText(received))
-                : t.usageWaiting,
-      );
-      if (received > 0) line.title = new Date(received).toLocaleString();
-      const actions = el("span", "agent-accounts-actions");
+      const names = `claude · ${members.map((member) => accountDisplayName(member, t)).join(", ")}`;
       const canAct =
         status.state !== "unreadable" && status.state !== "no-config-dir";
-      if (canAct) {
-        const action = on && !status.wrapperMissing ? "uninstall" : "install";
-        actions.appendChild(
-          actionButton(
-            action === "install" ? t.statusLineInstall : t.statusLineUninstall,
-            t.statusLineDialogTitle(action),
-            () =>
-              void run(`statusline:${realPath}`, () =>
-                deps.dialogs.statusLine(first, action),
-              ),
-          ),
-        );
-      }
-      box.append(names, line, actions);
-      // 使用量を確かめる (全体ボードのカードと同じ部品)。同じ設定ファイルを
-      // 共有するアカウントが並ぶときは、ボタンに名前を添える。
-      for (const member of members) {
-        const check = usageCheckBlock(member, now(), deps.client, t, openers, {
-          name: members.length > 1 ? accountDisplayName(member, t) : undefined,
-        });
-        if (check) box.appendChild(check);
-      }
+      const action = on && !status.wrapperMissing ? "uninstall" : "install";
       const problems: string[] = [];
       if (status.wrapperMissing) problems.push(t.statusLineWrapperMissing);
       if (status.detail) problems.push(status.detail);
-      if (problems.length > 0) {
-        box.appendChild(
-          el(
-            "p",
-            "agent-hooks-detail agent-hooks-detail-problem",
-            problems.join("\n"),
-          ),
-        );
-      }
-      const result = results.get(`statusline:${realPath}`);
-      if (result) box.appendChild(resultLine(result));
-      usageRows.appendChild(box);
-      const facts = [
-        `claude · ${members.map((member) => accountDisplayName(member, t)).join(", ")}: ${t.statusLine[status.state]}`,
+      rows.push({
+        tone,
+        who: names,
+        line: {
+          text:
+            status.state === "unreadable"
+              ? t.statusLine.unreadable
+              : status.state === "no-config-dir"
+                ? t.statusLine["no-config-dir"]
+                : !on
+                  ? t.usageOff
+                  : received > 0
+                    ? t.usageReceiving(agoText(received))
+                    : t.usageWaiting,
+          title: received > 0 ? new Date(received).toLocaleString() : null,
+        },
+        action: canAct
+          ? {
+              label:
+                action === "install"
+                  ? t.statusLineInstall
+                  : t.statusLineUninstall,
+              title: t.statusLineDialogTitle(action),
+              onClick: () =>
+                void run(`statusline:${realPath}`, () =>
+                  deps.dialogs.statusLine(first, action),
+                ),
+            }
+          : null,
+        // 使用量を確かめる (全体ボードのカードと同じ部品)。同じ設定ファイルを
+        // 共有するアカウントが並ぶときは、ボタンに名前を添える。
+        checks: members.flatMap(
+          (member) =>
+            usageCheckProps(member, now(), deps.client, t, openers, {
+              name:
+                members.length > 1 ? accountDisplayName(member, t) : undefined,
+            }) ?? [],
+        ),
+        problems: problems.length > 0 ? problems.join("\n") : null,
+        result: results.get(`statusline:${realPath}`) ?? null,
+      });
+      const lines = [
+        `${names}: ${t.statusLine[status.state]}`,
         t.usageFile(
           status.symlink
             ? `${abbreviateHome(status.path, home)} → ${abbreviateHome(realPath, home)}`
             : abbreviateHome(status.path, home),
         ),
       ];
-      if (status.command) facts.push(t.statusLineCommand(status.command));
-      how.push(
-        el("p", "agent-accounts-how-fact terminal-mono", facts.join("\n")),
-      );
+      if (status.command) lines.push(t.statusLineCommand(status.command));
+      facts.push(lines.join("\n"));
     }
-    usageHowBody.replaceChildren(...how);
+    return { rows, facts };
   }
 
-  function render(): void {
+  function viewProps(): AccountsSettingsViewProps {
     const t = text();
     const { data, error } = deps.client.snapshot();
-    title.textContent = t.sectionTitle;
-    intro.textContent = t.sectionIntro;
-    addButton.textContent = t.add;
-    addButton.disabled = busy;
-    usageTitle.textContent = t.usageTitle;
     const refreshing =
       data?.accounts.some(
         (account) => deps.client.usageCheck(account.id)?.running,
       ) === true;
-    refreshUsage.textContent = refreshing ? t.usageChecking : t.usageRefreshAll;
-    refreshUsage.title = t.usageRefreshAuto;
-    refreshUsage.disabled = refreshing || !data;
-    usageHowSummary.textContent = t.usageHow;
-    commandsTitle.textContent = t.commandsTitle;
-    commandsUnsaved.textContent = t.commandsUnsaved;
-    commandsIntro.textContent = t.commandsIntro;
-    commandsReset.textContent = t.commandsReset;
-    commandsReset.disabled = !data;
-    failuresClear.textContent = t.usageFailuresClear;
-    loadError.hidden = !error;
-    loadError.textContent = error ? `${t.bandLoadFailed}\n${error}` : "";
-    registryError.hidden = !data?.registryError;
-    registryError.textContent = data?.registryError
-      ? `${t.registryError(data.registryPath)}\n${data.registryError}`
-      : "";
-    sectionResult.hidden = !sectionMessage;
-    sectionResult.className = `agent-hooks-result ${sectionMessage?.ok === false ? "agent-hooks-result-error" : "agent-hooks-result-ok"}`;
-    sectionResult.textContent = sectionMessage?.text ?? "";
-    table.replaceChildren();
-    if (!data) {
-      if (!error) table.appendChild(el("p", "scope-settings-help", t.loading));
-      usageRows.replaceChildren();
-      failures.hidden = true;
-      commandsUnsaved.hidden = true;
-      return;
+    if (data && !commandsEdited) {
+      commandValues.claude = data.launchCommands.claude;
+      commandValues.codex = data.launchCommands.codex;
     }
-    table.appendChild(headRow());
-    for (const account of data.accounts) {
-      table.appendChild(accountRow(account, data.home));
-    }
-    renderUsage(data.accounts, data.home);
-    failures.hidden = data.usageFailures.total === 0;
-    failuresSummary.textContent = t.usageFailures(data.usageFailures.total);
-    failuresBody.textContent = data.usageFailures.recent.join("\n");
-    failuresLog.textContent = t.usageFailuresLog(data.usageFailures.log);
-    if (!commandsEdited) {
-      commandInputs.claude.value = data.launchCommands.claude;
-      commandInputs.codex.value = data.launchCommands.codex;
-    }
-    commandsUnsaved.hidden = !commandsDirty();
+    const usage = data ? usageParts(data.accounts, data.home) : null;
+    const failures = data?.usageFailures;
+    return {
+      title: t.sectionTitle,
+      intro: t.sectionIntro,
+      registryError: data?.registryError
+        ? `${t.registryError(data.registryPath)}\n${data.registryError}`
+        : null,
+      table: data
+        ? {
+            head: [
+              t.columns.account,
+              t.columns.email,
+              t.columns.state,
+              t.columns.checked,
+            ],
+            rows: data.accounts.map((account) =>
+              accountRowProps(account, data.home),
+            ),
+          }
+        : null,
+      loading: !data && !error ? t.loading : null,
+      busy,
+      add: {
+        label: t.add,
+        onClick: () => runForSection("add", () => deps.dialogs.add()),
+      },
+      sectionMessage,
+      usage: {
+        title: t.usageTitle,
+        refresh: {
+          label: refreshing ? t.usageChecking : t.usageRefreshAll,
+          title: t.usageRefreshAuto,
+          disabled: refreshing || !data,
+          onClick: () => void deps.client.checkAllUsage(),
+        },
+        rows: usage?.rows ?? [],
+        howLabel: t.usageHow,
+        paragraphs: usage ? [...t.usageIntro] : [],
+        facts: usage?.facts ?? [],
+        failures: {
+          hidden: !failures || failures.total === 0,
+          summary: failures ? t.usageFailures(failures.total) : "",
+          lines: failures ? failures.recent.join("\n") : "",
+          log: failures ? t.usageFailuresLog(failures.log) : "",
+          clearLabel: t.usageFailuresClear,
+          onClear: () =>
+            void run("failures", async () => {
+              await deps.client.clearUsageFailures();
+              return null;
+            }),
+        },
+      },
+      commands: {
+        title: t.commandsTitle,
+        unsaved: { label: t.commandsUnsaved, shown: !!data && commandsDirty() },
+        intro: t.commandsIntro,
+        items: HOOK_AGENTS.map((agent) => ({
+          agent,
+          value: commandValues[agent],
+          onInput(value: string) {
+            commandValues[agent] = value;
+            commandsEdited = true;
+            commandsChanged();
+          },
+        })),
+        reset: {
+          label: t.commandsReset,
+          disabled: !data,
+          onClick: () => {
+            for (const agent of HOOK_AGENTS)
+              commandValues[agent] = DEFAULT_COMMANDS[agent];
+            commandsEdited = true;
+            commandsChanged();
+          },
+        },
+      },
+      error: error ? `${t.bandLoadFailed}\n${error}` : null,
+    };
   }
 
-  addButton.addEventListener(
-    "click",
-    () =>
-      void run("add", async () => {
-        const out = await deps.dialogs.add();
-        if (out) sectionMessage = { ok: true, text: out };
-        return null;
-      }),
-  );
-  for (const input of Object.values(commandInputs)) {
-    input.addEventListener("input", () => {
-      commandsEdited = true;
-      commandsChanged();
-    });
+  function render(): void {
+    renderOwned(element, view(viewProps()));
   }
-  commandsReset.addEventListener("click", () => {
-    for (const agent of HOOK_AGENTS) {
-      commandInputs[agent].value = DEFAULT_COMMANDS[agent];
-    }
-    commandsEdited = true;
-    commandsChanged();
-  });
-  failuresClear.addEventListener(
-    "click",
-    () =>
-      void run("failures", async () => {
-        await deps.client.clearUsageFailures();
-        return null;
-      }),
-  );
+
   deps.client.subscribe(() => {
     if (element.isConnected) render();
     // 保存した値が変わると「未保存」かどうかも変わる。
@@ -679,8 +746,9 @@ export function createAccountsSettings(
     dirty: commandsDirty,
     async save() {
       await deps.client.savePreferences({
-        claude: commandToSave("claude", commandInputs.claude.value),
-        codex: commandToSave("codex", commandInputs.codex.value),
+        claude: commandToSave("claude", commandValues.claude),
+        codex: commandToSave("codex", commandValues.codex),
+        opencode: commandToSave("opencode", commandValues.opencode),
       });
       commandsEdited = false;
       render();

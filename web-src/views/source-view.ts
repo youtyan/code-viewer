@@ -1,3 +1,8 @@
+import { live } from "lit/directives/live.js";
+import { ref } from "lit/directives/ref.js";
+import { repeat } from "lit/directives/repeat.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import { apiUrl, projectKey } from "../core/api-url";
 import { showCopyFailure, showHighlightFailure } from "../core/copy-failure";
 import {
@@ -15,7 +20,7 @@ import {
   isEditableKeyTarget,
   isPageKeymapBlockedTarget,
 } from "../core/focus-scope";
-import { COPY_16_PATHS, iconSvg } from "../core/icons";
+import { COPY_16_PATHS } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import {
@@ -56,9 +61,9 @@ import type {
 } from "../core/types";
 import { DIFF_SCREEN_TEXT } from "./diff-view-i18n";
 import {
-  appendFileViewTabs,
   createFileShellSticky,
   type FileViewTab,
+  fileViewTabsTemplate,
   isMediaPreviewOnlySource,
   mountFileShellCard,
   type SourceBlobTab,
@@ -68,8 +73,8 @@ import {
   openMarkdownLink,
 } from "./markdown-link-navigation";
 import {
-  appendMediaEmbed,
   type DelimitedPreviewElement,
+  mediaEmbedTemplate,
   renderDelimitedPreview,
   renderHtmlPreviewFrame,
   renderUnsupportedPreview,
@@ -80,6 +85,8 @@ import {
   SOURCE_READING_TEXT,
 } from "./source-preview-i18n";
 import { markNeedleInCell } from "./text-mark";
+import { iconTemplate } from "./ui/icon";
+import { detachedElement, renderOwned, templateElement } from "./ui/renderer";
 
 export type VirtualSourcePagingKeyboardEvent = KeyboardEvent & {
   __gdpVirtualSourcePagingHandled?: boolean;
@@ -175,7 +182,390 @@ export type SourceViewDeps = {
   requestUrl?(url: string): string;
 };
 
-export function createSourceView(deps: SourceViewDeps) {
+type CopyButtonProps = {
+  label: string;
+  disabled: boolean;
+  extraClass: string;
+  onClick(button: HTMLButtonElement): void;
+};
+
+/** 行へ移る欄。 */
+export type SourceLineJumpProps = {
+  count: string;
+  label: string;
+  go: string;
+  value: string;
+  max: number | null;
+  onSubmit(input: HTMLInputElement): void;
+};
+
+/** 小さなファイルの表の 1 行。 */
+export type SourceRowProps = {
+  line: number;
+  target: boolean;
+  cursor: boolean;
+  /** 色付けした HTML (届くまでは null で原文)。 */
+  html: string | null;
+  text: string;
+};
+
+/** 大きなファイルの窓の 1 行。 */
+export type SourceVirtualRowProps = {
+  line: number;
+  target: boolean;
+  cursor: boolean;
+  rowClass: string | null;
+  gutter: HTMLElement | null;
+  code:
+    | { kind: "missing"; failed: string | null }
+    | {
+        kind: "marked";
+        pieces: { text: string; hit: boolean; active: boolean }[];
+      }
+    | { kind: "html"; html: string }
+    | { kind: "plain"; text: string };
+};
+
+export type SourceFindBarProps = {
+  placeholder: string;
+  value: string;
+  count: { text: string; title: string | null };
+  previous: string;
+  next: string;
+  close: string;
+  onInput(value: string): void;
+  onEscape(): void;
+  onMove(direction: 1 | -1): void;
+  onClose(): void;
+};
+
+export type SourceViewView = {
+  loading(props: {
+    title: string;
+    message: string;
+    slow: string | null;
+    cancel: { label: string; title: string; onClick(): void } | null;
+  }): unknown;
+  error(text: string): unknown;
+  cancelled(props: {
+    title: string;
+    message: string;
+    reopen: { label: string; onClick(): void };
+  }): unknown;
+  download(props: { href: string; label: string }): unknown;
+  fileInfo(props: {
+    kind: string;
+    size: string | null;
+    resolution: string | null;
+  }): unknown;
+  copyButton(props: CopyButtonProps): unknown;
+  tabs(props: {
+    fileTabs: Parameters<typeof fileViewTabsTemplate>;
+    lineJump: SourceLineJumpProps;
+  }): unknown;
+  table(): unknown;
+  tableRows(props: {
+    rows: SourceRowProps[];
+    onLineNumber(element: HTMLElement, line: number): void;
+  }): unknown;
+  viewer(props: {
+    virtual: boolean;
+    meta: string | null;
+    children: Node[];
+  }): unknown;
+  virtualFrame(props: {
+    mode: string;
+    summary: string;
+    sourceLabel: string;
+    copy: CopyButtonProps | null;
+    raw: { href: string; label: string } | null;
+    full: {
+      href: string;
+      title: string;
+      label: string;
+      onOpen(href: string): void;
+    };
+  }): unknown;
+  virtualRows(props: {
+    rows: SourceVirtualRowProps[];
+    onLineNumber(element: HTMLElement, line: number): void;
+  }): unknown;
+  findBar(props: SourceFindBarProps): unknown;
+  media(props: {
+    kind: string;
+    meta: string | null;
+    info: HTMLElement;
+    embed: Parameters<typeof mediaEmbedTemplate>[0];
+  }): unknown;
+  card(props: { path: string; ref: string; sticky: HTMLElement }): unknown;
+  backButton(props: {
+    onClick(): void;
+    init(button: HTMLButtonElement): void;
+  }): unknown;
+};
+
+/** 行番号の欄に、行を選ぶ操作を 1 度だけ付ける (描き直しでは付け直さない)。 */
+const boundLineNumbers = new WeakSet<Element>();
+function lineNumberRef(
+  bind: (element: HTMLElement, line: number) => void,
+  line: number,
+) {
+  return ref((element) => {
+    if (!(element instanceof HTMLElement) || boundLineNumbers.has(element))
+      return;
+    boundLineNumbers.add(element);
+    bind(element, line);
+  });
+}
+
+function copyButtonTemplate(props: CopyButtonProps): TemplateResult {
+  return html`<button
+    type="button"
+    class=${`gdp-file-header-icon gdp-copy-source${props.extraClass ? ` ${props.extraClass}` : ""}`}
+    title=${props.label}
+    aria-label=${props.label}
+    ?disabled=${props.disabled}
+    @click=${(event: MouseEvent) =>
+      props.onClick(event.currentTarget as HTMLButtonElement)}
+  >${iconTemplate(COPY_16_PATHS, "octicon-copy")}</button>`;
+}
+
+export const DEFAULT_VIEW: SourceViewView = {
+  loading: (props) => html`<div class="gdp-source-viewer loading"><div
+      class="gdp-source-loading-content"
+    ><span class="gdp-source-loading-spinner" aria-hidden="true"></span><strong
+        class="gdp-source-loading-title"
+        >${props.title}</strong
+      ><div class="gdp-source-loading-message">${props.message}</div>${
+        props.slow !== null
+          ? html`<div class="gdp-source-loading-slow-note">${props.slow}</div>`
+          : nothing
+      }${
+        props.cancel
+          ? html`<button
+              type="button"
+              class="gdp-btn gdp-btn-sm gdp-source-cancel"
+              title=${props.cancel.title}
+              @click=${(event: MouseEvent) => {
+                event.stopPropagation();
+                props.cancel?.onClick();
+              }}
+            >${props.cancel.label}</button>`
+          : nothing
+      }</div></div>`,
+  error: (text) => html`<div class="gdp-source-viewer error">${text}</div>`,
+  cancelled: (props) => html`<div class="gdp-source-viewer cancelled"><div
+      class="gdp-source-loading-content"
+    ><strong class="gdp-source-loading-title">${props.title}</strong><div
+        class="gdp-source-loading-message"
+      >${props.message}</div><button
+        type="button"
+        class="gdp-btn gdp-btn-sm"
+        @click=${props.reopen.onClick}
+      >${props.reopen.label}</button></div></div>`,
+  download: (props) => html`<a
+    class="gdp-btn gdp-btn-sm gdp-source-download"
+    href=${props.href}
+    target="_blank"
+    rel="noreferrer"
+  >${props.label}</a>`,
+  fileInfo: (props) => html`<div class="gdp-source-file-info"><span class="kind"
+      >${props.kind}</span
+    >${props.size !== null ? html`<span>${props.size}</span>` : nothing}${
+      props.resolution !== null
+        ? html`<span>${props.resolution}</span>`
+        : nothing
+    }</div>`,
+  copyButton: copyButtonTemplate,
+  tabs: (props) => {
+    const jump = props.lineJump;
+    // 文字は span に包む: 狭い面では CSS がこれだけを畳む (欄は残す)。
+    // localize は label の最初の子の文字を書き換える。
+    return html`<div class="gdp-source-tabs">${fileViewTabsTemplate(
+      ...props.fileTabs,
+    )}<form
+      class="gdp-source-line-jump"
+      @submit=${(event: SubmitEvent) => {
+        event.preventDefault();
+        const input = (event.currentTarget as HTMLFormElement).querySelector(
+          "input",
+        );
+        if (input) jump.onSubmit(input);
+      }}
+    ><span class="gdp-source-line-count">${jump.count}</span><label
+        ><span class="gdp-source-line-jump-label">${jump.label}</span><input
+          type="number"
+          min="1"
+          step="1"
+          required
+          max=${jump.max !== null ? String(jump.max) : nothing}
+          aria-label=${jump.label}
+          .value=${jump.value}
+      /></label><button type="submit" class="gdp-btn gdp-btn-sm">${jump.go}</button></form
+    ></div>`;
+  },
+  table: () =>
+    html`<table class="gdp-source-table" data-source-pane="code"><tbody></tbody></table>`,
+  tableRows: (props) =>
+    props.rows.map((row) => {
+      const cls = [
+        row.target ? "gdp-source-line-target" : "",
+        row.cursor ? "gdp-source-cursor" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return html`<tr data-line=${String(row.line)} class=${cls}><td
+          class="gdp-source-line-number"
+          ${lineNumberRef(props.onLineNumber, row.line)}
+        >${String(row.line)}</td>${
+          // 同じ升のまま中身だけを色付けしたものに替える (升を作り直さない)。
+          html`<td class=${row.html === null ? "gdp-source-line-code" : "gdp-source-line-code shiki"}
+            >${row.html === null ? row.text || " " : unsafeHTML(row.html || " ")}</td
+          >`
+        }</tr>`;
+    }),
+  viewer: (props) => html`<div
+    class=${props.virtual ? "gdp-source-viewer virtual" : "gdp-source-viewer"}
+    >${props.meta !== null ? html`<div class="gdp-source-meta">${props.meta}</div>` : nothing}${props.children}</div
+  >`,
+  virtualFrame: (props) => html`<div class="gdp-source-virtual"><div
+      class="gdp-source-virtual-info"
+    ><span class="gdp-source-virtual-badge">${props.mode}</span><span
+        class="gdp-source-virtual-summary"
+        >${props.summary}</span
+      ><span class="gdp-source-virtual-actions">${
+        props.copy ? copyButtonTemplate(props.copy) : nothing
+      }${
+        props.raw
+          ? html`<a
+              class="gdp-source-virtual-action"
+              href=${props.raw.href}
+              target="_blank"
+              rel="noreferrer"
+              >${props.raw.label}</a
+            >`
+          : nothing
+      }<a
+          class="gdp-source-virtual-action"
+          href=${props.full.href}
+          title=${props.full.title}
+          @click=${(event: MouseEvent) => {
+            event.preventDefault();
+            props.full.onOpen((event.currentTarget as HTMLAnchorElement).href);
+          }}
+        >${props.full.label}</a
+      ></span></div
+    ><div
+      class="gdp-source-virtual-scroller"
+      tabindex="0"
+      role="region"
+      aria-label=${props.sourceLabel}
+    ><div class="gdp-source-virtual-spacer"><div
+          class="gdp-source-virtual-window"
+        ></div></div></div></div>`,
+  virtualRows: (props) =>
+    repeat(
+      props.rows,
+      (row) => row.line,
+      (row) => {
+        const cls = [
+          "gdp-source-virtual-row",
+          row.target ? "gdp-source-line-target" : "",
+          row.cursor ? "gdp-source-cursor" : "",
+          row.rowClass ?? "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        const code = row.code;
+        return html`<div class=${cls} data-line=${String(row.line)}>${
+          row.gutter ?? nothing
+        }<span
+            class="gdp-source-virtual-line-number"
+            ${lineNumberRef(props.onLineNumber, row.line)}
+          >${String(row.line)}</span
+          >${
+            code.kind === "missing"
+              ? // 読めなかった範囲の行は空のままにせず、失敗の印と理由を付ける。
+                html`<span
+                  class=${code.failed ? "gdp-source-virtual-line-code gdp-highlight-failed" : "gdp-source-virtual-line-code"}
+                  title=${code.failed ?? nothing}
+                ></span>`
+              : code.kind === "marked"
+                ? html`<span class="gdp-source-virtual-line-code">${code.pieces.map(
+                    (piece) =>
+                      piece.hit
+                        ? html`<mark
+                            class=${piece.active ? "gdp-source-virtual-search-hit active" : "gdp-source-virtual-search-hit"}
+                            >${piece.text}</mark
+                          >`
+                        : piece.text,
+                  )}</span>`
+                : code.kind === "html"
+                  ? html`<span class="gdp-source-virtual-line-code hljs">${unsafeHTML(code.html)}</span>`
+                  : html`<span class="gdp-source-virtual-line-code">${code.text}</span>`
+          }</div>`;
+      },
+    ),
+  findBar: (props) => html`<input
+      type="search"
+      placeholder=${props.placeholder}
+      autocomplete="off"
+      spellcheck="false"
+      .value=${live(props.value)}
+      @input=${(event: Event) =>
+        props.onInput((event.currentTarget as HTMLInputElement).value)}
+      @keydown=${(event: KeyboardEvent) => {
+        if (isImeComposing(event)) return;
+        if (event.key === "Escape") {
+          event.preventDefault();
+          props.onEscape();
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          props.onMove(event.shiftKey ? -1 : 1);
+        }
+      }}
+    /><span class="gdp-source-virtual-search-count" title=${props.count.title ?? nothing}
+      >${props.count.text}</span
+    ><button type="button" class="gdp-btn gdp-btn-sm" @click=${() => props.onMove(-1)}
+      >${props.previous}</button
+    ><button type="button" class="gdp-btn gdp-btn-sm" @click=${() => props.onMove(1)}
+      >${props.next}</button
+    ><button type="button" class="gdp-btn gdp-btn-sm" @click=${props.onClose}
+      >${props.close}</button
+    >`,
+  media: (props) =>
+    html`<div class=${`gdp-source-viewer media ${props.kind}`}>${
+      props.meta !== null
+        ? html`<div class="gdp-source-meta">${props.meta}</div>`
+        : nothing
+    }${props.info}${mediaEmbedTemplate(props.embed)}</div>`,
+  card: (props) => html`<article
+    class="gdp-file-shell loaded gdp-standalone-source gdp-source-mode"
+    data-path=${props.path}
+    data-source-ref=${props.ref}
+  ><div class="gdp-file-detail-wrapper">${props.sticky}<div
+        class="gdp-file-detail-body"
+      ></div></div></article>`,
+  backButton: (props) => html`<button
+    type="button"
+    class="gdp-view-file gdp-btn gdp-btn-sm"
+    ${ref((back) => {
+      if (back instanceof HTMLButtonElement) props.init(back);
+    })}
+    @click=${props.onClick}
+  ></button>`,
+};
+
+/** 小さなファイルの表と、色付けした行で描き直す口。 */
+type SourceTable = {
+  table: HTMLTableElement;
+  highlight(lines: string[]): void;
+};
+
+export function createSourceView(
+  deps: SourceViewDeps,
+  view: SourceViewView = DEFAULT_VIEW,
+) {
   const {
     STATE,
     route: currentRoute,
@@ -560,10 +950,10 @@ export function createSourceView(deps: SourceViewDeps) {
     } catch (error) {
       throw errorWithCause(`shiki could not highlight ${lang}`, error);
     }
-    const template = document.createElement("template");
-    template.innerHTML = html;
+    // 色付けした HTML を読むだけ (画面には置かない)。行ごとの中身を取り出す。
+    const parsed = new DOMParser().parseFromString(html, "text/html");
     const renderedLines = Array.from(
-      template.content.querySelectorAll<HTMLElement>(".line"),
+      parsed.querySelectorAll<HTMLElement>(".line"),
     );
     if (!renderedLines.length)
       throw new Error(`shiki returned no lines for ${lang}`);
@@ -571,12 +961,13 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function scheduleSourceHighlight(
-    table: HTMLTableElement,
+    sourceTable: SourceTable,
     target: SourceFileTarget,
     textValue: string,
     lang: string,
     signal?: AbortSignal,
   ): void {
+    const { table } = sourceTable;
     setTimeout(() => {
       if (
         signal?.aborted ||
@@ -607,21 +998,7 @@ export function createSourceView(deps: SourceViewDeps) {
             !sourceTargetsEqual(sourceTargetFromRoute(), target)
           )
             return;
-          const cells = table.querySelectorAll<HTMLElement>(
-            ".gdp-source-line-code",
-          );
-          const sourceLines = textValue.split("\n");
-          cells.forEach((cell, index) => {
-            if (highlightedLines[index] == null) return;
-            cell.innerHTML = highlightedLines[index] || " ";
-            cell.classList.add("shiki");
-            markSourceHighlightTerm(
-              cell,
-              sourceLines[index] ?? "",
-              index + 1,
-              target,
-            );
-          });
+          sourceTable.highlight(highlightedLines);
         })
         .catch((err: unknown) => {
           showHighlightFailure(
@@ -788,72 +1165,53 @@ export function createSourceView(deps: SourceViewDeps) {
       });
   }
 
+  /** カードの本文 (読み込み中・失敗などの面) を view に差し替える。 */
+  function replaceSourceBody(card: DiffCardElement, view: HTMLElement): void {
+    const body = card.querySelector<HTMLElement>(
+      ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
+    );
+    if (body) body.replaceWith(view);
+    else card.appendChild(view);
+  }
+
   function renderSourceLoading(
     card: DiffCardElement,
     target: SourceFileTarget,
     onCancel?: () => void,
   ) {
-    const body = card.querySelector<HTMLElement>(
-      ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
-    );
-    const view = document.createElement("div");
-    view.className = "gdp-source-viewer loading";
-    const content = document.createElement("div");
-    content.className = "gdp-source-loading-content";
-    const spinner = document.createElement("span");
-    spinner.className = "gdp-source-loading-spinner";
-    spinner.setAttribute("aria-hidden", "true");
-    spinner.textContent = "";
-    const title = document.createElement("strong");
-    title.className = "gdp-source-loading-title";
-    const text = SOURCE_READING_TEXT[getLanguage()];
-    title.textContent = text.loadingFile;
-    const message = document.createElement("div");
-    message.className = "gdp-source-loading-message";
-    message.textContent = text.fileAtRef(target.path, target.ref);
-    content.append(spinner, title, message);
-    if (onCancel) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-btn gdp-btn-sm gdp-source-cancel";
-      button.textContent = text.cancel;
-      button.title = text.cancelTitle;
-      button.addEventListener("click", (e) => {
-        e.stopPropagation();
-        onCancel();
-      });
-      content.appendChild(button);
-    }
-    view.appendChild(content);
     const startedAt = Date.now();
+    /** 長くかかっているときの経過秒 (null はまだ普通の待ち)。 */
+    let elapsed: number | null = null;
+    const box = detachedElement(() => {
+      const text = SOURCE_READING_TEXT[getLanguage()];
+      return view.loading({
+        title: elapsed === null ? text.loadingFile : text.stillLoading(elapsed),
+        message: text.fileAtRef(target.path, target.ref),
+        slow: elapsed === null ? null : text.slowNote(elapsed),
+        cancel: onCancel
+          ? { label: text.cancel, title: text.cancelTitle, onClick: onCancel }
+          : null,
+      });
+    });
     // Loads usually finish in well under a second. If this exact loading
     // view is still mounted past the threshold, that is no longer the
     // common case, so say so explicitly instead of leaving the user
     // guessing whether the app has silently hung.
     window.setTimeout(() => {
-      if (!view.isConnected) return;
-      const slowNote = document.createElement("div");
-      slowNote.className = "gdp-source-loading-slow-note";
-      content.insertBefore(slowNote, onCancel ? content.lastChild : null);
+      if (!box.element.isConnected) return;
       let interval: number | null = null;
       const updateSlowNote = () => {
-        if (!view.isConnected) {
+        if (!box.element.isConnected) {
           if (interval !== null) window.clearInterval(interval);
           return;
         }
-        const elapsed = Math.max(
-          1,
-          Math.floor((Date.now() - startedAt) / 1000),
-        );
-        const later = SOURCE_READING_TEXT[getLanguage()];
-        title.textContent = later.stillLoading(elapsed);
-        slowNote.textContent = later.slowNote(elapsed);
+        elapsed = Math.max(1, Math.floor((Date.now() - startedAt) / 1000));
+        box.draw();
       };
       updateSlowNote();
       interval = window.setInterval(updateSlowNote, 1000);
     }, SOURCE_LOADING_SLOW_THRESHOLD_MS);
-    if (body) body.replaceWith(view);
-    else card.appendChild(view);
+    replaceSourceBody(card, box.element);
   }
 
   function renderSourceError(
@@ -861,16 +1219,18 @@ export function createSourceView(deps: SourceViewDeps) {
     target: SourceFileTarget,
     message: string,
   ) {
-    const body = card.querySelector<HTMLElement>(
-      ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
+    replaceSourceBody(
+      card,
+      templateElement(
+        view.error(
+          message ||
+            SOURCE_READING_TEXT[getLanguage()].cannotLoad(
+              target.path,
+              target.ref,
+            ),
+        ),
+      ),
     );
-    const view = document.createElement("div");
-    view.className = "gdp-source-viewer error";
-    view.textContent =
-      message ||
-      SOURCE_READING_TEXT[getLanguage()].cannotLoad(target.path, target.ref);
-    if (body) body.replaceWith(view);
-    else card.appendChild(view);
     setSourceCardState(card, "error");
   }
 
@@ -878,31 +1238,21 @@ export function createSourceView(deps: SourceViewDeps) {
     card: DiffCardElement,
     target: SourceFileTarget,
   ) {
-    const body = card.querySelector<HTMLElement>(
-      ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
-    );
-    const view = document.createElement("div");
-    view.className = "gdp-source-viewer cancelled";
-    const content = document.createElement("div");
-    content.className = "gdp-source-loading-content";
-    const title = document.createElement("strong");
-    title.className = "gdp-source-loading-title";
     const text = SOURCE_READING_TEXT[getLanguage()];
-    title.textContent = text.loadingCancelled;
-    const message = document.createElement("div");
-    message.className = "gdp-source-loading-message";
-    message.textContent = text.fileAtRef(target.path, target.ref);
-    const retry = document.createElement("button");
-    retry.type = "button";
-    retry.className = "gdp-btn gdp-btn-sm";
-    retry.textContent = text.reopen;
-    retry.addEventListener("click", () =>
-      renderStandaloneSource(sourceTargetFromRoute() || target),
+    replaceSourceBody(
+      card,
+      templateElement(
+        view.cancelled({
+          title: text.loadingCancelled,
+          message: text.fileAtRef(target.path, target.ref),
+          reopen: {
+            label: text.reopen,
+            onClick: () =>
+              renderStandaloneSource(sourceTargetFromRoute() || target),
+          },
+        }),
+      ),
     );
-    content.append(title, message, retry);
-    view.appendChild(content);
-    if (body) body.replaceWith(view);
-    else card.appendChild(view);
     setSourceCardState(card, "cancelled");
   }
 
@@ -910,23 +1260,18 @@ export function createSourceView(deps: SourceViewDeps) {
     card: DiffCardElement,
     target: SourceFileTarget,
   ) {
-    const body = card.querySelector<HTMLElement>(
-      ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
-    );
-    const info = createSourceFileInfo(target, "unsupported file");
-    const link = document.createElement("a");
-    link.className = "gdp-btn gdp-btn-sm gdp-source-download";
-    link.href = rawFileUrl(target);
     const text = SOURCE_READING_TEXT[getLanguage()];
-    link.textContent = text.downloadRaw;
-    link.target = "_blank";
-    link.rel = "noreferrer";
-    const view = renderUnsupportedPreview({
-      message: text.unsupported,
-      extraChildren: [info, link],
-    });
-    if (body) body.replaceWith(view);
-    else card.appendChild(view);
+    const info = createSourceFileInfo(target, "unsupported file");
+    const link = templateElement(
+      view.download({ href: rawFileUrl(target), label: text.downloadRaw }),
+    );
+    replaceSourceBody(
+      card,
+      renderUnsupportedPreview({
+        message: text.unsupported,
+        extraChildren: [info, link],
+      }),
+    );
     setSourceCardState(card, "done");
   }
 
@@ -934,18 +1279,16 @@ export function createSourceView(deps: SourceViewDeps) {
     card: DiffCardElement,
     target: SourceFileTarget,
   ) {
-    const body = card.querySelector<HTMLElement>(
-      ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
-    );
     const info = createSourceFileInfo(target, "internal metadata", {
       loadMeta: false,
     });
-    const view = renderUnsupportedPreview({
-      message: SOURCE_READING_TEXT[getLanguage()].internalMetadata,
-      extraChildren: [info],
-    });
-    if (body) body.replaceWith(view);
-    else card.appendChild(view);
+    replaceSourceBody(
+      card,
+      renderUnsupportedPreview({
+        message: SOURCE_READING_TEXT[getLanguage()].internalMetadata,
+        extraChildren: [info],
+      }),
+    );
     setSourceCardState(card, "done");
   }
 
@@ -956,114 +1299,95 @@ export function createSourceView(deps: SourceViewDeps) {
     return renderHtmlPreviewFrame(`${target.path} preview`, html);
   }
 
+  /** ファイルの種類と大きさ (と、画像なら縦横) の小さな行。 */
+  function sourceFileInfo(
+    target: SourceFileTarget,
+    kind: string,
+    options: { loadMeta?: boolean } = {},
+  ): { element: HTMLElement; setResolution(text: string): void } {
+    let meta: RawFileInfo | undefined;
+    let resolution: string | null = null;
+    const box = detachedElement(() =>
+      view.fileInfo({
+        kind: humanFileKind(target.path, meta?.type, kind, getLanguage()),
+        size: meta?.size != null ? formatBytes(meta.size) : null,
+        resolution,
+      }),
+    );
+    if (options.loadMeta !== false)
+      loadRawFileInfo(target).then((loaded) => {
+        meta = loaded;
+        box.draw();
+      });
+    return {
+      element: box.element,
+      setResolution(text) {
+        resolution = text;
+        box.draw();
+      },
+    };
+  }
+
   function createSourceFileInfo(
     target: SourceFileTarget,
     kind: string,
     options: { loadMeta?: boolean } = {},
   ): HTMLElement {
-    const info = document.createElement("div");
-    info.className = "gdp-source-file-info";
-    const type = document.createElement("span");
-    type.className = "kind";
-    type.textContent = humanFileKind(
-      target.path,
-      undefined,
-      kind,
-      getLanguage(),
-    );
-    info.appendChild(type);
-    if (options.loadMeta === false) return info;
-    loadRawFileInfo(target).then((meta) => {
-      type.textContent = humanFileKind(
-        target.path,
-        meta.type,
-        kind,
-        getLanguage(),
-      );
-      if (meta.size != null) {
-        const size = document.createElement("span");
-        size.textContent = formatBytes(meta.size);
-        info.appendChild(size);
-      }
-    });
-    return info;
+    return sourceFileInfo(target, kind, options).element;
   }
 
   /**
    * 中身をコピーするボタン。textValue が null なら読み込む前の場所取り
    * (押せない。読み込んだら本物と差し替える)。
    */
-  function createSourceCopyButton(textValue: string | null): HTMLButtonElement {
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className = "gdp-file-header-icon gdp-copy-source";
+  function copyButtonProps(
+    textValue: string | null,
+    extraClass = "",
+  ): CopyButtonProps {
     const text = SOURCE_READING_TEXT[getLanguage()];
-    copy.title = text.copySource;
-    copy.setAttribute("aria-label", text.copySource);
-    copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-    if (textValue === null) {
-      copy.disabled = true;
-      return copy;
-    }
-    copy.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(textValue);
-        copy.classList.add("copied");
-        setTimeout(() => {
-          copy.classList.remove("copied");
-        }, 1200);
-      } catch (error) {
-        showCopyFailure(
-          copy,
-          "copy the source to the clipboard",
-          error,
-          text.copySource,
-          1600,
-        );
-      }
-    });
-    return copy;
+    return {
+      label: text.copySource,
+      disabled: textValue === null,
+      extraClass,
+      onClick: async (copy) => {
+        if (textValue === null) return;
+        try {
+          await navigator.clipboard.writeText(textValue);
+          copy.classList.add("copied");
+          setTimeout(() => {
+            copy.classList.remove("copied");
+          }, 1200);
+        } catch (error) {
+          showCopyFailure(
+            copy,
+            "copy the source to the clipboard",
+            error,
+            text.copySource,
+            1600,
+          );
+        }
+      },
+    };
   }
 
-  function createSourceLineJump(target: SourceFileTarget): HTMLElement {
+  function lineJumpProps(target: SourceFileTarget): SourceLineJumpProps {
     const text = SOURCE_READING_TEXT[getLanguage()];
-    const form = document.createElement("form");
-    form.className = "gdp-source-line-jump";
-    const label = document.createElement("label");
-    // 文字は span に包む: 狭い面では CSS がこれだけを畳む (欄は残す)。
-    // localize は label の最初の子の文字を書き換える。
-    const labelText = document.createElement("span");
-    labelText.className = "gdp-source-line-jump-label";
-    labelText.textContent = text.line;
-    label.appendChild(labelText);
-    const input = document.createElement("input");
-    input.type = "number";
-    input.min = "1";
-    input.step = "1";
-    input.required = true;
-    input.value = String(lineTargetStart(currentSourceLineTarget(target)) || 1);
-    input.setAttribute("aria-label", text.line);
     const total = SOURCE_CURSOR_TOTALS.get(sourceCursorKey(target));
-    if (total) input.max = String(total);
-    label.appendChild(input);
-    const button = document.createElement("button");
-    button.type = "submit";
-    button.className = "gdp-btn gdp-btn-sm";
-    button.textContent = text.go;
-    const count = document.createElement("span");
-    count.className = "gdp-source-line-count";
-    count.textContent = total ? text.total(total) : text.totalPending;
-    form.append(count, label, button);
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      if (!input.reportValidity()) return;
-      const cursor = ensureSourceCursor(target);
-      cursor.line = input.valueAsNumber;
-      syncSourceCursorRows(target);
-      scrollSourceCursorIntoView(cursor, "center");
-      focusMainSurface();
-    });
-    return form;
+    return {
+      count: total ? text.total(total) : text.totalPending,
+      label: text.line,
+      go: text.go,
+      value: String(lineTargetStart(currentSourceLineTarget(target)) || 1),
+      max: total || null,
+      onSubmit: (input) => {
+        if (!input.reportValidity()) return;
+        const cursor = ensureSourceCursor(target);
+        cursor.line = input.valueAsNumber;
+        syncSourceCursorRows(target);
+        scrollSourceCursorIntoView(cursor, "center");
+        focusMainSurface();
+      },
+    };
   }
 
   /**
@@ -1077,26 +1401,95 @@ export function createSourceView(deps: SourceViewDeps) {
     textValue?: string | null,
     options: { previewable?: boolean } = {},
   ) {
-    const tabs = document.createElement("div");
-    tabs.className = "gdp-source-tabs";
-    const { codeButton, previewButton } = appendFileViewTabs(
-      tabs,
-      { currentRange, setRoute, setPreferredSourceTab },
-      target,
-      active,
-      {
-        includeFileTabs:
-          currentRoute().screen === "file" &&
-          sourceInternalPathKind(target.path) !== "code-viewer",
-        previewable: !!options.previewable || active === "preview",
-        sourceTabClick: "manual",
-        ...(textValue !== undefined
-          ? { sourceCopyButton: createSourceCopyButton(textValue) }
-          : {}),
-      },
+    const tabs = templateElement(
+      view.tabs({
+        fileTabs: [
+          { currentRange, setRoute, setPreferredSourceTab },
+          target,
+          active,
+          {
+            includeFileTabs:
+              currentRoute().screen === "file" &&
+              sourceInternalPathKind(target.path) !== "code-viewer",
+            previewable: !!options.previewable || active === "preview",
+            sourceTabClick: "manual",
+            ...(textValue !== undefined
+              ? {
+                  sourceCopyButton: view.copyButton(copyButtonProps(textValue)),
+                }
+              : {}),
+          },
+        ],
+        lineJump: lineJumpProps(target),
+      }),
     );
-    tabs.appendChild(createSourceLineJump(target));
-    return { tabs, codeButton, previewButton };
+    const button = (tab: SourceBlobTab) =>
+      tabs.querySelector<HTMLButtonElement>(`button[data-file-tab="${tab}"]`);
+    return {
+      tabs,
+      codeButton: button("code"),
+      previewButton: button("preview"),
+    };
+  }
+
+  /**
+   * 小さなファイルの表。行は 500 行ずつ描いて間に休む (大きめのファイルで画面を
+   * 止めない)。色付けが届いたら、同じ行を色付けした中身で描き直す。
+   */
+  async function buildSourceTable(
+    card: DiffCardElement,
+    target: SourceFileTarget,
+    lines: string[],
+    signal?: AbortSignal,
+  ): Promise<SourceTable | null> {
+    const table = templateElement<HTMLTableElement>(view.table());
+    const tbody = table.tBodies[0];
+    if (!tbody) throw new Error("source table: the body was not drawn");
+    let highlighted: string[] | null = null;
+    const rows = (count: number) => {
+      const lineTarget = currentSourceLineTarget(target);
+      return view.tableRows({
+        rows: lines.slice(0, count).map((line, index) => ({
+          line: index + 1,
+          target: lineInSourceTarget(index + 1, lineTarget),
+          cursor: sourceCursorMatches(target, index + 1),
+          html: highlighted?.[index] ?? null,
+          text: line,
+        })),
+        onLineNumber: (element, line) =>
+          bindSourceLineNumber(element, card, target, line),
+      });
+    };
+    /** 描いた行のうち from から後の目当ての行に、探した語の印を付ける。 */
+    const markFrom = (from: number) => {
+      const cells = tbody.querySelectorAll<HTMLElement>(
+        ".gdp-source-line-code",
+      );
+      for (let index = from; index < cells.length; index++) {
+        const cell = cells[index];
+        if (cell)
+          markSourceHighlightTerm(cell, lines[index] ?? "", index + 1, target);
+      }
+    };
+    for (let drawn = 0; drawn < lines.length; ) {
+      if (signal?.aborted) return null;
+      const next = Math.min(lines.length, drawn + 500);
+      renderOwned(tbody, rows(next));
+      markFrom(drawn);
+      drawn = next;
+      if (drawn < lines.length) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        if (signal?.aborted) return null;
+      }
+    }
+    return {
+      table,
+      highlight(next) {
+        highlighted = next;
+        renderOwned(tbody, rows(lines.length));
+        markFrom(0);
+      },
+    };
   }
 
   async function renderSourceText(
@@ -1112,13 +1505,15 @@ export function createSourceView(deps: SourceViewDeps) {
       ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
     );
     const isStandalone = card.classList.contains("gdp-standalone-source");
-    const view = document.createElement("div");
-    view.className = "gdp-source-viewer";
-    const header = isStandalone ? null : document.createElement("div");
-    if (header) {
-      header.className = "gdp-source-meta";
-      header.textContent = `${target.path} @ ${target.ref}`;
-    }
+    /** 本文の面。単独で開いたカードでなければ、頭にパスと ref を出す。 */
+    const sourceView = (virtual: boolean, children: Node[]) =>
+      templateElement(
+        view.viewer({
+          virtual,
+          meta: isStandalone ? null : `${target.path} @ ${target.ref}`,
+          children,
+        }),
+      );
     const lang = inferLang(target.path);
     const sourceShikiLang = normalizeSourceShikiLang(lang);
     const usesVirtualSource =
@@ -1217,11 +1612,9 @@ export function createSourceView(deps: SourceViewDeps) {
             preview,
           );
         });
-        if (header) view.appendChild(header);
-        view.classList.add("virtual");
-        view.append(preview, virtualCode);
-        if (body) body.replaceWith(view);
-        else card.appendChild(view);
+        const viewer = sourceView(true, [preview, virtualCode]);
+        if (body) body.replaceWith(viewer);
+        else card.appendChild(viewer);
         if (initialSourceTab === "preview") ensurePreviewHighlight();
         return true;
       }
@@ -1232,48 +1625,15 @@ export function createSourceView(deps: SourceViewDeps) {
         tabsHost.hidden = false;
         tabsHost.replaceChildren(tabs);
       }
-      if (header) view.appendChild(header);
-      view.classList.add("virtual");
-      view.appendChild(virtualCode);
       if (signal?.aborted) return false;
-      if (body) body.replaceWith(view);
-      else card.appendChild(view);
+      const viewer = sourceView(true, [virtualCode]);
+      if (body) body.replaceWith(viewer);
+      else card.appendChild(viewer);
       return true;
     }
-    const table = document.createElement("table");
-    table.className = "gdp-source-table";
-    table.dataset.sourcePane = "code";
-    const tbody = document.createElement("tbody");
-    for (let index = 0; index < lines.length; index++) {
-      if (signal?.aborted) return false;
-      const line = lines[index];
-      const tr = document.createElement("tr");
-      tr.dataset.line = String(index + 1);
-      tr.classList.toggle(
-        "gdp-source-line-target",
-        lineInSourceTarget(index + 1, currentSourceLineTarget(target)),
-      );
-      tr.classList.toggle(
-        "gdp-source-cursor",
-        sourceCursorMatches(target, index + 1),
-      );
-      const num = document.createElement("td");
-      num.className = "gdp-source-line-number";
-      num.textContent = String(index + 1);
-      bindSourceLineNumber(num, card, target, index + 1);
-      const code = document.createElement("td");
-      code.className = "gdp-source-line-code";
-      code.textContent = line || " ";
-      markSourceHighlightTerm(code, line, index + 1, target);
-      tr.appendChild(num);
-      tr.appendChild(code);
-      tbody.appendChild(tr);
-      if (index > 0 && index % 500 === 0) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        if (signal?.aborted) return false;
-      }
-    }
-    table.appendChild(tbody);
+    const sourceTable = await buildSourceTable(card, target, lines, signal);
+    if (!sourceTable) return false;
+    const { table } = sourceTable;
     const { tabs, codeButton, previewButton } = createSourceTabs(
       target,
       initialSourceTab,
@@ -1350,15 +1710,13 @@ export function createSourceView(deps: SourceViewDeps) {
           preview,
         );
       });
-      if (header) view.appendChild(header);
-      view.appendChild(preview);
-      view.appendChild(table);
       if (signal?.aborted) return false;
-      if (body) body.replaceWith(view);
-      else card.appendChild(view);
+      const viewer = sourceView(false, [preview, table]);
+      if (body) body.replaceWith(viewer);
+      else card.appendChild(viewer);
       if (STATE.syntaxHighlight && sourceShikiLang)
         scheduleSourceHighlight(
-          table,
+          sourceTable,
           target,
           textValue,
           sourceShikiLang,
@@ -1367,14 +1725,13 @@ export function createSourceView(deps: SourceViewDeps) {
       if (initialSourceTab === "preview") ensurePreviewHighlight();
       return true;
     }
-    if (header) view.appendChild(header);
-    view.appendChild(table);
     if (signal?.aborted) return false;
-    if (body) body.replaceWith(view);
-    else card.appendChild(view);
+    const viewer = sourceView(false, [table]);
+    if (body) body.replaceWith(viewer);
+    else card.appendChild(viewer);
     if (STATE.syntaxHighlight && sourceShikiLang)
       scheduleSourceHighlight(
-        table,
+        sourceTable,
         target,
         textValue,
         sourceShikiLang,
@@ -1702,37 +2059,124 @@ export function createSourceView(deps: SourceViewDeps) {
     return matches;
   }
 
-  function appendVirtualSourceLineCode(
-    code: HTMLElement,
+  /** 検索の当たりで分けた行の文字。当たりが無ければ null。 */
+  function virtualSourceSearchPieces(
     line: string,
     query: string,
     activeRange: VirtualSourceSearchMatch | null,
     lineNumber: number,
-  ): boolean {
+  ): { text: string; hit: boolean; active: boolean }[] | null {
     const ranges = virtualSourceSearchRanges(line, query);
-    if (!ranges.length) return false;
+    if (!ranges.length) return null;
+    const pieces: { text: string; hit: boolean; active: boolean }[] = [];
     let cursor = 0;
     for (const range of ranges) {
       if (range.start > cursor)
-        code.appendChild(
-          document.createTextNode(line.slice(cursor, range.start)),
-        );
-      const mark = document.createElement("mark");
-      const active =
-        !!activeRange &&
-        activeRange.line === lineNumber &&
-        activeRange.start === range.start &&
-        activeRange.end === range.end;
-      mark.className = active
-        ? "gdp-source-virtual-search-hit active"
-        : "gdp-source-virtual-search-hit";
-      mark.textContent = line.slice(range.start, range.end);
-      code.appendChild(mark);
+        pieces.push({
+          text: line.slice(cursor, range.start),
+          hit: false,
+          active: false,
+        });
+      pieces.push({
+        text: line.slice(range.start, range.end),
+        hit: true,
+        active:
+          !!activeRange &&
+          activeRange.line === lineNumber &&
+          activeRange.start === range.start &&
+          activeRange.end === range.end,
+      });
       cursor = range.end;
     }
     if (cursor < line.length)
-      code.appendChild(document.createTextNode(line.slice(cursor)));
-    return true;
+      pieces.push({ text: line.slice(cursor), hit: false, active: false });
+    return pieces;
+  }
+
+  type VirtualRow = {
+    number: number;
+    /** 行の文字 (まだ読んでいなければ null)。 */
+    text: string | null;
+    /** 読めなかった範囲の行の理由。 */
+    failedReason?: string;
+  };
+
+  /**
+   * 仮想の窓の行を描く。行は行番号で結ぶ (窓が動いても、同じ行の要素は同じ行の
+   * まま。行番号の操作はその行に付く)。色付けに失敗した行は原文のまま、行に
+   * 失敗の印と理由を付ける。
+   */
+  function drawVirtualRows(
+    windowEl: HTMLElement,
+    wrap: HTMLElement,
+    target: SourceFileTarget,
+    rows: VirtualRow[],
+    search: VirtualSourceSearchHandle | null,
+    hljsRef: HljsApi | null,
+    lang: string | null,
+    gutter?: VirtualSourceGutter,
+  ): void {
+    const lineTarget = currentSourceLineTarget(target);
+    const query = search?.query() || "";
+    const activeRange = search?.activeRange() || null;
+    const failures: Array<{ line: number; error: unknown }> = [];
+    const codeProps = (row: VirtualRow): SourceVirtualRowProps["code"] => {
+      const line = row.text;
+      if (line == null)
+        return { kind: "missing", failed: row.failedReason ?? null };
+      const pieces = virtualSourceSearchPieces(
+        line,
+        query,
+        activeRange,
+        row.number,
+      );
+      if (pieces) return { kind: "marked", pieces };
+      if (
+        hljsRef?.highlight &&
+        lang &&
+        line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH &&
+        (!hljsRef.getLanguage || hljsRef.getLanguage(lang))
+      ) {
+        try {
+          return {
+            kind: "html",
+            html: hljsRef.highlight(line, {
+              language: lang,
+              ignoreIllegals: true,
+            }).value,
+          };
+        } catch (error) {
+          failures.push({ line: row.number, error });
+        }
+      }
+      return { kind: "plain", text: line };
+    };
+    renderOwned(
+      windowEl,
+      view.virtualRows({
+        rows: rows.map((row) => ({
+          line: row.number,
+          target: lineInSourceTarget(row.number, lineTarget),
+          cursor: sourceCursorMatches(target, row.number),
+          rowClass: gutter?.rowClass ?? null,
+          gutter: gutter ? gutter.cell(row.number) : null,
+          code: codeProps(row),
+        })),
+        onLineNumber: (element, line) =>
+          bindSourceLineNumber(element, wrap, target, line),
+      }),
+    );
+    for (const failure of failures) {
+      const code = windowEl.querySelector<HTMLElement>(
+        `[data-line="${failure.line}"] .gdp-source-virtual-line-code`,
+      );
+      if (code)
+        showHighlightFailure(
+          code,
+          `syntax highlighting failed for line ${failure.line} of ${target.path}`,
+          failure.error,
+        );
+    }
   }
 
   function createVirtualSourceSearch(
@@ -1741,81 +2185,97 @@ export function createSourceView(deps: SourceViewDeps) {
     findMatches: (query: string) => Promise<VirtualSourceSearchMatch[]>,
     renderFn: () => void,
   ): VirtualSourceSearchHandle {
-    const bar = document.createElement("div");
-    bar.className = "gdp-source-virtual-search";
-    const input = document.createElement("input");
-    input.type = "search";
-    const text = SOURCE_READING_TEXT[getLanguage()];
-    input.placeholder = text.findInFile;
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    const count = document.createElement("span");
-    count.className = "gdp-source-virtual-search-count";
-    const previous = document.createElement("button");
-    previous.type = "button";
-    previous.textContent = text.findPrev;
-    const next = document.createElement("button");
-    next.type = "button";
-    next.textContent = text.findNext;
-    const close = document.createElement("button");
-    close.type = "button";
-    close.textContent = text.findClose;
-    bar.append(input, count, previous, next, close);
+    // 探す欄は情報の帯の右に置く (帯の中身とは別に、この欄だけを描き直す)。
+    const bar = templateElement(
+      html`<div class="gdp-source-virtual-search" hidden></div>`,
+    );
     wrap.querySelector(".gdp-source-virtual-info")?.appendChild(bar);
-    bar.hidden = true;
 
+    let query = "";
+    let count: { text: string; title?: string } = { text: "" };
     let matches: VirtualSourceSearchMatch[] = [];
     let active = -1;
     let debounce = 0;
     let searchVersion = 0;
+    const input = () => bar.querySelector<HTMLInputElement>("input");
+    const drawBar = () => {
+      const text = SOURCE_READING_TEXT[getLanguage()];
+      renderOwned(
+        bar,
+        view.findBar({
+          placeholder: text.findInFile,
+          value: query,
+          count: { text: count.text, title: count.title ?? null },
+          previous: text.findPrev,
+          next: text.findNext,
+          close: text.findClose,
+          onInput: (value) => {
+            query = value;
+            active = 0;
+            scheduleSync();
+          },
+          onEscape: hide,
+          onMove: move,
+          onClose: hide,
+        }),
+      );
+    };
+    const setCount = (next: { text: string; title?: string }) => {
+      count = next;
+      drawBar();
+    };
     const hide = () => {
       bar.hidden = true;
       renderFn();
       scroller.focus({ preventScroll: true });
     };
+    const scrollToActive = () => {
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
+      scroller.scrollTop = Math.max(
+        0,
+        (matches[active].line - 1) * rowHeight - rowHeight * 3,
+      );
+    };
     const sync = () => {
-      const query = input.value;
       const version = ++searchVersion;
       if (!query) {
         matches = [];
         active = -1;
-        count.textContent = "";
+        setCount({ text: "" });
         renderFn();
         return;
       }
-      count.textContent = text.searching;
-      findMatches(query)
+      const text = SOURCE_READING_TEXT[getLanguage()];
+      setCount({ text: text.searching });
+      const asked = query;
+      findMatches(asked)
         .then((nextMatches) => {
           if (version !== searchVersion) return;
           matches = nextMatches;
           active = matches.length
             ? Math.max(0, Math.min(active, matches.length - 1))
             : -1;
-          count.textContent = matches.length
-            ? `${active + 1} / ${matches.length}`
-            : "0 / 0";
-          count.removeAttribute("title");
-          if (active >= 0) {
-            const rowHeight =
-              sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
-            scroller.scrollTop = Math.max(
-              0,
-              (matches[active].line - 1) * rowHeight - rowHeight * 3,
-            );
-          }
+          setCount({
+            text: matches.length
+              ? `${active + 1} / ${matches.length}`
+              : "0 / 0",
+          });
+          if (active >= 0) scrollToActive();
           renderFn();
         })
         .catch((error: unknown) => {
           if (version !== searchVersion) return;
           const failure = errorWithCause(
-            `in-file search for ${JSON.stringify(query)} failed`,
+            `in-file search for ${JSON.stringify(asked)} failed`,
             error,
           );
           console.error(failure);
           matches = [];
           active = -1;
-          count.textContent = text.searchFailed;
-          count.title = formatErrorDetail(failure);
+          setCount({
+            text: SOURCE_READING_TEXT[getLanguage()].searchFailed,
+            title: formatErrorDetail(failure),
+          });
           renderFn();
         });
     };
@@ -1826,41 +2286,77 @@ export function createSourceView(deps: SourceViewDeps) {
     const move = (direction: number) => {
       if (!matches.length) return;
       active = (active + direction + matches.length) % matches.length;
-      count.textContent = `${active + 1} / ${matches.length}`;
-      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
-      scroller.scrollTop = Math.max(
-        0,
-        (matches[active].line - 1) * rowHeight - rowHeight * 3,
-      );
+      setCount({ text: `${active + 1} / ${matches.length}` });
+      scrollToActive();
       renderFn();
     };
-    input.addEventListener("input", () => {
-      active = 0;
-      scheduleSync();
-    });
-    input.addEventListener("keydown", (e) => {
-      if (isImeComposing(e)) return;
-      if (e.key === "Escape") {
-        e.preventDefault();
-        hide();
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        move(e.shiftKey ? -1 : 1);
-      }
-    });
-    previous.addEventListener("click", () => move(-1));
-    next.addEventListener("click", () => move(1));
-    close.addEventListener("click", hide);
+    drawBar();
     return {
-      open: (query?: string) => {
+      open: (next?: string) => {
         bar.hidden = false;
-        if (query !== undefined) input.value = query;
-        input.focus();
-        input.select();
+        if (next !== undefined) query = next;
+        drawBar();
+        input()?.focus();
+        input()?.select();
         sync();
       },
-      query: () => (bar.hidden ? "" : input.value),
+      query: () => (bar.hidden ? "" : query),
       activeRange: () => (active >= 0 ? matches[active] || null : null),
+    };
+  }
+
+  /** 大きなファイルの枠: 情報の帯 (印・要約・操作) と、行の窓を持つ巻物。 */
+  function virtualSourceFrame(
+    target: SourceFileTarget,
+    actions: {
+      copy: CopyButtonProps | null;
+      raw: { href: string; label: string } | null;
+      fullTitle: string;
+      onFull(): void;
+    },
+    summary: string,
+  ): {
+    wrap: VirtualSourceSearchRoot;
+    summaryEl: HTMLElement;
+    scroller: HTMLElement;
+    spacer: HTMLElement;
+    windowEl: HTMLElement;
+  } {
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    const wrap = templateElement<VirtualSourceSearchRoot>(
+      view.virtualFrame({
+        mode: text.virtualMode,
+        summary,
+        sourceLabel: text.sourceCode(target.path),
+        copy: actions.copy,
+        raw: actions.raw,
+        full: {
+          href: buildCurrentFileRouteWithVirtualMode(target, "off"),
+          title: actions.fullTitle,
+          label: text.openFullView,
+          onOpen: (href) => {
+            const url = new URL(href, window.location.origin);
+            setRoute(
+              parseRoute(url.pathname, url.search, currentRange()),
+              true,
+            );
+            actions.onFull();
+          },
+        },
+      }),
+    );
+    const find = (selector: string) => {
+      const element = wrap.querySelector<HTMLElement>(selector);
+      if (!element)
+        throw new Error(`virtual source: ${selector} was not drawn`);
+      return element;
+    };
+    return {
+      wrap,
+      summaryEl: find(".gdp-source-virtual-summary"),
+      scroller: find(".gdp-source-virtual-scroller"),
+      spacer: find(".gdp-source-virtual-spacer"),
+      windowEl: find(".gdp-source-virtual-window"),
     };
   }
 
@@ -1889,76 +2385,27 @@ export function createSourceView(deps: SourceViewDeps) {
     lang: string | null,
     gutter?: VirtualSourceGutter,
   ): HTMLElement {
-    const wrap = document.createElement("div") as VirtualSourceSearchRoot;
-    wrap.className = "gdp-source-virtual";
-    const info = document.createElement("div");
-    info.className = "gdp-source-virtual-info";
-    const badge = document.createElement("span");
-    badge.className = "gdp-source-virtual-badge";
     const text = SOURCE_READING_TEXT[getLanguage()];
-    badge.textContent = text.virtualMode;
-    const summary = document.createElement("span");
-    summary.className = "gdp-source-virtual-summary";
-    summary.textContent = text.virtualSummary(
-      lines.length.toLocaleString(),
-      formatBytes(textValue.length),
+    const { wrap, scroller, spacer, windowEl } = virtualSourceFrame(
+      target,
+      {
+        copy: copyButtonProps(textValue, "gdp-source-virtual-copy"),
+        raw: null,
+        fullTitle: text.openFullViewTitle,
+        onFull: () => {
+          if (gutter) gutter.fullView();
+          else renderStandaloneSource(target, { refresh: true });
+        },
+      },
+      text.virtualSummary(
+        lines.length.toLocaleString(),
+        formatBytes(textValue.length),
+      ),
     );
-    const actions = document.createElement("span");
-    actions.className = "gdp-source-virtual-actions";
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className =
-      "gdp-file-header-icon gdp-copy-source gdp-source-virtual-copy";
-    copy.title = text.copySource;
-    copy.setAttribute("aria-label", text.copySource);
-    copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-    copy.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(textValue);
-        copy.classList.add("copied");
-        setTimeout(() => {
-          copy.classList.remove("copied");
-        }, 1200);
-      } catch (error) {
-        showCopyFailure(
-          copy,
-          "copy the source to the clipboard",
-          error,
-          text.copySource,
-          1600,
-        );
-      }
-    });
-    const full = document.createElement("a");
-    full.className = "gdp-source-virtual-action";
-    full.href = buildCurrentFileRouteWithVirtualMode(target, "off");
-    full.textContent = text.openFullView;
-    full.title = text.openFullViewTitle;
-    full.addEventListener("click", (e) => {
-      e.preventDefault();
-      const url = new URL(full.href, window.location.origin);
-      setRoute(parseRoute(url.pathname, url.search, currentRange()), true);
-      if (gutter) gutter.fullView();
-      else renderStandaloneSource(target, { refresh: true });
-    });
-    actions.append(copy, full);
-    info.append(badge, summary, actions);
-    const scroller = document.createElement("div");
-    scroller.className = "gdp-source-virtual-scroller";
-    scroller.tabIndex = 0;
-    scroller.setAttribute("role", "region");
-    scroller.setAttribute("aria-label", text.sourceCode(target.path));
-    const spacer = document.createElement("div");
-    spacer.className = "gdp-source-virtual-spacer";
     spacer.style.height = `${Math.max(
       1,
       lines.length * (sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT),
     )}px`;
-    const windowEl = document.createElement("div");
-    windowEl.className = "gdp-source-virtual-window";
-    spacer.appendChild(windowEl);
-    scroller.appendChild(spacer);
-    wrap.append(info, scroller);
 
     let raf = 0;
     let renderedStart = -1;
@@ -1988,72 +2435,20 @@ export function createSourceView(deps: SourceViewDeps) {
       renderedStart = start;
       renderedEnd = end;
       renderedRowHeight = rowHeight;
-      windowEl.replaceChildren();
       windowEl.style.transform = `translateY(${start * rowHeight}px)`;
-      const fragment = document.createDocumentFragment();
-      for (let index = start; index < end; index++) {
-        const row = document.createElement("div");
-        row.className = "gdp-source-virtual-row";
-        row.dataset.line = String(index + 1);
-        row.classList.toggle(
-          "gdp-source-line-target",
-          lineInSourceTarget(index + 1, currentSourceLineTarget(target)),
-        );
-        row.classList.toggle(
-          "gdp-source-cursor",
-          sourceCursorMatches(target, index + 1),
-        );
-        const num = document.createElement("span");
-        num.className = "gdp-source-virtual-line-number";
-        num.textContent = String(index + 1);
-        bindSourceLineNumber(num, wrap, target, index + 1);
-        const code = document.createElement("span");
-        code.className = "gdp-source-virtual-line-code";
-        const line = lines[index] ?? "";
-        const searchQuery = search?.query() || "";
-        const activeRange = search?.activeRange() || null;
-        if (
-          appendVirtualSourceLineCode(
-            code,
-            line,
-            searchQuery,
-            activeRange,
-            index + 1,
-          )
-        ) {
-          // Intentional: appendVirtualSourceLineCode は DOM 構築の副作用が完了したら true を返すので追加処理不要
-        } else if (
-          hljsRef?.highlight &&
-          lang &&
-          line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH &&
-          (!hljsRef.getLanguage || hljsRef.getLanguage(lang))
-        ) {
-          try {
-            code.innerHTML = hljsRef.highlight(line, {
-              language: lang,
-              ignoreIllegals: true,
-            }).value;
-            code.classList.add("hljs");
-          } catch (error) {
-            code.textContent = line;
-            showHighlightFailure(
-              code,
-              `syntax highlighting failed for line ${index + 1} of ${target.path}`,
-              error,
-            );
-          }
-        } else {
-          code.textContent = line;
-        }
-        if (gutter) {
-          row.classList.add(gutter.rowClass);
-          row.append(gutter.cell(index + 1), num, code);
-        } else {
-          row.append(num, code);
-        }
-        fragment.appendChild(row);
-      }
-      windowEl.appendChild(fragment);
+      const rows: VirtualRow[] = [];
+      for (let index = start; index < end; index++)
+        rows.push({ number: index + 1, text: lines[index] ?? "" });
+      drawVirtualRows(
+        windowEl,
+        wrap,
+        target,
+        rows,
+        search,
+        hljsRef,
+        lang,
+        gutter,
+      );
     };
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(render);
@@ -2113,50 +2508,17 @@ export function createSourceView(deps: SourceViewDeps) {
     lang: string | null,
     signal?: AbortSignal,
   ): HTMLElement {
-    const wrap = document.createElement("div") as VirtualSourceSearchRoot;
-    wrap.className = "gdp-source-virtual";
-    const info = document.createElement("div");
-    info.className = "gdp-source-virtual-info";
-    const badge = document.createElement("span");
-    badge.className = "gdp-source-virtual-badge";
     const text = SOURCE_READING_TEXT[getLanguage()];
-    badge.textContent = text.virtualMode;
-    const summary = document.createElement("span");
-    summary.className = "gdp-source-virtual-summary";
-    const actions = document.createElement("span");
-    actions.className = "gdp-source-virtual-actions";
-    const raw = document.createElement("a");
-    raw.className = "gdp-source-virtual-action";
-    raw.href = rawFileUrl(target);
-    raw.target = "_blank";
-    raw.rel = "noreferrer";
-    raw.textContent = text.openRaw;
-    const full = document.createElement("a");
-    full.className = "gdp-source-virtual-action";
-    full.href = buildCurrentFileRouteWithVirtualMode(target, "off");
-    full.textContent = text.openFullView;
-    full.title = text.openFullViewPagedTitle;
-    full.addEventListener("click", (e) => {
-      e.preventDefault();
-      const url = new URL(full.href, window.location.origin);
-      setRoute(parseRoute(url.pathname, url.search, currentRange()), true);
-      renderStandaloneSource(target, { refresh: true });
-    });
-    actions.append(raw, full);
-    info.append(badge, summary, actions);
-
-    const scroller = document.createElement("div");
-    scroller.className = "gdp-source-virtual-scroller";
-    scroller.tabIndex = 0;
-    scroller.setAttribute("role", "region");
-    scroller.setAttribute("aria-label", text.sourceCode(target.path));
-    const spacer = document.createElement("div");
-    spacer.className = "gdp-source-virtual-spacer";
-    const windowEl = document.createElement("div");
-    windowEl.className = "gdp-source-virtual-window";
-    spacer.appendChild(windowEl);
-    scroller.appendChild(spacer);
-    wrap.append(info, scroller);
+    const { wrap, summaryEl, scroller, spacer, windowEl } = virtualSourceFrame(
+      target,
+      {
+        copy: null,
+        raw: { href: rawFileUrl(target), label: text.openRaw },
+        fullTitle: text.openFullViewPagedTitle,
+        onFull: () => renderStandaloneSource(target, { refresh: true }),
+      },
+      "",
+    );
 
     const lines = new Map<number, string>();
     const requestedPages = new Set<number>();
@@ -2189,11 +2551,14 @@ export function createSourceView(deps: SourceViewDeps) {
 
     const updateTotals = () => {
       SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), totalRows);
-      summary.textContent = text.pagedSummary(
-        complete
-          ? totalRows.toLocaleString()
-          : `${lines.size.toLocaleString()}+`,
-        formatBytes(size),
+      renderOwned(
+        summaryEl,
+        text.pagedSummary(
+          complete
+            ? totalRows.toLocaleString()
+            : `${lines.size.toLocaleString()}+`,
+          formatBytes(size),
+        ),
       );
       const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
       spacer.style.height = `${Math.max(1, totalRows * rowHeight)}px`;
@@ -2281,77 +2646,20 @@ export function createSourceView(deps: SourceViewDeps) {
       renderedStart = start;
       renderedEnd = end;
       renderedRowHeight = rowHeight;
-      windowEl.replaceChildren();
       windowEl.style.transform = `translateY(${start * rowHeight}px)`;
-      const fragment = document.createDocumentFragment();
+      const rows: VirtualRow[] = [];
       for (let index = start; index < end; index++) {
         const lineNumber = index + 1;
         if (!lines.has(lineNumber)) loadPage(lineNumber);
-        const row = document.createElement("div");
-        row.className = "gdp-source-virtual-row";
-        row.dataset.line = String(lineNumber);
-        row.classList.toggle(
-          "gdp-source-line-target",
-          lineInSourceTarget(lineNumber, currentSourceLineTarget(target)),
-        );
-        row.classList.toggle(
-          "gdp-source-cursor",
-          sourceCursorMatches(target, lineNumber),
-        );
-        const num = document.createElement("span");
-        num.className = "gdp-source-virtual-line-number";
-        num.textContent = String(lineNumber);
-        bindSourceLineNumber(num, wrap, target, lineNumber);
-        const code = document.createElement("span");
-        code.className = "gdp-source-virtual-line-code";
-        const line = lines.get(lineNumber);
-        const failedReason = failedPages.get(
-          Math.floor((lineNumber - 1) / VIRTUAL_SOURCE_PAGE_SIZE),
-        );
-        if (line == null) {
-          code.textContent = "";
-          // 読めなかった範囲の行は空のままにせず、失敗の印と理由を付ける。
-          if (failedReason) {
-            code.classList.add("gdp-highlight-failed");
-            code.title = failedReason;
-          }
-        } else if (
-          appendVirtualSourceLineCode(
-            code,
-            line,
-            search?.query() || "",
-            search?.activeRange() || null,
-            lineNumber,
-          )
-        ) {
-          // Search marks are rendered from text so virtual rows can be rebuilt cheaply.
-        } else if (
-          hljsRef?.highlight &&
-          lang &&
-          line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH &&
-          (!hljsRef.getLanguage || hljsRef.getLanguage(lang))
-        ) {
-          try {
-            code.innerHTML = hljsRef.highlight(line, {
-              language: lang,
-              ignoreIllegals: true,
-            }).value;
-            code.classList.add("hljs");
-          } catch (error) {
-            code.textContent = line;
-            showHighlightFailure(
-              code,
-              `syntax highlighting failed for line ${lineNumber} of ${target.path}`,
-              error,
-            );
-          }
-        } else {
-          code.textContent = line;
-        }
-        row.append(num, code);
-        fragment.appendChild(row);
+        rows.push({
+          number: lineNumber,
+          text: lines.get(lineNumber) ?? null,
+          failedReason: failedPages.get(
+            Math.floor((lineNumber - 1) / VIRTUAL_SOURCE_PAGE_SIZE),
+          ),
+        });
       }
-      windowEl.appendChild(fragment);
+      drawVirtualRows(windowEl, wrap, target, rows, search, hljsRef, lang);
       if (!complete && totalRows - end < VIRTUAL_SOURCE_PAGE_SIZE) {
         totalRows += VIRTUAL_SOURCE_PAGE_SIZE;
         updateTotals();
@@ -2459,14 +2767,6 @@ export function createSourceView(deps: SourceViewDeps) {
       ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
     );
     const isStandalone = card.classList.contains("gdp-standalone-source");
-    const view = document.createElement("div");
-    view.className = "gdp-source-viewer virtual";
-    const header = isStandalone ? null : document.createElement("div");
-    if (header) {
-      header.className = "gdp-source-meta";
-      header.textContent = `${target.path} @ ${target.ref}`;
-      view.appendChild(header);
-    }
     const lineTarget = lineTargetStart(currentSourceLineTarget(target)) || 1;
     const initialPage = Math.max(
       0,
@@ -2520,9 +2820,15 @@ export function createSourceView(deps: SourceViewDeps) {
       lang,
       signal,
     );
-    view.appendChild(virtualCode);
-    if (body) body.replaceWith(view);
-    else card.appendChild(view);
+    const viewer = templateElement(
+      view.viewer({
+        virtual: true,
+        meta: isStandalone ? null : `${target.path} @ ${target.ref}`,
+        children: [virtualCode],
+      }),
+    );
+    if (body) body.replaceWith(viewer);
+    else card.appendChild(viewer);
     return true;
   }
 
@@ -2531,61 +2837,26 @@ export function createSourceView(deps: SourceViewDeps) {
     target: SourceFileTarget,
     mediaKind: string,
   ) {
-    const body = card.querySelector<HTMLElement>(
-      ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
-    );
     const isStandalone = card.classList.contains("gdp-standalone-source");
-    const view = document.createElement("div");
-    view.className = "gdp-source-viewer media";
-    view.classList.add(mediaKind);
-    if (!isStandalone) {
-      const meta = document.createElement("div");
-      meta.className = "gdp-source-meta";
-      meta.textContent = `${target.path} @ ${target.ref}`;
-      view.appendChild(meta);
-    }
-    const url = rawFileUrl(target);
-    const info = createSourceFileInfo(target, mediaKind);
-    view.appendChild(info);
-    appendMediaEmbed(view, {
-      url,
-      kind: mediaKind,
-      title: target.path,
-      onImageLoad: (img) => {
-        const resolution = document.createElement("span");
-        resolution.textContent = `${img.naturalWidth} x ${img.naturalHeight}`;
-        info.appendChild(resolution);
-      },
-    });
-    if (body) body.replaceWith(view);
-    else card.appendChild(view);
+    const info = sourceFileInfo(target, mediaKind);
+    replaceSourceBody(
+      card,
+      templateElement(
+        view.media({
+          kind: mediaKind,
+          meta: isStandalone ? null : `${target.path} @ ${target.ref}`,
+          info: info.element,
+          embed: {
+            url: rawFileUrl(target),
+            kind: mediaKind,
+            title: target.path,
+            onImageLoad: (img) =>
+              info.setResolution(`${img.naturalWidth} x ${img.naturalHeight}`),
+          },
+        }),
+      ),
+    );
     setSourceCardState(card, "done");
-  }
-
-  function _renderSourceBinary(
-    card: DiffCardElement,
-    target: SourceFileTarget,
-  ) {
-    const body = card.querySelector<HTMLElement>(
-      ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
-    );
-    const isStandalone = card.classList.contains("gdp-standalone-source");
-    const view = document.createElement("div");
-    view.className = "gdp-source-viewer binary";
-    const link = document.createElement("a");
-    link.href = rawFileUrl(target);
-    link.textContent = SOURCE_READING_TEXT[getLanguage()].openRawFile;
-    link.target = "_blank";
-    link.rel = "noreferrer";
-    if (!isStandalone) {
-      const meta = document.createElement("div");
-      meta.className = "gdp-source-meta";
-      meta.textContent = `${target.path} @ ${target.ref}`;
-      view.appendChild(meta);
-    }
-    view.appendChild(link);
-    if (body) body.replaceWith(view);
-    else card.appendChild(view);
   }
 
   // AGENTS.md "Request Lifecycle Discipline": entering the blob view must be
@@ -2651,15 +2922,7 @@ export function createSourceView(deps: SourceViewDeps) {
       .forEach((el) => {
         el.remove();
       });
-    const card = document.createElement("article") as DiffCardElement;
-    card.className =
-      "gdp-file-shell loaded gdp-standalone-source gdp-source-mode";
-    card.dataset.path = target.path;
-    card.dataset.sourceRef = target.ref || "worktree";
-    setSourceCardState(card, "loading");
     const internalKind = sourceInternalPathKind(target.path);
-    const wrapper = document.createElement("div");
-    wrapper.className = "gdp-file-detail-wrapper";
     const mediaOnly = !internalKind && isMediaPreviewOnlySource(target.path);
     const activeTab: SourceBlobTab =
       mediaOnly || (!internalKind && !!currentFileRoute()?.preview)
@@ -2719,28 +2982,36 @@ export function createSourceView(deps: SourceViewDeps) {
       });
     }
     if (!repoTarget) {
-      const back = document.createElement("button");
-      back.type = "button";
-      back.className = "gdp-view-file gdp-btn gdp-btn-sm";
-      setViewFileButtonState(back, true);
-      back.addEventListener("click", () => {
-        const route = currentRoute();
-        setRoute(
-          route.screen === "history"
-            ? { ...route, source: undefined }
-            : { screen: "diff", range: currentRange() },
-        );
-        setPageMode();
-        removeStandaloneSource();
-      });
-      header.appendChild(back);
+      header.appendChild(
+        templateElement(
+          view.backButton({
+            init: (back) => setViewFileButtonState(back, true),
+            onClick: () => {
+              const route = currentRoute();
+              setRoute(
+                route.screen === "history"
+                  ? { ...route, source: undefined }
+                  : { screen: "diff", range: currentRange() },
+              );
+              setPageMode();
+              removeStandaloneSource();
+            },
+          }),
+        ),
+      );
     }
-    wrapper.appendChild(sticky);
+    const card = templateElement<DiffCardElement>(
+      view.card({
+        path: target.path,
+        ref: target.ref || "worktree",
+        sticky,
+      }),
+    );
+
+    setSourceCardState(card, "loading");
+    const wrapper = card.querySelector<HTMLElement>(".gdp-file-detail-wrapper");
+    if (!wrapper) throw new Error("source view: the card was not drawn");
     observeDocHeadHeight(wrapper, sticky);
-    const detailBody = document.createElement("div");
-    detailBody.className = "gdp-file-detail-body";
-    wrapper.appendChild(detailBody);
-    card.appendChild(wrapper);
     // Prepend instead of replaceChildren: the rendered diff cards stay alive
     // (hidden via body.gdp-repo-blob-page CSS), so leaving the blob view does
     // not force a full diff reload.

@@ -9,12 +9,14 @@
 // ここだけで確かめられる。
 
 import type { PaneAccount } from "./agent-accounts";
-import type {
-  AgentConversation,
-  AgentState,
-  AgentStateObservationError,
-  AgentStateRecord,
-  AgentStateSource,
+import {
+  type AgentAttention,
+  type AgentConversation,
+  type AgentState,
+  type AgentStateObservationError,
+  type AgentStateRecord,
+  type AgentStateSource,
+  needsAttention,
 } from "./agent-state";
 import type {
   ProjectRegistrySnapshot,
@@ -24,17 +26,95 @@ import { basenameOf } from "./terminal-board";
 import type { TmuxClientWindow, TmuxPaneId } from "./tmux";
 
 /**
- * エージェントの種類。claude / codex はペインで動いているコマンド名か、
+ * エージェントの種類。claude / codex / opencode はペインで動いているコマンド名か、
  * フックが名乗った種類で見分ける。それ以外でも状態を申告してきたもの
  * (フックを入れたエージェント) は other にする。どれにも当たらないペインは
  * ただのシェルなどで、種類は null。
  */
-export const AGENT_KINDS = ["claude", "codex", "other"] as const;
+export const AGENT_KINDS = ["claude", "codex", "opencode", "other"] as const;
 
 export type AgentKind = (typeof AGENT_KINDS)[number];
 
 /** 申告の記録のうち、種類の判定に使う部分。 */
 export type AgentKindReport = Pick<AgentStateRecord, "agent" | "ended">;
+
+/** プロセスの引数から決まる種類 (フックを名乗らないので other は無い)。 */
+export type ProcessAgentKind = Exclude<AgentKind, "other">;
+
+/**
+ * 中のプログラムで種類が決まる前面のコマンド (インタプリタ)。npm で入れた
+ * claude・codex・opencode は `node` などとして動き、tmux の pane_current_command
+ * にはインタプリタの名前が出る。
+ */
+const INTERPRETERS = new Set(["node", "nodejs", "bun", "deno"]);
+
+/** `<シェル> -c '<コマンド>' …` を包みとしてほどくシェル。 */
+const WRAPPING_SHELLS = new Set(["sh", "bash", "zsh", "dash", "fish"]);
+
+export function isInterpreterCommand(command: string): boolean {
+  return INTERPRETERS.has(command.trim().toLowerCase());
+}
+
+/** 実行ファイルの名前だけで決まる種類 (agentKindOf のコマンド名と同じ決まり)。 */
+function kindOfProgramName(name: string): ProcessAgentKind | null {
+  if (name === "claude" || /^\d+\.\d+\.\d+$/.test(name)) return "claude";
+  if (name === "codex") return "codex";
+  if (name === "opencode") return "opencode";
+  return null;
+}
+
+/**
+ * インタプリタが動かしているスクリプトの場所から決める種類。npm の
+ * パッケージの場所 (`…/@anthropic-ai/claude-code/cli.js` など) か、
+ * bin のリンクの名前 (`…/bin/claude`)。
+ */
+function kindOfScript(path: string): ProcessAgentKind | null {
+  if (path.includes("/@anthropic-ai/claude-code/")) return "claude";
+  if (path.includes("/@openai/codex/")) return "codex";
+  if (path.includes("/opencode-ai/")) return "opencode";
+  const name = (path.split("/").pop() ?? "")
+    .toLowerCase()
+    .replace(/\.(c|m)?js$|\.ts$/, "");
+  return name === "claude" || name === "codex" || name === "opencode"
+    ? name
+    : null;
+}
+
+/**
+ * 前面のプロセスの引数 (`ps -o args=` の 1 行。引用符は付かず空白で区切られる)
+ * から種類を決める。インタプリタなら最初のスクリプトの引数、対話シェルの包み
+ * (`zsh -ic 'claude "$@"' zsh …`) なら -c の次の語を見る。決められなければ null。
+ * 引数に空白を含むパスは切れるので決められないことがある (null に倒す)。
+ */
+export function agentKindFromArgs(args: string): ProcessAgentKind | null {
+  let words = args
+    .trim()
+    .split(/\s+/)
+    .map((word) => word.replace(/^['"]+|['"]+$/g, ""))
+    .filter(Boolean);
+  // 包みの中にまた包みがあっても、ほどくのは数段まで。
+  for (let depth = 0; depth < 4 && words.length > 0; depth += 1) {
+    const name = (words[0]?.split("/").pop() ?? "").toLowerCase();
+    const direct = kindOfProgramName(name);
+    if (direct) return direct;
+    if (INTERPRETERS.has(name)) {
+      const script = words
+        .slice(1)
+        .find((word) => !word.startsWith("-") && word !== "run");
+      return script ? kindOfScript(script) : null;
+    }
+    if (WRAPPING_SHELLS.has(name)) {
+      const flag = words.findIndex(
+        (word, index) => index > 0 && /^-[a-z]*c[a-z]*$/i.test(word),
+      );
+      if (flag < 0) return null;
+      words = words.slice(flag + 1);
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
 
 /**
  * コマンド名と申告から種類を決める。
@@ -42,7 +122,8 @@ export type AgentKindReport = Pick<AgentStateRecord, "agent" | "ended">;
  * claude の単体版は、版番号の名前を持つ実行ファイル (`2.1.0` など) として
  * 起動するので、tmux の pane_current_command には版番号がそのまま出る。
  * 数字 3 つの形だけを claude とみなす。npm 版は node として動くので、
- * コマンド名からは分からない。フックが名乗った種類で補う。
+ * コマンド名からは分からない。前面のプロセスの引数から当てた種類
+ * (processKind。agentKindFromArgs) と、フックが名乗った種類で補う。
  *
  * 最後の申告がセッションの終了なら、名乗った種類は使わない (そのペインは
  * もうシェルに戻っている)。
@@ -51,10 +132,15 @@ export function agentKindOf(
   command: string,
   source: AgentStateSource | null,
   report: AgentKindReport | null = null,
+  processKind: ProcessAgentKind | null = null,
 ): AgentKind | null {
   const name = command.trim().toLowerCase();
-  if (name === "claude" || /^\d+\.\d+\.\d+$/.test(name)) return "claude";
-  if (name === "codex") return "codex";
+  // opencode は単体の実行ファイル (`opencode`) として動く。
+  const direct = kindOfProgramName(name);
+  if (direct) return direct;
+  // インタプリタ (node など) の中のプログラムを引数から当てたもの
+  // (server/terminal/process-kind.ts。コマンドがインタプリタのときだけ調べる)。
+  if (processKind && isInterpreterCommand(name)) return processKind;
   if (report?.ended) return null;
   if (report?.agent) return report.agent;
   return source === "hook" ? "other" : null;
@@ -110,6 +196,16 @@ export type AgentPane = {
    * この欄を持たない古い版のサーバでは無い。
    */
   conversation?: AgentConversation;
+  /**
+   * 入力待ちの理由 (許可・質問・エラーで停止)。フックが知らせた入力待ちの
+   * ペインだけ。古い版のサーバには無い。
+   */
+  attention?: AgentAttention;
+  /**
+   * このペインを起こしたエージェントのペイン (tmux の `@agent-parent`)。親が
+   * 一覧に居れば、行を親の下に字下げして並べる (nestAgentPanes)。
+   */
+  parent?: TmuxPaneId;
 };
 
 /**
@@ -118,8 +214,17 @@ export type AgentPane = {
  */
 const TITLE_STATUS_PREFIX = /^[⠀-⣿✳✻✽✶✢*·•]+\s+/;
 
+/**
+ * opencode が題名の頭に付ける自分の名前 (`OC | <会話の題>`。1.19.5 で観測)。
+ * 種類は別の列で出すので落とす。opencode のペインに限る。
+ */
+const OPENCODE_TITLE_PREFIX = /^OC \| /;
+
 export function paneTaskText(pane: AgentPane): string {
-  const title = pane.title.replace(TITLE_STATUS_PREFIX, "").trim();
+  let title = pane.title.replace(TITLE_STATUS_PREFIX, "");
+  if (pane.kind === "opencode")
+    title = title.replace(OPENCODE_TITLE_PREFIX, "");
+  title = title.trim();
   return title || pane.command;
 }
 
@@ -182,7 +287,43 @@ export type AgentProjectInfo = {
    * 登録していなければ null。
    */
   registered: RegisteredProjectInfo | null;
+  /**
+   * 今のブランチと上流との差 (左のサイドバーの行)。まだ読んでいない・git でない・
+   * 読めなかった (理由は errors) ときは無い。この欄を持たない古い版のサーバでも無い。
+   */
+  branch?: {
+    branch: string | null;
+    ahead: number;
+    behind: number;
+    upstream: boolean;
+  };
 };
+
+/**
+ * 左のサイドバーの行の、名前の後ろの補足: 主でないブランチと上流との差 (`feature ↑2 ↓1`)。
+ * main・master と、プロジェクトの名前と同じブランチ (worktree はたいていブランチの名前)
+ * は言うまでもないので出さない。差が無く出すブランチも無ければ null。
+ */
+export function projectBranchTail(
+  name: string,
+  status: AgentProjectInfo["branch"],
+): string | null {
+  if (!status) return null;
+  const branch = status.branch;
+  const shown =
+    branch &&
+    branch !== "main" &&
+    branch !== "master" &&
+    branch.toLowerCase() !== name.toLowerCase()
+      ? branch
+      : "";
+  const parts = [
+    shown,
+    status.ahead > 0 ? `↑${status.ahead}` : "",
+    status.behind > 0 ? `↓${status.behind}` : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" ") : null;
+}
 
 export type AgentOverviewResponse = {
   /**
@@ -217,6 +358,11 @@ export type AgentOverviewResponse = {
    * 移っても消えない。この欄を持たない古い版のサーバでは無い。
    */
   unread?: AgentUnreadEntry[];
+  /**
+   * 全体ボードで上に留めたペイン (サーバのメモリ。どの窓でも同じ)。この欄を
+   * 持たない古い版のサーバでは無い (画面のメモリだけで留める)。
+   */
+  pinned?: TmuxPaneId[];
   /**
    * このサーバが開いているシェル (ブラウザのターミナルのタブの中身) と、
    * その中で tmux が動いていれば、その端末とウインドウの大きさ。ブラウザは
@@ -451,6 +597,140 @@ export function groupAgentPanesByPlace(
   ).sort(compareGroupsByRegistry);
 }
 
+/** 子エージェントの字下げの最大の段。深い入れ子でも行が細くなりすぎないように。 */
+export const MAX_AGENT_DEPTH = 3;
+
+/**
+ * 子エージェント (parent の付いたペイン) を親のすぐ下に並べ、段 (depth) を付ける。
+ * 親が同じ一覧に居ない子・親の輪 (互いに親) は、渡した順のまま 0 段で残す。
+ * 兄弟の順は渡した順。段は MAX_AGENT_DEPTH まで。
+ */
+export function nestAgentPanes<T extends { id: string; parent?: string }>(
+  panes: readonly T[],
+): { pane: T; depth: number }[] {
+  const listed = new Map(panes.map((pane) => [pane.id, pane]));
+  // 親が一覧に居て、たどっても輪にならない子だけを木に入れる。
+  const parentOf = (pane: T): T | null => {
+    const parent = pane.parent ? listed.get(pane.parent) : undefined;
+    if (!parent) return null;
+    const seen = new Set([pane.id]);
+    for (let at: T | undefined = parent; at; ) {
+      if (seen.has(at.id)) return null;
+      seen.add(at.id);
+      at = at.parent ? listed.get(at.parent) : undefined;
+    }
+    return parent;
+  };
+  const children = new Map<string, T[]>();
+  const roots: T[] = [];
+  for (const pane of panes) {
+    const parent = parentOf(pane);
+    if (!parent) {
+      roots.push(pane);
+      continue;
+    }
+    const list = children.get(parent.id) ?? [];
+    list.push(pane);
+    children.set(parent.id, list);
+  }
+  const out: { pane: T; depth: number }[] = [];
+  const walk = (pane: T, depth: number) => {
+    out.push({ pane, depth: Math.min(depth, MAX_AGENT_DEPTH) });
+    for (const child of children.get(pane.id) ?? []) walk(child, depth + 1);
+  };
+  for (const root of roots) walk(root, 0);
+  return out;
+}
+
+/** 全体ボードの「急ぐ順」の段の順。 */
+export const URGENCY_ORDER = ["waiting", "done", "working", "idle"] as const;
+
+/**
+ * プロジェクトをまたいで状態ごとの段に分ける (全体ボードの「急ぐ順」)。段の
+ * 中は変わったのが新しい順 (変わった瞬間を見ていないものは後ろ)、同じなら
+ * tmux の場所の順。空の段は返さない。左のサイドバーは使わない (行が動くと
+ * 押そうとしたものが逃げる)。
+ */
+export function groupAgentPanesByUrgency(
+  panes: AgentPane[],
+): { state: AgentState; panes: AgentPane[] }[] {
+  return URGENCY_ORDER.map((state) => ({
+    state,
+    panes: panes
+      .filter((pane) => pane.state === state)
+      .sort((a, b) => b.updatedAt - a.updatedAt || comparePanePlace(a, b)),
+  })).filter((group) => group.panes.length > 0);
+}
+
+/**
+ * 全体ボードの「急ぐ順」の段。子エージェント (@agent-parent) は親の下に字下げした
+ * まま、親子のまとまり (木) ごと段に入る。木の段は木の中で一番急ぐ状態 (作業役が
+ * 入力待ちなら、指揮役の行ごと入力待ちの段に上がる)。段の中は、その状態のものが
+ * 変わったのが新しい順、同じなら親の tmux の場所の順。空の段は返さない。
+ */
+export function groupAgentTreesByUrgency(
+  panes: AgentPane[],
+): { state: AgentState; rows: { pane: AgentPane; depth: number }[] }[] {
+  const trees: { pane: AgentPane; depth: number }[][] = [];
+  for (const entry of nestAgentPanes(panes)) {
+    const tree = trees[trees.length - 1];
+    if (entry.depth === 0 || !tree) trees.push([entry]);
+    else tree.push(entry);
+  }
+  const rank = (state: AgentState) => URGENCY_ORDER.indexOf(state);
+  const ranked = trees.map((tree) => {
+    const head = tree[0].pane;
+    const state = tree.reduce<AgentState>(
+      (best, { pane }) => (rank(pane.state) < rank(best) ? pane.state : best),
+      head.state,
+    );
+    const at = Math.max(
+      ...tree
+        .filter(({ pane }) => pane.state === state)
+        .map(({ pane }) => pane.updatedAt),
+    );
+    return { tree, head, state, at };
+  });
+  return URGENCY_ORDER.map((state) => ({
+    state,
+    rows: ranked
+      .filter((item) => item.state === state)
+      .sort((a, b) => b.at - a.at || comparePanePlace(a.head, b.head))
+      .flatMap((item) => item.tree),
+  })).filter((group) => group.rows.length > 0);
+}
+
+/**
+ * 手が要るエージェント (入力待ち → 完了・未読) を回る順。キーで次・前へ移る
+ * ときに使う。同じ段の中は tmux の場所の順にして、回っている間に順が入れ
+ * 替わらないようにする。渡す一覧は未読の完了を done にした後のもの
+ * (withFinishedAsDone)。
+ */
+export function attentionPanes(panes: AgentPane[]): AgentPane[] {
+  const rank = (pane: AgentPane) => (pane.state === "waiting" ? 0 : 1);
+  return panes
+    .filter((pane) => pane.kind !== null && needsAttention(pane.state))
+    .sort((a, b) => rank(a) - rank(b) || comparePanePlace(a, b));
+}
+
+/**
+ * current (いま見ているペイン。無ければ null) から direction の向きに次の
+ * 手が要るエージェント。current が回る順に無ければ (読んで待機に戻った・
+ * 見ていない)、次は先頭・前は末尾。回るものが無ければ null。current しか
+ * 無ければ current を返す。
+ */
+export function nextAttentionPane(
+  panes: AgentPane[],
+  current: TmuxPaneId | null,
+  direction: 1 | -1,
+): AgentPane | null {
+  const order = attentionPanes(panes);
+  if (order.length === 0) return null;
+  const index = order.findIndex((pane) => pane.id === current);
+  if (index < 0) return order[direction === 1 ? 0 : order.length - 1] ?? null;
+  return order[(index + direction + order.length) % order.length] ?? null;
+}
+
 /** ヘッダの件数表示に出す数。エージェントのペインだけを数える。 */
 export function headerAgentCounts(panes: AgentPane[]): {
   waiting: number;
@@ -576,16 +856,41 @@ export function notifyPermissionView(
   return asked ? "ask-again" : "ask";
 }
 
-/** ブラウザの通知を出すか。 */
-export function shouldNotifyAgent(
+/**
+ * 子エージェント (一覧に親が居る、@agent-parent のペイン) の完了は親に任せる:
+ * 知らせず (窓の中・OS・音)、未読にもしない (タブの題名の件数・未読の印・`g n` と
+ * 揃える)。入力待ちは人の手が要るので知らせる。親が一覧に居なければ普通に扱う。
+ */
+export function isChildFinish(
+  pane: Pick<AgentPane, "parent">,
   transition: AgentTransition,
-  context: AgentNotifyContext,
+  panes: readonly Pick<AgentPane, "id">[],
 ): boolean {
-  if (context.permission !== "granted") return false;
-  if (context.viewing) return false;
-  return transition === "waiting"
-    ? context.settings.waiting
-    : context.settings.finished;
+  return (
+    transition === "finished" &&
+    pane.parent !== undefined &&
+    panes.some((item) => item.id === pane.parent)
+  );
+}
+
+/**
+ * 知らせをどこに出すか。見ているペイン・種類ごとの設定で切ったものは出さない。
+ * 窓が前面 (見えていて、キーを受けている) なら窓の中の知らせ (押すとそこへ)。
+ * 前面で作業している人に OS の通知の帯は届きにくく、押してもタブを探すため。
+ * 窓が前面でなければ、許可があるときだけ OS の通知。
+ */
+export function agentAlertPlace(
+  transition: AgentTransition,
+  context: AgentNotifyContext & { windowInFront: boolean; canToast: boolean },
+): "toast" | "os" | null {
+  if (context.viewing) return null;
+  const wanted =
+    transition === "waiting"
+      ? context.settings.waiting
+      : context.settings.finished;
+  if (!wanted) return null;
+  if (context.canToast && context.windowInFront) return "toast";
+  return context.permission === "granted" ? "os" : null;
 }
 
 /** タブのタイトル。未読があれば先頭に件数を付ける。 */

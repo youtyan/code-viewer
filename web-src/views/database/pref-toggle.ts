@@ -1,3 +1,6 @@
+import { html } from "lit/html.js";
+import { templateElement } from "../ui/renderer";
+
 // 共通のラベル付き「ピル形」永続化トグル button を作るヘルパ。
 // 同じ DOM 構造 (button.db-pref-toggle > svg + span.db-pref-toggle-label)
 // が複数箇所で再現していたのを 1 か所に集約する。
@@ -27,28 +30,20 @@ export function localizePrefToggle(
 }
 
 export function makePrefToggle(opts: PrefToggleOptions): HTMLButtonElement {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = opts.extraClass
-    ? `db-pref-toggle ${opts.extraClass}`
-    : "db-pref-toggle";
-  btn.title = opts.title;
-  // SVG はテンプレ化された定数 (path data) なので innerHTML で組み立てる。
-  // label はユーザー/ローカライズ由来の文字列が入る可能性があるため、span
-  // 側に textContent で挿入して escape 不要にする。
-  const NS = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("viewBox", "0 0 16 16");
-  svg.setAttribute("width", "14");
-  svg.setAttribute("height", "14");
-  svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("fill", "currentColor");
-  const path = document.createElementNS(NS, "path");
-  path.setAttribute("d", opts.pathD);
-  svg.appendChild(path);
-  const label = document.createElement("span");
-  label.className = "db-pref-toggle-label";
-  label.textContent = opts.label;
-  btn.append(svg, label);
-  return btn;
+  // label はユーザー/ローカライズ由来の文字列が入る可能性があるので、文字と
+  // して入れる (テンプレートが escape する)。
+  return templateElement<HTMLButtonElement>(
+    html`<button
+      type="button"
+      class=${opts.extraClass ? `db-pref-toggle ${opts.extraClass}` : "db-pref-toggle"}
+      title=${opts.title}
+    ><svg
+        viewBox="0 0 16 16"
+        width="14"
+        height="14"
+        aria-hidden="true"
+        fill="currentColor"
+      ><path d=${opts.pathD}></path></svg
+      ><span class="db-pref-toggle-label">${opts.label}</span></button>`,
+  );
 }

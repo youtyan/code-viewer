@@ -2,26 +2,15 @@
 // 応答を、展開の帯のすぐ下と console に理由つきで出し、もう一度押して読めたら
 // 帯を消す。以前は r.ok を見ずに r.json() し、失敗も行の無い応答も、ボタンが
 // 押せる状態に戻るだけで何も残らなかった。
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { DiffCardElement, FileMeta } from "../core/types";
-import { createHunkExpand } from "../views/hunk-expand";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
+import {
+  type ContextRowsProps,
+  createHunkExpand,
+  DEFAULT_VIEW,
+  type ExpandButtonSpec,
+} from "../views/hunk-expand";
 
 const originalFetch = globalThis.fetch;
 let consoleError: ReturnType<typeof vi.spyOn>;
@@ -164,4 +153,65 @@ test("行の無い応答も失敗として出し、読めたら帯を消す", as
     errorTexts(card),
     card.querySelectorAll("tr.gdp-inserted-ctx").length,
   ]).toEqual([[], 2]);
+});
+
+test("presenter: 描き方を差し替えると、ボタンの束と差し込む行に渡す値が分かる", async () => {
+  const card = mountCard();
+  const lines = Array.from({ length: 9 }, (_, index) => `line ${index + 1}`);
+  const urls = stubFetch((url) => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    // 最後のハンクの後の問い合わせ (12 行目) には行が無い: 下へ広げる行は出さない。
+    body: { generation: 1, lines: url.includes("start=12") ? [] : lines },
+  }));
+  const stacks: ExpandButtonSpec[][] = [];
+  const rows: ContextRowsProps[] = [];
+  createHunkExpand(
+    {
+      trackLoad: (promise) => promise,
+      getServerGeneration: () => 1,
+      getToRef: () => "worktree",
+      highlightInsertedSpans: () => undefined,
+    },
+    {
+      ...DEFAULT_VIEW,
+      stack: (buttons) => {
+        stacks.push([...buttons]);
+        return DEFAULT_VIEW.stack(buttons);
+      },
+      contextRows: (props) => {
+        rows.push(props);
+        return DEFAULT_VIEW.contextRows(props);
+      },
+    },
+  ).setupHunkExpand(card, file);
+  await settle();
+  // 最初のハンクの上 (1-9 行目) は ↑ の 1 つだけ。
+  expect(stacks.map((buttons) => buttons.map((b) => b.direction))).toEqual([
+    ["up"],
+  ]);
+  stacks[0]?.[0]?.onClick();
+  await settle();
+  expect({
+    asked: urls.filter((url) => url.includes("start=1&")),
+    rows: rows.map(({ lines: shown, ...rest }) => ({
+      ...rest,
+      lines: shown.length,
+    })),
+    inserted: [...card.querySelectorAll("tr.gdp-inserted-ctx")].length,
+  }).toEqual({
+    asked: ["/file_range?path=src%2Fsample.ts&ref=worktree&start=1&end=9"],
+    rows: [
+      {
+        newStart: 1,
+        oldStart: 1,
+        dir: "after",
+        isSplit: false,
+        sideIndex: 0,
+        lines: 9,
+      },
+    ],
+    inserted: 9,
+  });
 });

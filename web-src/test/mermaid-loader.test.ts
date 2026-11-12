@@ -1,14 +1,5 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { PROJECT_COLORS } from "../core/project-colors";
 
 const bundle = vi.hoisted(() => ({ initialize: vi.fn() }));
@@ -19,14 +10,6 @@ vi.mock("../core/lazy-bundle", () => ({
       default: { initialize: bundle.initialize, run: () => Promise.resolve() },
     }),
 }));
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const DARK_LOOK: Record<string, string> = {
   "--color-doc": "#101018",

@@ -8,7 +8,8 @@
 //   PROJECT_LOOKS.order()       一覧の並び (根。左の一覧と同じ順 = compareProjectsByRegistry。
 //                               タブのグループの並び。一覧から消えた根も前の位置に残す)
 //   PROJECT_LOOKS.subscribe(fn) 色・名前・いま見ているものが変わったら呼ぶ
-//   projectMark(look)           色の四角と頭文字の要素 (.project-mark)
+//   projectMarkTemplate(look)   色の四角と頭文字 (.project-mark) のテンプレート
+//                               (projectMark(look) はまだ命令的に描く画面のための要素)
 //   paintProjectColor(el, c)    要素に色を付ける。子孫の CSS は var(--project-color)
 //                               で読む (頭文字の色は var(--project-ink))
 //   projectColorValue(c)        CSS 変数を読めない先 (meta の theme-color) へ渡す値
@@ -17,12 +18,14 @@
 // 取り直すたびに update へ渡す。色の値そのものは web/style.css の名前の層にある
 // (core/project-colors.ts の先頭)。
 
+import { html, type TemplateResult } from "lit/html.js";
 import {
   type AgentOverviewResponse,
   type AgentProjectInfo,
   compareProjectsByRegistry,
 } from "../../core/agent-overview";
 import { type ProjectColor, projectInitials } from "../../core/project-colors";
+import { templateElement } from "../ui/renderer";
 
 export type ProjectLook = {
   root: string;
@@ -53,13 +56,24 @@ export function paintProjectColor(
 }
 
 /** 色の四角と頭文字。名前は隣に書くので、読み上げには出さない。 */
+/** プロジェクトの印 (色の四角に頭文字) のテンプレート。 */
+export function projectMarkTemplate(
+  look: ProjectLook,
+  className = "",
+): TemplateResult {
+  return html`<span
+    class=${className ? `project-mark ${className}` : "project-mark"}
+    data-project-color=${look.color ?? "none"}
+    aria-hidden="true"
+  >${look.initials}</span>`;
+}
+
+/**
+ * まだ宣言的に描いていない画面のための、印の要素を 1 つ返す形。宣言的に描く
+ * 画面は projectMarkTemplate を使う。
+ */
 export function projectMark(look: ProjectLook, className = ""): HTMLElement {
-  const mark = document.createElement("span");
-  mark.className = className ? `project-mark ${className}` : "project-mark";
-  paintProjectColor(mark, look.color);
-  mark.textContent = look.initials;
-  mark.setAttribute("aria-hidden", "true");
-  return mark;
+  return templateElement(projectMarkTemplate(look, className));
 }
 
 /** 今のテーマでの色の値 (#rrggbb)。 */

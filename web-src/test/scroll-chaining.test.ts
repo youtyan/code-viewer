@@ -16,8 +16,8 @@
 // happy-dom はレイアウトを持たず scrollHeight などが常に 0 なので、寸法は
 // 差し替えて渡す。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import { blockScrollChaining } from "../core/scroll-chaining";
 
 /** 中身 1000px を 300px の枠に入れた箱。動ける余地は 700px。 */
@@ -37,14 +37,6 @@ let root: HTMLElement;
 let box: HTMLElement;
 let leaf: HTMLElement;
 let detach: (() => void) | null = null;
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   detach?.();

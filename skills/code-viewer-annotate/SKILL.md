@@ -67,6 +67,18 @@ text-to-speech playback.
    panel pin button to capture the current data grid, query editor, or global
    search state instead of reconstructing it by hand.
 
+## Showing one file instead
+
+When the human asks to see a single file or line (not a walkthrough), open it in
+a new tab of their viewer. Only when they ask: it changes what they see.
+
+```sh
+code-viewer show src/server.ts:120
+code-viewer show src/server.ts --diff
+```
+
+It fails with the reason when no code-viewer window shows this repository.
+
 ## Full reference
 
 Before composing annotations, read the complete agent guide (all commands,

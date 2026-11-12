@@ -8,27 +8,19 @@
 // - Esc・外側のクリックで閉じない / 閉じたらフォーカスが迷子になる
 // - 取り直しの失敗を黙る
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "vitest";
-import type { AccountStatus, AccountsResponse } from "../core/agent-accounts";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import type { AccountStatus } from "../core/agent-accounts";
 import type { AccountsSnapshot } from "../views/agents/accounts-client";
 import { agentsText } from "../views/agents/i18n";
-import { mountUsageStatus } from "../views/agents/usage-status";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
+import { createUsageStatusPresenter } from "../views/agents/usage-status";
+import {
+  DEFAULT_VIEW as USAGE_DEFAULT_VIEW,
+  type UsagePopoverProps,
+  type UsageStatusView,
+  type UsageStatusViewProps,
+} from "../views/agents/usage-status-view";
+import { accountsData } from "./_accounts-fixture";
 
 const NOW = Date.now();
 const MINUTE = 60_000;
@@ -76,19 +68,6 @@ function account(
   };
 }
 
-function response(accounts: AccountStatus[]): AccountsResponse {
-  return {
-    home: "/home/sample",
-    serverRoot: "/home/sample/work/sample-app",
-    accounts,
-    registryError: null,
-    registryPath: "/home/sample/.local/state/code-viewer/accounts.json",
-    launchCommands: { claude: "claude", codex: "codex" },
-    lastLaunch: null,
-    usageFailures: { total: 0, recent: [], log: "" },
-  };
-}
-
 type Harness = {
   root: HTMLElement;
   logins: string[];
@@ -100,13 +79,13 @@ type Harness = {
 
 let harness: Harness;
 
-function mount(accounts: AccountStatus[]): void {
+function mount(accounts: AccountStatus[], view?: UsageStatusView): void {
   document.body.style.setProperty("--space-4", "16px");
   const root = document.createElement("div");
   root.id = "usage-status";
   document.body.appendChild(root);
   const listeners = new Set<() => void>();
-  let snapshot: AccountsSnapshot = { data: response(accounts), error: "" };
+  let snapshot: AccountsSnapshot = { data: accountsData(accounts), error: "" };
   const h: Harness = {
     root,
     logins: [],
@@ -118,32 +97,35 @@ function mount(accounts: AccountStatus[]): void {
       for (const listener of listeners) listener();
     },
   };
-  mountUsageStatus({
-    root,
-    client: {
-      snapshot: () => snapshot,
-      subscribe(listener) {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
+  createUsageStatusPresenter(
+    {
+      root,
+      client: {
+        snapshot: () => snapshot,
+        subscribe(listener) {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        async load() {
+          h.loads += 1;
+          if (h.failNextLoad) {
+            h.setSnapshot({ data: snapshot.data, error: h.failNextLoad });
+            h.failNextLoad = "";
+          }
+        },
       },
-      async load() {
-        h.loads += 1;
-        if (h.failNextLoad) {
-          h.setSnapshot({ data: snapshot.data, error: h.failNextLoad });
-          h.failNextLoad = "";
-        }
+      getText: () => agentsText("en"),
+      openSettings: () => undefined,
+      openBoard: () => {
+        h.boards += 1;
+      },
+      login: async (target) => {
+        h.logins.push(target.id);
+        return "Sign-in opened";
       },
     },
-    getText: () => agentsText("en"),
-    openSettings: () => undefined,
-    openBoard: () => {
-      h.boards += 1;
-    },
-    login: async (target) => {
-      h.logins.push(target.id);
-      return "Sign-in opened";
-    },
-  });
+    view,
+  );
   harness = h;
 }
 
@@ -268,7 +250,7 @@ describe("the usage popover", () => {
     ]);
     // 最下段の塊は値があるときだけなので、ポップオーバーは値のあるもう 1 つから開く。
     harness.setSnapshot({
-      data: response([
+      data: accountsData([
         account({ id: "claude:default" }),
         account({
           id: "codex:personal",
@@ -419,5 +401,51 @@ describe("usage collection that is off", () => {
     expect(harness.boards).toBe(1);
     // 移ったら小窓は閉じる。
     expect(popover()).toBeNull();
+  });
+});
+
+// presenter (usage-status.ts) を、表示を差し替えて確かめる。閉じたときに同じ位置の
+// ボタンへフォーカスを戻すので、差し替える view は渡された値を記録してから既定の
+// 表示に渡す。見るのは view に渡す値と、取り直し・ログイン (モデルの呼び出し)。
+describe("usage status presenter", () => {
+  function mountWithView(accounts: AccountStatus[]) {
+    const items: UsageStatusViewProps[] = [];
+    const popovers: UsagePopoverProps[] = [];
+    mount(accounts, {
+      items: (props) => {
+        items.push(props);
+        return USAGE_DEFAULT_VIEW.items(props);
+      },
+      popover: (props) => {
+        popovers.push(props);
+        return USAGE_DEFAULT_VIEW.popover(props);
+      },
+    });
+    return {
+      lastItems: () => items[items.length - 1],
+      lastPopover: () => popovers[popovers.length - 1],
+    };
+  }
+
+  test("each account with a readable usage reaches the view with its windows", () => {
+    const { lastItems } = mountWithView([account({ id: "claude:default" })]);
+    expect(
+      lastItems().items.map((item) => [
+        item.kind,
+        item.windows.map((window) => window.value),
+        item.warnLabel,
+      ]),
+    ).toEqual([["claude", ["42%", "81%"], "High"]]);
+  });
+
+  test("toggling an item from the view opens the popover, and refresh reloads the accounts", async () => {
+    const { lastItems, lastPopover } = mountWithView([
+      account({ id: "claude:default" }),
+    ]);
+    lastItems().onToggle("claude:default", new Event("click"));
+    lastPopover().onRefresh();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect([lastItems().items[0]?.expanded, harness.loads]).toEqual([true, 1]);
   });
 });

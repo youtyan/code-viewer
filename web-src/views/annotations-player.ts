@@ -11,7 +11,6 @@ import {
   annotationSpeechText,
 } from "../core/annotation-speech";
 import {
-  iconSvg,
   NEXT_16_PATHS,
   PAUSE_16_PATHS,
   PLAY_16_PATH,
@@ -21,6 +20,8 @@ import {
 } from "../core/icons";
 import type { AnnotationEntry } from "../core/types";
 import { annotationText } from "./annotations/i18n";
+import { iconTemplate } from "./ui/icon";
+import { renderOwned } from "./ui/renderer";
 
 export type AnnotationsPlayerDeps = {
   getLanguage?(): "en" | "ja";
@@ -37,18 +38,31 @@ export type AnnotationsPlayerDeps = {
   setRate(rate: number): void;
 };
 
-function setIconButton(
-  button: HTMLButtonElement,
-  label: string,
-  iconClass: string,
-  paths: string | string[],
-) {
-  button.innerHTML = iconSvg(iconClass, paths);
-  button.title = label;
-  button.setAttribute("aria-label", label);
-}
+/** 再生の帯 (画面にもとからあるボタン) の描き方。 */
+export type AnnotationsPlayerView = {
+  /** ボタンの中の絵。 */
+  icon(iconClass: string, paths: string | string[]): unknown;
+};
 
-export function createAnnotationsPlayer(deps: AnnotationsPlayerDeps) {
+export const DEFAULT_VIEW: AnnotationsPlayerView = {
+  icon: (iconClass, paths) => iconTemplate(paths, iconClass),
+};
+
+export function createAnnotationsPlayer(
+  deps: AnnotationsPlayerDeps,
+  view: AnnotationsPlayerView = DEFAULT_VIEW,
+) {
+  function setIconButton(
+    button: HTMLButtonElement,
+    label: string,
+    iconClass: string,
+    paths: string | string[],
+  ) {
+    renderOwned(button, view.icon(iconClass, paths));
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+
   const bar = deps.$<HTMLElement>("#annotation-player");
   const toggleBtn = deps.$<HTMLButtonElement>("#annotation-player-toggle");
   const prevBtn = deps.$<HTMLButtonElement>("#annotation-player-prev");

@@ -91,7 +91,7 @@ export function agentStateForEvent(
  * フックが名乗ってきたエージェントの種類。プロセス名から見分けられない
  * もの (node として動く claude など) を一覧に出すために使う。
  */
-export const REPORTED_AGENTS = ["claude", "codex"] as const;
+export const REPORTED_AGENTS = ["claude", "codex", "opencode"] as const;
 
 export type ReportedAgent = (typeof REPORTED_AGENTS)[number];
 
@@ -201,6 +201,47 @@ export function clipAgentStateText(value: string): string {
   return value.slice(0, MAX_AGENT_STATE_TEXT);
 }
 
+/**
+ * 人の手が要る (waiting) ときの、その理由の種類。フックだけが知っている。
+ * - permission: 道具の実行の許可を待っている
+ * - question: 質問・入力の欄 (MCP の elicitation など) に答えを待っている
+ * - error: API の失敗・上限・認証切れなどでターンが止まった (完了ではない)
+ */
+export const AGENT_ATTENTION_KINDS = [
+  "permission",
+  "question",
+  "error",
+] as const;
+
+export type AgentAttentionKind = (typeof AGENT_ATTENTION_KINDS)[number];
+
+export type AgentAttention = {
+  kind: AgentAttentionKind;
+  /** エラーの種類 (`rate_limit` など)。無ければ空。 */
+  reason: string;
+  /** 補足 (エラーの詳しい文)。無ければ空。 */
+  detail: string;
+};
+
+/** 理由・補足の上限 (文字数)。行と title に出すだけなので短く切る。 */
+export const MAX_ATTENTION_TEXT = 200;
+
+/** サーバが申告の本文を受けるときの検査。 */
+export function isAgentAttention(value: unknown): value is AgentAttention {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.kind === "string" &&
+    (AGENT_ATTENTION_KINDS as readonly string[]).includes(record.kind) &&
+    [record.reason, record.detail].every(
+      (text) =>
+        typeof text === "string" &&
+        text.length <= MAX_ATTENTION_TEXT &&
+        !hasControlCharacter(text),
+    )
+  );
+}
+
 export type AgentStateRecord = {
   /** tmux ペイン ID か、ブラウザシェルのセッション ID。 */
   target: string;
@@ -223,6 +264,8 @@ export type AgentStateRecord = {
   note: string;
   /** フックが名乗った種類。名乗っていなければ無い。 */
   agent?: ReportedAgent;
+  /** waiting の理由 (フックが知らせたときだけ)。waiting でなくなれば無い。 */
+  attention?: AgentAttention;
   /**
    * 最後の申告がセッションの終了 (exit) だった。そのペインではもう
    * エージェントが動いていないので、一覧では種類を持たないペインに戻す。
@@ -243,7 +286,16 @@ export type AgentStateObservationError = {
     /** 保存した会話の場所を読めなかった (server/terminal/agent-conversations.ts)。 */
     | "restore_conversations"
     /** 会話の場所を保存できなかった。 */
-    | "save_conversations";
+    | "save_conversations"
+    /** 保存した未読と変わった時刻を読めなかった (server/terminal/unread-store.ts)。 */
+    | "restore_unread"
+    /** 未読と変わった時刻を保存できなかった。 */
+    | "save_unread"
+    // インタプリタ (node など) のペインの中のプログラムを ps で調べられなかった
+    // (server/terminal/process-kind.ts)。種類はコマンド名と申告で決める。
+    | "probe_process"
+    /** プロジェクトのブランチと上流との差を読めなかった (server/projects/branch-status.ts)。 */
+    | "branch_status";
   target: string;
   at: number;
   /** Error の cause と独自フィールドを保持した表示用詳細。 */

@@ -267,6 +267,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               kind: "list",
               items: [
                 "Select a project's name in the sidebar to switch to it.",
+                "After the name, a branch other than main and how far it is from its upstream (↑ ahead, ↓ behind) are shown.",
                 [
                   "Select the project name at the top of the list column (or press ",
                   key("p"),
@@ -672,7 +673,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
     "start-agent": {
       title: "Start an agent",
       intro:
-        "An agent is claude or codex running in a tmux window. You start it for a project, with the account you choose.",
+        "An agent is claude, codex or opencode running in a tmux window. You start it for a project, with the account you choose.",
       groups: [
         {
           title: "From the left sidebar",
@@ -761,6 +762,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   " at the bottom of the page.",
                 ],
                 "The launch dialog shows the exact command it will run.",
+                "If the agent stops right after it starts (a mistyped command, an expired sign-in), you get its exit code and last lines. Its window stays open so you can read why.",
                 "claude starts in the classic renderer even if fullscreen is set, because fullscreen keeps no earlier output in tmux for the phone to read.",
               ],
             },
@@ -799,6 +801,18 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 [ui(l.agents.state.idle), "Doing nothing"],
               ],
             },
+            {
+              kind: "paragraph",
+              text: [
+                "With hooks installed, the reason shows instead of needing input (",
+                ui(l.agents.attention.permission),
+                ", ",
+                ui(l.agents.attention.question),
+                ", ",
+                ui(l.agents.attention.error),
+                "). An agent stopped on an error (a usage limit, an expired sign-in) stays as needing you until you reply.",
+              ],
+            },
             w.see("agent-hooks"),
           ],
         },
@@ -810,7 +824,19 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               items: [
                 "Select an agent to open its pane in a terminal tab, where you can type your answer.",
                 "Rest the pointer on an agent to see the last lines of its screen.",
+                "An agent started by another agent is indented under it when the tool that starts it sets the tmux option @agent-parent (the parent's pane ID) on the new pane.",
+                [
+                  "To come back to one later, right-click it and choose ",
+                  ui(l.agents.markUnread),
+                  ".",
+                ],
                 "The numbers at the right of the bottom bar count agents that need input and agents that are working. Select them to open the list.",
+                [
+                  key("g n"),
+                  " opens the agents that need you one by one (waiting first, then done); ",
+                  key("g N"),
+                  " goes back.",
+                ],
               ],
             },
             {
@@ -835,6 +861,15 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ") lists every agent running in tmux on this machine.",
                 ],
                 "Inside each project, agents that need input come first, so you can work down from the top.",
+                [
+                  ui(l.agents.board.orderByUrgency),
+                  " lists every project together: needs input, then done, then working, then idle.",
+                ],
+                [
+                  "To keep an eye on one, right-click it and choose ",
+                  ui(l.agents.board.pin),
+                  ".",
+                ],
               ],
             },
             {
@@ -903,6 +938,12 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   ", choose whether to be notified when an agent needs input and when it finishes.",
                 ],
                 "An agent you are looking at in the front tab does not notify you.",
+                "A child agent started by another agent notifies you only when it needs input; its parent takes care of its finish.",
+                "While the code-viewer window is in front, a note appears at the bottom right instead of a system notification. Click it to open that agent.",
+                [
+                  ui(l.settings.agentNotifySoundLabel),
+                  " also plays a short sound, whether or not notifications are allowed (off by default).",
+                ],
               ],
             },
           ],
@@ -924,7 +965,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
     "agent-hooks": {
       title: "Show agent state reliably (install hooks)",
       intro:
-        "With hooks, claude and codex tell code-viewer themselves when they are working, need input or are done. Without them, the state is only a guess from what the screen shows, and it goes wrong when an agent changes how its screen looks.",
+        "With hooks, claude, codex and opencode tell code-viewer themselves when they are working, need input or are done. Without them, the state is only a guess from the screen, and it goes wrong when an agent changes how its screen looks.",
       groups: [
         {
           title: "Set them up",
@@ -953,7 +994,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   text: [
                     "Select ",
                     ui(hooks.action.install),
-                    " on the claude or codex row.",
+                    " on the claude, codex or opencode row.",
                   ],
                 },
                 {
@@ -976,6 +1017,29 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                     " after installing and trust the code-viewer hooks under ",
                     code("/hooks"),
                     " in that tab. They do not run until you do.",
+                  ],
+                },
+                {
+                  text: [
+                    "Start the codex you run yourself with ",
+                    code("--no-daemon"),
+                    ". Without it the hooks run inside the shared background server and report the pane of the codex that started it (codex started from code-viewer gets it automatically).",
+                  ],
+                },
+                {
+                  text: [
+                    "For opencode, it writes one plugin file, ",
+                    code(
+                      "~/.config/opencode/plugins/code-viewer-agent-hook.js",
+                    ),
+                    ". opencode reads plugins when it starts, so restart an opencode that is already running.",
+                  ],
+                },
+                {
+                  text: [
+                    "Start opencode 2 yourself with ",
+                    code("--standalone"),
+                    ". Without it the plugin runs in the shared background service, which cannot tell the pane, and reports nothing (opencode started from code-viewer gets it).",
                   ],
                 },
               ],
@@ -1053,7 +1117,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
     "add-account": {
       title: "Add an account",
       intro:
-        "An account is one claude or codex settings directory. Add one to keep work and personal use apart, or to sign in to another plan.",
+        "An account is one claude or codex settings directory. Add one to keep work and personal use apart, or to sign in to another plan. opencode has only its default account: no opencode setting keeps a sign-in in another directory.",
       groups: [
         {
           title: "Add one in the app",
@@ -1264,7 +1328,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 [
                   "Select the + in the tab row, then ",
                   ui(l.terminal.newShell),
-                  " or one of the listed sessions (",
+                  " (",
                   key("Ctrl+`"),
                   ").",
                 ],
@@ -1287,11 +1351,38 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
             {
               kind: "list",
               items: [
-                "Closing a tab does not stop the shell or the agent. Reopen it from the +.",
+                "Closing a tab does not stop the shell or the agent. Reopen it from the left sidebar, the palette, or the Agents screen.",
                 [
                   "To stop one, right-click its tab and choose ",
                   ui(l.mainTabs.stopSession),
                   ".",
+                ],
+              ],
+            },
+          ],
+        },
+        {
+          title: "Copying and new shells",
+          blocks: [
+            {
+              kind: "list",
+              items: [
+                "A new shell opens in the folder of the tmux pane shown in the front tab (for example, another worktree).",
+                "Text you copy in tmux copy mode goes straight to the clipboard.",
+                "To also take copies from programs inside tmux (such as claude), add set -g set-clipboard on to your tmux configuration.",
+                [
+                  "To stop it, clear ",
+                  ui(l.settings.terminalClipboardWriteLabel),
+                  " in ",
+                  settings,
+                  " → ",
+                  ui(cat.appearance.label),
+                  ". Programs are never allowed to read the clipboard.",
+                ],
+                [
+                  "To use Option shortcuts on macOS, such as Option+Enter for a new line in claude, turn on ",
+                  ui(l.settings.terminalOptionAsAltLabel),
+                  " in the same place.",
                 ],
               ],
             },
@@ -1316,6 +1407,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 ],
                 "Move the shelf to the right, left, bottom, or top with the ⋯ on its header, and drag its inner edge to resize it.",
                 "Hover a URL, file path, or image path on the screen for Open and Copy buttons, or click it to open. When tmux handles the mouse, hold ⌘/Ctrl while clicking.",
+                "A tmux pane ID on the screen (such as %12, when an agent names a worker) opens that pane when clicked, as long as the pane still exists.",
                 [
                   "The terminal is drawn dark even when the page is light. To change this, pick ",
                   ui(l.settings.terminalTone),
@@ -1328,7 +1420,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               ],
             },
             more(
-              "Paste an image (⌘V / Ctrl+V) to hand it to the agent. It is saved in the project under .code-viewer/pasted/ with the date and time as its name (git ignores it), and its path is typed without sending.",
+              "Paste an image (⌘V / Ctrl+V) or drop it onto the terminal to hand it to the agent. It is saved under .code-viewer/pasted/ with the date and time as its name (git ignores it), and its path is typed without sending.",
               [
                 "If some colors are still hard to read after matching a light page, switch the agent's own colors to a light theme too (",
                 code("/theme"),
@@ -1380,11 +1472,11 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                 "Each pane shows the tabs of its own project only. Switch the pane to another project and back, and its tabs come back.",
                 "The project or agent you pick in the left sidebar opens in the focused pane (the one you last clicked). An agent that already shows in a pane is shown there.",
                 [
-                  "The + in the tab row opens ",
+                  "The + in the tab row opens the screens of the project (files, diff, history, and more), ",
                   ui(l.terminal.newShell),
-                  " and ",
+                  ", and ",
                   ui(l.mainTabs.newAgentHere),
-                  ". The screens of the project open from the icons at the head of the list column.",
+                  ". The screens also open from the icons at the head of the list column.",
                 ],
               ],
             },
@@ -1434,6 +1526,11 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
               kind: "list",
               items: [
                 "Fold the file list with the button at the top of the list column.",
+                [
+                  "With the left sidebar collapsed, ",
+                  ui(l.agents.sidebar.expand),
+                  " at the top left shows a colored dot while an agent needs you.",
+                ],
                 "In a narrow window, the list columns get narrower first, and fold when that is not enough.",
               ],
             },
@@ -2451,7 +2548,7 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
             {
               kind: "command",
               title:
-                "Choose the agents (claude, codex, gemini, cursor, agents, or all)",
+                "Choose the agents (claude, codex, gemini, cursor, agents, opencode, or all)",
               command: "code-viewer skill install --agent claude,codex",
             },
             {
@@ -2530,6 +2627,10 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                   " runs read-only queries, searches across tables and compares snapshots.",
                 ],
                 "Results also land in the query history, so you can look at them again in the browser.",
+                [
+                  code("code-viewer show <path>[:line]"),
+                  " lets an AI open a file (or its diff with --diff) in a new tab of your viewer. It is meant to be used only when you ask.",
+                ],
                 "These commands print everything each CLI can do.",
               ],
             },

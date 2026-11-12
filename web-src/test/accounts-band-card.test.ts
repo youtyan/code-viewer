@@ -3,8 +3,8 @@
 // メールアドレスの行、窓の行 (名前・棒・割合・戻る時刻)。名前・メールアドレス・
 // パスはすべて架空。時刻はテストを動かす時計の時間帯で組む (書き方もその時計)。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import type {
   AccountLogin,
   AccountStatus,
@@ -21,12 +21,6 @@ import {
 } from "../views/agents/accounts-i18n";
 import { resetClock } from "../views/agents/usage-meter";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 afterEach(() => {
   document.body.replaceChildren();
 });
@@ -98,7 +92,7 @@ function render(
     accounts,
     registryError: null,
     registryPath: "/home/sample/.local/state/code-viewer/accounts.json",
-    launchCommands: { claude: "claude", codex: "codex" },
+    launchCommands: { claude: "claude", codex: "codex", opencode: "opencode" },
     lastLaunch: null,
     usageFailures: { total: 0, recent: [], log: "" },
   };

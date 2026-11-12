@@ -9,6 +9,13 @@
 // 親子とは限らない。そのときは linear で呼び、行を上から順につないだ 1 本の
 // 線にする (枝を作り話で描かない)。
 
+import {
+  html,
+  type SVGTemplateResult,
+  svg,
+  type TemplateResult,
+} from "lit/html.js";
+
 export type GraphCommit = {
   readonly sha: string;
   readonly parents: readonly string[];
@@ -131,41 +138,49 @@ function laneClass(lane: number): string {
   return lane === 0 ? "history-graph-main" : "history-graph-branch";
 }
 
-function vertical(lane: number, from: string, to: string): string {
+function vertical(lane: number, from: string, to: string): SVGTemplateResult {
   const x = laneX(lane);
-  return `<line class="${laneClass(lane)}" x1="${x}" y1="${from}" x2="${x}" y2="${to}"/>`;
+  return svg`<line class=${laneClass(lane)} x1=${x} y1=${from} x2=${x} y2=${to}/>`;
+}
+
+function graphFrame(lanes: number, parts: readonly SVGTemplateResult[]) {
+  return html`<svg
+    class="history-graph"
+    width=${lanes * GRAPH_LANE_WIDTH}
+    aria-hidden="true"
+  >${parts}</svg>`;
 }
 
 /** コミットの行の SVG。 */
-export function historyGraphSvg(row: GraphRow, lanes: number): string {
-  const width = lanes * GRAPH_LANE_WIDTH;
-  const parts: string[] = [];
+export function historyGraphSvg(row: GraphRow, lanes: number): TemplateResult {
+  const parts: SVGTemplateResult[] = [];
   for (const lane of row.through) parts.push(vertical(lane, "0", "100%"));
   if (row.fromAbove) parts.push(vertical(row.lane, "0", "50%"));
   if (row.toBelow) parts.push(vertical(row.lane, "50%", "100%"));
   const nodeX = laneX(row.lane);
   for (const lane of row.mergeFrom) {
     parts.push(
-      `<line class="${laneClass(lane)}" x1="${laneX(lane)}" y1="0" x2="${nodeX}" y2="50%"/>`,
+      svg`<line class=${laneClass(lane)} x1=${laneX(lane)} y1="0" x2=${nodeX} y2="50%"/>`,
     );
   }
   for (const lane of row.branchTo) {
     parts.push(
-      `<line class="${laneClass(lane)}" x1="${nodeX}" y1="50%" x2="${laneX(lane)}" y2="100%"/>`,
+      svg`<line class=${laneClass(lane)} x1=${nodeX} y1="50%" x2=${laneX(lane)} y2="100%"/>`,
     );
   }
   parts.push(
-    `<circle class="${laneClass(row.lane)} history-graph-node" cx="${nodeX}" cy="50%" r="3"/>`,
+    svg`<circle class=${`${laneClass(row.lane)} history-graph-node`} cx=${nodeX} cy="50%" r="3"/>`,
   );
-  return `<svg class="history-graph" width="${width}" aria-hidden="true">${parts.join("")}</svg>`;
+  return graphFrame(lanes, parts);
 }
 
 /** 行と行の間に挟まる行 (日付の見出し) の SVG。素通りする線だけ。 */
 export function historyGraphPassSvg(
   lanesThrough: readonly number[],
   lanes: number,
-): string {
-  const width = lanes * GRAPH_LANE_WIDTH;
-  const parts = lanesThrough.map((lane) => vertical(lane, "0", "100%"));
-  return `<svg class="history-graph" width="${width}" aria-hidden="true">${parts.join("")}</svg>`;
+): TemplateResult {
+  return graphFrame(
+    lanes,
+    lanesThrough.map((lane) => vertical(lane, "0", "100%")),
+  );
 }

@@ -8,6 +8,9 @@
 //   (`src/app.ts`)。後ろの `:12`・`:12:3` は行と桁。ここでは形だけを見る。
 //   実在するか (このプロジェクトの中のファイルか) はサーバに訊く
 //   (`apiUrl("agentPaths")` の経路)
+// - tmux のペイン ID: `%12`。指揮役のエージェントが作業役のペインを文で名指しする。
+//   形だけを見て拾い、今 tmux に居るペインかは画面の側が一覧で確かめる (`50%` の
+//   ような数の後ろの `%`、`%5d` のような書式、URL の中の `%20` は拾わない)
 // - 端末の幅で折り返された (幅いっぱいの行と次の行の頭が続いている) ものも
 //   1 つとして拾う (画像のパスの `findImagePathLinks` と同じ扱い)
 //
@@ -15,12 +18,12 @@
 
 import type { PathLink } from "./terminal-images";
 
-export type TerminalTextLinkKind = "url" | "file";
+export type TerminalTextLinkKind = "url" | "file" | "pane";
 
 /** 画面の行の上の URL かファイルのパス。範囲の形は画像のパスと同じ。 */
 export type TerminalTextLink = PathLink & {
   kind: TerminalTextLinkKind;
-  /** ファイルのパスの、行と桁を除いた部分 (URL では candidate と同じ)。 */
+  /** ファイルのパスの、行と桁を除いた部分 (URL・ペイン ID では candidate と同じ)。 */
   path: string;
   /** `:12` の行 (1 始まり)。 */
   line?: number;
@@ -55,6 +58,13 @@ const FILE_RE = new RegExp(
   "gu",
 );
 
+/**
+ * tmux のペイン ID (`%12`)。前に英数字・`%`・パスの区切りがあれば拾わない (`50%`・
+ * `a%2`)、後ろに英数字・`_`・`%` が続けば拾わない (`%5d`・`%2F`)。日本語の字と
+ * 文の終わりの句読点は前後に来てよい (`作業役は%7です`)。
+ */
+const PANE_ID_RE = /(?<![A-Za-z0-9_%/\\.-])%\d{1,6}(?![A-Za-z0-9_%])/g;
+
 /** URL の後ろの、文の句読点と対にならない閉じ括弧を外す。 */
 function trimUrl(url: string): string {
   let end = url.length;
@@ -85,7 +95,7 @@ type Found = Omit<TerminalTextLink, "start" | "end"> & {
   length: number;
 };
 
-/** 1 本の文字列の中の URL とファイルのパス (重なるものは URL を取る)。 */
+/** 1 本の文字列の中の URL・ファイルのパス・ペイン ID (重なるものは URL を取る)。 */
 export function matchTextLinks(text: string): Found[] {
   const found: Found[] = [];
   for (const match of text.matchAll(URL_RE)) {
@@ -125,6 +135,20 @@ export function matchTextLinks(text: string): Found[] {
       ...(column !== undefined && column > 0 ? { column } : {}),
       index: match.index,
       length: full.length,
+    });
+  }
+  const insideFound = (index: number) =>
+    found.some(
+      (item) => index >= item.index && index < item.index + item.length,
+    );
+  for (const match of text.matchAll(PANE_ID_RE)) {
+    if (insideFound(match.index)) continue;
+    found.push({
+      kind: "pane",
+      candidate: match[0],
+      path: match[0],
+      index: match.index,
+      length: match[0].length,
     });
   }
   return found.sort((a, b) => a.index - b.index);

@@ -116,6 +116,8 @@ export type PaletteActionId =
   | "goto-database"
   | "goto-journal"
   | "goto-agents"
+  | "agent-next-attention"
+  | "agent-previous-attention"
   | "goto-tools"
   | "goto-search"
   | "toggle-terminal-panel"
@@ -241,6 +243,8 @@ const EN: SearchPaletteText = {
     "goto-database": "Go to Data",
     "goto-journal": "Go to Work log",
     "goto-agents": "Go to Agents",
+    "agent-next-attention": "Next agent that needs you",
+    "agent-previous-attention": "Previous agent that needs you",
     "goto-tools": "Go to Tools",
     "goto-search": "Go to Search",
     "toggle-terminal-panel": "Open a terminal (new shell or session)",
@@ -368,6 +372,8 @@ const JA: SearchPaletteText = {
     "goto-database": "データストアへ移る",
     "goto-journal": "ワークログへ移る",
     "goto-agents": "エージェントへ移る",
+    "agent-next-attention": "次の手が要るエージェント",
+    "agent-previous-attention": "前の手が要るエージェント",
     "goto-tools": "ツールへ移る",
     "goto-search": "検索へ移る",
     "toggle-terminal-panel": "ターミナルを開く (新しいシェル・セッション)",

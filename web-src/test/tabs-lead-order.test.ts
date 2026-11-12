@@ -7,21 +7,15 @@
 // サイドバーを出す・名前 → 2 段目の絵柄・畳む) → タブ列 → ファイル一覧 → 一覧 →
 // 変更ファイルの一覧 → 本文 → 最下段。
 
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, describe, expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import {
   baseRules,
   cascadedDeclarations,
   loadStyleSheet,
   resolveVar,
 } from "./_css-fixture";
-
-GlobalRegistrator.register();
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const page = new DOMParser().parseFromString(
   readFileSync("web/index.html", "utf8"),

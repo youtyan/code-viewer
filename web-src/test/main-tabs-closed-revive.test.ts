@@ -10,21 +10,15 @@
 // 直した: 本文の route のタブが消えたら、前面を変えずに本文を残った route のタブ
 // (無ければフォルダ表示) へ置き換える (main-tabs-view.ts の followClosedBody)。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import type { SerializedLayout, TabTarget } from "../core/main-tabs";
 import type { AppRoute } from "../core/routes";
 import {
-  createMainTabsView,
+  createMainTabsPresenter,
   type MainTabsDeps,
-} from "../views/main-tabs/main-tabs-view";
+} from "../views/main-tabs/main-tabs-presenter";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 afterEach(() => {
   document.body.replaceChildren();
 });
@@ -47,7 +41,7 @@ function openWindow(
   const saves: SerializedLayout[] = [];
   /** replaceBody で置き換えた本文の画面。 */
   const replaced: string[] = [];
-  const handle = createMainTabsView({
+  const handle = createMainTabsPresenter({
     mount,
     getLanguage: () => "en",
     pageLabel: (page) => page,

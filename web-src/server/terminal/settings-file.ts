@@ -1,7 +1,8 @@
 // エージェントの設定ファイル (JSON) を安全に書き換える共通部分。
 //
 // フックの入れ外し (hooks.ts) と statusLine を包む・戻す (statusline.ts) が
-// 同じ約束で書くためにここへ置く:
+// 同じ約束で書くためにここへ置く。JSON でないファイル (opencode のプラグイン
+// の .js) も、読み方 (parse) を渡せば同じ約束で書ける:
 //
 // - 書く前に読む。JSON として読めない・想定外の形なら書かない
 // - 確認画面に出した差分は、そのとき読んだ中身のハッシュと一緒に返す。
@@ -117,6 +118,12 @@ export function settingsRevisionConflicts(
 }
 
 /**
+ * 設定ファイルの読み方。既定は JSON。JSON でないファイルは、中身を受けて
+ * check に渡す値を返す (読めないなら投げる)。
+ */
+export type SettingsParse = (text: string) => unknown;
+
+/**
  * 設定ファイルを読む。JSON として読めない・check が問題を返したら
  * unreadable (書かない)。
  */
@@ -124,6 +131,7 @@ export function readJsonSettingsFile(
   configDir: string,
   path: string,
   check: (root: unknown) => ShapeIssue[],
+  parse: SettingsParse = JSON.parse,
 ): JsonFileRead {
   let symlink = false;
   try {
@@ -174,13 +182,16 @@ export function readJsonSettingsFile(
     const mode = stat.mode & 0o7777;
     let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
+      parsed = parse(text);
     } catch (error) {
       return {
         kind: "unreadable",
         realPath,
         symlink,
-        detail: `not valid JSON: ${formatErrorDetail(error)}`,
+        detail:
+          parse === JSON.parse
+            ? `not valid JSON: ${formatErrorDetail(error)}`
+            : formatErrorDetail(error),
       };
     }
     const issues = check(parsed);
@@ -290,7 +301,9 @@ export function writeBackupUnique(
  * バックアップに失敗したら書かない (failed)。
  *
  * @param next 読んだ JSON (ファイルが無ければ null) から、書く中身の文字列を
- *   作る。確認の画面を作った関数と同じものを使う。
+ *   作る。確認の画面を作った関数と同じものを使う。null ならファイルを消す
+ *   (自分だけのファイルを外すとき。バックアップは消す前に作る)。
+ * @param parse readJsonSettingsFile の読み方 (JSON でないファイル)。
  * @param error 呼び出し側の例外の型に合わせて作る。cause は必ず載せる。
  * @returns バックアップの場所 (ファイルが無かったなら null)
  */
@@ -298,10 +311,14 @@ export async function commitJsonSettingsChange(options: {
   configDir: string;
   path: string;
   check: (root: unknown) => ShapeIssue[];
+  parse?: SettingsParse;
   baseHash: string;
   realPath: string;
   fileIdentity: string;
-  next: (root: Record<string, unknown> | null, text: string | null) => string;
+  next: (
+    root: Record<string, unknown> | null,
+    text: string | null,
+  ) => string | null;
   now: Date;
   ops: SettingsWriteOps;
   error: (
@@ -312,7 +329,12 @@ export async function commitJsonSettingsChange(options: {
 }): Promise<{ backupPath: string | null }> {
   const { path } = options;
   return withFileLock(`${options.realPath}.lock`, () => {
-    const read = readJsonSettingsFile(options.configDir, path, options.check);
+    const read = readJsonSettingsFile(
+      options.configDir,
+      path,
+      options.check,
+      options.parse,
+    );
     const conflicts: string[] = [];
     if (read.kind !== "ok" && read.kind !== "missing") {
       conflicts.push(
@@ -362,11 +384,19 @@ export async function commitJsonSettingsChange(options: {
       current.kind === "ok" ? current.text : null,
     );
     try {
-      writeFileAtomic(
-        current.realPath,
-        text,
-        current.kind === "ok" ? current.mode : 0o600,
-      );
+      if (text === null) {
+        if (current.kind === "ok") {
+          unlinkSync(current.realPath);
+          // リンクだけが残ると、先の無いファイルを読もうとする。
+          if (current.symlink) unlinkSync(path);
+        }
+      } else {
+        writeFileAtomic(
+          current.realPath,
+          text,
+          current.kind === "ok" ? current.mode : 0o600,
+        );
+      }
     } catch (cause) {
       throw options.error(
         "failed",

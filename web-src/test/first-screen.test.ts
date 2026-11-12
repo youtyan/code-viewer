@@ -11,17 +11,9 @@
 // happy-dom は var() を含むカスタムプロパティを解決しないので、スクリプトが読む
 // 骨格の変数 (--nav-w など) は _css-fixture.ts で style.css から解決した値を渡す。
 
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { withoutProjectPrefix } from "../core/api-url";
 import { listColumnKindFor, listColumnLayout } from "../core/list-column";
 import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
@@ -44,7 +36,7 @@ import { embeddedMediaText } from "../core/workspace-role";
 import {
   COMFORTABLE_PANE_WIDTH,
   SPLIT_DIVIDER_WIDTH,
-} from "../views/main-tabs/main-tabs-view";
+} from "../views/main-tabs/main-tabs-presenter";
 import {
   EARLY_PROJECTS_MAX,
   withEarlyProject,
@@ -95,14 +87,6 @@ type Look = {
   language?: "en" | "ja";
   split?: boolean;
 };
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 beforeEach(() => {
   document.body.className = "";
@@ -672,6 +656,12 @@ describe("#first-status は setStatus と同じ文言を同じ並びで重ねる
       [text.live, text.loading, text.error, text.idle],
       text.idle,
     );
+    // lit が描くときに置く印 (コメント) は、描いた中身ではないので外して比べる。
+    const walker = document.createTreeWalker(host, NodeFilter.SHOW_COMMENT);
+    const marks: Node[] = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode())
+      marks.push(node);
+    for (const mark of marks) mark.parentNode?.removeChild(mark);
     return host.innerHTML;
   }
 

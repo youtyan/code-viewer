@@ -1,5 +1,6 @@
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { render } from "lit/html.js";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { listColumnLayout } from "../core/list-column";
 import type { SerializedLayout, TabTarget } from "../core/main-tabs";
@@ -8,29 +9,35 @@ import { HISTORY_WIDTH } from "../core/panel-sizes";
 import { lastTabNumber } from "../core/pwa";
 import { type AppRoute, urlKeepsSavedFront } from "../core/routes";
 import { TAB_FLOOR_UNITS } from "../core/tab-widths";
-import { closeContextMenu } from "../views/context-menu";
+import { type ContextMenuItem, closeContextMenu } from "../views/context-menu";
 import {
   COMFORTABLE_PANE_WIDTH,
-  createMainTabsView,
+  createMainTabsPresenter,
   type MainTabsDeps,
   type MainTabsHandle,
+  NEW_TAB_SCREENS,
   routeTarget,
   SPLIT_DIVIDER_WIDTH,
   VIEW_SCREENS,
+} from "../views/main-tabs/main-tabs-presenter";
+import {
+  DEFAULT_VIEW as MAIN_TABS_DEFAULT_VIEW,
+  type MainTabsView,
+  type MainTabsViewProps,
 } from "../views/main-tabs/main-tabs-view";
 import { pageIconPaths } from "../views/main-tabs/tab-icons";
 
-// 窓 (happy-dom) はテストごとに作り直す。画面の部品は片付けの口を持たず、
-// document.body の class を見張る MutationObserver を残す。同じ窓を使い回すと、
+// body はテストごとに新しい要素に替える。画面の部品は片付けの口を持たず、
+// document.body の class を見張る MutationObserver を残す。同じ body を使い回すと、
 // 前のテストの部品がすべて次のテストの body の変化にも反応し、後ろのテストほど
-// 遅くなっていた (131 件で最初の 15ms が最後は 800ms)。
+// 遅くなっていた (131 件で最初の 15ms が最後は 800ms)。窓 (happy-dom) ごと作り
+// 直すのはやめた: lit は読み込んだ時点の document を掴むので、窓を替えると描けない。
 beforeEach(() => {
-  GlobalRegistrator.register();
+  document.body.replaceWith(document.createElement("body"));
 });
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  await GlobalRegistrator.unregister();
 });
 
 const range = { from: "HEAD", to: "worktree" };
@@ -53,6 +60,8 @@ function setup(
   /** このページのプロジェクトの根 (読み戻しの応答の root)。 */
   root: string | null = null,
   extra: Partial<MainTabsDeps> = {},
+  /** 表示を差し替える (presenter のテスト)。 */
+  view?: MainTabsView,
 ) {
   const mount = document.createElement("nav");
   document.body.append(mount);
@@ -66,62 +75,65 @@ function setup(
   /** 本文を移した先と、履歴を積まない (replace) か。 */
   const navigations: Array<{ to: string; replace: boolean }> = [];
   let current: AppRoute = initial;
-  const handle: MainTabsHandle = createMainTabsView({
-    mount,
-    ...(listColumnWidth ? { listColumnWidth } : {}),
-    getLanguage: () => "en",
-    pageLabel: (page) => page,
-    navigate: (route, replace) => {
-      navigations.push({
-        to: route.screen === "file" ? route.path : route.screen,
-        replace: replace === true,
-      });
-      current = route;
-      handle.syncRoute(route);
+  const handle: MainTabsHandle = createMainTabsPresenter(
+    {
+      mount,
+      ...(listColumnWidth ? { listColumnWidth } : {}),
+      getLanguage: () => "en",
+      pageLabel: (page) => page,
+      navigate: (route, replace) => {
+        navigations.push({
+          to: route.screen === "file" ? route.path : route.screen,
+          replace: replace === true,
+        });
+        current = route;
+        handle.syncRoute(route);
+      },
+      currentRoute: () => current,
+      defaultRoute: (target: TabTarget): AppRoute =>
+        target.kind === "file"
+          ? fileRoute(target.path)
+          : target.kind === "page"
+            ? ({ screen: target.page, range } as AppRoute)
+            : { screen: "diff", range },
+      homeRoute: () => ({ screen: "repo", ref: "worktree", path: "", range }),
+      copyPath: () => undefined,
+      onNewTab: (side, anchor) =>
+        calls.push(`new:${side}:${anchor.getAttribute("aria-label")}`),
+      stopTerminal: (session) => calls.push(`stop:${session}`),
+      // session: そのタブのシェル (映しているエージェントの項目を足すため)。
+      terminalMenuItems: (session) => {
+        calls.push(`menu:${session}`);
+        return [
+          { label: "Larger text (13)", onSelect: () => calls.push("larger") },
+        ];
+      },
+      loadSaved: async () => ({
+        layout: await loadSaved(),
+        root,
+      }),
+      save: async (layout) => {
+        saves.push(layout);
+      },
+      backupSaved: async () => {
+        backups.push("backup");
+        return backupSaved();
+      },
+      terminalInfo: (session) =>
+        session === "shell-a1"
+          ? { label: "claude · Working", state: "working" }
+          : { label: `Shell ${session}`, state: null },
+      onPanes: (view, how) => {
+        const tab = view.fronts[view.focused];
+        fronts.push(`${tab?.target.kind ?? "none"}:${how}`);
+      },
+      onTerminals: (open, closed) => {
+        terminals.push({ open: [...open], closed });
+      },
+      ...extra,
     },
-    currentRoute: () => current,
-    defaultRoute: (target: TabTarget): AppRoute =>
-      target.kind === "file"
-        ? fileRoute(target.path)
-        : target.kind === "page"
-          ? ({ screen: target.page, range } as AppRoute)
-          : { screen: "diff", range },
-    homeRoute: () => ({ screen: "repo", ref: "worktree", path: "", range }),
-    copyPath: () => undefined,
-    onNewTab: (side, anchor) =>
-      calls.push(`new:${side}:${anchor.getAttribute("aria-label")}`),
-    stopTerminal: (session) => calls.push(`stop:${session}`),
-    // session: そのタブのシェル (映しているエージェントの項目を足すため)。
-    terminalMenuItems: (session) => {
-      calls.push(`menu:${session}`);
-      return [
-        { label: "Larger text (13)", onSelect: () => calls.push("larger") },
-      ];
-    },
-    loadSaved: async () => ({
-      layout: await loadSaved(),
-      root,
-    }),
-    save: async (layout) => {
-      saves.push(layout);
-    },
-    backupSaved: async () => {
-      backups.push("backup");
-      return backupSaved();
-    },
-    terminalInfo: (session) =>
-      session === "shell-a1"
-        ? { label: "claude · Working", state: "working" }
-        : { label: `Shell ${session}`, state: null },
-    onPanes: (view, how) => {
-      const tab = view.fronts[view.focused];
-      fronts.push(`${tab?.target.kind ?? "none"}:${how}`);
-    },
-    onTerminals: (open, closed) => {
-      terminals.push({ open: [...open], closed });
-    },
-    ...extra,
-  });
+    view,
+  );
   handle.syncRoute(current);
   return {
     mount,
@@ -532,8 +544,12 @@ describe("main tabs view: プロジェクトのグループ", () => {
   });
 
   /** 面の中のタブ列。many は窓に面が 2 つ以上あるか、closed は閉じるボタンの記録。 */
-  async function paneTabs(many = false, closed: string[] = []) {
-    const { handle, mount } = setup(
+  async function paneSetup(
+    many = false,
+    closed: string[] = [],
+    extra: Partial<MainTabsDeps> = {},
+  ) {
+    const mounted = setup(
       async () => saved,
       undefined,
       undefined,
@@ -548,17 +564,42 @@ describe("main tabs view: プロジェクトのグループ", () => {
           closePane: () => closed.push("pane"),
           many: () => many,
         },
+        ...extra,
       }),
     );
-    await handle.restore();
-    return mount;
+    await mounted.handle.restore();
+    return mounted;
   }
+  const paneTabs = async (many = false, closed: string[] = []) =>
+    (await paneSetup(many, closed)).mount;
 
   test("面の中では札を出さず、その面のプロジェクトのタブをタブの順に並べる", async () => {
     expect(strip(await paneTabs())).toEqual([
       "-(>app.ts README.md agents)",
       "+",
     ]);
+  });
+
+  // 同じ tmux のウインドウに別のプロジェクトのペインがあると、前面のペインが
+  // 移っただけでシェルのグループが変わる。本文に出したままタブだけ消えていた。
+  test("面の中: 前面のシェルのグループが変わってもタブ列に残し、前面でなくなれば隠す", async () => {
+    let shellProject = APP;
+    const { handle, mount } = await paneSetup(false, [], {
+      terminalProject: (session) =>
+        session === "shell-lib" ? shellProject : null,
+    });
+    handle.openTerminal("shell-lib");
+    shellProject = LIB;
+    handle.localize();
+    const whileInFront = strip(mount);
+
+    mount.querySelector<HTMLElement>('.main-tab[data-tab-id="a1"]')?.click();
+
+    expect({ whileInFront, afterLeaving: strip(mount) }).toEqual({
+      // グループの並び (一覧で sample-lib が先) のまま、頭に出る。
+      whileInFront: ["-(>Shell shell-lib app.ts README.md agents)", "+"],
+      afterLeaving: ["-(>app.ts README.md agents)", "+"],
+    });
   });
 
   // 移す先の面が無いのに出すと、押したら面を分けていた。
@@ -959,15 +1000,6 @@ describe("main tabs view: プロジェクトのグループ", () => {
   });
 
   describe("▾ のメニューの画面の行", () => {
-    /** 画面の入口と同じキー (worktree は割り当てが無い)。 */
-    const KEYS = {
-      repo: "gf",
-      diff: "gd",
-      history: "gh",
-      worktree: "",
-      database: "gb",
-      journal: "gj",
-    } as const;
     const setupScreens = async (
       initial: AppRoute = fileRoute("src/app.ts"),
       extra: Partial<MainTabsDeps> = {},
@@ -979,7 +1011,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
         undefined,
         initial,
         APP,
-        groupDeps(calls, { screenKey: (screen) => KEYS[screen], ...extra }),
+        groupDeps(calls, { ...extra }),
       );
       await ctx.handle.restore();
       return { ...ctx, calls };
@@ -997,22 +1029,17 @@ describe("main tabs view: プロジェクトのグループ", () => {
       ];
     };
     /**
-     * 画面の行 (menuitemradio) を短く書く: 絵があれば ◆、名前、[キー]、選択の印 ✓、
+     * 画面の行 (menuitemradio) を短く書く: 絵があれば ◆、名前、選択の印 ✓ (キーは出さない)、
      * 押せなければ (disabled)、title があれば {title}。
      */
     const screenRows = (mount: HTMLElement, root: string) => {
       const rows = openMenu(mount, root)
         .filter((item) => item.getAttribute("role") === "menuitemradio")
         .map((item) => {
-          const label = [...item.childNodes]
-            .filter((node) => node.nodeType === Node.TEXT_NODE)
-            .map((node) => node.textContent)
-            .join("");
-          const key = item.querySelector(".gdp-context-menu-key")?.textContent;
+          const label = menuItemLabel(item);
           return [
             item.querySelector(".gdp-context-menu-icon svg") ? "◆ " : "",
             label,
-            key ? ` [${key}]` : "",
             item.getAttribute("aria-checked") === "true" ? " ✓" : "",
             item.disabled ? " (disabled)" : "",
             item.title ? ` {${item.title}}` : "",
@@ -1052,24 +1079,24 @@ describe("main tabs view: プロジェクトのグループ", () => {
         name: "いま見ているプロジェクト (ファイルを開いている)",
         root: APP,
         expected: [
-          "◆ repo [gf] ✓",
-          "◆ diff [gd]",
-          "◆ history [gh]",
+          "◆ repo ✓",
+          "◆ diff",
+          "◆ history",
           "◆ worktree",
-          "◆ database [gb]",
-          "◆ journal [gj]",
+          "◆ database",
+          "◆ journal",
         ],
       },
       {
         name: "別のプロジェクト (印は無く、移ってから開くと title で知らせる)",
         root: LIB,
         expected: [
-          "◆ repo [gf] {Switch to sample-lib and open this screen}",
-          "◆ diff [gd] {Switch to sample-lib and open this screen}",
-          "◆ history [gh] {Switch to sample-lib and open this screen}",
+          "◆ repo {Switch to sample-lib and open this screen}",
+          "◆ diff {Switch to sample-lib and open this screen}",
+          "◆ history {Switch to sample-lib and open this screen}",
           "◆ worktree {Switch to sample-lib and open this screen}",
-          "◆ database [gb] {Switch to sample-lib and open this screen}",
-          "◆ journal [gj] {Switch to sample-lib and open this screen}",
+          "◆ database {Switch to sample-lib and open this screen}",
+          "◆ journal {Switch to sample-lib and open this screen}",
         ],
       },
     ])("$name: 絵・名前・キー・選択の印", async ({ root, expected }) => {
@@ -1116,7 +1143,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
         const { mount } = await setupScreens(initial);
         const checked = openMenu(mount, APP)
           .filter((item) => item.getAttribute("aria-checked") === "true")
-          .map((item) => item.firstChild?.nextSibling?.textContent);
+          .map(menuItemLabel);
         closeContextMenu();
         expect(checked).toEqual(expected === null ? [] : [expected]);
       },
@@ -1193,7 +1220,7 @@ describe("main tabs view: プロジェクトのグループ", () => {
         .find(
           (item) =>
             item.getAttribute("role") === "menuitemradio" &&
-            item.firstChild?.nextSibling?.textContent === row,
+            menuItemLabel(item) === row,
         )
         ?.click();
       expect({
@@ -1211,6 +1238,117 @@ describe("main tabs view: プロジェクトのグループ", () => {
         screenRows(mount, LIB).every((row) => row.includes("(disabled)")),
         screenRows(mount, APP).some((row) => row.includes("(disabled)")),
       ]).toEqual([true, false]);
+    });
+  });
+
+  // タブの ＋ のメニューの頭 (残りのファイル・シェル・エージェントの行は app.ts の
+  // newTabMenuItems が足す)。行の形はグループの ▾ の画面の行と同じ。
+  describe("＋ のメニューの画面の行", () => {
+    const setupNewTab = async (initial: AppRoute = fileRoute("src/app.ts")) => {
+      const calls: string[] = [];
+      const ctx = setup(
+        async () => saved,
+        undefined,
+        undefined,
+        initial,
+        APP,
+        groupDeps(calls, {}),
+      );
+      await ctx.handle.restore();
+      return { ...ctx, calls };
+    };
+    const rows = (items: ContextMenuItem[]) =>
+      items.map((item) =>
+        item.kind === "separator"
+          ? "---"
+          : `${item.leading ? "◆ " : ""}${item.label}${item.checked ? " ✓" : ""}${item.disabled ? " (disabled)" : ""}`,
+      );
+
+    test("左の帯と同じ順に、ページのタブで開ける画面を並べる (ヘルプと設定は無い)", async () => {
+      const { handle } = await setupNewTab();
+      expect(rows(handle.newTabScreenItems("left"))).toEqual([
+        "◆ repo ✓",
+        "◆ diff",
+        "◆ history",
+        "◆ worktree",
+        "◆ database",
+        "◆ journal",
+        "◆ agents",
+        "◆ search",
+        "◆ tools",
+      ]);
+    });
+
+    test("行の絵はページのタブと同じ絵", async () => {
+      const { handle } = await setupNewTab();
+      const host = document.createElement("div");
+      const icons = handle.newTabScreenItems("left").map((item) => {
+        if (item.kind === "separator") return [];
+        render(item.leading, host);
+        return [...host.querySelectorAll("path")].map((path) =>
+          path.getAttribute("d"),
+        );
+      });
+      expect(icons).toEqual(
+        [...NEW_TAB_SCREENS].map((screen) => [pageIconPaths(screen)].flat()),
+      );
+    });
+
+    test("本文が全体ボードなら、その行に印が付く", async () => {
+      const { handle } = await setupNewTab({ screen: "agents", range });
+      expect(
+        rows(handle.newTabScreenItems("left")).filter((row) =>
+          row.endsWith("✓"),
+        ),
+      ).toEqual(["◆ agents ✓"]);
+    });
+
+    test.each([
+      {
+        name: "タブの無い画面: その画面へ移り、このプロジェクトのタブになる",
+        row: "history",
+        navigations: ["history"],
+        strip: [
+          `${LIB}(lib.ts diff Shell shell-lib)`,
+          `${APP}(app.ts >history README.md)`,
+          "-(agents)",
+        ],
+      },
+      {
+        name: "全体ボード: 開いているタブ (どのプロジェクトのものでもない) を前面にする",
+        row: "agents",
+        navigations: ["agents"],
+        strip: [
+          `${LIB}(lib.ts diff Shell shell-lib)`,
+          `${APP}(app.ts README.md)`,
+          "-(>agents)",
+        ],
+      },
+      {
+        name: "ファイル: フォルダ表示 (タブにしない)",
+        row: "repo",
+        navigations: ["repo"],
+        strip: [
+          `${LIB}(lib.ts diff Shell shell-lib)`,
+          `${APP}(app.ts README.md)`,
+          "-(agents)",
+        ],
+      },
+    ])("$name", async ({ name: _name, row, ...expected }) => {
+      const { mount, calls, handle, navigations } = await setupNewTab();
+      const item = handle
+        .newTabScreenItems("left")
+        .find((entry) => entry.kind !== "separator" && entry.label === row);
+      if (!item || item.kind === "separator") throw new Error(`no ${row} row`);
+      item.onSelect();
+      expect({
+        calls,
+        navigations: navigations.map((entry) => entry.to),
+        // プロジェクトのグループと、どのプロジェクトのものでもないタブ (-)。
+        strip: strip(mount).filter(
+          (entry) => entry.startsWith("/work/") || entry.startsWith("-("),
+        ),
+      }).toEqual({ calls: [], ...expected });
     });
   });
 
@@ -1698,12 +1836,12 @@ describe("main tabs view: 操作", () => {
       }),
     );
     await Promise.resolve();
+    // 描き直しでタブの要素が替わっても替わらなくても、同じタブへ戻る。
     const active = document.activeElement as HTMLElement;
     expect([
-      active === tab,
       active.classList.contains("main-tab"),
       active.dataset.tabId === id,
-    ]).toEqual([false, true, true]);
+    ]).toEqual([true, true]);
   });
 
   // 版が違えば別のタブ。名前は作業ツリー以外の版だけ短い印を添える。
@@ -1825,10 +1963,9 @@ describe("main tabs view: 操作", () => {
     handle.localize();
     const focused = document.activeElement as HTMLElement | null;
     expect([
-      second.isConnected,
       focused?.classList.contains("main-tab"),
       focused?.dataset.tabId,
-    ]).toEqual([false, true, id]);
+    ]).toEqual([true, id]);
   });
 
   test("描き直しは、タブの外にあるフォーカスを動かさない", async () => {
@@ -1927,6 +2064,14 @@ describe("main tabs view: 操作", () => {
     expect([handle.openFrontMenu(), menuLabels()]).toEqual([false, []]);
   });
 });
+
+/** メニューの項目の名前 (絵を除いた文字)。 */
+function menuItemLabel(item: HTMLElement): string {
+  return [...item.childNodes]
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => node.textContent)
+    .join("");
+}
 
 /** 開いている右クリックのメニューの項目 (押せないものに印)。 */
 function menuLabels(): string[] {
@@ -3306,10 +3451,9 @@ describe("main tabs view: 左右 2 面", () => {
       `.main-tab[data-tab-id="${id}"]`,
     );
     expect([
-      redrawn === dragged,
       redrawn?.classList.contains("main-tab-dragging"),
       document.body.classList.contains("main-tab-drag-active"),
-    ]).toEqual([false, true, true]);
+    ]).toEqual([true, true]);
     // 外れた要素には dragend が来ない。ボタンを離した移動で終わりと分かる
     const moved = new Event("pointermove", { bubbles: true });
     Object.defineProperty(moved, "buttons", { value: 0 });
@@ -3455,5 +3599,60 @@ describe("main tabs view: 左右 2 面", () => {
       kind: "image",
       path: "docs/images/dunes.png",
     });
+  });
+});
+
+// presenter (main-tabs-presenter.ts) を、表示を差し替えて確かめる。presenter は
+// 描いた後に列とタブを測るので、差し替える view は渡された値を記録してから既定の
+// 表示に渡す。見るのは view に渡す値と、本文の移り先・保存 (モデルの呼び出し)。
+describe("main tabs presenter", () => {
+  function setupWithView() {
+    const seen: MainTabsViewProps[] = [];
+    const ctx = setup(
+      async () => savedLayout,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      null,
+      {},
+      (props) => {
+        seen.push(props);
+        return MAIN_TABS_DEFAULT_VIEW(props);
+      },
+    );
+    const last = () => seen[seen.length - 1];
+    const tabs = () =>
+      last().sections.map((section) =>
+        section.loose.map((tab) => `${tab.active ? ">" : ""}${tab.name}`),
+      );
+    return { ...ctx, last, tabs };
+  }
+
+  test("the restored tabs reach the view with the front tab marked", async () => {
+    const { handle, tabs } = setupWithView();
+    await handle.restore();
+    // 保存のタブに、URL (src/app.ts) のタブが前面で加わる。
+    expect(tabs()).toEqual([
+      ["README.md", ">app.ts", "diff", "shot.png", "Shell shell-ab12"],
+    ]);
+  });
+
+  test("a tab clicked in the view becomes the front and the body follows", async () => {
+    const { handle, last, tabs, navigations } = setupWithView();
+    await handle.restore();
+    last().onTabClick("t2");
+    expect([tabs(), navigations.map((item) => item.to)]).toEqual([
+      [["README.md", "app.ts", ">diff", "shot.png", "Shell shell-ab12"]],
+      ["diff"],
+    ]);
+  });
+
+  test("a tab closed in the view leaves the strip", async () => {
+    const { handle, last, tabs } = setupWithView();
+    await handle.restore();
+    last().onTabClose("t4", new MouseEvent("click"));
+    expect(tabs()).toEqual([
+      ["README.md", ">app.ts", "diff", "Shell shell-ab12"],
+    ]);
   });
 });

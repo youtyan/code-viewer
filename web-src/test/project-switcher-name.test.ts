@@ -3,8 +3,8 @@
 // 読まれなかった (省略して切れた名前も、中身の文字なら全体が読まれる)。何をする
 // ボタンかは説明 (title) に置く。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import "./_dom";
+import { expect, test } from "vitest";
 import type { ProjectActions } from "../views/projects/project-actions";
 import { mountProjectSwitcher } from "../views/projects/project-switcher";
 import {
@@ -12,14 +12,6 @@ import {
   PROJECTS_JA,
   type ProjectsText,
 } from "../views/projects/projects-i18n";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 test.each([
   { lang: "en", text: PROJECTS_EN },

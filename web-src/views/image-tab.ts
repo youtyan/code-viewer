@@ -1,3 +1,4 @@
+import { html, nothing } from "lit/html.js";
 import { clampDiagramScale, stepDiagramScale } from "../core/diagram-viewport";
 import { formatErrorDetail } from "../core/error-detail";
 import {
@@ -6,7 +7,6 @@ import {
   CHEVRON_RIGHT_16_PATH,
   COPY_16_PATHS,
   FOLDER_ICON_PATHS,
-  iconSvg,
   X_16_PATH,
 } from "../core/icons";
 import type { TerminalImageRef } from "../core/terminal-images";
@@ -21,6 +21,8 @@ import {
   mediaErrorDetail,
   onMediaReady,
 } from "./terminal/media-element";
+import { iconTemplate } from "./ui/icon";
+import { detachedElement } from "./ui/renderer";
 
 const NARROW_WIDTH = 720;
 const COPY_FEEDBACK_MS = 1200;
@@ -63,110 +65,152 @@ function imageMatches(
   );
 }
 
-export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
-  const el = document.createElement("section");
-  el.className = "image-tab";
-  el.tabIndex = 0;
-  el.setAttribute("role", "region");
+type ImageTabButtonProps = {
+  label: string;
+  disabled: boolean;
+  onClick(): void;
+};
 
-  const toolbar = document.createElement("div");
-  toolbar.className = "image-tab-toolbar";
-
-  const primary = document.createElement("div");
-  primary.className = "image-tab-primary";
-  const secondary = document.createElement("div");
-  secondary.className = "image-tab-secondary";
-
-  const zoom = document.createElement("div");
-  zoom.className = "image-tab-zoom";
-  const modes = document.createElement("div");
-  modes.className = "image-tab-modes";
-  const navigation = document.createElement("div");
-  navigation.className = "image-tab-navigation";
-  const meta = document.createElement("div");
-  meta.className = "image-tab-meta";
-  const actions = document.createElement("div");
-  actions.className = "image-tab-actions";
-
-  const button = (
-    action: string,
-    onClick: () => void,
-    icon?: string | string[],
-  ): HTMLButtonElement => {
-    const control = document.createElement("button");
-    control.type = "button";
-    control.className = "image-tab-button";
-    control.dataset.action = action;
-    if (icon) {
-      control.innerHTML = iconSvg("image-tab-icon", icon);
-      control.classList.add("icon-only");
-    }
-    control.addEventListener("click", onClick);
-    return control;
+/** 画像のタブ (createImageTabView) の中。 */
+export type ImageTabProps = {
+  label: string;
+  /** 狭い幅か (ResizeObserver が測るまでは無し)。 */
+  narrow: boolean | null;
+  zoom: {
+    value: string;
+    out: ImageTabButtonProps;
+    in: ImageTabButtonProps;
   };
+  actual: ImageTabButtonProps & { pressed: boolean };
+  fit: ImageTabButtonProps & { pressed: boolean };
+  previous: ImageTabButtonProps;
+  next: ImageTabButtonProps;
+  path: string;
+  dimensions: string;
+  copy: ImageTabButtonProps & { copied: boolean };
+  open: ImageTabButtonProps;
+  close: { label: string; onClick(): void };
+  /** 画像・動画の要素 (media-element.ts が作る)。読めないときは null。 */
+  picture: HTMLElement | null;
+  status: { kind: StatusKind; text: string } | null;
+  onKeyDown(event: KeyboardEvent): void;
+};
 
-  const zoomOut = button("zoom-out", () => applyCustomScale(-1));
-  zoomOut.textContent = "−";
-  const scaleValue = document.createElement("output");
-  scaleValue.className = "image-tab-scale";
-  scaleValue.textContent = "100%";
-  const zoomIn = button("zoom-in", () => applyCustomScale(1));
-  zoomIn.textContent = "+";
-  zoom.append(zoomOut, scaleValue, zoomIn);
+export type ImageTabView = (props: ImageTabProps) => unknown;
 
-  const actual = button("actual", () => applyScale(1, "actual"));
-  const fit = button("fit", () => applyFit());
-  modes.append(actual, fit);
+const iconButton = (
+  action: string,
+  props: ImageTabButtonProps,
+  icon: string | string[],
+  extra = "",
+) => html`<button
+  type="button"
+  class=${`image-tab-button${extra}`}
+  data-action=${action}
+  title=${props.label}
+  aria-label=${props.label}
+  ?disabled=${props.disabled}
+  @click=${props.onClick}
+>${iconTemplate(icon, "image-tab-icon")}</button>`;
 
-  const previous = button("previous", () => navigate(-1), CHEVRON_LEFT_16_PATH);
-  const next = button("next", () => navigate(1), CHEVRON_RIGHT_16_PATH);
-  navigation.append(previous, next);
+export const DEFAULT_VIEW: ImageTabView = (props) => html`<section
+  class="image-tab"
+  tabindex="0"
+  role="region"
+  aria-label=${props.label}
+  data-narrow=${props.narrow === null ? nothing : String(props.narrow)}
+  @keydown=${props.onKeyDown}
+><div class="image-tab-toolbar"><div class="image-tab-primary"><div
+        class="image-tab-zoom"
+      ><button
+          type="button"
+          class="image-tab-button"
+          data-action="zoom-out"
+          title=${props.zoom.out.label}
+          aria-label=${props.zoom.out.label}
+          ?disabled=${props.zoom.out.disabled}
+          @click=${props.zoom.out.onClick}
+        >−</button><output class="image-tab-scale">${props.zoom.value}</output><button
+          type="button"
+          class="image-tab-button"
+          data-action="zoom-in"
+          title=${props.zoom.in.label}
+          aria-label=${props.zoom.in.label}
+          ?disabled=${props.zoom.in.disabled}
+          @click=${props.zoom.in.onClick}
+        >+</button></div><div class="image-tab-modes">${(
+          [
+            ["actual", props.actual],
+            ["fit", props.fit],
+          ] as const
+        ).map(
+          ([action, mode]) => html`<button
+          type="button"
+          class="image-tab-button"
+          data-action=${action}
+          data-active=${String(mode.pressed)}
+          aria-pressed=${String(mode.pressed)}
+          title=${mode.label}
+          ?disabled=${mode.disabled}
+          @click=${mode.onClick}
+        >${mode.label}</button>`,
+        )}</div><div class="image-tab-navigation">${iconButton(
+          "previous",
+          props.previous,
+          CHEVRON_LEFT_16_PATH,
+          " icon-only",
+        )}${iconButton("next", props.next, CHEVRON_RIGHT_16_PATH, " icon-only")}</div></div
+    ><div class="image-tab-secondary"><div class="image-tab-meta"><span
+          class="image-tab-path"
+          title=${props.path}
+        >${props.path}</span><span class="image-tab-dimensions"
+          >${props.dimensions}</span
+        ></div
+      ><div class="image-tab-actions"><button
+          type="button"
+          class="image-tab-button"
+          data-action="copy"
+          data-copied=${String(props.copy.copied)}
+          title=${props.copy.label}
+          aria-label=${props.copy.label}
+          ?disabled=${props.copy.disabled}
+          @click=${props.copy.onClick}
+        >${iconTemplate(
+          props.copy.copied ? CHECK_16_PATHS : COPY_16_PATHS,
+          "image-tab-icon",
+        )}<span>${props.copy.label}</span></button><button
+          type="button"
+          class="image-tab-button"
+          data-action="open"
+          title=${props.open.label}
+          aria-label=${props.open.label}
+          ?disabled=${props.open.disabled}
+          @click=${props.open.onClick}
+        >${iconTemplate(FOLDER_ICON_PATHS.open, "image-tab-icon")}<span
+            >${props.open.label}</span
+          ></button
+        ><button
+          type="button"
+          class="image-tab-button image-tab-close"
+          data-action="close"
+          title=${props.close.label}
+          aria-label=${props.close.label}
+          @click=${props.close.onClick}
+        >${iconTemplate(X_16_PATH, "image-tab-icon")}<span>${props.close.label}</span><kbd
+            >Esc</kbd
+          ></button></div></div></div
+  ><div class="image-tab-canvas"><div class="image-tab-stage">${props.picture ?? nothing}</div><pre
+      class="image-tab-status"
+      ?hidden=${!props.status}
+      aria-live="polite"
+      role=${props.status?.kind === "error" ? "alert" : "status"}
+      data-kind=${props.status?.kind ?? nothing}
+    >${props.status?.text ?? ""}</pre></div></section>`;
 
-  const path = document.createElement("span");
-  path.className = "image-tab-path";
-  const dimensions = document.createElement("span");
-  dimensions.className = "image-tab-dimensions";
-  dimensions.textContent = "—×—";
-  meta.append(path, dimensions);
-
-  const copy = button("copy", () => void copyCurrentPath(), COPY_16_PATHS);
-  copy.classList.remove("icon-only");
-  const copyLabel = document.createElement("span");
-  copy.append(copyLabel);
-  const open = button(
-    "open",
-    () => void openCurrentPath(),
-    FOLDER_ICON_PATHS.open,
-  );
-  open.classList.remove("icon-only");
-  const openLabel = document.createElement("span");
-  open.append(openLabel);
-  // 閉じる: 本文いっぱいに開くと、タブ列の小さな × しか閉じ方が無かった。
-  // 「閉じる」「Esc」を添えて、ほかの操作から離して置く。
-  const close = button("close", () => deps.close(), X_16_PATH);
-  close.classList.remove("icon-only");
-  close.classList.add("image-tab-close");
-  const closeLabel = document.createElement("span");
-  const closeKey = document.createElement("kbd");
-  closeKey.textContent = "Esc";
-  close.append(closeLabel, closeKey);
-  actions.append(copy, open, close);
-
-  primary.append(zoom, modes, navigation);
-  secondary.append(meta, actions);
-  toolbar.append(primary, secondary);
-
-  const canvas = document.createElement("div");
-  canvas.className = "image-tab-canvas";
-  const stage = document.createElement("div");
-  stage.className = "image-tab-stage";
-  const status = document.createElement("pre");
-  status.className = "image-tab-status";
-  status.hidden = true;
-  status.setAttribute("aria-live", "polite");
-  canvas.append(stage, status);
-  el.append(toolbar, canvas);
-
+export function createImageTabView(
+  deps: ImageTabDeps,
+  view: ImageTabView = DEFAULT_VIEW,
+): ImageTabHandle {
   let language = deps.language;
   let images: readonly TerminalImageRef[] = [];
   let index = 0;
@@ -175,6 +219,15 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
   let naturalHeight = 0;
   let scale = 1;
   let scaleMode: ScaleMode = "fit";
+  /** 画面に出ている倍率 (測った幅から)。読み込む前は前の画像のまま。 */
+  let scaleText = "100%";
+  let dimensions = "—×—";
+  /** 寸法が分かるまで、拡大縮小のボタンは押せない。 */
+  let sized = false;
+  let narrow: boolean | null = null;
+  let copied = false;
+  let copying = false;
+  let opening = false;
   let statusKind: StatusKind | null = null;
   let statusMessage: StatusMessage | null = null;
   let loadVersion = 0;
@@ -182,6 +235,86 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
   let resizeObserver: ResizeObserver | null = null;
   let scaleFrame: number | null = null;
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function props(): ImageTabProps {
+    const text = imageTabText(language);
+    const single = images.length < 2;
+    return {
+      label: images.length > 0 ? text.imageView(current().name) : "",
+      narrow,
+      zoom: {
+        value: scaleText,
+        out: {
+          label: text.zoomOut,
+          disabled: !sized,
+          onClick: () => applyCustomScale(-1),
+        },
+        in: {
+          label: text.zoomIn,
+          disabled: !sized,
+          onClick: () => applyCustomScale(1),
+        },
+      },
+      actual: {
+        label: text.actualSize,
+        disabled: !sized,
+        pressed: scaleMode === "actual",
+        onClick: () => applyScale(1, "actual"),
+      },
+      fit: {
+        label: text.fitWidth,
+        disabled: !sized,
+        pressed: scaleMode === "fit",
+        onClick: () => applyFit(),
+      },
+      previous: {
+        label: text.previousImage,
+        disabled: single,
+        onClick: () => navigate(-1),
+      },
+      next: {
+        label: text.nextImage,
+        disabled: single,
+        onClick: () => navigate(1),
+      },
+      path: images.length > 0 ? current().path : "",
+      dimensions,
+      copy: {
+        label: text.copyPath,
+        disabled: copying,
+        copied,
+        onClick: () => void copyCurrentPath(),
+      },
+      open: {
+        label: text.openFolder,
+        disabled: opening,
+        onClick: () => void openCurrentPath(),
+      },
+      // 閉じる: 本文いっぱいに開くと、タブ列の小さな × しか閉じ方が無かった。
+      // 「閉じる」「Esc」を添えて、ほかの操作から離して置く。
+      close: { label: text.closeTab, onClick: () => deps.close() },
+      picture,
+      status:
+        statusKind && statusMessage
+          ? { kind: statusKind, text: statusMessage(text) }
+          : null,
+      onKeyDown,
+    };
+  }
+
+  const tab = detachedElement(() => view(props()));
+  const el = tab.element;
+  const draw = () => {
+    if (!disposed) tab.draw();
+  };
+
+  function stage(): HTMLElement | null {
+    return el.querySelector<HTMLElement>(".image-tab-stage");
+  }
+
+  function canvas(): HTMLElement | null {
+    return el.querySelector<HTMLElement>(".image-tab-canvas");
+  }
 
   function current(): TerminalImageRef {
     const image = images[index];
@@ -204,35 +337,22 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
     index = 0;
   }
 
-  function updateStatus(): void {
-    if (!statusMessage || !statusKind) {
-      status.hidden = true;
-      status.textContent = "";
-      status.removeAttribute("data-kind");
-      status.setAttribute("role", "status");
-      return;
-    }
-    status.hidden = false;
-    status.dataset.kind = statusKind;
-    status.setAttribute("role", statusKind === "error" ? "alert" : "status");
-    status.textContent = statusMessage(imageTabText(language));
-  }
-
   function setStatus(kind: StatusKind, message: StatusMessage): void {
     statusKind = kind;
     statusMessage = message;
-    updateStatus();
+    draw();
   }
 
   function clearStatus(): void {
     statusKind = null;
     statusMessage = null;
-    updateStatus();
+    draw();
   }
 
   function updateScaleValue(): void {
     if (!picture || naturalWidth <= 0) {
-      scaleValue.textContent = "—";
+      scaleText = "—";
+      draw();
       return;
     }
     const measuredWidth = picture.getBoundingClientRect().width;
@@ -240,7 +360,8 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
       Number.isFinite(measuredWidth) && measuredWidth > 0
         ? measuredWidth / naturalWidth
         : scale;
-    scaleValue.textContent = `${Math.round(renderedScale * 100)}%`;
+    scaleText = `${Math.round(renderedScale * 100)}%`;
+    draw();
   }
 
   function scheduleScaleRead(): void {
@@ -252,26 +373,21 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
     });
   }
 
-  function updateModeButtons(): void {
-    actual.dataset.active = scaleMode === "actual" ? "true" : "false";
-    fit.dataset.active = scaleMode === "fit" ? "true" : "false";
-    actual.setAttribute("aria-pressed", String(scaleMode === "actual"));
-    fit.setAttribute("aria-pressed", String(scaleMode === "fit"));
-  }
-
   function applyScale(next: number, mode: ScaleMode): void {
     if (!picture || naturalWidth <= 0 || naturalHeight <= 0) return;
     scale = clampDiagramScale(next);
     scaleMode = mode;
+    // 寸法は画像・動画の要素そのものに当てる (外の部品が作った要素)。
     picture.style.width = `${naturalWidth * scale}px`;
     picture.style.height = `${naturalHeight * scale}px`;
-    updateModeButtons();
     updateScaleValue();
     scheduleScaleRead();
   }
 
   function stageHorizontalPadding(): number {
-    const computed = getComputedStyle(stage);
+    const box = stage();
+    if (!box) return 0;
+    const computed = getComputedStyle(box);
     const left = Number.parseFloat(computed.paddingLeft);
     const right = Number.parseFloat(computed.paddingRight);
     return (
@@ -280,7 +396,10 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
   }
 
   function availableImageWidth(): number {
-    const measured = canvas.getBoundingClientRect().width || canvas.clientWidth;
+    const box = canvas();
+    const measured = box
+      ? box.getBoundingClientRect().width || box.clientWidth
+      : 0;
     return Math.max(1, measured - stageHorizontalPadding());
   }
 
@@ -293,32 +412,21 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
     applyScale(stepDiagramScale(scale, direction), "custom");
   }
 
-  function updateNavigation(): void {
-    const disabled = images.length < 2;
-    previous.disabled = disabled;
-    next.disabled = disabled;
-  }
-
   function showCurrent(): void {
     const image = current();
     deps.onShow?.(image);
     const myVersion = ++loadVersion;
     if (copiedTimer) clearTimeout(copiedTimer);
     copiedTimer = null;
-    setCopyIcon(false);
+    copied = false;
     naturalWidth = 0;
     naturalHeight = 0;
     scale = 1;
     scaleMode = "fit";
-    path.textContent = image.path;
-    path.title = image.path;
-    dimensions.textContent = "—×—";
-    el.setAttribute("aria-label", imageTabText(language).imageView(image.name));
-    updateNavigation();
-    updateModeButtons();
-    for (const control of [zoomOut, zoomIn, actual, fit])
-      control.disabled = true;
-    setStatus("loading", (text) => text.loading);
+    dimensions = "—×—";
+    sized = false;
+    statusKind = "loading";
+    statusMessage = (text) => text.loading;
 
     let url: string;
     try {
@@ -326,13 +434,12 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
       if (!url) throw new Error("imageUrlFor returned an empty URL");
     } catch (error) {
       console.error("[code-viewer] image tab URL creation failed", error);
+      picture = null;
       setStatus(
         "error",
         (text) =>
           `${text.imageLoadFailed}\n${text.pathLabel}: ${image.path}\n${formatErrorDetail(error)}`,
       );
-      stage.replaceChildren();
-      picture = null;
       return;
     }
 
@@ -344,17 +451,18 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
       naturalWidth = size.width;
       naturalHeight = size.height;
       if (naturalWidth <= 0 || naturalHeight <= 0) {
+        nextPicture.hidden = true;
         setStatus(
           "error",
           (text) =>
             `${text.imageLoadFailed}\n${text.pathLabel}: ${image.path}\n${text.eventLabel}: invalid dimensions ${naturalWidth}×${naturalHeight}`,
         );
-        nextPicture.hidden = true;
         return;
       }
-      dimensions.textContent = `${naturalWidth}×${naturalHeight}`;
-      for (const control of [zoomOut, zoomIn, actual, fit])
-        control.disabled = false;
+      dimensions = `${naturalWidth}×${naturalHeight}`;
+      sized = true;
+      statusKind = null;
+      statusMessage = null;
       clearStatus();
       applyFit();
     });
@@ -368,7 +476,7 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
       );
     });
     picture = nextPicture;
-    stage.replaceChildren(nextPicture);
+    draw();
   }
 
   function navigate(direction: -1 | 1): void {
@@ -382,29 +490,21 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
       el.focus({ preventScroll: true });
   }
 
-  function setCopyIcon(copied: boolean): void {
-    const existing = copy.querySelector("svg");
-    existing?.remove();
-    copy.insertAdjacentHTML(
-      "afterbegin",
-      iconSvg("image-tab-icon", copied ? CHECK_16_PATHS : COPY_16_PATHS),
-    );
-    copy.dataset.copied = copied ? "true" : "false";
-  }
-
   async function copyCurrentPath(): Promise<void> {
     const image = current();
     const myVersion = loadVersion;
-    copy.disabled = true;
+    copying = true;
+    draw();
     try {
       await deps.copyPath(image.path);
       if (myVersion !== loadVersion) return;
-      setCopyIcon(true);
+      copied = true;
       setStatus("info", (text) => text.pathCopied);
       if (copiedTimer) clearTimeout(copiedTimer);
       copiedTimer = setTimeout(() => {
         copiedTimer = null;
-        setCopyIcon(false);
+        copied = false;
+        draw();
       }, COPY_FEEDBACK_MS);
     } catch (error) {
       console.error("[code-viewer] image tab path copy failed", error);
@@ -414,13 +514,15 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
           `${text.copyFailed}\n${text.pathLabel}: ${image.path}\n${formatErrorDetail(error)}`,
       );
     } finally {
-      copy.disabled = false;
+      copying = false;
+      draw();
     }
   }
 
   async function openCurrentPath(): Promise<void> {
     const image = current();
-    open.disabled = true;
+    opening = true;
+    draw();
     try {
       await deps.openPath(image.path);
     } catch (error) {
@@ -431,39 +533,12 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
           `${text.openFailed}\n${text.pathLabel}: ${image.path}\n${formatErrorDetail(error)}`,
       );
     } finally {
-      open.disabled = false;
+      opening = false;
+      draw();
     }
   }
 
-  function applyLanguage(): void {
-    const text = imageTabText(language);
-    zoomOut.title = text.zoomOut;
-    zoomOut.setAttribute("aria-label", text.zoomOut);
-    zoomIn.title = text.zoomIn;
-    zoomIn.setAttribute("aria-label", text.zoomIn);
-    actual.textContent = text.actualSize;
-    actual.title = text.actualSize;
-    fit.textContent = text.fitWidth;
-    fit.title = text.fitWidth;
-    previous.title = text.previousImage;
-    previous.setAttribute("aria-label", text.previousImage);
-    next.title = text.nextImage;
-    next.setAttribute("aria-label", text.nextImage);
-    copyLabel.textContent = text.copyPath;
-    copy.title = text.copyPath;
-    copy.setAttribute("aria-label", text.copyPath);
-    openLabel.textContent = text.openFolder;
-    open.title = text.openFolder;
-    open.setAttribute("aria-label", text.openFolder);
-    closeLabel.textContent = text.closeTab;
-    close.title = text.closeTab;
-    close.setAttribute("aria-label", text.closeTab);
-    if (images.length > 0)
-      el.setAttribute("aria-label", text.imageView(current().name));
-    updateStatus();
-  }
-
-  const onKeyDown = (event: KeyboardEvent): void => {
+  function onKeyDown(event: KeyboardEvent): void {
     if (!el.contains(document.activeElement)) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     let handled = true;
@@ -498,20 +573,21 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
     if (!handled) return;
     event.preventDefault();
     event.stopPropagation();
-  };
-  el.addEventListener("keydown", onKeyDown);
+  }
 
   if (typeof ResizeObserver === "function") {
     resizeObserver = new ResizeObserver((entries) => {
       const width = entries[entries.length - 1]?.contentRect.width ?? 0;
-      if (width > 0) el.dataset.narrow = String(width < NARROW_WIDTH);
+      if (width > 0 && narrow !== width < NARROW_WIDTH) {
+        narrow = width < NARROW_WIDTH;
+        draw();
+      }
       if (scaleMode === "fit") applyFit();
     });
     resizeObserver.observe(el);
   }
 
   configureImages(deps.image, deps.images);
-  applyLanguage();
   showCurrent();
 
   return {
@@ -524,7 +600,7 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
     setLanguage(nextLanguage) {
       if (disposed) return;
       language = nextLanguage;
-      applyLanguage();
+      draw();
     },
     focus() {
       if (!disposed) el.focus();
@@ -535,7 +611,6 @@ export function createImageTabView(deps: ImageTabDeps): ImageTabHandle {
       loadVersion += 1;
       resizeObserver?.disconnect();
       resizeObserver = null;
-      el.removeEventListener("keydown", onKeyDown);
       if (scaleFrame !== null && typeof cancelAnimationFrame === "function")
         cancelAnimationFrame(scaleFrame);
       scaleFrame = null;

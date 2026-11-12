@@ -1,3 +1,7 @@
+import { live } from "lit/directives/live.js";
+import { repeat } from "lit/directives/repeat.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl, projectKey } from "../core/api-url";
 // Code annotations (AI walkthrough) UI.
 //
@@ -17,7 +21,6 @@ import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 import {
   CHEVRON_DOWN_16_PATH,
   COPY_16_PATHS,
-  iconSvg,
   NEXT_16_PATHS,
   PENCIL_16_PATH,
   PLUS_16_PATH,
@@ -43,6 +46,14 @@ import type {
 import { createAnnotationEditor } from "./annotations/editor";
 import { annotationText } from "./annotations/i18n";
 import { diffRowHasAfterChange } from "./diff-line-select";
+import { iconTemplate } from "./ui/icon";
+import {
+  detachedElement,
+  renderOwned,
+  templateElement,
+  templateElements,
+  templateFragment,
+} from "./ui/renderer";
 import { showConfirmDialog, showPromptDialog } from "./ui-dialog";
 
 export const ANNOTATION_SESSION_PARAM = "annotationSession";
@@ -123,7 +134,344 @@ export type AnnotationsUi = {
   stepAnnotation(direction: 1 | -1): void;
 };
 
-export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
+/** 絞り込みの欄と「すべて / この場所」。 */
+export type AnnotationToolbarProps = {
+  search: {
+    value: string;
+    placeholder: string;
+    onInput(value: string): void;
+    onEscape(): void;
+  };
+  clear: { label: string; disabled: boolean; onClick(): void };
+  all: { label: string; pressed: boolean; onClick(): void };
+  current: {
+    label: string;
+    title: string;
+    pressed: boolean;
+    disabled: boolean;
+    onClick(): void;
+  };
+};
+
+/** 読み込み・保存に失敗したときの帯。 */
+export type AnnotationErrorProps = {
+  hidden: boolean;
+  title: string;
+  summary: string;
+  detail: string;
+  retry: { label: string; onClick(): void };
+  dismiss: { label: string; onClick(): void };
+};
+
+export type AnnotationIconButtonProps = {
+  icon: string;
+  paths: string | string[];
+  label: string;
+  /** 足す class (annotation-icon-btn の後ろ)。 */
+  extra?: string;
+  /** 開閉のボタンだけ (aria-expanded)。 */
+  expanded?: boolean;
+  onClick(event: Event): void;
+};
+
+export type AnnotationEntryRowProps = {
+  id: string;
+  active: boolean;
+  step: number;
+  summary: string;
+  location: string;
+  time: { text: string; title: string } | null;
+  onOpen(): void;
+  remove: AnnotationIconButtonProps;
+};
+
+export type AnnotationSessionProps = {
+  id: string;
+  active: boolean;
+  createdAt: string;
+  title: string;
+  time: string;
+  selectTitle: string;
+  count: { text: string; title: string };
+  expanded: boolean;
+  collapse: AnnotationIconButtonProps;
+  rename: AnnotationIconButtonProps;
+  remove: AnnotationIconButtonProps;
+  onSelect(): void;
+  /** 札の中 (ボタン以外) を押したとき。 */
+  onCardClick(event: Event): void;
+  entries: AnnotationEntryRowProps[];
+};
+
+/** 右の面の一覧 (#annotation-sessions) の中。 */
+export type AnnotationPanelProps =
+  | { kind: "sessions"; sessions: AnnotationSessionProps[] }
+  | {
+      kind: "empty";
+      heading: string;
+      description: string;
+      action: { label: string; onClick(): void };
+      hint: string;
+    };
+
+/** コードの行の下に差し込む注釈 (と、行の高さをそろえる向かいの空の行)。 */
+export type AnnotationInlineProps = {
+  id: string;
+  active: boolean;
+  colSpan: number;
+  idSuffix: string;
+  step: { label: string; title: string; onClick(): void };
+  location: { text: string; title: string };
+  read: { label: string; onClick(): void };
+  expand: AnnotationExpandProps;
+  copy: AnnotationIconButtonProps;
+  title: string;
+  /** 描いた Markdown (渡された文字から作った HTML)。 */
+  html: string;
+};
+
+export type AnnotationExpandProps = {
+  bodyId: string;
+  expanded: boolean;
+  label: string;
+  title: string;
+  onToggle(): void;
+};
+
+/** データストアの画面の上に並べる注釈。 */
+export type AnnotationDatabaseProps = {
+  id: string;
+  active: boolean;
+  bodyId: string;
+  expand: AnnotationExpandProps;
+  step: { label: string; title: string; onClick(): void };
+  title: { text: string; onClick(): void };
+  location: string;
+  copy: AnnotationIconButtonProps;
+  html: string;
+};
+
+/** 注釈の画面 (createAnnotationsUi) の描き方。 */
+export type AnnotationsView = {
+  /** 画面にもとからあるボタンの中身 (絵と文字)。 */
+  iconLabel(icon: string, paths: string | string[], label?: string): unknown;
+  iconButton(props: AnnotationIconButtonProps): unknown;
+  toolbar(props: AnnotationToolbarProps): unknown;
+  error(props: AnnotationErrorProps): unknown;
+  panel(props: AnnotationPanelProps): unknown;
+  detailMeta(): unknown;
+  detailBody(props: { title: string | null; html: string }): unknown;
+  inlineRow(props: AnnotationInlineProps): unknown;
+  spacerRow(props: { id: string; colSpan: number }): unknown;
+  databaseStrip(props: { label: string; blocks: HTMLElement[] }): unknown;
+  databaseBlock(props: AnnotationDatabaseProps): unknown;
+};
+
+const iconButtonTemplate = (props: AnnotationIconButtonProps) => html`<button
+  type="button"
+  class=${props.extra ? `annotation-icon-btn ${props.extra}` : "annotation-icon-btn"}
+  title=${props.label}
+  aria-label=${props.label}
+  aria-expanded=${props.expanded === undefined ? nothing : String(props.expanded)}
+  @click=${props.onClick}
+>${iconTemplate(props.paths, props.icon)}</button>`;
+
+const stepTemplate = (step: AnnotationInlineProps["step"]) => html`<button
+  type="button"
+  class="gdp-annotation-step"
+  title=${step.title}
+  aria-label=${step.title}
+  @click=${step.onClick}
+>${step.label}</button>`;
+
+const expandTemplate = (props: AnnotationExpandProps) => html`<button
+  type="button"
+  class="annotation-icon-btn gdp-annotation-expand"
+  title=${props.title}
+  aria-label=${props.title}
+  aria-controls=${props.bodyId}
+  aria-expanded=${String(props.expanded)}
+  @click=${props.onToggle}
+>${iconTemplate(CHEVRON_DOWN_16_PATH, "octicon-chevron-down")}${props.label}</button>`;
+
+function sessionTemplate(session: AnnotationSessionProps): unknown {
+  return html`<section
+    class=${session.active ? "annotation-session active" : "annotation-session"}
+    data-session-id=${session.id}
+    title=${session.createdAt}
+    @click=${session.onCardClick}
+  ><div class="annotation-session-head">${iconButtonTemplate(session.collapse)}<button
+        type="button"
+        class="annotation-session-select"
+        title=${session.selectTitle}
+        aria-pressed=${String(session.active)}
+        @click=${session.onSelect}
+      ><span>${session.title}</span><small
+          class="annotation-session-time"
+          title=${session.createdAt}
+        >${session.time}</small></button
+      ><span class="annotation-session-count" title=${session.count.title}
+        >${session.count.text}</span
+      >${iconButtonTemplate(session.rename)}${iconButtonTemplate(session.remove)}</div
+    ><ol class="annotation-entries" ?hidden=${!session.expanded}>${repeat(
+      session.entries,
+      (entry) => entry.id,
+      (entry) => html`<li
+        class=${entry.active ? "active" : ""}
+        data-entry-id=${entry.id}
+      ><button
+          type="button"
+          class="annotation-entry-open"
+          data-step=${String(entry.step)}
+          @click=${entry.onOpen}
+        ><span class="annotation-entry-summary" title=${entry.summary}
+            >${entry.summary}</span
+          ><span class="annotation-entry-location" title=${entry.location}
+            >${entry.location}</span
+          >${
+            entry.time
+              ? html`<span class="annotation-entry-time" title=${entry.time.title}
+                  >${entry.time.text}</span
+                >`
+              : nothing
+          }</button
+        >${iconButtonTemplate(entry.remove)}</li>`,
+    )}</ol></section>`;
+}
+
+export const DEFAULT_VIEW: AnnotationsView = {
+  iconLabel: (icon, paths, label) =>
+    html`${iconTemplate(paths, icon)}${label ?? nothing}`,
+  iconButton: iconButtonTemplate,
+  toolbar: (props) => html`<div class="annotation-search-toolbar"><div
+      class="annotation-search-box"
+    >${iconTemplate(SEARCH_16_PATH, "octicon-search")}<input
+        id="annotation-search"
+        type="search"
+        placeholder=${props.search.placeholder}
+        aria-label=${props.search.placeholder}
+        .value=${live(props.search.value)}
+        @input=${(event: Event) =>
+          props.search.onInput((event.currentTarget as HTMLInputElement).value)}
+        @keydown=${(event: KeyboardEvent) => {
+          if (event.key !== "Escape") return;
+          event.stopPropagation();
+          props.search.onEscape();
+        }}
+      /><button
+        type="button"
+        class="annotation-icon-btn"
+        id="annotation-search-clear"
+        title=${props.clear.label}
+        aria-label=${props.clear.label}
+        ?disabled=${props.clear.disabled}
+        @click=${props.clear.onClick}
+      >${iconTemplate(X_16_PATH, "octicon-x")}</button></div
+    ><div class="annotation-search-scopes"><button
+        type="button"
+        id="annotation-scope-all"
+        aria-pressed=${String(props.all.pressed)}
+        @click=${props.all.onClick}
+      >${props.all.label}</button><button
+        type="button"
+        id="annotation-scope-current"
+        title=${props.current.title}
+        aria-pressed=${String(props.current.pressed)}
+        ?disabled=${props.current.disabled}
+        @click=${props.current.onClick}
+      >${props.current.label}</button></div></div>`,
+  error: (
+    props,
+  ) => html`<div id="annotation-error" role="alert" ?hidden=${props.hidden}
+    ><strong>${props.title}</strong>${iconButtonTemplate({
+      icon: "octicon-x",
+      paths: X_16_PATH,
+      label: props.dismiss.label,
+      onClick: props.dismiss.onClick,
+    })}<details><summary>${props.summary}</summary><pre>${props.detail}</pre></details
+    ><button type="button" class="gdp-btn gdp-btn-sm" @click=${props.retry.onClick}
+      >${props.retry.label}</button
+    ></div>`,
+  panel: (props) =>
+    props.kind === "empty"
+      ? html`<div class="annotation-empty"><h3>${props.heading}</h3><p
+            >${props.description}</p
+          ><button
+            type="button"
+            class="gdp-btn annotation-primary"
+            @click=${props.action.onClick}
+          >${props.action.label}</button><p class="annotation-empty-hint"
+            >${props.hint}</p
+          ></div>`
+      : repeat(
+          props.sessions,
+          (session) => session.id,
+          (session) => sessionTemplate(session),
+        ),
+  detailMeta: () => html`<div class="annotation-detail-meta"></div>`,
+  detailBody: (props) => html`${
+    props.title
+      ? html`<strong class="annotation-detail-title">${props.title}</strong>`
+      : nothing
+  }<div class="gdp-markdown-preview markdown-body gdp-annotation-prose"
+    >${unsafeHTML(props.html)}</div
+  >`,
+  inlineRow: (props) => html`<tr
+    class=${props.active ? "gdp-annotation-row active" : "gdp-annotation-row"}
+    data-annotation-id=${props.id}
+  ><td colspan=${props.colSpan}><div
+        class="gdp-annotation-inline"
+        role="note"
+        aria-labelledby=${`annotation-title-${props.id}${props.idSuffix}`}
+      ><div class="gdp-annotation-inline-head">${stepTemplate(props.step)}<span
+            class="gdp-annotation-inline-location"
+            title=${props.location.title}
+          >${props.location.text}</span><div class="gdp-annotation-inline-actions"
+            ><button
+              type="button"
+              class="gdp-btn gdp-btn-sm gdp-annotation-read"
+              @click=${props.read.onClick}
+            >${props.read.label}</button>${expandTemplate(props.expand)}${iconButtonTemplate(props.copy)}</div
+          ></div
+        ><strong
+          class="gdp-annotation-inline-title"
+          id=${`annotation-title-${props.id}${props.idSuffix}`}
+        >${props.title}</strong><div
+          class="gdp-annotation-inline-body gdp-markdown-preview markdown-body gdp-annotation-prose"
+          id=${props.expand.bodyId}
+          ?hidden=${!props.expand.expanded}
+        >${unsafeHTML(props.html)}</div></div></td></tr>`,
+  spacerRow: (props) => html`<tr
+    class="gdp-annotation-row gdp-annotation-spacer"
+    data-annotation-id=${props.id}
+  ><td colspan=${props.colSpan}><div></div></td></tr>`,
+  databaseStrip: (props) => html`<section
+    class="gdp-db-annotation-strip"
+    aria-label=${props.label}
+  >${props.blocks}</section>`,
+  databaseBlock: (props) => html`<div
+    class=${props.active ? "gdp-db-annotation-inline active" : "gdp-db-annotation-inline"}
+    data-annotation-id=${props.id}
+  ><div class="gdp-db-annotation-inline-head">${expandTemplate(props.expand)}${stepTemplate(
+    props.step,
+  )}<button
+        type="button"
+        class="gdp-db-annotation-inline-title"
+        @click=${props.title.onClick}
+      >${props.title.text}</button><span class="gdp-db-annotation-inline-location"
+        >${props.location}</span
+      >${iconButtonTemplate(props.copy)}</div
+    ><div
+      class="gdp-db-annotation-inline-body"
+      id=${props.bodyId}
+      ?hidden=${!props.expand.expanded}
+    >${unsafeHTML(props.html)}</div></div>`,
+};
+
+export function createAnnotationsUi(
+  deps: AnnotationsUiDeps,
+  view: AnnotationsView = DEFAULT_VIEW,
+): AnnotationsUi {
   const { $ } = deps;
   const getLanguage = () => deps.getLanguage?.() || "en";
   const t = () => annotationText(getLanguage());
@@ -186,25 +534,24 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   const annotationCountEl = $("#annotations-count");
   const annotationListCountEl = $("#annotation-list-count");
   const annotationAdd = $<HTMLButtonElement>("#annotation-add");
-  annotationAdd.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
+  annotationAdd.replaceChildren(
+    templateFragment(view.iconLabel("octicon-plus", PLUS_16_PATH)),
+  );
   const annotationDetailPrev = $<HTMLButtonElement>("#annotation-detail-prev");
   const annotationDetailNext = $<HTMLButtonElement>("#annotation-detail-next");
-  annotationDetailPrev.innerHTML = iconSvg(
-    "octicon-skip-back",
-    PREVIOUS_16_PATHS,
+  annotationDetailPrev.replaceChildren(
+    templateFragment(view.iconLabel("octicon-skip-back", PREVIOUS_16_PATHS)),
   );
   annotationDetailPrev.title = t().previous;
   annotationDetailPrev.setAttribute("aria-label", t().previous);
-  annotationDetailNext.innerHTML = iconSvg(
-    "octicon-skip-forward",
-    NEXT_16_PATHS,
+  annotationDetailNext.replaceChildren(
+    templateFragment(view.iconLabel("octicon-skip-forward", NEXT_16_PATHS)),
   );
   annotationDetailNext.title = t().next;
   annotationDetailNext.setAttribute("aria-label", t().next);
 
   const detailHead = annotationDetail.querySelector(".annotation-detail-head");
-  const detailMeta = document.createElement("div");
-  detailMeta.className = "annotation-detail-meta";
+  const detailMeta = templateElement(view.detailMeta());
   detailMeta.append(
     $("#annotation-detail-session"),
     $("#annotation-detail-time"),
@@ -212,122 +559,121 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   detailHead?.after(detailMeta);
   detailHead?.prepend($("#annotation-detail-close"));
 
-  const searchToolbar = document.createElement("div");
-  searchToolbar.className = "annotation-search-toolbar";
-  const searchBox = document.createElement("div");
-  searchBox.className = "annotation-search-box";
-  searchBox.innerHTML = iconSvg("octicon-search", SEARCH_16_PATH);
-  const search = document.createElement("input");
-  search.id = "annotation-search";
-  search.type = "search";
-  const clearSearch = annotationIconButton(
-    "octicon-x",
-    X_16_PATH,
-    t().clearSearch,
+  /** 一覧の絞り込みの語。 */
+  let searchValue = "";
+  /** 今の画面に「この場所」があるか (ファイル・差分・データストアの表)。 */
+  function currentScopeAvailable(): boolean {
+    const route = deps.getRoute();
+    return (
+      ((route.screen === "file" || route.screen === "diff") && !!route.path) ||
+      (route.screen === "database" && !!route.db)
+    );
+  }
+  const toolbar = detachedElement(() =>
+    view.toolbar({
+      search: {
+        value: searchValue,
+        placeholder: t().search,
+        onInput: (value) => {
+          searchValue = value;
+          renderAnnotationPanel();
+        },
+        onEscape: () => {
+          searchValue = "";
+          renderAnnotationPanel();
+        },
+      },
+      clear: {
+        label: t().clearSearch,
+        disabled: !searchValue,
+        onClick: () => {
+          searchValue = "";
+          renderAnnotationPanel();
+          toolbar.element
+            .querySelector<HTMLInputElement>("#annotation-search")
+            ?.focus();
+        },
+      },
+      all: {
+        label: t().all,
+        pressed: !currentLocationOnly,
+        onClick: () => {
+          currentLocationOnly = false;
+          renderAnnotationPanel();
+        },
+      },
+      current: {
+        label: t().current,
+        title: t().currentHint,
+        pressed: currentLocationOnly,
+        disabled: !currentScopeAvailable(),
+        onClick: () => {
+          currentLocationOnly = true;
+          renderAnnotationPanel();
+        },
+      },
+    }),
   );
-  clearSearch.id = "annotation-search-clear";
-  searchBox.append(search, clearSearch);
-  const scopes = document.createElement("div");
-  scopes.className = "annotation-search-scopes";
-  const allScope = document.createElement("button");
-  const currentScope = document.createElement("button");
-  allScope.type = currentScope.type = "button";
-  allScope.id = "annotation-scope-all";
-  currentScope.id = "annotation-scope-current";
-  scopes.append(allScope, currentScope);
-  searchToolbar.append(searchBox, scopes);
-  annotationSessionsEl.before(searchToolbar);
-  search.addEventListener("input", renderAnnotationPanel);
-  search.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      search.value = "";
-      renderAnnotationPanel();
-    }
-  });
-  clearSearch.addEventListener("click", () => {
-    search.value = "";
-    renderAnnotationPanel();
-    search.focus();
-  });
-  allScope.addEventListener("click", () => {
-    currentLocationOnly = false;
-    renderAnnotationPanel();
-  });
-  currentScope.addEventListener("click", () => {
-    currentLocationOnly = true;
-    renderAnnotationPanel();
-  });
+  annotationSessionsEl.before(toolbar.element);
 
-  const errorBanner = document.createElement("div");
-  errorBanner.id = "annotation-error";
-  errorBanner.setAttribute("role", "alert");
-  errorBanner.hidden = true;
-  const errorTitle = document.createElement("strong");
-  const errorDetails = document.createElement("details");
-  const errorSummary = document.createElement("summary");
-  const errorBody = document.createElement("pre");
-  errorDetails.append(errorSummary, errorBody);
-  const retry = document.createElement("button");
-  retry.type = "button";
-  retry.className = "gdp-btn gdp-btn-sm";
-  retry.addEventListener("click", () => {
-    void refreshAnnotations();
-  });
-  const dismissError = annotationIconButton(
-    "octicon-x",
-    X_16_PATH,
-    t().dismiss,
+  /** 帯に出している失敗 (読み込み・保存)。 */
+  let failure = { shown: false, title: "", detail: "" };
+  const errorBanner = detachedElement(() =>
+    view.error({
+      hidden: !failure.shown,
+      title: failure.title,
+      summary: t().errorDetails,
+      detail: failure.detail,
+      retry: {
+        label: t().retry,
+        onClick: () => {
+          void refreshAnnotations();
+        },
+      },
+      dismiss: { label: t().dismiss, onClick: () => hideAnnotationError() },
+    }),
   );
-  dismissError.addEventListener("click", () => {
-    errorBanner.hidden = true;
-  });
-  errorBanner.append(errorTitle, dismissError, errorDetails, retry);
-  annotationPanel.querySelector(".annotation-panel-head")?.after(errorBanner);
-  if (!errorBanner.isConnected) annotationPanel.prepend(errorBanner);
+  annotationPanel
+    .querySelector(".annotation-panel-head")
+    ?.after(errorBanner.element);
+  if (!errorBanner.element.isConnected)
+    annotationPanel.prepend(errorBanner.element);
+
+  function hideAnnotationError() {
+    failure = { ...failure, shown: false };
+    errorBanner.draw();
+  }
 
   function showAnnotationError(error: unknown, message = t().actionFailed) {
     console.error(message, error);
-    errorTitle.textContent = message;
-    errorBody.textContent = formatErrorDetail(error);
-    errorBanner.hidden = false;
+    failure = { shown: true, title: message, detail: formatErrorDetail(error) };
+    errorBanner.draw();
   }
 
   function updateAnnotationContext() {
     // Creation also works from the repository list by entering a file path.
     annotationAdd.hidden = false;
-    const route = deps.getRoute();
-    currentScope.disabled =
-      !((route.screen === "file" || route.screen === "diff") && route.path) &&
-      !(route.screen === "database" && route.db);
-    if (currentScope.disabled) currentLocationOnly = false;
-    allScope.setAttribute("aria-pressed", String(!currentLocationOnly));
-    currentScope.setAttribute("aria-pressed", String(currentLocationOnly));
+    if (!currentScopeAvailable()) currentLocationOnly = false;
+    toolbar.draw();
   }
 
   function localize() {
-    annotationAdd.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
-    annotationAdd.append(t().add);
+    annotationAdd.replaceChildren(
+      templateFragment(view.iconLabel("octicon-plus", PLUS_16_PATH, t().add)),
+    );
     annotationAdd.title = t().add;
     annotationAdd.setAttribute("aria-label", t().add);
     const close = $("#annotation-panel-close");
-    close.innerHTML = iconSvg("octicon-x", X_16_PATH);
+    close.replaceChildren(
+      templateFragment(view.iconLabel("octicon-x", X_16_PATH)),
+    );
     close.title = t().close;
     close.setAttribute("aria-label", t().close);
     $("#annotation-detail-close").textContent = t().back;
     $("#annotation-clear").textContent = t().deleteAll;
     $("#annotation-clear").title = t().deleteAll;
-    search.placeholder = t().search;
-    search.setAttribute("aria-label", t().search);
-    clearSearch.title = t().clearSearch;
-    clearSearch.setAttribute("aria-label", t().clearSearch);
-    allScope.textContent = t().all;
-    currentScope.textContent = t().current;
-    currentScope.title = t().currentHint;
-    errorSummary.textContent = t().errorDetails;
-    retry.textContent = t().retry;
-    dismissError.title = t().dismiss;
-    dismissError.setAttribute("aria-label", t().dismiss);
+    toolbar.draw();
+    errorBanner.draw();
     for (const [button, label] of [
       [annotationDetailPrev, t().previous],
       [annotationDetailNext, t().next],
@@ -439,47 +785,49 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   // it opens the entry in the detail dock, so the walkthrough order is
   // navigable straight from the code. The label matches the panel list
   // numbering and the detail dock's "n/total" counter.
-  function createStepChip(
+  function stepProps(
     entry: AnnotationEntry,
     step: { index: number; total: number },
-  ): HTMLButtonElement {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "gdp-annotation-step";
-    chip.textContent = `${step.index + 1}/${step.total}`;
-    chip.title = t().openStep(step.index + 1, step.total);
-    chip.setAttribute("aria-label", chip.title);
-    chip.addEventListener("click", () => {
-      void openAnnotationEntry(entry.id);
-    });
-    return chip;
+  ): AnnotationInlineProps["step"] {
+    return {
+      label: `${step.index + 1}/${step.total}`,
+      title: t().openStep(step.index + 1, step.total),
+      onClick: () => {
+        void openAnnotationEntry(entry.id);
+      },
+    };
   }
 
-  function createInlineExpandButton(entry: AnnotationEntry, body: HTMLElement) {
-    const toggle = annotationIconButton(
-      "octicon-chevron-down",
-      CHEVRON_DOWN_16_PATH,
-      t().expandNote,
-    );
-    toggle.classList.add("gdp-annotation-expand");
-    toggle.append(t().body);
-    toggle.setAttribute("aria-controls", body.id);
-    const sync = (expanded: boolean) => {
-      body.hidden = !expanded;
-      toggle.setAttribute("aria-expanded", String(expanded));
-      toggle.title = expanded ? t().collapseNote : t().expandNote;
-      toggle.setAttribute("aria-label", toggle.title);
+  /**
+   * 本文の開閉。パネルを開いても、読んでいる注釈の本文は隠さない。開閉は
+   * 押したときだけ変わる。
+   */
+  function expandProps(
+    entry: AnnotationEntry,
+    bodyId: string,
+    redraw: () => void,
+  ): AnnotationExpandProps {
+    const expanded = inlineExpanded.get(entry.id) ?? true;
+    return {
+      bodyId,
+      expanded,
+      label: t().body,
+      title: expanded ? t().collapseNote : t().expandNote,
+      onToggle: () => {
+        inlineExpanded.set(entry.id, !expanded);
+        redraw();
+        syncInlineAnnotationSpacerHeights();
+      },
     };
-    // Opening the panel must not hide explanations the reader is following
-    // in the code. Only an explicit toggle changes inline visibility.
-    sync(inlineExpanded.get(entry.id) ?? true);
-    toggle.addEventListener("click", () => {
-      const expanded = body.hidden !== false;
-      inlineExpanded.set(entry.id, expanded);
-      sync(expanded);
-      syncInlineAnnotationSpacerHeights();
-    });
-    return toggle;
+  }
+
+  function markdownHtml(entry: AnnotationEntry): string {
+    ensureMarkdownHighlighter();
+    return renderMarkdownHtml(
+      entry.body,
+      { path: entry.path, ref: annotationRefForEntry(entry) },
+      mdHighlighter,
+    );
   }
 
   function buildInlineAnnotationRow(
@@ -490,97 +838,64 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     copy = 0,
   ): HTMLTableRowElement {
     const idSuffix = copy === 0 ? "" : `-${copy + 1}`;
-    const tr = document.createElement("tr");
-    tr.className = "gdp-annotation-row";
-    tr.dataset.annotationId = entry.id;
-    tr.classList.toggle("active", entry.id === activeAnnotationId);
-    const td = document.createElement("td");
-    td.colSpan = colSpan;
-    const box = document.createElement("div");
-    box.className = "gdp-annotation-inline";
-    box.setAttribute("role", "note");
-    const head = document.createElement("div");
-    head.className = "gdp-annotation-inline-head";
-    const location = document.createElement("span");
-    location.className = "gdp-annotation-inline-location";
-    location.textContent = entry.line
-      ? t().inlineLines(entry.line.start, entry.line.end)
-      : t().wholeFile;
-    location.title = annotationLocationLabel(entry);
-    const actions = document.createElement("div");
-    actions.className = "gdp-annotation-inline-actions";
-    const read = document.createElement("button");
-    read.type = "button";
-    read.className = "gdp-btn gdp-btn-sm gdp-annotation-read";
-    read.textContent = t().readInPanel;
-    read.addEventListener("click", () => {
-      void openAnnotationEntry(entry.id);
-    });
-    head.append(createStepChip(entry, step), location, actions);
-    const heading = document.createElement("strong");
-    heading.className = "gdp-annotation-inline-title";
-    heading.id = `annotation-title-${entry.id}${idSuffix}`;
-    heading.textContent = entry.title?.trim() || t().body;
-    box.setAttribute("aria-labelledby", heading.id);
-    const markdown = document.createElement("div");
-    markdown.className =
-      "gdp-annotation-inline-body gdp-markdown-preview markdown-body gdp-annotation-prose";
-    markdown.id = `annotation-body-${entry.id}${idSuffix}`;
-    ensureMarkdownHighlighter();
-    markdown.innerHTML = renderMarkdownHtml(
-      entry.body,
-      { path: entry.path, ref: annotationRefForEntry(entry) },
-      mdHighlighter,
+    const html = markdownHtml(entry);
+    const row = detachedElement(() =>
+      view.inlineRow({
+        id: entry.id,
+        active: entry.id === activeAnnotationId,
+        colSpan,
+        idSuffix,
+        step: stepProps(entry, step),
+        location: {
+          text: entry.line
+            ? t().inlineLines(entry.line.start, entry.line.end)
+            : t().wholeFile,
+          title: annotationLocationLabel(entry),
+        },
+        read: {
+          label: t().readInPanel,
+          onClick: () => {
+            void openAnnotationEntry(entry.id);
+          },
+        },
+        expand: expandProps(
+          entry,
+          `annotation-body-${entry.id}${idSuffix}`,
+          () => row.draw(),
+        ),
+        copy: copyRefProps(entry, "gdp-annotation-inline-copy"),
+        title: entry.title?.trim() || t().body,
+        html,
+      }),
     );
-    actions.append(
-      read,
-      createInlineExpandButton(entry, markdown),
-      createCopyRefButton(entry, "gdp-annotation-inline-copy"),
-    );
-    box.append(head, heading, markdown);
-    td.appendChild(box);
-    tr.appendChild(td);
-    return tr;
+    return row.element as HTMLTableRowElement;
   }
 
   function buildDatabaseAnnotationBlock(
     entry: AnnotationEntry,
     step: { index: number; total: number },
   ): HTMLElement {
-    const box = document.createElement("div");
-    box.className = "gdp-db-annotation-inline";
-    box.dataset.annotationId = entry.id;
-    box.classList.toggle("active", entry.id === activeAnnotationId);
-    const head = document.createElement("div");
-    head.className = "gdp-db-annotation-inline-head";
-    const title = document.createElement("button");
-    title.type = "button";
-    title.className = "gdp-db-annotation-inline-title";
-    title.textContent = entry.title || annotationLocationLabel(entry);
-    title.addEventListener("click", () => {
-      void openAnnotationEntry(entry.id);
-    });
-    const location = document.createElement("span");
-    location.className = "gdp-db-annotation-inline-location";
-    location.textContent = annotationLocationLabel(entry);
-    head.append(
-      createStepChip(entry, step),
-      title,
-      location,
-      createCopyRefButton(entry),
+    const html = markdownHtml(entry);
+    const bodyId = `annotation-db-body-${entry.id}`;
+    const block = detachedElement(() =>
+      view.databaseBlock({
+        id: entry.id,
+        active: entry.id === activeAnnotationId,
+        bodyId,
+        expand: expandProps(entry, bodyId, () => block.draw()),
+        step: stepProps(entry, step),
+        title: {
+          text: entry.title || annotationLocationLabel(entry),
+          onClick: () => {
+            void openAnnotationEntry(entry.id);
+          },
+        },
+        location: annotationLocationLabel(entry),
+        copy: copyRefProps(entry),
+        html,
+      }),
     );
-    const markdown = document.createElement("div");
-    markdown.className = "gdp-db-annotation-inline-body";
-    markdown.id = `annotation-db-body-${entry.id}`;
-    ensureMarkdownHighlighter();
-    markdown.innerHTML = renderMarkdownHtml(
-      entry.body,
-      { path: entry.path, ref: annotationRefForEntry(entry) },
-      mdHighlighter,
-    );
-    head.prepend(createInlineExpandButton(entry, markdown));
-    box.append(head, markdown);
-    return box;
+    return block.element;
   }
 
   function applyDatabaseAnnotations(session: AnnotationSession | undefined) {
@@ -597,18 +912,19 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     if (!matches.length) return;
     const root = document.querySelector<HTMLElement>(".db-root");
     if (!root) return;
-    const strip = document.createElement("section");
-    strip.className = "gdp-db-annotation-strip";
-    strip.setAttribute("aria-label", t().datastoreNotes);
-    for (const entry of matches) {
-      strip.appendChild(
-        buildDatabaseAnnotationBlock(entry, {
-          index: session.entries.indexOf(entry),
-          total: session.entries.length,
+    root.prepend(
+      templateElement(
+        view.databaseStrip({
+          label: t().datastoreNotes,
+          blocks: matches.map((entry) =>
+            buildDatabaseAnnotationBlock(entry, {
+              index: session.entries.indexOf(entry),
+              total: session.entries.length,
+            }),
+          ),
         }),
-      );
-    }
-    root.prepend(strip);
+      ),
+    );
     databaseAnnotationsMounted = true;
   }
 
@@ -697,14 +1013,9 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     entry: AnnotationEntry,
     colSpan: number,
   ): HTMLTableRowElement {
-    const tr = document.createElement("tr");
-    tr.className = "gdp-annotation-row gdp-annotation-spacer";
-    tr.dataset.annotationId = entry.id;
-    const td = document.createElement("td");
-    td.colSpan = colSpan;
-    td.appendChild(document.createElement("div"));
-    tr.appendChild(td);
-    return tr;
+    return templateElement<HTMLTableRowElement>(
+      view.spacerRow({ id: entry.id, colSpan }),
+    );
   }
 
   // Both sidebar resizing and late Markdown layout (fonts/images) can alter
@@ -906,50 +1217,40 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     ].join("\n");
   }
 
-  function annotationIconButton(
-    icon: string,
-    paths: string | string[],
-    title: string,
-  ): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "annotation-icon-btn";
-    button.title = title;
-    button.setAttribute("aria-label", title);
-    button.innerHTML = iconSvg(icon, paths);
-    return button;
-  }
-
-  function createCopyRefButton(
+  /**
+   * AI に渡す参照を写すボタン。押した後の印 (copied・failed と title) は、押した
+   * ボタンへの一瞬の合図。
+   */
+  function copyRefProps(
     entry: AnnotationEntry,
-    extraClass = "",
-  ): HTMLButtonElement {
-    const button = annotationIconButton(
-      "octicon-copy",
-      COPY_16_PATHS,
-      t().copy,
-    );
-    if (extraClass) button.classList.add(extraClass);
-    button.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const found = findAnnotation(entry.id);
-      if (!found) return;
-      try {
-        await navigator.clipboard.writeText(
-          annotationAiReference(found.session, found.entry),
-        );
-        button.classList.add("copied");
-        button.title = t().copied;
-      } catch (error) {
-        showAnnotationError(error, t().copyFailed);
-        button.classList.add("failed");
-      }
-      setTimeout(() => {
-        button.classList.remove("copied", "failed");
-        button.title = t().copy;
-      }, 1200);
-    });
-    return button;
+    extra?: string,
+  ): AnnotationIconButtonProps {
+    return {
+      icon: "octicon-copy",
+      paths: COPY_16_PATHS,
+      label: t().copy,
+      ...(extra ? { extra } : {}),
+      onClick: async (e) => {
+        e.stopPropagation();
+        const button = e.currentTarget as HTMLButtonElement;
+        const found = findAnnotation(entry.id);
+        if (!found) return;
+        try {
+          await navigator.clipboard.writeText(
+            annotationAiReference(found.session, found.entry),
+          );
+          button.classList.add("copied");
+          button.title = t().copied;
+        } catch (error) {
+          showAnnotationError(error, t().copyFailed);
+          button.classList.add("failed");
+        }
+        setTimeout(() => {
+          button.classList.remove("copied", "failed");
+          button.title = t().copy;
+        }, 1200);
+      },
+    };
   }
 
   function findAnnotation(entryId: string): {
@@ -1000,7 +1301,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     if (revision !== dataRevision) return doRefreshAnnotations();
     ANNOTATIONS = state;
     annotationsLoaded = true;
-    if (errorTitle.textContent === t().loadFailed) errorBanner.hidden = true;
+    if (failure.title === t().loadFailed) hideAnnotationError();
     updateAnnotationBadge();
     if (
       activeSessionId &&
@@ -1172,7 +1473,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         // never offer "Save" again and accidentally create a duplicate note.
         editor = null;
         annotationPanel.classList.remove("annotation-editing");
-        errorBanner.hidden = true;
+        hideAnnotationError();
         activeSessionId = session.id;
         updateAnnotationBadge();
         renderAnnotationPanel();
@@ -1189,12 +1490,129 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     ensureMarkdownHighlighter();
   }
 
+  function sessionProps(
+    session: AnnotationSession,
+    entries: AnnotationEntry[],
+    expanded: boolean,
+  ): AnnotationSessionProps {
+    const active = session.id === activeSessionId;
+    return {
+      id: session.id,
+      active,
+      createdAt: session.created_at,
+      title: session.title,
+      time: annotationTimeLabel(session.created_at),
+      selectTitle: t().inline,
+      // Total step count, visible before opening the session so the reader
+      // knows how long the walkthrough is.
+      count: {
+        text: String(session.entries.length),
+        title: t().count(entries.length, session.entries.length),
+      },
+      expanded,
+      collapse: {
+        icon: "octicon-chevron-down",
+        paths: CHEVRON_DOWN_16_PATH,
+        label: expanded ? t().collapse : t().expand,
+        extra: "annotation-session-collapse",
+        expanded,
+        onClick: () => {
+          if (collapsedSessions.has(session.id))
+            collapsedSessions.delete(session.id);
+          else collapsedSessions.add(session.id);
+          renderAnnotationPanel();
+        },
+      },
+      rename: {
+        icon: "octicon-pencil",
+        paths: PENCIL_16_PATH,
+        label: `${t().rename}: ${session.title}`,
+        onClick: async () => {
+          const next = await showPromptDialog({
+            cancelLabel: t().cancel,
+            title: t().rename,
+            defaultValue: session.title,
+            ariaLabel: t().sessionName,
+            confirmLabel: t().renameAction,
+            validate: (v) => {
+              const trimmed = v.trim();
+              return trimmed ? trimmed : null;
+            },
+          });
+          if (next === null) return;
+          void changeAnnotations({
+            action: "rename",
+            id: session.id,
+            title: next,
+          });
+        },
+      },
+      remove: {
+        icon: "octicon-trash",
+        paths: TRASH_16_PATH,
+        label: `${t().deleteSession}: ${session.title}`,
+        onClick: async () => {
+          const ok = await showConfirmDialog({
+            cancelLabel: t().cancel,
+            title: t().deleteTitle,
+            body: t().deleteBody(session.title),
+            confirmLabel: t().delete,
+            danger: true,
+          });
+          if (!ok) return;
+          void changeAnnotations({ action: "delete", id: session.id });
+        },
+      },
+      // Click toggles: selecting shows this session inline, re-clicking
+      // the active session clears the inline walkthrough.
+      onSelect: () => setActiveSession(active ? null : session.id),
+      // Clicking the card body (not its buttons or entries) selects the
+      // session so [ and ] navigate inside it.
+      onCardClick: (event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest("button, a, input")) return;
+        if (session.id !== activeSessionId) setActiveSession(session.id);
+      },
+      entries: entries.map((entry) => {
+        const location = annotationLocationLabel(entry);
+        const time = annotationTimeLabel(entry.created_at);
+        return {
+          id: entry.id,
+          active: entry.id === activeAnnotationId,
+          step: session.entries.indexOf(entry) + 1,
+          summary: annotationEntrySummary(entry),
+          location,
+          time: time ? { text: time, title: entry.created_at } : null,
+          onOpen: () => {
+            void openAnnotationEntry(entry.id);
+          },
+          remove: {
+            icon: "octicon-trash",
+            paths: TRASH_16_PATH,
+            label: `${t().deleteNote}: ${location}`,
+            onClick: async () => {
+              const ok = await showConfirmDialog({
+                cancelLabel: t().cancel,
+                title: t().deleteNoteTitle,
+                body: t().deleteBody(annotationEntrySummary(entry)),
+                confirmLabel: t().delete,
+                danger: true,
+              });
+              if (!ok) return;
+              void changeAnnotations({ action: "delete", id: entry.id });
+            },
+          },
+        };
+      }),
+    };
+  }
+
+  // 選び直し (どの注釈・どのセッションか) でも同じ描き方で描き直す。lit は
+  // 変わった所だけを書き換えるので、一覧のスクロールの位置はそのまま残る。
   function renderAnnotationPanel() {
     updateAnnotationContext();
     const scrollTop = annotationSessionsEl.scrollTop;
-    annotationSessionsEl.replaceChildren();
-    const query = search.value.trim().toLocaleLowerCase();
-    clearSearch.disabled = !search.value;
+    const query = searchValue.trim().toLocaleLowerCase();
     const route = deps.getRoute();
     const matches = (session: AnnotationSession, entry: AnnotationEntry) => {
       if (
@@ -1217,220 +1635,51 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       (count, session) => count + session.entries.length,
       0,
     );
+    const sessions: AnnotationSessionProps[] = [];
     for (const session of [...ANNOTATIONS.sessions].reverse()) {
       const entries = session.entries.filter((entry) =>
         matches(session, entry),
       );
       if ((query || currentLocationOnly) && !entries.length) continue;
       visible += entries.length;
-      const sessionEl = document.createElement("section");
-      sessionEl.className = "annotation-session";
-      sessionEl.dataset.sessionId = session.id;
-      sessionEl.classList.toggle("active", session.id === activeSessionId);
-
-      sessionEl.addEventListener("click", (event) => {
-        // Clicking the card body (not its buttons or entries) selects the
-        // session so [ and ] navigate inside it.
-        const target = event.target as HTMLElement;
-        if (target.closest("button, a, input")) return;
-        if (session.id !== activeSessionId) setActiveSession(session.id);
-      });
-
-      const head = document.createElement("div");
-      head.className = "annotation-session-head";
-      const title = document.createElement("button");
-      title.type = "button";
-      title.className = "annotation-session-select";
-      const sessionName = document.createElement("span");
-      sessionName.textContent = session.title;
-      const sessionTime = document.createElement("small");
-      sessionTime.className = "annotation-session-time";
-      sessionTime.textContent = annotationTimeLabel(session.created_at);
-      sessionTime.title = session.created_at;
-      title.append(sessionName, sessionTime);
-      title.title = t().inline;
-      title.setAttribute(
-        "aria-pressed",
-        String(session.id === activeSessionId),
+      sessions.push(
+        sessionProps(
+          session,
+          entries,
+          !!query || !collapsedSessions.has(session.id),
+        ),
       );
-      // Total step count, visible before opening the session so the reader
-      // knows how long the walkthrough is.
-      const count = document.createElement("span");
-      count.className = "annotation-session-count";
-      count.textContent = String(session.entries.length);
-      count.title = t().count(entries.length, session.entries.length);
-      title.addEventListener("click", () => {
-        // Click toggles: selecting shows this session inline, re-clicking
-        // the active session clears the inline walkthrough.
-        setActiveSession(session.id === activeSessionId ? null : session.id);
-      });
-      const rename = annotationIconButton(
-        "octicon-pencil",
-        PENCIL_16_PATH,
-        `${t().rename}: ${session.title}`,
-      );
-      rename.addEventListener("click", async () => {
-        const next = await showPromptDialog({
-          cancelLabel: t().cancel,
-          title: t().rename,
-          defaultValue: session.title,
-          ariaLabel: t().sessionName,
-          confirmLabel: t().renameAction,
-          validate: (v) => {
-            const trimmed = v.trim();
-            return trimmed ? trimmed : null;
-          },
-        });
-        if (next === null) return;
-        void changeAnnotations({
-          action: "rename",
-          id: session.id,
-          title: next,
-        });
-      });
-      const del = annotationIconButton(
-        "octicon-trash",
-        TRASH_16_PATH,
-        `${t().deleteSession}: ${session.title}`,
-      );
-      del.addEventListener("click", async () => {
-        const ok = await showConfirmDialog({
-          cancelLabel: t().cancel,
-          title: t().deleteTitle,
-          body: t().deleteBody(session.title),
-          confirmLabel: t().delete,
-          danger: true,
-        });
-        if (!ok) return;
-        void changeAnnotations({ action: "delete", id: session.id });
-      });
-      const collapse = annotationIconButton(
-        "octicon-chevron-down",
-        CHEVRON_DOWN_16_PATH,
-        t().collapse,
-      );
-      collapse.classList.add("annotation-session-collapse");
-      head.append(collapse, title, count, rename, del);
-      sessionEl.title = session.created_at;
-      sessionEl.appendChild(head);
-
-      const list = document.createElement("ol");
-      list.className = "annotation-entries";
-      const syncCollapsed = () => {
-        const expanded = !!query || !collapsedSessions.has(session.id);
-        list.hidden = !expanded;
-        collapse.setAttribute("aria-expanded", String(expanded));
-        collapse.title = expanded ? t().collapse : t().expand;
-        collapse.setAttribute("aria-label", collapse.title);
-      };
-      collapse.addEventListener("click", () => {
-        if (collapsedSessions.has(session.id))
-          collapsedSessions.delete(session.id);
-        else collapsedSessions.add(session.id);
-        syncCollapsed();
-      });
-      syncCollapsed();
-      entries.forEach((entry) => {
-        const item = document.createElement("li");
-        item.dataset.entryId = entry.id;
-        item.classList.toggle("active", entry.id === activeAnnotationId);
-        const open = document.createElement("button");
-        open.type = "button";
-        open.className = "annotation-entry-open";
-        open.dataset.step = String(session.entries.indexOf(entry) + 1);
-        const location = document.createElement("span");
-        location.className = "annotation-entry-location";
-        location.textContent = annotationLocationLabel(entry);
-        const summary = document.createElement("span");
-        summary.className = "annotation-entry-summary";
-        summary.textContent = annotationEntrySummary(entry);
-        location.title = location.textContent;
-        summary.title = summary.textContent;
-        open.append(summary, location);
-        const entryTimeLabel = annotationTimeLabel(entry.created_at);
-        if (entryTimeLabel) {
-          const time = document.createElement("span");
-          time.className = "annotation-entry-time";
-          time.textContent = entryTimeLabel;
-          time.title = entry.created_at;
-          open.appendChild(time);
-        }
-        open.addEventListener("click", () => {
-          void openAnnotationEntry(entry.id);
-        });
-        const remove = annotationIconButton(
-          "octicon-trash",
-          TRASH_16_PATH,
-          `${t().deleteNote}: ${annotationLocationLabel(entry)}`,
-        );
-        remove.addEventListener("click", async () => {
-          const ok = await showConfirmDialog({
-            cancelLabel: t().cancel,
-            title: t().deleteNoteTitle,
-            body: t().deleteBody(annotationEntrySummary(entry)),
-            confirmLabel: t().delete,
-            danger: true,
-          });
-          if (!ok) return;
-          void changeAnnotations({ action: "delete", id: entry.id });
-        });
-        item.append(open, remove);
-        list.appendChild(item);
-      });
-      sessionEl.appendChild(list);
-      annotationSessionsEl.appendChild(sessionEl);
     }
     annotationListCountEl.textContent = t().count(visible, total);
-    if (!annotationSessionsEl.childElementCount) {
-      const empty = document.createElement("div");
-      empty.className = "annotation-empty";
-      const heading = document.createElement("h3");
-      heading.textContent = total ? t().noMatches : t().emptyTitle;
-      const description = document.createElement("p");
-      description.textContent = total ? t().noMatchesBody : t().emptyBody;
-      const action = document.createElement("button");
-      action.type = "button";
-      action.className = "gdp-btn annotation-primary";
-      action.textContent = total ? t().reset : t().add;
-      action.addEventListener("click", () => {
-        if (total) {
-          search.value = "";
-          currentLocationOnly = false;
-          renderAnnotationPanel();
-        } else void openAnnotationEditForm();
-      });
-      const hint = document.createElement("p");
-      hint.className = "annotation-empty-hint";
-      hint.textContent = total ? "" : t().emptyHint;
-      empty.append(heading, description, action, hint);
-      annotationSessionsEl.appendChild(empty);
-    }
+    renderOwned(
+      annotationSessionsEl,
+      view.panel(
+        sessions.length
+          ? { kind: "sessions", sessions }
+          : {
+              kind: "empty",
+              heading: total ? t().noMatches : t().emptyTitle,
+              description: total ? t().noMatchesBody : t().emptyBody,
+              action: {
+                label: total ? t().reset : t().add,
+                onClick: () => {
+                  if (total) {
+                    searchValue = "";
+                    currentLocationOnly = false;
+                    renderAnnotationPanel();
+                  } else void openAnnotationEditForm();
+                },
+              },
+              hint: total ? "" : t().emptyHint,
+            },
+      ),
+    );
     $("#annotation-clear").hidden = !total;
     annotationSessionsEl.scrollTop = scrollTop;
   }
 
-  // Toggle .active classes in place. Rebuilding the whole panel for a
-  // selection change resets the list scroll position and causes visible
-  // layout shift, so full renderAnnotationPanel() is reserved for data
-  // changes (refresh/delete).
   function updateActiveHighlights() {
-    annotationSessionsEl
-      .querySelectorAll<HTMLElement>(".annotation-session")
-      .forEach((el) => {
-        el.classList.toggle("active", el.dataset.sessionId === activeSessionId);
-        el.querySelector(".annotation-session-select")?.setAttribute(
-          "aria-pressed",
-          String(el.dataset.sessionId === activeSessionId),
-        );
-      });
-    annotationSessionsEl
-      .querySelectorAll<HTMLElement>(".annotation-entries li")
-      .forEach((el) => {
-        el.classList.toggle(
-          "active",
-          el.dataset.entryId === activeAnnotationId,
-        );
-      });
+    renderAnnotationPanel();
   }
 
   function hideAnnotationDetail() {
@@ -1455,40 +1704,36 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       `${index + 1}/${session.entries.length}`;
     const location = $<HTMLAnchorElement>("#annotation-detail-location");
     location.textContent = annotationLocationLabel(entry);
-    const body = $("#annotation-detail-body");
-    body.replaceChildren();
-    if (entry.title) {
-      const heading = document.createElement("strong");
-      heading.className = "annotation-detail-title";
-      heading.textContent = entry.title;
-      body.appendChild(heading);
-    }
-    const markdown = document.createElement("div");
-    markdown.className =
-      "gdp-markdown-preview markdown-body gdp-annotation-prose";
-    ensureMarkdownHighlighter();
-    markdown.innerHTML = renderMarkdownHtml(
-      entry.body,
-      { path: entry.path, ref: annotationRefForEntry(entry) },
-      mdHighlighter,
+    // 本文の箱は書く画面 (annotations/editor.ts) と使い分けるので、ここで描いた
+    // 要素に差し替える (箱に描く係を置かない)。
+    $("#annotation-detail-body").replaceChildren(
+      ...templateElements(
+        view.detailBody({
+          title: entry.title || null,
+          html: markdownHtml(entry),
+        }),
+      ),
     );
-    body.appendChild(markdown);
     const head = annotationDetail.querySelector<HTMLElement>(
       ".annotation-detail-head",
     );
     head?.querySelectorAll(".annotation-detail-head-action").forEach((el) => {
       el.remove();
     });
-    const copyRef = createCopyRefButton(entry, "annotation-detail-head-action");
-    const edit = annotationIconButton(
-      "octicon-pencil",
-      PENCIL_16_PATH,
-      t().edit,
+    const copyRef = templateElement(
+      view.iconButton(copyRefProps(entry, "annotation-detail-head-action")),
     );
-    edit.classList.add("annotation-detail-head-action");
-    edit.addEventListener("click", () => {
-      void openAnnotationEditForm(entry);
-    });
+    const edit = templateElement(
+      view.iconButton({
+        icon: "octicon-pencil",
+        paths: PENCIL_16_PATH,
+        label: t().edit,
+        extra: "annotation-detail-head-action",
+        onClick: () => {
+          void openAnnotationEditForm(entry);
+        },
+      }),
+    );
     head?.insertBefore(copyRef, annotationDetailPrev);
     head?.insertBefore(edit, annotationDetailPrev);
     annotationDetailPrev.disabled = index <= 0;

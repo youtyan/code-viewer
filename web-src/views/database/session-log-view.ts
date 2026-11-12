@@ -6,10 +6,15 @@
 // 永続) と用途が違うので統合はしない。両方とも query-history-panel 内に出すが
 // タブで切替える。
 
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { html, nothing } from "lit/html.js";
+import { showCopyFailure } from "../../core/copy-failure";
 import {
   loadShikiHighlighter,
   type ShikiHighlighter,
 } from "../../core/shiki-loader";
+import { detachedElement } from "../ui/renderer";
 import { type DbText, dbText } from "./i18n";
 import type { SessionLogEntry, SessionLogStore } from "./session-log";
 import { highlightSqlToInnerHtml } from "./shiki-sql";
@@ -26,289 +31,326 @@ export type SessionLogView = {
   localize: () => void;
 };
 
+export type SessionLogEntryProps = {
+  id: string;
+  status: SessionLogEntry["status"];
+  kind: SessionLogEntry["kind"];
+  badge: string;
+  kindLabel: string;
+  time: string;
+  stats: string;
+  title: string;
+  selected: boolean;
+  onSelect: () => void;
+};
+
+export type SessionLogDetailProps = {
+  /** 「エディタで使う」と「コピー」。SQL が無い・使い先が無いときは null。 */
+  actions: {
+    useLabel: string;
+    copyLabel: string;
+    onUse: () => void;
+    /** 押したボタン (失敗の印と理由をそこに出す)。 */
+    onCopy: (button: HTMLElement) => void;
+  } | null;
+  /** SQL の全文。色付けできたら html、できなければ text。 */
+  sql: { html: string } | { text: string } | null;
+  message: { text: string; status: SessionLogEntry["status"] } | null;
+};
+
+export type SessionLogProps = {
+  labels: {
+    autoFollow: string;
+    autoFollowTitle: string;
+    clear: string;
+    clearTitle: string;
+    placeholder: string;
+  };
+  autoFollow: boolean;
+  /** 新しい順。 */
+  entries: SessionLogEntryProps[];
+  /** 1 件も無いときの文。 */
+  empty: string | null;
+  /** 選んだ記録の詳細。選んでいなければ null (案内を出す)。 */
+  detail: SessionLogDetailProps | null;
+  listRef: Ref<HTMLElement>;
+  onToggleFollow: () => void;
+  onClear: () => void;
+  onListScroll: () => void;
+};
+
+export type SessionLogViewView = (props: SessionLogProps) => unknown;
+
+function detailTemplate(d: SessionLogDetailProps): unknown {
+  return html`${
+    d.actions
+      ? html`<div class="db-session-log-detail-actions"><button
+            class="db-btn db-btn-primary"
+            type="button"
+            @click=${d.actions.onUse}
+          >${d.actions.useLabel}</button><button
+            class="db-btn"
+            type="button"
+            @click=${(event: Event) => d.actions?.onCopy(event.currentTarget as HTMLElement)}
+          >${d.actions.copyLabel}</button></div>`
+      : nothing
+  }${
+    d.sql
+      ? html`<pre class="db-session-log-sql">${
+          "html" in d.sql ? unsafeHTML(d.sql.html) : d.sql.text
+        }</pre>`
+      : nothing
+  }${
+    d.message
+      ? html`<pre
+          class=${`db-session-log-message db-session-log-message-${d.message.status}`}
+        >${d.message.text}</pre>`
+      : nothing
+  }`;
+}
+
+export const DEFAULT_VIEW: SessionLogViewView = (p) =>
+  html`<div class="db-session-log"><div class="db-session-log-toolbar"><button
+        class=${p.autoFollow ? "db-session-log-action active" : "db-session-log-action"}
+        type="button"
+        title=${p.labels.autoFollowTitle}
+        aria-pressed=${String(p.autoFollow)}
+        @click=${p.onToggleFollow}
+      >${p.labels.autoFollow}</button><button
+        class="db-session-log-action db-session-log-danger"
+        type="button"
+        title=${p.labels.clearTitle}
+        @click=${p.onClear}
+      >${p.labels.clear}</button></div
+    ><div class="db-session-log-body-split"><div class="db-session-log-list-col"
+        ><div
+          class="db-session-log-list"
+          ${ref(p.listRef)}
+          @scroll=${p.onListScroll}
+        >${
+          p.empty !== null
+            ? html`<div class="db-session-log-empty">${p.empty}</div>`
+            : p.entries.map(
+                (e) =>
+                  html`<div
+                    class=${e.selected ? "db-session-log-entry selected" : "db-session-log-entry"}
+                    data-id=${e.id}
+                    data-status=${e.status}
+                    data-kind=${e.kind}
+                    @click=${e.onSelect}
+                  ><div class="db-session-log-entry-meta"><span
+                        class=${`db-session-log-badge db-session-log-badge-${e.status}`}
+                        >${e.badge}</span
+                      ><span class="db-session-log-kind">${e.kindLabel}</span
+                      ><span class="db-session-log-time">${e.time}</span
+                      ><span class="db-session-log-stats">${e.stats}</span></div
+                    ><div class="db-session-log-entry-title">${e.title}</div></div>`,
+              )
+        }</div></div
+      ><div class="db-session-log-detail-col">${
+        p.detail
+          ? detailTemplate(p.detail)
+          : html`<div class="db-session-log-detail-placeholder"
+              >${p.labels.placeholder}</div
+            >`
+      }</div></div
+    ></div
+  >`;
+
+/** 「コピーしました」を出しておく時間。 */
+const COPIED_MS = 1200;
+const AUTO_FOLLOW_THRESHOLD_PX = 4;
+
 export function createSessionLogView(
   callbacks: SessionLogViewCallbacks,
+  view: SessionLogViewView = DEFAULT_VIEW,
 ): SessionLogView {
   const text = (): DbText => callbacks.getText?.() ?? dbText("en");
-  const el = document.createElement("div");
-  el.className = "db-session-log";
-
-  const toolbar = document.createElement("div");
-  toolbar.className = "db-session-log-toolbar";
-  // 自動追従トグル: ON 中は新しいエントリが追加されるたびに先頭 (最新位置)
-  // へ強制スクロールする。ユーザーが手で下にスクロールすると自動で OFF に
-  // なる (ボタンを押し直すと再 ON)。
-  const followBtn = document.createElement("button");
-  followBtn.className = "db-session-log-action active";
-  followBtn.type = "button";
-  followBtn.textContent = text().sessionLog.autoFollow;
-  followBtn.title = text().sessionLog.autoFollowTitle;
-  followBtn.setAttribute("aria-pressed", "true");
-  const clearBtn = document.createElement("button");
-  clearBtn.className = "db-session-log-action db-session-log-danger";
-  clearBtn.type = "button";
-  clearBtn.textContent = text().sessionLog.clear;
-  clearBtn.title = text().sessionLog.clearTitle;
-  toolbar.append(followBtn, clearBtn);
-
-  const body = document.createElement("div");
-  body.className = "db-session-log-body-split";
-
-  const listCol = document.createElement("div");
-  listCol.className = "db-session-log-list-col";
-  const listEl = document.createElement("div");
-  listEl.className = "db-session-log-list";
-  listCol.appendChild(listEl);
-
-  const detailCol = document.createElement("div");
-  detailCol.className = "db-session-log-detail-col";
-  const placeholder = document.createElement("div");
-  placeholder.className = "db-session-log-detail-placeholder";
-  placeholder.textContent = text().sessionLog.selectPlaceholder;
-  detailCol.appendChild(placeholder);
-
-  body.append(listCol, detailCol);
-  el.append(toolbar, body);
+  const listRef = createRef<HTMLElement>();
 
   let selectedId: string | null = null;
-  const rowById = new Map<string, HTMLElement>();
-
-  // 自動追従: 新しいエントリは listEl の先頭 (scrollTop=0) に積まれるので、
-  // ON のときは render 後に scrollTop=0 へ戻す。ユーザーが手で下に
-  // スクロール (scrollTop > しきい値) したら自動 OFF にする (IDE の
-  // コンソールやブラウザの開発者ツールと同じ流儀)。
+  // 「コピーしました」を出している記録。
+  let copiedId: string | null = null;
+  // 自動追従: ON 中は新しいエントリが追加されるたびに先頭 (最新位置) へ
+  // 強制スクロールし、右の詳細も最新へ切り替える (tail -f 風)。ユーザーが
+  // 手で下にスクロールすると自動で OFF になる (ボタンを押し直すと再 ON)。
+  // IDE のコンソールやブラウザの開発者ツールと同じ流儀。
   let autoFollow = true;
   // 自分で scrollTop=0 をセットしたときに発火する scroll イベントを
   // ユーザー操作と区別するためのフラグ。
   let suppressScrollEvent = false;
-  const AUTO_FOLLOW_THRESHOLD_PX = 4;
-  function refreshFollowBtn(): void {
-    followBtn.classList.toggle("active", autoFollow);
-    followBtn.setAttribute("aria-pressed", String(autoFollow));
-  }
-  followBtn.addEventListener("click", () => {
-    autoFollow = !autoFollow;
-    refreshFollowBtn();
-    if (autoFollow) {
-      suppressScrollEvent = true;
-      listEl.scrollTop = 0;
-    }
-  });
-  listEl.addEventListener("scroll", () => {
-    if (suppressScrollEvent) {
-      suppressScrollEvent = false;
-      return;
-    }
-    // 手で下にスクロールしたら追従解除。先頭付近への戻りで再 ON は
-    // しない (ボタンを押すことで明示的に復帰させる)。
-    if (autoFollow && listEl.scrollTop > AUTO_FOLLOW_THRESHOLD_PX) {
-      autoFollow = false;
-      refreshFollowBtn();
-    }
-  });
 
   // SQL syntax highlight: shiki を lazy load し、現在開いている entry が
-  // あればロード完了時に再描画する。失敗時は null のまま plain text 表示。
+  // あればロード完了時に描き直す。失敗時は null のまま plain text 表示。
   let shiki: ShikiHighlighter | null = null;
   loadShikiHighlighter({
     langs: ["sql"],
   }).then((h) => {
     shiki = h;
-    if (selectedId) {
-      const cur = callbacks.store.list().find((e) => e.id === selectedId);
-      if (cur) renderDetail(cur);
-    }
+    if (selectedId) draw();
   });
 
-  function render(): void {
-    listEl.innerHTML = "";
-    rowById.clear();
-    const entries = callbacks.store.list();
-    if (entries.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "db-session-log-empty";
-      empty.textContent = text().sessionLog.empty;
-      listEl.appendChild(empty);
-      // 詳細も placeholder に戻す。
-      detailCol.innerHTML = "";
-      detailCol.appendChild(placeholder);
-      selectedId = null;
-      return;
-    }
-    // 新しい順で見やすい。ストアは push 順なので末尾から並べる。
-    const fragment = document.createDocumentFragment();
-    for (let i = entries.length - 1; i >= 0; i--) {
-      fragment.appendChild(renderEntry(entries[i]));
-    }
-    listEl.appendChild(fragment);
-    // autoFollow が ON のとき、新エントリの追加で常に最新を見せる。新しい
-    // エントリは先頭にあるので scrollTop=0 へ。自分でセットして発火する
-    // scroll イベントは suppressScrollEvent で無視する (ループ防止)。
-    // ついでに右側 detail も最新エントリへ自動切替する (tail -f 風)。
-    if (autoFollow) {
-      suppressScrollEvent = true;
-      listEl.scrollTop = 0;
-      const latest = entries[entries.length - 1];
-      selectedId = latest.id;
-      renderDetail(latest);
-      rowById.get(latest.id)?.classList.add("selected");
-    } else if (selectedId) {
-      const cur = entries.find((e) => e.id === selectedId);
-      if (cur) {
-        renderDetail(cur);
-        rowById.get(cur.id)?.classList.add("selected");
-      } else {
-        detailCol.innerHTML = "";
-        detailCol.appendChild(placeholder);
-        selectedId = null;
-      }
-    }
-  }
-
-  function renderEntry(entry: SessionLogEntry): HTMLElement {
-    const row = document.createElement("div");
-    row.className = "db-session-log-entry";
-    row.dataset.id = entry.id;
-    row.dataset.status = entry.status;
-    row.dataset.kind = entry.kind;
-    rowById.set(entry.id, row);
-
-    const meta = document.createElement("div");
-    meta.className = "db-session-log-entry-meta";
-
-    const badge = document.createElement("span");
-    badge.className = `db-session-log-badge db-session-log-badge-${entry.status}`;
-    badge.textContent =
-      entry.status === "error"
-        ? text().sessionLog.statusError
-        : text().sessionLog.statusOk;
-
-    const kind = document.createElement("span");
-    kind.className = "db-session-log-kind";
-    kind.textContent =
-      entry.kind === "query"
-        ? text().sessionLog.kindQuery
-        : text().sessionLog.kindMutate;
-
-    const time = document.createElement("span");
-    time.className = "db-session-log-time";
-    time.textContent = formatTime(entry.timestamp);
-
-    const stats = document.createElement("span");
-    stats.className = "db-session-log-stats";
+  function entryProps(
+    entry: SessionLogEntry,
+    entries: readonly SessionLogEntry[],
+  ): SessionLogEntryProps {
+    const t = text().sessionLog;
     const parts: string[] = [];
     if (entry.rowCount !== undefined) parts.push(`${entry.rowCount} rows`);
     if (entry.elapsedMs !== undefined) parts.push(`${entry.elapsedMs}ms`);
-    stats.textContent = parts.join(", ");
-
-    meta.append(badge, kind, time, stats);
-
-    const title = document.createElement("div");
-    title.className = "db-session-log-entry-title";
-    title.textContent =
-      entry.label.length > 100
-        ? `${entry.label.slice(0, 100)}...`
-        : entry.label;
-
-    row.append(meta, title);
-    row.addEventListener("click", () => selectEntry(entry));
-    return row;
+    return {
+      id: entry.id,
+      status: entry.status,
+      kind: entry.kind,
+      badge: entry.status === "error" ? t.statusError : t.statusOk,
+      kindLabel: entry.kind === "query" ? t.kindQuery : t.kindMutate,
+      time: formatTime(entry.timestamp),
+      stats: parts.join(", "),
+      title:
+        entry.label.length > 100
+          ? `${entry.label.slice(0, 100)}...`
+          : entry.label,
+      selected: entry.id === selectedId,
+      onSelect: () => selectEntry(entry, entries),
+    };
   }
 
-  function selectEntry(entry: SessionLogEntry): void {
+  function detailProps(entry: SessionLogEntry): SessionLogDetailProps {
+    const t = text().sessionLog;
+    const inner = entry.detail
+      ? highlightSqlToInnerHtml(entry.detail, shiki)
+      : null;
+    return {
+      actions:
+        callbacks.copySqlToQuery && entry.detail
+          ? {
+              useLabel: t.useInEditor,
+              copyLabel: copiedId === entry.id ? t.copied : t.copy,
+              onUse: () => callbacks.copySqlToQuery?.(entry.detail ?? ""),
+              onCopy: (button) => copyEntry(entry, button),
+            }
+          : null,
+      sql: entry.detail
+        ? inner
+          ? { html: inner }
+          : { text: entry.detail }
+        : null,
+      message: entry.message
+        ? { text: entry.message, status: entry.status }
+        : null,
+    };
+  }
+
+  function props(): SessionLogProps {
+    const t = text().sessionLog;
+    const entries = callbacks.store.list();
+    const selected = entries.find((e) => e.id === selectedId);
+    return {
+      labels: {
+        autoFollow: t.autoFollow,
+        autoFollowTitle: t.autoFollowTitle,
+        clear: t.clear,
+        clearTitle: t.clearTitle,
+        placeholder: t.selectPlaceholder,
+      },
+      autoFollow,
+      // 新しい順で見やすい。ストアは push 順なので末尾から並べる。
+      entries: [...entries].reverse().map((e) => entryProps(e, entries)),
+      empty: entries.length === 0 ? t.empty : null,
+      detail: selected ? detailProps(selected) : null,
+      listRef,
+      onToggleFollow: () => {
+        autoFollow = !autoFollow;
+        draw();
+        if (autoFollow) scrollToLatest();
+      },
+      onClear: () => callbacks.store.clear(),
+      onListScroll: () => {
+        if (suppressScrollEvent) {
+          suppressScrollEvent = false;
+          return;
+        }
+        // 手で下にスクロールしたら追従解除。先頭付近への戻りで再 ON は
+        // しない (ボタンを押すことで明示的に復帰させる)。
+        const list = listRef.value;
+        if (autoFollow && list && list.scrollTop > AUTO_FOLLOW_THRESHOLD_PX) {
+          autoFollow = false;
+          draw();
+        }
+      },
+    };
+  }
+
+  const box = detachedElement(() => view(props()));
+  const draw = () => box.draw();
+
+  // 新しいエントリは先頭にあるので scrollTop=0 へ。自分でセットして発火する
+  // scroll イベントは suppressScrollEvent で無視する (ループ防止)。
+  function scrollToLatest(): void {
+    const list = listRef.value;
+    if (!list) return;
+    suppressScrollEvent = true;
+    list.scrollTop = 0;
+  }
+
+  function copyEntry(entry: SessionLogEntry, button: HTMLElement): void {
+    const txt =
+      entry.message && entry.detail
+        ? `${entry.detail}\n\n${entry.message}`
+        : (entry.detail ?? entry.message ?? "");
+    navigator.clipboard.writeText(txt).then(
+      () => {
+        copiedId = entry.id;
+        draw();
+        setTimeout(() => {
+          if (copiedId !== entry.id) return;
+          copiedId = null;
+          draw();
+        }, COPIED_MS);
+      },
+      (error: unknown) =>
+        showCopyFailure(
+          button,
+          "copy a session log entry",
+          error,
+          button.title,
+          4000,
+        ),
+    );
+  }
+
+  function selectEntry(
+    entry: SessionLogEntry,
+    entries: readonly SessionLogEntry[],
+  ): void {
     selectedId = entry.id;
-    for (const r of rowById.values()) r.classList.remove("selected");
-    rowById.get(entry.id)?.classList.add("selected");
-    renderDetail(entry);
     // 最新以外を手動で選んだら追従を解除 (古いエントリを腰を据えて見たい
     // ケース)。最新を選んだ場合は ON のままで OK。
-    const entries = callbacks.store.list();
     const isLatest = entries[entries.length - 1]?.id === entry.id;
-    if (autoFollow && !isLatest) {
-      autoFollow = false;
-      refreshFollowBtn();
-    }
+    if (autoFollow && !isLatest) autoFollow = false;
+    draw();
   }
 
-  function renderDetail(entry: SessionLogEntry): void {
-    detailCol.innerHTML = "";
-
-    if (callbacks.copySqlToQuery && entry.detail) {
-      const actions = document.createElement("div");
-      actions.className = "db-session-log-detail-actions";
-      const useBtn = document.createElement("button");
-      useBtn.className = "db-btn db-btn-primary";
-      useBtn.type = "button";
-      useBtn.textContent = text().sessionLog.useInEditor;
-      useBtn.addEventListener("click", () => {
-        callbacks.copySqlToQuery?.(entry.detail ?? "");
-      });
-      const copyBtn = document.createElement("button");
-      copyBtn.className = "db-btn";
-      copyBtn.type = "button";
-      copyBtn.textContent = text().sessionLog.copy;
-      copyBtn.addEventListener("click", () => {
-        const txt =
-          entry.message && entry.detail
-            ? `${entry.detail}\n\n${entry.message}`
-            : (entry.detail ?? entry.message ?? "");
-        navigator.clipboard.writeText(txt).then(
-          () => {
-            copyBtn.textContent = text().sessionLog.copied;
-            setTimeout(() => {
-              copyBtn.textContent = text().sessionLog.copy;
-            }, 1200);
-          },
-          () => undefined,
-        );
-      });
-      actions.append(useBtn, copyBtn);
-      detailCol.appendChild(actions);
-    }
-
-    if (entry.detail) {
-      const sql = document.createElement("pre");
-      sql.className = "db-session-log-sql";
-      const inner = highlightSqlToInnerHtml(entry.detail, shiki);
-      if (inner) {
-        sql.innerHTML = inner;
-      } else {
-        sql.textContent = entry.detail;
-      }
-      detailCol.appendChild(sql);
-    }
-
-    if (entry.message) {
-      const msg = document.createElement("pre");
-      msg.className = `db-session-log-message db-session-log-message-${entry.status}`;
-      msg.textContent = entry.message;
-      detailCol.appendChild(msg);
-    }
+  // ストアが変わったら描き直す。追従中は最新を選び、先頭へ戻す。
+  function onStoreChange(): void {
+    const entries = callbacks.store.list();
+    if (entries.length === 0) selectedId = null;
+    else if (autoFollow) selectedId = entries[entries.length - 1].id;
+    else if (!entries.some((e) => e.id === selectedId)) selectedId = null;
+    draw();
+    if (entries.length > 0 && autoFollow) scrollToLatest();
   }
-
-  clearBtn.addEventListener("click", () => {
-    callbacks.store.clear();
-  });
 
   // subscribe: 自動再描画。listener を hold する disposer は外部で必要ない
   // (このビューが mount される間 = ストアと同寿命)。
-  callbacks.store.subscribe(render);
-  render();
+  callbacks.store.subscribe(onStoreChange);
+  onStoreChange();
 
-  function clear(): void {
-    callbacks.store.clear();
-  }
-
-  function localize(): void {
-    clearBtn.textContent = text().sessionLog.clear;
-    clearBtn.title = text().sessionLog.clearTitle;
-    followBtn.textContent = text().sessionLog.autoFollow;
-    followBtn.title = text().sessionLog.autoFollowTitle;
-    placeholder.textContent = text().sessionLog.selectPlaceholder;
-    render();
-  }
-
-  return { el, clear, localize };
+  return {
+    el: box.element,
+    clear: () => callbacks.store.clear(),
+    localize: onStoreChange,
+  };
 }
 
 function formatTime(timestamp: number): string {

@@ -13,6 +13,7 @@
 // 持つ点だけが違う。
 
 import type {
+  AgentAttention,
   AgentConversation,
   AgentEvent,
   AgentState,
@@ -48,6 +49,27 @@ const states = new Map<string, AgentStateRecord>();
 const conversations = new Map<string, AgentConversationEntry>();
 let conversationsChanged: (() => void) | null = null;
 let tmuxGeneration: string | null = null;
+
+/**
+ * 記録が増えた・変わったときに呼ぶもの (unread-store.ts の保存と読み戻し)。
+ * first: その対象の最初の記録 (サーバが起きてから)。読み戻す側はこの記録の
+ * 経過時刻を書き換えてよい (states に置く前に呼ぶ)。
+ */
+export type AgentRecordListener = (event: {
+  key: string;
+  record: AgentStateRecord;
+  first: boolean;
+}) => void;
+let recordListener: AgentRecordListener | null = null;
+
+export function onAgentRecord(listener: AgentRecordListener | null): void {
+  recordListener = listener;
+}
+
+/** 今の tmux のサーバの世代。最初の巡回の前は null。 */
+export function currentAgentTmuxGeneration(): string | null {
+  return tmuxGeneration;
+}
 
 /** 会話の場所が変わったら呼ぶ。保存する側 (agent-conversations.ts) が 1 つだけ置く。 */
 export function onAgentConversationsChanged(
@@ -131,6 +153,8 @@ export type RecordAgentStateInput = {
   agent?: ReportedAgent;
   /** フックが渡した会話の場所。送られてこなければ前の値を残す。 */
   conversation?: AgentConversation;
+  /** 入力待ちの理由 (フックが知らせたときだけ)。 */
+  attention?: AgentAttention;
 };
 
 /**
@@ -161,6 +185,9 @@ export function recordAgentState(
     // 未読の完了状態を解けるのは read / 新しい hook だけ。画面には直前の
     // 作業表示や入力欄が残りうるため、それを根拠に done を消してはいけない。
     if (previous.state === "done") return previous;
+    // エラーで止まったもの (StopFailure) も同じ。画面には入力欄が出ているので
+    // 待機のルールに当たるが、人が手を入れるまで止まったまま。
+    if (previous.attention?.kind === "error") return previous;
     const visibleRule = input.source === "screen" && input.override === true;
     const motionPromoting =
       input.source === "activity" &&
@@ -208,12 +235,28 @@ export function recordAgentState(
   // 種類と終了の印は申告だけが決める。画面観測の記録でも前の値を引き継ぐ。
   const agent = input.agent ?? previous?.agent;
   if (agent) record.agent = agent;
+  // 理由は入力待ちの間だけ持つ。申告は自分の理由で置き換え、画面の観測は
+  // 入力待ちのままなら前の理由を残す。
+  const attention =
+    next !== "waiting"
+      ? undefined
+      : input.source === "hook"
+        ? input.attention
+        : previous?.attention;
+  if (attention) record.attention = attention;
   const ended =
     input.source === "hook" ? input.event === "exit" : previous?.ended;
   if (ended) record.ended = true;
   if (input.source === "hook") noteConversation(key, input, agent, at);
   if (previous?.state !== next) {
     noteAgentStateChange(key, previous?.state, next);
+  }
+  if (
+    previous === undefined ||
+    previous.state !== record.state ||
+    previous.updatedAt !== record.updatedAt
+  ) {
+    recordListener?.({ key, record, first: previous === undefined });
   }
   states.set(key, record);
   evictOldest();
@@ -313,6 +356,20 @@ export function restoreAgentConversations(
   }
   evictOldestConversations();
   return restored;
+}
+
+/** tmux のペインの記録 (保存する側が読む)。世代が分かるまでは null。 */
+export function agentRecordsSnapshot(): {
+  generation: string;
+  records: [key: string, record: AgentStateRecord][];
+} | null {
+  if (tmuxGeneration === null) return null;
+  return {
+    generation: tmuxGeneration,
+    records: [...states.entries()].filter(([, record]) =>
+      isTmuxPaneId(record.target),
+    ),
+  };
 }
 
 /** 一覧。人間の番のものが先、その中では待たせている順に並べる。 */

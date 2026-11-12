@@ -3,16 +3,8 @@
 // reject で渡し、覚えている一覧は失敗で変えない。xterm は描かないので画面は
 // 差し替える。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { PROJECT_HEADER } from "../core/api-url";
 import type { ShellSession, ShellSessionId } from "../core/shell";
 import type { TerminalScreenDeps } from "../views/terminal/terminal-screen";
@@ -64,15 +56,9 @@ vi.mock("../views/terminal/terminal-screen", () => ({
   },
 }));
 
-const { createTerminalView } = await import("../views/terminal/terminal-view");
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
+const { createTerminalView, DEFAULT_VIEW } = await import(
+  "../views/terminal/terminal-view"
+);
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -96,6 +82,7 @@ function shell(id: string): ShellSession {
 function setup(
   responses: Array<() => Response | Promise<Response>>,
   extra: Partial<TerminalViewDeps> = {},
+  look: typeof DEFAULT_VIEW = DEFAULT_VIEW,
 ) {
   const requests: string[] = [];
   /** 要求ごとの、プロジェクトの鍵のヘッダ (無ければ null)。 */
@@ -113,24 +100,27 @@ function setup(
   const opened: string[] = [];
   const ended: string[] = [];
   const openFailures: string[] = [];
-  const view = createTerminalView({
-    trackLoad: (promise) => promise,
-    actionHeaders: () => ({}),
-    getLanguage: () => "en",
-    getFontSize: () => 13,
-    onFontSizeChange: () => undefined,
-    isImageShelfCollapsed: () => false,
-    onImageShelfCollapsedChange: () => undefined,
-    onOpenInTab: (session, pane, side) =>
-      opened.push(
-        pane ? `${session.id}:${pane}:${side}` : `${session.id}:${side}`,
-      ),
-    onShellEnded: (id) => ended.push(id),
-    onOpenFailed: (message) => openFailures.push(message),
-    tmuxWindow: () => null,
-    onTmuxWindowStale: () => undefined,
-    ...extra,
-  });
+  const view = createTerminalView(
+    {
+      trackLoad: (promise) => promise,
+      actionHeaders: () => ({}),
+      getLanguage: () => "en",
+      getFontSize: () => 13,
+      onFontSizeChange: () => undefined,
+      isImageShelfCollapsed: () => false,
+      onImageShelfCollapsedChange: () => undefined,
+      onOpenInTab: (session, pane, side) =>
+        opened.push(
+          pane ? `${session.id}:${pane}:${side}` : `${session.id}:${side}`,
+        ),
+      onShellEnded: (id) => ended.push(id),
+      onOpenFailed: (message) => openFailures.push(message),
+      tmuxWindow: () => null,
+      onTmuxWindowStale: () => undefined,
+      ...extra,
+    },
+    look,
+  );
   return { view, requests, projects, opened, ended, openFailures };
 }
 
@@ -482,6 +472,28 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
     ]);
   });
 
+  // 繋ぎ直しの応答を待つ間、端末は前の tmux の設定のまま (マウスのクリックを
+  // 信号で送る等) 同じ ID へ入力を送っていた。それが新しいシェルの attach の行に
+  // 混ざって失敗し、ただのシェルが残った。前のサーバのシェルはもう無いので、
+  // 繋ぎ直しを頼む前に面を切り離す。
+  test("頼む前に面を前のシェルから切り離す", async () => {
+    const revived = { ...shell("shell-r4"), tty: "/dev/sample-new" };
+    let attachedWhileAsking: unknown = "not asked";
+    const { view } = await showing("shell-r4", [
+      () => {
+        attachedWhileAsking = terminalScreenState.screens[0]?.attached;
+        return json({ session: revived, action: "attached" });
+      },
+    ]);
+
+    await view.reviveInTab(revived.id, PLACE, "left");
+
+    expect([
+      attachedWhileAsking,
+      terminalScreenState.screens[0]?.attached,
+    ]).toEqual([null, revived]);
+  });
+
   test("場所がもう無い (410) なら gone を返し、付け直さない", async () => {
     const { view, session } = await showing("shell-r2", [
       () => new Response("pane is gone", { status: 410 }),
@@ -490,7 +502,8 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
     await expect(view.reviveInTab(session.id, PLACE, "left")).resolves.toBe(
       "gone",
     );
-    expect(terminalScreenState.screens[0]?.attached).toEqual(session);
+    // 頼む前に切り離している (上のテスト)。新しいシェルにも付け直さない。
+    expect(terminalScreenState.screens[0]?.attached).toBeNull();
   });
 
   test("それ以外の失敗は理由と本文ごと reject する", async () => {
@@ -632,5 +645,34 @@ describe("terminal view: サーバが起き直して終わったシェルのタ�
       ["Error: Could not open a shell. (HTTP 500): spawn failed"],
       "The shell ended when the server restarted",
     ]);
+  });
+});
+
+describe("the terminal view's view", () => {
+  test("builds the slot for a tab from the view", async () => {
+    const session = shell("shell-a1");
+    const slots: Node[][] = [];
+    const { view } = setup(
+      [() => json({ available: true, sessions: [session] })],
+      {},
+      {
+        ...DEFAULT_VIEW,
+        slot: (children) => {
+          slots.push(children);
+          return DEFAULT_VIEW.slot(children);
+        },
+      },
+    );
+    await view.loadShells();
+    await view.showInTab(session.id, "left");
+    expect(
+      slots.map((children) =>
+        children.map((child) => (child as HTMLElement).className),
+      ),
+    ).toEqual([[expect.any(String), "terminal-empty-hint", "terminal-status"]]);
+    expect(view.tabPaneFor("left").firstElementChild?.className).toBe(
+      "terminal-slot",
+    );
+    view.dispose();
   });
 });

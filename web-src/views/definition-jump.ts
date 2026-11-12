@@ -1,3 +1,4 @@
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 // Definition lookup is limited to standalone source code and the main diff in
 // v1. Blame, markdown code blocks, worktree diffs, and embedded history diffs
@@ -29,6 +30,7 @@ import {
   type DefinitionJumpLanguage,
   definitionJumpText,
 } from "./definition-jump-i18n";
+import { detachedElement, templateElement } from "./ui/renderer";
 
 export type DefinitionCellContext = {
   path: string;
@@ -369,12 +371,39 @@ function triggerForCell(
   };
 }
 
+/** ⌘ で載せた語の下線の位置 (出さないときは null)。 */
+export type DefinitionUnderlineProps = {
+  rect: { left: number; top: number; width: number; height: number } | null;
+};
+
+export type DefinitionJumpView = {
+  underline(props: DefinitionUnderlineProps): unknown;
+  /** 見本の小窓の箱 (中は見本 code-preview.ts が描く)。 */
+  flyout(): unknown;
+};
+
+export const DEFAULT_VIEW: DefinitionJumpView = {
+  underline: (props) => html`<div
+    class="gdp-def-underline"
+    aria-hidden="true"
+    ?hidden=${!props.rect}
+    style=${
+      props.rect
+        ? `left: ${props.rect.left}px; top: ${props.rect.top}px; width: ${props.rect.width}px; height: ${props.rect.height}px;`
+        : nothing
+    }
+  ></div>`,
+  flyout: () =>
+    html`<div class="gdp-definition-preview-flyout" hidden aria-hidden="true"></div>`,
+};
+
 function openSearchMenu(
   trigger: SearchTrigger,
   items: ContextMenuItem[],
   preview?: {
     deps: DefinitionJumpDeps;
     matches: Array<GrepMatch | null>;
+    view: DefinitionJumpView;
   },
 ): HTMLElement {
   if (!preview) {
@@ -384,10 +413,8 @@ function openSearchMenu(
     });
   }
 
-  const flyout = document.createElement("div");
-  flyout.className = "gdp-definition-preview-flyout";
-  flyout.hidden = true;
-  flyout.setAttribute("aria-hidden", "true");
+  // 見本の小窓の箱。body の末尾に 1 つ置き、中は見本 (code-preview.ts) が描く。
+  const flyout = templateElement(preview.view.flyout());
   document.body.appendChild(flyout);
   const codePreview = createCodePreview(flyout, {
     trackLoad: preview.deps.trackLoad,
@@ -449,6 +476,7 @@ function openSearchMenu(
 
 function createDefinitionSearchRunner(
   deps: DefinitionJumpDeps,
+  view: DefinitionJumpView,
 ): (trigger: SearchTrigger) => void {
   let generation = 0;
   let controller: AbortController | null = null;
@@ -568,6 +596,7 @@ function createDefinitionSearchRunner(
           ownMenu = openSearchMenu(trigger, visible, {
             deps,
             matches: previewMatches,
+            view,
           });
           return;
         }
@@ -616,6 +645,7 @@ function createDefinitionSearchRunner(
         ownMenu = openSearchMenu(trigger, items, {
           deps,
           matches: [null, ...references.matches.slice(0, 10), null, null],
+          view,
         });
       } catch (err) {
         if (deps.isAbortError(err) || abort.signal.aborted) {
@@ -637,12 +667,15 @@ function createDefinitionSearchRunner(
   return runDefinitionSearch;
 }
 
-export function createDefinitionJump(deps: DefinitionJumpDeps): {
+export function createDefinitionJump(
+  deps: DefinitionJumpDeps,
+  view: DefinitionJumpView = DEFAULT_VIEW,
+): {
   install(content: HTMLElement): void;
   triggerFromKeyboard(): boolean;
 } {
   const installed = new WeakSet<HTMLElement>();
-  const runDefinitionSearch = createDefinitionSearchRunner(deps);
+  const runDefinitionSearch = createDefinitionSearchRunner(deps, view);
   let globalHoverListenersInstalled = false;
   let metaPressed = false;
   let controlPressed = false;
@@ -652,7 +685,8 @@ export function createDefinitionJump(deps: DefinitionJumpDeps): {
     x: number;
     y: number;
   } | null = null;
-  let underline: HTMLElement | null = null;
+  let underlineRect: DefinitionUnderlineProps["rect"] = null;
+  let underline: { element: HTMLElement; draw(): void } | null = null;
 
   const modifierPressed = () => metaPressed || controlPressed;
   const cancelHoverFrame = () => {
@@ -661,7 +695,9 @@ export function createDefinitionJump(deps: DefinitionJumpDeps): {
     hoverTarget = null;
   };
   const hideUnderline = () => {
-    if (underline) underline.hidden = true;
+    if (!underline || !underlineRect) return;
+    underlineRect = null;
+    underline.draw();
   };
   const clearHover = () => {
     cancelHoverFrame();
@@ -681,17 +717,19 @@ export function createDefinitionJump(deps: DefinitionJumpDeps): {
       hideUnderline();
       return;
     }
-    if (!underline) {
-      underline = document.createElement("div");
-      underline.className = "gdp-def-underline";
-      underline.setAttribute("aria-hidden", "true");
-    }
-    if (!underline.isConnected) document.body.appendChild(underline);
-    underline.style.left = `${rect.left}px`;
-    underline.style.top = `${rect.top}px`;
-    underline.style.width = `${rect.width}px`;
-    underline.style.height = `${rect.height}px`;
-    underline.hidden = false;
+    underlineRect = {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    if (!underline)
+      underline = detachedElement(() =>
+        view.underline({ rect: underlineRect }),
+      );
+    else underline.draw();
+    if (!underline.element.isConnected)
+      document.body.appendChild(underline.element);
   };
   const scheduleUnderline = (cell: HTMLElement, x: number, y: number) => {
     hoverTarget = { cell, x, y };

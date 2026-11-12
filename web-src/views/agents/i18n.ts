@@ -9,7 +9,11 @@ import type {
   HookRowAction,
 } from "../../core/agent-hooks";
 import type { AgentKind, AgentTransition } from "../../core/agent-overview";
-import type { AgentState } from "../../core/agent-state";
+import type {
+  AgentAttention,
+  AgentAttentionKind,
+  AgentState,
+} from "../../core/agent-state";
 import { elapsedBucket } from "../../core/terminal-board";
 import {
   PROJECTS_EN,
@@ -47,6 +51,13 @@ export type AgentsText = {
   unreadFinished: string;
   /** エージェントのカードの札 (見ていない間に入力待ちになった・終わった)。 */
   cardBadge: Record<AgentTransition, string>;
+  /**
+   * 入力待ちの理由 (フックが知らせたとき)。札と状態の語を「入力待ち」の代わりに
+   * これにする。エラーは種類 (`rate_limit` など) を後ろに添える。
+   */
+  attention: Record<AgentAttentionKind, string>;
+  /** 理由の補足 (行の title)。種類と詳しい文。 */
+  attentionTitle: (attention: AgentAttention) => string;
   /** 状態が変わってからの経過。刻み方はターミナルの一覧と同じ。 */
   elapsed: (ms: number) => string;
   /** 状態が変わった瞬間を見ていないペインの経過時間の欄。 */
@@ -59,6 +70,10 @@ export type AgentsText = {
   /** 見始めて 1 分未満。下限と言えるほどの長さが無い。 */
   elapsedJustWatched: string;
   openPane: string;
+  /** 行の右クリック: 見た印を外して未読に戻す。 */
+  markUnread: string;
+  markUnreadTitle: string;
+  markUnreadFailed: string;
   /** 行・タブの右クリックのメニュー: 別のアカウントで続ける (views/agents/handoff.ts)。 */
   handoff: string;
   handoffTitle: string;
@@ -110,7 +125,13 @@ export type AgentsText = {
   notifyRequestFailed: string;
   /** ブラウザ通知の本文。 */
   notifyWaitingTitle: (project: string) => string;
+  /** 入力待ちの理由が分かるときの通知の題 (reason は attention の文言)。 */
+  notifyAttentionTitle: (reason: string, project: string) => string;
+  /** 手が要るエージェントへ移るキーを押したが、1 つも無いとき (最下段の吹き出し)。 */
+  noAttentionAgents: string;
   notifyFinishedTitle: (project: string) => string;
+  /** 窓の中の知らせを閉じるボタン。 */
+  toastClose: string;
   /** ヘッダの件数表示。 */
   headerWaiting: string;
   headerWorking: string;
@@ -121,6 +142,10 @@ export type AgentsText = {
   board: AgentsBoardText;
   /** フックが未設定のときに一覧の上に出す 1 行。 */
   hookHint: (agents: string) => string;
+  /** フックが入っているが古い (一部だけ)・呼び先が無いときの 1 行。 */
+  hookHintStale: (agents: string) => string;
+  /** その場で入れ直すボタン。 */
+  hookHintRepair: (agent: string) => string;
   hookHintOpen: string;
   hookHintClose: string;
   /** 設定画面の「エージェント連携」。 */
@@ -142,6 +167,17 @@ export type AgentsBoardText = {
   noAgents: string;
   /** プロジェクトの見出しのツールチップに出す件数。 */
   projectCounts: (summary: string) => string;
+  /** 並びの切替 (プロジェクトごと・急ぐ順)。 */
+  orderLabel: string;
+  orderByProject: string;
+  orderByUrgency: string;
+  orderByUrgencyTitle: string;
+  /** 上に留めた段の見出しと、行の右クリックの項目。 */
+  pinned: string;
+  pin: string;
+  unpin: string;
+  /** 留める・外すのを、サーバが受けなかった。 */
+  pinFailed: string;
 };
 
 export type AgentsSidebarText = {
@@ -151,6 +187,8 @@ export type AgentsSidebarText = {
   search: string;
   collapse: string;
   expand: string;
+  /** 畳んだサイドバーの「サイドバーを表示」に添える、手が要るものの数。 */
+  expandAttention: (count: number) => string;
   resize: string;
   newAgent: string;
   openProjectTitle: (name: string) => string;
@@ -246,7 +284,7 @@ export type AgentHooksText = {
 const HOOKS_EN: AgentHooksText = {
   title: "Agent integration",
   intro:
-    "With these hooks, claude and codex tell code-viewer themselves when they are working, waiting for input or done, so the states shown are reliable. Other hooks in the file stay as they are.",
+    "With these hooks (a plugin for opencode), claude, codex and opencode tell code-viewer themselves when they are working, waiting for input or done, so the states shown are reliable. Other hooks in the file stay as they are.",
   helpBefore: "How to set them up and what they change: ",
   helpAfter: ".",
   state: {
@@ -340,14 +378,26 @@ const HOOKS_EN: AgentHooksText = {
       uninstall:
         "Sessions started from now on no longer call the hooks. Already running ones may keep them until restarted.",
     },
+    opencode: {
+      install:
+        "This works in opencode started from now on with Open opencode. opencode 2 started by hand reports only with --standalone: its shared background service cannot tell which pane a session is in. Restart a running one to pick it up.",
+      uninstall:
+        "opencode started from now on no longer loads the plugin. A running one keeps it until restarted.",
+    },
   },
   afterInstall: {
     claude:
       "Running claude sessions normally pick this up on their own. If one does not, /hooks in the tab Open claude opens shows the hooks that are in.",
     codex:
       "codex runs the hooks once you trust them: in the tab Open codex opens, open /hooks and trust the code-viewer hooks.",
+    opencode:
+      "Open opencode starts one that reports its state. opencode 2 started by hand reports only when started with opencode --standalone. Restart opencode that is already running.",
   },
-  openAgent: { claude: "Open claude", codex: "Open codex" },
+  openAgent: {
+    claude: "Open claude",
+    codex: "Open codex",
+    opencode: "Open opencode",
+  },
   openAgentTitle: (agent) =>
     `Starts ${agent} with the default account in this project's folder and brings its terminal tab to the front.`,
   openedAgent: (agent) => `Opened ${agent} in a terminal tab.`,
@@ -364,7 +414,7 @@ const HOOKS_EN: AgentHooksText = {
 const HOOKS_JA: AgentHooksText = {
   title: "エージェント連携",
   intro:
-    "入れると、claude と codex が作業中・入力待ち・完了を自分で知らせるので、状態の表示が確かになります。ファイルにあるほかのフックはそのまま残ります。",
+    "入れると、claude・codex・opencode（opencode はプラグイン）が作業中・入力待ち・完了を自分で知らせるので、状態の表示が確かになります。ファイルにあるほかのフックはそのまま残ります。",
   helpBefore: "入れ方と、入れると何が変わるかは ",
   helpAfter: " にあります。",
   state: {
@@ -455,14 +505,26 @@ const HOOKS_JA: AgentHooksText = {
       uninstall:
         "これから起動する codex では呼ばれません。動いているものには、起動し直すまで残ることがあります。",
     },
+    opencode: {
+      install:
+        "これから［opencode を開く］で起動する opencode で効きます。自分で起動する opencode 2 は --standalone を付けたときだけ知らせます。動いているものは起動し直すと効きます。",
+      uninstall:
+        "これから起動する opencode では読まれません。動いているものには、起動し直すまで残ります。",
+    },
   },
   afterInstall: {
     claude:
       "動いている claude にも、通常はそのまま効きます。効かないときは、［claude を開く］で開いたタブの /hooks で、入ったフックを確かめられます。",
     codex:
       "codex は信頼するまでフックを実行しません。［codex を開く］で開いたタブで /hooks を開き、code-viewer のフックを信頼すると効きます。",
+    opencode:
+      "［opencode を開く］で起動したものから状態を知らせます。自分で起動する opencode 2 は opencode --standalone で起動したときだけ知らせます。動いている opencode は起動し直してください。",
   },
-  openAgent: { claude: "claude を開く", codex: "codex を開く" },
+  openAgent: {
+    claude: "claude を開く",
+    codex: "codex を開く",
+    opencode: "opencode を開く",
+  },
   openAgentTitle: (agent) =>
     `既定のアカウントで、このプロジェクトのフォルダの ${agent} を起こし、ターミナルのタブで前に出します。`,
   openedAgent: (agent) => `${agent} をターミナルのタブで開きました。`,
@@ -485,7 +547,12 @@ const EN: AgentsText = {
     done: "Finished · unread",
     idle: "Idle",
   },
-  kind: { claude: "claude", codex: "codex", other: "agent" },
+  kind: {
+    claude: "claude",
+    codex: "codex",
+    opencode: "opencode",
+    other: "agent",
+  },
   kindShell: "shell",
   filterLabel: "State",
   filterAll: "All",
@@ -502,6 +569,21 @@ const EN: AgentsText = {
   unreadWaiting: "Started waiting for input while you were away",
   unreadFinished: "Finished while you were away",
   cardBadge: { waiting: "Needs input", finished: "Done" },
+  attention: {
+    permission: "Needs permission",
+    question: "Has a question",
+    error: "Stopped on an error",
+  },
+  attentionTitle: (attention) =>
+    [
+      attention.kind === "error"
+        ? "The turn stopped on an error. It does not continue until you reply."
+        : "Waiting for your answer.",
+      attention.reason ? `Error: ${attention.reason}` : "",
+      attention.detail,
+    ]
+      .filter(Boolean)
+      .join("\n"),
   elapsed: (ms) => terminalText("en").elapsed(elapsedBucket(ms)),
   elapsedUnknown: "–",
   elapsedAtLeast: (lowerBound) =>
@@ -509,9 +591,13 @@ const EN: AgentsText = {
   elapsedJustWatched:
     "Just started watching: when it entered this state is not known",
   openPane: "Open in a tab",
+  markUnread: "Mark as unread",
+  markUnreadTitle:
+    "Keep it as needing you until you open it again (it stays unread while you keep looking at it now)",
+  markUnreadFailed: "Could not mark the agent as unread",
   handoff: "Continue with another account…",
   handoffTitle:
-    "Start claude or codex with another account in a new window of the same tmux session, and have it read this agent's conversation log and continue",
+    "Start claude, codex or opencode with another account in a new window of the same tmux session, and have it read this agent's conversation log and continue",
   handoffNeedsHooks: "Needs the agent hooks — show how to install",
   handoffNeedsHooksTitle:
     "The hooks tell code-viewer where the conversation log is. After installing them, send the agent one message.",
@@ -531,7 +617,7 @@ const EN: AgentsText = {
   toggleProject: "Collapse or expand this project",
   emptyNoTmuxTitle: "tmux is not running",
   emptyNoTmuxBody:
-    "Agents are listed here when they run inside tmux. New agent starts claude or codex in a new tmux session for you, or run them in tmux yourself (“tmux new -s work”).",
+    "Agents are listed here when they run inside tmux. New agent starts claude, codex or opencode in a new tmux session for you, or run them in tmux yourself (“tmux new -s work”).",
   emptyNotInstalledTitle: "tmux was not found",
   emptyNotInstalledBody:
     "This list reads the agents that run inside tmux, and tmux was not found (if it lives elsewhere, start code-viewer with --bin tmux=<path>).",
@@ -540,7 +626,7 @@ const EN: AgentsText = {
   tmuxInstallHelp: (section) => `Help › ${section}`,
   emptyNoAgentsTitle: "No agents are running",
   emptyNoAgentsBody:
-    "Start one with New agent, or launch claude or codex in a tmux pane; it appears here, grouped by project.",
+    "Start one with New agent, or launch claude, codex or opencode in a tmux pane; it appears here, grouped by project.",
   emptyNoAgentsAction: "Show all panes",
   emptyRegisterProject: "Register a project…",
   emptyKeysLabel: "Keys",
@@ -564,7 +650,10 @@ const EN: AgentsText = {
   notifyUnsupported: "This browser cannot show notifications",
   notifyRequestFailed: "Could not ask for notification permission",
   notifyWaitingTitle: (project) => `Needs input · ${project}`,
+  notifyAttentionTitle: (reason, project) => `${reason} · ${project}`,
+  noAttentionAgents: "No agent needs you right now",
   notifyFinishedTitle: (project) => `Finished · ${project}`,
+  toastClose: "Dismiss",
   headerWaiting: "Needs input",
   headerWorking: "Working",
   headerTitle: (waiting, working) =>
@@ -575,9 +664,20 @@ const EN: AgentsText = {
     allAgents: "All agents",
     noAgents: "No agents",
     projectCounts: (summary) => summary || "No agents",
+    orderLabel: "Order",
+    orderByProject: "By project",
+    orderByUrgency: "Needs you first",
+    orderByUrgencyTitle:
+      "Every project together: needs input, then done, then working, then idle. Newest change first in each.",
+    pinned: "Pinned",
+    pin: "Pin to the top",
+    unpin: "Unpin",
+    pinFailed: "Could not change the pin",
   },
   hookHint: (agents) =>
     `Finish detection is off for ${agents}. Hooks make it reliable.`,
+  hookHintStale: (agents) => `The ${agents} hooks are out of date.`,
+  hookHintRepair: (agent) => `Reinstall for ${agent}`,
   hookHintOpen: "Set up",
   hookHintClose: "Hide this",
   hooks: HOOKS_EN,
@@ -594,6 +694,8 @@ const EN: AgentsText = {
     search: "Search",
     collapse: "Hide sidebar",
     expand: "Show sidebar",
+    expandAttention: (count) =>
+      `${count} agent${count === 1 ? "" : "s"} need${count === 1 ? "s" : ""} you`,
     resize: "Resize sidebar",
     newAgent: "New agent",
     openProjectTitle: (name) => `Open a shell, agent or screen in ${name}`,
@@ -635,7 +737,12 @@ const JA: AgentsText = {
     done: "完了・未読",
     idle: "待機",
   },
-  kind: { claude: "claude", codex: "codex", other: "エージェント" },
+  kind: {
+    claude: "claude",
+    codex: "codex",
+    opencode: "opencode",
+    other: "エージェント",
+  },
   kindShell: "シェル",
   filterLabel: "状態",
   filterAll: "すべて",
@@ -651,15 +758,34 @@ const JA: AgentsText = {
   unreadWaiting: "見ていない間に入力待ちになりました",
   unreadFinished: "見ていない間に終わりました",
   cardBadge: { waiting: "入力待ち", finished: "完了" },
+  attention: {
+    permission: "許可待ち",
+    question: "質問あり",
+    error: "エラーで停止",
+  },
+  attentionTitle: (attention) =>
+    [
+      attention.kind === "error"
+        ? "エラーでターンが止まりました。返事をするまで進みません。"
+        : "あなたの答えを待っています。",
+      attention.reason ? `エラー: ${attention.reason}` : "",
+      attention.detail,
+    ]
+      .filter(Boolean)
+      .join("\n"),
   elapsed: (ms) => terminalText("ja").elapsed(elapsedBucket(ms)),
   elapsedUnknown: "–",
   elapsedAtLeast: (lowerBound) =>
     `見始めてから変化なし。少なくとも ${lowerBound} 前からこの状態です`,
   elapsedJustWatched: "見始めたばかりで、この状態になった時刻は分かりません",
   openPane: "タブで開く",
+  markUnread: "未読に戻す",
+  markUnreadTitle:
+    "もう一度開くまで、手が要るものとして残します (いま見ていても、離れるまでは未読のまま)",
+  markUnreadFailed: "未読に戻せませんでした",
   handoff: "別のアカウントで続ける…",
   handoffTitle:
-    "同じ tmux のセッションの新しいウィンドウで、別のアカウントの claude か codex を起動し、このエージェントの会話記録を読んで続きをやらせます",
+    "同じ tmux のセッションの新しいウィンドウで、別のアカウントの claude・codex・opencode を起動し、このエージェントの会話記録を読んで続きをやらせます",
   handoffNeedsHooks: "フックを入れると使えます（入れ方を見る）",
   handoffNeedsHooksTitle:
     "会話記録の場所はフックから受け取ります。入れた後、そのエージェントに一度話しかけると使えます。",
@@ -679,7 +805,7 @@ const JA: AgentsText = {
   toggleProject: "このプロジェクトを畳む / 開く",
   emptyNoTmuxTitle: "tmux が動いていません",
   emptyNoTmuxBody:
-    "エージェントは tmux の中で動いているとここに並びます。「新しいエージェント」で claude や codex を新しい tmux のセッションに起動できます (自分で「tmux new -s work」から起動してもかまいません)。",
+    "エージェントは tmux の中で動いているとここに並びます。「新しいエージェント」で claude・codex・opencode を新しい tmux のセッションに起動できます (自分で「tmux new -s work」から起動してもかまいません)。",
   emptyNotInstalledTitle: "tmux が見つかりません",
   emptyNotInstalledBody:
     "この一覧は tmux の中で動くエージェントを読み取ります。tmux が見つかりませんでした（別の場所にあるなら --bin tmux=<パス> で起動します）。",
@@ -688,7 +814,7 @@ const JA: AgentsText = {
   tmuxInstallHelp: (section) => `ヘルプ › ${section}`,
   emptyNoAgentsTitle: "エージェントが動いていません",
   emptyNoAgentsBody:
-    "「新しいエージェント」で起動するか、tmux のペインで claude や codex を起動すると、プロジェクトごとにここへ並びます。",
+    "「新しいエージェント」で起動するか、tmux のペインで claude・codex・opencode を起動すると、プロジェクトごとにここへ並びます。",
   emptyNoAgentsAction: "すべてのペインを表示",
   emptyRegisterProject: "プロジェクトを登録…",
   emptyKeysLabel: "キー",
@@ -712,7 +838,10 @@ const JA: AgentsText = {
   notifyUnsupported: "このブラウザは通知に対応していません",
   notifyRequestFailed: "通知の許可を求められませんでした",
   notifyWaitingTitle: (project) => `入力待ち · ${project}`,
+  notifyAttentionTitle: (reason, project) => `${reason} · ${project}`,
+  noAttentionAgents: "いま手が要るエージェントはありません",
   notifyFinishedTitle: (project) => `完了 · ${project}`,
+  toastClose: "閉じる",
   headerWaiting: "入力待ち",
   headerWorking: "作業中",
   headerTitle: (waiting, working) =>
@@ -723,9 +852,20 @@ const JA: AgentsText = {
     allAgents: "すべてのエージェント",
     noAgents: "エージェントはいません",
     projectCounts: (summary) => summary || "エージェントはいません",
+    orderLabel: "並び",
+    orderByProject: "プロジェクトごと",
+    orderByUrgency: "急ぐ順",
+    orderByUrgencyTitle:
+      "全プロジェクトをまとめて、入力待ち → 完了 → 作業中 → 待機。それぞれ変わったのが新しい順。",
+    pinned: "ピン留め",
+    pin: "上に留める",
+    unpin: "留めを外す",
+    pinFailed: "留める・外すことができませんでした",
   },
   hookHint: (agents) =>
     `${agents} の完了の検知を有効にできます (フックが未設定です)。`,
+  hookHintStale: (agents) => `${agents} のフックが古くなっています。`,
+  hookHintRepair: (agent) => `${agent} を入れ直す`,
   hookHintOpen: "設定する",
   hookHintClose: "閉じる",
   hooks: HOOKS_JA,
@@ -740,6 +880,7 @@ const JA: AgentsText = {
     search: "検索",
     collapse: "サイドバーを隠す",
     expand: "サイドバーを表示",
+    expandAttention: (count) => `手が要るエージェント ${count}`,
     resize: "サイドバーの幅を変える",
     newAgent: "新しいエージェント",
     openProjectTitle: (name) => `${name} のシェル・エージェント・画面を開く`,

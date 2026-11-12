@@ -11,17 +11,8 @@
 // 本物の WebGL は happy-dom に無いので、addon は差し替える。線がつながることは
 // 実画面で撮り比べる (作業報告)。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
 vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
@@ -111,6 +102,7 @@ vi.mock("../core/xterm-loader", () => {
       this.element = root;
     };
     registerLinkProvider = disposable;
+    parser = { registerOscHandler: () => ({ dispose: () => undefined }) };
     onResize = disposable;
     onRender = disposable;
     onScroll = disposable;
@@ -136,14 +128,6 @@ vi.mock("../core/xterm-loader", () => {
         WebglAddon: FakeWebglAddon,
       }),
   };
-});
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
 });
 
 let warnings: unknown[][];

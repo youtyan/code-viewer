@@ -1,3 +1,5 @@
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../../core/api-url";
 import type {
   RedisDatabasesResponse,
@@ -8,33 +10,22 @@ import type {
   RedisValueResponse,
 } from "../../core/database/types";
 import { formatBytes } from "../../core/source-meta";
+import { renderOwned, templateElement } from "../ui/renderer";
 import { showConfirmDialog } from "../ui-dialog";
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
-import { setPaneEmpty, setPaneStatus } from "./pane-status";
+import { paneEmptyTemplate, paneStatusTemplate } from "./pane-status";
 import { reportDatastoreFailure, requireOkResponse } from "./report-failure";
 
 function isBinaryItem(item: RedisItem): item is { binaryBase64: string } {
   return typeof item === "object" && item !== null && "binaryBase64" in item;
 }
 
-// item を element に書き込む。binary なら base64 badge を頭に付ける。
-// innerHTML 経由を避けて textContent + 要素生成で組み立てる。
-function renderItemInto(
-  el: HTMLElement,
-  item: RedisItem,
-  binaryBadge: string,
-): void {
-  el.textContent = "";
-  if (isBinaryItem(item)) {
-    const badge = document.createElement("span");
-    badge.className = "redis-binary-badge";
-    badge.textContent = binaryBadge;
-    el.appendChild(badge);
-    el.appendChild(document.createTextNode(item.binaryBase64));
-    return;
-  }
-  el.textContent = item;
+// item の中身。binary なら base64 の札を頭に付ける。
+function itemTemplate(item: RedisItem, binaryBadge: string): unknown {
+  if (isBinaryItem(item))
+    return html`<span class="redis-binary-badge">${binaryBadge}</span>${item.binaryBase64}`;
+  return item;
 }
 
 export type RedisExplorerCallbacks = {
@@ -59,75 +50,322 @@ export type RedisExplorerView = {
   localize: () => void;
 };
 
+type PaneStatus = { status: string; error: boolean };
+const isStatus = (pane: unknown): pane is PaneStatus =>
+  typeof pane === "object" && pane !== null && "status" in pane;
+type RedisKey = RedisKeysResponse["keys"][number];
+type RedisDatabase = RedisDatabasesResponse["databases"][number];
+
+/** 右の欄: 案内・札・値 (その場で書き直す欄を含む)・新しいキーを作る欄。 */
+type RedisMainPane =
+  | { empty: "selectKey" | "selectDatabase" }
+  | PaneStatus
+  | {
+      key: string;
+      value: RedisValue;
+      editing: { current: string; message: string; busy: boolean } | null;
+    }
+  | { create: true; message: string; busy: boolean };
+
+export type RedisSidebarProps = {
+  text: DbText["explorer"];
+  databases: null | PaneStatus | { list: RedisDatabase[] };
+  activeDb: number | null;
+  onSelectDb: (index: number) => void;
+};
+
+export type RedisMainProps = {
+  text: DbText["explorer"];
+  filterRef: Ref<HTMLInputElement>;
+  keys: null | PaneStatus | { list: RedisKey[] };
+  activeKey: string | null;
+  more: { shown: boolean; disabled: boolean };
+  pane: RedisMainPane;
+  refs: {
+    edit: Ref<HTMLTextAreaElement>;
+    newName: Ref<HTMLInputElement>;
+    newValue: Ref<HTMLTextAreaElement>;
+  };
+  onNewKey: () => void;
+  onFilter: (event: Event) => void;
+  onMore: () => void;
+  onSelectKey: (name: string) => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onSave: () => void;
+  onCancelEdit: () => void;
+  onCreate: (event: Event) => void;
+  onCancelCreate: () => void;
+};
+
+export type RedisExplorerLook = {
+  sidebar: (props: RedisSidebarProps) => unknown;
+  main: (props: RedisMainProps) => unknown;
+};
+
+const notice = (message: string) =>
+  html`<div class="datastore-value-truncation">${message}</div>`;
+
+function valueBody(t: DbText["explorer"], value: RedisValue): unknown {
+  const badge = t.redis.binaryBadge;
+  if (value.type === "none")
+    return html`<div class="redis-value-body redis-value-empty">${t.redis.noValue}</div>`;
+  let content: unknown;
+  if (value.type === "string") {
+    content =
+      value.binaryBase64 !== undefined
+        ? html`${notice(
+            value.truncated
+              ? t.redis.binaryTruncatedNotice(
+                  formatBytes(value.fullSize),
+                  formatBytes(64 * 1024),
+                )
+              : t.redis.binaryNotice(formatBytes(value.fullSize)),
+          )}<pre class="redis-value-string">${value.binaryBase64}</pre>`
+        : html`${
+            value.truncated
+              ? notice(
+                  t.redis.truncatedString(
+                    formatBytes(64 * 1024),
+                    formatBytes(value.fullSize),
+                  ),
+                )
+              : nothing
+          }<pre class="redis-value-string">${value.value}</pre>`;
+  } else if (value.type === "hash") {
+    content = html`${
+      value.truncated
+        ? notice(
+            t.redis.truncatedFields(
+              Object.keys(value.fields).length.toLocaleString(),
+              value.total.toLocaleString(),
+            ),
+          )
+        : nothing
+    }<table class="redis-value-hash-table"><thead><tr><th>${t.redis.fieldHeader}</th><th
+            >${t.redis.valueHeader}</th
+          ></tr></thead
+        ><tbody>${
+          value.fields.length === 0
+            ? html`<tr><td colspan="2" class="redis-value-empty"
+                  >${t.redis.emptyHash}</td
+                ></tr>`
+            : nothing
+        }${value.fields.map(
+          (pair) =>
+            html`<tr><td class="redis-value-hash-field">${itemTemplate(
+              pair.field,
+              badge,
+            )}</td><td class="redis-value-hash-val">${itemTemplate(
+              pair.value,
+              badge,
+            )}</td></tr>`,
+        )}</tbody></table>`;
+  } else if (value.type === "list") {
+    content = html`${
+      value.truncated
+        ? notice(
+            t.redis.truncatedItems(
+              value.items.length.toLocaleString(),
+              value.total.toLocaleString(),
+            ),
+          )
+        : nothing
+    }<ol class="redis-value-list">${
+      value.items.length === 0
+        ? html`<li class="redis-value-empty">${t.redis.emptyList}</li>`
+        : nothing
+    }${value.items.map((item) => html`<li>${itemTemplate(item, badge)}</li>`)}</ol>`;
+  } else {
+    // set / zset / stream: raw JSON with truncation banner if applicable.
+    const shown =
+      value.type === "set" || value.type === "zset"
+        ? value.members.length
+        : value.entries.length;
+    content = html`${
+      value.truncated
+        ? notice(
+            t.redis.truncatedEntries(
+              shown.toLocaleString(),
+              value.total.toLocaleString(),
+            ),
+          )
+        : nothing
+    }<pre class="redis-value-raw-json">${JSON.stringify(value, null, 2)}</pre>`;
+  }
+  return html`<div class="redis-value-body">${content}</div>`;
+}
+
+function mainPaneTemplate(p: RedisMainProps): unknown {
+  const t = p.text;
+  const pane = p.pane;
+  if ("empty" in pane)
+    return paneEmptyTemplate(
+      pane.empty === "selectKey" ? t.redis.selectKey : t.redis.selectDatabase,
+    );
+  if (isStatus(pane)) return paneStatusTemplate(pane.status, pane.error);
+  const status = (message: string) =>
+    html`<span class="redis-value-edit-status">${message}</span>`;
+  if ("create" in pane)
+    return html`<form class="redis-new-key-form" @submit=${p.onCreate}><div
+        class="redis-value-edit-bar"
+      ><button
+          type="submit"
+          class="db-btn db-btn-primary db-btn-sm"
+          ?disabled=${pane.busy}
+        >${t.redis.create}</button><button
+          type="button"
+          class="db-btn db-btn-sm"
+          @click=${p.onCancelCreate}
+        >${t.common.cancel}</button>${status(pane.message)}</div
+      ><input
+        type="text"
+        class="redis-new-key-name"
+        placeholder=${t.redis.newKeyNamePlaceholder}
+        autocomplete="off"
+        ${ref(p.refs.newName)}
+      /><textarea
+        class="redis-new-key-value"
+        placeholder=${t.redis.newKeyValuePlaceholder}
+        ${ref(p.refs.newValue)}
+      ></textarea></form>`;
+  const value = pane.value;
+  // 値編集アクション。文字列 (全文・非バイナリ) は Edit、存在するキーは Delete。
+  const editable =
+    value.type === "string" &&
+    value.binaryBase64 === undefined &&
+    !value.truncated;
+  return html`<div class="redis-value-header"><span
+        class=${`redis-type-badge redis-type-${value.type}`}
+        >${value.type}</span
+      ><span class="redis-value-key-name">${pane.key}</span><div
+        class="redis-value-actions"
+      >${
+        editable
+          ? html`<button type="button" class="db-btn db-btn-sm" @click=${p.onEdit}
+              >${t.common.edit}</button
+            >`
+          : nothing
+      }${
+        value.type !== "none"
+          ? html`<button
+              type="button"
+              class="db-btn db-btn-sm"
+              @click=${p.onDelete}
+            >${t.common.delete}</button>`
+          : nothing
+      }</div></div
+    >${
+      pane.editing
+        ? html`<div class="redis-value-body"><div class="redis-value-edit-bar"
+              ><button
+                type="button"
+                class="db-btn db-btn-primary db-btn-sm"
+                ?disabled=${pane.editing.busy}
+                @click=${p.onSave}
+              >${t.common.save}</button><button
+                type="button"
+                class="db-btn db-btn-sm"
+                ?disabled=${pane.editing.busy}
+                @click=${p.onCancelEdit}
+              >${t.common.cancel}</button>${status(pane.editing.message)}</div
+            ><textarea
+              class="redis-value-edit-textarea"
+              .value=${pane.editing.current}
+              ${ref(p.refs.edit)}
+            ></textarea></div>`
+        : valueBody(t, value)
+    }`;
+}
+
+export const DEFAULT_VIEW: RedisExplorerLook = {
+  sidebar: (p) =>
+    html`<div class="db-explorer-pane-header">${p.text.redis.databases}</div><div
+        class="redis-db-list"
+      >${
+        p.databases === null
+          ? nothing
+          : isStatus(p.databases)
+            ? paneStatusTemplate(p.databases.status, p.databases.error)
+            : p.databases.list.map(
+                (db) =>
+                  html`<div
+                    class=${db.index === p.activeDb ? "redis-db-item active" : "redis-db-item"}
+                    data-db-index=${db.index}
+                    @click=${() => p.onSelectDb(db.index)}
+                  ><span class="redis-db-name">db${db.index}</span><span
+                      class="redis-db-count"
+                      >${p.text.redis.keyCount(db.keyCount.toLocaleString())}</span
+                    ></div>`,
+              )
+      }</div>`,
+  main: (p) =>
+    html`<div class="redis-key-list-pane"><div
+          class="db-explorer-pane-header redis-key-list-header"
+        ><span>${p.text.redis.keys}</span><button
+            type="button"
+            class="db-btn db-btn-sm redis-new-key-btn"
+            title=${p.text.redis.newKey}
+            @click=${p.onNewKey}
+          >＋ ${p.text.redis.newKey}</button></div
+        ><form class="redis-key-filter-form" @submit=${p.onFilter}><input
+            type="search"
+            class="redis-key-filter"
+            placeholder=${p.text.redis.keyFilterPlaceholder}
+            autocomplete="off"
+            ${ref(p.filterRef)}
+          /><button type="submit" class="redis-key-filter-btn"
+            >${p.text.common.search}</button
+          ></form
+        ><div class="redis-key-list">${
+          p.keys === null
+            ? nothing
+            : isStatus(p.keys)
+              ? paneStatusTemplate(p.keys.status, p.keys.error)
+              : p.keys.list.map(
+                  (k) =>
+                    html`<div
+                      class=${k.name === p.activeKey ? "redis-key-item active" : "redis-key-item"}
+                      data-key-name=${k.name}
+                      @click=${() => p.onSelectKey(k.name)}
+                    ><span class=${`redis-type-badge redis-type-${k.type}`}
+                        >${k.type}</span
+                      ><span class="redis-key-name" title=${k.name}
+                        >${k.name}</span
+                      ></div>`,
+                )
+        }</div><button
+          type="button"
+          class="redis-key-more-btn"
+          ?hidden=${!p.more.shown}
+          ?disabled=${p.more.disabled}
+          @click=${p.onMore}
+        >${p.text.common.loadMore}</button></div
+      ><div class="redis-main-pane">${mainPaneTemplate(p)}</div>`,
+};
+
+/** 1 回に取るキーの数。 */
+const KEYS_PAGE_SIZE = 200;
+
 export function createRedisExplorer(
   callbacks: RedisExplorerCallbacks = {},
+  view: RedisExplorerLook = DEFAULT_VIEW,
 ): RedisExplorerView {
   const text = (): DbText["explorer"] =>
     (callbacks.getText?.() ?? dbText("en")).explorer;
   const tFailure = (): DbText["failure"] =>
     (callbacks.getText?.() ?? dbText("en")).failure;
-  const container = document.createElement("div");
-  container.className = "redis-explorer";
-
-  // 左サイドバー (db-sidebar) の dbToolbar 直下にぶら下がる Database リスト。
-  // container には append しない。
-  const sidebarSlot = document.createElement("div");
-  sidebarSlot.className = "db-explorer-sidebar-slot redis-db-list-pane";
-
-  const dbListHeader = document.createElement("div");
-  dbListHeader.className = "db-explorer-pane-header";
-  dbListHeader.textContent = text().redis.databases;
-  sidebarSlot.appendChild(dbListHeader);
-
-  const dbList = document.createElement("div");
-  dbList.className = "redis-db-list";
-  sidebarSlot.appendChild(dbList);
-
-  const keyListPane = document.createElement("div");
-  keyListPane.className = "redis-key-list-pane";
-
-  const keyListHeader = document.createElement("div");
-  keyListHeader.className = "db-explorer-pane-header redis-key-list-header";
-  const keyListTitle = document.createElement("span");
-  keyListTitle.textContent = text().redis.keys;
-  const newKeyBtn = document.createElement("button");
-  newKeyBtn.type = "button";
-  newKeyBtn.className = "db-btn db-btn-sm redis-new-key-btn";
-  newKeyBtn.textContent = `＋ ${text().redis.newKey}`;
-  newKeyBtn.title = text().redis.newKey;
-  keyListHeader.append(keyListTitle, newKeyBtn);
-  keyListPane.appendChild(keyListHeader);
-
-  const keyFilterForm = document.createElement("form");
-  keyFilterForm.className = "redis-key-filter-form";
-  const keyFilterInput = document.createElement("input");
-  keyFilterInput.type = "search";
-  keyFilterInput.className = "redis-key-filter";
-  keyFilterInput.placeholder = text().redis.keyFilterPlaceholder;
-  keyFilterInput.autocomplete = "off";
-  const keyFilterBtn = document.createElement("button");
-  keyFilterBtn.type = "submit";
-  keyFilterBtn.className = "redis-key-filter-btn";
-  keyFilterBtn.textContent = text().common.search;
-  keyFilterForm.append(keyFilterInput, keyFilterBtn);
-  keyListPane.appendChild(keyFilterForm);
-
-  const keyList = document.createElement("div");
-  keyList.className = "redis-key-list";
-  keyListPane.appendChild(keyList);
-
-  const keyMoreBtn = document.createElement("button");
-  keyMoreBtn.type = "button";
-  keyMoreBtn.className = "redis-key-more-btn";
-  keyMoreBtn.textContent = text().common.loadMore;
-  keyMoreBtn.hidden = true;
-  keyListPane.appendChild(keyMoreBtn);
-
-  const mainPane = document.createElement("div");
-  mainPane.className = "redis-main-pane";
-  setPaneEmpty(mainPane, text().redis.selectKey);
-
-  container.append(keyListPane, mainPane);
+  const filterRef = createRef<HTMLInputElement>();
+  const refs = {
+    edit: createRef<HTMLTextAreaElement>(),
+    newName: createRef<HTMLInputElement>(),
+    newValue: createRef<HTMLTextAreaElement>(),
+  };
+  const drawn = <T extends Element>(target: Ref<T>, name: string): T => {
+    const element = target.value;
+    if (!element) throw new Error(`Redis explorer: the ${name} was not drawn`);
+    return element;
+  };
 
   let currentDbId: string | null = null;
   let currentDbIndex: number | null = null;
@@ -138,13 +376,76 @@ export function createRedisExplorer(
   let keyRunId = 0;
   let suppressNotify = false;
   let disposed = false;
-  let activeDbRow: HTMLElement | null = null;
-  let activeKeyRow: HTMLElement | null = null;
-  const dbRowsByIndex = new Map<number, HTMLElement>();
-  const keyRowsByName = new Map<string, HTMLElement>();
+  let dbPane: RedisSidebarProps["databases"] = null;
+  let activeDb: number | null = null;
+  let keysPane: RedisMainProps["keys"] = null;
+  let activeKey: string | null = null;
+  let keyMore = { shown: false, disabled: false };
+  let mainPane: RedisMainPane = { empty: "selectKey" };
   const dbGuard = createAbortGuard();
   const keysGuard = createAbortGuard();
   const valueGuard = createAbortGuard();
+
+  const sidebarSlot = templateElement(
+    html`<div class="db-explorer-sidebar-slot redis-db-list-pane"></div>`,
+  );
+  const container = templateElement(html`<div class="redis-explorer"></div>`);
+
+  function draw(): void {
+    const t = text();
+    renderOwned(
+      sidebarSlot,
+      view.sidebar({
+        text: t,
+        databases: dbPane,
+        activeDb,
+        onSelectDb: (index) => void selectDatabase(index),
+      }),
+    );
+    renderOwned(
+      container,
+      view.main({
+        text: t,
+        filterRef,
+        keys: keysPane,
+        activeKey,
+        more: keyMore,
+        pane: mainPane,
+        refs,
+        onNewKey: showNewKeyForm,
+        onFilter: (event) => {
+          event.preventDefault();
+          applyFilter();
+        },
+        onMore: () => void loadKeys(true),
+        onSelectKey: (name) => void selectKey(name),
+        onEdit: () => {
+          if ("key" in mainPane && mainPane.value.type === "string")
+            startStringEdit(mainPane.value.value);
+        },
+        onDelete: () => {
+          if ("key" in mainPane) void deleteCurrentKey(mainPane.key);
+        },
+        onSave: () => void saveString(),
+        onCancelEdit: () => {
+          if ("key" in mainPane) void selectKey(mainPane.key);
+        },
+        onCreate: (event) => {
+          event.preventDefault();
+          void createKey();
+        },
+        onCancelCreate: () => {
+          if (currentKey) void selectKey(currentKey);
+          else showMain({ empty: "selectKey" });
+        },
+      }),
+    );
+  }
+
+  function showMain(pane: RedisMainPane): void {
+    mainPane = pane;
+    draw();
+  }
 
   function notifySelectionChange(): void {
     if (suppressNotify) return;
@@ -155,90 +456,28 @@ export function createRedisExplorer(
     });
   }
 
-  function setDbStatus(message: string, isError = false) {
-    setPaneStatus(dbList, message, { error: isError });
-  }
-
   function setKeyStatus(message: string, isError = false) {
-    setPaneStatus(keyList, message, {
-      error: isError,
-      afterClear: () => {
-        keyMoreBtn.hidden = true;
-      },
-    });
-  }
-
-  function renderDatabases(
-    databases: RedisDatabasesResponse["databases"],
-  ): void {
-    dbList.innerHTML = "";
-    dbRowsByIndex.clear();
-    const fragment = document.createDocumentFragment();
-    for (const db of databases) {
-      const item = document.createElement("div");
-      item.className = "redis-db-item";
-      item.dataset.dbIndex = String(db.index);
-      dbRowsByIndex.set(db.index, item);
-      const name = document.createElement("span");
-      name.className = "redis-db-name";
-      name.textContent = `db${db.index}`;
-      const count = document.createElement("span");
-      count.className = "redis-db-count";
-      count.textContent = text().redis.keyCount(db.keyCount.toLocaleString());
-      item.append(name, count);
-      fragment.appendChild(item);
-    }
-    dbList.appendChild(fragment);
+    keysPane = { status: message, error: isError };
+    keyMore = { ...keyMore, shown: false };
+    draw();
   }
 
   function highlightActiveDb(index: number) {
-    if (activeDbRow?.dataset.dbIndex === String(index)) return;
-    activeDbRow?.classList.remove("active");
-    activeDbRow = dbRowsByIndex.get(index) ?? null;
-    activeDbRow?.classList.add("active");
-  }
-
-  function appendKeys(keys: RedisKeysResponse["keys"]): void {
-    const fragment = document.createDocumentFragment();
-    for (const k of keys) {
-      const row = document.createElement("div");
-      row.className = "redis-key-item";
-      row.dataset.keyName = k.name;
-      keyRowsByName.set(k.name, row);
-      const typeBadge = document.createElement("span");
-      typeBadge.className = `redis-type-badge redis-type-${k.type}`;
-      typeBadge.textContent = k.type;
-      const nameEl = document.createElement("span");
-      nameEl.className = "redis-key-name";
-      nameEl.textContent = k.name;
-      nameEl.title = k.name;
-      row.append(typeBadge, nameEl);
-      fragment.appendChild(row);
-    }
-    keyList.appendChild(fragment);
+    activeDb =
+      dbPane !== null &&
+      !isStatus(dbPane) &&
+      dbPane.list.some((db) => db.index === index)
+        ? index
+        : null;
   }
 
   function highlightActiveKey(name: string) {
-    if (activeKeyRow?.dataset.keyName === name) return;
-    activeKeyRow?.classList.remove("active");
-    activeKeyRow = keyRowsByName.get(name) ?? null;
-    activeKeyRow?.classList.add("active");
-  }
-
-  function makeNotice(message: string, kind: "info" | "warn" = "info") {
-    const div = document.createElement("div");
-    div.className =
-      kind === "warn" ? "datastore-value-truncation" : "datastore-value-info";
-    div.textContent = message;
-    return div;
-  }
-
-  function mkBtn(label: string, cls: string): HTMLButtonElement {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = cls;
-    b.textContent = label;
-    return b;
+    activeKey =
+      keysPane !== null &&
+      !isStatus(keysPane) &&
+      keysPane.list.some((k) => k.name === name)
+        ? name
+        : null;
   }
 
   function writeBase(): { db: string; dbIndex: number } | null {
@@ -273,120 +512,95 @@ export function createRedisExplorer(
     try {
       await postRedisWrite({ ...base, key, op: "delete" });
       currentKey = null;
-      setPaneEmpty(mainPane, text().redis.selectKey);
+      showMain({ empty: "selectKey" });
       await loadKeys(false);
     } catch (err) {
-      setPaneStatus(
-        mainPane,
-        text().common.saveError(
+      showMain({
+        status: text().common.saveError(
           reportDatastoreFailure("Redis", "key delete", err, base.dbIndex, key),
         ),
-        { error: true },
-      );
+        error: true,
+      });
     }
   }
 
   // 文字列値をその場で textarea 編集する。truncated/binary は対象外
   // (全文が手元に無いため上書きで欠損する)。
-  function startStringEdit(key: string, current: string): void {
-    const body = mainPane.querySelector<HTMLElement>(".redis-value-body");
-    if (!body) return;
-    body.innerHTML = "";
-    const bar = document.createElement("div");
-    bar.className = "redis-value-edit-bar";
-    const save = mkBtn(text().common.save, "db-btn db-btn-primary db-btn-sm");
-    const cancel = mkBtn(text().common.cancel, "db-btn db-btn-sm");
-    const status = document.createElement("span");
-    status.className = "redis-value-edit-status";
-    bar.append(save, cancel, status);
-    const ta = document.createElement("textarea");
-    ta.className = "redis-value-edit-textarea";
-    ta.value = current;
-    body.append(bar, ta);
-    cancel.addEventListener("click", () => void selectKey(key));
-    save.addEventListener("click", async () => {
-      const base = writeBase();
-      if (!base) return;
-      save.disabled = true;
-      cancel.disabled = true;
-      status.textContent = text().common.saving;
-      try {
-        await postRedisWrite({
-          ...base,
-          key,
-          op: "setString",
-          value: ta.value,
-        });
-        await selectKey(key);
-      } catch (err) {
-        save.disabled = false;
-        cancel.disabled = false;
-        status.textContent = text().common.saveError(
-          reportDatastoreFailure("Redis", "key write", err, base.dbIndex, key),
-        );
-      }
+  function startStringEdit(current: string): void {
+    if (!("key" in mainPane)) return;
+    showMain({
+      ...mainPane,
+      editing: { current, message: "", busy: false },
     });
-    ta.focus();
+    refs.edit.value?.focus();
   }
 
-  // 新規キー (文字列) 作成フォームを mainPane に表示する。
+  async function saveString(): Promise<void> {
+    if (!("key" in mainPane) || !mainPane.editing) return;
+    const editingPane = mainPane;
+    const editing = mainPane.editing;
+    const key = mainPane.key;
+    const base = writeBase();
+    if (!base) return;
+    const value = drawn(refs.edit, "editor").value;
+    showMain({
+      ...editingPane,
+      editing: { ...editing, busy: true, message: text().common.saving },
+    });
+    try {
+      await postRedisWrite({ ...base, key, op: "setString", value });
+      await selectKey(key);
+    } catch (err) {
+      showMain({
+        ...editingPane,
+        editing: {
+          ...editing,
+          busy: false,
+          message: text().common.saveError(
+            reportDatastoreFailure(
+              "Redis",
+              "key write",
+              err,
+              base.dbIndex,
+              key,
+            ),
+          ),
+        },
+      });
+    }
+  }
+
+  // 新規キー (文字列) 作成フォームを右の欄に出す。
   function showNewKeyForm(): void {
     if (currentDbIndex === null) {
-      setPaneStatus(mainPane, text().redis.selectDatabase);
+      showMain({ status: text().redis.selectDatabase, error: false });
       return;
     }
-    mainPane.innerHTML = "";
-    const form = document.createElement("form");
-    form.className = "redis-new-key-form";
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.className = "redis-new-key-name";
-    nameInput.placeholder = text().redis.newKeyNamePlaceholder;
-    nameInput.autocomplete = "off";
-    const valueInput = document.createElement("textarea");
-    valueInput.className = "redis-new-key-value";
-    valueInput.placeholder = text().redis.newKeyValuePlaceholder;
-    const bar = document.createElement("div");
-    bar.className = "redis-value-edit-bar";
-    const create = mkBtn(
-      text().redis.create,
-      "db-btn db-btn-primary db-btn-sm",
-    );
-    create.type = "submit";
-    const cancel = mkBtn(text().common.cancel, "db-btn db-btn-sm");
-    const status = document.createElement("span");
-    status.className = "redis-value-edit-status";
-    bar.append(create, cancel, status);
-    form.append(bar, nameInput, valueInput);
-    mainPane.append(form);
-    nameInput.focus();
-    cancel.addEventListener("click", () => {
-      if (currentKey) void selectKey(currentKey);
-      else setPaneEmpty(mainPane, text().redis.selectKey);
-    });
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const base = writeBase();
-      if (!base) return;
-      const name = nameInput.value.trim();
-      if (!name) {
-        nameInput.focus();
-        return;
-      }
-      create.disabled = true;
-      status.textContent = text().common.saving;
-      try {
-        await postRedisWrite({
-          ...base,
-          key: name,
-          op: "createString",
-          value: valueInput.value,
-        });
-        await loadKeys(false);
-        await selectKey(name);
-      } catch (err) {
-        create.disabled = false;
-        status.textContent = text().common.saveError(
+    showMain({ create: true, message: "", busy: false });
+    refs.newName.value?.focus();
+  }
+
+  async function createKey(): Promise<void> {
+    if (!("create" in mainPane)) return;
+    const base = writeBase();
+    if (!base) return;
+    const nameInput = drawn(refs.newName, "new key name");
+    const name = nameInput.value.trim();
+    if (!name) {
+      nameInput.focus();
+      return;
+    }
+    const value = drawn(refs.newValue, "new key value").value;
+    showMain({ create: true, busy: true, message: text().common.saving });
+    try {
+      await postRedisWrite({ ...base, key: name, op: "createString", value });
+      await loadKeys(false);
+      await selectKey(name);
+    } catch (err) {
+      showMain({
+        create: true,
+        busy: false,
+        message: text().common.saveError(
           reportDatastoreFailure(
             "Redis",
             "key create",
@@ -394,190 +608,9 @@ export function createRedisExplorer(
             base.dbIndex,
             name,
           ),
-        );
-      }
-    });
-  }
-
-  newKeyBtn.addEventListener("click", () => showNewKeyForm());
-
-  // 言語を切り替えたときに値を描き直すため、最後に描いた値を持つ。
-  let lastValue: { key: string; value: RedisValue } | null = null;
-  function renderValue(key: string, value: RedisValue): void {
-    lastValue = { key, value };
-    mainPane.innerHTML = "";
-    const header = document.createElement("div");
-    header.className = "redis-value-header";
-    const typeBadge = document.createElement("span");
-    typeBadge.className = `redis-type-badge redis-type-${value.type}`;
-    typeBadge.textContent = value.type;
-    const keyEl = document.createElement("span");
-    keyEl.className = "redis-value-key-name";
-    keyEl.textContent = key;
-    header.append(typeBadge, keyEl);
-
-    // 値編集アクション。文字列 (全文・非バイナリ) は Edit、存在するキーは Delete。
-    const actions = document.createElement("div");
-    actions.className = "redis-value-actions";
-    if (
-      value.type === "string" &&
-      value.binaryBase64 === undefined &&
-      !value.truncated
-    ) {
-      const editBtn = mkBtn(text().common.edit, "db-btn db-btn-sm");
-      const stringValue = value.value;
-      editBtn.addEventListener("click", () =>
-        startStringEdit(key, stringValue),
-      );
-      actions.appendChild(editBtn);
+        ),
+      });
     }
-    if (value.type !== "none") {
-      const delBtn = mkBtn(text().common.delete, "db-btn db-btn-sm");
-      delBtn.addEventListener("click", () => void deleteCurrentKey(key));
-      actions.appendChild(delBtn);
-    }
-    header.appendChild(actions);
-    mainPane.appendChild(header);
-
-    const body = document.createElement("div");
-    body.className = "redis-value-body";
-    if (value.type === "none") {
-      body.textContent = text().redis.noValue;
-      body.classList.add("redis-value-empty");
-    } else if (value.type === "string") {
-      if (value.binaryBase64 !== undefined) {
-        body.appendChild(
-          makeNotice(
-            value.truncated
-              ? text().redis.binaryTruncatedNotice(
-                  formatBytes(value.fullSize),
-                  formatBytes(64 * 1024),
-                )
-              : text().redis.binaryNotice(formatBytes(value.fullSize)),
-            "warn",
-          ),
-        );
-        const pre = document.createElement("pre");
-        pre.className = "redis-value-string";
-        pre.textContent = value.binaryBase64;
-        body.appendChild(pre);
-      } else {
-        if (value.truncated) {
-          body.appendChild(
-            makeNotice(
-              text().redis.truncatedString(
-                formatBytes(64 * 1024),
-                formatBytes(value.fullSize),
-              ),
-              "warn",
-            ),
-          );
-        }
-        const pre = document.createElement("pre");
-        pre.className = "redis-value-string";
-        pre.textContent = value.value;
-        body.appendChild(pre);
-      }
-    } else if (value.type === "hash") {
-      if (value.truncated) {
-        body.appendChild(
-          makeNotice(
-            text().redis.truncatedFields(
-              Object.keys(value.fields).length.toLocaleString(),
-              value.total.toLocaleString(),
-            ),
-            "warn",
-          ),
-        );
-      }
-      const table = document.createElement("table");
-      table.className = "redis-value-hash-table";
-      const thead = document.createElement("thead");
-      const headRow = document.createElement("tr");
-      for (const label of [
-        text().redis.fieldHeader,
-        text().redis.valueHeader,
-      ]) {
-        const th = document.createElement("th");
-        th.textContent = label;
-        headRow.appendChild(th);
-      }
-      thead.appendChild(headRow);
-      table.appendChild(thead);
-      const tbody = document.createElement("tbody");
-      if (value.fields.length === 0) {
-        const row = document.createElement("tr");
-        const td = document.createElement("td");
-        td.colSpan = 2;
-        td.className = "redis-value-empty";
-        td.textContent = text().redis.emptyHash;
-        row.appendChild(td);
-        tbody.appendChild(row);
-      }
-      for (const pair of value.fields) {
-        const row = document.createElement("tr");
-        const fieldTd = document.createElement("td");
-        fieldTd.className = "redis-value-hash-field";
-        renderItemInto(fieldTd, pair.field, text().redis.binaryBadge);
-        const valTd = document.createElement("td");
-        valTd.className = "redis-value-hash-val";
-        renderItemInto(valTd, pair.value, text().redis.binaryBadge);
-        row.append(fieldTd, valTd);
-        tbody.appendChild(row);
-      }
-      table.appendChild(tbody);
-      body.appendChild(table);
-    } else if (value.type === "list") {
-      if (value.truncated) {
-        body.appendChild(
-          makeNotice(
-            text().redis.truncatedItems(
-              value.items.length.toLocaleString(),
-              value.total.toLocaleString(),
-            ),
-            "warn",
-          ),
-        );
-      }
-      const ol = document.createElement("ol");
-      ol.className = "redis-value-list";
-      if (value.items.length === 0) {
-        const li = document.createElement("li");
-        li.className = "redis-value-empty";
-        li.textContent = text().redis.emptyList;
-        ol.appendChild(li);
-      }
-      for (const item of value.items) {
-        const li = document.createElement("li");
-        renderItemInto(li, item, text().redis.binaryBadge);
-        ol.appendChild(li);
-      }
-      body.appendChild(ol);
-    } else {
-      // set / zset / stream: raw JSON with truncation banner if applicable.
-      if (value.truncated) {
-        const shown =
-          value.type === "set"
-            ? value.members.length
-            : value.type === "zset"
-              ? value.members.length
-              : value.entries.length;
-        body.appendChild(
-          makeNotice(
-            text().redis.truncatedEntries(
-              shown.toLocaleString(),
-              value.total.toLocaleString(),
-            ),
-            "warn",
-          ),
-        );
-      }
-      const pre = document.createElement("pre");
-      pre.className = "redis-value-raw-json";
-      pre.textContent = JSON.stringify(value, null, 2);
-      body.appendChild(pre);
-    }
-    mainPane.appendChild(body);
   }
 
   async function selectKey(name: string): Promise<void> {
@@ -589,7 +622,7 @@ export function createRedisExplorer(
     currentKey = name;
     notifySelectionChange();
     highlightActiveKey(name);
-    setPaneStatus(mainPane, text().redis.loadingValue);
+    showMain({ status: text().redis.loadingValue, error: false });
     try {
       const params = new URLSearchParams({
         db: requestDbId,
@@ -612,15 +645,20 @@ export function createRedisExplorer(
       ) {
         return;
       }
-      renderValue(data.key, data.value);
+      showMain({ key: data.key, value: data.value, editing: null });
     } catch (err) {
       if (slot.isStale()) return;
       if (requestRunId !== keyRunId || requestDbId !== currentDbId) return;
-      setPaneStatus(
-        mainPane,
-        reportDatastoreFailure("Redis", "value", err, requestDbIndex, name),
-        { error: true },
-      );
+      showMain({
+        status: reportDatastoreFailure(
+          "Redis",
+          "value",
+          err,
+          requestDbIndex,
+          name,
+        ),
+        error: true,
+      });
     } finally {
       slot.finish();
     }
@@ -633,10 +671,9 @@ export function createRedisExplorer(
     currentCursor = "0";
     notifySelectionChange();
     highlightActiveDb(dbIndex);
-    keyList.innerHTML = "";
-    keyRowsByName.clear();
-    activeKeyRow = null;
-    setPaneEmpty(mainPane, text().redis.selectKey);
+    keysPane = null;
+    activeKey = null;
+    showMain({ empty: "selectKey" });
     await loadKeys(false);
   }
 
@@ -646,15 +683,16 @@ export function createRedisExplorer(
     const requestRunId = loadRunId;
     const requestDbId = currentDbId;
     const requestDbIndex = currentDbIndex;
-    keyMoreBtn.disabled = true;
+    keyMore = { ...keyMore, disabled: true };
     if (!append) setKeyStatus(text().redis.loadingKeys);
+    else draw();
     try {
       const params = new URLSearchParams({
         db: requestDbId,
         dbIndex: String(requestDbIndex),
         pattern: currentKeyFilter || "*",
         cursor: currentCursor,
-        count: "200",
+        count: String(KEYS_PAGE_SIZE),
       });
       const res = await fetch(`${apiUrl("dbRedisKeys")}?${params}`, {
         signal: slot.signal,
@@ -672,18 +710,18 @@ export function createRedisExplorer(
       ) {
         return;
       }
-      if (!append) {
-        keyList.innerHTML = "";
-        keyRowsByName.clear();
-        activeKeyRow = null;
-      }
+      const shown =
+        append && keysPane !== null && !isStatus(keysPane) ? keysPane.list : [];
+      if (!append) activeKey = null;
+      currentCursor = data.nextCursor;
       if (data.keys.length === 0 && !append) {
         setKeyStatus(text().redis.noKeys);
+        keyMore = { ...keyMore, shown: currentCursor !== "0" };
       } else {
-        appendKeys(data.keys);
+        keysPane = { list: [...shown, ...data.keys] };
+        keyMore = { ...keyMore, shown: currentCursor !== "0" };
       }
-      currentCursor = data.nextCursor;
-      keyMoreBtn.hidden = currentCursor === "0";
+      draw();
     } catch (err) {
       if (slot.isStale()) return;
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
@@ -699,40 +737,23 @@ export function createRedisExplorer(
       );
     } finally {
       slot.finish();
-      if (!slot.isStale()) keyMoreBtn.disabled = false;
+      if (!slot.isStale()) {
+        keyMore = { ...keyMore, disabled: false };
+        draw();
+      }
     }
   }
 
-  keyMoreBtn.addEventListener("click", () => loadKeys(true));
-  dbList.addEventListener("click", (e) => {
-    const row = (e.target as HTMLElement | null)?.closest<HTMLElement>(
-      ".redis-db-item",
-    );
-    if (!row || !dbList.contains(row)) return;
-    const raw = row.dataset.dbIndex;
-    const index = raw === undefined ? NaN : Number(raw);
-    if (Number.isInteger(index)) void selectDatabase(index);
-  });
-  keyList.addEventListener("click", (e) => {
-    const row = (e.target as HTMLElement | null)?.closest<HTMLElement>(
-      ".redis-key-item",
-    );
-    if (!row || !keyList.contains(row)) return;
-    const key = row.dataset.keyName;
-    if (key) void selectKey(key);
-  });
-
-  keyFilterForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const nextFilter = keyFilterInput.value.trim() || "*";
+  function applyFilter(): void {
+    const nextFilter = drawn(filterRef, "key filter").value.trim() || "*";
     if (nextFilter === currentKeyFilter && currentCursor === "0") return;
     currentKeyFilter = nextFilter;
     currentKey = null;
     currentCursor = "0";
     notifySelectionChange();
-    setPaneEmpty(mainPane, text().redis.selectKey);
+    showMain({ empty: "selectKey" });
     void loadKeys(false);
-  });
+  }
 
   async function load(
     dbId: string,
@@ -749,15 +770,16 @@ export function createRedisExplorer(
     currentDbIndex = null;
     currentKey = null;
     currentKeyFilter = initial?.keyFilter?.trim() || "*";
-    keyFilterInput.value = currentKeyFilter === "*" ? "" : currentKeyFilter;
+    drawn(filterRef, "key filter").value =
+      currentKeyFilter === "*" ? "" : currentKeyFilter;
     currentCursor = "0";
-    keyList.innerHTML = "";
-    keyRowsByName.clear();
-    activeDbRow = null;
-    activeKeyRow = null;
-    keyMoreBtn.hidden = true;
-    setPaneEmpty(mainPane, text().redis.selectKey);
-    setDbStatus(text().redis.loadingDatabases);
+    keysPane = null;
+    activeDb = null;
+    activeKey = null;
+    keyMore = { ...keyMore, shown: false };
+    mainPane = { empty: "selectKey" };
+    dbPane = { status: text().redis.loadingDatabases, error: false };
+    draw();
     try {
       const res = await fetch(
         `${apiUrl("dbRedisDatabases")}?db=${encodeURIComponent(dbId)}`,
@@ -773,7 +795,8 @@ export function createRedisExplorer(
         currentDbId !== dbId
       )
         return;
-      renderDatabases(data.databases);
+      dbPane = { list: data.databases };
+      draw();
 
       // initial.dbIndex が指定されていて、かつ実在する db index ならその db を
       // 自動選択し、さらに initial.key が指定されていればその key も再選択する。
@@ -788,9 +811,8 @@ export function createRedisExplorer(
           currentKey = null;
           currentCursor = "0";
           highlightActiveDb(initial.dbIndex);
-          keyList.innerHTML = "";
-          keyRowsByName.clear();
-          setPaneEmpty(mainPane, text().redis.selectKey);
+          keysPane = null;
+          showMain({ empty: "selectKey" });
           const valuePromise = initial.key
             ? selectKey(initial.key).catch((err: unknown) => {
                 reportDatastoreFailure(
@@ -806,7 +828,10 @@ export function createRedisExplorer(
           if (currentDbId !== dbId) return;
           if (valuePromise) {
             await valuePromise;
-            if (initial.key) highlightActiveKey(initial.key);
+            if (initial.key) {
+              highlightActiveKey(initial.key);
+              draw();
+            }
           }
         } finally {
           suppressNotify = false;
@@ -815,10 +840,11 @@ export function createRedisExplorer(
       }
     } catch (err) {
       if (slot.isStale()) return;
-      setDbStatus(
-        reportDatastoreFailure("Redis", "database list", err, dbId),
-        true,
-      );
+      dbPane = {
+        status: reportDatastoreFailure("Redis", "database list", err, dbId),
+        error: true,
+      };
+      draw();
     } finally {
       slot.finish();
     }
@@ -835,16 +861,14 @@ export function createRedisExplorer(
     currentDbIndex = null;
     currentKey = null;
     currentKeyFilter = "*";
-    keyFilterInput.value = "";
+    drawn(filterRef, "key filter").value = "";
     currentCursor = "0";
-    dbList.innerHTML = "";
-    keyList.innerHTML = "";
-    dbRowsByIndex.clear();
-    keyRowsByName.clear();
-    activeDbRow = null;
-    activeKeyRow = null;
-    keyMoreBtn.hidden = true;
-    setPaneEmpty(mainPane, text().redis.selectDatabase);
+    dbPane = null;
+    keysPane = null;
+    activeDb = null;
+    activeKey = null;
+    keyMore = { ...keyMore, shown: false };
+    showMain({ empty: "selectDatabase" });
   }
 
   function getSelection(): RedisExplorerSelection {
@@ -861,29 +885,15 @@ export function createRedisExplorer(
   }
 
   function localize(): void {
-    const t = text();
-    dbListHeader.textContent = t.redis.databases;
-    keyListTitle.textContent = t.redis.keys;
-    newKeyBtn.textContent = `＋ ${t.redis.newKey}`;
-    newKeyBtn.title = t.redis.newKey;
-    keyFilterInput.placeholder = t.redis.keyFilterPlaceholder;
-    keyFilterBtn.textContent = t.common.search;
-    keyMoreBtn.textContent = t.common.loadMore;
     // 空状態のプレースホルダは「DB未選択」か「キー未選択」かで文言が異なる。
-    if (!currentKey) {
-      setPaneEmpty(
-        mainPane,
-        currentDbId ? t.redis.selectKey : t.redis.selectDatabase,
-      );
-    } else if (
-      lastValue?.key === currentKey &&
-      mainPane.querySelector(".redis-value-body") &&
-      !mainPane.querySelector(".redis-value-edit-textarea")
-    ) {
-      // 描画済みの値 (見出し・切り詰めの注記・操作ボタン) を描き直す。編集中は触らない。
-      renderValue(lastValue.key, lastValue.value);
-    }
+    // 値を描いている欄 (見出し・切り詰めの注記・操作ボタン) は、描き直すと
+    // 今の言語になる。書き直している欄は触らない。
+    if (!currentKey)
+      mainPane = { empty: currentDbId ? "selectKey" : "selectDatabase" };
+    draw();
   }
+
+  draw();
 
   return {
     el: container,

@@ -2,12 +2,10 @@
 // 動かすことを happy-dom 上の実描画で確認する。文字列の存在ではなく、
 // db-grid-cell-active が付くセルの位置と、詳細フッタが何を出しているかで見る。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import { tableData } from "./_table-grid-fixture";
 import { q } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createTableGrid } = await import("../views/database/table-grid");
 const { dbText } = await import("../views/database/i18n");
@@ -122,10 +120,6 @@ function clickCell(root: HTMLElement, row: number, col: number): void {
 }
 
 describe("table-grid arrow-key cell navigation", () => {
-  afterAll(() => {
-    GlobalRegistrator.unregister();
-  });
-
   test("row details show every column and follow the active row", async () => {
     const { grid } = setup();
     await tick();

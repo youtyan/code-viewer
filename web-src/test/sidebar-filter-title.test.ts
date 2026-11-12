@@ -2,17 +2,9 @@
 // 正規表現の誤りの間だけ理由に差し替え、直ったら説明に戻す。以前は正しい
 // 絞り込みのたびに空で上書きし、説明が最初の描画で消えていた。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, expect, test } from "vitest";
 import { createSidebarForTest, installSidebarDom } from "./_sidebar-fixture";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";

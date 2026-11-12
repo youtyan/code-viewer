@@ -1,3 +1,4 @@
+import { html } from "lit/html.js";
 import { apiUrl, PROJECT_HEADER } from "../../core/api-url";
 // メインの面 (左 / 右) のターミナルのタブの中身。映すのは PTY のシェルで、
 // tmux はその中で普通に動く。
@@ -29,7 +30,8 @@ import {
   TERMINAL_FONT_SIZE_STEP,
 } from "../../core/tmux";
 import type { ContextMenuItem } from "../context-menu";
-import { renderEmptyState } from "../empty-state";
+import { renderEmptyState } from "../ui/empty-state";
+import { templateElement } from "../ui/renderer";
 import { type TerminalLang, type TerminalText, terminalText } from "./i18n";
 import type { ImageShelfLayout } from "./image-shelf";
 import {
@@ -44,6 +46,10 @@ export type TerminalViewDeps = {
   getLanguage(): TerminalLang;
   /** 保存してある文字サイズ (px)。 */
   getFontSize(): number;
+  /** 端末のプログラムが送ったコピー (OSC 52) をクリップボードに書くか。無ければ書く。 */
+  allowClipboardWrite?(): boolean;
+  /** macOS の Option キーを Alt (Meta) として送るか。無ければ送らない。 */
+  optionAsAlt?(): boolean;
   /** 文字サイズが変わった。保存は呼び出し側 (app.ts) が持つ。 */
   onFontSizeChange(size: number): void;
   /** 画像の棚を畳んでいるか (ユーザー単位の設定)。 */
@@ -56,6 +62,10 @@ export type TerminalViewDeps = {
   paneName?(paneId: string): string | null;
   /** 画面のファイルのパスを開く (プロジェクトの根からの相対パスと行)。 */
   onOpenFile?(path: string, line: number | undefined, kept: boolean): void;
+  /** 画面の文字のペイン ID が今 tmux に居るペインか。 */
+  isLivePane?(pane: string): boolean;
+  /** 画面のペイン ID を押した。そのペインを開く。 */
+  onOpenPane?(pane: string): void;
   /** 棚の置き場所か大きさを変えた。保存は呼び出し側 (app.ts) が持つ。 */
   onImageShelfLayoutChange?(patch: Partial<ImageShelfLayout>): void;
   /**
@@ -127,11 +137,13 @@ export type TerminalViewHandle = {
    * 新しいシェルを開き、そのタブを前面に出してもらう。失敗は reject する。
    * project はカレントにするプロジェクトの鍵 (無ければこのページのプロジェクト)。
    * id はそのタブのシェルの ID のまま開き直すとき (サーバが起き直して終わった)。
+   * cwd は作業場所 (前面のペインの場所など)。無ければプロジェクトの根。
    */
   createShell(
     side: TabSide,
     project?: string,
     id?: ShellSessionId,
+    cwd?: string,
   ): Promise<void>;
   /**
    * サーバが起き直して終わったシェルのタブを、同じ ID のシェルで保存した tmux の
@@ -183,7 +195,29 @@ type ScreenSlot = {
   hint: HTMLElement;
 };
 
-export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
+/** ターミナルの面の描き方。枠とタブの面の形だけを持つ (中身は画面の部品)。 */
+export type TerminalViewView = {
+  /** 画面の下端の状態の行 (文字は後から書き込む)。 */
+  statusLine: () => unknown;
+  /** 何も映していない間の、真ん中の案内 (文字は後から書き込む)。 */
+  emptyHint: () => unknown;
+  /** 画面・案内・状態の行を入れる枠。 */
+  slot: (children: Node[]) => unknown;
+  tabPane: () => unknown;
+};
+
+export const DEFAULT_VIEW: TerminalViewView = {
+  statusLine: () => html`<p class="terminal-status" role="status" hidden></p>`,
+  emptyHint: () =>
+    html`<p class="terminal-empty-hint" role="status" hidden></p>`,
+  slot: (children) => html`<div class="terminal-slot">${children}</div>`,
+  tabPane: () => html`<div class="terminal-pane"></div>`,
+};
+
+export function createTerminalView(
+  deps: TerminalViewDeps,
+  view: TerminalViewView = DEFAULT_VIEW,
+): TerminalViewHandle {
   /** 面ごとにタブで映す枠。最初にその面で映すときに作る。 */
   const tabs: Record<TabSide, ScreenSlot | null> = { left: null, right: null };
   /** 面ごとの、枠を置く場所 (app がその面の箱に入れる)。 */
@@ -238,21 +272,17 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   }
 
   function createSlot(): ScreenSlot {
-    const status = document.createElement("p");
-    status.className = "terminal-status";
-    status.role = "status";
-    status.hidden = true;
+    const status = templateElement(view.statusLine());
     // 見えるのは status か hint のどちらか一方だけ (style.css)。読み上げも
     // 見えている方から届く。
-    const hint = document.createElement("p");
-    hint.className = "terminal-empty-hint";
-    hint.role = "status";
-    hint.hidden = true;
+    const hint = templateElement(view.emptyHint());
     const screen = createTerminalScreen({
       trackLoad: deps.trackLoad,
       actionHeaders: deps.actionHeaders,
       getText: text,
       getFontSize: () => clampTerminalFontSize(deps.getFontSize()),
+      allowClipboardWrite: () => deps.allowClipboardWrite?.() ?? true,
+      optionAsAlt: () => deps.optionAsAlt?.() === true,
       // 状態の行は枠の中にあるので、付け替えても映しているシェルの状態が付いて行く。
       onStatus: (message, overlay) =>
         writeStatus({ status, hint }, message, overlay),
@@ -268,6 +298,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       getImageShelfLayout: deps.getImageShelfLayout,
       paneName: deps.paneName,
       onOpenFile: deps.onOpenFile,
+      isLivePane: deps.isLivePane,
+      onOpenPane: deps.onOpenPane,
       // 棚で変えたら、保存してから両方の面の棚に当て直す。
       setImageShelfLayout: (patch) => {
         deps.onImageShelfLayoutChange?.(patch);
@@ -276,16 +308,12 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       onOpenImage: deps.onOpenImage,
     });
     screen.setInputEnabled(inputEnabled);
-    const el = document.createElement("div");
-    el.className = "terminal-slot";
-    el.append(screen.el, hint, status);
+    const el = templateElement(view.slot([screen.el, hint, status]));
     return { el, screen, status, hint };
   }
 
   function createTabPane(): HTMLElement {
-    const pane = document.createElement("div");
-    pane.className = "terminal-pane";
-    return pane;
+    return templateElement(view.tabPane());
   }
 
   /** 左右の面の枠を入れ替える (反対側へ移したタブの xterm を付け替える)。 */
@@ -473,6 +501,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     side: TabSide,
     project?: string,
     id?: ShellSessionId,
+    cwd?: string,
   ): Promise<void> {
     const size = tabs[side]?.screen.measure();
     const res = await deps.trackLoad(
@@ -484,7 +513,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
           // 入口はシェルの作業場所をこの鍵で決める (server/entry/server.ts)。
           ...(project ? { [PROJECT_HEADER]: project } : {}),
         },
-        body: JSON.stringify({ id, cols: size?.cols, rows: size?.rows }),
+        body: JSON.stringify({ id, cols: size?.cols, rows: size?.rows, cwd }),
       }),
     );
     if (res.status === 429)
@@ -636,6 +665,15 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     // 映す面で測った大きさで繋ぐ。渡さないと仮の大きさ (120×32) で tmux に
     // 繋ぎ、window-size smallest の tmux では PC のウインドウまで縮んだ。
     const size = tabSlot(side, id).screen.measure();
+    // 応答を待つ間に、前の tmux の設定のままの端末 (マウスのクリックを信号で
+    // 送る等) が同じ ID へ入力を送ると、新しいシェルの attach の行の頭に混ざって
+    // attach が失敗し、ただのシェルが残った。前のサーバのシェルはもう無いので、
+    // 頼む前に切り離して入力を止める (付け直すときに端末も作り直す)。
+    for (const s of ["left", "right"] as const) {
+      if (showing[s] !== id) continue;
+      const slot = tabSlot(s, id);
+      if (slot.screen.getAttached()?.id === id) slot.screen.detach();
+    }
     const res = await deps.trackLoad(
       fetch(apiUrl("tmuxOpen"), {
         method: "POST",

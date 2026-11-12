@@ -3,20 +3,10 @@
 // クラス・取りに行った並び (fetchPage に渡った sort) を見る。時計は Date だけ
 // 止める (行の組み立ては requestAnimationFrame と setTimeout で本物を使う)。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tableData } from "./_table-grid-fixture";
 import { q } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createTableGrid } = await import("../views/database/table-grid");
 const { dbText } = await import("../views/database/i18n");
@@ -159,9 +149,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 describe("the Changed column", () => {

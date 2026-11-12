@@ -9,6 +9,7 @@
 //                                          (usage-check.ts。終わるまで待って結果を返す)
 // - POST   /_agent/launch                 エージェントを tmux の新しいウィンドウで起動する
 //                                          (handoff を付けると「別のアカウントで続ける」)
+// - GET    /_agent/launch/status?pane=%N  起動したペインが動いているか・失敗して終わったか
 // - GET    /_agent/statusline/plan        claude の statusLine を包む・戻すと何が変わるか
 // - POST   /_agent/statusline/apply       確認した計画を実行する
 // - DELETE /_agent/statusline/failures    包むスクリプトの失敗の記録を消す
@@ -20,6 +21,7 @@ import {
   type AccountTag,
   handoffArgs,
   handoffPrompt,
+  handoffSource,
   isAccountAgent,
   isHandoffLanguage,
   LOGIN_SESSION,
@@ -32,6 +34,7 @@ import {
 import { hasControlCharacter } from "../../core/control-chars";
 import { formatErrorDetail } from "../../core/error-detail";
 import { isProjectColor } from "../../core/project-colors";
+import { isTmuxPaneId } from "../../core/tmux";
 import {
   json,
   parseBoundedJsonBody,
@@ -50,6 +53,7 @@ import {
 import {
   accountWindowName,
   agentCommandArgv,
+  launchedPaneStatus,
   loginWindowArgv,
   openAccountWindow,
 } from "./launch";
@@ -67,6 +71,7 @@ import {
   updateAccountRegistry,
 } from "./registry";
 import { sharedAccountService } from "./service";
+import { sharedServerArgs } from "./shared-server";
 import { sharedUsageChecker } from "./usage-check";
 
 /** 本文の上限。名前・パス・コマンドとリンクの一覧だけが来る。 */
@@ -361,7 +366,7 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
     const account = findAccount(accountId);
     const service = sharedAccountService();
     const command = service.launchCommands()[account.agent];
-    const handoffArgs = handoffLaunchArgs(handoff, account.agent);
+    const handoffLaunch = handoffLaunchArgs(handoff, account.agent);
     // 使用量を記録しているアカウントなら、プロジェクトの statusLine に負けない
     // よう、包んだものを --settings で渡す (project-statusline.ts)。先に置くのは、
     // 引き継ぎの --add-dir が値を複数とるため。
@@ -373,13 +378,22 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
       folder: cwd,
       home: service.paths.home,
     });
+    // codex と opencode は共有の裏のサーバを使わせない (フックが別のペインを
+    // 指す。shared-server.ts)。
+    const daemon = await sharedServerArgs(account.agent, command, cwd);
     const pane = await openAccountWindow({
       agent: account.agent,
       account,
       cwd,
       session: sessionName,
       windowName: accountWindowName(account.agent, account),
-      argv: agentCommandArgv(command, [...statusLine.args, ...handoffArgs]),
+      argv: agentCommandArgv(command, [
+        ...daemon,
+        ...statusLine.args,
+        ...handoffLaunch.args,
+      ]),
+      // 引き継ぎなら元のペインの下に並べる (@agent-parent)。
+      ...(handoffLaunch.pane ? { parent: handoffLaunch.pane } : {}),
     });
     // 次に開いたときの既定。覚えられなくても起動は済んでいるので、理由を
     // 添えて返す (画面に出す)。
@@ -421,8 +435,12 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
  * (terminal/agent-state.ts) から引く。画面から来るのは、どのペインか・
  * 指示文の言語・前の担当のアカウントの表示名だけ。handoff が無ければ空。
  */
-function handoffLaunchArgs(value: unknown, agent: AccountAgent): string[] {
-  if (value === undefined) return [];
+/** 引き継ぎの起動の引数と、引き継ぐ元のペイン (引き継ぎでなければ null)。 */
+function handoffLaunchArgs(
+  value: unknown,
+  agent: AccountAgent,
+): { args: string[]; pane: string | null } {
+  if (value === undefined) return { args: [], pane: null };
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new AccountError("invalid handoff", "invalid");
   }
@@ -442,31 +460,36 @@ function handoffLaunchArgs(value: unknown, agent: AccountAgent): string[] {
     throw new AccountError("invalid handoff account name", "invalid");
   }
   const record = getAgentConversation(pane);
-  const transcriptPath = record?.conversation.transcriptPath ?? "";
-  if (!record || !transcriptPath) {
+  const source = record
+    ? handoffSource(record.agent, record.conversation)
+    : null;
+  if (!record || !source) {
     throw new AccountError(
       `${pane} has no conversation log reported by a hook (install the agent hooks, then use the agent once)`,
       "conflict",
     );
   }
-  const dir = transcriptDir(transcriptPath);
-  try {
-    if (!statSync(dir).isDirectory()) {
-      throw new Error(`${dir} is not a directory`);
+  const transcriptPath = source.transcriptPath ?? "";
+  if (transcriptPath) {
+    const dir = transcriptDir(transcriptPath);
+    try {
+      if (!statSync(dir).isDirectory()) {
+        throw new Error(`${dir} is not a directory`);
+      }
+    } catch (error) {
+      throw new AccountError(
+        `cannot open the folder of the conversation log of ${pane}: ${dir}`,
+        "unreadable",
+        { cause: error },
+      );
     }
-  } catch (error) {
-    throw new AccountError(
-      `cannot open the folder of the conversation log of ${pane}: ${dir}`,
-      "unreadable",
-      { cause: error },
-    );
   }
   const prompt = handoffPrompt(language, {
     agent: record.agent,
     account: fromAccount,
-    transcriptPath,
+    ...source,
   });
-  return handoffArgs(agent, prompt, transcriptPath);
+  return { args: handoffArgs(agent, prompt, transcriptPath), pane };
 }
 
 function claudeAccount(id: unknown): AccountEntry {
@@ -475,6 +498,24 @@ function claudeAccount(id: unknown): AccountEntry {
     throw new AccountError("statusLine is a claude setting", "invalid");
   }
   return account;
+}
+
+/** 起動の直後に、起動したペインの様子を読む (launchedPaneStatus)。読むだけ。 */
+export async function handleLaunchStatusGet(
+  url: URL,
+  cwd: string,
+): Promise<Response> {
+  const pane = url.searchParams.get("pane") ?? "";
+  if (!isTmuxPaneId(pane)) return textError("invalid pane", 400);
+  try {
+    return json(await launchedPaneStatus(pane, cwd));
+  } catch (error) {
+    console.error(
+      `[code-viewer] could not read the launched pane ${pane}`,
+      error,
+    );
+    return json({ error: formatErrorDetail(error), code: "failed" }, 500);
+  }
 }
 
 export function handleStatusLinePlanGet(url: URL): Response {

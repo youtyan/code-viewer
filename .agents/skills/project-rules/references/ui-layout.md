@@ -22,7 +22,7 @@
 |---|---|---|---|
 | **T0** スケールトークン | 文字とコントロールの寸法。密度モードごとに定義。余白・角丸の段階 (`--space-*` `--radius-*`) もここ。一覧の行の高さ `--ui-row-h` だけは出所が TS (`views/shell/row-height.ts`。仮想表示が位置の計算に使うため) で、CSS は初回描画用の既定。表の行の高さ `--ui-table-row-h` は仮想表示に使わないので CSS だけ (`ui-surface.md` の決まり 7) | `--ui-font-*` `--ui-control-*` `--ui-dense-row-h` `--ui-row-h` `--ui-table-row-h` `--code-line-height` | **可**（ここだけ） |
 | **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--main-tabs-h` (最上段のタブ列) `--global-header-h` (上に居座る固定物の合計。今はタブ列だけなので `= --main-tabs-h`。body で決める) `--view-head-h` (一覧の列の頭の 2 段目の高さ) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--sidebar-w` (ファイル一覧の幅) `--files-shown` (ファイル一覧が占める幅。畳めば縦の帯の幅 `--view-rail-w`) `--history-w` (一覧の利用者の幅) `--list-w` (一覧のいまの幅。TS が書く) `--listcol-head-w` `--column-head-w` (一覧の列の頭の幅) `--chrome-right` (右端の固定物。デスクトップは 0) `--annotation-panel-w` | **可**（その固定物の実寸なので） |
-| **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--main-bottom` (メインの面の箱の下端。最下段の上) `--main-pane-h` (面の箱の高さ) `--column-head-h` (一覧の列の頭の 2 段の高さ) `--panel-body-top` (一覧の列の本体の上端 = 頭の下) `--listcol-shown` (一覧の列が占める幅) `--page-left` `--page-right` (本文の左右の端。下の「左右 2 面」) | **不可。T2 の式に px リテラルを書かない** |
+| **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--main-bottom` (メインの面の箱の下端。最下段の上) `--main-pane-h` (面の箱の高さ) `--column-head-h` (一覧の列の頭の 2 段の高さ) `--panel-body-top` (一覧の列の本体の上端 = 頭の下) `--listcol-shown` (一覧の列が占める幅) `--page-left` `--page-right` (本文の左右の端。下の「左右 2 面」) `--head-overhang-h` (一覧の列の頭が本文の上へはみ出す高さ) `--toolbarless-chrome-h` (topbar を隠すページの `--chrome-h`) | **不可。T2 の式に px リテラルを書かない** |
 | **T3** ローカルインセット | 「このエンベロープの内側に居座る家具の高さ」 | `--file-detail-head-h` | **可。ただし必ず命名し、ページスコープに宣言し、何の高さかコメントする** |
 
 ### 消費側の規則
@@ -435,10 +435,15 @@ getComputedStyle(document.body).getPropertyValue('--content-h')
 `--chrome-h` は**ページスコープで上書きするためにある**。topbar を隠すページは
 
 ```css
-body.gdp-<name>-page { --chrome-h: var(--global-header-h); }
+body.gdp-<name>-page { --chrome-h: var(--toolbarless-chrome-h); }
 ```
 
-を書く。消費側（`#load-bar` `#content` `#sidebar` `#annotation-panel` sticky 各種）は
+を書く。`--toolbarless-chrome-h` はタブ列と、一覧の列の頭のはみ出し (`--head-overhang-h`。
+左のサイドバーを畳んだとき・大きい密度で頭が一覧の列より右へ出る) の和。topbar を隠すページの
+本文はタブ列のすぐ下から始まるので、`--global-header-h` だけでは頭の 2 段目が本文の上端を
+隠す (全体ボードの見出しの 1 文字目が隠れていた)。本文の上の余白 (`--content-top-gap`) で
+空けるページ (フォルダ表示・ファイル表示) もある。どちらかで空けることは
+`web-src/test/panel-head-kept.test.ts` が topbar を隠す全ページについて確かめる。消費側（`#load-bar` `#content` `#sidebar` `#annotation-panel` sticky 各種）は
 `var(--chrome-h)` / `var(--content-h)` **だけ**を読む。
 
 **禁止:**

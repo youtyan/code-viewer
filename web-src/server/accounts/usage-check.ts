@@ -6,6 +6,7 @@ import type {
   UsageCheckResponse,
   UsageWindow,
 } from "../../core/agent-accounts";
+import { usageSupported } from "../../core/agent-accounts";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { type RunResult, runAsync } from "../runtime";
 import { accountReadArgv, agentCommandArgv } from "./launch";
@@ -181,6 +182,10 @@ export function createUsageChecker(deps: UsageCheckDeps): UsageChecker {
       startedAt: deps.now(),
     };
     try {
+      if (!usageSupported(account.agent))
+        throw new Error(
+          `${account.agent} has no command that reports its plan limits`,
+        );
       const env = accountEnv(account, deps.env);
       let windows: UsageWindow[];
       if (account.agent === "claude") {

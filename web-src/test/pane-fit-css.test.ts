@@ -107,12 +107,6 @@ test.each([
   // 全体ボード: 狭い面では絞り込みを折り返し、アカウントのカードは行を折る
   [".agents-toolbar", "flex-wrap", "wrap"],
   [".agents-filter", "flex-wrap", "wrap"],
-  // フォルダ表示もファイル表示と同じ本文の左右の余白 (左端が 8px ずれていた)
-  [
-    "body.gdp-repo-page #content",
-    "padding",
-    "var(--content-top-gap) var(--content-pad-x) 48px",
-  ],
   // 一覧の見出し: 「ツリー / 一覧」と題の語を折らない
   [
     ":is(#sidebar, #file-list) .sb-head .sb-view-seg",
@@ -171,6 +165,22 @@ test.each([
       (candidate) => candidate === selector,
     ).get("display"),
   ).toBe(expected);
+});
+
+// フォルダ表示とファイル表示は、本文の箱の余白が同じ (どちらも面を箱の端まで敷き、
+// 文字の線は面の中の --pad-doc)。片方だけ余白を変えると、行き来したときに本文の
+// 左端がずれる (以前は 8px ずれていた)。
+test("the folder view and the file view share the content box edges", () => {
+  const box = (page: string) => {
+    const declarations = cascadedDeclarations(
+      rules,
+      (candidate) => candidate === `body.${page} #content`,
+    );
+    return ["padding", "--content-top-gap", "--content-pad-x"].map((name) =>
+      declarations.get(name),
+    );
+  };
+  expect(box("gdp-repo-page")).toEqual(box("gdp-file-detail-page"));
 });
 
 // アカウントのカードは 1 行に最大 4 枚で、1 枚が最小の幅を下回るなら行を折る

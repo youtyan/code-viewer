@@ -6,8 +6,8 @@
 // 地がアクセントの塗りのボタンでは、輪と塗りが同じ色で接してボタンが少し大きく
 // 見えるだけだったので、輪と部品の間に地の色の隙間を挟む。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { beforeAll, describe, expect, test } from "vitest";
 import { themeVariants } from "./_color-themes";
 import {
   baseRules,
@@ -279,27 +279,28 @@ describe("a focused tree row draws the shared ring inside", () => {
   });
 });
 
-// 差分のカードの見出しの Viewed はチェックの箱ではなく文字ごと (label) を囲む。
+// 差分のカードの見出しの Viewed は、ほかのチェックボックスと同じく箱に共通の輪を描く
+// (チェックボックスの節。置き場所ごとに輪の描き方を変えない)。
 // 隠れた行を出すボタンは行番号の列いっぱいに積まれ、外の輪が切れるので内側に描く。
 describe("the diff card header's Viewed and the hidden-line buttons draw the shared ring", () => {
   const exactly = (selector: string) =>
     cascadedDeclarations(rules, (s) => s === selector);
 
-  test("Viewed: the label draws the ring, the checkbox drops the browser's", () => {
-    expect({
-      checkbox: exactly(".d2h-file-collapse-input:focus-visible").get(
-        "outline",
-      ),
-      label: resolveVar(
-        exactly(
-          ".d2h-file-collapse:has(> .d2h-file-collapse-input:focus-visible)",
-        ).get("box-shadow") ?? "",
-        light,
-      ),
-    }).toEqual({
-      checkbox: "none",
-      label: resolveVar("var(--focus-ring)", light),
-    });
+  test("Viewed: the checkbox draws the shared ring, not the browser's", () => {
+    // チェックボックスの節の規則 (input:is([type="checkbox"], …):focus-visible)。
+    const focused = cascadedDeclarations(
+      rules,
+      (s) =>
+        s.startsWith("input:is(") &&
+        s.includes('[type="checkbox"]') &&
+        s.endsWith(":focus-visible"),
+    );
+    expect([
+      focused.get("outline"),
+      resolveVar(focused.get("box-shadow") ?? "", light),
+      // 置き場所の規則が輪を書き換えていない。
+      exactly(".d2h-file-collapse-input:focus-visible").size,
+    ]).toEqual(["none", resolveVar("var(--focus-ring)", light), 0]);
   });
 
   test("the hidden-line button draws the ring inside", () => {
@@ -418,11 +419,7 @@ describe("a focused control draws the ring that fits where it sits", () => {
     </section>`;
 
   beforeAll(() => {
-    GlobalRegistrator.register();
     document.body.innerHTML = PAGE;
-  });
-  afterAll(() => {
-    GlobalRegistrator.unregister();
   });
 
   /** その部品に当たる規則だけで解いた、フォーカス中の outline と box-shadow。 */

@@ -36,6 +36,7 @@ import type { ProjectRegistrySnapshot } from "../../core/projects";
 import type { ShellSession } from "../../core/shell";
 import { basenameOf, linkShellsAndPanes } from "../../core/terminal-board";
 import type { TmuxClient, TmuxPanesResponse } from "../../core/tmux";
+import type { ProbeTarget } from "../accounts/process-env";
 import {
   type PaneAccountTarget,
   sharedAccountService,
@@ -55,6 +56,11 @@ import {
   getAgentConversation,
   listAgentStates,
 } from "./agent-state";
+import {
+  createProcessKindProber,
+  type ProcessKindProber,
+  type ProcessKindResult,
+} from "./process-kind";
 
 export type ProjectResolution =
   | { kind: "root"; root: string; toplevel: string }
@@ -104,6 +110,11 @@ export type AgentOverviewDeps = {
   paneAccounts(
     targets: readonly PaneAccountTarget[],
   ): Promise<Map<string, PaneAccount>>;
+  /**
+   * 前面のコマンドがインタプリタ (node など) のペインの中のプログラムの種類。
+   * process-kind.ts が覚えておき、ペインかコマンドが変わったときだけ ps を呼ぶ。
+   */
+  paneProcessKinds(targets: readonly ProbeTarget[]): Promise<ProcessKindResult>;
   now(): number;
 };
 
@@ -181,12 +192,27 @@ export async function buildAgentOverview(
   const states = new Map(
     deps.listStates().map((record) => [record.target, record]),
   );
+  const processKinds = await deps.paneProcessKinds(
+    tmuxPanes.map((pane) => ({
+      id: pane.id,
+      pid: pane.pid,
+      command: pane.command,
+    })),
+  );
+  for (const failure of processKinds.errors) {
+    errors.push(error("probe_process", failure.target, failure.error, now));
+  }
   const kinds = new Map(
     tmuxPanes.map((pane) => {
       const record = states.get(pane.id) ?? null;
       return [
         pane.id,
-        agentKindOf(pane.command, record?.source ?? null, record),
+        agentKindOf(
+          pane.command,
+          record?.source ?? null,
+          record,
+          processKinds.kinds.get(pane.id) ?? null,
+        ),
       ] as const;
     }),
   );
@@ -206,18 +232,42 @@ export async function buildAgentOverview(
         placeOf.set(pane.id, { session: session.name, window: window.index });
     }
   }
+  // git の外で動くペイン (作業役を一時フォルダで起こしたものなど) は、同じ
+  // ウインドウのリポジトリのペインがみな同じプロジェクトなら、そのプロジェクトに
+  // 入れる。作業場所のフォルダを 1 つのプロジェクトにすると、登録していない
+  // 別のプロジェクトとして「tmux で検出」に出ていた。リポジトリが無い・2 つ
+  // 以上あるウインドウでは決めず、作業場所のままにする。
+  const windowKey = (place: { session: string; window: number }) =>
+    `${place.session}\u0000${place.window}`;
+  const windowRoots = new Map<string, Set<string>>();
+  for (const pane of tmuxPanes) {
+    const resolution = resolved.get(pane.path);
+    const place = placeOf.get(pane.id);
+    if (resolution?.kind !== "root" || !place) continue;
+    const roots = windowRoots.get(windowKey(place)) ?? new Set<string>();
+    roots.add(resolution.root);
+    windowRoots.set(windowKey(place), roots);
+  }
+  const windowRootOf = (paneId: string): string | null => {
+    const place = placeOf.get(paneId);
+    const roots = place ? windowRoots.get(windowKey(place)) : undefined;
+    return roots?.size === 1 ? ([...roots][0] ?? null) : null;
+  };
   for (const pane of tmuxPanes) {
     const resolution = resolved.get(pane.path) ?? {
       kind: "error" as const,
       error: `project for ${pane.path} was not resolved`,
     };
-    const root = resolution.kind === "root" ? resolution.root : pane.path;
+    const borrowed =
+      resolution.kind === "outside" ? windowRootOf(pane.id) : null;
+    const root =
+      resolution.kind === "root" ? resolution.root : (borrowed ?? pane.path);
     if (!projects.has(root)) {
       projects.set(root, {
         root,
         name: basenameOf(root) || root,
         displayRoot: abbreviateHome(root, deps.home),
-        git: resolution.kind === "root",
+        git: resolution.kind === "root" || borrowed !== null,
         error: resolution.kind === "error" ? resolution.error : "",
         server: { status: "none" },
         registered: null,
@@ -262,6 +312,10 @@ export async function buildAgentOverview(
           })
         : null,
       ...(conversation ? { conversation: conversation.conversation } : {}),
+      ...(record?.attention && record.state === "waiting"
+        ? { attention: record.attention }
+        : {}),
+      ...(pane.parent ? { parent: pane.parent } : {}),
     });
   }
 
@@ -378,6 +432,14 @@ const SERVER_CACHE_TTL_MS = 10_000;
 /** 登録されたサーバの生存確認の上限。一覧の応答を待たせすぎない。 */
 const SERVER_HEALTH_TIMEOUT_MS = 800;
 
+let processKindProber: ProcessKindProber | null = null;
+
+/** サーバのプロセスで 1 つ (覚えた結果を一覧の取り直しの間で持つ)。 */
+function sharedProcessKindProber(): ProcessKindProber {
+  processKindProber ??= createProcessKindProber();
+  return processKindProber;
+}
+
 export function defaultAgentOverviewDeps(cwd: string): AgentOverviewDeps {
   const projectCache = createTtlCache<ProjectResolution>(
     PROJECT_CACHE_TTL_MS,
@@ -425,6 +487,7 @@ export function defaultAgentOverviewDeps(cwd: string): AgentOverviewDeps {
       }),
     forgetServer: (root) => serverCache.forget(root),
     paneAccounts: (targets) => sharedAccountService().paneAccounts(targets),
+    paneProcessKinds: (targets) => sharedProcessKindProber().probe(targets),
     readRegistry: () => projectRegistrySnapshot(projectRegistryPath()),
     rootExists: existsSync,
     now: Date.now,

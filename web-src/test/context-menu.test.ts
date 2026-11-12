@@ -2,18 +2,12 @@
 // 閉じる。関係のない箱のスクロール (裏の更新でタブの列を描き直したときなど)
 // で閉じると、開いた直後に消えて項目が押せなくなる。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
-
-GlobalRegistrator.register();
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 
 const { closeContextMenu, isContextMenuOpen, showContextMenu } = await import(
   "../views/context-menu"
 );
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   closeContextMenu();
@@ -153,34 +147,24 @@ describe("context menu closes on Escape and Tab", () => {
   );
 });
 
-// 右端のキー (hint): 名前の後ろに kbd で置く。無ければ何も足さない。
-describe("context menu key hints", () => {
-  test.each([
-    { name: "with a hint", hint: "gd", expected: ["Diff", "KBD:gd"] },
-    { name: "without a hint", hint: undefined, expected: ["Diff"] },
-    { name: "with an empty hint", hint: "", expected: ["Diff"] },
-  ])("$name", ({ hint, expected }) => {
-    document.body.innerHTML = '<button id="anchor">+</button>';
-    const menu = showContextMenu(
-      document.getElementById("anchor") as HTMLElement,
-      [
-        {
-          label: "Diff",
-          leading: document.createElement("span"),
-          ...(hint === undefined ? {} : { hint }),
-          onSelect: () => undefined,
-        },
-      ],
-    );
-    const item = menu.querySelector("button") as HTMLButtonElement;
-    expect(
-      [...item.childNodes].flatMap((node) =>
-        node.nodeType === Node.TEXT_NODE
-          ? [node.textContent]
-          : node.nodeName === "KBD"
-            ? [`KBD:${node.textContent}`]
-            : [],
-      ),
-    ).toEqual(expected);
-  });
+// メニューの項目にキーの割り当ては出さない: 項目は絵と名前だけで、kbd を置かない。
+test("context menu items show no key bindings", () => {
+  document.body.innerHTML = '<button id="anchor">+</button>';
+  const menu = showContextMenu(
+    document.getElementById("anchor") as HTMLElement,
+    [
+      {
+        label: "Diff",
+        leading: document.createElement("span"),
+        onSelect: () => undefined,
+      },
+      { label: "Copy path", onSelect: () => undefined },
+    ],
+  );
+  expect({
+    labels: [...menu.querySelectorAll("button")].map((item) =>
+      item.textContent?.trim(),
+    ),
+    keys: menu.querySelectorAll("kbd").length,
+  }).toEqual({ labels: ["Diff", "Copy path"], keys: 0 });
 });

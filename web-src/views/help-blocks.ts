@@ -3,14 +3,20 @@
 // 「設定とヘルプのページの文字と部品」の節が持ち、ここは DOM の形だけを決める。本文を
 // 書く側 (help-page.ts・help-guides.ts) は helpBlocks(lang) の関数を呼んで中身を入れる
 // (.agents/skills/project-rules/references/ui-surface.md の「Help ページ」)。
+//
+// どの部品もテンプレートを返す。描くのは置く側 (本文・キーの小窓・入れ方の案内)。
 
+import { ref } from "lit/directives/ref.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { until } from "lit/directives/until.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import { showCopyFailure, showHighlightFailure } from "../core/copy-failure";
+import { errorWithCause } from "../core/error-detail";
 import {
   ALERT_16_PATH,
   CHECK_16_PATHS,
   COPY_16_PATHS,
   INFO_16_PATH,
-  iconSvg,
 } from "../core/icons";
 import {
   highlightToInnerHtml,
@@ -20,6 +26,8 @@ import { HELP_CAPTURE_WIDTH, type HelpFigure } from "./help-images";
 import type { HelpLanguage } from "./help-page";
 import { terminalText } from "./terminal/i18n";
 import { openImageLightbox } from "./terminal/image-lightbox";
+import { defineElement } from "./ui/element";
+import { iconTemplate } from "./ui/icon";
 
 /**
  * 文の中に置けるもの。文字列はそのまま、`code` は等幅の短いコード、`key` は
@@ -78,56 +86,41 @@ const HELP_BLOCKS_TEXT: Record<HelpLanguage, HelpBlocksText> = {
 /** コピーできた印 (チェック) を出しておく時間。 */
 const COPIED_MARK_MS = 1200;
 
-function inlineNode(part: HelpInline): Node {
-  if (typeof part === "string") return document.createTextNode(part);
-  if ("code" in part) {
-    const code = document.createElement("code");
-    code.textContent = part.code;
-    return code;
-  }
+export const CV_HELP_COMMAND_COPY = "cv-help-command-copy";
+
+function inlineTemplate(part: HelpInline): unknown {
+  if (typeof part === "string") return part;
+  if ("code" in part) return html`<code>${part.code}</code>`;
   if ("key" in part) return helpKey(part.key);
-  if ("ui" in part) {
-    const name = document.createElement("b");
-    name.className = "gdp-help-ui";
-    name.textContent = part.ui;
-    return name;
-  }
-  const link = document.createElement("a");
-  link.href = part.href;
-  link.textContent = part.link;
+  if ("ui" in part) return html`<b class="gdp-help-ui">${part.ui}</b>`;
   const open = part.open;
-  if (!open) {
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    return link;
-  }
-  link.addEventListener("click", (event) => {
-    // 中ボタン・⌘/Ctrl はブラウザに任せる (別のタブで開く)。
-    if (event.button !== 0 || event.metaKey || event.ctrlKey) return;
-    event.preventDefault();
-    open();
-  });
-  return link;
+  if (!open)
+    return html`<a href=${part.href} target="_blank" rel="noopener noreferrer"
+      >${part.link}</a
+    >`;
+  return html`<a
+    href=${part.href}
+    @click=${(event: MouseEvent) => {
+      // 中ボタン・⌘/Ctrl はブラウザに任せる (別のタブで開く)。
+      if (event.button !== 0 || event.metaKey || event.ctrlKey) return;
+      event.preventDefault();
+      open();
+    }}
+  >${part.link}</a>`;
 }
 
-/** 文を DOM の並びにする (段落・手順・表の中で使う)。 */
-export function helpInline(text: HelpText): Node[] {
-  return (Array.isArray(text) ? text : [text]).map(inlineNode);
+/** 文を並びにする (段落・手順・表の中で使う)。 */
+export function helpInline(text: HelpText): unknown[] {
+  return (Array.isArray(text) ? text : [text]).map(inlineTemplate);
 }
 
 /** キーキャップ 1 つ。 */
-export function helpKey(key: string): HTMLElement {
-  const kbd = document.createElement("kbd");
-  kbd.className = "gdp-help-key";
-  kbd.textContent = key;
-  return kbd;
+export function helpKey(key: string): TemplateResult {
+  return html`<kbd class="gdp-help-key">${key}</kbd>`;
 }
 
-function paragraph(text: HelpText, className?: string): HTMLParagraphElement {
-  const p = document.createElement("p");
-  if (className) p.className = className;
-  p.append(...helpInline(text));
-  return p;
+function paragraph(text: HelpText, className?: string): TemplateResult {
+  return html`<p class=${className ?? nothing}>${helpInline(text)}</p>`;
 }
 
 /** 画像を覆いの上に大きく出す。同じ本文の画像を並びにして ←→ で移れる。 */
@@ -146,181 +139,187 @@ function openFigure(anchor: HTMLAnchorElement, lang: HelpLanguage): void {
   );
 }
 
-function figure(lang: HelpLanguage, item: HelpFigure): HTMLAnchorElement {
-  const link = document.createElement("a");
-  link.className = "gdp-help-figure";
-  link.href = item.src;
-  link.target = "_blank";
-  link.rel = "noopener";
+function figure(lang: HelpLanguage, item: HelpFigure): TemplateResult {
   // 縦横の比で、画像が届く前から箱を取る (style.css の .gdp-help-figure)。
-  link.style.setProperty(
-    "--help-figure-ratio",
-    String(HELP_CAPTURE_WIDTH / item.height),
+  return html`<a
+    class="gdp-help-figure"
+    href=${item.src}
+    target="_blank"
+    rel="noopener"
+    style=${`--help-figure-ratio: ${HELP_CAPTURE_WIDTH / item.height};`}
+    @click=${(event: MouseEvent) => {
+      if (
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey
+      )
+        return;
+      event.preventDefault();
+      openFigure(event.currentTarget as HTMLAnchorElement, lang);
+    }}
+  ><img src=${item.src} alt=${item.alt} loading="lazy" decoding="async"
+  /></a>`;
+}
+
+/**
+ * コマンドのコピーのボタン。写せたら印をチェックに替え、少ししたら戻す (形は
+ * 変えず、印だけ替える。押した後にボタンの箱を動かさない)。
+ */
+export function defineCvHelpCommandCopy(): void {
+  defineElement(
+    CV_HELP_COMMAND_COPY,
+    (Base) =>
+      class extends Base {
+        static props = ["text", "label"];
+        declare text: string;
+        declare label: string;
+        #copied = false;
+
+        #copy = async (event: Event) => {
+          const button = event.currentTarget as HTMLButtonElement;
+          try {
+            await navigator.clipboard.writeText(this.text);
+            this.#copied = true;
+            this.renderNow();
+            setTimeout(() => {
+              this.#copied = false;
+              this.renderNow();
+            }, COPIED_MARK_MS);
+          } catch (error) {
+            showCopyFailure(
+              button,
+              "copying the help command failed",
+              error,
+              this.label,
+              COPIED_MARK_MS,
+            );
+          }
+        };
+
+        protected template() {
+          return html`<button
+            type="button"
+            class="gdp-help-command-copy"
+            title=${this.label}
+            aria-label=${this.label}
+            data-copied=${this.#copied ? "true" : nothing}
+            @click=${this.#copy}
+          >${
+            this.#copied
+              ? iconTemplate(CHECK_16_PATHS, "octicon-check")
+              : iconTemplate(COPY_16_PATHS, "octicon-copy")
+          }</button>`;
+        }
+      },
   );
-  const img = document.createElement("img");
-  img.src = item.src;
-  img.alt = item.alt;
-  img.loading = "lazy";
-  img.decoding = "async";
-  link.appendChild(img);
-  link.addEventListener("click", (event) => {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey)
-      return;
-    event.preventDefault();
-    openFigure(link, lang);
-  });
-  return link;
 }
 
 /**
  * コピーのボタンつきのコマンドの箱。ヘルプの本文と、画面で入れ方を出す所
- * (install-help.ts) が同じものを使う。
+ * (install-help.ts) が同じものを使う。色付けは届いてから差し替える (届くまでと
+ * 失敗したときは、色の無いコードのまま。失敗は箱の title と console に出す)。
  */
 export function command(
   lang: HelpLanguage,
   text: string,
   title?: string,
   language: "bash" | "json" = "bash",
-): HTMLDivElement {
-  const wrap = document.createElement("div");
-  wrap.className = "gdp-help-command";
-  if (title) {
-    const head = document.createElement("div");
-    head.className = "gdp-help-command-title";
-    head.textContent = title;
-    wrap.appendChild(head);
-  }
-  const body = document.createElement("div");
-  body.className = "gdp-help-command-body";
-  const pre = document.createElement("pre");
-  const code = document.createElement("code");
-  code.textContent = text;
-  pre.appendChild(code);
-  pre.dataset.language = language;
-  void loadShikiHighlighter({
+): TemplateResult {
+  defineCvHelpCommandCopy();
+  let pre: HTMLElement | undefined;
+  const plain = html`<code>${text}</code>`;
+  const highlighted = loadShikiHighlighter({
     langs: ["bash", "json"],
     failureMode: "throw",
   })
     .then((highlighter) => {
-      const html = highlightToInnerHtml(text, language, highlighter);
-      if (!html && text)
+      const code = highlightToInnerHtml(text, language, highlighter);
+      if (!code && text)
         throw new Error(`No highlighted HTML for the ${language} help code`);
-      if (html) pre.innerHTML = html;
+      return code ? unsafeHTML(code) : plain;
     })
     .catch((error: unknown) => {
+      if (!pre)
+        throw errorWithCause(
+          `the ${language} help code was not drawn before highlighting finished`,
+          error,
+        );
       showHighlightFailure(
         pre,
         `Highlighting the ${language} help code failed`,
         error,
       );
+      return plain;
     });
   const label = HELP_BLOCKS_TEXT[lang].copyCommand;
-  const copy = document.createElement("button");
-  copy.type = "button";
-  copy.className = "gdp-help-command-copy";
-  copy.title = label;
-  copy.setAttribute("aria-label", label);
-  copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-  copy.addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      // 形は変えず、印だけ替える (押した後にボタンの箱を動かさない)。
-      copy.innerHTML = iconSvg("octicon-check", CHECK_16_PATHS);
-      copy.dataset.copied = "true";
-      setTimeout(() => {
-        copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-        delete copy.dataset.copied;
-      }, COPIED_MARK_MS);
-    } catch (error) {
-      showCopyFailure(
-        copy,
-        "copying the help command failed",
-        error,
-        label,
-        COPIED_MARK_MS,
-      );
-    }
-  });
-  body.append(pre, copy);
-  wrap.appendChild(body);
-  return wrap;
+  return html`<div class="gdp-help-command">${
+    title ? html`<div class="gdp-help-command-title">${title}</div>` : nothing
+  }<div class="gdp-help-command-body"><pre
+    data-language=${language}
+    ${ref((element) => {
+      if (element instanceof HTMLElement) pre = element;
+    })}
+  >${until(highlighted, plain)}</pre><cv-help-command-copy
+    .text=${text}
+    .label=${label}
+  ></cv-help-command-copy></div></div>`;
 }
 
 function steps(
   lang: HelpLanguage,
   items: readonly (string | HelpStepSpec)[],
-): HTMLOListElement {
-  const ol = document.createElement("ol");
-  ol.className = "gdp-help-steps";
-  for (const item of items) {
+): TemplateResult {
+  return html`<ol class="gdp-help-steps">${items.map((item) => {
     const spec: HelpStepSpec = typeof item === "string" ? { text: item } : item;
-    const li = document.createElement("li");
     const text =
       spec.text === undefined
-        ? null
+        ? nothing
         : paragraph(spec.text, "gdp-help-step-text");
-    if (spec.title !== undefined)
-      li.appendChild(paragraph(spec.title, "gdp-help-step-title"));
-    else if (text) li.appendChild(text);
-    if (spec.command !== undefined) li.appendChild(command(lang, spec.command));
-    for (const item of spec.figures ?? []) li.appendChild(figure(lang, item));
-    if (spec.title !== undefined && text) li.appendChild(text);
-    if (spec.link !== undefined)
-      li.appendChild(paragraph(spec.link, "gdp-help-step-link"));
-    ol.appendChild(li);
-  }
-  return ol;
+    const titled = spec.title !== undefined;
+    return html`<li>${
+      spec.title !== undefined
+        ? paragraph(spec.title, "gdp-help-step-title")
+        : text
+    }${spec.command !== undefined ? command(lang, spec.command) : nothing}${(
+      spec.figures ?? []
+    ).map((entry) => figure(lang, entry))}${titled ? text : nothing}${
+      spec.link !== undefined
+        ? paragraph(spec.link, "gdp-help-step-link")
+        : nothing
+    }</li>`;
+  })}</ol>`;
 }
 
 function note(
   lang: HelpLanguage,
   kind: HelpNoteKind,
   paragraphs: readonly HelpText[],
-): HTMLElement {
-  const aside = document.createElement("aside");
-  aside.className = "gdp-help-note";
-  aside.dataset.kind = kind;
-  const icon = document.createElement("span");
-  icon.className = "gdp-help-note-icon";
-  icon.innerHTML = iconSvg(
-    "gdp-help-note-mark",
-    kind === "warning" ? ALERT_16_PATH : INFO_16_PATH,
-  );
-  const content = document.createElement("div");
-  content.className = "gdp-help-note-body";
-  const label = document.createElement("strong");
-  label.className = "gdp-help-note-label";
-  label.textContent = HELP_BLOCKS_TEXT[lang].note[kind];
-  content.append(label, ...paragraphs.map((text) => paragraph(text)));
-  aside.append(icon, content);
-  return aside;
+): TemplateResult {
+  return html`<aside class="gdp-help-note" data-kind=${kind}><span
+      class="gdp-help-note-icon"
+    >${iconTemplate(
+      kind === "warning" ? ALERT_16_PATH : INFO_16_PATH,
+      "gdp-help-note-mark",
+    )}</span><div class="gdp-help-note-body"><strong class="gdp-help-note-label"
+        >${HELP_BLOCKS_TEXT[lang].note[kind]}</strong
+      >${paragraphs.map((text) => paragraph(text))}</div></aside>`;
 }
 
 function subsection(
   lang: HelpLanguage,
-  body: readonly HTMLElement[],
+  body: readonly unknown[],
   title?: string,
-): HTMLElement {
-  const box = document.createElement("section");
-  box.className = "gdp-help-subsection";
-  const head = document.createElement("h4");
-  head.textContent = title ?? HELP_BLOCKS_TEXT[lang].subsection;
-  const inner = document.createElement("div");
-  inner.className = "gdp-help-subsection-body";
-  inner.append(...body);
-  box.append(head, inner);
-  return box;
+): TemplateResult {
+  return html`<section class="gdp-help-subsection"><h4
+      >${title ?? HELP_BLOCKS_TEXT[lang].subsection}</h4
+    ><div class="gdp-help-subsection-body">${body}</div></section>`;
 }
 
-function list(items: readonly HelpText[]): HTMLUListElement {
-  const ul = document.createElement("ul");
-  ul.className = "gdp-help-list";
-  for (const item of items) {
-    const li = document.createElement("li");
-    li.append(...helpInline(item));
-    ul.appendChild(li);
-  }
-  return ul;
+function list(items: readonly HelpText[]): TemplateResult {
+  return html`<ul class="gdp-help-list">${items.map(
+    (item) => html`<li>${helpInline(item)}</li>`,
+  )}</ul>`;
 }
 
 /**
@@ -334,48 +333,33 @@ export const UI_TABLE_STRIPE_MIN_ROWS = 8;
  * で表を組む。rowHeaders なら各行の 1 つ目の欄は行の見出し (th)。
  */
 function uiTable(
-  head: readonly (readonly Node[])[] | undefined,
-  rows: readonly (readonly (readonly Node[])[])[],
+  head: readonly unknown[] | undefined,
+  rows: readonly (readonly unknown[])[],
   options: { className: string; rowHeaders?: boolean },
-): HTMLTableElement {
-  const element = document.createElement("table");
-  element.className = `ui-table ${options.className}`;
-  element.classList.toggle(
-    "ui-table-striped",
-    rows.length >= UI_TABLE_STRIPE_MIN_ROWS,
-  );
-  if (head) {
-    const thead = document.createElement("thead");
-    const tr = document.createElement("tr");
-    for (const cell of head) {
-      const th = document.createElement("th");
-      th.scope = "col";
-      th.append(...cell);
-      tr.appendChild(th);
-    }
-    thead.appendChild(tr);
-    element.appendChild(thead);
-  }
-  const tbody = document.createElement("tbody");
-  for (const row of rows) {
-    const tr = document.createElement("tr");
-    row.forEach((cell, index) => {
-      const header = options.rowHeaders === true && index === 0;
-      const box = document.createElement(header ? "th" : "td");
-      if (header) box.setAttribute("scope", "row");
-      box.append(...cell);
-      tr.appendChild(box);
-    });
-    tbody.appendChild(tr);
-  }
-  element.appendChild(tbody);
-  return element;
+): TemplateResult {
+  const striped = rows.length >= UI_TABLE_STRIPE_MIN_ROWS;
+  return html`<table
+    class=${`ui-table ${options.className}${striped ? " ui-table-striped" : ""}`}
+  >${
+    head
+      ? html`<thead><tr>${head.map(
+          (cell) => html`<th scope="col">${cell}</th>`,
+        )}</tr></thead>`
+      : nothing
+  }<tbody>${rows.map(
+    (row) =>
+      html`<tr>${row.map((cell, index) =>
+        options.rowHeaders === true && index === 0
+          ? html`<th scope="row">${cell}</th>`
+          : html`<td>${cell}</td>`,
+      )}</tr>`,
+  )}</tbody></table>`;
 }
 
 function table(
   rows: readonly (readonly HelpText[])[],
   head?: readonly HelpText[],
-): HTMLTableElement {
+): TemplateResult {
   return uiTable(
     head?.map(helpInline),
     rows.map((row) => row.map(helpInline)),
@@ -391,24 +375,22 @@ function table(
 export function renderHelpTable(
   rows: Array<[string, string]>,
   head?: readonly [string, string],
-): HTMLTableElement {
+): TemplateResult {
   return uiTable(
-    head?.map((label) => [document.createTextNode(label)]),
+    head,
     rows.map(([keys, description]) => [
       keys
         .split(" / ")
         .flatMap((key, index) =>
-          index > 0
-            ? [document.createTextNode(" / "), helpKey(key)]
-            : [helpKey(key)],
+          index > 0 ? [" / ", helpKey(key)] : [helpKey(key)],
         ),
-      [document.createTextNode(description)],
+      description,
     ]),
     { className: "ui-table-keys", rowHeaders: true },
   );
 }
 
-/** その言語のヘルプの部品。返す関数はどれも 1 つの要素を返す。 */
+/** その言語のヘルプの部品。返す関数はどれも 1 つの要素のテンプレートを返す。 */
 export function helpBlocks(lang: HelpLanguage) {
   return {
     paragraph: (text: HelpText) => paragraph(text),
@@ -420,7 +402,7 @@ export function helpBlocks(lang: HelpLanguage) {
     command: (text: string, title?: string, language?: "bash" | "json") =>
       command(lang, text, title, language),
     key: helpKey,
-    subsection: (body: readonly HTMLElement[], title?: string) =>
+    subsection: (body: readonly unknown[], title?: string) =>
       subsection(lang, body, title),
     table,
     keyTable: (rows: Array<[string, string]>) =>

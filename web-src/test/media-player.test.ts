@@ -1,22 +1,10 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
-import { createMediaPlayer } from "../views/media-player";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
+  createMediaPlayer,
+  DEFAULT_VIEW,
+  type MediaPlayerProps,
+} from "../views/media-player";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -119,7 +107,8 @@ describe("media player", () => {
       name: "a refused play shows the reason on the play button",
       failure: new DOMException("sample playback refused", "NotAllowedError"),
       title:
-        "Error: playing /_file?path=clip.mp4 failed\nCaused by: NotAllowedError: sample playback refused",
+        // 画面の URL (http) を基に解決した再生元。ブラウザの media.src と同じ形。
+        "Error: playing http://localhost/_file?path=clip.mp4 failed\nCaused by: NotAllowedError: sample playback refused",
       logged: 1,
     },
     {
@@ -231,5 +220,39 @@ describe("media player", () => {
     expect(media.muted).toBe(true);
     click(mute);
     expect(media.muted).toBe(false);
+  });
+});
+
+// 再生の箱 (views/media-player.ts) の presenter。描き方を記録する view に差し替え、
+// 再生の状態・速さ・音を消したときに view に渡す値を見る。
+describe("the media player presenter", () => {
+  test("gives the view the play state, the speed and the muted volume", () => {
+    const shown: MediaPlayerProps[] = [];
+    const player = createMediaPlayer(
+      "/_file?path=clip.mp4",
+      "video",
+      "clip.mp4",
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    document.body.append(player);
+    const last = () => shown[shown.length - 1];
+    expect([
+      last()?.play.icon.cls,
+      last()?.speed.text,
+      last()?.fullscreen?.icon.cls,
+    ]).toEqual(["octicon-play", "1x", "octicon-screen-full"]);
+    last()?.speed.onClick();
+    expect([last()?.speed.text, getMedia(player).playbackRate]).toEqual([
+      "1.25x",
+      1.25,
+    ]);
+    last()?.volume.onClick();
+    expect([last()?.volume.value, last()?.volume.icon.cls]).toEqual([
+      0,
+      "octicon-volume-mute",
+    ]);
   });
 });

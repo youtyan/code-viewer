@@ -13,6 +13,8 @@ import {
   type AgentStateFilter,
   type AgentTransition,
   abbreviateHome,
+  agentAlertPlace,
+  agentKindFromArgs,
   agentKindOf,
   agentTransition,
   filterAgentPanes,
@@ -22,7 +24,6 @@ import {
   nextAgentUnread,
   notifyPermissionView,
   paneTaskText,
-  shouldNotifyAgent,
   titleWithUnread,
   withFinishedAsDone,
 } from "../core/agent-overview";
@@ -52,6 +53,97 @@ function project(root: string, name: string): AgentProjectInfo {
   };
 }
 
+// 前面のプロセスの引数 (`ps -o args=` の 1 行) から中のプログラムを当てる。
+// パスはすべて架空。
+describe("agentKindFromArgs", () => {
+  test.each([
+    {
+      name: "npm で入れた claude (パッケージの cli.js)",
+      args: "node /opt/sample/lib/node_modules/@anthropic-ai/claude-code/cli.js",
+      expected: "claude",
+    },
+    {
+      name: "bin のリンク経由の claude (#!/usr/bin/env node)",
+      args: "node /opt/sample/bin/claude --resume",
+      expected: "claude",
+    },
+    {
+      name: "インタプリタのオプションを飛ばす",
+      args: "node --no-warnings --enable-source-maps /opt/sample/bin/codex",
+      expected: "codex",
+    },
+    {
+      name: "npm の codex",
+      args: "node /opt/sample/lib/node_modules/@openai/codex/bin/codex.js",
+      expected: "codex",
+    },
+    {
+      name: "npm の opencode",
+      args: "node /opt/sample/lib/node_modules/opencode-ai/bin/opencode",
+      expected: "opencode",
+    },
+    {
+      name: "bun で動く opencode",
+      args: "bun /opt/sample/bin/opencode.js",
+      expected: "opencode",
+    },
+    {
+      name: "deno run のスクリプト",
+      args: "deno run -A /opt/sample/claude.ts",
+      expected: "claude",
+    },
+    {
+      name: "対話シェルの包み (起動コマンドの形)",
+      args: 'zsh -ic claude "$@" zsh --add-dir /work/sample',
+      expected: "claude",
+    },
+    {
+      name: "包みの中のインタプリタ",
+      args: 'bash -lc node /opt/sample/bin/codex "$@" bash',
+      expected: "codex",
+    },
+    {
+      name: "単体版の claude (版の名前)",
+      args: "/home/sample/.local/share/claude/versions/2.1.0",
+      expected: "claude",
+    },
+    {
+      name: "ほかのスクリプト",
+      args: "node /work/sample/server.js --port 3000",
+      expected: null,
+    },
+    {
+      name: "スクリプトの無い対話の node",
+      args: "node",
+      expected: null,
+    },
+    {
+      name: "名前の一部だけ一致するものは当てない",
+      args: "node /opt/sample/bin/claude-helper",
+      expected: null,
+    },
+    { name: "-c の無いシェル", args: "zsh -i", expected: null },
+    { name: "空", args: "", expected: null },
+  ])("$name", ({ args, expected }) => {
+    expect(agentKindFromArgs(args)).toBe(expected);
+  });
+
+  test.each([
+    { command: "node", processKind: "claude", expected: "claude" },
+    { command: "bun", processKind: "opencode", expected: "opencode" },
+    // コマンド名で決まるものは引数より先 (引数は使わない)。
+    { command: "codex", processKind: "claude", expected: "codex" },
+    // インタプリタでないコマンドには引数から当てた種類を使わない。
+    { command: "zsh", processKind: "claude", expected: null },
+    { command: "node", processKind: null, expected: null },
+  ] as const)(
+    "agentKindOf: $command + $processKind → $expected",
+    ({ command, processKind, expected }) => {
+      expect(agentKindOf(command, null, null, processKind)).toBe(expected);
+    },
+  );
+});
+
 describe("agentKindOf", () => {
   test.each<{
     name: string;
@@ -79,6 +171,20 @@ describe("agentKindOf", () => {
       expected: "claude",
     },
     { name: "codex", command: "codex", source: null, expected: "codex" },
+    // tmux の pane_current_command に出る名前 (opencode 1.19.5 で観測)。
+    {
+      name: "opencode",
+      command: "opencode",
+      source: null,
+      expected: "opencode",
+    },
+    {
+      name: "申告が opencode を名乗れば opencode",
+      command: "node",
+      source: "hook",
+      report: { agent: "opencode", ended: false },
+      expected: "opencode",
+    },
     {
       name: "数字 2 つは版番号とみなさない",
       command: "2.1",
@@ -550,7 +656,8 @@ describe("notifyPermissionView", () => {
   );
 });
 
-describe("shouldNotifyAgent", () => {
+// 窓が前面でないとき (OS の通知だけ): 許可・見ている・種類ごとの設定で決まる。
+describe("agentAlertPlace (window not in front)", () => {
   const on = { waiting: true, finished: true };
   test.each<{
     name: string;
@@ -634,7 +741,83 @@ describe("shouldNotifyAgent", () => {
     },
   ])("$name", ({ transition, settings, permission, viewing, expected }) => {
     expect(
-      shouldNotifyAgent(transition, { settings, permission, viewing }),
+      agentAlertPlace(transition, {
+        settings,
+        permission,
+        viewing,
+        windowInFront: false,
+        canToast: true,
+      }),
+    ).toBe(expected ? "os" : null);
+  });
+});
+
+// 窓が前面のときは、許可に関係なく窓の中の知らせ (押すとそこへ)。
+describe("agentAlertPlace (window in front)", () => {
+  const on = { waiting: true, finished: true };
+  test.each<{
+    name: string;
+    context: {
+      settings: { waiting: boolean; finished: boolean };
+      permission: "granted" | "denied" | "default" | "unsupported";
+      viewing: boolean;
+      canToast: boolean;
+    };
+    expected: "toast" | "os" | null;
+  }>([
+    {
+      name: "許可済みでも窓の中",
+      context: {
+        settings: on,
+        permission: "granted",
+        viewing: false,
+        canToast: true,
+      },
+      expected: "toast",
+    },
+    {
+      name: "許可が無くても窓の中",
+      context: {
+        settings: on,
+        permission: "denied",
+        viewing: false,
+        canToast: true,
+      },
+      expected: "toast",
+    },
+    {
+      name: "そのペインを見ているなら出さない",
+      context: {
+        settings: on,
+        permission: "granted",
+        viewing: true,
+        canToast: true,
+      },
+      expected: null,
+    },
+    {
+      name: "種類を切ってあれば出さない",
+      context: {
+        settings: { waiting: false, finished: true },
+        permission: "granted",
+        viewing: false,
+        canToast: true,
+      },
+      expected: null,
+    },
+    {
+      name: "窓の中の知らせが無い画面では OS の通知",
+      context: {
+        settings: on,
+        permission: "granted",
+        viewing: false,
+        canToast: false,
+      },
+      expected: "os",
+    },
+  ])("$name", ({ context, expected }) => {
+    expect(
+      agentAlertPlace("waiting", { ...context, windowInFront: true }),
     ).toBe(expected);
   });
 });
@@ -671,4 +854,30 @@ describe("paneTaskText", () => {
   ])("$name", ({ title, expected }) => {
     expect(paneTaskText(pane({ id: "%1", title }))).toBe(expected);
   });
+});
+
+// opencode の題名は `OC | <会話の題>` (1.19.5 で観測)。
+test.each([
+  {
+    name: "opencode の頭の名前を落とす",
+    kind: "opencode" as const,
+    title: "OC | Fix the parser",
+    expected: "Fix the parser",
+  },
+  {
+    name: "opencode 以外の同じ形はそのまま",
+    kind: "claude" as const,
+    title: "OC | Fix the parser",
+    expected: "OC | Fix the parser",
+  },
+  {
+    name: "起動直後の題名 (OpenCode) はそのまま",
+    kind: "opencode" as const,
+    title: "OpenCode",
+    expected: "OpenCode",
+  },
+])("$name", ({ kind, title, expected }) => {
+  expect(
+    paneTaskText(pane({ id: "%1", title, kind, command: "opencode" })),
+  ).toBe(expected);
 });

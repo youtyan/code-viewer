@@ -1,16 +1,9 @@
 // ヘルプの本文の部品 (views/help-blocks.ts)。部品ごとに、出す DOM の形と操作を見る。
 // 見た目 (文字・幅・行間) は help-typography-css.test.ts。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { render } from "lit/html.js";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import * as shiki from "../core/shiki-loader";
 import {
   type HelpText,
@@ -26,18 +19,18 @@ vi.mock("../core/lazy-bundle", () => ({
 }));
 
 beforeAll(async () => {
-  GlobalRegistrator.register({
-    url: "http://localhost/",
-    // クリックをブラウザへ渡すことを確認し、リンク先の通信は行わない。
-    settings: { navigation: { disableChildPageNavigation: true } },
-  });
+  // クリックをブラウザへ渡すことを確認し、リンク先の通信は行わない。
+  (
+    window as unknown as {
+      happyDOM: {
+        settings: { navigation: { disableChildPageNavigation: boolean } };
+      };
+    }
+  ).happyDOM.settings.navigation.disableChildPageNavigation = true;
   await shiki.loadShikiHighlighter({
     langs: ["bash", "json"],
     failureMode: "throw",
   });
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 afterEach(() => {
   document.body.innerHTML = "";
@@ -53,13 +46,30 @@ function shape(nodes: readonly Node[]): string[] {
   });
 }
 
-/** 本文の枠に入れて置く (画像の並びは本文の中で数える)。 */
-function mount(...elements: HTMLElement[]): HTMLElement {
+/** 本文の枠に描いて置く (画像の並びは本文の中で数える)。描いた要素を返す。 */
+function mount(...templates: unknown[]): HTMLElement[] {
   const article = document.createElement("article");
   article.className = "gdp-help-content";
-  article.append(...elements);
   document.body.appendChild(article);
-  return article;
+  render(templates, article);
+  return [...article.children] as HTMLElement[];
+}
+
+/** 部品 1 つを本文に描いて、その要素を返す。 */
+function draw<T extends HTMLElement = HTMLElement>(template: unknown): T {
+  const [element] = mount(template);
+  if (!element) throw new Error("the block drew no element");
+  return element as T;
+}
+
+/** 文を段落に描いて、描いた並び (文字と要素。lit の印は除く) を返す。 */
+function inline(text: HelpText): Node[] {
+  const p = document.createElement("p");
+  document.body.appendChild(p);
+  render(helpInline(text), p);
+  return [...p.childNodes].filter(
+    (node) => node.nodeType !== Node.COMMENT_NODE,
+  );
 }
 
 describe("the inline parts of a sentence", () => {
@@ -92,7 +102,7 @@ describe("the inline parts of a sentence", () => {
       ],
     },
   ])("$name", ({ text, expected }) => {
-    expect(shape(helpInline(text))).toEqual(expected);
+    expect(shape(inline(text))).toEqual(expected);
   });
 
   test.each([
@@ -122,13 +132,12 @@ describe("the inline parts of a sentence", () => {
     },
   ])("a link: $name", ({ init, opened, prevented }) => {
     const open = vi.fn();
-    const [link] = helpInline({
+    const [link] = inline({
       link: "Projects",
       href: "/help?section=projects",
       open,
     });
     if (!(link instanceof HTMLAnchorElement)) throw new Error("not a link");
-    document.body.appendChild(link);
     const event = new MouseEvent("click", {
       bubbles: true,
       cancelable: true,
@@ -147,15 +156,17 @@ describe("numbered steps", () => {
   const figure = helpFigure("en", "overview", "The screen right after start");
 
   test("a step puts its action, command, capture, sentence and link in that order", () => {
-    const list = helpBlocks("en").steps([
-      {
-        title: "Start it",
-        command: "npx @youtyan/code-viewer --open",
-        figures: [figure],
-        text: "The screen opens in the browser.",
-        link: "→ Projects",
-      },
-    ]);
+    const list = draw(
+      helpBlocks("en").steps([
+        {
+          title: "Start it",
+          command: "npx @youtyan/code-viewer --open",
+          figures: [figure],
+          text: "The screen opens in the browser.",
+          link: "→ Projects",
+        },
+      ]),
+    );
     expect(shape([...(list.querySelector("li")?.children ?? [])])).toEqual([
       "p.gdp-help-step-title:Start it",
       "div.gdp-help-command:npx @youtyan/code-viewer --open",
@@ -177,14 +188,14 @@ describe("numbered steps", () => {
       expected: ["p.gdp-help-step-text:Press Save."],
     },
   ])("$name", ({ item, expected }) => {
-    const list = helpBlocks("en").steps([item]);
+    const list = draw(helpBlocks("en").steps([item]));
     expect(shape([...(list.querySelector("li")?.children ?? [])])).toEqual(
       expected,
     );
   });
 
   test("each step is one numbered item", () => {
-    const list = helpBlocks("en").steps(["One.", "Two.", "Three."]);
+    const list = draw(helpBlocks("en").steps(["One.", "Two.", "Three."]));
     expect([list.tagName, list.className, list.children.length]).toEqual([
       "OL",
       "gdp-help-steps",
@@ -198,7 +209,7 @@ describe("a capture", () => {
   const second = helpFigure("en", "agent-launch", "Second screen");
 
   test("links to the image and describes it", () => {
-    const link = helpBlocks("en").figure(first);
+    const link = draw<HTMLAnchorElement>(helpBlocks("en").figure(first));
     const img = link.querySelector("img");
     expect({
       href: link.getAttribute("href"),
@@ -217,8 +228,7 @@ describe("a capture", () => {
 
   test("a click opens it large with the other captures of the page, without a copy button", () => {
     const blocks = helpBlocks("en");
-    const links = [blocks.figure(first), blocks.figure(second)];
-    mount(...links);
+    const links = mount(blocks.figure(first), blocks.figure(second));
     const event = new MouseEvent("click", { bubbles: true, cancelable: true });
     links[1]?.dispatchEvent(event);
     const box = document.querySelector(".terminal-lightbox");
@@ -241,7 +251,7 @@ describe("a capture", () => {
   });
 
   test("⌘-click is left to the browser (a new tab)", () => {
-    const link = helpBlocks("en").figure(first);
+    const link = draw(helpBlocks("en").figure(first));
     mount(link);
     const event = new MouseEvent("click", {
       bubbles: true,
@@ -263,10 +273,9 @@ describe("a note", () => {
     { lang: "ja", kind: "warning", label: "注意" },
     { lang: "ja", kind: "info", label: "補足" },
   ] as const)("$lang $kind is labeled $label", ({ lang, kind, label }) => {
-    const note = helpBlocks(lang).note(kind, [
-      "First.",
-      ["Second ", { code: "x" }],
-    ]);
+    const note = draw(
+      helpBlocks(lang).note(kind, ["First.", ["Second ", { code: "x" }]]),
+    );
     expect({
       tag: note.tagName,
       kind: note.dataset.kind,
@@ -299,7 +308,7 @@ describe("a command", () => {
         configurable: true,
         value: { writeText },
       });
-      const block = helpBlocks("en").command(text, undefined, language);
+      const block = draw(helpBlocks("en").command(text, undefined, language));
       await vi.waitFor(() =>
         expect(block.querySelector("code span[style]")).not.toBeNull(),
       );
@@ -338,7 +347,7 @@ describe("a command", () => {
       const errors = vi
         .spyOn(console, "error")
         .mockImplementation(() => undefined);
-      const block = helpBlocks("en").command('echo "sample"');
+      const block = draw(helpBlocks("en").command('echo "sample"'));
       await vi.waitFor(() =>
         expect(
           block
@@ -355,8 +364,8 @@ describe("a command", () => {
   test("shows the command with an optional title", () => {
     const blocks = helpBlocks("en");
     expect([
-      shape([...blocks.command("code-viewer doctor", "Check").children]),
-      shape([...blocks.command("code-viewer doctor").children]),
+      shape([...draw(blocks.command("code-viewer doctor", "Check")).children]),
+      shape([...draw(blocks.command("code-viewer doctor")).children]),
     ]).toEqual([
       [
         "div.gdp-help-command-title:Check",
@@ -377,7 +386,7 @@ describe("a command", () => {
         configurable: true,
         value: { writeText },
       });
-      const block = helpBlocks(lang).command("code-viewer skill install");
+      const block = draw(helpBlocks(lang).command("code-viewer skill install"));
       const copy = block.querySelector<HTMLButtonElement>(
         ".gdp-help-command-copy",
       );
@@ -401,9 +410,9 @@ describe("a command", () => {
         writeText: () => Promise.reject(new Error("permission denied")),
       },
     });
-    const copy = helpBlocks("en")
-      .command("code-viewer doctor")
-      .querySelector<HTMLButtonElement>(".gdp-help-command-copy");
+    const copy = draw(
+      helpBlocks("en").command("code-viewer doctor"),
+    ).querySelector<HTMLButtonElement>(".gdp-help-command-copy");
     copy?.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect([
@@ -436,7 +445,7 @@ describe("visible subsections", () => {
     },
   ] as const)("$name", ({ lang, title, expected }) => {
     const blocks = helpBlocks(lang);
-    const box = blocks.subsection([blocks.paragraph("Inside.")], title);
+    const box = draw(blocks.subsection([blocks.paragraph("Inside.")], title));
     expect({
       tag: box.tagName,
       heading: box.querySelector("h4")?.textContent,
@@ -455,7 +464,7 @@ describe("visible subsections", () => {
 
 describe("lists and tables", () => {
   test("a list holds one item per sentence", () => {
-    const list = helpBlocks("en").list(["One.", ["Two ", { key: "t" }]]);
+    const list = draw(helpBlocks("en").list(["One.", ["Two ", { key: "t" }]]));
     expect([list.className, shape([...list.children])]).toEqual([
       "gdp-help-list",
       ["li:One.", "li:Two t"],
@@ -463,12 +472,14 @@ describe("lists and tables", () => {
   });
 
   test("a table puts the head in thead and the rows in tbody", () => {
-    const table = helpBlocks("en").table(
-      [
-        ["SQLite does not open", [{ code: "rm -rf" }, " the cache"]],
-        ["No tmux", "Install it"],
-      ],
-      ["Problem", "Fix"],
+    const table = draw(
+      helpBlocks("en").table(
+        [
+          ["SQLite does not open", [{ code: "rm -rf" }, " the cache"]],
+          ["No tmux", "Install it"],
+        ],
+        ["Problem", "Fix"],
+      ),
     );
     expect({
       head: [...table.querySelectorAll("thead th")].map((th) => th.textContent),
@@ -496,9 +507,13 @@ describe("lists and tables", () => {
       ],
     },
   ])("the key table splits $name into key caps", ({ keys, expected }) => {
-    const table = renderHelpTable([[keys, "Open the palette"]]);
+    const table = draw(renderHelpTable([[keys, "Open the palette"]]));
     expect([
-      shape([...(table.querySelector("th")?.childNodes ?? [])]),
+      shape(
+        [...(table.querySelector("th")?.childNodes ?? [])].filter(
+          (node) => node.nodeType !== Node.COMMENT_NODE,
+        ),
+      ),
       table.querySelector("td")?.textContent,
     ]).toEqual([expected, "Open the palette"]);
   });
@@ -509,7 +524,9 @@ describe("lists and tables", () => {
   ] as const)(
     "the key table of the help has a head row ($lang)",
     ({ lang, head }) => {
-      const table = helpBlocks(lang).keyTable([["t", "Toggle the theme"]]);
+      const table = draw(
+        helpBlocks(lang).keyTable([["t", "Toggle the theme"]]),
+      );
       expect({
         classes: [...table.classList],
         head: [...table.querySelectorAll("thead th")].map(
@@ -535,10 +552,10 @@ describe("lists and tables", () => {
     const cells = Array.from({ length: rows }, () => ["a", "b"]);
     expect([
       UI_TABLE_STRIPE_MIN_ROWS,
-      blocks.table(cells).classList.contains("ui-table-striped"),
-      blocks
-        .keyTable(cells.map(() => ["t", "b"] as [string, string]))
-        .classList.contains("ui-table-striped"),
+      draw(blocks.table(cells)).classList.contains("ui-table-striped"),
+      draw(
+        blocks.keyTable(cells.map(() => ["t", "b"] as [string, string])),
+      ).classList.contains("ui-table-striped"),
     ]).toEqual([8, striped, striped]);
   });
 });

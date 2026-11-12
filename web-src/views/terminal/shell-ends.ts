@@ -9,6 +9,9 @@
 // 起きたか分からない)。知らせの形は最下段の操作の塊の既存の吹き出し
 // (`.goi-feedback`。AI 向けのコピーの結果と同じ)。
 
+import { html } from "lit/html.js";
+import { detachedElement } from "../ui/renderer";
+
 /** 知らせを出しておく時間。 */
 export const SHELL_END_NOTICE_MS = 5000;
 
@@ -44,31 +47,45 @@ export function createShellEndTracker(): {
   };
 }
 
+export type ShellEndNoticeView = (props: {
+  message: string;
+  shown: boolean;
+}) => unknown;
+
+export const DEFAULT_VIEW: ShellEndNoticeView = ({ message, shown }) =>
+  html`<span class="goi-feedback shell-end-notice" role="status" ?hidden=${!shown}
+    >${message}</span
+  >`;
+
 /** 最下段の操作の塊に、短い知らせの吹き出しを 1 つ置く。 */
-export function createShellEndNotice(host: HTMLElement): {
+export function createShellEndNotice(
+  host: HTMLElement,
+  view: ShellEndNoticeView = DEFAULT_VIEW,
+): {
   show(message: string): void;
   dispose(): void;
 } {
-  const el = document.createElement("span");
-  el.className = "goi-feedback shell-end-notice";
-  el.role = "status";
-  el.hidden = true;
-  host.append(el);
+  let message = "";
+  let shown = false;
+  const notice = detachedElement(() => view({ message, shown }));
+  host.append(notice.element);
   let timer: ReturnType<typeof setTimeout> | null = null;
   return {
-    show(message) {
-      el.textContent = message;
-      el.hidden = false;
+    show(next) {
+      message = next;
+      shown = true;
+      notice.draw();
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
-        el.hidden = true;
+        shown = false;
+        notice.draw();
       }, SHELL_END_NOTICE_MS);
     },
     dispose() {
       if (timer) clearTimeout(timer);
       timer = null;
-      el.remove();
+      notice.element.remove();
     },
   };
 }

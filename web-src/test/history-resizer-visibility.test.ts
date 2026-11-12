@@ -1,18 +1,11 @@
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 // #history-resizer (本文の左の一覧の列の幅の掴み) を出すのは、一覧の列を出して
 // いる間 (data-list-column があり、data-list-column-hidden が無い) だけ。ページ
 // クラスの列挙ではなく属性で判定する (ui-layout.md「ページクラスの列挙を
 // レイアウト規則に書かない」)。
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";

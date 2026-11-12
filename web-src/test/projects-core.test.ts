@@ -36,6 +36,7 @@ import {
   splitSettingsPatch,
   withUserSettings,
 } from "../core/user-settings";
+import { sanitizeAppSettingsState } from "../server/state-store";
 import { agentPane } from "./_test-helpers";
 
 const NOW = Date.parse("2026-09-21T00:00:00.000Z");
@@ -827,6 +828,20 @@ describe("user settings", () => {
     "navStoppedProjectsOpen",
   ])("the workspace look %s is a per-person item", (key) => {
     expect(isUserSettingKey(key)).toBe(true);
+  });
+
+  // 全体ボードのフックの案内を閉じたときの中身 (core/agent-hooks.ts の
+  // hookHintKey)。ユーザー単位で覚え、文字でなければ捨てる。
+  test.each([
+    ["claude:none,opencode:partial", "claude:none,opencode:partial"],
+    [true, undefined],
+    ["", undefined],
+  ])("the dismissed hook hint %j is kept as %j", (value, kept) => {
+    expect(isUserSettingKey("agentHookHintDismissedFor")).toBe(true);
+    expect(
+      sanitizeAppSettingsState({ version: 1, agentHookHintDismissedFor: value })
+        .agentHookHintDismissedFor,
+    ).toBe(kept);
   });
 
   test("the first run takes over only the per-person items", () => {

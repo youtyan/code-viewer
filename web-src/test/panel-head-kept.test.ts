@@ -250,3 +250,51 @@ describe("縦の帯と右の列の痕跡が無い", () => {
     );
   });
 });
+
+// ツールバー (#topbar) を隠す画面の本文は、タブ列のすぐ下から始まる。左のサイドバーを
+// 畳んだとき (頭の 1 段目の先頭に「サイドバーを出す」が出て頭が広がる) や大きい密度では
+// 頭が一覧の列より右へはみ出し (--head-overhang-h)、その 2 段目が本文の上端を隠した
+// (全体ボードの見出し「エージェント」の 1 文字目)。本文の箱ごと下げる
+// (--chrome-h = --toolbarless-chrome-h) か、本文の上の余白 (--content-top-gap) で空ける。
+describe("ツールバーを隠す画面は、頭のはみ出しの分を本文の上に空ける", () => {
+  const pages = [
+    ...new Set(
+      rules.flatMap((rule) => {
+        const page = /^(?:body)?\.(gdp-[a-z-]+-page) #topbar$/.exec(
+          rule.selector,
+        )?.[1];
+        const hidden = new Map(rule.declarations).get("display") ?? "";
+        return page && hidden.startsWith("none") ? [page] : [];
+      }),
+    ),
+  ].sort();
+
+  test("ツールバーを隠す画面が見つかる (検査が空振りしていない)", () => {
+    expect(pages).toEqual(
+      expect.arrayContaining(["gdp-agents-page", "gdp-repo-page"]),
+    );
+  });
+
+  test("下げる高さは、タブ列と頭のはみ出しの和", () => {
+    expect(
+      cascadedDeclarations(rules, (s) => s === "body").get(
+        "--toolbarless-chrome-h",
+      ),
+    ).toBe("calc(var(--global-header-h) + var(--head-overhang-h))");
+  });
+
+  test.each(pages)("%s", (page) => {
+    const scoped = (element: string) => (s: string) =>
+      s === element ||
+      s === `body.${page} ${element}`.trim() ||
+      s === `.${page} ${element}`.trim();
+    const body = cascadedDeclarations(rules, (s) =>
+      ["body", `body.${page}`, `.${page}`].includes(s),
+    );
+    const content = cascadedDeclarations(rules, scoped("#content"));
+    expect(
+      body.get("--chrome-h") === "var(--toolbarless-chrome-h)" ||
+        (content.get("--content-top-gap") ?? "").includes("--head-overhang-h"),
+    ).toBe(true);
+  });
+});

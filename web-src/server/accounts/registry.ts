@@ -181,6 +181,8 @@ function addIssueMessage(issue: AddAccountIssue): string {
       return `${issue.configDir} is already registered as "${issue.existing}"`;
     case "too-many":
       return `at most ${issue.limit} accounts can be registered`;
+    case "single-account":
+      return `${issue.agent} has only the default account: it has no setting of its own that moves its sign-in to another directory`;
   }
 }
 
@@ -196,6 +198,8 @@ function exists(path: string): boolean {
 
 /** 共有する設定ファイルの中の、認証に関わるキーの名前 (値は読まない)。 */
 function authKeysIn(agent: AccountAgent, defaultDir: string): string[] {
+  // opencode は新しく作れない (checkAddAccount が先に断る)。
+  if (agent === "opencode") return [];
   const file = join(
     defaultDir,
     agent === "claude" ? "settings.json" : "config.toml",

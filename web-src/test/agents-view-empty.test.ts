@@ -4,137 +4,20 @@
 // エージェントでないだけなら、登録の代わりに今までの「すべてのペインを表示」。
 // 起動中でない登録プロジェクトは、左のサイドバーと同じ判定で下の「停止中」へ。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import type {
-  AgentOverviewResponse,
-  AgentPane,
-  AgentProjectInfo,
-} from "../core/agent-overview";
-import type { AgentMonitor } from "../views/agents/agent-monitor";
-import { createAgentsView } from "../views/agents/agents-view";
+import "./_dom";
+import { describe, expect, test } from "vitest";
+import type { AgentPane } from "../core/agent-overview";
+import {
+  type AgentsBoardViewProps,
+  DEFAULT_VIEW as BOARD_DEFAULT_VIEW,
+  type BoardOrder,
+} from "../views/agents/agents-view";
 import { agentsText } from "../views/agents/i18n";
 import type { PanePreview } from "../views/agents/pane-preview";
-import type { ProjectActions } from "../views/projects/project-actions";
-import { info, overview as overviewWith } from "./_agents-sidebar-fixture";
+import { flushRenders } from "../views/ui/render-queue";
+import { mountBoard } from "./_agents-board";
+import { info } from "./_agents-sidebar-fixture";
 import { agentPane } from "./_test-helpers";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
-
-function overview(panes: AgentPane[]): AgentOverviewResponse {
-  return {
-    serverInstance: "sample",
-    observedAt: 0,
-    tmux: { available: true, running: true, error: "" },
-    panes,
-    projects: [],
-    errors: [],
-    registry: { projects: [], error: "", path: "/state/projects.json" },
-  };
-}
-
-async function mountBoard(
-  panes: AgentPane[],
-  lang: "en" | "ja" = "en",
-  preview?: PanePreview,
-  projects?: AgentProjectInfo[],
-  extra: {
-    permission?: "granted" | "denied" | "default" | "unsupported";
-    tmux?: AgentOverviewResponse["tmux"];
-  } = {},
-) {
-  document.body.innerHTML = '<main id="content"></main>';
-  const calls: string[] = [];
-  const base = projects ? overviewWith(panes, projects) : overview(panes);
-  const snapshot = {
-    overview: extra.tmux ? { ...base, tmux: extra.tmux } : base,
-    error: "",
-    notifyError: "",
-    unread: new Map(),
-    sawWaiting: false,
-    permissionAsked: false,
-  };
-  const monitor: AgentMonitor = {
-    start: () => undefined,
-    refresh: async () => undefined,
-    snapshot: () => snapshot,
-    subscribe: () => () => undefined,
-    markRead: () => undefined,
-    latest: () => ({ overview: snapshot.overview, error: snapshot.error }),
-    receive: () => undefined,
-    permission: () => extra.permission ?? "granted",
-    requestPermission: async () => "granted",
-  };
-  const actions: ProjectActions = {
-    activity: () => null,
-    signature: () => "",
-    dismiss: () => undefined,
-    subscribe: () => () => undefined,
-    open: async () => undefined,
-    registerCurrent: async () => undefined,
-    registerRoot: async () => undefined,
-    registerByPath: async () => {
-      calls.push("register");
-    },
-    unregister: async () => undefined,
-    rename: async () => undefined,
-    recolor: async () => undefined,
-    move: async () => undefined,
-    place: async () => undefined,
-    stop: async () => undefined,
-  };
-  const view = createAgentsView({
-    monitor,
-    getText: () => agentsText(lang),
-    setPageMode: () => undefined,
-    syncHeaderMenu: () => undefined,
-    openPane: () => undefined,
-    openNotificationSettings: () => undefined,
-    reloadPage: () => {
-      calls.push("reload");
-    },
-    tmuxInstallHelp: () => {
-      calls.push("tmux-help");
-      const box = document.createElement("div");
-      box.className = "sample-install-help";
-      return box;
-    },
-    getHookStatus: () => null,
-    refreshHookStatus: async () => undefined,
-    hookHintDismissed: () => true,
-    dismissHookHint: () => undefined,
-    openHookSettings: () => undefined,
-    accountsBand: {
-      element: document.createElement("div"),
-      render: () => undefined,
-      signature: () => "",
-    },
-    getAccounts: () => null,
-    launch: () => {
-      calls.push("launch");
-    },
-    handoff: {
-      handoff: (pane) => {
-        calls.push(`handoff:${pane.id}`);
-      },
-      openHookHelp: () => {
-        calls.push("hook-help");
-      },
-      hookState: () => null,
-    },
-    onVisibilityChange: () => undefined,
-    projects: actions,
-    preview,
-  });
-  await view.enter();
-  return { view, calls };
-}
 
 async function board(panes: AgentPane[], lang: "en" | "ja" = "en") {
   const { calls } = await mountBoard(panes, lang);
@@ -279,7 +162,12 @@ describe("the board row context menu", () => {
         transcriptPath: "/home/sample/log/sample.jsonl",
         cwd: "/work/sample",
       },
-      labels: ["Open in a tab", "Continue with another account…"],
+      labels: [
+        "Open in a tab",
+        "Pin to the top",
+        "Mark as unread",
+        "Continue with another account…",
+      ],
       click: "Continue with another account…",
       calls: ["handoff:%1"],
     },
@@ -288,6 +176,8 @@ describe("the board row context menu", () => {
       conversation: undefined,
       labels: [
         "Open in a tab",
+        "Pin to the top",
+        "Mark as unread",
         "Continue with another account…",
         "Needs the agent hooks — show how to install",
       ],
@@ -345,5 +235,304 @@ describe("entries next to the words", () => {
       agentsText("en").emptyNotInstalledBody,
     );
     expect(empty?.nextElementSibling?.className).toBe("sample-install-help");
+  });
+});
+
+// presenter (agents-presenter.ts) を、表示を差し替えて確かめる。描いた後にフォーカスの
+// 戻し先と一覧の箱を読むので、差し替える view は渡された値を記録してから既定の表示に
+// 渡す。見るのは view に渡す値と、絞り込み・起動 (モデルの呼び出し)。
+describe("agents board presenter", () => {
+  async function mountWithView(
+    panes: AgentPane[],
+    boardOrder?: { get(): BoardOrder | null; set(order: BoardOrder): void },
+    pins?: {
+      serverPins: string[];
+      setPinned: (pane: string, on: boolean) => void;
+    },
+  ) {
+    const seen: AgentsBoardViewProps[] = [];
+    const mounted = await mountBoard(panes, "en", undefined, undefined, {
+      boardOrder,
+      ...pins,
+      view: (props) => {
+        seen.push(props);
+        return BOARD_DEFAULT_VIEW(props);
+      },
+    });
+    return { ...mounted, last: () => seen[seen.length - 1] };
+  }
+
+  const panes = () => [
+    agentPane({
+      id: "%1",
+      label: "work:0.0",
+      session: "work",
+      title: "task 1",
+      path: "/work/sample-app",
+      state: "waiting",
+      source: "screen",
+      project: "/work/sample-app",
+      kind: "claude",
+    }),
+  ];
+
+  test("the agents reach the view grouped by project, with the filter counts", async () => {
+    const { last } = await mountWithView(panes());
+    const props = last();
+    expect({
+      count: props.board.count,
+      filters: props.board.filters.map((item) => [item.filter, item.count]),
+      projects: props.list
+        .filter((entry) => entry.kind === "project")
+        .map((entry) =>
+          entry.kind === "project"
+            ? [entry.project.name, entry.project.rows.map((row) => row.id)]
+            : null,
+        ),
+    }).toEqual({
+      count: 1,
+      filters: [
+        ["all", 1],
+        ["waiting", 1],
+        ["working", 0],
+        ["idle", 0],
+      ],
+      projects: [["sample-app", ["%1"]]],
+    });
+  });
+
+  test("a filter picked in the view narrows the next draw", async () => {
+    const { last } = await mountWithView(panes());
+    last().onFilter("working");
+    expect([
+      last().board.filters.find((item) => item.active)?.filter,
+      last().list.some((entry) => entry.kind === "project"),
+    ]).toEqual(["working", false]);
+  });
+
+  test("launching from the view starts a new agent", async () => {
+    const { last, calls } = await mountWithView(panes());
+    last().onLaunch();
+    expect(calls).toEqual(["launch"]);
+  });
+
+  test("Pin to the top puts the row in a Pinned section first, in either order, until unpinned", async () => {
+    const { last } = await mountWithView([
+      agentPane({
+        id: "%1",
+        label: "work:0.1",
+        state: "waiting",
+        project: "/work/sample-app",
+        kind: "claude",
+      }),
+      agentPane({
+        id: "%2",
+        label: "work:0.2",
+        state: "idle",
+        project: "/work/sample-lib",
+        kind: "claude",
+      }),
+    ]);
+    const menu = (id: string) => {
+      document
+        .querySelector<HTMLElement>(`[data-agent-nav="pane:${id}"]`)
+        ?.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+        );
+      return [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          ".gdp-context-menu button",
+        ),
+      ];
+    };
+    const sections = () =>
+      last().list.flatMap((entry) =>
+        entry.kind === "section"
+          ? [[entry.state, entry.rows.map((row) => row.id)]]
+          : entry.kind === "project"
+            ? [[entry.project.name, entry.project.rows.map((row) => row.id)]]
+            : [],
+      );
+    menu("%2")
+      .find((item) => item.textContent === "Pin to the top")
+      ?.click();
+    await flushRenders();
+    expect(sections()).toEqual([
+      [null, ["%2"]],
+      ["sample-app", ["%1"]],
+    ]);
+    last().onOrder("urgency");
+    await flushRenders();
+    expect(sections()).toEqual([
+      [null, ["%2"]],
+      ["waiting", ["%1"]],
+    ]);
+    menu("%2")
+      .find((item) => item.textContent === "Unpin")
+      ?.click();
+    await flushRenders();
+    expect(sections()).toEqual([
+      ["waiting", ["%1"]],
+      ["idle", ["%2"]],
+    ]);
+  });
+
+  test("with a server that keeps pins, pinning goes to the server and a board opened later shows it", async () => {
+    const sent: [string, boolean][] = [];
+    const server: string[] = [];
+    const twoPanes = [
+      agentPane({
+        id: "%1",
+        label: "work:0.1",
+        state: "waiting",
+        project: "/work/sample-app",
+        kind: "claude",
+      }),
+      agentPane({
+        id: "%2",
+        label: "work:0.2",
+        state: "idle",
+        project: "/work/sample-lib",
+        kind: "claude",
+      }),
+    ];
+    const pinnedRows = (props: AgentsBoardViewProps) =>
+      props.list.flatMap((entry) =>
+        entry.kind === "section" && entry.state === null
+          ? entry.rows.map((row) => row.id)
+          : [],
+      );
+    const { last } = await mountWithView(twoPanes, undefined, {
+      serverPins: server,
+      setPinned: (pane, on) => {
+        sent.push([pane, on]);
+        if (on) server.push(pane);
+      },
+    });
+    document
+      .querySelector<HTMLElement>('[data-agent-nav="pane:%2"]')
+      ?.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+    [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        ".gdp-context-menu button",
+      ),
+    ]
+      .find((item) => item.textContent === "Pin to the top")
+      ?.click();
+    await flushRenders();
+    expect(sent).toEqual([["%2", true]]);
+    expect(pinnedRows(last())).toEqual(["%2"]);
+
+    // 別の窓 (読み直した画面) でも、サーバの一覧のピンで留まって見える。
+    const again = await mountWithView(twoPanes, undefined, {
+      serverPins: server,
+      setPinned: () => undefined,
+    });
+    expect(pinnedRows(again.last())).toEqual(["%2"]);
+  });
+
+  test("in the urgency order a section counts only its own state, not the parent lifted in by a child", async () => {
+    const { last } = await mountWithView([
+      agentPane({
+        id: "%1",
+        label: "work:0.1",
+        state: "idle",
+        project: "/work/sample-app",
+        kind: "claude",
+      }),
+      {
+        ...agentPane({
+          id: "%2",
+          label: "work:0.2",
+          state: "waiting",
+          project: "/work/sample-app",
+          kind: "codex",
+        }),
+        parent: "%1",
+      },
+    ]);
+    last().onOrder("urgency");
+    await flushRenders();
+    expect(
+      last().list.flatMap((entry) =>
+        entry.kind === "section"
+          ? [[entry.state, entry.count, entry.rows.map((row) => row.id)]]
+          : [],
+      ),
+    ).toEqual([["waiting", 1, ["%1", "%2"]]]);
+    expect(
+      document.querySelector(".agents-urgency-section .agents-chip")
+        ?.textContent,
+    ).toBe("1");
+  });
+
+  test("the chosen order is remembered, and a board opened later starts in it", async () => {
+    let stored: BoardOrder | null = null;
+    const memory = {
+      get: () => stored,
+      set: (order: BoardOrder) => {
+        stored = order;
+      },
+    };
+    const first = await mountWithView(panes(), memory);
+    first.last().onOrder("urgency");
+    expect(stored).toBe("urgency");
+
+    const again = await mountWithView(panes(), memory);
+    expect(
+      again.last().board.order.options.map((item) => [item.order, item.active]),
+    ).toEqual([
+      ["project", false],
+      ["urgency", true],
+    ]);
+    expect(again.last().list.map((entry) => entry.kind)).toEqual(["section"]);
+  });
+
+  test("Needs you first lists every project together, by state, with the project on each row", async () => {
+    const row = (
+      id: string,
+      state: AgentPane["state"],
+      project: string,
+      updatedAt: number,
+    ) =>
+      agentPane({
+        id,
+        label: `work:0.${id.slice(1)}`,
+        state,
+        project,
+        updatedAt,
+        kind: "claude",
+      });
+    const { last } = await mountWithView([
+      row("%1", "working", "/work/sample-app", 10),
+      row("%2", "waiting", "/work/sample-lib", 20),
+      row("%3", "done", "/work/sample-app", 30),
+      row("%4", "waiting", "/work/sample-app", 40),
+    ]);
+    expect(
+      last().board.order.options.map((item) => [item.order, item.active]),
+    ).toEqual([
+      ["project", true],
+      ["urgency", false],
+    ]);
+    last().onOrder("urgency");
+    await flushRenders();
+    const sections = last().list.flatMap((entry) =>
+      entry.kind === "section"
+        ? [[entry.state, entry.rows.map((item) => item.id)]]
+        : [],
+    );
+    expect(sections).toEqual([
+      ["waiting", ["%4", "%2"]],
+      ["done", ["%3"]],
+      ["working", ["%1"]],
+    ]);
+    expect(last().list.some((entry) => entry.kind === "project")).toBe(false);
+    expect(
+      document.querySelector('[data-agent-nav="pane:%2"] .agents-project-label')
+        ?.textContent,
+    ).toBe("/work/sample-lib");
   });
 });

@@ -29,11 +29,12 @@
 //   載っている間だけ、棚の見出しの行 (「画像 11」) をその表示に切り替えて出す。
 //   浮く札は作らない (どこに出しても端末の文字か隣の画像を隠した)
 
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html } from "lit/html.js";
 import { attachDragResizer } from "../../core/drag-resizer";
 import {
   CHEVRON_DOWN_16_PATH,
   IMAGE_16_PATH,
-  iconSvg,
   KEBAB_16_PATH,
   PLAY_16_PATH,
 } from "../../core/icons";
@@ -50,6 +51,12 @@ import {
 } from "../../core/terminal-images";
 import { showContextMenu } from "../context-menu";
 import { adjacentRow, onListRowKeys } from "../list-tab-stop";
+import { iconTemplate } from "../ui/icon";
+import {
+  templateElement,
+  templateElements,
+  templateFragment,
+} from "../ui/renderer";
 import type { TerminalText } from "./i18n";
 import {
   groupShelfEntries,
@@ -161,82 +168,181 @@ type GroupParts = {
   items: HTMLOListElement;
 };
 
-export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
+const SHELL_PARTS = [
+  "head",
+  "title",
+  "count",
+  "collapse",
+  "move",
+  "detail",
+  "detailDir",
+  "detailName",
+  "detailFacts",
+  "list",
+  "expand",
+  "expandCount",
+  "resizer",
+] as const;
+
+/** 棚の外枠の中で、棚が後から書き込む要素。 */
+export type ImageShelfRefs = Record<
+  (typeof SHELL_PARTS)[number],
+  Ref<HTMLElement>
+>;
+
+/**
+ * 画像の棚の描き方。項目は画像を読み込み直さないよう要素を使い回し、
+ * presenter が中身を書き換えるので、view は形 (テンプレート) だけを持つ。
+ */
+export type ImageShelfView = {
+  /** 外枠 (見出し・並び・畳んだときのボタン・掴み)。 */
+  shell: (props: {
+    refs: ImageShelfRefs;
+    onCollapse: () => void;
+    onMove: () => void;
+    onExpand: () => void;
+  }) => unknown;
+  /** 項目 1 つ (絵の枠・名前・情報)。 */
+  item: (props: {
+    refs: {
+      open: Ref<HTMLButtonElement>;
+      frame: Ref<HTMLElement>;
+      name: Ref<HTMLElement>;
+      meta: Ref<HTMLElement>;
+    };
+  }) => unknown;
+  /** 出た所 1 つぶんのまとまり。 */
+  group: (props: {
+    refs: { head: Ref<HTMLElement>; items: Ref<HTMLElement> };
+  }) => unknown;
+  /** 項目の情報 (大きさ・寸法・時刻) を 1 つずつ。 */
+  metaParts: (parts: string[]) => unknown;
+  /** 動画の見本の上の再生の印。 */
+  playMark: () => unknown;
+  /** 読めなかった項目の印。 */
+  failedMark: () => unknown;
+};
+
+const shelfIcon = (paths: string | readonly string[]) =>
+  iconTemplate(paths, "terminal-image-shelf-icon");
+
+export const DEFAULT_VIEW: ImageShelfView = {
+  // カーソルかフォーカスが載っている項目の詳しいこと (detail) は、載っている
+  // 間だけ、題と件数の代わりに同じ行に出す (行の高さは変えない)。
+  shell: ({ refs, onCollapse, onMove, onExpand }) =>
+    html`<aside class="terminal-image-shelf" hidden><div
+        class="terminal-image-shelf-head"
+        ${ref(refs.head)}
+      ><span class="terminal-image-shelf-title" ${ref(refs.title)}></span><span
+          class="terminal-image-shelf-count"
+          ${ref(refs.count)}
+        ></span><span class="terminal-image-shelf-detail" hidden ${ref(refs.detail)}
+          ><span
+            class="terminal-image-shelf-detail-dir"
+            ${ref(refs.detailDir)}
+          ></span><span
+            class="terminal-image-shelf-detail-name"
+            ${ref(refs.detailName)}
+          ></span><span
+            class="terminal-image-shelf-detail-facts"
+            ${ref(refs.detailFacts)}
+          ></span></span
+        ><button
+          type="button"
+          class="terminal-image-shelf-toggle terminal-image-shelf-move"
+          ${ref(refs.move)}
+          @click=${onMove}
+        >${shelfIcon(KEBAB_16_PATH)}</button><button
+          type="button"
+          class="terminal-image-shelf-toggle terminal-image-shelf-collapse"
+          ${ref(refs.collapse)}
+          @click=${onCollapse}
+        >${shelfIcon(CHEVRON_DOWN_16_PATH)}</button></div
+      ><ol class="terminal-image-shelf-list" ${ref(refs.list)}></ol><button
+        type="button"
+        class="terminal-image-shelf-expand"
+        ${ref(refs.expand)}
+        @click=${onExpand}
+      >${shelfIcon(IMAGE_16_PATH)}<span
+          class="terminal-image-shelf-count"
+          ${ref(refs.expandCount)}
+        ></span></button
+      ><div
+        class="terminal-image-shelf-resizer"
+        role="separator"
+        tabindex="0"
+        ${ref(refs.resizer)}
+      ></div></aside>`,
+  item: ({ refs }) =>
+    html`<li class="terminal-image-shelf-item"><button
+        type="button"
+        class="terminal-image-shelf-open"
+        ${ref(refs.open)}
+      ><span class="terminal-image-shelf-frame" ${ref(refs.frame)}></span><span
+          class="terminal-image-shelf-name"
+          ${ref(refs.name)}
+        ></span><span class="terminal-image-shelf-meta" ${ref(refs.meta)}></span></button></li>`,
+  group: ({ refs }) =>
+    html`<li class="terminal-image-shelf-group"><div
+        class="terminal-image-shelf-group-head"
+        ${ref(refs.head)}
+      ></div><ol class="terminal-image-shelf-group-items" ${ref(refs.items)}></ol></li>`,
+  metaParts: (parts) => parts.map((part) => html`<span>${part}</span>`),
+  playMark: () => iconTemplate(PLAY_16_PATH, "terminal-image-shelf-play"),
+  failedMark: () =>
+    iconTemplate(IMAGE_16_PATH, "terminal-image-shelf-failed-icon"),
+};
+
+function drawnPart<T extends Element>(part: Ref<T>): T {
+  if (!part.value) throw new Error("image shelf: a part was not drawn");
+  return part.value;
+}
+
+export function createImageShelf(
+  deps: ImageShelfDeps,
+  view: ImageShelfView = DEFAULT_VIEW,
+): ImageShelfHandle {
   const now = () => (deps.now ? deps.now() : Date.now());
 
-  const el = document.createElement("aside");
-  el.className = "terminal-image-shelf";
-  el.hidden = true;
-
-  const head = document.createElement("div");
-  head.className = "terminal-image-shelf-head";
-  const title = document.createElement("span");
-  title.className = "terminal-image-shelf-title";
-  const count = document.createElement("span");
-  count.className = "terminal-image-shelf-count";
-  const collapse = document.createElement("button");
-  collapse.type = "button";
-  collapse.className =
-    "terminal-image-shelf-toggle terminal-image-shelf-collapse";
-  collapse.innerHTML = iconSvg(
-    "terminal-image-shelf-icon",
-    CHEVRON_DOWN_16_PATH,
+  const refs = Object.fromEntries(
+    SHELL_PARTS.map((name) => [name, createRef<HTMLElement>()]),
+  ) as ImageShelfRefs;
+  const el = templateElement(
+    view.shell({
+      refs,
+      onCollapse: () => setCollapsed(true),
+      // 置き場所を移す小さなメニュー。
+      onMove: () => {
+        const text = deps.getText();
+        const current = layout().placement;
+        showContextMenu(
+          move,
+          TERMINAL_IMAGE_SHELF_PLACEMENTS.map((placement) => ({
+            label: text.imageShelfPlacementNames[placement],
+            checked: placement === current,
+            onSelect: () => {
+              if (placement !== current) deps.setLayout?.({ placement });
+            },
+          })),
+        );
+      },
+      onExpand: () => setCollapsed(false),
+    }),
   );
-  collapse.addEventListener("click", () => setCollapsed(true));
-  // 置き場所を移す小さなメニュー。
-  const move = document.createElement("button");
-  move.type = "button";
-  move.className = "terminal-image-shelf-toggle terminal-image-shelf-move";
-  move.innerHTML = iconSvg("terminal-image-shelf-icon", KEBAB_16_PATH);
-  move.addEventListener("click", () => {
-    const text = deps.getText();
-    const current = layout().placement;
-    showContextMenu(
-      move,
-      TERMINAL_IMAGE_SHELF_PLACEMENTS.map((placement) => ({
-        label: text.imageShelfPlacementNames[placement],
-        checked: placement === current,
-        onSelect: () => {
-          if (placement !== current) deps.setLayout?.({ placement });
-        },
-      })),
-    );
-  });
-  // カーソルかフォーカスが載っている項目の詳しいこと。載っている間だけ、題と
-  // 件数の代わりに同じ行に出す (行の高さは変えない)。パスは真ん中 (ディレクトリ)
-  // を省略し、ファイル名は残す。
-  const detail = document.createElement("span");
-  detail.className = "terminal-image-shelf-detail";
-  detail.hidden = true;
-  const detailDir = document.createElement("span");
-  detailDir.className = "terminal-image-shelf-detail-dir";
-  const detailName = document.createElement("span");
-  detailName.className = "terminal-image-shelf-detail-name";
-  const detailFacts = document.createElement("span");
-  detailFacts.className = "terminal-image-shelf-detail-facts";
-  detail.append(detailDir, detailName, detailFacts);
-  head.append(title, count, detail, move, collapse);
-
-  const list = document.createElement("ol");
-  list.className = "terminal-image-shelf-list";
-
-  // 畳んだときに残るボタン。画像の印と件数。
-  const expand = document.createElement("button");
-  expand.type = "button";
-  expand.className = "terminal-image-shelf-expand";
-  const expandCount = document.createElement("span");
-  expandCount.className = "terminal-image-shelf-count";
-  expand.innerHTML = iconSvg("terminal-image-shelf-icon", IMAGE_16_PATH);
-  expand.append(expandCount);
-  expand.addEventListener("click", () => setCollapsed(false));
-
+  const head = drawnPart(refs.head);
+  const title = drawnPart(refs.title);
+  const count = drawnPart(refs.count);
+  const collapse = drawnPart(refs.collapse);
+  const move = drawnPart(refs.move);
+  const detail = drawnPart(refs.detail);
+  const detailDir = drawnPart(refs.detailDir);
+  const detailName = drawnPart(refs.detailName);
+  const detailFacts = drawnPart(refs.detailFacts);
+  const list = drawnPart(refs.list);
+  const expand = drawnPart(refs.expand);
+  const expandCount = drawnPart(refs.expandCount);
   // 内側の縁 (端末の側) の掴み。ドラッグと矢印キーで大きさを変える。
-  const resizer = document.createElement("div");
-  resizer.className = "terminal-image-shelf-resizer";
-  resizer.setAttribute("role", "separator");
-  resizer.tabIndex = 0;
-
-  el.append(head, list, expand, resizer);
+  const resizer = drawnPart(refs.resizer);
 
   // 矢印で隣の項目へ移り、押したのと同じに画像のタブで開く (タブの中身を棚の
   // 並びで送る)。読めなかった項目は移るだけ (押すと確かめ直しになる)。右・左の
@@ -417,29 +523,21 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
     ) {
       return;
     }
-    meta.replaceChildren(
-      ...parts.map((part) => {
-        const span = document.createElement("span");
-        span.textContent = part;
-        return span;
-      }),
-    );
+    meta.replaceChildren(...templateElements(view.metaParts(parts)));
   }
 
   function buildItem(): ItemParts {
-    const li = document.createElement("li");
-    li.className = "terminal-image-shelf-item";
-    const open = document.createElement("button");
-    open.type = "button";
-    open.className = "terminal-image-shelf-open";
-    const frame = document.createElement("span");
-    frame.className = "terminal-image-shelf-frame";
-    const name = document.createElement("span");
-    name.className = "terminal-image-shelf-name";
-    const meta = document.createElement("span");
-    meta.className = "terminal-image-shelf-meta";
-    open.append(frame, name, meta);
-    li.append(open);
+    const itemRefs = {
+      open: createRef<HTMLButtonElement>(),
+      frame: createRef<HTMLElement>(),
+      name: createRef<HTMLElement>(),
+      meta: createRef<HTMLElement>(),
+    };
+    const li = templateElement<HTMLLIElement>(view.item({ refs: itemRefs }));
+    const open = drawnPart(itemRefs.open);
+    const frame = drawnPart(itemRefs.frame);
+    const name = drawnPart(itemRefs.name);
+    const meta = drawnPart(itemRefs.meta);
     const parts: ItemParts = {
       li,
       open,
@@ -546,16 +644,10 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
         parts.frame.replaceChildren(picture);
         // 動画は見本の上に再生の印。
         if (picture instanceof HTMLVideoElement) {
-          parts.frame.insertAdjacentHTML(
-            "beforeend",
-            iconSvg("terminal-image-shelf-play", PLAY_16_PATH),
-          );
+          parts.frame.append(templateFragment(view.playMark()));
         }
       } else {
-        parts.frame.innerHTML = iconSvg(
-          "terminal-image-shelf-failed-icon",
-          IMAGE_16_PATH,
-        );
+        parts.frame.replaceChildren(templateFragment(view.failedMark()));
       }
     }
     fillMeta(parts.meta, entry);
@@ -638,14 +730,16 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
   }
 
   function buildGroup(): GroupParts {
-    const li = document.createElement("li");
-    li.className = "terminal-image-shelf-group";
-    const head = document.createElement("div");
-    head.className = "terminal-image-shelf-group-head";
-    const groupItems = document.createElement("ol");
-    groupItems.className = "terminal-image-shelf-group-items";
-    li.append(head, groupItems);
-    return { li, head, items: groupItems };
+    const groupRefs = {
+      head: createRef<HTMLElement>(),
+      items: createRef<HTMLElement>(),
+    };
+    const li = templateElement<HTMLLIElement>(view.group({ refs: groupRefs }));
+    return {
+      li,
+      head: drawnPart(groupRefs.head),
+      items: drawnPart(groupRefs.items) as HTMLOListElement,
+    };
   }
 
   /** 並びが同じなら DOM を動かさない (動かすと img が読み直しになることがある)。 */

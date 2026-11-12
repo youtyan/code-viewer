@@ -26,6 +26,7 @@ import {
   type JournalTaskStatus,
 } from "../core/journal";
 import { SSE_RETRY_MS } from "../core/live";
+import { isShowRequest, type ShowEvent } from "../core/show";
 import type {
   AnnotationTarget,
   AppSettingsState,
@@ -335,8 +336,8 @@ through a tunnel.
 
 Getting started: run code-viewer inside a git repository and open the printed
 URL; the repository is listed under Projects in the left sidebar. New agent
-there starts claude or codex in tmux (tmux must be installed). When something
-is missing (git, tmux, an older code-viewer still running), run
+there starts claude, codex or opencode in tmux (tmux must be installed). When
+something is missing (git, tmux, an older code-viewer still running), run
 code-viewer doctor.
 
 Examples:
@@ -3026,6 +3027,40 @@ async function handleJournal(req: Request): Promise<Response> {
   return text("invalid action", 400);
 }
 
+/**
+ * `code-viewer show`: 利用者の画面にファイル・差分を新しいタブで開く。このプロジェクト
+ * を映している画面 (プロジェクトの通知の購読) へ `show` を流し、画面の側が 1 つの
+ * 窓だけで開く (core/show.ts の id)。映している画面が無ければ開けないので 409。
+ * GET は映している画面の数 (CLI がサーバを確かめるのにも使う)。
+ */
+async function handleShow(req: Request) {
+  if (req.method === "GET") return json({ windows: sseClients.size });
+  if (req.method !== "POST") return text("method not allowed", 405);
+  if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
+  const contentType = req.headers.get("content-type") || "";
+  if (!/^application\/json(?:;|$)/i.test(contentType))
+    return text("unsupported media type", 415);
+  const parsed = await readBoundedJsonBody(req, 8192, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  if (!isShowRequest(parsed)) return text("invalid show request", 400);
+  const full = safeOpenWorktreePath(parsed.path);
+  if (!full || !existsSync(full) || statSync(full).isDirectory())
+    return text(`not a file in this repository: ${parsed.path}`, 404);
+  if (sseClients.size === 0)
+    return text(
+      "no code-viewer window is showing this project: open it in the browser first",
+      409,
+    );
+  const event: ShowEvent = {
+    id: randomBytes(8).toString("hex"),
+    path: parsed.path,
+    view: parsed.view,
+    ...(parsed.line !== undefined ? { line: parsed.line } : {}),
+  };
+  sendSse("show", JSON.stringify(event));
+  return json({ ok: true, windows: sseClients.size });
+}
+
 async function handleAnnotations(req: Request) {
   if (req.method === "GET") return json(await loadAnnotationsState(cwd));
   if (req.method !== "POST") return text("method not allowed", 405);
@@ -3430,6 +3465,7 @@ const server = await startServer({
     if (url.pathname === "/_mcp") return handleMcp(req);
     if (url.pathname === "/_journal") return handleJournal(req);
     if (url.pathname === "/_annotations") return handleAnnotations(req);
+    if (url.pathname === "/_show") return handleShow(req);
     if (url.pathname === "/_refs") {
       const result = await git.refsResultAsync(cwd);
       if (result.error) return text(result.error, result.status ?? 500);

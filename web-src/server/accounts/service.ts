@@ -5,6 +5,7 @@
 import { statSync } from "node:fs";
 import {
   ACCOUNT_ENV,
+  type AccountAgent,
   type AccountEntry,
   type AccountRegistry,
   type AccountStatus,
@@ -47,7 +48,11 @@ import {
 } from "./registry";
 import { readAccountUsage } from "./usage";
 
-const DEFAULT_COMMANDS = { claude: "claude", codex: "codex" } as const;
+const DEFAULT_COMMANDS = {
+  claude: "claude",
+  codex: "codex",
+  opencode: "opencode",
+} as const;
 
 export type PaneAccountTarget = ProbeTarget & { kind: string | null };
 
@@ -102,6 +107,7 @@ export function launchCommandsOf(
   return {
     claude: registry.launchCommands.claude ?? DEFAULT_COMMANDS.claude,
     codex: registry.launchCommands.codex ?? DEFAULT_COMMANDS.codex,
+    opencode: registry.launchCommands.opencode ?? DEFAULT_COMMANDS.opencode,
   };
 }
 
@@ -125,7 +131,11 @@ export function createAccountService(
     const read = readAccountRegistryCached(paths.registry);
     const registry = read.ok ? read.registry : emptyAccountRegistry();
     return {
-      entries: accountEntries(registry, paths.home, { claude: "", codex: "" }),
+      entries: accountEntries(registry, paths.home, {
+        claude: "",
+        codex: "",
+        opencode: "",
+      }),
       registryError: read.ok === false ? read.error : null,
       registry,
     };
@@ -272,12 +282,22 @@ export function createAccountService(
     },
     async paneAccounts(targets) {
       const agents = targets.filter((target) => isAccountAgent(target.kind));
+      const probing = agents.filter(
+        (target) => ACCOUNT_ENV[target.kind as AccountAgent] !== null,
+      );
       const out = new Map<string, PaneAccount>();
       if (agents.length === 0) return out;
-      const probed = await prober.probe(agents);
+      const probed =
+        probing.length > 0 ? await prober.probe(probing) : new Map();
       const { entries: list, registryError } = entries();
       for (const target of agents) {
-        const agent = target.kind as "claude" | "codex";
+        const agent = target.kind as AccountAgent;
+        const name = ACCOUNT_ENV[agent];
+        // opencode は分ける変数が無く、いつも既定のアカウント (プロセスを調べない)。
+        if (name === null) {
+          out.set(target.id, accountForEnv(agent, undefined, list, paths.home));
+          continue;
+        }
         const result = probed.get(target.id);
         if (!result || result.status === "error") {
           out.set(target.id, {
@@ -286,7 +306,7 @@ export function createAccountService(
           });
           continue;
         }
-        const value = result.env[ACCOUNT_ENV[agent]];
+        const value = result.env[name];
         const account = accountForEnv(agent, value, list, paths.home);
         // 登録簿が読めない間は、既定以外を「未登録」と言い切れない。
         if (account.kind === "unregistered" && registryError) {

@@ -6,6 +6,7 @@
 // - 再読み込みの印: 再読み込みの前に持っていた行と比べ、新しく出た行・中身が
 //   変わった行に印を付ける (時刻の列が無い表でも効く)
 
+import { html, render } from "lit/html.js";
 import { relativeTimeText } from "../../core/blame";
 import {
   changeAge,
@@ -25,8 +26,10 @@ import type {
   DbOrderDirection,
   DbValue,
 } from "../../core/database/types";
-import { iconSvg, PENCIL_16_PATH, PLUS_16_PATH } from "../../core/icons";
+import { PENCIL_16_PATH, PLUS_16_PATH } from "../../core/icons";
 import { pageLanguage } from "../page-language";
+import { iconTemplate } from "../ui/icon";
+import { templateElement } from "../ui/renderer";
 import type { DbText } from "./i18n";
 
 /** 「変更」の列の幅。列幅は表 (table-grid.ts) と同じく TS が持つ。 */
@@ -60,10 +63,42 @@ export type GridRecency = {
   refreshLabels: (root: ParentNode) => void;
 };
 
-export function createGridRecency(opts: {
-  text: () => DbText;
-  now?: () => number;
-}): GridRecency {
+/** 「変更」の列の箱の位置。列幅は RECENCY_COLUMN_WIDTH、left は表が決める。 */
+export type RecencyCellProps = { left: number; className: string };
+
+export type GridRecencyView = {
+  /** 見出しの箱。 */
+  header: (
+    props: RecencyCellProps & { label: string; title: string },
+  ) => unknown;
+  /** 行の箱 (中は change が描く)・行の無い所を埋める箱。 */
+  cell: (props: RecencyCellProps) => unknown;
+  /** 行の箱の中身。足された・変わった印と「〜分前」。 */
+  change: (props: { kind: "added" | "updated"; when: string }) => unknown;
+};
+
+const cellStyle = (left: number) =>
+  `width: ${RECENCY_COLUMN_WIDTH}px; left: ${left}px;`;
+
+export const DEFAULT_VIEW: GridRecencyView = {
+  header: ({ left, className, label, title }) =>
+    html`<div class=${className} style=${cellStyle(left)} title=${title}>${label}</div>`,
+  cell: ({ left, className }) =>
+    html`<div class=${className} style=${cellStyle(left)}></div>`,
+  change: ({ kind, when }) =>
+    html`${iconTemplate(
+      kind === "added" ? PLUS_16_PATH : PENCIL_16_PATH,
+      "db-grid-recency-icon",
+    )}<span class="db-grid-recency-text">${when}</span>`,
+};
+
+export function createGridRecency(
+  opts: {
+    text: () => DbText;
+    now?: () => number;
+  },
+  view: GridRecencyView = DEFAULT_VIEW,
+): GridRecency {
   const now = opts.now ?? Date.now;
   let picked: RecencyColumns = { created: null, updated: null, serial: null };
   let createdIndex = -1;
@@ -74,12 +109,6 @@ export function createGridRecency(opts: {
   const zoneOf = (index: number): ZoneMode => zones.get(index) ?? "utc";
   const readTime = (row: DbValue[], index: number): number | null =>
     index >= 0 ? parseTimestamp(row[index], zoneOf(index)) : null;
-
-  function sized(el: HTMLElement, left: number): HTMLElement {
-    el.style.width = `${RECENCY_COLUMN_WIDTH}px`;
-    el.style.left = `${left}px`;
-    return el;
-  }
 
   function paint(el: HTMLElement): void {
     const at = Number(el.dataset.at);
@@ -93,14 +122,7 @@ export function createGridRecency(opts: {
     for (const name of AGES) el.classList.toggle(`is-${name}`, name === age);
     el.classList.toggle("is-added", kind === "added");
     el.classList.toggle("is-updated", kind === "updated");
-    el.innerHTML = iconSvg(
-      "db-grid-recency-icon",
-      kind === "added" ? PLUS_16_PATH : PENCIL_16_PATH,
-    );
-    const label = document.createElement("span");
-    label.className = "db-grid-recency-text";
-    label.textContent = when;
-    el.appendChild(label);
+    render(view.change({ kind, when }), el);
     const describe = kind === "added" ? t.recencyAdded : t.recencyUpdated;
     el.title = describe(when, el.dataset.column ?? "", el.dataset.raw ?? "");
   }
@@ -139,23 +161,28 @@ export function createGridRecency(opts: {
     timeOf: (row, index) => (zones.has(index) ? readTime(row, index) : null),
     headerCell(left) {
       const t = opts.text().grid;
-      const cell = document.createElement("div");
-      cell.className = "db-grid-cell db-grid-recency-header";
-      cell.textContent = t.recencyHeader;
-      cell.title = t.recencyHeaderHint(
-        [picked.created, picked.updated].filter(Boolean).join(" / "),
+      return templateElement(
+        view.header({
+          left,
+          className: "db-grid-cell db-grid-recency-header",
+          label: t.recencyHeader,
+          title: t.recencyHeaderHint(
+            [picked.created, picked.updated].filter(Boolean).join(" / "),
+          ),
+        }),
       );
-      return sized(cell, left);
     },
-    spacerCell(left, className) {
-      const cell = document.createElement("div");
-      cell.className = `db-grid-cell db-grid-recency ${className}`;
-      return sized(cell, left);
-    },
+    spacerCell: (left, className) =>
+      templateElement(
+        view.cell({
+          left,
+          className: `db-grid-cell db-grid-recency ${className}`,
+        }),
+      ),
     cell(row, left) {
-      const cell = document.createElement("div");
-      cell.className = "db-grid-cell db-grid-recency";
-      sized(cell, left);
+      const cell = templateElement(
+        view.cell({ left, className: "db-grid-cell db-grid-recency" }),
+      );
       const change = rowChange(
         readTime(row, createdIndex),
         readTime(row, updatedIndex),

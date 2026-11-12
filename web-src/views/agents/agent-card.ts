@@ -10,19 +10,24 @@
 // 足せる。押したとき・キー・未読を読んだ扱いは呼び出し側 (行の作り方は場所ごとに
 // 違う) が持つ。
 
+import { ifDefined } from "lit/directives/if-defined.js";
+import { live } from "lit/directives/live.js";
+import { ref } from "lit/directives/ref.js";
+import { html, nothing, render, type TemplateResult } from "lit/html.js";
 import {
   type AgentPane,
   type AgentTransition,
   paneTaskSummary,
 } from "../../core/agent-overview";
 import type { AgentsText } from "./i18n";
+import { markPreviewRow } from "./pane-preview";
 import { paneText } from "./pane-text";
 
-export function agentStateMark(state: AgentPane["state"]): HTMLElement {
-  const mark = document.createElement("i");
-  mark.className = `terminal-mark terminal-mark-${state}`;
-  mark.setAttribute("aria-hidden", "true");
-  return mark;
+/** 状態の印 (形で区別する)。 */
+export function agentStateMarkTemplate(
+  state: AgentPane["state"],
+): TemplateResult {
+  return html`<i class=${`terminal-mark terminal-mark-${state}`} aria-hidden="true"></i>`;
 }
 
 /**
@@ -53,7 +58,139 @@ export type AgentCardParts = {
   ageTitle: string;
 };
 
-/** row の中身をカードにする。row の class・属性・イベントは呼び出し側。 */
+/** 補足の後ろに足す項目 (全体ボードのアカウント・tmux の場所)。空の文字は出さない。 */
+export type AgentCardExtra = {
+  cls: string;
+  text: string;
+  title?: string;
+  /** 文字の後ろに添えるもの (アカウントのタグの札)。 */
+  after?: unknown;
+};
+
+/**
+ * カードの中身 (状態の印・1 行目・補足・未読の点) のテンプレート。行の要素
+ * (button など) と、その class (agent-card を含む)・属性・イベントは呼び出し側。
+ */
+export function agentCardTemplate(
+  pane: AgentPane,
+  text: AgentsText,
+  unread: AgentTransition | undefined,
+  extra: readonly AgentCardExtra[] = [],
+): { template: TemplateResult } & AgentCardParts {
+  const shown = paneText(pane, text);
+  const hasTask = paneTaskSummary(pane) !== null;
+  const name = hasTask ? shown.summary : shown.kind;
+  const age = agentAge(pane, text);
+  const items: AgentCardExtra[] = [];
+  if (hasTask) items.push({ cls: "agent-card-kind", text: shown.kind });
+  // 入力待ちの理由が分かれば (許可・質問・エラーで停止)、「入力待ち」の代わりに出す。
+  const attention =
+    pane.state === "waiting" && pane.attention ? pane.attention : null;
+  const attentionTitle = attention ? text.attentionTitle(attention) : undefined;
+  if (!unread)
+    items.push({
+      cls: attention
+        ? `agent-card-state agent-card-attention-${attention.kind}`
+        : "agent-card-state",
+      text: attention
+        ? [text.attention[attention.kind], attention.reason]
+            .filter(Boolean)
+            .join(" · ")
+        : text.state[pane.state],
+      title: attentionTitle,
+    });
+  items.push({ cls: "agent-card-age", text: age.text, title: age.title });
+  if (pane.worktree)
+    items.push({
+      cls: "agent-card-worktree",
+      text: pane.worktree,
+      title: text.worktreeTitle(pane.worktree),
+    });
+  items.push(...extra.filter((item) => item.text));
+  const template = html`${agentStateMarkTemplate(pane.state)}<span class="agent-card-head"
+      ><span class="agent-card-name">${name}</span>${
+        unread
+          ? html`<span
+              class=${`agent-card-badge agent-card-badge-${unread}`}
+              title=${ifDefined(unread === "waiting" ? attentionTitle : undefined)}
+            >${
+              unread === "waiting" && attention
+                ? text.attention[attention.kind]
+                : text.cardBadge[unread]
+            }</span>`
+          : nothing
+      }</span
+    ><span class="agent-card-meta">${items.map(
+      (item, index) =>
+        html`${index > 0 ? " · " : nothing}<span
+            class=${item.cls}
+            title=${ifDefined(item.title || undefined)}
+          >${item.text}${item.after ?? nothing}</span>`,
+    )}</span><span class="agent-card-unread" aria-hidden="true"></span>`;
+  return { template, name, ageTitle: age.title };
+}
+
+/** エージェントの行 (左のサイドバー・全体ボード)。押し方・キーは使う側。 */
+export type AgentRowTemplateOptions = {
+  /** 行の場所ごとのクラス (nav-agent・agents-row)。状態ごとのクラスはその後ろに -state。 */
+  base: "nav-agent" | "agents-row";
+  id: string;
+  state: AgentPane["state"];
+  active: boolean;
+  unread: boolean;
+  title: string;
+  ariaLabel?: string;
+  /** 覗き窓の名前 (pane-preview.ts)。 */
+  previewName: string;
+  card: TemplateResult;
+  /** 子エージェントの段。1 以上なら親の下に字下げする (style.css の data-agent-depth)。 */
+  depth?: number;
+  onOpen(event: MouseEvent): void;
+  onMenu(event: MouseEvent): void;
+};
+
+export function agentRowTemplate(
+  options: AgentRowTemplateOptions,
+): TemplateResult {
+  const cls = [
+    `${options.base} ${options.base}-${options.state}`,
+    options.active ? "active" : "",
+    options.unread ? "unread" : "",
+    "agent-card",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  // 描き直しの前後で同じ行を指す鍵。左のサイドバーは data-nav-item、全体
+  // ボードは data-agent-nav (どちらも描き直し後にフォーカスを戻すのに使う)。
+  const key = `pane:${options.id}`;
+  // ターミナルは 1 か所にしか置けず、仮にもならないので、中ボタン・⌘/Ctrl・Alt
+  // も 1 回押すと同じ (開くか前面に出す)。
+  return html`<button
+    type="button"
+    class=${cls}
+    data-nav-item=${options.base === "nav-agent" ? key : nothing}
+    data-agent-nav=${options.base === "agents-row" ? key : nothing}
+    role="treeitem"
+    tabindex=${live("-1")}
+    aria-current=${options.active ? "true" : nothing}
+    title=${options.title}
+    aria-label=${ifDefined(options.ariaLabel)}
+    data-agent-depth=${options.depth ? String(options.depth) : nothing}
+    style=${options.depth ? `--agent-depth: ${options.depth}` : nothing}
+    ${ref((el) => {
+      if (el instanceof HTMLElement)
+        markPreviewRow(el, options.id, options.previewName);
+    })}
+    @click=${options.onOpen}
+    @auxclick=${options.onOpen}
+    @contextmenu=${options.onMenu}
+  >${options.card}</button>`;
+}
+
+/**
+ * まだ宣言的に描いていない画面のための形: row の中身をカードにする。row の
+ * class・属性・イベントは呼び出し側。宣言的に描く画面は agentCardTemplate を使う。
+ */
 export function fillAgentCard(
   row: HTMLElement,
   pane: AgentPane,
@@ -61,56 +198,17 @@ export function fillAgentCard(
   unread: AgentTransition | undefined,
   extra: readonly HTMLElement[] = [],
 ): AgentCardParts {
-  const shown = paneText(pane, text);
-  const hasTask = paneTaskSummary(pane) !== null;
-  const name = hasTask ? shown.summary : shown.kind;
-
-  const head = document.createElement("span");
-  head.className = "agent-card-head";
-  const title = document.createElement("span");
-  title.className = "agent-card-name";
-  title.textContent = name;
-  head.appendChild(title);
-  if (unread) {
-    const badge = document.createElement("span");
-    badge.className = `agent-card-badge agent-card-badge-${unread}`;
-    badge.textContent = text.cardBadge[unread];
-    head.appendChild(badge);
-  }
-
-  const age = agentAge(pane, text);
-  const ageItem = document.createElement("span");
-  ageItem.className = "agent-card-age";
-  ageItem.textContent = age.text;
-  if (age.title) ageItem.title = age.title;
-  const items: HTMLElement[] = [];
-  const word = (className: string, value: string) => {
-    const item = document.createElement("span");
-    item.className = className;
-    item.textContent = value;
-    return item;
-  };
-  if (hasTask) items.push(word("agent-card-kind", shown.kind));
-  if (!unread) items.push(word("agent-card-state", text.state[pane.state]));
-  items.push(ageItem);
-  if (pane.worktree) {
-    const worktree = word("agent-card-worktree", pane.worktree);
-    worktree.title = text.worktreeTitle(pane.worktree);
-    items.push(worktree);
-  }
-  items.push(...extra.filter((item) => item.textContent));
-  const meta = document.createElement("span");
-  meta.className = "agent-card-meta";
-  items.forEach((item, index) => {
-    if (index > 0) meta.append(" · ");
-    meta.appendChild(item);
-  });
-
-  const dot = document.createElement("span");
-  dot.className = "agent-card-unread";
-  dot.setAttribute("aria-hidden", "true");
-
+  const card = agentCardTemplate(
+    pane,
+    text,
+    unread,
+    extra.map((item) => ({
+      cls: item.className,
+      text: item.textContent ?? "",
+      title: item.title,
+    })),
+  );
   row.classList.add("agent-card");
-  row.append(agentStateMark(pane.state), head, meta, dot);
-  return { name, ageTitle: age.title };
+  render(card.template, row);
+  return { name: card.name, ageTitle: card.ageTitle };
 }

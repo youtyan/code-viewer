@@ -406,6 +406,8 @@ describe("resolveServerUrl: which server a CLI command talks to", () => {
     identity?: EntryIdentityVerification;
     probe?: (url: string) => ServerProbe;
     answers?: Record<string, Answer[]>;
+    /** 裏を起こさない (`show`)。 */
+    noWake?: boolean;
   }) {
     let registry = options.registry;
     const calls: string[] = [];
@@ -443,12 +445,45 @@ describe("resolveServerUrl: which server a CLI command talks to", () => {
       notice: (message) => notices.push(message),
       wakeTimeoutMs: ENTRY_WAKE_TIMEOUT_MS,
     };
-    return resolveServerUrl(ROOT, options.override, "/_annotations", deps).then(
-      (result) => ({ result, calls, notices }),
-    );
+    return resolveServerUrl(
+      ROOT,
+      options.override,
+      "/_annotations",
+      deps,
+      options.noWake ? { wake: false } : {},
+    ).then((result) => ({ result, calls, notices }));
   }
 
   const wakePath = `/p/${KEY}/_settings`;
+
+  // `show` は裏を起こさない: 起こすとリポジトリがプロジェクトの一覧に加わる
+  // (頼まれていない登録)。画面が無ければどのみち開けない。
+  test("without waking, an unopened repository fails with the reason and asks the entry for nothing", async () => {
+    const { result, calls } = await run({
+      registry: null,
+      entry: true,
+      noWake: true,
+    });
+    expect(calls).toEqual([]);
+    expect(result).toEqual({
+      status: "error",
+      message: expect.stringContaining(
+        "no code-viewer window is showing this repository",
+      ),
+    });
+  });
+
+  test("without waking, a project process that answers is still used", async () => {
+    const { result, calls } = await run({
+      registry: backendEntry(),
+      entry: true,
+      noWake: true,
+    });
+    expect({ result, calls }).toEqual({
+      result: { status: "ok", url: BACKEND },
+      calls: [],
+    });
+  });
   const openCall = `POST /_entry/open ${JSON.stringify({ path: ROOT })}`;
 
   test.each([

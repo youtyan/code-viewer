@@ -1,15 +1,13 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { TerminalImageRef } from "../core/terminal-images";
-import { createImageTabView, type ImageTabHandle } from "../views/image-tab";
+import {
+  createImageTabView,
+  DEFAULT_VIEW,
+  type ImageTabHandle,
+  type ImageTabProps,
+  type ImageTabView,
+} from "../views/image-tab";
 import { contrastRatio } from "./_color-contrast";
 import { themeVariants } from "./_color-themes";
 import {
@@ -69,16 +67,21 @@ function createView(options?: {
   openPath?: (path: string) => Promise<void>;
   close?: () => void;
   language?: "en" | "ja";
+  /** 描き方を差し替える (presenter のテスト)。 */
+  view?: ImageTabView;
 }): ImageTabHandle {
-  const view = createImageTabView({
-    image: options?.image ?? FIRST,
-    images: options?.images,
-    imageUrlFor: (image) => image.url,
-    copyPath: options?.copyPath ?? (() => Promise.resolve()),
-    openPath: options?.openPath ?? (() => Promise.resolve()),
-    close: options?.close ?? (() => undefined),
-    language: options?.language ?? "en",
-  });
+  const view = createImageTabView(
+    {
+      image: options?.image ?? FIRST,
+      images: options?.images,
+      imageUrlFor: (image) => image.url,
+      copyPath: options?.copyPath ?? (() => Promise.resolve()),
+      openPath: options?.openPath ?? (() => Promise.resolve()),
+      close: options?.close ?? (() => undefined),
+      language: options?.language ?? "en",
+    },
+    options?.view,
+  );
   handles.push(view);
   document.body.append(view.el);
   return view;
@@ -169,14 +172,6 @@ function installResizeObserver(): {
     disconnected,
   };
 }
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   for (const handle of handles.splice(0)) handle.dispose();
@@ -582,32 +577,74 @@ describe("image tab close", () => {
 });
 
 describe("image tab close look", () => {
+  // 色はボタンの種類の節が決める (style.css の「ボタンの種類」)。閉じるは枠線、
+  // ほかの道具のボタンはアイコン。それぞれの種類の休んでいるときの規則を読む
+  // (hover・押されている間・無効の規則は除く)。
   const rules = baseRules(loadStyleSheet());
-  const plain = cascadedDeclarations(rules, (s) => s === ".image-tab-button");
-  const close = cascadedDeclarations(
-    rules,
-    (s) => s === ".image-tab-button.image-tab-close",
-  );
+  const restingKind = (member: string) =>
+    cascadedDeclarations(
+      rules,
+      (s) =>
+        s.startsWith(":is(button, a):is(") &&
+        s.includes(member) &&
+        !/:hover|:disabled|aria-pressed|\.active\)/.test(s),
+    );
+  const plain = restingKind(".image-tab-button:not(:where(.image-tab-close))");
+  const close = restingKind(".image-tab-close,");
   const toolbar = cascadedDeclarations(
     rules,
     (s) => s === ".image-tab-toolbar",
   );
 
-  // 枠の色だけを比べる (ほかのボタンの枠は border の一括指定の最後の語)。
+  // 枠の色だけを比べる (枠は border の一括指定の最後の語。透明の枠は地と同じ)。
   // 全部のテーマ × 明暗。
   test.each(themeVariants(rules))(
     "the close border stands out more than the other buttons' ($name)",
     ({ vars }) => {
       const ground = resolveVar(toolbar.get("background") ?? "", vars);
-      const plainBorder = resolveVar(
-        (plain.get("border") ?? "").split(" ").pop() ?? "",
-        vars,
-      );
-      const closeBorder = resolveVar(close.get("border-color") ?? "", vars);
+      const edge = (declarations: Map<string, string>) => {
+        const last = (declarations.get("border") ?? "").split(" ").pop() ?? "";
+        return last === "transparent" ? ground : resolveVar(last, vars);
+      };
 
-      expect(contrastRatio(closeBorder, ground)).toBeGreaterThan(
-        contrastRatio(plainBorder, ground),
+      expect(contrastRatio(edge(close), ground)).toBeGreaterThan(
+        contrastRatio(edge(plain), ground),
       );
     },
   );
+});
+
+// 画像のタブ (views/image-tab.ts) の presenter。描き方を記録する view に差し替え、
+// 読み込みの前後に view に渡す値と、前後へ送る・閉じるの呼び出しを見る。
+describe("the image tab presenter", () => {
+  test("gives the view the loading state, then the size, and moves through the gallery", () => {
+    const shown: ImageTabProps[] = [];
+    const closed: string[] = [];
+    const tab = createView({
+      images: [FIRST, SECOND],
+      close: () => closed.push("close"),
+      view: (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    });
+    const last = () => shown[shown.length - 1];
+    expect([
+      last()?.status?.kind,
+      last()?.dimensions,
+      last()?.zoom.in.disabled,
+      last()?.previous.disabled,
+    ]).toEqual(["loading", "—×—", true, false]);
+    loadImage(tab);
+    expect([
+      last()?.status,
+      last()?.dimensions,
+      last()?.zoom.in.disabled,
+      last()?.fit.pressed,
+    ]).toEqual([null, "1600×1000", false, true]);
+    last()?.next.onClick();
+    expect(last()?.path).toBe(SECOND.path);
+    last()?.close.onClick();
+    expect(closed).toEqual(["close"]);
+  });
 });

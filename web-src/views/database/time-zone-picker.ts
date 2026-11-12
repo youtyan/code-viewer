@@ -4,6 +4,9 @@
 // 値は設定 (db-ui.json の prefs.timeZone) に置く: "" = 元の時刻のまま、
 // "local" = この PC、ほかは IANA の名前。
 
+import { live } from "lit/directives/live.js";
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html, nothing } from "lit/html.js";
 import {
   formatInZone,
   formatUtcOffset,
@@ -11,13 +14,11 @@ import {
   timeZoneOffsetMinutes,
   timeZoneShortName,
 } from "../../core/database/time-zone";
-import {
-  CHECK_16_PATHS,
-  CHEVRON_DOWN_12_PATH,
-  iconSvg,
-} from "../../core/icons";
+import { CHECK_16_PATHS, CHEVRON_DOWN_12_PATH } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
 import { pageLanguage } from "../page-language";
+import { iconTemplate } from "../ui/icon";
+import { detachedElement } from "../ui/renderer";
 import type { DbText } from "./i18n";
 import { reportDatastoreFailure } from "./report-failure";
 
@@ -69,48 +70,145 @@ export type TimeZonePicker = {
 
 type Option = {
   value: string;
-  el: HTMLButtonElement;
-  /** 絞り込みに使う名前と時差。 */
-  name: string;
+  /** 一覧に出す名前と時差。 */
+  label: string;
   offset: string;
+  /** 絞り込みに使う名前 (「この PC」は IANA の名前も足す)。 */
+  name: string;
+  /** 見出し (よく使うもの・全部) のどちらの組か。 */
+  group: 0 | 1;
 };
 
-export function createTimeZonePicker(opts: {
-  text: () => DbText;
-  get: () => string;
-  set: (pref: string | null) => Promise<void>;
-  onChange: () => void;
-}): TimeZonePicker {
-  const el = document.createElement("span");
-  el.className = "db-grid-tz";
-  el.hidden = true;
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "db-btn db-btn-sm db-grid-tz-button";
-  button.setAttribute("aria-haspopup", "listbox");
-  button.setAttribute("aria-expanded", "false");
-  const current = document.createElement("span");
-  current.className = "db-grid-tz-current";
-  const chevron = document.createElement("span");
-  chevron.className = "db-grid-tz-chevron";
-  chevron.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_12_PATH);
-  button.append(current, chevron);
-  const menu = document.createElement("div");
-  menu.className = "db-grid-tz-menu";
-  menu.hidden = true;
-  const search = document.createElement("input");
-  search.type = "search";
-  search.className = "db-grid-tz-search";
-  search.autocomplete = "off";
-  search.spellcheck = false;
-  const list = document.createElement("div");
-  list.className = "db-grid-tz-list";
-  list.setAttribute("role", "listbox");
-  const empty = document.createElement("div");
-  empty.className = "db-grid-tz-empty";
-  empty.hidden = true;
-  menu.append(search, list);
-  el.append(button, menu);
+export type TimeZoneOptionProps = {
+  value: string;
+  name: string;
+  offset: string;
+  selected: boolean;
+  highlighted: boolean;
+  hidden: boolean;
+  onChoose: () => void;
+  onHover: () => void;
+};
+
+export type TimeZonePickerProps = {
+  /** この表に日時の列があるか。 */
+  shown: boolean;
+  /** 設定のタイムゾーンをこのブラウザが知らない。 */
+  failed: boolean;
+  /** 選んだ値の保存に失敗した (理由は title)。 */
+  saveFailed: boolean;
+  /** ボタンの文字・title・読み上げ名と検索欄の案内。sync の前は null。 */
+  label: string | null;
+  title: string | null;
+  ariaLabel: string | null;
+  placeholder: string | null;
+  open: boolean;
+  /** 窓の高さの上限 (px)。表の箱の下端に合わせる。 */
+  maxHeight: number | null;
+  query: string;
+  /** 一覧 (初めて開くまでは空)。絞り込み中は見出しを隠す。 */
+  groups: { label: string; hidden: boolean; options: TimeZoneOptionProps[] }[];
+  /** 当たるものが無いときの文。一覧を作る前は null。 */
+  empty: { text: string; hidden: boolean } | null;
+  buttonRef: Ref<HTMLButtonElement>;
+  searchRef: Ref<HTMLInputElement>;
+  onToggle: () => void;
+  onQuery: (query: string) => void;
+  onKeydown: (event: KeyboardEvent) => void;
+};
+
+export type TimeZonePickerView = (props: TimeZonePickerProps) => unknown;
+
+const attr = (value: string | null) => value ?? nothing;
+
+export const DEFAULT_VIEW: TimeZonePickerView = (p) =>
+  html`<span
+    class=${p.failed ? "db-grid-tz is-failed" : "db-grid-tz"}
+    ?hidden=${!p.shown}
+    data-save-failed=${p.saveFailed ? "1" : nothing}
+    ><button
+      type="button"
+      class="db-btn db-btn-sm db-grid-tz-button"
+      aria-haspopup="listbox"
+      aria-expanded=${p.open ? "true" : "false"}
+      aria-label=${attr(p.ariaLabel)}
+      title=${attr(p.title)}
+      ${ref(p.buttonRef)}
+      @click=${p.onToggle}
+    ><span class="db-grid-tz-current">${p.label ?? ""}</span><span
+        class="db-grid-tz-chevron"
+        >${iconTemplate(CHEVRON_DOWN_12_PATH, "octicon-chevron-down")}</span
+      ></button
+    ><div
+      class="db-grid-tz-menu"
+      ?hidden=${!p.open}
+      style=${p.maxHeight === null ? nothing : `max-height: ${p.maxHeight}px;`}
+    ><input
+        type="search"
+        class="db-grid-tz-search"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder=${attr(p.placeholder)}
+        .value=${live(p.query)}
+        ${ref(p.searchRef)}
+        @input=${(event: Event) =>
+          p.onQuery((event.currentTarget as HTMLInputElement).value)}
+        @keydown=${p.onKeydown}
+      /><div class="db-grid-tz-list" role="listbox">${p.groups.map(
+        (group) =>
+          html`<div class="db-grid-tz-group" ?hidden=${group.hidden}>${group.label}</div>${group.options.map(
+            (o) =>
+              html`<button
+                type="button"
+                class=${[
+                  "db-grid-tz-option",
+                  o.selected ? "is-selected" : "",
+                  o.highlighted ? "is-highlighted" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                role="option"
+                data-value=${o.value}
+                aria-selected=${o.selected ? "true" : "false"}
+                ?hidden=${o.hidden}
+                @click=${o.onChoose}
+                @mousemove=${o.onHover}
+              >${iconTemplate(CHECK_16_PATHS, "db-grid-tz-check")}<span
+                  class="db-grid-tz-name"
+                  >${o.name}</span
+                ><span class="db-grid-tz-offset">${o.offset}</span></button>`,
+          )}`,
+      )}${
+        p.empty
+          ? html`<div class="db-grid-tz-empty" ?hidden=${p.empty.hidden}>${p.empty.text}</div>`
+          : nothing
+      }</div></div
+  ></span>`;
+
+export function createTimeZonePicker(
+  opts: {
+    text: () => DbText;
+    get: () => string;
+    set: (pref: string | null) => Promise<void>;
+    onChange: () => void;
+  },
+  view: TimeZonePickerView = DEFAULT_VIEW,
+): TimeZonePicker {
+  const buttonRef = createRef<HTMLButtonElement>();
+  const searchRef = createRef<HTMLInputElement>();
+  let shown = false;
+  let open = false;
+  let query = "";
+  let maxHeight: number | null = null;
+  // sync で映した文言 (sync の前は何も出さない)。
+  let synced: {
+    label: string;
+    ariaLabel: string;
+    placeholder: string;
+  } | null = null;
+  let title: string | null = null;
+  let saveFailed = false;
+  let emptyText: string | null = null;
 
   // この画面で選んだ値。保存の応答を待たずに効かせ、保存に失敗しても
   // この画面では選んだまま (失敗は title に出す)。
@@ -122,8 +220,74 @@ export function createTimeZonePicker(opts: {
   let failure: { zone: string; detail: string } | null = null;
   let resolvedFor: string | null = null;
   let options: Option[] = [];
+  let groupLabels: [string, string] = ["", ""];
   let builtFor = "";
   let highlighted = -1;
+  let selectedValue: string | null = null;
+
+  const matches = (o: Option) => timeZoneMatches(query, o.name, o.offset);
+
+  function props(): TimeZonePickerProps {
+    const searching = query.trim() !== "";
+    const optionProps = options.map(
+      (o, index): TimeZoneOptionProps => ({
+        value: o.value,
+        name: o.label,
+        offset: o.offset,
+        selected: o.value === selectedValue,
+        highlighted: index === highlighted,
+        hidden: !matches(o),
+        onChoose: () => choose(o.value),
+        onHover: () => {
+          if (highlighted === index) return;
+          highlighted = index;
+          draw();
+        },
+      }),
+    );
+    return {
+      shown,
+      failed: failure !== null,
+      saveFailed,
+      label: synced?.label ?? null,
+      title,
+      ariaLabel: synced?.ariaLabel ?? null,
+      placeholder: synced?.placeholder ?? null,
+      open,
+      maxHeight,
+      query,
+      groups:
+        options.length === 0
+          ? []
+          : ([0, 1] as const).map((group) => ({
+              label: groupLabels[group],
+              hidden: searching,
+              options: optionProps.filter((_, i) => options[i].group === group),
+            })),
+      empty:
+        emptyText === null
+          ? null
+          : {
+              text: emptyText,
+              hidden: options.some(matches),
+            },
+      buttonRef,
+      searchRef,
+      onToggle: () => {
+        if (open) close(true);
+        else openMenu();
+      },
+      onQuery: (value) => {
+        query = value;
+        filter();
+      },
+      onKeydown,
+    };
+  }
+
+  const box = detachedElement(() => view(props()));
+  const el = box.element;
+  const draw = () => box.draw();
 
   function resolve(): void {
     const value = pref();
@@ -162,34 +326,15 @@ export function createTimeZonePicker(opts: {
     }
   }
 
-  function group(label: string): void {
-    const head = document.createElement("div");
-    head.className = "db-grid-tz-group";
-    head.textContent = label;
-    list.appendChild(head);
-  }
-
-  function option(value: string, name: string, offset: string): void {
-    const o = document.createElement("button");
-    o.type = "button";
-    o.className = "db-grid-tz-option";
-    o.setAttribute("role", "option");
-    o.dataset.value = value;
-    o.innerHTML = iconSvg("db-grid-tz-check", CHECK_16_PATHS);
-    const nameEl = document.createElement("span");
-    nameEl.className = "db-grid-tz-name";
-    nameEl.textContent = name;
-    const offsetEl = document.createElement("span");
-    offsetEl.className = "db-grid-tz-offset";
-    offsetEl.textContent = offset;
-    o.append(nameEl, offsetEl);
-    const index = options.length;
-    o.addEventListener("click", () => choose(value));
-    o.addEventListener("mousemove", () => highlight(index, false));
-    list.appendChild(o);
+  function option(
+    group: 0 | 1,
+    value: string,
+    label: string,
+    offset: string,
+  ): Option {
     // 「この PC」も Asia/Tokyo の名前で引けるようにする。
-    const zoneName = value === "local" ? `${name} ${localTimeZone()}` : name;
-    options.push({ value, el: o, name: zoneName, offset });
+    const name = value === "local" ? `${label} ${localTimeZone()}` : label;
+    return { value, label, offset, name, group };
   }
 
   // 一覧は初めて開いたとき (と言語・この PC が変わったとき) に作る。
@@ -199,94 +344,81 @@ export function createTimeZonePicker(opts: {
     const key = `${t.timeZoneRaw}|${local}`;
     if (key === builtFor) return;
     builtFor = key;
-    list.textContent = "";
-    options = [];
     const now = Date.now();
-    group(t.timeZoneCommon);
-    option("", t.timeZoneRaw, "");
-    option("local", t.timeZoneLocal(local), offsetOf(local, now));
-    option("UTC", "UTC", "+00:00");
-    group(t.timeZoneAll);
-    for (const zone of knownTimeZones())
-      if (zone !== "UTC") option(zone, zone, offsetOf(zone, now));
-    list.appendChild(empty);
+    groupLabels = [t.timeZoneCommon, t.timeZoneAll];
+    options = [
+      option(0, "", t.timeZoneRaw, ""),
+      option(0, "local", t.timeZoneLocal(local), offsetOf(local, now)),
+      option(0, "UTC", "UTC", "+00:00"),
+      ...knownTimeZones()
+        .filter((zone) => zone !== "UTC")
+        .map((zone) => option(1, zone, zone, offsetOf(zone, now))),
+    ];
+    emptyText = "";
   }
 
-  function visible(): Option[] {
-    return options.filter((o) => !o.el.hidden);
+  function visible(): number[] {
+    return options.flatMap((o, i) => (matches(o) ? [i] : []));
   }
 
-  function highlight(index: number, scroll: boolean): void {
-    highlighted = index;
-    options.forEach((o, i) => {
-      o.el.classList.toggle("is-highlighted", i === index);
-    });
-    if (scroll && index >= 0)
-      options[index].el.scrollIntoView?.({ block: "nearest" });
+  function scrollToHighlighted(): void {
+    if (highlighted < 0) return;
+    el.querySelector<HTMLElement>(
+      ".db-grid-tz-option.is-highlighted",
+    )?.scrollIntoView?.({ block: "nearest" });
   }
 
   function filter(): void {
-    const query = search.value;
-    const searching = query.trim() !== "";
-    for (const o of options)
-      o.el.hidden = !timeZoneMatches(query, o.name, o.offset);
-    // 絞り込み中は見出しを隠し、当たったものだけを並べる。
-    for (const head of list.querySelectorAll<HTMLElement>(".db-grid-tz-group"))
-      head.hidden = searching;
-    const shown = visible();
-    empty.hidden = shown.length > 0;
-    empty.textContent = opts.text().grid.timeZoneNoMatch;
-    highlight(shown.length > 0 ? options.indexOf(shown[0]) : -1, true);
-  }
-
-  function markSelected(): void {
-    const value = pref();
-    for (const o of options) {
-      const selected = o.value === value;
-      o.el.classList.toggle("is-selected", selected);
-      o.el.setAttribute("aria-selected", selected ? "true" : "false");
-    }
+    const shownIndexes = visible();
+    emptyText = opts.text().grid.timeZoneNoMatch;
+    highlighted = shownIndexes.length > 0 ? shownIndexes[0] : -1;
+    draw();
+    scrollToHighlighted();
   }
 
   function onDocumentPointer(e: Event): void {
     if (!el.contains(e.target as Node)) close(false);
   }
 
-  function open(): void {
+  function openMenu(): void {
     build();
-    markSelected();
-    search.value = "";
+    selectedValue = pref();
+    query = "";
     filter();
     const selectedIndex = options.findIndex((o) => o.value === pref());
-    if (selectedIndex >= 0) highlight(selectedIndex, true);
+    if (selectedIndex >= 0) highlighted = selectedIndex;
     // 表の箱 (.db-grid は overflow: hidden) の下端で切れないよう、入る高さまでにする。
     const host = el.closest(".db-grid");
-    if (host) {
+    const button = buttonRef.value;
+    if (host && button) {
       const room =
         host.getBoundingClientRect().bottom -
         button.getBoundingClientRect().bottom -
         MENU_MARGIN_PX;
-      menu.style.maxHeight = `${Math.max(MENU_MIN_HEIGHT_PX, room)}px`;
+      maxHeight = Math.max(MENU_MIN_HEIGHT_PX, room);
     }
-    menu.hidden = false;
-    button.setAttribute("aria-expanded", "true");
+    // 開いたときの一覧は送らない (書き直す前も、送るのが窓を出す前で効いて
+    // いなかった。同じ見え方にしておく)。
+    open = true;
+    draw();
     document.addEventListener("mousedown", onDocumentPointer, true);
-    search.focus();
+    searchRef.value?.focus();
   }
 
   function close(returnFocus: boolean): void {
-    if (menu.hidden) return;
-    menu.hidden = true;
-    button.setAttribute("aria-expanded", "false");
+    if (!open) return;
+    open = false;
+    draw();
     document.removeEventListener("mousedown", onDocumentPointer, true);
-    if (returnFocus) button.focus();
+    if (returnFocus) buttonRef.value?.focus();
   }
 
   function choose(value: string): void {
     close(true);
     if (value === pref()) return;
     chosen = value;
-    delete el.dataset.saveFailed;
+    saveFailed = false;
+    draw();
     void opts.set(value || null).catch((error: unknown) => {
       const detail = reportDatastoreFailure(
         "SQL",
@@ -294,19 +426,15 @@ export function createTimeZonePicker(opts: {
         error,
         value,
       );
-      el.dataset.saveFailed = "1";
-      button.title = opts.text().grid.timeZoneSaveFailed(detail);
+      saveFailed = true;
+      title = opts.text().grid.timeZoneSaveFailed(detail);
+      draw();
     });
     // 保存を待たずに出し直す (保存の失敗はボタンの title に出す)。
     opts.onChange();
   }
 
-  button.addEventListener("click", () => {
-    if (menu.hidden) open();
-    else close(true);
-  });
-  search.addEventListener("input", filter);
-  search.addEventListener("keydown", (e) => {
+  function onKeydown(e: KeyboardEvent): void {
     if (isImeComposing(e)) return;
     if (e.key === "Escape") {
       e.preventDefault();
@@ -317,45 +445,50 @@ export function createTimeZonePicker(opts: {
     if (e.key === "Enter") {
       e.preventDefault();
       const target = options[highlighted];
-      if (target && !target.el.hidden) choose(target.value);
+      if (target && matches(target)) choose(target.value);
       return;
     }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
-    const shown = visible();
-    if (shown.length === 0) return;
-    const at = shown.findIndex((o) => options.indexOf(o) === highlighted);
+    const shownIndexes = visible();
+    if (shownIndexes.length === 0) return;
+    const at = shownIndexes.indexOf(highlighted);
     const step = e.key === "ArrowDown" ? 1 : -1;
-    const next = shown[Math.min(Math.max(at + step, 0), shown.length - 1)];
-    highlight(options.indexOf(next), true);
-  });
+    highlighted =
+      shownIndexes[Math.min(Math.max(at + step, 0), shownIndexes.length - 1)];
+    draw();
+    scrollToHighlighted();
+  }
 
   function sync(): void {
     const t = opts.text().grid;
     resolve();
-    current.textContent = labelOf(pref());
-    search.placeholder = t.timeZoneSearch;
-    button.setAttribute("aria-label", t.timeZoneLabel);
-    el.classList.toggle("is-failed", failure !== null);
+    synced = {
+      label: labelOf(pref()),
+      ariaLabel: t.timeZoneLabel,
+      placeholder: t.timeZoneSearch,
+    };
     // 開いている窓の文言 (見出し・この PC) も言語に合わせる。
-    if (!menu.hidden) {
+    if (open) {
       build();
-      markSelected();
+      selectedValue = pref();
       filter();
     }
-    if (el.dataset.saveFailed) return;
-    button.title = failure
-      ? t.timeZoneUnknown(failure.zone, failure.detail)
-      : `${t.timeZoneTitle}\n${labelOf(pref())}${active && pref() !== "UTC" && pref() !== "" ? ` (${active})` : ""}`;
+    if (!saveFailed)
+      title = failure
+        ? t.timeZoneUnknown(failure.zone, failure.detail)
+        : `${t.timeZoneTitle}\n${labelOf(pref())}${active && pref() !== "UTC" && pref() !== "" ? ` (${active})` : ""}`;
+    draw();
   }
 
   return {
     el,
     zone: () => active,
     sync,
-    setShown(shown) {
-      el.hidden = !shown;
-      if (!shown) close(false);
+    setShown(next) {
+      shown = next;
+      draw();
+      if (!next) close(false);
     },
     shortName: () =>
       active ? timeZoneShortName(active, Date.now(), pageLanguage()) : "",

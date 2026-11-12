@@ -3,10 +3,8 @@
 // ボタンを押す。どれを外すかは CSS の段が決めるので、ここでは「見えていない」を
 // getClientRects が空であることで表す (data-folded の中)。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "./_dom";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
-
-GlobalRegistrator.register();
 const { topbarMoreItems } = await import("../views/topbar-more");
 
 const originalRects = HTMLElement.prototype.getClientRects;
@@ -19,7 +17,6 @@ beforeAll(() => {
 });
 afterAll(() => {
   HTMLElement.prototype.getClientRects = originalRects;
-  GlobalRegistrator.unregister();
 });
 afterEach(() => {
   document.body.innerHTML = "";

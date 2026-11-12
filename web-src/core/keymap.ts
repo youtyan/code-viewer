@@ -67,6 +67,9 @@ export const KEYMAP_ACTIONS = [
   "goto-journal",
   "goto-database",
   "goto-agents",
+  // 手が要るエージェント (入力待ち → 完了・未読) を順に開く。
+  "agent-next-attention",
+  "agent-previous-attention",
   "goto-worktrees",
   "goto-tools",
   "goto-search",
@@ -339,6 +342,8 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "goto-journal", key: "j", pendingG: true },
   { action: "goto-database", key: "b", pendingG: true },
   { action: "goto-agents", key: "a", pendingG: true },
+  { action: "agent-next-attention", key: "n", pendingG: true },
+  { action: "agent-previous-attention", key: "n", shift: true, pendingG: true },
   // ヘッダ左端のリポジトリ名 (プロジェクトの切替) を開く。
   { action: "switch-project", key: "p" },
   { action: "nav-back", key: "[", ctrl: true },

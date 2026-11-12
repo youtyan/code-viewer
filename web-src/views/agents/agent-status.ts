@@ -6,7 +6,9 @@
 //
 // 押すとエージェント一覧へ。入力待ちが 1 件だけなら、そのペインを直接開く。
 
+import { html } from "lit/html.js";
 import { headerAgentCounts } from "../../core/agent-overview";
+import { renderOwned } from "../ui/renderer";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
 
@@ -17,42 +19,54 @@ export type AgentStatusDeps = {
   openPane(pane: string): void;
 };
 
-function item(state: "waiting" | "working"): {
-  el: HTMLElement;
-  label: HTMLElement;
-  count: HTMLElement;
-} {
-  const el = document.createElement("span");
-  el.className = `agent-status-item agent-status-${state}`;
-  const mark = document.createElement("i");
-  mark.className = `terminal-mark terminal-mark-${state}`;
-  mark.setAttribute("aria-hidden", "true");
-  const label = document.createElement("span");
-  label.className = "agent-status-label";
-  const count = document.createElement("span");
-  count.className = "agent-status-count";
-  el.append(mark, label, count);
-  return { el, label, count };
-}
+/** 件数の欄に描くもの (入力待ち・作業中の順)。 */
+export type AgentStatusProps = {
+  items: { state: "waiting" | "working"; label: string; count: string }[];
+};
+
+export type AgentStatusView = (props: AgentStatusProps) => unknown;
+
+export const DEFAULT_VIEW: AgentStatusView = (props) =>
+  props.items.map(
+    (
+      item,
+    ) => html`<span class=${`agent-status-item agent-status-${item.state}`}><i
+        class=${`terminal-mark terminal-mark-${item.state}`}
+        aria-hidden="true"
+      ></i><span class="agent-status-label">${item.label}</span><span
+        class="agent-status-count"
+      >${item.count}</span></span>`,
+  );
 
 export function mountAgentStatus(
   button: HTMLButtonElement,
   deps: AgentStatusDeps,
+  view: AgentStatusView = DEFAULT_VIEW,
 ): { localize(): void } {
-  const waiting = item("waiting");
-  const working = item("working");
-  button.replaceChildren(waiting.el, working.el);
-
   function render(): void {
     const text = deps.getText();
     const { overview, error } = deps.monitor.snapshot();
     const panes = overview?.panes ?? [];
     const counts = headerAgentCounts(panes);
-    waiting.label.textContent = text.headerWaiting;
-    working.label.textContent = text.headerWorking;
     // 取れていないときは数えられない。0 と出すと「誰も待っていない」と読める。
-    waiting.count.textContent = overview ? String(counts.waiting) : "–";
-    working.count.textContent = overview ? String(counts.working) : "–";
+    renderOwned(
+      button,
+      view({
+        items: [
+          {
+            state: "waiting",
+            label: text.headerWaiting,
+            count: overview ? String(counts.waiting) : "–",
+          },
+          {
+            state: "working",
+            label: text.headerWorking,
+            count: overview ? String(counts.working) : "–",
+          },
+        ],
+      }),
+    );
+
     button.classList.toggle("agent-status-attention", counts.waiting > 0);
     button.classList.toggle("agent-status-busy", counts.working > 0);
     button.classList.toggle("agent-status-error", error !== "");

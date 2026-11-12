@@ -23,10 +23,12 @@ import {
   AGENT_HOOK_MARKER,
   HOOK_SPECS,
   type HookAgent,
+  opencodePluginSource,
   planHookChange,
   serializeHookFile,
 } from "../core/agent-hooks";
 import { unifiedDiff } from "../core/text-diff";
+import { checkAgentHooks } from "../server/doctor";
 import {
   AgentHookError,
   type AgentHookTarget,
@@ -39,6 +41,7 @@ import {
   hookLauncherScript,
   launcherHealth,
   planAgentHooks,
+  writeHookLauncher,
 } from "../server/terminal/hooks";
 import {
   commitJsonSettingsChange,
@@ -137,6 +140,22 @@ describe("paths", () => {
       env: { CODEX_HOME: "/tmp/sample-codex" },
       expected: "/tmp/sample-codex",
     },
+    { agent: "opencode", env: {}, expected: "/home/sample/.config/opencode" },
+    {
+      agent: "opencode",
+      env: { XDG_CONFIG_HOME: "/tmp/sample-xdg" },
+      expected: "/tmp/sample-xdg/opencode",
+    },
+    {
+      // opencode 2 はここの plugins/ だけを読む (1 は足して読む)。どちらでも
+      // 読まれる場所に置く。
+      agent: "opencode",
+      env: {
+        OPENCODE_CONFIG_DIR: "/tmp/sample-extra",
+        XDG_CONFIG_HOME: "/tmp/sample-xdg",
+      },
+      expected: "/tmp/sample-extra",
+    },
   ] satisfies {
     agent: HookAgent;
     env: Record<string, string>;
@@ -151,6 +170,7 @@ describe("paths", () => {
   test.each([
     { agent: "claude", file: "settings.json" },
     { agent: "codex", file: "hooks.json" },
+    { agent: "opencode", file: "plugins/code-viewer-agent-hook.js" },
   ] satisfies { agent: HookAgent; file: string }[])(
     "$agent writes $file",
     ({ agent, file }) => {
@@ -279,6 +299,121 @@ describe("install and uninstall", () => {
     );
     expect(statSync(launcher.path).mode & 0o777).toBe(0o755);
     expect(launcherHealth(launcher).state).toBe("ok");
+  });
+});
+
+// opencode はプラグインのファイル 1 つ (core/agent-hooks.ts の OPENCODE_PLUGIN_FILE)。
+describe("opencode plugin file", () => {
+  const plugin = () => settingsPath("opencode");
+  const source = () =>
+    opencodePluginSource({
+      launcher: launcher.path,
+      failureLog: launcher.failureLog,
+    });
+
+  test("install creates plugins/ and the file; uninstall removes the file", async () => {
+    expect(existsSync(join(configDir, "plugins"))).toBe(false);
+    expect(agentHookStatus(target("opencode"), launcher).state).toBe("none");
+    expect(
+      planAgentHooks(target("opencode"), "install", launcher, NOW),
+    ).toMatchObject({
+      fileExists: false,
+      changed: true,
+      writeBlocked: "",
+      backupPath: null,
+      added: HOOK_SPECS.opencode.map((spec) => ({ event: spec.event })),
+      removed: [],
+      diff: unifiedDiff(null, source(), "code-viewer-agent-hook.js"),
+    });
+
+    const first = await apply("install", "opencode");
+    expect(first.result).toMatchObject({ changed: true, backupPath: null });
+    expect(readFileSync(plugin(), "utf8")).toBe(source());
+    expect(agentHookStatus(target("opencode"), launcher).state).toBe(
+      "installed",
+    );
+
+    const second = await apply("install", "opencode");
+    expect(second.result.changed).toBe(false);
+
+    const removed = await apply("uninstall", "opencode");
+    expect(removed.plan.removed.map((change) => change.event)).toEqual(
+      HOOK_SPECS.opencode.map((spec) => spec.event),
+    );
+    expect(removed.result.backupPath).toBe(
+      join(
+        configDir,
+        "plugins",
+        "code-viewer-agent-hook.js.code-viewer-backup-20260102-030405",
+      ),
+    );
+    expect(existsSync(plugin())).toBe(false);
+    // plugins/ はほかのプラグインの置き場なので残す。
+    expect(existsSync(join(configDir, "plugins"))).toBe(true);
+    expect(agentHookStatus(target("opencode"), launcher).state).toBe("none");
+  });
+
+  test("an older copy of the plugin is partial and is rewritten", async () => {
+    mkdirSync(join(configDir, "plugins"));
+    writeFileSync(plugin(), `// ${AGENT_HOOK_MARKER} older\n`);
+    // 起動スクリプトが無ければ「呼び先が無い」(claude・codex と同じ)。
+    expect(agentHookStatus(target("opencode"), launcher).state).toBe("broken");
+    writeHookLauncher(launcher);
+    expect(agentHookStatus(target("opencode"), launcher).state).toBe("partial");
+    await apply("install", "opencode");
+    expect(readFileSync(plugin(), "utf8")).toBe(source());
+  });
+
+  test("a file of the same name without the mark is not ours and is not written", async () => {
+    mkdirSync(join(configDir, "plugins"));
+    writeFileSync(plugin(), "export const Other = async () => ({});\n");
+    const status = agentHookStatus(target("opencode"), launcher);
+    expect(status.state).toBe("unreadable");
+    expect(status.detail).toContain("not written by code-viewer");
+    expect(() =>
+      planAgentHooks(target("opencode"), "install", launcher, NOW),
+    ).toThrow(AgentHookError);
+    expect(readFileSync(plugin(), "utf8")).toBe(
+      "export const Other = async () => ({});\n",
+    );
+  });
+
+  test("no opencode settings directory means opencode is not in use", () => {
+    const missing = {
+      agent: "opencode" as const,
+      configDir: join(root, "none"),
+    };
+    expect(agentHookStatus(missing, launcher).state).toBe("no-config-dir");
+  });
+
+  test("a read-only settings directory blocks creating plugins/", () => {
+    chmodSync(configDir, 0o555);
+    expect(
+      planAgentHooks(target("opencode"), "install", launcher, NOW).writeBlocked,
+    ).toContain(configDir);
+  });
+
+  test("doctor finds the plugin file and says how to remove it", async () => {
+    await apply("install", "opencode");
+    const row = checkAgentHooks([target("opencode")], launcher).rows[0];
+    expect(row).toMatchObject({
+      id: "agent-hooks.opencode",
+      status: "ok",
+      detail: `installed: ${plugin()}`,
+    });
+    expect(row?.hint).toContain(`delete ${plugin()}`);
+  });
+
+  test("the file changed after it was shown is not overwritten", async () => {
+    const plan = planAgentHooks(target("opencode"), "install", launcher, NOW);
+    mkdirSync(join(configDir, "plugins"));
+    writeFileSync(plugin(), `// ${AGENT_HOOK_MARKER} someone else\n`);
+    await expect(
+      applyAgentHooks(target("opencode"), "install", launcher, plan, NOW),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(readFileSync(plugin(), "utf8")).toBe(
+      `// ${AGENT_HOOK_MARKER} someone else\n`,
+    );
   });
 });
 

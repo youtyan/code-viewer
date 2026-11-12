@@ -1,21 +1,11 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "./_dom";
+import { beforeEach, describe, expect, test } from "vitest";
 import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "vitest";
-import { createLineRefPill, readRenderedLines } from "../views/line-ref-pill";
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
+  createLineRefPill,
+  DEFAULT_VIEW,
+  type LineRefPillProps,
+  readRenderedLines,
+} from "../views/line-ref-pill";
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -119,7 +109,7 @@ describe("line reference pill line history action", () => {
   });
 
   test("stays hidden when the host does not provide line history", () => {
-    createLineRefPill({
+    const pill = createLineRefPill({
       onClose() {
         /* noop */
       },
@@ -129,6 +119,7 @@ describe("line reference pill line history action", () => {
       githubOpenTitle: () => "Open on GitHub",
       githubCopyTitle: () => "Copy GitHub link",
     });
+    pill.show("src/index.ts", 10, 12);
     expect(
       document.querySelector<HTMLButtonElement>("#line-ref-pill-history")
         ?.hidden,
@@ -301,5 +292,41 @@ describe("line reference pill placement", () => {
     pill.show("src/sample.ts", 3, 3);
     const el = document.querySelector<HTMLElement>("#line-ref-pill");
     expect(el?.style.getPropertyValue("--lrp-center")).toBe("");
+  });
+});
+
+describe("the line reference pill presenter", () => {
+  test("gives the view the reference and the line count; close goes to the host", () => {
+    const shown: LineRefPillProps[] = [];
+    const closed: string[] = [];
+    const pill = createLineRefPill(
+      {
+        onClose: () => closed.push("close"),
+        githubUrlForSelection: () => null,
+        copyReferenceLabel: () => "Copy AI reference",
+        lineCountLabel: (count) => `${count} lines`,
+        githubOpenTitle: () => "Open on GitHub",
+        githubCopyTitle: () => "Copy GitHub link",
+      },
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    pill.show("src/index.ts", 10, 12);
+    const last = shown[shown.length - 1];
+    expect([
+      last?.copy.ref,
+      last?.copy.count,
+      last?.github,
+      last?.history,
+    ]).toEqual([
+      "@src/index.ts#10-12",
+      { text: "3 lines", warn: false },
+      null,
+      null,
+    ]);
+    last?.onClose();
+    expect(closed).toEqual(["close"]);
   });
 });

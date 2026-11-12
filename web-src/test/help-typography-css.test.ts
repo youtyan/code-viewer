@@ -13,9 +13,9 @@
 //
 // happy-dom は var() を解決するが calc() は解かずに返し、em の max-width は NaNpx に
 // なる。大きさは下の px() で読み、幅は宣言を _css-fixture のカスケードで読む。
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import {
   baseRules,
   cascadedDeclarations,
@@ -23,13 +23,9 @@ import {
 } from "./_css-fixture";
 
 beforeAll(() => {
-  GlobalRegistrator.register();
   const style = document.createElement("style");
   style.textContent = readFileSync("web/style.css", "utf8");
   document.head.append(style);
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 /** 計算値の長さを px の数にする。`14px` と、密度の段階の `calc(4px * 3.75)` だけ。 */

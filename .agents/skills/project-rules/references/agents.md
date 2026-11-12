@@ -28,13 +28,15 @@
 | 「なぜ〜しないのか」と聞かれた | 11 |
 | ターミナルに出た画像パス（右の画像の棚・`/_agent/images`・`/_agent/image`）を触る | 12 |
 | ターミナルのタブがいつ閉じるか（シェル・tmux のペインの終わり）・tmux のウインドウの外側の覆いを触る | 13 |
+| 端末の中のプログラムが送るコピー（OSC 52）を触る | 14 |
 
 ---
 
 ## 1. 全体像
 
 tmux の全ペインを「プロジェクト → エージェント」でまとめて見せ、入力待ちと完了に気付かせ、
-claude / codex の複数アカウントを使い分け、登録したプロジェクトの間を同じタブ・同じポートで移る機能群。
+claude / codex の複数アカウントを使い分け（opencode も同じ一覧・状態・起動・フックに載るが、
+アカウントは既定だけ。5 の冒頭）、登録したプロジェクトの間を同じタブ・同じポートで移る機能群。
 
 | 画面 | 置き場所 |
 |---|---|
@@ -77,11 +79,13 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 
 状態は 4 つ（`core/agent-state.ts` の `AGENT_STATES`）。
 
-**並びは画面で 2 通り。混ぜない。**
+**並びは画面ごとに決める。混ぜない。**
 
 | 画面 | 並べる関数 | 並び | 理由 |
 |---|---|---|---|
 | エージェントの全体ボード | `groupAgentPanes` | プロジェクトはサイドバーと同じ（下の行）。行は 入力待ち → 完了・未読 → 作業中 → 待機（`STATE_RANK`） | 行は「いま手が要るものを上から片付ける」。プロジェクトの順は利用者が並べた 1 つの順（2026-09-23 に決めた。以前は入力待ちを含むプロジェクトを先に出していた） |
+| エージェントの全体ボードの「急ぐ順」（並びの切替。既定は上の行） | `groupAgentTreesByUrgency` | プロジェクトをまたいで 入力待ち → 完了 → 作業中 → 待機 の段。子エージェントは親の下に字下げのまま、親子の木ごと木の中で一番急ぐ状態の段に入る。段の中はその状態のものが変わったのが新しい順（見ていないものは後ろ）、同じなら親の場所の順。段の見出しの件数はその状態の行だけ（子の状態で段に入った親は数えない）。行の補足にプロジェクトの名前 | プロジェクトが多いと手が要るものが各プロジェクトに散る。選んだ並びはユーザー単位の設定 `agentsBoardOrder` に覚える（開き直すたびに選び直していた。ブラウザの保存はポートが変わると消えるので使わない） |
+| 全体ボードの「ピン留め」（行の右クリックの「上に留める」） | `groupAgentPanesByUrgency`（留めたものだけ） | どちらの並びでも一番上の段。行の補足にプロジェクトの名前 | 見張りたいものを手元に置く。**左のサイドバーには入れない**（行が動く）。ピンは入口のサーバのメモリ（`server/terminal/pins.ts`、`POST /_agent/pin`、一覧の `pinned`）で、どの窓・電話でも同じ。鍵は tmux の世代 + ペイン ID、ペインが一覧から消えたら外す。保存はしない。`pinned` 欄の無い古い版のサーバでは画面のメモリで留める |
 | 左のサイドバー | `groupAgentPanesByPlace` | プロジェクトは登録順 → 未登録（名前の順、同名はパスの順）。行は tmux の場所（セッション名 → ウィンドウ番号 → ペイン番号） | 行が勝手に上下すると押そうとしたものが逃げる。気づかせる役目は行の印・畳んだ見出しの印・最下段の件数・通知が持つ |
 
 プロジェクトの順（登録簿の配列の順）は、サイドバーの見出しのドラッグ・見出しで Alt+↑↓・
@@ -98,9 +102,31 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 「ターミナルの文字の上に重ねる」は端末の中に居座る画像の話で、これは行に載せている間だけ出て、
 離れる・Esc・押す・スクロールで消える見るだけの窓。
 
+**子エージェントは親の下に字下げして並べる**（左のサイドバーと全体ボードのプロジェクトの中。
+`core/agent-overview.ts` の `nestAgentPanes`、字下げは `style.css` の `[data-agent-depth]`）。親子の
+出どころは tmux のペインのユーザーオプション `@agent-parent`（値は親のペイン ID）で、
+`server/tmux/panes.ts` が `list-panes` の書式で**読むだけ**（ペイン ID の形でない値・自分自身は無視）。
+付けるのは起こした側: エージェントを起こす道具は、新しいペインに
+`tmux set-option -p -t <新しいペイン> @agent-parent "$TMUX_PANE"` を打つ。code-viewer が自分で付けるのは
+起こした元が分かるとき（引き継ぎ。`launchedPaneOptionArgs`）だけで、利用者の tmux のほかの所には書かない
+（ペインのオプションなのでペインと一緒に消える）。親が一覧に居ない子（別のプロジェクト・終わった）と
+親の輪はそのまま並べ、段は `MAX_AGENT_DEPTH` まで。
+
+**サイドバーを畳んでも手が要るものは見える。** 畳んだときに一覧の列の頭に出る「サイドバーを表示」
+（`#nav-expand`）の右上に、一番急ぐもの（入力待ち → 完了）の色の点を重ね、題に数を足す（`app.ts` の
+`syncNavExpandMark`、`style.css` の `#nav-expand[data-attention]`）。細い帯を新しく作らなかったのは、
+サイドバーの幅（`--nav-w` → `--chrome-left`）がほかの固定物の位置の元で、畳んだ幅を 0 から変えると
+全部の消費側が動くため（ui-layout.md の骨格）。
+
 サイドバーは 2 つの区画に分ける。上 (「PROJECTS」) は登録したプロジェクトで、エージェントが
 居なくても常に 1 行。下 (「tmux で検出」) は未登録でエージェントが居るもの。起動・終了で
 出入りするのは下の区画だけで、上の行の位置は動かない。0 件なら下の区画ごと出さない。
+プロジェクト見出しの名前の後ろに、主でないブランチと上流との差（`feature ↑2 ↓1`。`projectBranchTail`。
+main・master・名前と同じブランチは出さない）を小さく出し、狭いときは名前より先に縮んで消える。
+読むのは入口のサーバ（`server/projects/branch-status.ts`。寝ているプロジェクトの裏を起こさない）で、
+まだ読んでいない・そのプロジェクトのエージェントのターンが終わった・そのプロジェクトへ移った・
+`BRANCH_STATUS_FALLBACK_MS`（5 分）経った、のときだけ裏で読み、一覧（`projects[].branch`）には前に
+読んだ値を載せる。git は読むだけの指定（`branchStatusResultAsync`）。読めなければ errors の `branch_status`。
 プロジェクト見出しの頭はプロジェクトの色の四角と頭文字（7 の「色と頭文字」）。名前の後ろに、
 人の番のもの（入力待ち > 完了・未読 > 作業中）があればその印を出し、サーバを起こしている
 最中だけ回る点線と「起動中…」を優先する。
@@ -120,6 +146,9 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
   題名で預けたタブの数を出す。広がれば同じ比で戻す。保存するのは預けた分を含む配置
 - タブ列の `+` は `app.ts` の `openNewTabMenu` / `newTabMenuItems` が作る。ファイル、新しいシェル、
   既存のシェルと tmux ペインを開き、全プロジェクトの一覧へも移れる
+- 新しいシェルは、その面の前面のタブが同じプロジェクトの tmux のペインを映していれば、そのペインの
+  今の作業場所（別の作業ツリーなど）で開く（`app.ts` の `frontPaneFolder` → `/_shell/create` の `cwd`。
+  サーバは絶対パス・制御文字なし・今あるフォルダだけを受ける）。それ以外はプロジェクトの根
 - エージェントは、そのシェルを出している面があればその面で、無ければフォーカスのある面の
   タブで開く（`app.ts` の `openAgentPane`。サイドバー・パレット・全体ボード・通知・最下段で同じ。
   修飾キーでも開く先は変わらない）。経路は `/_tmux/open`（ペイン → そのセッションのシェル）で、
@@ -168,7 +197,8 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
   届くので、`progress` が `stop` より遅れて着くことがある
 - 状態はサーバのメモリにだけ持つ。サーバを再起動すると消え、次の申告と巡回で入り直る
   （古い状態をディスクから戻すと、終わったものを「待ち」と出す害のほうが大きい）。
-  例外は会話の場所だけで、状態とは別に持って保存する（4 の「フックで受け取る欄」）
+  例外は会話の場所（4 の「フックで受け取る欄」）と、未読・変わった時刻（3 の「未読の保存」）で、
+  どちらも状態とは別に持って保存する
 - tmux の pane id はサーバを起動し直すと再利用される。巡回ごとに `tmux/command.ts` の
   `readTmuxServerGeneration` で pid と開始時刻（得られなければ socket の inode と ctime）を
   世代として読み、状態・画面観測・未読の鍵は
@@ -228,7 +258,7 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 
 ## 3. 通知と未読
 
-`core/agent-overview.ts` の `agentTransition`・`nextAgentUnread`・`shouldNotifyAgent` が
+`core/agent-overview.ts` の `agentTransition`・`nextAgentUnread`・`agentAlertPlace` が
 条件の全部。ここは理由だけ書く。
 
 | 決まり | 理由 |
@@ -239,6 +269,9 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 | タブが前面で、そのペインをいま見ているなら知らせず、未読にもしない | 見ているものに通知は要らない |
 | 通知の許可は、一覧の「通知を有効にする」か、最初の入力待ちでサイドバーに 1 度だけ出す案内（`agentNotifyHintDismissed`。許可かブロックを選ぶか、閉じたら二度と出さない。許可の窓を閉じただけで default のままなら、どちらも「まだ許可されていません」と「もう一度求める」を出す。判定は `notifyPermissionView` だけ）を押したときだけ求める | ページを開いた瞬間に許可を求めない。入力待ちが来たときが、通知の要る理由が分かる瞬間 |
 | 通知は画面が見た変化に加えて、サーバの未読に新しく載った変化でも出す（`agent-monitor.ts` の `serverOnlyTransitions`） | 背面のタブはブラウザが取り直しを十数秒まで間引き、短い作業中をまるごと見逃す（実測で 17 秒あいた）。通知が要るのはまさに背面にいるとき |
+| 短い音（設定の「短い音も鳴らす」`agentNotifySound`。既定は切）は、通知の許可に関係なく、見ていないペインの変化で 1 回の取得に 1 回（入力待ちを優先）。種類ごとの通知の設定に従う。音のファイルは持たず Web Audio で鳴らす（`views/agents/attention-sound.ts`）。鳴らせなければ理由を console に。設定の節に「試しに鳴らす」（入力待ち・完了。`onTestSound`、鳴らせなければ理由を節の下に） | 許可を出していない人・通知を見落とす人にも気付かせる。毎回は鳴らさない（既定は切）。音を写さない（自作） |
+| 窓が前面（見えていてキーを受けている）なら、OS の通知の代わりに窓の中の知らせ（右下。`views/agents/attention-toast.ts`。押すとそのペインを開く・しばらくで消える・同じペインの同じ変化は 1 枚・3 枚まで）。前面でなければ許可があるときだけ OS の通知（`agentAlertPlace`）。出すのは外側のページだけ（面の中には置かない） | 前面で作業している人に OS の通知の帯は届きにくく、押してもタブを探すことになる。通知の許可が無い人にも、窓の中なら届く |
+| 子エージェント（一覧に親が居る `@agent-parent` のペイン）は入力待ちだけ知らせる。完了は知らせず（窓の中・OS・音）、未読にもしない（`isChildFinish`。監視役が知らせの前と未読の地図で外すので、タブの題名の件数・未読の印・`g n` も揃う）。親が一覧に居なければ普通に扱う | 作業役の完了は指揮役が受け取る（2026-11-12 に利用者が決めた）。入力待ち（許可の確認）は人の手が要る。未読の印だけ残すと、知らせないのに題名の件数が増えて食い違う |
 | 通知の `tag` はペインと変化の組 | 同じオリジンのタブが複数あっても重ならない |
 | 取り直しの fetch に `BACKGROUND_REQUEST_HEADER` を付ける | 通信中の表示と画面切替の中断の巻き添えにしないため。規則は `server.md` の Request Lifecycle の表 |
 
@@ -252,8 +285,26 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 一覧を作るたびに比べる形だと、一覧を取りに来るのが背面のタブだけのとき作業中を見逃した。
 「見ている」はサーバに分からないので、画面が見ているペイン・開いたペインを
 `POST /_agent/unread` で解く（`agent-monitor.ts`）。応答に `unread` が無い古い版の
-サーバでは、今までどおりタブのメモリで数える。サーバまたは tmux の世代が変わると消える
+サーバでは、今までどおりタブのメモリで数える。tmux の世代が変わると消える
 （状態の記録と同じ）。
+
+**未読の保存**（`server/terminal/unread-store.ts`、`<状態>/agent-unread.json`）。`pnpm dev` や入口の
+起動し直しのたびに未読が全部消え、経過時間が全部「–」になっていた。巡回するサーバが、未読と
+「変わった瞬間を見た時刻」をペインごと（tmux の世代つき）に保存する（変化から
+`UNREAD_SAVE_DELAY_MS` まとめて 1 回。ロックの中で読み直し・0600・読めない保存は上書きしない。
+書き方と失敗の持ち方は会話の場所と共通の `saved-store.ts`）。**状態は保存しない。** 読み戻すのは、
+起きた後にそのペインを初めて記録したとき（`recordAgentState` の最初の記録。`onAgentRecord`）に、
+同じ世代・最初の記録が画面の観測（申告が先なら新しい出来事なので戻さない）・最初に観測した状態が
+保存したときと同じ組（待機と完了は「止まっている」で同じ、入力待ち、作業中）を全部満たすものだけ
+（`decideUnreadRestore`）。未読は「入力待ち」なら入力待ちのとき、「終わった」なら止まっているときだけ
+戻す。戻さなかった理由は 1 行ずつログに出す。失敗は一覧の errors（`restore_unread` / `save_unread`）
+
+**未読に戻す**（行の右クリック。`views/agents/unread-menu.ts`）。一度見た入力待ち・終わったものを
+後で片付けるために戻す。`POST /_agent/unread` の `mark: true` で、サーバが今の状態から種類を決める
+（入力待ち → 入力待ち、待機・完了 → 終わった。作業中は 409、知らない対象は 404）。画面の監視役は、
+見ている間に戻したペインを「見ているから読んだ」で解かない（`agent-monitor.ts` の `keptUnread`）。
+いったん見なくなった取得の後で、また見たら読んだことにする。作業中・既に未読・エージェントでない
+ペインには項目を出さない。
 
 **「読んだ」の中継**（`server/terminal/read-relay.ts`）は、1 つで完結するサーバが並ぶ間の
 もの。入口は状態を持つのが自分だけなので中継しない（`relay: true` を受けても送らない）。
@@ -265,7 +316,21 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 ## 4. フック
 
 エージェント自身に状態を申告させる。画面の推測（2）の弱点（完了が「15 秒動かなかった」
-でしか分からない・node として動く claude の種類が分からない）を埋める。
+でしか分からない）を埋める。
+
+**インタプリタで動くエージェントの種類**（2026-11-12）。npm で入れた claude などは `node` として動き、
+`pane_current_command` から種類が分からなかった（フックが無いと一覧に出ない）。前面のコマンドが
+インタプリタのペインだけ、前面のプロセスの引数（`ps -o pid=,args=`。環境変数は読まない `e` なし）から
+中のプログラムを当てる。決まりは `core/agent-overview.ts` の `agentKindFromArgs`（表のテストは
+`agent-overview-core.test.ts`）、調べ役は `server/terminal/process-kind.ts`:
+
+- ペイン（シェルの pid）か前面のコマンドが変わったときだけ ps を呼び、結果を覚える（一覧の取り直しのたびに
+  呼ばない）。インタプリタでなくなったペインは忘れる
+- 調べられなかった（ps の失敗・プロセスが見つからない・終わっていた）ときは覚えず、理由を一覧の errors
+  （`probe_process`）に出し、種類は今までどおりコマンド名と申告で決める
+- 引数にもトークンが入りうるので、当てた種類だけを残す（引数をログ・失敗の説明・応答に載せない）
+- 会話の場所の読み戻し（`agent-conversations.ts`）はコマンド名だけで決めるので、node として動く
+  claude は今も戻らない
 
 設定の節（`views/agents/agent-hooks-settings.ts`、分類は「エージェント」）は、見出しの下に
 「入れると何が良くなるか」の 1〜2 文とヘルプへの 1 行（`AGENT_HOOKS_HELP_SECTION`。いまは
@@ -273,18 +338,95 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 行を並べる。フックの仕組み（起動スクリプト・申告の送り先）は画面に書かず、ヘルプとこの節に
 置く。文言の長さの決まりは `ui-surface.md` の設定の節。
 
+**全体ボードの上の案内**（`core/agent-hooks.ts` の `agentsNeedingHooks`・`hookHintShown`、
+`views/agents/agents-presenter.ts` の `hookHintProps`）。一覧に居る種類で、未設定なら「有効にできます」、
+入っているが中身が今の版と違う（一部だけ）・呼び先が無いなら「古くなっています」と言い、その場で入れ直す
+ボタンを種類ごとに出す（設定の行の「直す」と同じ `review` と確認の画面。行が直せる状態でなければ設定へ
+移る）。閉じたときは中身（種類と状態。`hookHintKey`）をユーザー単位の設定 `agentHookHintDismissedFor` に
+覚え、中身が変われば出し直す（2026-11-13。前は真偽で覚え、閉じた後にフックが古くなっても出なかった。
+古い真偽の印は未設定の案内だけを隠す）。code-viewer を上げてフックの中身が変わったときの入れ直しの口がこれ。
+
 ### 何をどこに足すか
 
 | 対象 | 足すファイル | 足すもの |
 |---|---|---|
 | claude | `<設定ディレクトリ>/settings.json` の `hooks` | コマンド `<状態ディレクトリ>/agent-hooks/code-viewer-agent-hook claude` |
 | codex | `<CODEX_HOME>/hooks.json` | 同じ形で `… codex` |
-| 両方 | `<状態ディレクトリ>/agent-hooks/code-viewer-agent-hook` | 起動スクリプト（node と code-viewer の場所を持つ） |
+| opencode | `${OPENCODE_CONFIG_DIR:-${XDG_CONFIG_HOME:-~/.config}/opencode}/plugins/code-viewer-agent-hook.js`（無ければ `plugins/` も作る） | プラグインのファイル 1 つ（`opencodePluginSource`）。中身が起動スクリプトを `… opencode` で呼ぶ |
+| 全部 | `<状態ディレクトリ>/agent-hooks/code-viewer-agent-hook` | 起動スクリプト（node と code-viewer の場所を持つ） |
+
+### opencode のプラグイン
+
+opencode には設定ファイルのフックが無く、`plugins/` の .js を読むプラグインの仕組みが
+ある（https://opencode.ai/docs/plugins.md）。code-viewer は自分だけのファイルを 1 つ置く。
+
+**opencode 2 と 1 でプラグインの API が違う**（2026-11-13。2.2.7 に上げた利用者で、1.19.5 で作った
+プラグインが「Plugin must export a default definition with an id and an effect or setup function」で
+読み込めなかった。https://opencode.ai/docs/build/plugins/migrate-v1.md ）。1 つの default export に、
+2 が読む `id` と `setup(ctx)`、1（1.18.29 以降）が呼ぶ `server()` を両方持たせる（公式の
+「Support V1 and V2 from one package」）。`@opencode/plugin` は import しない（依存の無いファイル 1 つ）。
+素の定義の object を 2.2.7 が読むことは実物で確かめた。ほかに書き出すものを足さない（1 は書き出した
+関数をそれぞれプラグインとして呼ぶので二重に申告する）。1.18.29 より古い 1 は対象外。
+
+| | opencode 1 | opencode 2 |
+|---|---|---|
+| 呼ばれ方 | `server({ directory })` が `event` と `dispose` を返す | `setup(ctx)`。出来事は `ctx.event.subscribe({ types, signal })`、片付けは setup が返す関数 |
+| 出来事の欄 | `event.properties` | `event.data`（2.2.7 で観測。欄の名前は logs に残した型だけ） |
+| 1 ターン | `session.status` の busy → `session.idle` | `session.execution.started` → `succeeded` / `failed` / `interrupted` |
+| 質問 | `question.asked` / `replied` / `rejected` | `form.created`（`data.form.sessionID`）/ `form.replied` / `form.cancelled` |
+| 許可 | `permission.asked`（古い版 `permission.updated`）/ `permission.replied` | `permission.asked`（`data.id`）/ `permission.replied`（`data.requestID`）。断っても replied で、続いて interrupted |
+| 下請け | `session.created` の `properties.info.parentID` | `session.created` の `data.parentID`（`data.sessionID` が下請け） |
+
+- **opencode 2 は既定で共有の裏のサーバ（`opencode serve --service`）にプラグインを読ませる**。裏のサーバは
+  最初に起こした端末の子として始まり、端末を閉じても残って（親が launchd に変わる）その端末の
+  `TMUX_PANE` を持ち続ける（2.2.7 で確かめた）。codex の `--no-daemon`（下）と同じ問題で、どの会話が
+  どのペインか分からない。プラグインは `process.argv` に `--service` があれば申告せず、理由を
+  `failures.jsonl` に 1 件残す（stage `service`）。code-viewer が起こす opencode には `--standalone` を付ける
+  （`server/accounts/shared-server.ts`。`--help` に載る版だけ）。そのときプラグインはペインの opencode の子
+  （`serve --stdio`）で動き、`TMUX_PANE` はそのペインのもの、終わると片付けが呼ばれ `exit` が届く。
+  ログインの状態の `opencode auth list` にも付ける（付けないと、裏のサーバが無いときに code-viewer の環境で
+  起こしてしまう）。自分で起こす opencode 2 は利用者が `--standalone` を付ける（ヘルプ・設定の案内）
+- opencode 2 の `session.execution.failed`（`data.error.type`・`message`）は claude の `StopFailure` と同じく
+  完了にせず入力待ち（理由 = エラー）。`interrupted`（Esc・許可を断った・質問を閉じた）は待機（`ready`）
+- opencode 2 は答えの残っている許可・質問を id でセッションごとに数え、全部に答えるまで答えの出来事を
+  送らない（モデルが道具を並べて呼ぶと許可が同時に 2 つ出て、1 つ目の答えで「作業中」に戻り理由が
+  消えた）
+
+- **ファイルの中身ごと code-viewer のもの。** 入れる = 書く、外す = 消す（`settings-file.ts` の
+  約束をそのまま通す。読み方だけ JSON でない `parse` を渡し、消すときは `next` が null）。中身に
+  印（`AGENT_HOOK_MARKER`）の無い同名のファイルはほかの人のものとして「読めない」にし、書かない。
+  中身が今の版と違えば「一部だけ」（入れ直すと書き直す）
+- 中身は起動スクリプトの場所と出来事の一覧だけを持つ（code-viewer の場所は持たない）。出来事と
+  申告の対応は claude・codex と同じく `HOOK_SPECS` と `agentEventForHook`（プラグインは名前と
+  `status` を渡すだけ。決めるのは core）
+- プラグインは同じセッションで同じ出来事が続けば 1 回にまとめ（`session.status` の busy は 1 ターンに
+  何度も来る）、起動スクリプトを **1 つずつ順に** 呼ぶ（申告の時刻は CLI が起きたときに付くので、
+  並べて起こすと完了が作業中より先に着く）。列は `globalThis` に置き、opencode 2 がプラグインを
+  読み直しても同じ列に並べる。下請けのセッション（`session.created` の `parentID`）は
+  許可と質問だけを送る（下請けの終わりで親が「完了」に見えないように）
+- 起動スクリプトを起こせない・異常終了したときは、起動スクリプトと同じ `failures.jsonl` に残す
+  （子の出力は端末の画面を崩すので捨てる）
+- 置くのは全体の設定。`OPENCODE_CONFIG_DIR` があればそこ（`server/terminal/hooks.ts` の
+  `defaultAgentConfigDir`）: 2 ではそれが全体の設定の場所になり、その `plugins/` だけを読む
+  （2.2.7 で `~/.config/opencode/plugins/` は読まれなかった）。1 では足して読む場所で、そこも読む。
+  動いているものには起動し直すまで効かない（案内はそう書く）
+- 確かめるときは本物の設定に置かない。砂場（10）の `HOME` を変えれば全体の設定も砂場に移る。
+  opencode 2 の裏のサーバの待ち受けのポートは `HOME` を変えても同じ既定（49374）なので、利用者の
+  裏のサーバが動いていると砂場の裏のサーバは起きない。砂場では `opencode service set port <空き>` を
+  先に動かす（砂場の設定に書く）か、`--standalone` で起こす。`node` などが mise の shim だと、`HOME` を
+  変えたシェルでは動かない（信頼の記録が `HOME` の下）ので、絶対パスで起こす
 
 出来事と申告の対応は `core/agent-hooks.ts` の `HOOK_SPECS` と `agentEventForHook`（**2 つは
 必ず一緒に直す**）。上のコメントに入れなかった出来事とその理由がある。要点:
 
 - **申告にならない出来事は入れない。** 呼ばれるたびにエージェントの時間を使う
+- **入力待ちには理由を添える**（`agentAttentionForHook`。`core/agent-state.ts` の `AgentAttention`:
+  許可・質問・エラーで停止）。申告の本文の `attention`（古い版のサーバは読み飛ばす。形の違う値は
+  400）→ 状態の記録 → 一覧のペインの `attention`（入力待ちの間だけ）→ 行の状態の語・札・通知の題が
+  「入力待ち」の代わりに理由を出す。claude の `StopFailure`（API の失敗・上限・認証切れ）は
+  **完了にしない**: 止まったものは人が手を入れるまで進まないので、完了と同じ見え方だと後回しに
+  される。理由がエラーの入力待ちは、申告の `done` と同じく画面の待機の判定では消さない（画面には
+  入力欄が出ている）。次の申告（指示・終了）で消える
 - claude の `Notification` は `permission_prompt` と `elicitation_dialog` だけ。`idle_prompt`
   （入力欄で待っているだけ）は完了・未読を入力待ちで上書きしてしまう
 - `SessionStart` の `compact` は除く。作業の途中で起きるので、待機に倒すと作業中が消える
@@ -393,6 +535,18 @@ codex は新しいフックを、利用者が `/hooks` で信頼するまで実�
 code-viewer から信頼の操作はしない・できない。入れた後の画面に手順を出すだけ。
 **入れたのに codex の状態が変わらないときは、まず信頼されているかを疑う。**
 
+### codex の共有の裏のサーバ（`--no-daemon`）
+
+codex は既定で、最初に起こした端末が始めた共有の裏のサーバ（`codex app-server --managed-daemon`）に
+後の codex をつなぎ、**道具とフックはその裏のサーバの中で、起こした端末の環境のまま走る**。フックが送る
+`TMUX_PANE` は最初の端末のペインになり、2 つ目以降の codex の状態がそのペインに付く（2026-11-12 に
+確かめた: 登録簿を空に向けた別の tmux の codex の 1 ターンが、失敗の記録に出ずに利用者の入口へ
+最初の端末のペインとして届いた。利用者の codex 4 つの出どころが全部 `screen` だった原因）。
+code-viewer が起こす codex には `--no-daemon` を付ける（`server/accounts/shared-server.ts`。`--help` に
+載っている版だけ。知らない版に付けると起動ごと失敗する。`--help` は 5 秒で打ち切る: 包んだコマンドが
+`--help` で終わらないと起動の要求ごと止まった）。自分で起こす codex は利用者が付ける（ヘルプ）。
+**codex のフックの状態がおかしいときは、まず共有の裏のサーバの環境（`ps eww` の `TMUX_PANE`）を見る。**
+
 ### 設定ファイルを安全に書き換える部品（`server/terminal/settings-file.ts`）
 
 利用者の設定ファイルに書く機能（フック、statusLine）は、必ずこれを通す。新しく書く機能を
@@ -430,6 +584,16 @@ doctor の検出行・消しても検出行を残す）が適用される。doct
 アカウント = 種類（claude / codex）と設定ディレクトリの組。claude は `CLAUDE_CONFIG_DIR`、
 codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴・セッションがそこに分かれる。
 既定のアカウント（変数なし = `~/.claude`・`~/.codex`）は登録しなくても常にあり、消せない。
+
+**opencode は既定のアカウント（`opencode:default`、`~/.config/opencode`）だけ**（2026-11-12）。
+認証はデータのフォルダ（`~/.local/share/opencode`。`opencode auth list` の `Credentials` の行）にあり、
+それを動かせるのは汎用の `XDG_DATA_HOME` だけ（V2 の文書 https://opencode.ai/docs/cli/providers/ ）。
+`XDG_DATA_HOME` はエージェントが起こす全部のプログラムに引き継がれ（pnpm のストアなども移る）、
+`OPENCODE_CONFIG_DIR` は認証を動かさないので、分けない。`ACCOUNT_ENV.opencode` が null で、
+登録・新しく作るは `checkAddAccount` が `single-account` で断る（登録簿に書かれていても読めない扱い）。
+ペインのアカウントはプロセスを調べずに既定とする。ログインは `opencode auth login`、状態は
+`opencode auth list`（人向けの一覧。1 は件数の行、2 は 1 件 1 行の「提供元  名前  方式」と、無ければ
+`No authenticated integrations`。メールアドレスは出ないので「誰として」に提供元の名前）
 登録簿は `<状態ディレクトリ>/accounts.json`（起動コマンドと前回の起動の選択も同じファイル）。
 「新しく作る」の設定ディレクトリは
 `<状態ディレクトリ>/accounts/<種類>-<表示名の slug>`（同名があれば `-2`、`-3`）で、
@@ -551,6 +715,7 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 | 種類 | 出どころ | 注意 |
 |---|---|---|
 | claude | ローカルの `/usage` コマンド。任意で settings.json の `statusLine.command` を包み、受け取った JSON を `<状態ディレクトリ>/agent-usage/` に保存してから元のコマンドにそのまま渡す（`server/terminal/statusline.ts`） | 包む・戻すは 4 の部品と同じ約束・同じ確認画面。**包むスクリプトは元の出力と終了コードを必ず返す**（保存に失敗しても。失敗は同じ場所の `failures.log`）。動いているセッションが無いと更新されない |
+| opencode | 無い（`opencode stats` はトークンと費用の集計）。`usageSupported` が偽で、一覧は理由（`unsupported`）を出し、「使用量を確かめる」は出さない・サーバも断る | 仕組みができたらこの行を変える（点検表 U7） |
 | codex | app-server の `account/rateLimits/read`。あわせて `<CODEX_HOME>/sessions/` のセッション記録の `token_count` の上限情報（`server/accounts/usage.ts`） | **セッション記録は公式に約束された書式ではない。** 読めなければ理由つきで「取得できません」にし、0% や空欄にしない。mtime は読む候補を有界に絞るためだけに使い、解析後の新旧はイベントの `observedAt` で決める。大きなファイルは末尾だけ読む |
 
 **プロジェクトの statusLine に負けない起動**（`server/accounts/project-statusline.ts`）。プロジェクトの
@@ -628,6 +793,12 @@ reset が古い reset より許容差を超えて前へ戻るか、古い窓が�
   会話記録を読む案は 4 の「中身は読まない」を変えるので採らなかった）。利用者が自分の
   シェルで起こす claude には足さない
 - 起動・ログインのウィンドウには `remain-on-exit failed`。すぐ失敗して閉じても理由が読める
+- 起動・ログインで開いたペインは、`LAUNCH_FAILURE_CHECK_MS`（3 秒）後に 1 度だけ
+  `GET /_agent/launch/status`（`server/accounts/launch.ts` の `launchedPaneStatus`。`display-message` と
+  `capture-pane` を読むだけ）で確かめ、失敗して終わっていれば終了コードと画面の最後の行を
+  確認のダイアログで出して「ウインドウを開く」を添える（`views/agents/launch-failure.ts`、配線は `app.ts` の
+  `LAUNCH_FAILURES`）。開いたタブには tmux の「Pane is dead」しか出ないことがあり、気付かれなかった。
+  確かめられなかったときは理由を console と最下段の吹き出しに出す
 - ログインのウィンドウは `LOGIN_SESSION` に置き、起動先の既定の候補から外す
 - 起動の画面のアカウントは、行ごとに 5 時間・週の使用量と「いつの値か」を並べた一覧から選ぶ
   （`accounts-dialogs.ts` の `renderAccounts`、部品は 5 の使用量と同じ `usage-meter.ts`）。
@@ -653,6 +824,12 @@ A のアカウントのエージェントの作業を、ログインし直さず
    - claude: `claude "<指示>" --add-dir <記録のフォルダ>`。作業フォルダの外を読むには許可が要るため
      `--add-dir` を足す。指示を先に置くのは、`--add-dir` が値を複数とるので後ろの指示を
      フォルダとして読んでしまうため
+   - opencode: `opencode --prompt "<指示>"`（`opencode --help`）。作業フォルダの外を読むかは
+     permission の `external_directory` が決める（https://opencode.ai/docs/permissions/）
+   - 前の担当が opencode: 会話のファイルが無い（データベース）。フックの `session_id` を使い、
+     指示に `opencode session export <セッション>`（1 は `opencode export <セッション>`。2 には無い）で
+     書き出して読むよう書く（`handoffSource`・`opencodeExportCommand`）。
+     code-viewer は書き出さない・読まない（4 の「中身は読まない」と同じ）
    - codex: `codex "<指示>"` だけ。codex の `--add-dir` は書き込みの許可を足すもの（公式の CLI
      reference）で、読むだけには強すぎる。既定のサンドボックス（workspace-write / read-only）は
      作業フォルダの外も読める（公式の文書には明記が無い。openai/codex の discussions #13559 の
@@ -890,6 +1067,7 @@ find web-src -name '*.ts' -not -path 'web-src/server/*' -not -path 'web-src/test
 | 置き場所 | 中身 | テストで逃がす環境変数 |
 |---|---|---|
 | `<状態>/agent-hooks/` | フックの起動スクリプト・`failures.jsonl` | `CODE_VIEWER_TEST_STATE_DIR` |
+| `<状態>/agent-unread.json` | 未読と変わった瞬間を見た時刻（ペインごと。tmux のサーバの世代・保存したときの状態つき）。形は `{ version: 1, entries }`（3 の「未読の保存」） | `CODE_VIEWER_TEST_STATE_DIR` |
 | `<状態>/agent-conversations.json` | フックが知らせた会話の場所（ペインごと。tmux のサーバの世代・種類・受け取った時刻つき。状態は含めない）。形は `{ version: 1, entries }`（4 の「フックで受け取る欄」） | 同上 |
 | `<状態>/accounts.json`・`<状態>/accounts/` | アカウントの登録簿・「新しく作る」の設定ディレクトリ | 同上 |
 | `<状態>/agent-usage/` | statusLine を包むスクリプト・claude の使用量・`failures.log` | 同上 |
@@ -1013,7 +1191,7 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 | 項目 | 現状と理由 |
 |---|---|
 | 使っていない裏の自動停止 | 入った（7）。止めるまでの時間は CLI の `--idle-stop` だけで、設定画面には出していない。入口を起動し直すと数え直す（前の入口が数えていた時間は引き継がない）ので、拾い直した裏はそこから `--idle-stop` 秒後に止まる |
-| 未読 | サーバのメモリ（3）。サーバの再起動では消える |
+| 未読 | サーバのメモリ（3）。再起動を跨ぐのは、同じペインが同じ状態のまま居るものだけ（3 の「未読の保存」）。止まっていた間に状態が変わったものは戻さない |
 | アカウントの追加のときの名前の重なり | 名前の変更は同じ種類の重なりと既定の名前を断るが、追加はまだ見ていない（5 の登録・削除・表示名）。`code-viewer accounts` のスキルとヘルプは「ほかと重ならない名前を選ぶ」と AI に言うだけで、断るのはサーバの仕事のまま。既定の付け替えは作らないと決めた |
 | 起動時に `--settings` でフックを渡す | 作っていない。設定ファイルが書けない人向けの別の入れ方になりうる |
 | 引き継ぎ: 上限に当たったことを見つけて知らせる | 作っていない（2026-09-24 に後回しと決めた）。今は利用者が使用量を見て「別のアカウントで続ける」を押す |
@@ -1105,6 +1283,14 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
   上の帯に出し、棚からは貼ったパスと同じ綴りだけを外していたので、エージェントが相対パスなど
   別の綴りで出し直すと、帯と棚の両方に同じ画像が並んだ。いまは貼ったパスを棚に問い合わせ
   （`pasteImage`）、同じ実体は棚の決まりで 1 枚にまとまる
+- **画面の文字の tmux のペイン ID（`%12`）もリンクにする**（`core/terminal-links.ts` の `PANE_ID_RE`。
+  形だけを拾い、今の一覧に居るペインだけを画面の側でリンクにする（`isLivePane`）。押すと
+  エージェントの行を押したのと同じ `openAgentPane`）。前後が英数字・`%`・パスの区切りなら拾わない
+  （`50%`・`%5d`・`a%2`）。日本語の字は前後に来てよい
+- **端末へ落とした画像も貼り付けと同じ道を通る**（`terminal-screen.ts` の `drop`。落とした順に
+  1 枚ずつ `pasteImage`）。ブラウザは落としたファイルの元の場所を渡さないので、写して保存する
+  ほかない。画像でないファイルは送らず理由を状態の行に出す。ファイルを運ぶドラッグは必ず
+  `preventDefault` する（しないとブラウザがそのファイルを開き、画面ごと離れる）
 - 開く口は `terminal-screen.ts` の `openShelfEntry` 1 つ。既定は画像のタブ、Alt / Shift と右クリック
   で拡大表示 `image-lightbox.ts`（画像だけを回る。動画は覆いでも画像のタブで再生する）。棚の項目の
   上の矢印キーは隣の項目へ移り、押したのと同じにタブで開く（右・左の棚でも下・上の棚でも 4 方向
@@ -1254,6 +1440,23 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 | SP（幅 640px 以下） | 知らせは最下段の操作の塊の吹き出しなので、その塊を隠す SP では見えない（タブは閉じる） |
 
 ---
+
+## 14. 端末からのコピー（OSC 52）
+
+置き場所: `core/terminal-clipboard.ts`（`parseOsc52`）・`views/terminal/terminal-screen.ts` の
+`receiveClipboardRequest`（xterm の `parser.registerOscHandler(52, …)`）。設定はユーザー単位の
+`terminalClipboardWrite`（未設定なら書く。設定 → 表示）。
+
+- **書くだけ。読み出し（`?`）はいつも断る**（端末のプログラムに、利用者が別の所でコピーした
+  ものを読ませない）。選択の文字（c・p・s・0〜7・空）は全部ブラウザのクリップボード 1 つに書く。
+  解いて 1 MiB（`MAX_TERMINAL_CLIPBOARD_BYTES`）を超える・base64 でない・UTF-8 でないものは書かず、
+  理由を console に出す。書けた・書けなかった（理由つき）は端末の下端に短く出す
+- xterm は OSC 52 を既定で何もしない。受けないと、tmux のマウスで選んでコピーモードで写したものが
+  黙って消えていた
+- **届く条件（tmux 3.8 で観測。端末の `TERM` は xterm-256color）**: tmux のコピーモードの写しは
+  既定の `set-clipboard external` でも外へ届く。tmux の中のプログラム（claude など）が送る OSC 52 は
+  `set-clipboard on` のときだけ届く。ヘルプのターミナルの節に書いてある。code-viewer から利用者の
+  tmux の設定は変えない
 
 ## 既存の違反をどう扱うか
 

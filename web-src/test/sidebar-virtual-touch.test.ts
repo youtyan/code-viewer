@@ -2,23 +2,16 @@
 // 行を押せる最小の高さ (style.css の --sp-touch) より低くしない。以前は CSS の
 // 44px が仮想表示の木に効かず、電話で木の行が 30px のままだった。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, expect, test, vi } from "vitest";
 import { TOUCH_MEDIA_QUERY } from "../core/mobile-layout";
 import { createSidebarForTest, installSidebarDom } from "./_sidebar-fixture";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const originalMatchMedia = () => window.matchMedia;
 let restoreMatchMedia: typeof window.matchMedia | null = null;
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   if (restoreMatchMedia) window.matchMedia = restoreMatchMedia;
   restoreMatchMedia = null;
   document.body.innerHTML = "";
@@ -73,4 +66,57 @@ test.each([
     second: tree.tops[1],
     height: tree.height,
   }).toEqual({ virtual: true, second, height });
+});
+
+// 一覧の箱が縦に伸びた (窓を縦に広げた) ときは、スクロールしなくても見える
+// ようになった行を描く。描いた範囲 (見える範囲の上下 16 行) より広く伸びると、
+// スクロールするまで下が空いたままだった。
+test("the virtual tree draws the rows that come into view when the list grows taller", () => {
+  pointer(false);
+  const resized: Array<() => void> = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(private readonly callback: () => void) {
+        resized.push(() => this.callback());
+      }
+      observe() {
+        /* the test calls the callback itself */
+      }
+      disconnect() {
+        /* noop */
+      }
+      unobserve() {
+        /* noop */
+      }
+    },
+  );
+  installSidebarDom();
+  const root = document.querySelector<HTMLElement>("#sidebar");
+  const list = document.querySelector<HTMLElement>("#filelist");
+  if (!root || !list) throw new Error("missing #sidebar or #filelist");
+  const setHeight = (px: number) =>
+    Object.defineProperty(root, "clientHeight", {
+      configurable: true,
+      value: px,
+    });
+  setHeight(10 * 30);
+  const sidebar = createSidebarForTest();
+  sidebar.renderSidebar(
+    [
+      { path: "src", type: "tree" as const },
+      ...Array.from({ length: 200 }, (_, index) => ({
+        path: `src/file-${String(index).padStart(3, "0")}.ts`,
+        type: "blob" as const,
+      })),
+    ],
+    () => {
+      /* noop */
+    },
+  );
+  const drawn = () => list.querySelectorAll(":scope > li").length;
+  expect(drawn()).toBe(26);
+  setHeight(100 * 30);
+  for (const notify of resized) notify();
+  expect(drawn()).toBe(116);
 });

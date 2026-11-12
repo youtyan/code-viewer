@@ -3,6 +3,7 @@
 // 該当の節へのリンクを並べる。tmux が無いときの全体ボードと、シェルを開けない
 // (@lydell/node-pty が無い) ときの画面が使う。コマンドは公式の入れ方に合わせる。
 
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import { command } from "./help-blocks";
 import type { HelpLanguage } from "./help-page";
 import { showFormDialog } from "./ui-dialog";
@@ -16,26 +17,17 @@ export type InstallHelp = {
   help: { label: string; open(): void };
 };
 
-export function installHelpBlock(
+export function installHelpTemplate(
   spec: InstallHelp,
   lang: HelpLanguage,
-): HTMLElement {
-  const box = document.createElement("div");
-  box.className = "install-help";
-  const intro = document.createElement("p");
-  intro.className = "install-help-intro";
-  intro.textContent = spec.intro;
-  box.appendChild(intro);
-  for (const item of spec.commands) {
-    box.appendChild(command(lang, item.command, item.title));
-  }
-  const link = document.createElement("button");
-  link.type = "button";
-  link.className = "agents-text-action install-help-link";
-  link.textContent = spec.help.label;
-  link.addEventListener("click", () => spec.help.open());
-  box.appendChild(link);
-  return box;
+): TemplateResult {
+  return html`<div class="install-help"><p class="install-help-intro">${spec.intro}</p>${spec.commands.map(
+    (item) => command(lang, item.command, item.title),
+  )}<button
+    type="button"
+    class="agents-text-action install-help-link"
+    @click=${() => spec.help.open()}
+  >${spec.help.label}</button></div>`;
 }
 
 /**
@@ -49,18 +41,16 @@ export function showInstallDialog(options: {
   closeLabel: string;
   lang: HelpLanguage;
 }): Promise<null> {
-  const body = document.createElement("div");
-  body.className = "agent-hooks-dialog";
-  body.appendChild(installHelpBlock(options.help, options.lang));
-  if (options.reason) {
-    const why = document.createElement("pre");
-    why.className = "agent-hooks-dialog-code terminal-mono";
-    why.textContent = options.reason;
-    body.appendChild(why);
-  }
   return showFormDialog({
     title: options.title,
-    body,
+    body: html`<div class="agent-hooks-dialog">${installHelpTemplate(
+      options.help,
+      options.lang,
+    )}${
+      options.reason
+        ? html`<pre class="agent-hooks-dialog-code terminal-mono">${options.reason}</pre>`
+        : nothing
+    }</div>`,
     wide: true,
     // 本文の［コピー］で済むので、確定の操作は無い。閉じるだけを出す。
     closeOnly: true,

@@ -11,6 +11,9 @@ import {
   type AgentHooksResponse,
   agentEventForHook,
   agentsNeedingHooks,
+  HOOK_HINT_DISMISSED_LEGACY,
+  hookHintKey,
+  hookHintShown,
   checkHookShape,
   detectJsonIndent,
   HOOK_SPECS,
@@ -77,7 +80,7 @@ describe("agentEventForHook", () => {
     ],
     ["claude", { hook_event_name: "Notification" }, null],
     ["claude", { hook_event_name: "Stop" }, "stop"],
-    ["claude", { hook_event_name: "StopFailure" }, "stop"],
+    ["claude", { hook_event_name: "StopFailure", error: "rate_limit" }, "ask"],
     ["claude", { hook_event_name: "SessionEnd" }, "exit"],
     ["claude", { hook_event_name: "PermissionRequest" }, null],
     ["claude", { hook_event_name: "PreToolUse" }, null],
@@ -91,6 +94,43 @@ describe("agentEventForHook", () => {
     ["codex", { hook_event_name: "PostToolUse" }, null],
     ["codex", { hook_event_name: "Notification" }, null],
     ["codex", {}, null],
+    // opencode はプラグインが渡す出来事 (core/agent-hooks.ts の HOOK_SPECS)。
+    ["opencode", { hook_event_name: "code-viewer.start" }, "ready"],
+    [
+      "opencode",
+      { hook_event_name: "session.status", status: "busy" },
+      "progress",
+    ],
+    [
+      "opencode",
+      { hook_event_name: "session.status", status: "retry" },
+      "progress",
+    ],
+    ["opencode", { hook_event_name: "session.status", status: "idle" }, null],
+    ["opencode", { hook_event_name: "session.status" }, null],
+    ["opencode", { hook_event_name: "permission.asked" }, "ask"],
+    ["opencode", { hook_event_name: "permission.updated" }, "ask"],
+    ["opencode", { hook_event_name: "permission.replied" }, "progress"],
+    ["opencode", { hook_event_name: "question.asked" }, "ask"],
+    ["opencode", { hook_event_name: "question.replied" }, "progress"],
+    ["opencode", { hook_event_name: "question.rejected" }, "progress"],
+    ["opencode", { hook_event_name: "session.idle" }, "stop"],
+    // opencode 2 (2.2.7 で観測した名前)。
+    ["opencode", { hook_event_name: "session.execution.started" }, "progress"],
+    ["opencode", { hook_event_name: "session.execution.succeeded" }, "stop"],
+    ["opencode", { hook_event_name: "session.execution.failed" }, "ask"],
+    ["opencode", { hook_event_name: "session.execution.interrupted" }, "ready"],
+    ["opencode", { hook_event_name: "form.created" }, "ask"],
+    ["opencode", { hook_event_name: "form.replied" }, "progress"],
+    ["opencode", { hook_event_name: "form.cancelled" }, "progress"],
+    ["opencode", { hook_event_name: "session.execution.retried" }, null],
+    ["opencode", { hook_event_name: "session.created" }, null],
+    ["opencode", { hook_event_name: "code-viewer.dispose" }, "exit"],
+    ["opencode", { hook_event_name: "session.updated" }, null],
+    ["opencode", { hook_event_name: "toString" }, null],
+    // claude・codex の出来事の名前は opencode では申告にしない。
+    ["opencode", { hook_event_name: "Stop" }, null],
+    ["opencode", {}, null],
   ] satisfies [HookAgent, Json, AgentEvent | null][])(
     "%s %j -> %s",
     (agent, input, expected) => {
@@ -98,7 +138,7 @@ describe("agentEventForHook", () => {
     },
   );
 
-  test.each(["claude", "codex"] satisfies HookAgent[])(
+  test.each(["claude", "codex", "opencode"] satisfies HookAgent[])(
     "%s: every installed hook is reported as some event",
     (agent) => {
       for (const spec of HOOK_SPECS[agent]) {
@@ -107,6 +147,7 @@ describe("agentEventForHook", () => {
             hook_event_name: spec.event,
             source: "startup",
             notification_type: "permission_prompt",
+            status: "busy",
           }),
         ).not.toBeNull();
       }
@@ -421,13 +462,16 @@ describe("agentsNeedingHooks", () => {
       name: "claude running, not set up",
       kinds: ["claude", null],
       rows: status(row("claude", "none"), row("codex", "none")),
-      expected: ["claude"],
+      expected: [{ agent: "claude", state: "none" }],
     },
     {
       name: "both running, partial and broken",
       kinds: ["codex", "claude"],
       rows: status(row("claude", "partial"), row("codex", "broken")),
-      expected: ["claude", "codex"],
+      expected: [
+        { agent: "claude", state: "partial" },
+        { agent: "codex", state: "broken" },
+      ],
     },
     {
       name: "installed is not hinted",
@@ -449,6 +493,48 @@ describe("agentsNeedingHooks", () => {
     },
   ])("$name", ({ kinds, rows, expected }) => {
     expect(agentsNeedingHooks(kinds, rows)).toEqual(expected);
+  });
+});
+
+describe("hookHintShown", () => {
+  const none = { agent: "opencode" as const, state: "none" as const };
+  const partial = { agent: "opencode" as const, state: "partial" as const };
+  const claude = { agent: "claude" as const, state: "none" as const };
+  test.each([
+    { name: "nothing to say", rows: [], dismissed: null, shown: false },
+    { name: "never hidden", rows: [none], dismissed: null, shown: true },
+    {
+      name: "hidden with the same contents",
+      rows: [claude, partial],
+      dismissed: hookHintKey([partial, claude]),
+      shown: false,
+    },
+    {
+      name: "the state changed since it was hidden",
+      rows: [partial],
+      dismissed: hookHintKey([none]),
+      shown: true,
+    },
+    {
+      name: "another agent appeared since it was hidden",
+      rows: [none, claude],
+      dismissed: hookHintKey([none]),
+      shown: true,
+    },
+    {
+      name: "the old plain dismissal hides only not-set-up hints",
+      rows: [none, claude],
+      dismissed: HOOK_HINT_DISMISSED_LEGACY,
+      shown: false,
+    },
+    {
+      name: "the old plain dismissal does not hide out-of-date hooks",
+      rows: [partial],
+      dismissed: HOOK_HINT_DISMISSED_LEGACY,
+      shown: true,
+    },
+  ])("$name", ({ rows, dismissed, shown }) => {
+    expect(hookHintShown(rows, dismissed)).toBe(shown);
   });
 });
 

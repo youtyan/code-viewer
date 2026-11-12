@@ -1,6 +1,7 @@
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
+import { DIFF_SCREEN_TEXT } from "../views/diff-view-i18n";
 import {
   CHANGES_LIST_DOM,
   createSidebar,
@@ -13,14 +14,6 @@ import {
 } from "./_sidebar-fixture";
 
 const styleCss = readFileSync("web/style.css", "utf8");
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -119,13 +112,7 @@ function createSidebarForTest(
     prefetchByPath() {
       /* noop */
     },
-    fileBadge(status) {
-      const badge = document.createElement("span");
-      badge.className = "badge";
-      badge.textContent = status || "";
-      return badge;
-    },
-    fileEntryIcon: () => "",
+    fileStatusTitles: () => DIFF_SCREEN_TEXT.en.fileStatus,
     applyViewedState() {
       /* noop */
     },
@@ -138,14 +125,8 @@ function createSidebarForTest(
     appendScopeParams() {
       /* noop */
     },
-    createOpenPathButton(_path, _kind, title) {
-      const button = document.createElement("button");
-      button.className = "gdp-open-path";
-      if (title) {
-        button.title = title;
-        button.setAttribute("aria-label", title);
-      }
-      return button;
+    openPathFromButton() {
+      /* noop */
     },
     normalizeViewerFontSize: () => "regular",
     getSidebarFontSize: () => "regular",
@@ -157,9 +138,6 @@ function createSidebarForTest(
     },
     scheduleMainSurfaceFocus() {
       /* noop */
-    },
-    setChevronIcon(el) {
-      el.textContent = ">";
     },
     trackLoad: (promise) => promise,
     getRepoSidebarRef: () => null,

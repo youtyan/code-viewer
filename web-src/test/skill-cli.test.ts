@@ -91,7 +91,8 @@ describe("parseSkillArgs", () => {
         all.args.agents.includes("codex") &&
         all.args.agents.includes("gemini") &&
         all.args.agents.includes("cursor") &&
-        all.args.agents.includes("agents"),
+        all.args.agents.includes("agents") &&
+        all.args.agents.includes("opencode"),
     ).toBe(true);
   });
 
@@ -136,7 +137,14 @@ describe("installSkill", () => {
 
   test("installs into every selected agent directory", () => {
     const dirs = makeDirs();
-    const agents = ["claude", "codex", "gemini", "cursor", "agents"] as const;
+    const agents = [
+      "claude",
+      "codex",
+      "gemini",
+      "cursor",
+      "agents",
+      "opencode",
+    ] as const;
     const result = installSkill({ agents: [...agents], global: false }, dirs);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -197,6 +205,19 @@ describe("installSkill", () => {
     expect(result.results.map((r) => r.target)).toEqual(
       BUNDLED_SKILLS.map((skill) =>
         join(dirs.homeDir, ".codex", "skills", skill),
+      ),
+    );
+  });
+
+  // opencode の全体の設定は ~/.config/opencode (https://opencode.ai/docs/skills/)。
+  test("--global puts opencode's skills under ~/.config/opencode", () => {
+    const dirs = makeDirs();
+    const result = installSkill({ agents: ["opencode"], global: true }, dirs);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.results.map((r) => r.target)).toEqual(
+      BUNDLED_SKILLS.map((skill) =>
+        join(dirs.homeDir, ".config", "opencode", "skills", skill),
       ),
     );
   });

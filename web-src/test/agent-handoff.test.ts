@@ -26,6 +26,7 @@ import {
 import {
   handoffArgs,
   handoffPrompt,
+  handoffSource,
   launchCommandLine,
   tmuxLaunchArgs,
 } from "../core/agent-accounts";
@@ -52,7 +53,8 @@ import {
   type AgentOverviewDeps,
   buildAgentOverview,
 } from "../server/terminal/overview";
-import { postRoute, tmuxPanes } from "./_test-helpers";
+import { canHandOff } from "../views/agents/handoff";
+import { agentPane, postRoute, tmuxPanes } from "./_test-helpers";
 
 const CLAUDE_LOG =
   "/home/sample/.claude/projects/-work-sample-app/0b3c-sample.jsonl";
@@ -252,6 +254,7 @@ function overviewDeps(ids: string[]): AgentOverviewDeps {
     }),
     findServer: async () => ({ status: "absent" }),
     paneAccounts: async () => new Map(),
+    paneProcessKinds: async () => ({ kinds: new Map(), errors: [] }),
     readRegistry: () => ({ projects: [], error: "", path: "/x.json" }),
     rootExists: () => true,
     forgetServer: () => undefined,
@@ -428,6 +431,127 @@ describe("引き継ぎの起動の引数", () => {
       "/home/sample/.claude/projects/-work-sample-app",
     ]);
     expect(args).not.toContain("send-keys");
+  });
+
+  // opencode は会話をファイルに持たない (データベース)。公式の書き出しの
+  // コマンドを B に渡す。
+  test("前の担当が opencode なら、セッションを書き出すコマンドを指示に入れる (英日)", () => {
+    const from = {
+      agent: "opencode" as const,
+      account: "Default",
+      opencodeSession: "sessionSample",
+    };
+    expect(handoffPrompt("en", from)).toBe(
+      "Take over the work of the previous agent (opencode · Default). Its conversation is the opencode session sessionSample; run `opencode session export sessionSample` (opencode 1: `opencode export sessionSample`) to print it as JSON. Read the last request and how far it got, then continue the work. If anything is unclear, ask before you start.",
+    );
+    expect(handoffPrompt("ja", { ...from, account: "既定" })).toBe(
+      "前の担当（opencode・既定）の作業を引き継いでください。前の担当の会話は opencode のセッション sessionSample にあります。`opencode session export sessionSample`（opencode 1 は `opencode export sessionSample`）を実行すると JSON で書き出されます。最後の依頼と、どこまで進んだかを読んで、続きをやってください。わからないことは、作業を始める前に聞いてください。",
+    );
+  });
+
+  test.each([
+    {
+      name: "opencode に渡す指示は --prompt",
+      agent: "opencode" as const,
+      transcriptPath: CLAUDE_LOG,
+      args: ["--prompt", "PROMPT"],
+    },
+    {
+      name: "記録のファイルが無ければ claude にも --add-dir を付けない",
+      agent: "claude" as const,
+      transcriptPath: "",
+      args: ["PROMPT"],
+    },
+  ])("$name", ({ agent, transcriptPath, args }) => {
+    expect(handoffArgs(agent, "PROMPT", transcriptPath)).toEqual(args);
+  });
+
+  test.each([
+    {
+      name: "記録のファイルがあればそれ",
+      agent: "claude",
+      conversation: { sessionId: "s", transcriptPath: CLAUDE_LOG, cwd: "/w" },
+      expected: { transcriptPath: CLAUDE_LOG },
+    },
+    {
+      name: "opencode はセッション",
+      agent: "opencode",
+      conversation: {
+        sessionId: "sessionSample",
+        transcriptPath: "",
+        cwd: "/w",
+      },
+      expected: { opencodeSession: "sessionSample" },
+    },
+    {
+      name: "opencode でもセッションが無ければ引き継げない",
+      agent: "opencode",
+      conversation: { sessionId: "", transcriptPath: "", cwd: "/w" },
+      expected: null,
+    },
+    {
+      // codex の transcript_path は null になりうる。opencode の書き出しには渡せない。
+      name: "codex でセッションだけなら引き継げない",
+      agent: "codex",
+      conversation: { sessionId: "abc", transcriptPath: "", cwd: "/w" },
+      expected: null,
+    },
+    {
+      name: "会話の場所が無い",
+      agent: "opencode",
+      conversation: null,
+      expected: null,
+    },
+  ])("handoffSource: $name", ({ agent, conversation, expected }) => {
+    expect(handoffSource(agent, conversation)).toEqual(expected);
+  });
+
+  test.each([
+    {
+      name: "opencode のセッションが知らされていれば引き継げる",
+      kind: "opencode" as const,
+      conversation: {
+        sessionId: "sessionSample",
+        transcriptPath: "",
+        cwd: "/w",
+      },
+      expected: true,
+    },
+    {
+      name: "まだ申告が無い opencode は引き継げない",
+      kind: "opencode" as const,
+      conversation: undefined,
+      expected: false,
+    },
+  ])("canHandOff: $name", ({ kind, conversation, expected }) => {
+    expect(
+      canHandOff(agentPane({ id: "%7", kind, command: kind, conversation })),
+    ).toBe(expected);
+  });
+
+  test("opencode の既定のアカウントは環境変数を外さずに起こす (分ける変数が無い)", () => {
+    expect(
+      tmuxLaunchArgs({
+        agent: "opencode",
+        configDir: null,
+        cwd: "/work/sample-app",
+        session: "sample-session",
+        sessionExists: true,
+        windowName: "opencode",
+        argv: ["opencode", "--prompt", "PROMPT"],
+      }).slice(-5),
+    ).toEqual(["--", "env", "opencode", "--prompt", "PROMPT"]);
+    expect(() =>
+      tmuxLaunchArgs({
+        agent: "opencode",
+        configDir: "/home/sample/other",
+        cwd: "/work",
+        session: "s",
+        sessionExists: true,
+        windowName: "opencode",
+        argv: ["opencode"],
+      }),
+    ).toThrow("opencode has only the default account");
   });
 
   test("画面に見せるコマンドにも同じ引数を引用して出す", () => {

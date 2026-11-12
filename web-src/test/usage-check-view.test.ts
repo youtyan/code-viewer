@@ -2,16 +2,9 @@
 // 出す 2 か所 (全体ボードのアカウントのカード・設定の使用量の行)、確認の
 // 状態を持つ AccountsClient。パス・名前はすべて架空。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { render } from "lit/html.js";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   type AccountStatus,
   type AccountsResponse,
@@ -30,17 +23,31 @@ import { ACCOUNTS_EN, ACCOUNTS_JA } from "../views/agents/accounts-i18n";
 import { createAccountsSettings } from "../views/agents/accounts-settings";
 import {
   type UsageCheckOpeners,
-  usageCheckBlock,
   usageCheckMenuItem,
+  usageCheckProps,
+  usageCheckTemplate,
 } from "../views/agents/usage-check";
+import { defineUiComponents } from "../views/ui/components";
+import { accountsData } from "./_accounts-fixture";
 import { deferred } from "./_test-helpers";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
+/**
+ * 欄を画面に置いて描き、その箱を返す (出すものが無ければ null)。欄の中の部品
+ * (cv-usage-check-copy) は画面に置いてから描くので、文書の中に置く。
+ */
+function usageCheckBlock(
+  ...args: Parameters<typeof usageCheckProps>
+): HTMLElement | null {
+  const props = usageCheckProps(...args);
+  if (!props) return null;
+  const template = usageCheckTemplate(props);
+  defineUiComponents();
+  const host = document.createElement("div");
+  document.body.append(host);
+  render(template, host);
+  return host.querySelector<HTMLElement>(".usage-check");
+}
+
 afterEach(() => {
   document.body.replaceChildren();
 });
@@ -251,6 +258,25 @@ describe("when the check is offered", () => {
     expect(usageCheckMenuItem(row, client, t)?.label).toBe(t.usageCheck);
   });
 
+  // opencode は上限を出す仕組みが無い (usageSupported)。理由は一覧の使用量の欄に出る。
+  test("opencode is never offered a check, in the card or the menu", () => {
+    const { client } = fakeClient();
+    const row = account({
+      agent: "opencode",
+      statusLine: null,
+      usage: {
+        status: "unavailable",
+        reason: "unsupported",
+        detail: "",
+        observedAt: 0,
+      },
+    });
+    expect(
+      shown(usageCheckBlock(row, NOW, client, t, NO_OPENERS))?.button ?? null,
+    ).toBeNull();
+    expect(usageCheckMenuItem(row, client, t)).toBeNull();
+  });
+
   test("pressing starts the check at once (no confirmation)", () => {
     const { client, pressed } = fakeClient();
     const block = usageCheckBlock(account(), NOW, client, t, NO_OPENERS);
@@ -369,7 +395,7 @@ describe("stopped at a claude screen", () => {
     state: Partial<UsageCheckState> = {},
     lang = t,
   ) {
-    const data = response([account()]);
+    const data = accountsData([account()]);
     const calls: string[] = [];
     const { client, pressed, opened } = fakeClient(
       {
@@ -536,22 +562,9 @@ const DIALOGS: AccountDialogs = {
   statusLine: async () => null,
 };
 
-function response(accounts: AccountStatus[]): AccountsResponse {
-  return {
-    home: "/home/sample",
-    serverRoot: "/home/sample/work/sample-app",
-    accounts,
-    registryError: null,
-    registryPath: "/home/sample/.local/state/code-viewer/accounts.json",
-    launchCommands: { claude: "claude", codex: "codex" },
-    lastLaunch: null,
-    usageFailures: { total: 0, recent: [], log: "" },
-  };
-}
-
 describe("the same part in the card and in Settings", () => {
   test("the account card shows the button and the result inside the card", () => {
-    const data = response([
+    const data = accountsData([
       account(),
       account({
         id: "codex-sample",
@@ -604,7 +617,7 @@ describe("the same part in the card and in Settings", () => {
 
   test("the built-in claude card gets a ⋯ menu with only the check", () => {
     // 登録アカウントがあると帯が出る (無ければ入口の 1 行だけ)。
-    const data = response([
+    const data = accountsData([
       account({
         id: "claude:default",
         builtin: true,
@@ -642,7 +655,7 @@ describe("the same part in the card and in Settings", () => {
   });
 
   test("the Settings usage row shows the same part", () => {
-    const data = response([account()]);
+    const data = accountsData([account()]);
     const { client } = fakeClient({ "claude-sample": { running: true } }, data);
     const settings = createAccountsSettings({
       client,
@@ -712,7 +725,7 @@ describe("the client keeps the state of each check", () => {
         if (!reply) throw new Error("no reply prepared");
         return reply();
       }
-      return new Response(JSON.stringify(response(rows)), {
+      return new Response(JSON.stringify(accountsData(rows)), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });

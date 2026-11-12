@@ -58,8 +58,6 @@ export type TerminalText = {
   newShellTitle: string;
   /** node-pty が無い環境。 */
   shellUnavailable: string;
-  /** シェルがまだ 1 つも無い。 */
-  noShells: string;
   /** シェルのプロセスが終了した。 */
   shellExited: (exitCode: number | null) => string;
   /** 開いていたシェルが無くなっていた。 */
@@ -106,12 +104,6 @@ export type TerminalText = {
   newTabOpenFileKeys: string;
   /** 一覧の行がタブで開いているときの添え書き。 */
   inTab: string;
-  /** 未読の印 (● ) の説明。 */
-  unreadTitle: string;
-  /** タブで開いていない未読を全部読んだことにする。 */
-  markAllRead: (count: number) => string;
-  /** 全部のプロジェクトのセッションを見る (Agents の一覧へ)。 */
-  allSessions: string;
   /** 「セッションを止める」の確かめ。 */
   stopConfirmTitle: string;
   stopConfirmMessage: (name: string) => string;
@@ -167,6 +159,9 @@ export type TerminalText = {
   imageShelfMove: string;
   /** 棚の置き場所の名前 (メニューと設定の欄)。 */
   imageShelfPlacementNames: Record<TerminalImageShelfPlacement, string>;
+  /** 端末のプログラムが送ったコピー (OSC 52) をクリップボードに書いた・書けなかった。 */
+  clipboardCopied: (characters: number) => string;
+  clipboardCopyFailed: (detail: string) => string;
   /** 棚の内側の縁の掴み (大きさを変える)。 */
   imageShelfResize: string;
   imageShelfExpand: (count: number) => string;
@@ -192,6 +187,8 @@ export type TerminalText = {
   pasteFailed: string;
   /** 貼り付けた画像を保存し、そのパスを入力した (保存先はリポジトリからの相対パス)。 */
   pasteSaved: (relativePath: string) => string;
+  /** 落としたファイルに画像が無かった (ブラウザは元の場所を渡さないので、画像しか渡せない)。 */
+  dropNotImage: string;
   /** 最後に人間が出した指示の見出し。 */
   lastPrompt: string;
   /** 状態が変わってからの経過。 */
@@ -255,7 +252,6 @@ const EN: TerminalText = {
   newShellTitle: "open a new shell in this repository",
   shellUnavailable:
     "Opening shells needs the optional package @lydell/node-pty, which is not installed. Reinstalling code-viewer with it opens shells:",
-  noShells: "No shell is open yet.",
   shellExited: (exitCode) =>
     exitCode === null
       ? "The shell has exited."
@@ -286,9 +282,6 @@ const EN: TerminalText = {
   newTabOpenFile: "Open a file…",
   newTabOpenFileKeys: "⌘K",
   inTab: "in a tab",
-  unreadTitle: "● = unread: it changed state while you were away",
-  markAllRead: (count) => `Mark all as read (${count})`,
-  allSessions: "All sessions in every project…",
   stopConfirmTitle: "Stop this session?",
   stopConfirmMessage: (name) =>
     `${name} will end, and whatever is running in it stops. Its tab closes too.`,
@@ -324,6 +317,10 @@ const EN: TerminalText = {
   imageRevealNotFound: "The path is no longer in the terminal.",
   imageShelfCollapse: "collapse images",
   imageShelfMove: "Move the image shelf",
+  clipboardCopied: (characters) =>
+    `Copied ${characters} character${characters === 1 ? "" : "s"} from the terminal`,
+  clipboardCopyFailed: (detail) =>
+    `Could not copy what the terminal sent: ${detail}`,
   imageShelfPlacementNames: {
     right: "Right of the terminal",
     left: "Left of the terminal",
@@ -364,6 +361,8 @@ const EN: TerminalText = {
   pasteFailed: "Could not attach the pasted image.",
   pasteSaved: (relativePath) =>
     `Pasted image saved in this project as ${relativePath} (not tracked by git); its path is typed for the agent.`,
+  dropNotImage:
+    "Only images can be dropped here (PNG, JPEG, GIF, WebP): the browser does not tell where other files are.",
   lastPrompt: "last instruction",
   elapsed: elapsedFormatter("now", "m", "h", "d"),
 };
@@ -404,7 +403,6 @@ const JA: TerminalText = {
   newShellTitle: "このリポジトリで新しいシェルを開きます",
   shellUnavailable:
     "シェルを開くには任意の依存 @lydell/node-pty が要りますが、入っていません。入れ直すと開けます:",
-  noShells: "開いているシェルはありません。",
   shellExited: (exitCode) =>
     exitCode === null
       ? "シェルが終了しました。"
@@ -435,9 +433,6 @@ const JA: TerminalText = {
   newTabOpenFile: "ファイルを開く…",
   newTabOpenFileKeys: "⌘K",
   inTab: "タブで表示中",
-  unreadTitle: "● = 未読: 離れている間に状態が変わりました",
-  markAllRead: (count) => `すべて読んだことにする (${count})`,
-  allSessions: "すべてのプロジェクトのセッション…",
   stopConfirmTitle: "このセッションを止めますか？",
   stopConfirmMessage: (name) =>
     `${name} を終了します。中で動いているものも止まり、タブも閉じます。`,
@@ -474,6 +469,10 @@ const JA: TerminalText = {
   imageRevealNotFound: "そのパスはもうターミナルにありません。",
   imageShelfCollapse: "画像の棚を畳む",
   imageShelfMove: "画像の棚の場所を移す",
+  clipboardCopied: (characters) =>
+    `ターミナルから ${characters} 文字をコピーしました`,
+  clipboardCopyFailed: (detail) =>
+    `ターミナルが送ったものをコピーできませんでした: ${detail}`,
   imageShelfPlacementNames: {
     right: "ターミナルの右",
     left: "ターミナルの左",
@@ -515,6 +514,8 @@ const JA: TerminalText = {
   pasteFailed: "貼り付けた画像を渡せませんでした。",
   pasteSaved: (relativePath) =>
     `貼り付けた画像をこのプロジェクトの ${relativePath} に保存し、エージェントに渡すパスを入力しました (git には入りません)。`,
+  dropNotImage:
+    "ここに落とせるのは画像 (PNG・JPEG・GIF・WebP) だけです。ほかのファイルは、ブラウザが元の場所を教えないので渡せません。",
   lastPrompt: "最後に出した指示",
   elapsed: elapsedFormatter("今", "分", "時間", "日"),
 };

@@ -5,6 +5,12 @@
 // 履歴・セッションがそのディレクトリに分かれる。既定のアカウント (環境変数を
 // 渡さないときの ~/.claude・~/.codex) は登録しなくても常にあり、消せない。
 //
+// opencode は既定のアカウントだけ。認証はデータのフォルダ
+// (`~/.local/share/opencode`) にあり、opencode だけに効く変数でそこを分けられない
+// (動かせるのは汎用の XDG_DATA_HOME だけで、エージェントが起こす全部の
+// プログラムのデータまで移る)。登録・新しく作るはサーバが断る
+// (OPENCODE_SINGLE_ACCOUNT)。
+//
 // 登録簿はユーザー単位の 1 ファイル (server/accounts/registry.ts が読み書き
 // する)。ここはファイルに触らない。読んだ JSON の検査、足す・消すの計画、
 // プロセスの環境変数からアカウントを求める処理、起動の引数の組み立てだけ。
@@ -17,19 +23,33 @@ import { flattenTmuxPanes, type TmuxPane, type TmuxSession } from "./tmux";
 
 export type AccountAgent = HookAgent;
 
-/** アカウントを選ぶ環境変数。取り出すのはこの 2 つだけ。 */
+/**
+ * アカウントを選ぶ環境変数。取り出すのはこの 2 つだけ。opencode は分ける
+ * 変数が無いので null (既定のアカウントだけ)。
+ */
 export const ACCOUNT_ENV: Record<
   AccountAgent,
-  "CLAUDE_CONFIG_DIR" | "CODEX_HOME"
+  "CLAUDE_CONFIG_DIR" | "CODEX_HOME" | null
 > = {
   claude: "CLAUDE_CONFIG_DIR",
   codex: "CODEX_HOME",
+  opencode: null,
 };
+
+/**
+ * 別のアカウントを登録できない種類 (既定のアカウントだけ)。理由は ACCOUNT_ENV
+ * の null と同じ。
+ */
+export function singleAccountAgent(agent: AccountAgent): boolean {
+  return ACCOUNT_ENV[agent] === null;
+}
 
 /** 既定のアカウントの設定ディレクトリ (ホームからの相対)。 */
 export const DEFAULT_CONFIG_DIR_NAME: Record<AccountAgent, string> = {
   claude: ".claude",
   codex: ".codex",
+  // opencode の全体の設定 (https://opencode.ai/docs/config/)。
+  opencode: ".config/opencode",
 };
 
 export function defaultAccountId(agent: AccountAgent): string {
@@ -37,7 +57,7 @@ export function defaultAccountId(agent: AccountAgent): string {
 }
 
 export function isAccountAgent(value: unknown): value is AccountAgent {
-  return value === "claude" || value === "codex";
+  return value === "claude" || value === "codex" || value === "opencode";
 }
 
 /** 登録簿に書く 1 件。既定のアカウントは書かない。 */
@@ -134,7 +154,7 @@ export function parseAccountRegistry(
       if (typeof id !== "string" || !id || id.endsWith(":default")) {
         issues.push(`${path}.id: must be a non-default id`);
       }
-      if (!isAccountAgent(agent)) {
+      if (!isAccountAgent(agent) || singleAccountAgent(agent)) {
         issues.push(`${path}.agent: must be "claude" or "codex"`);
       }
       if (typeof name !== "string" || checkAccountName(name) !== null) {
@@ -336,6 +356,7 @@ export function setAccountTags(
   const known =
     id === defaultAccountId("claude") ||
     id === defaultAccountId("codex") ||
+    id === defaultAccountId("opencode") ||
     registry.accounts.some((account) => account.id === id);
   if (!known) return { ok: false, code: "not-found" };
   const issue = checkAccountTags(next.map((tag) => tag.name));
@@ -380,7 +401,8 @@ export type AddAccountIssue =
   | { code: "relative-path"; configDir: string }
   | { code: "default-path"; configDir: string }
   | { code: "duplicate-path"; configDir: string; existing: string }
-  | { code: "too-many"; limit: number };
+  | { code: "too-many"; limit: number }
+  | { code: "single-account"; agent: AccountAgent };
 
 /** 足す前の検査。問題が無ければ null。 */
 export function checkAddAccount(
@@ -388,6 +410,9 @@ export function checkAddAccount(
   input: AddAccountInput,
   home: string,
 ): AddAccountIssue | null {
+  if (singleAccountAgent(input.agent)) {
+    return { code: "single-account", agent: input.agent };
+  }
   const nameIssue = checkAccountName(input.name);
   if (nameIssue) return { code: "name", issue: nameIssue };
   if (!input.configDir.startsWith("/")) {
@@ -527,14 +552,14 @@ export type AccountEntry = {
   tags?: AccountTag[];
 };
 
-/** 既定のアカウントを先頭に置いた全件。種類ごとに claude → codex の順。 */
+/** 既定のアカウントを先頭に置いた全件。種類ごとに claude → codex → opencode の順。 */
 export function accountEntries(
   registry: AccountRegistry,
   home: string,
   defaultNames: Record<AccountAgent, string>,
 ): AccountEntry[] {
   const out: AccountEntry[] = [];
-  for (const agent of ["claude", "codex"] as const) {
+  for (const agent of ["claude", "codex", "opencode"] as const) {
     out.push({
       id: defaultAccountId(agent),
       agent,
@@ -712,6 +737,8 @@ export type AccountUsage =
  * - no-sessions: codex のセッション記録が無い
  * - no-token-count: セッション記録に上限の情報が無い
  * - unreadable: 読めない・形が想定外 (公式に約束された書式ではない)
+ * - unsupported: その種類に上限の情報を出す仕組みが無い (opencode。
+ *   `opencode stats` はトークンと費用の集計で、上限は出さない)
  */
 export type UsageUnavailableReason =
   | "not-wrapped"
@@ -719,7 +746,16 @@ export type UsageUnavailableReason =
   | "no-limits"
   | "no-sessions"
   | "no-token-count"
-  | "unreadable";
+  | "unreadable"
+  | "unsupported";
+
+/**
+ * 使用量 (5 時間・週の上限) を読める種類か。読めない種類は「確かめる」を
+ * 出さず、一覧には理由 (unsupported) を出す。
+ */
+export function usageSupported(agent: AccountAgent): boolean {
+  return agent !== "opencode";
+}
 
 /**
  * 「使用量を確かめる」(POST /_agent/accounts/usage-check。
@@ -994,6 +1030,8 @@ export const SHARED_CONFIG_ENTRIES: Record<AccountAgent, readonly string[]> = {
     "hooks.json",
     "rules",
   ],
+  // 新しく作れない (ACCOUNT_ENV)。
+  opencode: [],
 };
 
 /**
@@ -1059,6 +1097,8 @@ const BLOCKED_NAMES: Record<AccountAgent, Record<string, BlockedReason>> = {
     "thread-writer-locks": "state",
     "version.json": "state",
   },
+  // 新しく作れない (ACCOUNT_ENV)。認証は設定のフォルダの外 (データのフォルダ)。
+  opencode: {},
 };
 
 /** 名前の形で共有できないと分かるもの (データベース・ロック・一時ファイル)。 */
@@ -1148,6 +1188,7 @@ export const AUTH_SETTING_KEYS: Record<AccountAgent, readonly string[]> = {
     "env.CLAUDE_CODE_OAUTH_TOKEN",
   ],
   codex: ["experimental_bearer_token", "bearer_token"],
+  opencode: [],
 };
 
 /** claude の settings.json (読んだ JSON) の中の認証に関わるキー。 */
@@ -1248,6 +1289,7 @@ export function defaultLaunchSession(
 export const LAUNCH_ENV: Record<AccountAgent, readonly string[]> = {
   claude: ["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1"],
   codex: [],
+  opencode: [],
 };
 
 export function launchCommandLine(
@@ -1262,13 +1304,14 @@ export function launchCommandLine(
     command,
     ...args.map(shellQuoteForDisplay),
   ].join(" ");
-  if (configDir === null) return line;
+  const name = ACCOUNT_ENV[agent];
+  if (configDir === null || name === null) return line;
   const short = abbreviateHome(configDir, home);
   const value =
     short.startsWith("~/") && SHELL_SAFE_WORD.test(short.slice(2))
       ? short
       : shellQuoteForDisplay(configDir);
-  return `${ACCOUNT_ENV[agent]}=${value} ${line}`;
+  return `${name}=${value} ${line}`;
 }
 
 /** 引き継ぎの指示文の言語 (利用者の画面の言語)。 */
@@ -1286,9 +1329,52 @@ export type HandoffFrom = {
   agent: AccountAgent;
   /** アカウントの表示名 (既定なら画面の言語の Default / 既定)。 */
   account: string;
-  /** フックが渡した会話記録のファイル (core/agent-state.ts の AgentConversation)。 */
-  transcriptPath: string;
-};
+} & HandoffSource;
+
+/**
+ * 前の担当の会話の在りか。
+ *
+ * - file: フックが渡した会話記録のファイル (claude・codex。
+ *   core/agent-state.ts の AgentConversation の transcriptPath)
+ * - opencode-session: opencode は会話をファイルに持たない (データベース)。
+ *   公式の書き出しのコマンド (opencodeExportCommand) で書き出して読ませる
+ */
+export type HandoffSource =
+  | { transcriptPath: string; opencodeSession?: undefined }
+  | { transcriptPath?: undefined; opencodeSession: string };
+
+/**
+ * 引き継ぎに使える会話の在りか。無ければ null (引き継げない)。opencode の
+ * セッションは、opencode の申告の記録に限る (ほかの種類のセッションの名前は
+ * opencode の書き出しに渡せない)。
+ */
+export function handoffSource(
+  agent: string | null | undefined,
+  conversation: { sessionId: string; transcriptPath: string } | null,
+): HandoffSource | null {
+  if (!conversation) return null;
+  if (conversation.transcriptPath) {
+    return { transcriptPath: conversation.transcriptPath };
+  }
+  if (agent === "opencode" && conversation.sessionId) {
+    return { opencodeSession: conversation.sessionId };
+  }
+  return null;
+}
+
+/**
+ * opencode のセッションを JSON で書き出すコマンド。opencode 2 は
+ * `opencode session export <セッション>` (2.2.7 の `opencode session --help`)。
+ * opencode 1 の `opencode export <セッション>` は 2 には無い (opencode1ExportCommand)。
+ */
+export function opencodeExportCommand(session: string): string {
+  return `opencode session export ${session}`;
+}
+
+/** opencode 1 の書き出しのコマンド。引き継ぎの指示に、古い版の人向けに添える。 */
+function opencode1ExportCommand(session: string): string {
+  return `opencode export ${session}`;
+}
 
 /**
  * 「別のアカウントで続ける」で、次の担当に最初の指示として渡す文。記録の
@@ -1299,6 +1385,11 @@ export function handoffPrompt(
   language: HandoffLanguage,
   from: HandoffFrom,
 ): string {
+  if (from.opencodeSession !== undefined) {
+    return language === "ja"
+      ? `前の担当（${from.agent}・${from.account}）の作業を引き継いでください。前の担当の会話は opencode のセッション ${from.opencodeSession} にあります。\`${opencodeExportCommand(from.opencodeSession)}\`（opencode 1 は \`${opencode1ExportCommand(from.opencodeSession)}\`）を実行すると JSON で書き出されます。最後の依頼と、どこまで進んだかを読んで、続きをやってください。わからないことは、作業を始める前に聞いてください。`
+      : `Take over the work of the previous agent (${from.agent} · ${from.account}). Its conversation is the opencode session ${from.opencodeSession}; run \`${opencodeExportCommand(from.opencodeSession)}\` (opencode 1: \`${opencode1ExportCommand(from.opencodeSession)}\`) to print it as JSON. Read the last request and how far it got, then continue the work. If anything is unclear, ask before you start.`;
+  }
   return language === "ja"
     ? `前の担当（${from.agent}・${from.account}）の作業を引き継いでください。前の担当の会話記録は ${from.transcriptPath}（JSONL）にあります。最後の依頼と、どこまで進んだかを読んで、続きをやってください。わからないことは、作業を始める前に聞いてください。`
     : `Take over the work of the previous agent (${from.agent} · ${from.account}). Its conversation log is at ${from.transcriptPath} (JSONL). Read the last request and how far it got, then continue the work. If anything is unclear, ask before you start.`;
@@ -1321,13 +1412,19 @@ export function transcriptDir(transcriptPath: string): string {
  * - codex: `--add-dir` は書き込みの許可を足すもの (公式の CLI reference) で、
  *   読むだけの記録には強すぎるので付けない。既定のサンドボックス
  *   (workspace-write / read-only) は作業フォルダの外も読める
+ * - opencode: 対話の画面に最初の指示を渡すのは `--prompt` (`opencode --help`)。
+ *   作業フォルダの外を読むのは permission の external_directory が決める
+ *   (https://opencode.ai/docs/permissions/)
+ * - 記録のファイルが無い (前の担当が opencode) なら claude にも `--add-dir`
+ *   を付けない (読むフォルダが無い。opencodeExportCommand の出力を読む)
  */
 export function handoffArgs(
   agent: AccountAgent,
   prompt: string,
   transcriptPath: string,
 ): string[] {
-  return agent === "claude"
+  if (agent === "opencode") return ["--prompt", prompt];
+  return agent === "claude" && transcriptPath
     ? [prompt, "--add-dir", transcriptDir(transcriptPath)]
     : [prompt];
 }
@@ -1364,10 +1461,17 @@ export type LaunchRequest = {
  */
 export function tmuxLaunchArgs(request: LaunchRequest): string[] {
   const name = ACCOUNT_ENV[request.agent];
+  if (name === null && request.configDir !== null) {
+    throw new Error(
+      `${request.agent} has only the default account; cannot launch it with ${request.configDir}`,
+    );
+  }
   const env = [
-    ...(request.configDir === null
-      ? ["env", "-u", name]
-      : ["env", `${name}=${request.configDir}`]),
+    ...(name === null
+      ? ["env"]
+      : request.configDir === null
+        ? ["env", "-u", name]
+        : ["env", `${name}=${request.configDir}`]),
     ...LAUNCH_ENV[request.agent],
   ];
   const place = request.sessionExists
@@ -1437,3 +1541,23 @@ export type LaunchResponse = {
    */
   statusLineError: string;
 };
+
+/**
+ * 起動の直後に、起動したペインがどうなったか (GET /_agent/launch/status)。
+ * 起動したウィンドウには remain-on-exit failed が付いているので、失敗して
+ * 終わったペインは残り、終了コードと画面の最後の行が読める。
+ * - running: まだ動いている
+ * - exited: 終わった (失敗。status は終了コード、読めなければ null)
+ * - gone: もう無い (正常に終わって閉じた・閉じられた)
+ */
+export type LaunchedPaneStatus =
+  | { kind: "running" }
+  | { kind: "exited"; status: number | null; lines: string[] }
+  | { kind: "gone" };
+
+/** 起動からこの時間までに終わったものを「起動に失敗した」として知らせる。 */
+export const LAUNCH_FAILURE_CHECK_MS = 3000;
+
+/** 知らせに添える画面の最後の行の数と、1 行の上限 (文字数)。 */
+export const LAUNCH_FAILURE_LINES = 5;
+export const LAUNCH_FAILURE_LINE_MAX = 300;

@@ -1,15 +1,11 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { renderDelimitedPreview } from "../views/source-preview-elements";
+import "./_dom";
+import { describe, expect, test } from "vitest";
+import {
+  DEFAULT_VIEW,
+  type DelimitedPreviewProps,
+  renderDelimitedPreview,
+} from "../views/source-preview-elements";
 import { delimitedPreviewText } from "../views/source-preview-i18n";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 describe("Delimited preview", () => {
   test.each([
@@ -287,5 +283,30 @@ describe("Delimited preview", () => {
         .querySelector<HTMLElement>(".gdp-csv-result-count")
         ?.getAttribute("aria-label"),
     ).toBe(resultCountLabel);
+  });
+});
+
+describe("the delimited preview presenter", () => {
+  test("gives the view the rows, and narrows them when a column filter is typed", () => {
+    const shown: DelimitedPreviewProps[] = [];
+    renderDelimitedPreview(
+      "name,role\nalpha,admin\nbeta,viewer\n",
+      "csv",
+      () => delimitedPreviewText("en", "csv"),
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    const last = () => shown[shown.length - 1];
+    expect(last()?.rows.map((row) => row.cells)).toEqual([
+      ["alpha", "admin"],
+      ["beta", "viewer"],
+    ]);
+    last()?.columns[1]?.filter.onInput("view");
+    expect([
+      last()?.rows.map((row) => row.index),
+      last()?.reset.disabled,
+    ]).toEqual([[2], false]);
   });
 });

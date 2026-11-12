@@ -1,5 +1,5 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   type AppRoute,
   buildRoute,
@@ -9,9 +9,10 @@ import {
 import type { SourceBlobTab } from "../views/file-shell";
 import { deferred, waitFor } from "./_test-helpers";
 
-GlobalRegistrator.register();
-
-const { createBlameView } = await import("../views/blame-view");
+const { createBlameView, DEFAULT_VIEW: BLAME_VIEW } = await import(
+  "../views/blame-view"
+);
+type BlameBodyProps = Parameters<typeof BLAME_VIEW.body>[0];
 const {
   createFileShellSticky,
   fileRouteKeepingActiveView,
@@ -292,8 +293,34 @@ beforeEach(() => {
   installFetchMock();
 });
 
-afterAll(() => {
-  GlobalRegistrator.unregister();
+describe("the blame presenter", () => {
+  test("gives the view the loading state, then one row per line with the group on its first line", async () => {
+    const state: { route: AppRoute } = {
+      route: {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blame",
+        range: RANGE,
+      } satisfies AppRoute,
+    };
+    const bodies: BlameBodyProps[] = [];
+    const blame = createBlameView(testDeps(state, []), {
+      ...BLAME_VIEW,
+      body: (props) => {
+        bodies.push(props);
+        return BLAME_VIEW.body(props);
+      },
+    });
+    await blame.renderBlamePage({ path: "README.md", ref: "worktree" });
+    const table = bodies.find((props) => props.kind === "table");
+    if (table?.kind !== "table") throw new Error("no blame table");
+    expect([
+      bodies[0]?.kind,
+      table.rows.length > 0,
+      table.rows[0]?.info !== null,
+    ]).toEqual(["loading", true, true]);
+  });
 });
 
 describe("file view shell routing", () => {

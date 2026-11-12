@@ -32,6 +32,7 @@ import {
   tmuxLaunchArgs,
   tmuxSessionName,
   usageIsStale,
+  usageSupported,
   usageWindowsConflict,
   usageWindowViews,
 } from "../core/agent-accounts";
@@ -57,6 +58,60 @@ function registry(
 }
 
 describe("parseAccountRegistry", () => {
+  test("an opencode account in the file is a problem (only its default exists)", () => {
+    const parsed = parseAccountRegistry({
+      version: 1,
+      accounts: [
+        {
+          id: "a1",
+          agent: "opencode",
+          name: "Work",
+          configDir: "/home/sample/opencode-work",
+          managed: false,
+          createdAt: 5,
+        },
+      ],
+      launchCommands: { opencode: "/opt/sample/opencode" },
+      lastLaunch: null,
+    });
+    expect(parsed).toEqual({
+      ok: false,
+      issues: ['$.accounts[0].agent: must be "claude" or "codex"'],
+    });
+  });
+
+  test("opencode keeps its launch command and the last launch", () => {
+    const parsed = parseAccountRegistry({
+      version: 1,
+      accounts: [],
+      launchCommands: { opencode: " /opt/sample/opencode " },
+      lastLaunch: {
+        agent: "opencode",
+        accountId: "opencode:default",
+        project: "/work/sample-repo",
+        session: "sample",
+      },
+    });
+    expect(parsed).toMatchObject({
+      ok: true,
+      registry: {
+        launchCommands: { opencode: "/opt/sample/opencode" },
+        lastLaunch: { agent: "opencode", accountId: "opencode:default" },
+      },
+    });
+  });
+
+  test.each([
+    { agent: "claude", expected: true },
+    { agent: "codex", expected: true },
+    { agent: "opencode", expected: false },
+  ] as const)(
+    "usage limits can be read for $agent: $expected",
+    ({ agent, expected }) => {
+      expect(usageSupported(agent)).toBe(expected);
+    },
+  );
+
   test("reads a well-formed registry", () => {
     const parsed = parseAccountRegistry({
       version: 1,
@@ -255,6 +310,23 @@ describe("adding and removing", () => {
     ).toEqual(expected);
   });
 
+  // opencode は認証の置き場所を opencode だけで分けられない (ACCOUNT_ENV)。
+  test.each([
+    { name: "a new directory", configDir: WORK },
+    {
+      name: "the default directory",
+      configDir: "/home/sample/.config/opencode",
+    },
+  ])("opencode refuses another account ($name)", ({ configDir }) => {
+    expect(
+      checkAddAccount(
+        registry([]),
+        { agent: "opencode", name: "Work", configDir, managed: true },
+        HOME,
+      ),
+    ).toEqual({ code: "single-account", agent: "opencode" });
+  });
+
   test("the same directory may be registered for the other agent", () => {
     expect(
       checkAddAccount(
@@ -410,7 +482,7 @@ describe("adding and removing", () => {
     const list = accountEntries(
       registry([{ agent: "codex", name: "Personal" }, { name: "Work" }]),
       HOME,
-      { claude: "Default", codex: "Default" },
+      { claude: "Default", codex: "Default", opencode: "Default" },
     );
     expect(
       list.map((entry) => [
@@ -424,6 +496,8 @@ describe("adding and removing", () => {
       ["id-1", "Work", false, "/home/sample/accounts/a1"],
       ["codex:default", "Default", true, "/home/sample/.codex"],
       ["id-0", "Personal", false, "/home/sample/accounts/a0"],
+      // opencode は既定のアカウントだけ (ACCOUNT_ENV)。
+      ["opencode:default", "Default", true, "/home/sample/.config/opencode"],
     ]);
   });
 });
@@ -564,7 +638,7 @@ describe("accountForEnv", () => {
   const entries: AccountEntry[] = accountEntries(
     registry([{ configDir: WORK }]),
     HOME,
-    { claude: "", codex: "" },
+    { claude: "", codex: "", opencode: "" },
   );
   test.each([
     {
@@ -1202,6 +1276,13 @@ describe("what a new account may share", () => {
 
 describe("launchCommandLine (what the launch dialog shows)", () => {
   test.each([
+    {
+      name: "opencode has no variable to show",
+      agent: "opencode",
+      dir: null,
+      command: "opencode",
+      expected: "opencode",
+    },
     {
       name: "default account",
       agent: "claude",

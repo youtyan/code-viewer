@@ -11,8 +11,8 @@
 //    ため)。直した: 分からない間は控えのまま (shellGroupOf)、外れて戻ったタブは
 //    元の左隣の右へ (main-tabs-view の returnHome)。この節は緑。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import { groupAgentPanesByPlace } from "../core/agent-overview";
 import type { TabTarget } from "../core/main-tabs";
 import type { RegisteredProjectInfo } from "../core/projects";
@@ -24,19 +24,11 @@ import {
   buildAgentOverview,
 } from "../server/terminal/overview";
 import {
-  createMainTabsView,
+  createMainTabsPresenter,
   type MainTabsDeps,
   shellGroupOf,
-} from "../views/main-tabs/main-tabs-view";
+} from "../views/main-tabs/main-tabs-presenter";
 import { createProjectLooks } from "../views/projects/project-looks";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -114,6 +106,7 @@ function overviewDeps(
     findServer: async () => ({ status: "absent" }),
     forgetServer: () => undefined,
     paneAccounts: async () => new Map(),
+    paneProcessKinds: async () => ({ kinds: new Map(), errors: [] }),
     readRegistry: () => ({
       projects: registered,
       error: "",
@@ -144,7 +137,7 @@ function mountTabs(saved: unknown, extra: Partial<MainTabsDeps>) {
     [GAMMA]: "GA",
     [LOOSE]: "LO",
   };
-  const handle = createMainTabsView({
+  const handle = createMainTabsPresenter({
     mount,
     getLanguage: () => "en",
     pageLabel: (page) => page,

@@ -12,9 +12,23 @@ export const AGENT_SKILL_DIRS = {
   gemini: ".gemini",
   cursor: ".cursor",
   agents: ".agents",
+  opencode: ".opencode",
 } as const;
 
 export type AgentName = keyof typeof AGENT_SKILL_DIRS;
+
+// The home directory equivalent, where it is not the same name under home.
+// opencode keeps its global settings in ~/.config/opencode
+// (https://opencode.ai/docs/skills/: ~/.config/opencode/skills).
+const GLOBAL_SKILL_DIRS: Partial<Record<AgentName, string>> = {
+  opencode: join(".config", "opencode"),
+};
+
+function skillsDirOf(agent: AgentName, global: boolean): string {
+  return (
+    (global ? GLOBAL_SKILL_DIRS[agent] : undefined) ?? AGENT_SKILL_DIRS[agent]
+  );
+}
 
 const AGENT_NAMES = Object.keys(AGENT_SKILL_DIRS) as AgentName[];
 
@@ -68,12 +82,12 @@ without manual setup.
 - Re-run is safe and idempotent: it overwrites files, so it doubles as
   an "update to latest" command.
 - \`--global\` writes under \`~/.claude/skills/\`, \`~/.codex/skills/\`,
-  etc. instead of the current repo.
+  \`~/.config/opencode/skills/\`, etc. instead of the current repo.
 
 ## How to call
 
   code-viewer skill install                # default agent = claude, into cwd
-  code-viewer skill install --agent all    # claude + codex + gemini + cursor + agents
+  code-viewer skill install --agent all    # claude + codex + gemini + cursor + agents + opencode
   code-viewer skill install --agent all --global
   code-viewer skill install --agent codex --cwd /path/to/repo
 
@@ -217,7 +231,12 @@ export function installSkill(
   for (const agent of args.agents) {
     for (const skill of skills) {
       const sourceDir = join(deps.skillsRoot, skill);
-      const target = join(base, AGENT_SKILL_DIRS[agent], "skills", skill);
+      const target = join(
+        base,
+        skillsDirOf(agent, args.global),
+        "skills",
+        skill,
+      );
       const action = existsSync(target) ? "updated" : "installed";
       // 書けなかった理由 (code・syscall・path・スタック) は cause ごと上へ投げる。
       // CLI は捕まえないので、Node が全文を端末に出して exit 1 で終わる。

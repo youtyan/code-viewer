@@ -6,7 +6,9 @@
 
 import { errorWithCause } from "../../core/error-detail";
 import {
+  AGENT_PARENT_OPTION,
   isPathInsideAny,
+  isTmuxPaneId,
   type TmuxPane,
   type TmuxPanesResponse,
   type TmuxSession,
@@ -30,6 +32,8 @@ const PANE_FIELDS = [
   "#{pane_current_path}",
   // エージェントのプロセスを探す起点 (ペインのシェル)。
   "#{pane_pid}",
+  // 子エージェントの親 (起こした側が付けるペインのユーザーオプション。読むだけ)。
+  `#{${AGENT_PARENT_OPTION}}`,
   // タイトルは自由文字列なので必ず最後に置く。
   "#{pane_title}",
 ];
@@ -51,7 +55,8 @@ const FIELD = {
   paneCommand: 10,
   panePath: 11,
   panePid: 12,
-  paneTitle: 13,
+  agentParent: 13,
+  paneTitle: 14,
 } as const;
 
 function toInt(value: string | undefined): number {
@@ -115,6 +120,8 @@ export function parseTmuxPanes(
     }
 
     const paneIndex = toInt(fields[FIELD.paneIndex]);
+    // 親はペイン ID の形のものだけ (利用者や道具が書く値なので確かめる)。自分は親にしない。
+    const parent = fields[FIELD.agentParent] ?? "";
     const pane: TmuxPane = {
       id: paneId,
       label: `${sessionName}:${windowIndex}.${paneIndex}`,
@@ -129,6 +136,7 @@ export function parseTmuxPanes(
       inRepo:
         worktrees.length === 0 ||
         isPathInsideAny(fields[FIELD.panePath] ?? "", worktrees),
+      ...(isTmuxPaneId(parent) && parent !== paneId ? { parent } : {}),
     };
     window.panes.push(pane);
   }

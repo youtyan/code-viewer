@@ -11,16 +11,9 @@
 // 棚だけを作って見る (端末とサーバは要らない)。見た目の計算値は実画面で撮る
 // (作業報告)。
 
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import {
   TERMINAL_IMAGE_SHELF_HEIGHT,
   TERMINAL_IMAGE_SHELF_WIDTH,
@@ -34,14 +27,6 @@ import {
   SHELF_AUTO_COLLAPSE_ROOM,
 } from "../views/terminal/image-shelf";
 import type { ShelfEntry } from "../views/terminal/image-shelf-list";
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 
 const ENTRY: ShelfEntry = {
   key: "/repo/out/a.png",

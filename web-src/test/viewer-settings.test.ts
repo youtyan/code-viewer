@@ -1,5 +1,5 @@
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   afterAll,
   beforeAll,
@@ -19,14 +19,17 @@ import { AGENT_HOOKS_SECTION_ID } from "../views/agents/agent-hooks-settings";
 import { REMOTE_ACCESS_SECTION_ID } from "../views/remote-access-settings";
 import {
   createViewerSettings,
+  DEFAULT_VIEW,
   SETTINGS_CATEGORIES,
   type SettingsCategory,
   type SettingsDraft,
   type ThemeChoice,
   type ViewerSettingsChoices,
   type ViewerSettingsDraft,
+  type ViewerSettingsFormProps,
   type ViewerSettingsText,
   type ViewerSettingsValues,
+  type ViewerSettingsView,
 } from "../views/viewer-settings";
 import {
   baseRules,
@@ -43,14 +46,6 @@ vi.mock("../core/shiki-loader", () => ({
   highlightToInnerHtml: (code: string) =>
     `<code><span class="tok">${code}</span></code>`,
 }));
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const EN_TEXT: ViewerSettingsText = {
   display: "Display",
@@ -84,6 +79,13 @@ const EN_TEXT: ViewerSettingsText = {
   },
   imageShelfPlacement: "Image shelf",
   imageShelfPlacementHelp: "Where the image shelf sits.",
+  terminalClipboardWriteLabel: "Let terminal programs copy",
+  agentNotifySoundLabel: "Also play a sound",
+  agentNotifySoundTest: { waiting: "Try waiting", finished: "Try finished" },
+  agentNotifySoundTestFailed: "Could not play.",
+  terminalClipboardWriteHelp: "OSC 52 copies.",
+  terminalOptionAsAltLabel: "Use Option as Alt",
+  terminalOptionAsAltHelp: "Option shortcuts.",
   imageShelfPlacementNames: {
     right: "Right of the terminal",
     left: "Left of the terminal",
@@ -202,6 +204,9 @@ function defaultValues(): ViewerSettingsValues {
     watchLimitDefault: 4096,
     watchLimitApplies: true,
     uploadEnabled: true,
+    terminalClipboardWrite: true,
+    terminalOptionAsAlt: false,
+    agentNotifySound: false,
     agentNotifyWaiting: true,
     agentNotifyDone: true,
     inferFkRails: false,
@@ -238,7 +243,9 @@ function setup(
     ) => Promise<void>;
     saveRules?: (value: string) => Promise<void>;
     resetRules?: () => Promise<void>;
+    testSound?: (kind: "waiting" | "finished") => Promise<void>;
     draft?: SettingsDraft;
+    view?: ViewerSettingsView;
   } = {},
 ) {
   document.body.innerHTML = '<div id="host"></div>';
@@ -271,67 +278,74 @@ function setup(
     },
   };
 
-  const settings = createViewerSettings({
-    getText: () => (language === "ja" ? JA_TEXT : EN_TEXT),
-    getTheme: () => theme,
-    setTheme: (choice) => {
-      calls.theme.push(choice);
-      theme = choice;
+  const settings = createViewerSettings(
+    {
+      getText: () => (language === "ja" ? JA_TEXT : EN_TEXT),
+      getTheme: () => theme,
+      setTheme: (choice) => {
+        calls.theme.push(choice);
+        theme = choice;
+      },
+      getColorTheme: () => colorTheme,
+      setColorTheme: (choice) => {
+        calls.colorTheme.push(choice);
+        colorTheme = choice;
+      },
+      getValues: () => {
+        calls.getValues++;
+        return { ...values };
+      },
+      getDefaultValues: () => ({ ...defaults }),
+      onChoose: (choice) => {
+        calls.choose.push(choice);
+        Object.assign(values, choice);
+      },
+      refresh:
+        options.refresh ??
+        (async () => {
+          calls.refresh++;
+        }),
+      onSave:
+        options.save ??
+        (async (draft, saveOptions) => {
+          calls.save.push({
+            draft: { ...draft },
+            restoreDefaults: saveOptions.restoreDefaults,
+          });
+          Object.assign(values, draft);
+        }),
+      onAgentRulesSave:
+        options.saveRules ??
+        (async (value) => {
+          calls.agentRulesSave.push(value);
+        }),
+      onTestSound: options.testSound,
+      onAgentRulesReset:
+        options.resetRules ??
+        (async () => {
+          calls.agentRulesReset++;
+          values.agentRulesJson =
+            '{\n  "version": 1,\n  "rules": ["default"]\n}\n';
+          values.agentRulesSource = "default";
+        }),
+      // 見出しの id はほかの画面が openSettingsAt で使う本物 (移し先のテスト)。
+      agentHooksSection: sectionWithHeading(AGENT_HOOKS_SECTION_ID, "Hooks"),
+      agentAccountsSection: sectionWithHeading(
+        ACCOUNTS_SECTION_ID,
+        "Accounts list",
+      ),
+      shortcutsSection: sectionWithHeading(
+        SHORTCUT_SECTION_ID,
+        "Shortcut list",
+      ),
+      remoteAccessSection: sectionWithHeading(
+        REMOTE_ACCESS_SECTION_ID,
+        "Remote access status",
+      ),
+      drafts: options.draft ? [options.draft] : [],
     },
-    getColorTheme: () => colorTheme,
-    setColorTheme: (choice) => {
-      calls.colorTheme.push(choice);
-      colorTheme = choice;
-    },
-    getValues: () => {
-      calls.getValues++;
-      return { ...values };
-    },
-    getDefaultValues: () => ({ ...defaults }),
-    onChoose: (choice) => {
-      calls.choose.push(choice);
-      Object.assign(values, choice);
-    },
-    refresh:
-      options.refresh ??
-      (async () => {
-        calls.refresh++;
-      }),
-    onSave:
-      options.save ??
-      (async (draft, saveOptions) => {
-        calls.save.push({
-          draft: { ...draft },
-          restoreDefaults: saveOptions.restoreDefaults,
-        });
-        Object.assign(values, draft);
-      }),
-    onAgentRulesSave:
-      options.saveRules ??
-      (async (value) => {
-        calls.agentRulesSave.push(value);
-      }),
-    onAgentRulesReset:
-      options.resetRules ??
-      (async () => {
-        calls.agentRulesReset++;
-        values.agentRulesJson =
-          '{\n  "version": 1,\n  "rules": ["default"]\n}\n';
-        values.agentRulesSource = "default";
-      }),
-    // 見出しの id はほかの画面が openSettingsAt で使う本物 (移し先のテスト)。
-    agentHooksSection: sectionWithHeading(AGENT_HOOKS_SECTION_ID, "Hooks"),
-    agentAccountsSection: sectionWithHeading(
-      ACCOUNTS_SECTION_ID,
-      "Accounts list",
-    ),
-    shortcutsSection: sectionWithHeading(SHORTCUT_SECTION_ID, "Shortcut list"),
-    remoteAccessSection: sectionWithHeading(
-      REMOTE_ACCESS_SECTION_ID,
-      "Remote access status",
-    ),
-    drafts: options.draft ? [options.draft] : [],
-  });
+    options.view,
+  );
 
   return {
     settings,
@@ -873,6 +887,10 @@ describe("viewer settings form", () => {
       choice: { agentNotifyWaiting: false },
     },
     { selector: "#agent-notify-done", choice: { agentNotifyDone: false } },
+    {
+      selector: "#terminal-option-as-alt",
+      choice: { terminalOptionAsAlt: true },
+    },
     { selector: "#datastore-infer-fk", choice: { inferFkRails: true } },
     { selector: "#datastore-s3-tooltip", choice: { s3TooltipEnabled: false } },
   ] satisfies Array<{
@@ -1660,5 +1678,88 @@ describe("every choice field on the page has the settings look", () => {
           appearance !== "none" || cursor !== "pointer",
       ),
     ).toEqual([]);
+  });
+});
+
+describe("the viewer settings presenter", () => {
+  test("gives the view only the open category's sections; typing marks the save bar unsaved", () => {
+    const forms: ViewerSettingsFormProps[] = [];
+    const { settings, host } = setup({
+      view: {
+        ...DEFAULT_VIEW,
+        form: (props) => {
+          forms.push(props);
+          return DEFAULT_VIEW.form(props);
+        },
+      },
+    });
+    settings.mount(host);
+    settings.setCategory("files");
+    const last = () => forms[forms.length - 1];
+    const shown = () =>
+      last()
+        ?.sections.filter((section) =>
+          section.key === "external" ? false : !section.box.hidden,
+        )
+        .map((section) => section.key);
+    expect(shown()).toEqual(["excluded", "uploads"]);
+    const excluded = last()?.sections.find(
+      (section) => section.key === "excluded",
+    );
+    if (excluded?.key !== "excluded") throw new Error("no excluded section");
+    excluded.omitDirs.onInput("vendor");
+    expect([last()?.footer.status.state, last()?.footer.save.disabled]).toEqual(
+      ["unsaved", false],
+    );
+  });
+});
+
+describe("trying the attention sounds", () => {
+  test("each button plays its sound, and a sound that cannot play says why", async () => {
+    const played: string[] = [];
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const { settings, host } = setup({
+      testSound: async (kind) => {
+        played.push(kind);
+        if (kind === "finished") throw new Error("no audio device");
+      },
+    });
+    settings.mount(host);
+
+    const buttons = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '[data-settings-section="agentNotify"] .scope-settings-actions button',
+      ),
+    ];
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      "Try waiting",
+      "Try finished",
+    ]);
+    buttons[0]?.click();
+    await vi.waitFor(() => expect(played).toEqual(["waiting"]));
+    expect(q<HTMLElement>(document, "#agent-notify-sound-error").hidden).toBe(
+      true,
+    );
+
+    buttons[1]?.click();
+    await vi.waitFor(() =>
+      expect(
+        q<HTMLElement>(document, "#agent-notify-sound-error").textContent,
+      ).toBe("Could not play.\nError: no audio device"),
+    );
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  test("without a player, no buttons are shown", () => {
+    const { settings, host } = setup();
+    settings.mount(host);
+    expect(
+      document.querySelectorAll(
+        '[data-settings-section="agentNotify"] .scope-settings-actions button',
+      ),
+    ).toHaveLength(0);
   });
 });

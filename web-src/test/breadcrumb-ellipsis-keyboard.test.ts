@@ -2,10 +2,8 @@
 // 届かない)。Tab で届き、読み上げの名前は全体のパス、Enter / Space で畳んだ段の
 // メニューを開き、選ぶとその段を押したのと同じ。Escape でフォーカスは「…」へ戻る。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "./_dom";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
-
-GlobalRegistrator.register();
 
 const { fitBreadcrumb } = await import("../views/breadcrumb-fit");
 const { closeContextMenu, isContextMenuOpen } = await import(
@@ -39,7 +37,6 @@ beforeAll(() => {
 
 afterAll(() => {
   globalThis.ResizeObserver = savedResizeObserver;
-  GlobalRegistrator.unregister();
 });
 
 afterEach(() => {

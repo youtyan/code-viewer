@@ -1,8 +1,8 @@
 // Redis エクスプローラの編集 UI を happy-dom で検証する。文字列値の編集 / キー
 // 削除 / 新規キー作成が、正しい op で POST /_db/redis/write を呼ぶことを確認する。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   clickDialogCancel,
   clickDialogConfirm,
@@ -10,11 +10,10 @@ import {
 } from "./_dialog-helpers";
 import { q, waitFor } from "./_test-helpers";
 
-GlobalRegistrator.register();
-
-const { createRedisExplorer } = await import(
+const { createRedisExplorer, DEFAULT_VIEW } = await import(
   "../views/database/redis-explorer"
 );
+type RedisLook = typeof DEFAULT_VIEW;
 const { dbText } = await import("../views/database/i18n");
 
 const tick = () => new Promise((r) => setTimeout(r, 20));
@@ -81,9 +80,6 @@ function installFetch(
 afterEach(() => {
   globalThis.fetch = origFetch;
   closeOpenDialog();
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 async function setupSelectedKey(
@@ -441,5 +437,46 @@ describe("redis explorer edit UI", () => {
     expect(create?.key).toBe("newkey");
     expect(create?.value).toBe("val");
     view.dispose();
+  });
+});
+
+describe("the Redis explorer presenter", () => {
+  test("passes databases, keys and the selected value to the view, then the editor", async () => {
+    installFetch();
+    const sidebars: Parameters<RedisLook["sidebar"]>[0][] = [];
+    const mains: Parameters<RedisLook["main"]>[0][] = [];
+    const view = createRedisExplorer(
+      { getText: () => dbText("en") },
+      {
+        sidebar: (props) => {
+          sidebars.push(props);
+          return DEFAULT_VIEW.sidebar(props);
+        },
+        main: (props) => {
+          mains.push(props);
+          return DEFAULT_VIEW.main(props);
+        },
+      },
+    );
+    document.body.append(view.sidebarSlot, view.el);
+    const last = <T>(list: T[]) => list[list.length - 1] as T;
+    await view.load("docker:redis", { dbIndex: 0, key: "foo" });
+    await waitFor(() => "key" in last(mains).pane);
+    const pane = last(mains).pane;
+    expect([
+      last(sidebars).activeDb,
+      last(mains).activeKey,
+      "key" in pane ? [pane.key, pane.value.type, pane.editing] : pane,
+    ]).toEqual([0, "foo", ["foo", "string", null]]);
+
+    last(mains).onEdit();
+    const editing = last(mains).pane;
+    expect("key" in editing ? editing.editing : editing).toEqual({
+      current: "hello",
+      message: "",
+      busy: false,
+    });
+    view.dispose();
+    document.body.innerHTML = "";
   });
 });

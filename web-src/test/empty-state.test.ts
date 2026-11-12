@@ -1,18 +1,10 @@
-// 空の状態の案内の部品 (views/empty-state.ts)。既存の .empty の形 (絵の箱・
+// 空の状態の案内の部品 (views/ui/empty-state.ts)。既存の .empty の形 (絵の箱・
 // 見出し・一文・.empty-actions) に、キーキャップの行を足したもの。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import { PLUS_16_PATH } from "../core/icons";
-import { renderEmptyState } from "../views/empty-state";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
+import { renderEmptyState } from "../views/ui/empty-state";
 
 function shape(el: HTMLElement) {
   return {

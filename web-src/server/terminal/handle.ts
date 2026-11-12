@@ -38,8 +38,10 @@ import {
 import type { AgentOverviewResponse } from "../../core/agent-overview";
 import type { AgentScreenRuleIssue } from "../../core/agent-screen";
 import {
+  type AgentStateObservationError,
   type AgentStatesResponse,
   clipAgentStateText,
+  isAgentAttention,
   isAgentConversation,
   isAgentEvent,
   isReportedAgent,
@@ -69,6 +71,7 @@ import {
   handleAccountsPlanGet,
   handleAccountsPost,
   handleLaunchPost,
+  handleLaunchStatusGet,
   handleLoginPost,
   handleStatusLineApplyPost,
   handleStatusLineFailuresDelete,
@@ -82,6 +85,7 @@ import {
   parseBoundedJsonBody,
   textError,
 } from "../database/handle-shared";
+import { createBranchStatusTracker } from "../projects/branch-status";
 import { handleProjectDirectoriesGet } from "../projects/directories";
 import {
   handleProjectOpenPost,
@@ -131,6 +135,7 @@ import {
 } from "./overview";
 import { savePastedImage } from "./paste";
 import { resolveTerminalPaths } from "./paths";
+import { noteAgentPins, setAgentPinned } from "./pins";
 import { relayAgentRead } from "./read-relay";
 import {
   MAX_AGENT_SCREEN_RULES_BYTES,
@@ -138,7 +143,7 @@ import {
   resetAgentScreenRules,
   saveAgentScreenRules,
 } from "./rules";
-import { clearAgentUnread, noteAgentUnread } from "./unread";
+import { clearAgentUnread, markAgentUnread, noteAgentUnread } from "./unread";
 
 const MAX_AGENT_ACTION_BODY_BYTES = 16 * 1024;
 /**
@@ -191,6 +196,7 @@ async function handleStatePost(
     agent?: unknown;
     relay?: unknown;
     conversation?: unknown;
+    attention?: unknown;
   };
 
   const target = body.target;
@@ -214,6 +220,9 @@ async function handleStatePost(
   ) {
     return textError("invalid conversation", 400);
   }
+  if (body.attention !== undefined && !isAgentAttention(body.attention)) {
+    return textError("invalid attention", 400);
+  }
   const now = Date.now();
   if (
     body.at !== undefined &&
@@ -235,6 +244,7 @@ async function handleStatePost(
     conversation: isAgentConversation(body.conversation)
       ? body.conversation
       : undefined,
+    attention: isAgentAttention(body.attention) ? body.attention : undefined,
   });
   if (!record) return textError("invalid event", 400);
   // 画面で「読んだ」ときは、ほかのサーバにも伝える (read-relay.ts)。送り先
@@ -664,11 +674,44 @@ async function handleUnreadPost(req: Request): Promise<Response> {
   if (!parsed || typeof parsed !== "object") {
     return textError("invalid unread request", 400);
   }
-  const body = parsed as { target?: unknown };
+  const body = parsed as { target?: unknown; mark?: unknown };
   if (typeof body.target !== "string" || !terminalKindOf(body.target)) {
     return textError("invalid target", 400);
   }
-  return json({ ok: true, removed: clearAgentUnread(body.target) });
+  if (body.mark !== undefined && body.mark !== true) {
+    return textError("invalid mark", 400);
+  }
+  if (body.mark !== true) {
+    return json({ ok: true, removed: clearAgentUnread(body.target) });
+  }
+  // 未読に戻す: 状態を知らない対象・作業中のものは戻せない。
+  const record = getAgentState(body.target);
+  if (!record) return textError("unknown target", 404);
+  const unread = markAgentUnread(body.target, record.state);
+  if (!unread) return textError("a working agent cannot be marked unread", 409);
+  return json({ ok: true, unread });
+}
+
+/** 全体ボードの「上に留める」・外す (pins.ts。サーバのメモリ)。 */
+async function handlePinPost(req: Request): Promise<Response> {
+  const parsed = await parseBoundedJsonBody(
+    req,
+    MAX_AGENT_ACTION_BODY_BYTES,
+    "agent pin request too large",
+  );
+  if (parsed instanceof Response) return parsed;
+  if (!parsed || typeof parsed !== "object") {
+    return textError("invalid pin request", 400);
+  }
+  const body = parsed as { target?: unknown; pinned?: unknown };
+  if (typeof body.target !== "string" || !terminalKindOf(body.target)) {
+    return textError("invalid target", 400);
+  }
+  if (typeof body.pinned !== "boolean") {
+    return textError("invalid pinned", 400);
+  }
+  setAgentPinned(body.target, body.pinned);
+  return json({ ok: true, pinned: body.pinned });
 }
 
 /** フックの入れ外しの本文上限。種類・動作・ハッシュだけが来る。 */
@@ -797,6 +840,8 @@ function handleHookFailuresDelete(): Response {
  * リクエストごとに作り直さずプロセスで 1 つ持つ (cwd はプロセスの間変わらない)。
  */
 let overviewDeps: AgentOverviewDeps | null = null;
+/** 左のサイドバーの行のブランチと上流との差 (入口が git を直接読む)。 */
+const BRANCH_STATUS = createBranchStatusTracker();
 
 async function handleOverviewGet(
   cwd: string,
@@ -818,9 +863,40 @@ async function handleOverviewGet(
       }
     : base;
   const overview = await buildAgentOverview(deps);
+  // 左のサイドバーの行のブランチと上流との差。読み直しが要るものだけを裏で読む
+  // (branch-status.ts)。この応答には前に読んだ値を載せる。
+  BRANCH_STATUS.note({
+    roots: overview.projects
+      .filter((info) => info.git && !info.error)
+      .map((info) => info.root),
+    working: new Set(
+      overview.panes
+        .filter((pane) => pane.state === "working")
+        .map((pane) => pane.project),
+    ),
+    selected: deps.serverRoot || null,
+  });
+  const branchErrors: AgentStateObservationError[] = [];
+  const projects = overview.projects.map((info) => {
+    const known = BRANCH_STATUS.get(info.root);
+    if (known?.status === "error") {
+      branchErrors.push({
+        operation: "branch_status",
+        target: info.root,
+        at: Date.now(),
+        detail: known.error,
+        stack: "",
+      });
+      return info;
+    }
+    return known ? { ...info, branch: known.value } : info;
+  });
   return json({
     ...overview,
+    projects,
+    errors: [...overview.errors, ...branchErrors],
     unread: noteAgentUnread(overview.panes),
+    pinned: noteAgentPins(overview.panes),
   } satisfies AgentOverviewResponse);
 }
 
@@ -954,6 +1030,11 @@ export function handleAgentRoute(
         sideEffect: true,
         handler: () => handleLaunchPost(req),
       },
+      "/_agent/launch/status": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handleLaunchStatusGet(url, cwd),
+      },
       "/_agent/statusline/plan": {
         methods: ["GET"],
         sideEffect: false,
@@ -998,6 +1079,12 @@ export function handleAgentRoute(
         methods: ["POST"],
         sideEffect: true,
         handler: () => handleUnreadPost(req),
+      },
+      // 全体ボードの「上に留める」。ピンはサーバのメモリにある (pins.ts)。
+      "/_agent/pin": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handlePinPost(req),
       },
       // ファイルを作るので副作用。同一オリジンからしか通らない。
       "/_agent/paste": {

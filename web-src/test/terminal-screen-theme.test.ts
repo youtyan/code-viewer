@@ -7,18 +7,9 @@
 //
 // 実物の style.css を happy-dom に当て、xterm は差し替えて受け取った値を見る。
 // 本物の画面での確認 (DOM と WebGL の描画・ライトの画面) は作業報告の記録。
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
 vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
@@ -31,16 +22,9 @@ import {
   type TerminalScreenHandle,
 } from "../views/terminal/terminal-screen";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
-
 type Options = {
   minimumContrastRatio?: number;
+  macOptionIsMeta?: boolean;
   theme?: { background?: string; foreground?: string; red?: string };
 };
 
@@ -63,6 +47,7 @@ vi.mock("../core/xterm-loader", async () => {
       (globalThis as Record<string, unknown>).__themeTestTerminal = this;
     }
     registerLinkProvider = () => ({ dispose: noop });
+    parser = { registerOscHandler: () => ({ dispose: () => undefined }) };
     open = (parent: HTMLElement) => {
       const root = document.createElement("div");
       parent.appendChild(root);
@@ -150,9 +135,10 @@ describe("the terminal colors", () => {
   let screen: TerminalScreenHandle;
   let style: HTMLStyleElement;
 
-  async function open(look: Look): Promise<void> {
+  async function open(look: Look, optionAsAlt?: () => boolean): Promise<void> {
     applyLook(look);
     screen = createTerminalScreen({
+      optionAsAlt,
       getText: () => terminalText("en"),
       getFontSize: () => 13,
       actionHeaders: () => ({}),
@@ -293,5 +279,18 @@ describe("the terminal colors", () => {
       option: terminalOptions().minimumContrastRatio,
       constant: TERMINAL_MINIMUM_CONTRAST_RATIO,
     }).toEqual({ option: 4.5, constant: 4.5 });
+  });
+
+  test("Option is sent as Alt only while the setting is on, and a change applies at the next key", async () => {
+    let on = false;
+    await open({ theme: "dark" }, () => on);
+    expect(terminalOptions().macOptionIsMeta).toBe(false);
+
+    on = true;
+    const screenEl = screen.el.querySelector(".terminal-screen");
+    screenEl?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", altKey: true }),
+    );
+    expect(terminalOptions().macOptionIsMeta).toBe(true);
   });
 });

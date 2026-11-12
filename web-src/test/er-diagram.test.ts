@@ -1,12 +1,13 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DbColumn, DbSchemaResponse } from "../core/database/types";
 import type { ErOption } from "../views/database/er-diagram";
 import { q } from "./_test-helpers";
 
-GlobalRegistrator.register();
-
-const { createErDiagram } = await import("../views/database/er-diagram");
+const { createErDiagram, DEFAULT_VIEW } = await import(
+  "../views/database/er-diagram"
+);
+type ErView = typeof DEFAULT_VIEW;
 const { dbText } = await import("../views/database/i18n");
 
 function column(
@@ -146,10 +147,6 @@ describe("ER diagram", () => {
   afterEach(() => {
     document.body.innerHTML = "";
     vi.restoreAllMocks();
-  });
-
-  afterAll(() => {
-    GlobalRegistrator.unregister();
   });
 
   test.each([
@@ -518,6 +515,58 @@ describe("ER diagram", () => {
       more: "ほか 2 列",
       find: "テーブルを探す",
     });
+    diagram.dispose();
+  });
+});
+
+describe("the ER diagram presenter", () => {
+  test("passes cards and toolbar state to the view, and redraws cards when an option flips", () => {
+    const toolbars: Parameters<ErView["toolbar"]>[0][] = [];
+    const cards: Parameters<ErView["card"]>[0][] = [];
+    const diagram = createErDiagram(
+      {},
+      {
+        ...DEFAULT_VIEW,
+        toolbar: (props) => {
+          toolbars.push(props);
+          return DEFAULT_VIEW.toolbar(props);
+        },
+        card: (props) => {
+          cards.push(props);
+          return DEFAULT_VIEW.card(props);
+        },
+      },
+    );
+    document.body.appendChild(diagram.el);
+    const lastToolbar = () => toolbars[toolbars.length - 1];
+    expect(lastToolbar()?.copy.disabled).toBe(true);
+
+    diagram.render(SAMPLE_SCHEMA, SAMPLE_COLUMNS);
+    expect([
+      lastToolbar()?.copy.disabled,
+      lastToolbar()?.options,
+      cards.map((card) => [card.name, card.rows, card.more]),
+    ]).toEqual([
+      false,
+      { erShowComments: true, erKeysOnly: false },
+      [
+        ["sample_parent", "1.2K", null],
+        ["sample_child", null, null],
+      ],
+    ]);
+
+    cards.length = 0;
+    lastToolbar()?.onToggle("erKeysOnly");
+    expect([
+      lastToolbar()?.options.erKeysOnly,
+      cards.map((card) => [card.name, card.more]),
+    ]).toEqual([
+      true,
+      [
+        ["sample_parent", null],
+        ["sample_child", "2 more columns"],
+      ],
+    ]);
     diagram.dispose();
   });
 });

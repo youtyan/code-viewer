@@ -10,11 +10,10 @@
 // 本文) と合うよう、DOM では受け持つ列の直後に置く。History・作業ツリーの変更
 // ファイルの一覧を開く帯は createListTreeOpen (幅が足りずに畳んだときも出る)。
 
-import {
-  iconSvg,
-  SIDEBAR_HIDE_16_PATHS,
-  SIDEBAR_SHOW_16_PATHS,
-} from "../core/icons";
+import { html } from "lit/html.js";
+import { SIDEBAR_HIDE_16_PATHS, SIDEBAR_SHOW_16_PATHS } from "../core/icons";
+import { iconTemplate } from "./ui/icon";
+import { templateElement } from "./ui/renderer";
 
 export type ListTreeOpenOptions = {
   /** 列を開く (このセッションは畳まない)。呼んだ後に列が見えている。 */
@@ -40,14 +39,17 @@ export function createColumnOpen(
     focusStop: () => HTMLElement;
   },
 ): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = options.className;
-  button.innerHTML = iconSvg("list-tree-open-icon", SIDEBAR_SHOW_16_PATHS);
-  button.addEventListener("click", () => {
-    options.open();
-    options.focusStop().focus();
-  });
+  const button = templateElement<HTMLButtonElement>(
+    html`<button
+      type="button"
+      class=${options.className}
+      @click=${() => {
+        options.open();
+        options.focusStop().focus();
+      }}
+    >${iconTemplate(SIDEBAR_SHOW_16_PATHS, "list-tree-open-icon")}</button>`,
+  );
+  // 置き場所は index.html の列の直後 (Tab の順を見た目の位置に合わせる)。
   options.after.after(button);
   localizeListTreeOpen(button, options.label());
   return button;
@@ -60,11 +62,13 @@ export function createColumnFold(options: {
   fold(): void;
   label(): string;
 }): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = `list-column-fold ${options.className}`;
-  button.innerHTML = iconSvg("list-column-fold-icon", SIDEBAR_HIDE_16_PATHS);
-  button.addEventListener("click", () => options.fold());
+  const button = templateElement<HTMLButtonElement>(
+    html`<button
+      type="button"
+      class=${`list-column-fold ${options.className}`}
+      @click=${() => options.fold()}
+    >${iconTemplate(SIDEBAR_HIDE_16_PATHS, "list-column-fold-icon")}</button>`,
+  );
   options.after.after(button);
   localizeListTreeOpen(button, options.label());
   return button;

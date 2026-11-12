@@ -27,6 +27,36 @@ const rows = (text: string): Row[] =>
     ...(column !== undefined ? { column } : {}),
   }));
 
+// tmux のペイン ID (指揮役が作業役を名指しする)。形だけを見る。今居るペインかは画面の側。
+describe("matchTextLinks: pane ids", () => {
+  const pane = (id: string) => ({ kind: "pane", candidate: id, path: id });
+  test.each<{ name: string; text: string; expected: Row[] }>([
+    {
+      name: "文の中のペイン ID",
+      text: "worker %18 is done",
+      expected: [pane("%18")],
+    },
+    { name: "括弧と文の終わりの点", text: "(see %3).", expected: [pane("%3")] },
+    { name: "日本語の文の中", text: "作業役は%7です", expected: [pane("%7")] },
+    { name: "数の後ろの % は拾わない", text: "50% done", expected: [] },
+    { name: "書式の %5d は拾わない", text: 'printf "%5d"', expected: [] },
+    {
+      name: "URL の中の %20 は拾わない",
+      text: "https://example.com/a%20b",
+      expected: [
+        {
+          kind: "url",
+          candidate: "https://example.com/a%20b",
+          path: "https://example.com/a%20b",
+        },
+      ],
+    },
+    { name: "パスの中は拾わない", text: "dir/%2 and a%2", expected: [] },
+  ])("$name", ({ text, expected }) => {
+    expect(rows(text)).toEqual(expected);
+  });
+});
+
 describe("matchTextLinks", () => {
   test.each<{ name: string; text: string; expected: Row[] }>([
     {

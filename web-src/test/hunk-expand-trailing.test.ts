@@ -4,18 +4,10 @@
 // - 最後の文脈が 3 行ちょうど (row_basis.tail_more) なら、描いた時点で行を置く
 //   (カードの見積もりにこの行が入っている。後から足すと下のカードが下がる)。
 //   問い合わせで行が無いと分かったら外す
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import type { DiffCardElement, FileMeta } from "../core/types";
 import { createHunkExpand } from "../views/hunk-expand";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const originalFetch = globalThis.fetch;
 

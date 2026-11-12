@@ -3,16 +3,8 @@
 // 同じものを開く。書けない (別の場所から生成される) ファイルでは、写す内容を
 // コピーのボタンで写す。パスはすべて架空。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type {
   AccountStatus,
   AccountsResponse,
@@ -25,12 +17,6 @@ import {
 } from "../views/agents/accounts-dialogs";
 import { ACCOUNTS_EN } from "../views/agents/accounts-i18n";
 
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
@@ -104,7 +90,7 @@ function setup(planned: StatusLinePlanResponse) {
     accounts: [ACCOUNT],
     registryError: null,
     registryPath: "/home/sample/.local/state/code-viewer/accounts.json",
-    launchCommands: { claude: "claude", codex: "codex" },
+    launchCommands: { claude: "claude", codex: "codex", opencode: "opencode" },
     lastLaunch: null,
     usageFailures: { total: 0, recent: [], log: "" },
   };

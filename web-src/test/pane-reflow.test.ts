@@ -2,8 +2,8 @@
 // 行に起こすところと、流しの始めの画面を空の端末へ書き戻すところ。本物の xterm に
 // バイト列を書いて確かめる (画面には出さない)。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import "./_dom";
+import { describe, expect, test } from "vitest";
 import {
   collapseBlankLines,
   DEFAULT_COLOR,
@@ -20,14 +20,6 @@ import {
 } from "../core/pane-reflow";
 import { paneSnapshotSequence, type TmuxPaneSnapshot } from "../core/tmux";
 import type { XtermTerminal } from "../core/xterm-loader";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 
 const ESC = String.fromCharCode(27);
 

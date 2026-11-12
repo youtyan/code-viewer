@@ -12,17 +12,8 @@
 // xterm・EventSource・fetch は外の境界なので差し替える。マス目は 8×16 px、
 // 偽の端末は 1 字 1 マス。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
 vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
@@ -118,6 +109,7 @@ vi.mock("../core/xterm-loader", async () => {
     select = noop;
     scrollToLine = noop;
     loadAddon = noop;
+    parser = { registerOscHandler: () => ({ dispose: () => undefined }) };
     onScroll = disposable;
     onResize = disposable;
     onData = disposable;
@@ -170,12 +162,14 @@ const LINES = [
   "changed src/greeting.ts:3 today",
   "missing src/missing.ts here",
   "wrote out/chart.png",
+  "ask %7 or %99 here",
 ];
 
 let emitOutput: (data: string) => void;
 let requests: string[];
 let statuses: Array<string | null>;
 let openedFiles: Array<{ path: string; line?: number; kept: boolean }>;
+let openedPanes: string[];
 let openedImages: Array<{ kept: boolean }>;
 let windowOpens: unknown[][];
 let copied: string[];
@@ -261,14 +255,6 @@ const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const nextFrame = () =>
   new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
-
 beforeEach(async () => {
   term.lines = [...LINES];
   term.selection = false;
@@ -276,6 +262,7 @@ beforeEach(async () => {
   requests = [];
   statuses = [];
   openedFiles = [];
+  openedPanes = [];
   openedImages = [];
   windowOpens = [];
   copied = [];
@@ -296,6 +283,9 @@ beforeEach(async () => {
     onOpenImage: (_image, _gallery, kept) => openedImages.push({ kept }),
     onOpenFile: (path, line, kept) =>
       openedFiles.push({ path, ...(line !== undefined ? { line } : {}), kept }),
+    // %7 だけが今 tmux に居るペイン。
+    isLivePane: (pane) => pane === "%7",
+    onOpenPane: (pane) => openedPanes.push(pane),
   });
   document.body.append(handle.el);
   await handle.attach(SHELL);
@@ -478,6 +468,18 @@ describe("押下", () => {
   ])("ファイルのパス: $name → その行を開く", ({ init, kept }) => {
     mouseAt("click", 1, 12, init);
     expect(openedFiles).toEqual([{ path: "src/greeting.ts", line: 3, kept }]);
+  });
+
+  test("今 tmux に居るペインの ID を押すと、そのペインを開く", () => {
+    mouseAt("click", 4, 5);
+    expect(openedPanes).toEqual(["%7"]);
+  });
+
+  test("一覧に居ないペインの ID はリンクにしない", () => {
+    mouseAt("mousemove", 4, 12);
+    expect(strong()).toEqual([]);
+    mouseAt("click", 4, 12);
+    expect(openedPanes).toEqual([]);
   });
 
   test("Shift は選択に任せて開かない", () => {

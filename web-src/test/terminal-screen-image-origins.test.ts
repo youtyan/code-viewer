@@ -14,17 +14,9 @@
 // xterm・EventSource・fetch は外の境界なので差し替える。tmux の応答 (ペインの
 // 並びと、どのペインに出たか) も偽物。本物は実画面で確かめる (作業報告)。
 
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 // 流しはチャンネルごとの偽の EventSource にする (_fake-live.ts)。
 vi.mock("../views/shell/live-hub", () => import("./_fake-live"));
@@ -125,6 +117,7 @@ vi.mock("../core/xterm-loader", async () => {
     };
     loadAddon = noop;
     registerLinkProvider = disposable;
+    parser = { registerOscHandler: () => ({ dispose: () => undefined }) };
     onResize = disposable;
     onRender = disposable;
     onScroll = disposable;
@@ -290,14 +283,6 @@ function installFakes(): void {
 }
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-
-beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
-});
 
 let handle: TerminalScreenHandle;
 

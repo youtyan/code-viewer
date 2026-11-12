@@ -108,7 +108,7 @@ global の `my-reuse-first` に従う。ここに置くのは**このリポジ�
 |---|---|
 | ドラッグでサイズを変えるハンドル | `core/drag-resizer.ts` `attachDragResizer`（5 箇所が共有） |
 | 変えたサイズを覚える | `core/stored-size.ts` `readStoredSize` / `writeStoredSize`（保存領域の失敗は結果の型で返る。既定値を使うときは `reportStoredSizeFailure` で操作ごとに 1 回 console.error） |
-| アイコン SVG | `core/icons.ts` の path 定数 + `iconSvg()` |
+| アイコン SVG | `core/icons.ts` の path 定数 + `views/ui/icon.ts` の `iconTemplate(paths, cls, size)`（テンプレートの中）/ `cv-icon` |
 | 確認・入力ダイアログ | `views/ui-dialog.ts` `showConfirmDialog` / `showAlertDialog` / `showPromptDialog` / `showFormDialog` |
 | 遅延バンドルの読み込み | `core/lazy-bundle.ts` `createBundleLoader` + `core/*-loader.ts` |
 | クライアント / サーバ共通の型 | `core/types.ts` |

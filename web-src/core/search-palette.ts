@@ -5,6 +5,37 @@ export const MAX_GREP_PALETTE_WIDTH = 2_400;
 export const MIN_GREP_PALETTE_HEIGHT = 420;
 export const MAX_GREP_PALETTE_HEIGHT = 1_400;
 
+/** 覚えておく「最近使った操作」の数 (空欄のときの操作の群は 5 つまで出す)。 */
+export const RECENT_PALETTE_ACTIONS_LIMIT = 10;
+
+/** 使った操作を先頭に置いた、最近使った操作の並び (新しいものが先)。 */
+export function rememberRecentPaletteAction(
+  recent: readonly string[],
+  id: string,
+): string[] {
+  return [id, ...recent.filter((entry) => entry !== id)].slice(
+    0,
+    RECENT_PALETTE_ACTIONS_LIMIT,
+  );
+}
+
+/**
+ * 検索欄が空のときの操作の行: 最近使ったもの (新しい順) を先に、その後ろに
+ * 決め打ちで勧めるもの (suggested)。同じ行は 1 回だけ。
+ */
+export function emptyQueryActions<T extends { id: string; suggested: boolean }>(
+  actions: readonly T[],
+  recent: readonly string[],
+): T[] {
+  const byId = new Map(actions.map((action) => [action.id, action]));
+  const used = recent.flatMap((id) => byId.get(id) ?? []);
+  const seen = new Set(used.map((action) => action.id));
+  return [
+    ...used,
+    ...actions.filter((action) => action.suggested && !seen.has(action.id)),
+  ];
+}
+
 export function limitPaletteResults<T>(items: T[]): T[] {
   return items.slice(0, PALETTE_RESULT_LIMIT);
 }

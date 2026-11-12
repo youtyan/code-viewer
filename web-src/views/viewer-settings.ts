@@ -1,16 +1,23 @@
-// ビューア設定のフォーム。Help ページは描画のたびに中身を作り直すため、
+// ビューア設定のフォーム。設定のページは描画のたびに枠を作り直すため、
 // ここで作った root を使い回して入力中の下書きを保持する。値の保存や、
 // フォント適用などの副作用は deps 経由で app.ts に任せる。
+//
+// 中身は状態 (下書き・保存の進み・出す節) から 1 つのテンプレートで描く。
+// ほかの持ち主の節 (アカウント・エージェント連携・ショートカット・外部接続) は
+// 要素のまま受け取って並べ、出す / 隠すだけをここが決める。
 
+import { live } from "lit/directives/live.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import {
-  applyColorTheme,
   COLOR_THEMES,
   type ColorTheme,
+  DEFAULT_COLOR_THEME,
   TERMINAL_TONES,
   type TerminalTone,
 } from "../core/color-themes";
 import { errorWithCause, formatErrorDetail } from "../core/error-detail";
-import { iconSvg, SEARCH_16_PATH } from "../core/icons";
+import { SEARCH_16_PATH } from "../core/icons";
 import {
   highlightToInnerHtml,
   loadShikiHighlighter,
@@ -20,6 +27,8 @@ import {
   TERMINAL_IMAGE_SHELF_PLACEMENTS,
   type TerminalImageShelfPlacement,
 } from "../core/terminal-images";
+import { iconTemplate } from "./ui/icon";
+import { renderOwned, templateElement } from "./ui/renderer";
 
 export type ViewerSettingsText = {
   display: string;
@@ -38,6 +47,10 @@ export type ViewerSettingsText = {
   /** ターミナルの画像の棚の置き場所。 */
   imageShelfPlacement: string;
   imageShelfPlacementHelp: string;
+  terminalClipboardWriteLabel: string;
+  terminalClipboardWriteHelp: string;
+  terminalOptionAsAltLabel: string;
+  terminalOptionAsAltHelp: string;
   imageShelfPlacementNames: Record<TerminalImageShelfPlacement, string>;
   language: string;
   fileListFontSize: string;
@@ -75,6 +88,11 @@ export type ViewerSettingsText = {
   agentNotifyTitle: string;
   agentNotifyWaitingLabel: string;
   agentNotifyDoneLabel: string;
+  agentNotifySoundLabel: string;
+  /** 「試しに鳴らす」のボタン (入力待ちの音・完了の音)。 */
+  agentNotifySoundTest: { waiting: string; finished: string };
+  /** 鳴らせなかったときの頭。 */
+  agentNotifySoundTestFailed: string;
   agentNotifyHelp: string;
   datastoreTitle: string;
   datastoreInferFkLabel: string;
@@ -132,6 +150,9 @@ export type ViewerSettingsChoices = {
   uploadEnabled: boolean;
   agentNotifyWaiting: boolean;
   agentNotifyDone: boolean;
+  agentNotifySound: boolean;
+  terminalClipboardWrite: boolean;
+  terminalOptionAsAlt: boolean;
   inferFkRails: boolean;
   s3TooltipEnabled: boolean;
 };
@@ -217,6 +238,11 @@ export type ViewerSettingsDeps = {
     },
   ): Promise<void>;
   onAgentRulesSave(value: string): Promise<void>;
+  /**
+   * 「短い音も鳴らす」の横の「試しに鳴らす」。鳴らせなければ理由つきで投げる
+   * (節の下に出す)。無ければボタンを出さない。
+   */
+  onTestSound?(kind: "waiting" | "finished"): Promise<void>;
   onAgentRulesReset(): Promise<void>;
   /**
    * 通知の節の次に置く節 (エージェント連携)。中身と取得・文言の切り替えは
@@ -237,18 +263,13 @@ export type ViewerSettingsDeps = {
 };
 
 /**
- * テーマの見本の中身 (固定の信頼できる HTML)。コードの 1 行・削除と追加の行
- * (語の強調つき)・コメント。色は見本の箱が持つそのテーマの名前の層から読む
- * (style.css の .theme-swatch)。
+ * テーマの見本の中身。コードの 1 行・削除と追加の行 (語の強調つき)・コメント。
+ * 色は見本の箱が持つそのテーマの名前の層から読む (style.css の .theme-swatch)。
  */
-const THEME_SWATCH_HTML = [
-  '<span class="theme-swatch-line"><span class="theme-swatch-keyword">const</span> <span class="theme-swatch-function">total</span> = <span class="theme-swatch-string">"a"</span></span>',
-  '<span class="theme-swatch-line theme-swatch-del">− <span class="theme-swatch-type">1</span><span class="theme-swatch-word">0</span></span>',
-  '<span class="theme-swatch-line theme-swatch-add">+ <span class="theme-swatch-type">1</span><span class="theme-swatch-word">5</span></span>',
-  '<span class="theme-swatch-line theme-swatch-comment">// sum</span>',
-].join("");
+const THEME_SWATCH = html`<span class="theme-swatch-line"><span class="theme-swatch-keyword">const</span> <span class="theme-swatch-function">total</span> = <span class="theme-swatch-string">"a"</span></span><span class="theme-swatch-line theme-swatch-del">− <span class="theme-swatch-type">1</span><span class="theme-swatch-word">0</span></span><span class="theme-swatch-line theme-swatch-add">+ <span class="theme-swatch-type">1</span><span class="theme-swatch-word">5</span></span><span class="theme-swatch-line theme-swatch-comment">// sum</span>`;
 
 const FONT_SIZE_VALUES = ["compact", "regular", "large", "xlarge"] as const;
+type FontSizeValue = (typeof FONT_SIZE_VALUES)[number];
 const LANGUAGE_VALUES = [
   { value: "en", label: "English" },
   { value: "ja", label: "日本語" },
@@ -259,213 +280,601 @@ const GENERAL_SETTING_FIELDS: readonly (keyof ViewerSettingsDraft)[] = [
   "watchLimit",
 ];
 
-function section(): HTMLDivElement {
-  const div = document.createElement("div");
-  div.className = "scope-settings-section";
-  return div;
+/** 節。own はここが描く節、ほかは持ち主から受け取る要素。 */
+type SectionKey =
+  | "display"
+  | "agentNotify"
+  | "agentHooks"
+  | "accounts"
+  | "shortcuts"
+  | "excluded"
+  | "uploads"
+  | "remote"
+  | "datastores"
+  | "watch"
+  | "rules";
+
+/** 並びは分類の並び (検索の結果もこの順に出る)。 */
+const SECTION_ORDER: readonly (readonly [SectionKey, SettingsCategory])[] = [
+  ["display", "appearance"],
+  ["agentNotify", "agents"],
+  ["agentHooks", "agents"],
+  ["accounts", "accounts"],
+  ["shortcuts", "shortcuts"],
+  ["excluded", "files"],
+  ["uploads", "files"],
+  ["remote", "remote"],
+  ["datastores", "advanced"],
+  ["watch", "advanced"],
+  ["rules", "advanced"],
+];
+
+/**
+ * 「デフォルトに戻す」が戻す項目 (打ち込む欄) を持つ節。どれも出ていない分類
+ * では、ページの下の「デフォルトに戻す」を出さない (戻すものが無い)。
+ */
+const GENERAL_SECTIONS: readonly SectionKey[] = ["excluded", "watch"];
+/**
+ * 「変更を保存」で保存する欄を持つ節。どれも出ていない分類 (表示・エージェント)
+ * では保存の帯を出さない (選ぶ欄はすぐ効くので、押すものが無い)。
+ */
+const SAVED_SECTIONS: readonly SectionKey[] = [
+  "excluded",
+  "watch",
+  "rules",
+  "accounts",
+  "shortcuts",
+  "remote",
+];
+
+/** すぐ当てて保存するチェックボックス (欄の id と値の名前)。 */
+const TOGGLES = {
+  uploadEnabled: "upload-enabled",
+  agentNotifyWaiting: "agent-notify-waiting",
+  agentNotifyDone: "agent-notify-done",
+  agentNotifySound: "agent-notify-sound",
+  terminalClipboardWrite: "terminal-clipboard-write",
+  terminalOptionAsAlt: "terminal-option-as-alt",
+  inferFkRails: "datastore-infer-fk",
+  s3TooltipEnabled: "datastore-s3-tooltip",
+} as const;
+type ToggleField = keyof typeof TOGGLES;
+
+/** 下書きの欄の id (焦点のある欄は取り直しで書き換えない)。 */
+const DRAFT_FIELD_IDS = {
+  omitDirs: "scope-omit-dirs",
+  excludeNames: "scope-exclude-names",
+  watchLimit: "scope-watch-limit",
+} as const;
+
+type SelectProps = {
+  id: string;
+  value: string;
+  options: readonly { value: string; label: string }[];
+  onChange(value: string): void;
+};
+
+type ToggleProps = {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange(checked: boolean): void;
+};
+
+type TextareaProps = {
+  id: string;
+  label: string;
+  rows: number;
+  value: string;
+  disabled: boolean;
+  help: { id: string; text: string };
+  onInput(value: string): void;
+};
+
+/** 自分で描く節の箱 (出すか・分類にその節だけか)。 */
+type SectionBox = { hidden: boolean; sole: boolean };
+
+/** 見出しの横の「全プロジェクト共通」。 */
+type SharedTag = { text: string; title: string };
+
+/** 節。持ち主から受け取る節 (element) は、出す / 隠すを presenter が決める。 */
+export type ViewerSettingsSectionProps =
+  | { key: "external"; element: HTMLElement }
+  | {
+      key: "display";
+      box: SectionBox;
+      title: string;
+      shared: SharedTag;
+      colorTheme: {
+        label: string;
+        help: string;
+        choices: {
+          id: ColorTheme;
+          name: string;
+          pressed: boolean;
+          onPick(): void;
+        }[];
+      };
+      theme: {
+        label: string;
+        select: SelectProps;
+        help: string;
+        keyHelp: string;
+      };
+      terminalTone: { label: string; select: SelectProps; help: string };
+      shelfPlacement: { label: string; select: SelectProps; help: string };
+      clipboardWrite: { toggle: ToggleProps; help: string };
+      optionAsAlt: { toggle: ToggleProps; help: string };
+      language: { label: string; select: SelectProps };
+      sidebarFontSize: { label: string; select: SelectProps; help: string };
+      codeFontSize: { label: string; select: SelectProps };
+      userSettingsError: string;
+    }
+  | {
+      key: "uploads";
+      box: SectionBox;
+      title: string;
+      toggle: ToggleProps;
+      help: string;
+    }
+  | {
+      key: "agentNotify";
+      box: SectionBox;
+      title: string;
+      shared: SharedTag;
+      help: string;
+      waiting: ToggleProps;
+      done: ToggleProps;
+      sound: ToggleProps;
+      /** 試しに鳴らすボタン (入力待ち・完了)。onTestSound が無ければ空。 */
+      soundTests: { label: string; onPlay(): void }[];
+      soundTestError: string;
+    }
+  | {
+      key: "excluded";
+      box: SectionBox;
+      title: string;
+      omitDirs: TextareaProps;
+      excludeNames: TextareaProps;
+      source: string;
+    }
+  | {
+      key: "datastores";
+      box: SectionBox;
+      title: string;
+      inferFk: ToggleProps;
+      inferFkHelp: string;
+      s3Tooltip: ToggleProps;
+      s3TooltipHelp: string;
+    }
+  | {
+      key: "watch";
+      box: SectionBox;
+      title: string;
+      label: string;
+      min: number;
+      max: number;
+      value: string;
+      disabled: boolean;
+      help: string;
+      onInput(value: string): void;
+    }
+  | {
+      key: "rules";
+      box: SectionBox;
+      title: string;
+      purpose: string;
+      source: string;
+      error: string;
+      highlightError: string;
+      edit: string;
+      label: string;
+      help: readonly string[];
+      guide: {
+        title: string;
+        intro: string;
+        fields: string;
+        matchers: string;
+        regions: string;
+        example: string;
+      };
+      /** 色付けした規則の HTML (色付けできなければ空)。 */
+      highlighted: string;
+      value: string;
+      disabled: boolean;
+      onInput(value: string): void;
+      onScroll(): void;
+      reset: { label: string; disabled: boolean; onClick(): void };
+    };
+
+export type ViewerSettingsFormProps = {
+  /** 検索で何も当たらないときの文 (当たれば null)。 */
+  searchEmpty: string | null;
+  sections: ViewerSettingsSectionProps[];
+  footer: {
+    hidden: boolean;
+    note: string;
+    status: { state: string; text: string };
+    saveError: string;
+    refreshError: string;
+    reset: {
+      label: string;
+      hidden: boolean;
+      disabled: boolean;
+      onClick(): void;
+    };
+    save: { label: string; disabled: boolean; onClick(): void };
+  };
+};
+
+export type ViewerSettingsSearchProps = {
+  placeholder: string;
+  value: string;
+  onInput(value: string): void;
+};
+
+export type ViewerSettingsView = {
+  /** 設定の節と保存の帯 (箱 .scope-settings の中)。 */
+  form(props: ViewerSettingsFormProps): unknown;
+  /** 見出しの下の検索欄 (箱 .scope-settings-search-wrap の中)。 */
+  search(props: ViewerSettingsSearchProps): unknown;
+};
+
+function sectionClass(box: SectionBox, extra = ""): string {
+  return [
+    "scope-settings-section",
+    extra,
+    box.sole ? "scope-settings-section-sole" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
-function sectionTitle(): HTMLElement {
-  const strong = document.createElement("strong");
-  strong.className = "scope-settings-section-title";
-  return strong;
+function sharedTagTemplate(tag: SharedTag): TemplateResult {
+  return html`<span class="scope-settings-shared" title=${tag.title}>${tag.text}</span>`;
 }
 
-/** 見出しの横の「全プロジェクト共通」。見出しの文字を書き換えても残るよう別の要素。 */
-function sharedTag(): HTMLSpanElement {
-  const tag = document.createElement("span");
-  tag.className = "scope-settings-shared";
-  return tag;
+function help(id: string, text: unknown): TemplateResult {
+  return html`<p class="scope-settings-help" id=${id}>${text}</p>`;
 }
 
-function titleRow(title: HTMLElement, tag: HTMLElement): HTMLDivElement {
-  const row = document.createElement("div");
-  row.className = "scope-settings-title-row";
-  row.append(title, tag);
-  return row;
+function errorLine(id: string, text: string): TemplateResult {
+  return html`<p
+    class="scope-settings-help scope-settings-refresh-error"
+    id=${id}
+    ?hidden=${!text}
+  >${text}</p>`;
 }
 
-function fieldLabel(htmlFor: string): HTMLLabelElement {
-  const label = document.createElement("label");
-  label.htmlFor = htmlFor;
-  return label;
+function selectTemplate(props: SelectProps): TemplateResult {
+  return html`<select
+    id=${props.id}
+    .value=${live(props.value)}
+    @change=${(event: Event) =>
+      props.onChange((event.currentTarget as HTMLSelectElement).value)}
+  >${props.options.map(
+    (option) =>
+      html`<option value=${option.value} ?selected=${option.value === props.value}
+        >${option.label}</option
+      >`,
+  )}</select>`;
 }
 
-function helpText(id?: string): HTMLParagraphElement {
-  const p = document.createElement("p");
-  p.className = "scope-settings-help";
-  if (id) p.id = id;
-  return p;
+function toggleTemplate(props: ToggleProps): TemplateResult {
+  return html`<label class="scope-settings-toggle"><input
+      type="checkbox"
+      id=${props.id}
+      .checked=${live(props.checked)}
+      @change=${(event: Event) =>
+        props.onChange((event.currentTarget as HTMLInputElement).checked)}
+    /><span>${props.label}</span></label>`;
 }
 
-function fontSizeSelect(id: string): HTMLSelectElement {
-  const select = document.createElement("select");
-  select.id = id;
-  for (const value of FONT_SIZE_VALUES) {
-    const option = document.createElement("option");
-    option.value = value;
-    select.appendChild(option);
+function textareaTemplate(props: TextareaProps): TemplateResult {
+  return html`<label for=${props.id}>${props.label}</label><textarea
+      id=${props.id}
+      rows=${props.rows}
+      spellcheck="false"
+      ?disabled=${props.disabled}
+      .value=${live(props.value)}
+      @input=${(event: Event) =>
+        props.onInput((event.currentTarget as HTMLTextAreaElement).value)}
+    ></textarea>${help(props.help.id, props.help.text)}`;
+}
+
+function titleTemplate(
+  id: string,
+  title: string,
+  shared?: SharedTag,
+): TemplateResult {
+  return shared
+    ? html`<div class="scope-settings-title-row"><strong
+          class="scope-settings-section-title"
+          id=${id}
+        >${title}</strong>${sharedTagTemplate(shared)}</div>`
+    : html`<strong class="scope-settings-section-title" id=${id}>${title}</strong>`;
+}
+
+function sectionTemplate(section: ViewerSettingsSectionProps): unknown {
+  switch (section.key) {
+    case "external":
+      return section.element;
+    case "display":
+      // テーマの各見本はライトとダークの小さなコードと差分を並べ、そのテーマの
+      // 名前の層の色 (html と同じ data-color-theme / data-theme) で描く。押すと
+      // すぐに当てる (明暗はそのまま)。
+      return html`<div
+        class=${sectionClass(section.box)}
+        data-settings-section="display"
+        ?hidden=${section.box.hidden}
+      >${titleTemplate("display-section-title", section.title, section.shared)}<label
+          id="viewer-color-theme-label"
+        >${section.colorTheme.label}</label><div
+          id="viewer-color-theme"
+          class="theme-picker"
+          role="group"
+          aria-labelledby="viewer-color-theme-label"
+        >${section.colorTheme.choices.map(
+          (choice) => html`<button
+            type="button"
+            class="theme-choice"
+            data-color-theme-choice=${choice.id}
+            aria-pressed=${String(choice.pressed)}
+            @click=${choice.onPick}
+          ><span class="theme-swatch" aria-hidden="true">${[...THEME_CHOICES]
+            .reverse()
+            .map(
+              (mode) => html`<span
+                class="theme-swatch-pane"
+                data-theme=${mode}
+                data-color-theme=${choice.id === DEFAULT_COLOR_THEME ? nothing : choice.id}
+              >${THEME_SWATCH}</span>`,
+            )}</span><span class="theme-choice-name">${choice.name}</span></button>`,
+        )}</div>${help("viewer-color-theme-help", section.colorTheme.help)}<label
+          for="viewer-theme"
+        >${section.theme.label}</label>${selectTemplate(section.theme.select)}${help(
+          "viewer-theme-help",
+          html`${section.theme.help}<span class="gdp-key-hint">${section.theme.keyHelp}</span>`,
+        )}<label for="viewer-terminal-tone">${section.terminalTone.label}</label>${selectTemplate(
+          section.terminalTone.select,
+        )}${help("viewer-terminal-tone-help", section.terminalTone.help)}<label
+          for="viewer-image-shelf-placement"
+        >${section.shelfPlacement.label}</label>${selectTemplate(
+          section.shelfPlacement.select,
+        )}${help("viewer-image-shelf-placement-help", section.shelfPlacement.help)}${toggleTemplate(
+          section.clipboardWrite.toggle,
+        )}${help("viewer-clipboard-write-help", section.clipboardWrite.help)}${toggleTemplate(
+          section.optionAsAlt.toggle,
+        )}${help("viewer-option-as-alt-help", section.optionAsAlt.help)}<label
+          for="viewer-language"
+        >${section.language.label}</label>${selectTemplate(section.language.select)}<label
+          for="sidebar-font-size"
+        >${section.sidebarFontSize.label}</label>${selectTemplate(
+          section.sidebarFontSize.select,
+        )}${help("ui-font-size-help", section.sidebarFontSize.help)}<label
+          for="code-font-size"
+        >${section.codeFontSize.label}</label>${selectTemplate(
+          section.codeFontSize.select,
+        )}${errorLine("user-settings-error", section.userSettingsError)}</div>`;
+    case "uploads":
+      return html`<div
+        class=${sectionClass(section.box)}
+        data-settings-section="uploads"
+        ?hidden=${section.box.hidden}
+      >${titleTemplate("upload-section-title", section.title)}${toggleTemplate(
+        section.toggle,
+      )}${help("upload-help", section.help)}</div>`;
+    case "agentNotify":
+      // エージェント一覧の「通知は有効です」から、この見出しへ飛んでくる。節は
+      // 見出し → 何のための設定かの 1 文 → 操作 (説明は 2 つのチェックボックスの両方に掛かる)。
+      return html`<div
+        class=${sectionClass(section.box)}
+        data-settings-section="agentNotify"
+        ?hidden=${section.box.hidden}
+      >${titleTemplate("agent-notify-section-title", section.title, section.shared)}${help(
+        "agent-notify-help",
+        section.help,
+      )}${toggleTemplate(section.waiting)}${toggleTemplate(section.done)}${toggleTemplate(
+        section.sound,
+      )}${
+        section.soundTests.length > 0
+          ? html`<div class="scope-settings-actions scope-settings-actions-inline">${section.soundTests.map(
+              (test) =>
+                html`<button type="button" class="gdp-btn gdp-btn-sm" @click=${test.onPlay}>${test.label}</button>`,
+            )}</div>`
+          : nothing
+      }${errorLine("agent-notify-sound-error", section.soundTestError)}</div>`;
+    case "excluded":
+      return html`<div
+        class=${sectionClass(section.box)}
+        data-settings-section="excluded"
+        ?hidden=${section.box.hidden}
+      >${titleTemplate("excluded-section-title", section.title)}${textareaTemplate(
+        section.omitDirs,
+      )}${textareaTemplate(section.excludeNames)}<p id="scope-omit-source"
+          >${section.source}</p
+        ></div>`;
+    case "datastores":
+      return html`<div
+        class=${sectionClass(section.box)}
+        data-settings-section="datastores"
+        ?hidden=${section.box.hidden}
+      >${titleTemplate("datastore-section-title", section.title)}${toggleTemplate(
+        section.inferFk,
+      )}${help("datastore-infer-fk-help", section.inferFkHelp)}${toggleTemplate(
+        section.s3Tooltip,
+      )}${help("datastore-s3-tooltip-help", section.s3TooltipHelp)}</div>`;
+    case "watch": {
+      // スライダーと数の欄は同じ値を持つ (どちらを動かしても、もう片方が付いてくる)。
+      const onWatch = (event: Event) =>
+        section.onInput((event.currentTarget as HTMLInputElement).value);
+      return html`<div
+        class=${sectionClass(section.box)}
+        id="watch-settings-section"
+        data-settings-section="watch"
+        ?hidden=${section.box.hidden}
+      ><strong class="scope-settings-section-title" id="watch-section-title"
+          >${section.title}</strong
+        ><label for="scope-watch-limit">${section.label}</label><div
+          class="scope-watch-limit-row"
+        ><input
+          id="scope-watch-limit-range"
+          type="range"
+          step="16"
+          min=${section.min}
+          max=${section.max}
+          aria-label=${section.label}
+          ?disabled=${section.disabled}
+          .value=${live(section.value)}
+          @input=${onWatch}
+          @change=${onWatch}
+        /><input
+          id="scope-watch-limit"
+          type="number"
+          step="1"
+          min=${section.min}
+          max=${section.max}
+          ?disabled=${section.disabled}
+          .value=${live(section.value)}
+          @input=${onWatch}
+          @change=${onWatch}
+        /></div>${help("scope-watch-limit-help", section.help)}</div>`;
+    }
+    case "rules":
+      // 誤りは畳んだ中に入れない (閉じたままでも読めるように)。編集の欄は既定で
+      // 畳む。普段は触らないもので、開いたままだと長い JSON が分類の大半を占めていた。
+      return html`<div
+        class=${sectionClass(section.box, "agent-screen-rules-section")}
+        data-settings-section="rules"
+        ?hidden=${section.box.hidden}
+      ><strong class="scope-settings-section-title" id="agent-screen-rules-title"
+          >${section.title}</strong
+        >${help("agent-screen-rules-purpose", section.purpose)}${help(
+          "agent-screen-rules-source",
+          section.source,
+        )}${errorLine("agent-screen-rules-error", section.error)}${errorLine(
+          "agent-screen-rules-highlight-error",
+          section.highlightError,
+        )}<details id="agent-screen-rules-details" class="agent-screen-rules-details"
+          ><summary>${section.edit}</summary><label for="agent-screen-rules"
+            >${section.label}</label
+          ><div id="agent-screen-rules-help">${section.help.map(
+            (paragraph) =>
+              html`<p class="scope-settings-help">${paragraph}</p>`,
+          )}</div><details id="agent-screen-rules-guide" class="agent-screen-rules-guide" open
+            ><summary>${section.guide.title}</summary><p class="scope-settings-help"
+              >${section.guide.intro}</p
+            ><p class="scope-settings-help">${section.guide.fields}</p><p
+              class="scope-settings-help"
+            >${section.guide.matchers}</p><p class="scope-settings-help"
+              >${section.guide.regions}</p
+            ><pre class="agent-screen-rules-guide-example">${section.guide.example}</pre></details
+          ><div class="agent-screen-rules-editor"><pre
+            class="agent-screen-rules-highlight"
+            aria-hidden="true"
+          >${section.highlighted ? unsafeHTML(section.highlighted) : section.value}</pre><textarea
+            id="agent-screen-rules"
+            rows="24"
+            spellcheck="false"
+            aria-describedby="agent-screen-rules-help agent-screen-rules-source agent-screen-rules-error agent-screen-rules-highlight-error"
+            ?disabled=${section.disabled}
+            .value=${live(section.value)}
+            @input=${(event: Event) =>
+              section.onInput(
+                (event.currentTarget as HTMLTextAreaElement).value,
+              )}
+            @scroll=${section.onScroll}
+          ></textarea></div><div class="scope-settings-actions"><button
+            type="button"
+            class="gdp-btn"
+            id="agent-screen-rules-reset"
+            ?disabled=${section.reset.disabled}
+            @click=${section.reset.onClick}
+          >${section.reset.label}</button></div></details
+        ></div>`;
   }
-  return select;
 }
 
-function toggleRow(id: string): {
-  wrap: HTMLLabelElement;
-  input: HTMLInputElement;
-  text: HTMLSpanElement;
-} {
-  const wrap = document.createElement("label");
-  wrap.className = "scope-settings-toggle";
-  const input = document.createElement("input");
-  input.type = "checkbox";
-  input.id = id;
-  const text = document.createElement("span");
-  wrap.append(input, text);
-  return { wrap, input, text };
-}
+export const DEFAULT_VIEW: ViewerSettingsView = {
+  form: (props) => html`<p
+      class="scope-settings-help"
+      id="scope-settings-search-empty"
+      ?hidden=${props.searchEmpty === null}
+    >${props.searchEmpty ?? ""}</p>${props.sections.map(sectionTemplate)}<div
+      class="scope-settings-footer"
+      ?hidden=${props.footer.hidden}
+    >${help("scope-settings-save-note", props.footer.note)}<p
+        class="scope-settings-help"
+        id="scope-settings-save-status"
+        aria-live="polite"
+        data-state=${props.footer.status.state}
+      >${props.footer.status.text}</p>${errorLine(
+        "scope-settings-save-error",
+        props.footer.saveError,
+      )}${errorLine("scope-settings-refresh-error", props.footer.refreshError)}<div
+        class="scope-settings-actions"
+      ><button
+        id="scope-omit-reset"
+        type="button"
+        class="gdp-btn"
+        ?hidden=${props.footer.reset.hidden}
+        ?disabled=${props.footer.reset.disabled}
+        @click=${props.footer.reset.onClick}
+      >${props.footer.reset.label}</button><button
+        id="scope-settings-save"
+        type="button"
+        class="scope-settings-primary-action"
+        ?disabled=${props.footer.save.disabled}
+        @click=${props.footer.save.onClick}
+      >${props.footer.save.label}</button></div></div>`,
+  search: (
+    props,
+  ) => html`${iconTemplate(SEARCH_16_PATH, "scope-settings-search-icon")}<input
+      type="search"
+      id="scope-settings-search"
+      class="scope-settings-search"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder=${props.placeholder}
+      aria-label=${props.placeholder}
+      .value=${live(props.value)}
+      @input=${(event: Event) =>
+        props.onInput((event.currentTarget as HTMLInputElement).value)}
+    />`,
+};
 
-function setFieldValue(
-  field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
-  value: string,
-  force = false,
-): void {
-  if (!force && field === document.activeElement) return;
-  if (field.value !== value) field.value = value;
-}
-
-export function createViewerSettings(deps: ViewerSettingsDeps) {
+export function createViewerSettings(
+  deps: ViewerSettingsDeps,
+  view: ViewerSettingsView = DEFAULT_VIEW,
+) {
+  // 節の箱。設定のページが置き、中はここが描く (ページを描き直しても使い回す)。
   let root: HTMLElement | null = null;
-  let category: SettingsCategory = SETTINGS_CATEGORIES[0];
-  /** 節と、その節が属する分類。build() が埋める。 */
-  const categorized: Array<[HTMLElement, SettingsCategory]> = [];
-  /**
-   * 「デフォルトに戻す」が戻す項目 (打ち込む欄) を持つ節。どれも出ていない分類
-   * では、ページの下の「デフォルトに戻す」を出さない (戻すものが無い)。
-   */
-  const generalSections: HTMLElement[] = [];
-  /**
-   * 「変更を保存」で保存する欄を持つ節。どれも出ていない分類 (表示・エージェント)
-   * では保存の帯を出さない (選ぶ欄はすぐ効くので、押すものが無い)。
-   */
-  const savedSections: HTMLElement[] = [];
-  const search = document.createElement("input");
-  search.type = "search";
-  search.id = "scope-settings-search";
-  search.className = "scope-settings-search";
-  search.autocomplete = "off";
-  search.spellcheck = false;
-  const searchWrap = document.createElement("div");
-  searchWrap.className = "scope-settings-search-wrap";
-  searchWrap.innerHTML = iconSvg("scope-settings-search-icon", SEARCH_16_PATH);
-  searchWrap.append(search);
-  const searchEmpty = helpText("scope-settings-search-empty");
-  searchEmpty.hidden = true;
-
-  const theme = document.createElement("select");
-  const themeHelp = helpText("viewer-theme-help");
-  const terminalTone = document.createElement("select");
-  const terminalToneHelp = helpText("viewer-terminal-tone-help");
-  const shelfPlacement = document.createElement("select");
-  const shelfPlacementHelp = helpText("viewer-image-shelf-placement-help");
-  const colorThemes = colorThemePicker();
-  const colorThemeHelp = helpText("viewer-color-theme-help");
-  const language = document.createElement("select");
-  const sidebarFontSize = fontSizeSelect("sidebar-font-size");
-  const codeFontSize = fontSizeSelect("code-font-size");
-  const uiFontSizeHelp = helpText("ui-font-size-help");
-  const userSettingsError = helpText("user-settings-error");
-  userSettingsError.classList.add("scope-settings-refresh-error");
-  userSettingsError.hidden = true;
-  const displayShared = sharedTag();
-  const agentNotifyShared = sharedTag();
-  const upload = toggleRow("upload-enabled");
-  const uploadHelp = helpText("upload-help");
-  const agentNotifyWaiting = toggleRow("agent-notify-waiting");
-  const agentNotifyDone = toggleRow("agent-notify-done");
-  const agentNotifyHelp = helpText("agent-notify-help");
-  const omitDirs = document.createElement("textarea");
-  const omitDirsHelp = helpText("scope-omit-dirs-help");
-  const excludeNames = document.createElement("textarea");
-  const excludeNamesHelp = helpText("scope-exclude-names-help");
-  const scopeSource = document.createElement("p");
-  const inferFk = toggleRow("datastore-infer-fk");
-  const inferFkHelp = helpText("datastore-infer-fk-help");
-  const s3Tooltip = toggleRow("datastore-s3-tooltip");
-  const s3TooltipHelp = helpText("datastore-s3-tooltip-help");
-  const watchLimitNumber = document.createElement("input");
-  const watchLimitRange = document.createElement("input");
-  const watchLimitHelp = helpText("scope-watch-limit-help");
-  const watch = section();
-
-  const agentRules = document.createElement("textarea");
-  const agentRulesPurpose = helpText("agent-screen-rules-purpose");
-  // 書き方の説明 (段落の数は文言が決める)。
-  const agentRulesHelp = document.createElement("div");
-  agentRulesHelp.id = "agent-screen-rules-help";
-  // 編集の欄は既定で畳む。普段は触らないもので、開いたままだと長い JSON が
-  // 分類の大半を占めていた。
-  const agentRulesDetails = document.createElement("details");
-  agentRulesDetails.id = "agent-screen-rules-details";
-  agentRulesDetails.className = "agent-screen-rules-details";
-  const agentRulesEdit = document.createElement("summary");
-  const agentRulesSource = helpText("agent-screen-rules-source");
-  const agentRulesError = helpText("agent-screen-rules-error");
-  agentRulesError.classList.add("scope-settings-refresh-error");
-  agentRulesError.hidden = true;
-  const agentRulesHighlightError = helpText(
-    "agent-screen-rules-highlight-error",
+  // 検索欄の箱。設定のページの見出しの下に置く。
+  const searchWrap = templateElement(
+    html`<div class="scope-settings-search-wrap"></div>`,
   );
-  agentRulesHighlightError.classList.add("scope-settings-refresh-error");
-  agentRulesHighlightError.hidden = true;
-  const agentRulesHighlight = document.createElement("pre");
-  agentRulesHighlight.className = "agent-screen-rules-highlight";
-  agentRulesHighlight.setAttribute("aria-hidden", "true");
-  const agentRulesGuide = document.createElement("details");
-  agentRulesGuide.id = "agent-screen-rules-guide";
-  agentRulesGuide.className = "agent-screen-rules-guide";
-  agentRulesGuide.open = true;
-  const agentRulesGuideTitle = document.createElement("summary");
-  const agentRulesGuideIntro = helpText();
-  const agentRulesGuideFields = helpText();
-  const agentRulesGuideMatchers = helpText();
-  const agentRulesGuideRegions = helpText();
-  const agentRulesGuideExample = document.createElement("pre");
-  agentRulesGuideExample.className = "agent-screen-rules-guide-example";
-  const agentRulesReset = document.createElement("button");
+  let category: SettingsCategory = SETTINGS_CATEGORIES[0];
+  let query = "";
+  /** 持ち主から受け取る節。 */
+  const external: Partial<Record<SectionKey, HTMLElement>> = {
+    agentHooks: deps.agentHooksSection,
+    accounts: deps.agentAccountsSection,
+    shortcuts: deps.shortcutsSection,
+    remote: deps.remoteAccessSection,
+  };
+  /** 出す節と、分類に 1 つだけの節 (見出しを出さない)。applyCategory が決める。 */
+  const visible = new Map<SectionKey, boolean>();
+  let sole: SectionKey | null = null;
 
-  const saveNote = helpText("scope-settings-save-note");
-  const saveStatus = helpText("scope-settings-save-status");
-  saveStatus.setAttribute("aria-live", "polite");
-  const saveError = helpText("scope-settings-save-error");
-  saveError.classList.add("scope-settings-refresh-error");
-  saveError.hidden = true;
-  const refreshError = helpText("scope-settings-refresh-error");
-  refreshError.classList.add("scope-settings-refresh-error");
-  refreshError.hidden = true;
-  const resetButton = document.createElement("button");
-  const saveButton = document.createElement("button");
-  const footer = document.createElement("div");
-
-  const displayTitle = sectionTitle();
-  const uploadsTitle = sectionTitle();
-  const agentNotifyTitle = sectionTitle();
-  const excludedTitle = sectionTitle();
-  const datastoreTitle = sectionTitle();
-  const watchTitle = sectionTitle();
-  const agentRulesTitle = sectionTitle();
-  const themeLabel = fieldLabel("viewer-theme");
-  const terminalToneLabel = fieldLabel("viewer-terminal-tone");
-  const shelfPlacementLabel = fieldLabel("viewer-image-shelf-placement");
-  // 見本の並びは 1 つの入力欄ではないので、for を持たない見出し (群の名前)。
-  const colorThemeLabel = document.createElement("label");
-  colorThemeLabel.id = "viewer-color-theme-label";
-  const languageLabel = fieldLabel("viewer-language");
-  const sidebarFontSizeLabel = fieldLabel("sidebar-font-size");
-  const codeFontSizeLabel = fieldLabel("code-font-size");
-  const omitDirsLabel = fieldLabel("scope-omit-dirs");
-  const excludeNamesLabel = fieldLabel("scope-exclude-names");
-  const watchLimitLabel = fieldLabel("scope-watch-limit");
-  const agentRulesLabel = fieldLabel("agent-screen-rules");
+  /** 最後に読んだ値 (sync が取り直す)。 */
+  let values: ViewerSettingsValues | null = null;
+  /** 選ぶ欄の今の値 (選んだらすぐ持つ。sync が保存してある値に合わせる)。 */
+  let choices: ViewerSettingsChoices | null = null;
+  let themeChoice: ThemeChoice = "dark";
+  let colorTheme: ColorTheme = DEFAULT_COLOR_THEME;
+  /** 打ち込む欄の下書き。 */
+  const general = { omitDirs: "", excludeNames: "", watchLimit: "" };
+  let agentRulesValue = "";
 
   let generalDirty = false;
   let generalSavePending = false;
@@ -478,307 +887,499 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
    */
   let agentRulesDirty = false;
   let agentRulesRestore = false;
+  let agentRulesError = "";
+  let agentRulesHighlightError = "";
   let jsonHighlighter: ShikiHighlighter | null = null;
+  /** 色付けした規則 (同じ文字なら色付けし直さない)。 */
+  let highlighted: { source: string; html: string; by: unknown } | null = null;
+  let saveError = "";
+  let refreshError = "";
+  let soundTestError = "";
   let refreshGeneration = 0;
 
-  function build(): HTMLElement {
-    const wrap = document.createElement("div");
-    wrap.className = "scope-settings";
+  function sectionElement(key: SectionKey): HTMLElement | null {
+    return (
+      external[key] ??
+      root?.querySelector<HTMLElement>(`[data-settings-section="${key}"]`) ??
+      null
+    );
+  }
 
-    theme.id = "viewer-theme";
-    for (const value of THEME_CHOICES) {
-      const option = document.createElement("option");
-      option.value = value;
-      theme.appendChild(option);
+  function byId<T extends HTMLElement>(id: string): T | null {
+    return (root?.querySelector<T>(`#${id}`) ?? null) as T | null;
+  }
+
+  /** 焦点のある欄は、取り直しの値で書き換えない (force は「デフォルトに戻す」)。 */
+  function focused(id: string): boolean {
+    const element = byId(id);
+    return element !== null && element === document.activeElement;
+  }
+
+  // ---- 描く ----------------------------------------------------------------
+
+  function box(key: SectionKey): SectionBox {
+    return { hidden: !visible.get(key), sole: sole === key };
+  }
+
+  function sharedTag(text: ViewerSettingsText): SharedTag {
+    return { text: text.sharedTag, title: text.sharedTagTitle };
+  }
+
+  /** 選ぶ欄は選んだ時点で当てて保存する (下書きにしない)。 */
+  function choose<K extends keyof ViewerSettingsChoices>(
+    field: K,
+    value: ViewerSettingsChoices[K],
+  ): void {
+    if (choices) choices = { ...choices, [field]: value };
+    deps.onChoose({ [field]: value } as Partial<ViewerSettingsChoices>);
+  }
+
+  function toggleProps(
+    field: ToggleField,
+    label: string,
+    checked: boolean,
+  ): ToggleProps {
+    return {
+      id: TOGGLES[field],
+      label,
+      checked,
+      onChange: (next) => choose(field, next),
+    };
+  }
+
+  function choiceSelect(
+    field: Exclude<keyof ViewerSettingsChoices, ToggleField>,
+    id: string,
+    value: string,
+    options: readonly { value: string; label: string }[],
+  ): SelectProps {
+    return { id, value, options, onChange: (next) => choose(field, next) };
+  }
+
+  function draftTextarea(
+    field: "omitDirs" | "excludeNames",
+    label: string,
+    rows: number,
+    helpText: { id: string; text: string },
+  ): TextareaProps {
+    return {
+      id: DRAFT_FIELD_IDS[field],
+      label,
+      rows,
+      value: general[field],
+      disabled: generalSavePending,
+      help: helpText,
+      onInput: (value) => {
+        if (generalSavePending) return;
+        general[field] = value;
+        markGeneralDirty(field);
+      },
+    };
+  }
+
+  function displayProps(
+    text: ViewerSettingsText,
+    v: ViewerSettingsValues,
+    c: ViewerSettingsChoices,
+  ): ViewerSettingsSectionProps {
+    const sizes = FONT_SIZE_VALUES.map((value) => ({
+      value,
+      label: (
+        {
+          compact: text.sizeSmall,
+          regular: text.sizeRegular,
+          large: text.sizeLarge,
+          xlarge: text.sizeExtraLarge,
+        } satisfies Record<FontSizeValue, string>
+      )[value],
+    }));
+    return {
+      key: "display",
+      box: box("display"),
+      title: text.display,
+      shared: sharedTag(text),
+      colorTheme: {
+        label: text.colorTheme,
+        help: text.colorThemeHelp,
+        choices: COLOR_THEMES.map((id) => ({
+          id,
+          name: text.colorThemeNames[id],
+          pressed: id === colorTheme,
+          onPick: () => deps.setColorTheme(id),
+        })),
+      },
+      theme: {
+        label: text.theme,
+        select: {
+          id: "viewer-theme",
+          value: themeChoice,
+          options: THEME_CHOICES.map((value) => ({
+            value,
+            label: text.themeNames[value] ?? value,
+          })),
+          onChange: (value) => {
+            const choice = THEME_CHOICES.find((item) => item === value);
+            if (!choice) return;
+            themeChoice = choice;
+            deps.setTheme(choice);
+          },
+        },
+        help: text.themeHelp,
+        keyHelp: text.themeKeyHelp,
+      },
+      terminalTone: {
+        label: text.terminalTone,
+        select: choiceSelect(
+          "terminalTone",
+          "viewer-terminal-tone",
+          c.terminalTone,
+          TERMINAL_TONES.map((value) => ({
+            value,
+            label: text.terminalToneNames[value] ?? value,
+          })),
+        ),
+        help: text.terminalToneHelp,
+      },
+      shelfPlacement: {
+        label: text.imageShelfPlacement,
+        select: choiceSelect(
+          "terminalImageShelfPlacement",
+          "viewer-image-shelf-placement",
+          c.terminalImageShelfPlacement,
+          TERMINAL_IMAGE_SHELF_PLACEMENTS.map((value) => ({
+            value,
+            label: text.imageShelfPlacementNames[value] ?? value,
+          })),
+        ),
+        help: text.imageShelfPlacementHelp,
+      },
+      clipboardWrite: {
+        toggle: toggleProps(
+          "terminalClipboardWrite",
+          text.terminalClipboardWriteLabel,
+          c.terminalClipboardWrite,
+        ),
+        help: text.terminalClipboardWriteHelp,
+      },
+      optionAsAlt: {
+        toggle: toggleProps(
+          "terminalOptionAsAlt",
+          text.terminalOptionAsAltLabel,
+          c.terminalOptionAsAlt,
+        ),
+        help: text.terminalOptionAsAltHelp,
+      },
+      language: {
+        label: text.language,
+        select: choiceSelect(
+          "language",
+          "viewer-language",
+          c.language,
+          LANGUAGE_VALUES,
+        ),
+      },
+      sidebarFontSize: {
+        label: text.fileListFontSize,
+        select: choiceSelect(
+          "sidebarFontSize",
+          "sidebar-font-size",
+          c.sidebarFontSize,
+          sizes,
+        ),
+        help: text.fileListFontSizeHelp,
+      },
+      codeFontSize: {
+        label: text.codeFontSize,
+        select: choiceSelect(
+          "codeFontSize",
+          "code-font-size",
+          c.codeFontSize,
+          sizes,
+        ),
+      },
+      userSettingsError: v.userSettingsError
+        ? text.userSettingsError(v.userSettingsError)
+        : "",
+    };
+  }
+
+  function agentRulesHighlightHtml(): string {
+    if (
+      highlighted?.source !== agentRulesValue ||
+      highlighted.by !== jsonHighlighter
+    ) {
+      highlighted = {
+        source: agentRulesValue,
+        html: highlightToInnerHtml(agentRulesValue, "json", jsonHighlighter),
+        by: jsonHighlighter,
+      };
     }
-    theme.addEventListener("change", () => {
-      const choice = THEME_CHOICES.find((value) => value === theme.value);
-      if (choice) deps.setTheme(choice);
-    });
-    terminalTone.id = "viewer-terminal-tone";
-    for (const value of TERMINAL_TONES) {
-      const option = document.createElement("option");
-      option.value = value;
-      terminalTone.appendChild(option);
-    }
-    shelfPlacement.id = "viewer-image-shelf-placement";
-    for (const value of TERMINAL_IMAGE_SHELF_PLACEMENTS) {
-      const option = document.createElement("option");
-      option.value = value;
-      shelfPlacement.appendChild(option);
-    }
-    language.id = "viewer-language";
-    for (const item of LANGUAGE_VALUES) {
-      const option = document.createElement("option");
-      option.value = item.value;
-      option.textContent = item.label;
-      language.appendChild(option);
-    }
-    displayTitle.id = "display-section-title";
-    const display = section();
-    display.append(
-      titleRow(displayTitle, displayShared),
-      colorThemeLabel,
-      colorThemes.root,
-      colorThemeHelp,
-      themeLabel,
-      theme,
-      themeHelp,
-      terminalToneLabel,
-      terminalTone,
-      terminalToneHelp,
-      shelfPlacementLabel,
-      shelfPlacement,
-      shelfPlacementHelp,
-      languageLabel,
-      language,
-      sidebarFontSizeLabel,
-      sidebarFontSize,
-      uiFontSizeHelp,
-      codeFontSizeLabel,
-      codeFontSize,
-      userSettingsError,
-    );
+    return highlighted.html;
+  }
 
-    uploadsTitle.id = "upload-section-title";
-    const uploads = section();
-    uploads.append(uploadsTitle, upload.wrap, uploadHelp);
+  function agentRulesSourceText(
+    text: ViewerSettingsText,
+    v: ViewerSettingsValues,
+  ): string {
+    return agentRulesDirty
+      ? agentRulesRestore
+        ? text.agentRulesSourceRestore
+        : text.agentRulesSourceEdited
+      : v.agentRulesSource === "saved"
+        ? text.agentRulesSourceSaved
+        : text.agentRulesSourceDefault;
+  }
 
-    // エージェント一覧の「通知は有効です」から、この見出しへ飛んでくる。
-    agentNotifyTitle.id = "agent-notify-section-title";
-    const agentNotify = section();
-    // 節は見出し → 何のための設定かの 1 文 → 操作 (この説明は 2 つのスイッチの両方に掛かる)。
-    agentNotify.append(
-      titleRow(agentNotifyTitle, agentNotifyShared),
-      agentNotifyHelp,
-      agentNotifyWaiting.wrap,
-      agentNotifyDone.wrap,
-    );
-
-    omitDirs.id = "scope-omit-dirs";
-    omitDirs.rows = 6;
-    omitDirs.spellcheck = false;
-    excludeNames.id = "scope-exclude-names";
-    excludeNames.rows = 4;
-    excludeNames.spellcheck = false;
-    scopeSource.id = "scope-omit-source";
-    excludedTitle.id = "excluded-section-title";
-    const excluded = section();
-    excluded.append(
-      excludedTitle,
-      omitDirsLabel,
-      omitDirs,
-      omitDirsHelp,
-      excludeNamesLabel,
-      excludeNames,
-      excludeNamesHelp,
-      scopeSource,
-    );
-
-    datastoreTitle.id = "datastore-section-title";
-    const datastores = section();
-    datastores.append(
-      datastoreTitle,
-      inferFk.wrap,
-      inferFkHelp,
-      s3Tooltip.wrap,
-      s3TooltipHelp,
-    );
-
-    watchTitle.id = "watch-section-title";
-    watchLimitRange.id = "scope-watch-limit-range";
-    watchLimitRange.type = "range";
-    watchLimitRange.step = "16";
-    watchLimitNumber.id = "scope-watch-limit";
-    watchLimitNumber.type = "number";
-    watchLimitNumber.step = "1";
-    const watchRow = document.createElement("div");
-    watchRow.className = "scope-watch-limit-row";
-    watchRow.append(watchLimitRange, watchLimitNumber);
-    watch.id = "watch-settings-section";
-    watch.append(watchTitle, watchLimitLabel, watchRow, watchLimitHelp);
-
-    agentRulesTitle.id = "agent-screen-rules-title";
-    agentRules.id = "agent-screen-rules";
-    agentRules.rows = 24;
-    agentRules.spellcheck = false;
-    agentRules.setAttribute(
-      "aria-describedby",
-      [
-        "agent-screen-rules-help",
-        "agent-screen-rules-source",
-        "agent-screen-rules-error",
-        "agent-screen-rules-highlight-error",
-      ].join(" "),
-    );
-    const agentRulesEditor = document.createElement("div");
-    agentRulesEditor.className = "agent-screen-rules-editor";
-    agentRulesEditor.append(agentRulesHighlight, agentRules);
-    agentRulesGuide.append(
-      agentRulesGuideTitle,
-      agentRulesGuideIntro,
-      agentRulesGuideFields,
-      agentRulesGuideMatchers,
-      agentRulesGuideRegions,
-      agentRulesGuideExample,
-    );
-    agentRulesReset.type = "button";
-    agentRulesReset.id = "agent-screen-rules-reset";
-    const agentRuleActions = document.createElement("div");
-    agentRuleActions.className = "scope-settings-actions";
-    agentRuleActions.append(agentRulesReset);
-    agentRulesDetails.append(
-      agentRulesEdit,
-      agentRulesLabel,
-      agentRulesHelp,
-      agentRulesGuide,
-      agentRulesEditor,
-      agentRuleActions,
-    );
-    const ruleSettings = section();
-    ruleSettings.classList.add("agent-screen-rules-section");
-    // 誤りは畳んだ中に入れない (閉じたままでも読めるように)。
-    ruleSettings.append(
-      agentRulesTitle,
-      agentRulesPurpose,
-      agentRulesSource,
-      agentRulesError,
-      agentRulesHighlightError,
-      agentRulesDetails,
-    );
-
-    resetButton.id = "scope-omit-reset";
-    resetButton.type = "button";
-    saveButton.id = "scope-settings-save";
-    saveButton.type = "button";
-    saveButton.className = "scope-settings-primary-action";
-    const generalActions = document.createElement("div");
-    generalActions.className = "scope-settings-actions";
-    generalActions.append(resetButton, saveButton);
-    footer.className = "scope-settings-footer";
-    footer.append(
-      saveNote,
-      saveStatus,
+  function footerProps(
+    text: ViewerSettingsText,
+  ): ViewerSettingsFormProps["footer"] {
+    const dirty = anyDirty();
+    const state =
+      generalStatus === "saving"
+        ? "saving"
+        : dirty
+          ? "unsaved"
+          : generalStatus === "saved"
+            ? "saved"
+            : "clean";
+    return {
+      // 保存の帯は、保存する欄のある節が出ている間と、ほかの分類に未保存の変更が
+      // 残っている間 (保存の口をなくさない) だけ出す。
+      hidden:
+        !SAVED_SECTIONS.some((key) => visible.get(key)) &&
+        !dirty &&
+        !generalSavePending,
+      note: text.saveNote,
+      status: {
+        state,
+        text:
+          state === "saving"
+            ? text.saving
+            : state === "unsaved"
+              ? text.unsaved
+              : state === "saved"
+                ? text.saved
+                : text.noChanges,
+      },
       saveError,
       refreshError,
-      generalActions,
-    );
-
-    generalSections.push(excluded, watch);
-    savedSections.push(
-      excluded,
-      watch,
-      ruleSettings,
-      deps.agentAccountsSection,
-      deps.shortcutsSection,
-      deps.remoteAccessSection,
-    );
-    // 並びは分類の並び (検索の結果もこの順に出る)。
-    categorized.push(
-      [display, "appearance"],
-      [agentNotify, "agents"],
-      [deps.agentHooksSection, "agents"],
-      [deps.agentAccountsSection, "accounts"],
-      [deps.shortcutsSection, "shortcuts"],
-      [excluded, "files"],
-      [uploads, "files"],
-      [deps.remoteAccessSection, "remote"],
-      [datastores, "advanced"],
-      [watch, "advanced"],
-      [ruleSettings, "advanced"],
-    );
-    wrap.append(
-      searchEmpty,
-      ...categorized.map(([element]) => element),
-      footer,
-    );
-    search.addEventListener("input", applyCategory);
-    wire();
-    applyCategory();
-    void initializeJsonHighlighting();
-    return wrap;
-  }
-
-  function wire(): void {
-    // 選ぶ欄は選んだ時点で当てて保存する (下書きにしない)。
-    for (const [field, select] of [
-      ["language", language],
-      ["sidebarFontSize", sidebarFontSize],
-      ["codeFontSize", codeFontSize],
-      ["terminalTone", terminalTone],
-      ["terminalImageShelfPlacement", shelfPlacement],
-    ] as const)
-      select.addEventListener("change", () =>
-        deps.onChoose({ [field]: select.value }),
-      );
-    for (const [field, toggle] of [
-      ["uploadEnabled", upload],
-      ["agentNotifyWaiting", agentNotifyWaiting],
-      ["agentNotifyDone", agentNotifyDone],
-      ["inferFkRails", inferFk],
-      ["s3TooltipEnabled", s3Tooltip],
-    ] as const)
-      toggle.input.addEventListener("change", () =>
-        deps.onChoose({ [field]: toggle.input.checked }),
-      );
-    omitDirs.addEventListener("input", () => markGeneralDirty("omitDirs"));
-    excludeNames.addEventListener("input", () =>
-      markGeneralDirty("excludeNames"),
-    );
-    watchLimitNumber.addEventListener("input", () => {
-      watchLimitRange.value = watchLimitNumber.value;
-      markGeneralDirty("watchLimit");
-    });
-    watchLimitNumber.addEventListener("change", () => {
-      watchLimitRange.value = watchLimitNumber.value;
-      markGeneralDirty("watchLimit");
-    });
-    watchLimitRange.addEventListener("input", () => {
-      watchLimitNumber.value = watchLimitRange.value;
-      markGeneralDirty("watchLimit");
-    });
-    watchLimitRange.addEventListener("change", () =>
-      markGeneralDirty("watchLimit"),
-    );
-    agentRules.addEventListener("input", () => {
-      if (generalSavePending) return;
-      markAgentRulesDirty(false);
-      syncAgentRulesHighlight();
-    });
-    agentRules.addEventListener("scroll", syncAgentRulesScroll);
-    // 組み込みの規則を欄に入れるだけ。保存するまで今の規則のまま動く。
-    agentRulesReset.addEventListener("click", () => {
-      setFieldValue(agentRules, deps.getValues().agentRulesDefaultJson, true);
-      syncAgentRulesHighlight();
-      markAgentRulesDirty(true);
-    });
-    resetButton.addEventListener("click", () => {
-      applyGeneralFields(deps.getDefaultValues(), true);
-      restoreDefaults = true;
-      changedGeneralFields.clear();
-      for (const field of GENERAL_SETTING_FIELDS) {
-        changedGeneralFields.add(field);
-      }
-      generalDirty = true;
-      generalStatus = "dirty";
-      clearGeneralSaveError();
-      renderGeneralSaveState();
-    });
-    saveButton.addEventListener("click", () => {
-      void saveChanges();
-    });
-    for (const draft of deps.drafts) {
-      draft.subscribe(() => {
-        if (draft.dirty()) {
+      reset: {
+        label: text.reset,
+        hidden: !GENERAL_SECTIONS.some((key) => visible.get(key)),
+        disabled: generalSavePending,
+        onClick: () => {
+          applyGeneralFields(deps.getDefaultValues(), true);
+          restoreDefaults = true;
+          changedGeneralFields.clear();
+          for (const field of GENERAL_SETTING_FIELDS)
+            changedGeneralFields.add(field);
+          generalDirty = true;
           generalStatus = "dirty";
-          clearGeneralSaveError();
-        } else if (!anyDirty() && generalStatus === "dirty") {
-          generalStatus = "idle";
-        }
-        renderGeneralSaveState();
-      });
-    }
+          saveError = "";
+          draw();
+        },
+      },
+      save: {
+        label: generalStatus === "saving" ? text.saving : text.save,
+        disabled: generalSavePending || !dirty,
+        onClick: () => {
+          void saveChanges();
+        },
+      },
+    };
   }
+
+  function formProps(): ViewerSettingsFormProps | null {
+    const v = values;
+    const c = choices;
+    if (!v || !c) return null;
+    const text = deps.getText();
+    const sections: Record<SectionKey, ViewerSettingsSectionProps> = {
+      display: displayProps(text, v, c),
+      uploads: {
+        key: "uploads",
+        box: box("uploads"),
+        title: text.uploadsTitle,
+        toggle: toggleProps(
+          "uploadEnabled",
+          text.uploadEnabledLabel,
+          c.uploadEnabled,
+        ),
+        help: text.uploadEnabledHelp,
+      },
+      agentNotify: {
+        key: "agentNotify",
+        box: box("agentNotify"),
+        title: text.agentNotifyTitle,
+        shared: sharedTag(text),
+        help: text.agentNotifyHelp,
+        waiting: toggleProps(
+          "agentNotifyWaiting",
+          text.agentNotifyWaitingLabel,
+          c.agentNotifyWaiting,
+        ),
+        done: toggleProps(
+          "agentNotifyDone",
+          text.agentNotifyDoneLabel,
+          c.agentNotifyDone,
+        ),
+        sound: toggleProps(
+          "agentNotifySound",
+          text.agentNotifySoundLabel,
+          c.agentNotifySound,
+        ),
+        soundTests: deps.onTestSound
+          ? (["waiting", "finished"] as const).map((kind) => ({
+              label: text.agentNotifySoundTest[kind],
+              onPlay: () => void testSound(kind),
+            }))
+          : [],
+        soundTestError,
+      },
+      excluded: {
+        key: "excluded",
+        box: box("excluded"),
+        title: text.excludedDirectories,
+        omitDirs: draftTextarea("omitDirs", text.omitDirs, 6, {
+          id: "scope-omit-dirs-help",
+          text: text.omitDirsHelp,
+        }),
+        excludeNames: draftTextarea("excludeNames", text.excludeNames, 4, {
+          id: "scope-exclude-names-help",
+          text: text.excludeNamesHelp,
+        }),
+        source: v.scopeSource,
+      },
+      datastores: {
+        key: "datastores",
+        box: box("datastores"),
+        title: text.datastoreTitle,
+        inferFk: toggleProps(
+          "inferFkRails",
+          text.datastoreInferFkLabel,
+          c.inferFkRails,
+        ),
+        inferFkHelp: text.datastoreInferFkHelp,
+        s3Tooltip: toggleProps(
+          "s3TooltipEnabled",
+          text.datastoreS3TooltipLabel,
+          c.s3TooltipEnabled,
+        ),
+        s3TooltipHelp: text.datastoreS3TooltipHelp,
+      },
+      watch: {
+        key: "watch",
+        box: box("watch"),
+        title: text.watchTitle,
+        label: text.watchLimit,
+        min: v.watchLimitMin,
+        max: v.watchLimitMax,
+        value: general.watchLimit,
+        disabled: generalSavePending,
+        help: text.watchLimitHelp(v.watchLimitDefault),
+        onInput: (value) => {
+          if (generalSavePending) return;
+          general.watchLimit = value;
+          markGeneralDirty("watchLimit");
+        },
+      },
+      rules: {
+        key: "rules",
+        box: box("rules"),
+        title: text.agentRulesTitle,
+        purpose: text.agentRulesPurpose,
+        source: agentRulesSourceText(text, v),
+        error: agentRulesError,
+        highlightError: agentRulesHighlightError,
+        edit: text.agentRulesEdit,
+        label: text.agentRulesLabel,
+        help: text.agentRulesHelp,
+        guide: {
+          title: text.agentRulesGuideTitle,
+          intro: text.agentRulesGuideIntro,
+          fields: text.agentRulesGuideFields,
+          matchers: text.agentRulesGuideMatchers,
+          regions: text.agentRulesGuideRegions,
+          example: text.agentRulesGuideExample,
+        },
+        highlighted: agentRulesHighlightHtml(),
+        value: agentRulesValue,
+        disabled: generalSavePending,
+        onInput: (value) => {
+          if (generalSavePending) return;
+          agentRulesValue = value;
+          markAgentRulesDirty(false);
+        },
+        onScroll: syncAgentRulesScroll,
+        reset: {
+          label: text.agentRulesReset,
+          disabled: generalSavePending,
+          onClick: () => {
+            // 組み込みの規則を欄に入れるだけ。保存するまで今の規則のまま動く。
+            agentRulesValue = deps.getValues().agentRulesDefaultJson;
+            markAgentRulesDirty(true);
+          },
+        },
+      },
+      agentHooks: { key: "external", element: deps.agentHooksSection },
+      accounts: { key: "external", element: deps.agentAccountsSection },
+      shortcuts: { key: "external", element: deps.shortcutsSection },
+      remote: { key: "external", element: deps.remoteAccessSection },
+    };
+    const trimmed = query.trim();
+    const shown = SECTION_ORDER.some(([key]) => visible.get(key));
+    return {
+      searchEmpty: trimmed && !shown ? text.searchNoMatch(trimmed) : null,
+      sections: SECTION_ORDER.map(([key]) => sections[key]),
+      footer: footerProps(text),
+    };
+  }
+
+  function drawSearch(): void {
+    const text = deps.getText();
+    renderOwned(
+      searchWrap,
+      view.search({
+        placeholder: text.searchPlaceholder,
+        value: query,
+        onInput: (value) => {
+          query = value;
+          applyCategory();
+        },
+      }),
+    );
+  }
+
+  /** 「試しに鳴らす」。鳴らせなければ理由を節の下と console に出す。 */
+  async function testSound(kind: "waiting" | "finished"): Promise<void> {
+    soundTestError = "";
+    draw();
+    try {
+      await deps.onTestSound?.(kind);
+    } catch (error) {
+      console.error(`[code-viewer] could not play the ${kind} sound`, error);
+      soundTestError = `${deps.getText().agentNotifySoundTestFailed}\n${formatErrorDetail(error)}`;
+    }
+    draw();
+  }
+
+  function draw(): void {
+    drawSearch();
+    if (!root) return;
+    const props = formProps();
+    renderOwned(root, props ? view.form(props) : nothing);
+    // 持ち主から受け取った節は、出す / 隠すと見出しの省き方だけをここが決める。
+    for (const [key, element] of Object.entries(external) as [
+      SectionKey,
+      HTMLElement,
+    ][]) {
+      element.hidden = !visible.get(key);
+      element.classList.toggle("scope-settings-section-sole", sole === key);
+    }
+    syncAgentRulesScroll();
+  }
+
+  // ---- 状態 ----------------------------------------------------------------
 
   function anyDirty(): boolean {
     return (
@@ -791,138 +1392,70 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   function markAgentRulesDirty(restore: boolean): void {
     agentRulesDirty = true;
     agentRulesRestore = restore;
-    agentRulesError.hidden = true;
-    agentRulesError.textContent = "";
+    agentRulesError = "";
     generalStatus = "dirty";
-    clearGeneralSaveError();
-    renderAgentRulesSource();
-    renderGeneralSaveState();
-  }
-
-  function renderAgentRulesSource(): void {
-    const text = deps.getText();
-    agentRulesSource.textContent = agentRulesDirty
-      ? agentRulesRestore
-        ? text.agentRulesSourceRestore
-        : text.agentRulesSourceEdited
-      : deps.getValues().agentRulesSource === "saved"
-        ? text.agentRulesSourceSaved
-        : text.agentRulesSourceDefault;
+    saveError = "";
+    draw();
   }
 
   function markGeneralDirty(field: keyof ViewerSettingsDraft): void {
-    if (generalSavePending) return;
     changedGeneralFields.add(field);
     generalDirty = true;
     restoreDefaults = false;
     generalStatus = "dirty";
-    watchLimitNumber.setCustomValidity("");
-    clearGeneralSaveError();
-    renderGeneralSaveState();
+    byId<HTMLInputElement>("scope-watch-limit")?.setCustomValidity("");
+    saveError = "";
+    draw();
   }
 
-  function clearGeneralSaveError(): void {
-    saveError.textContent = "";
-    saveError.hidden = true;
-  }
-
-  function renderGeneralSaveState(): void {
-    const text = deps.getText();
-    saveButton.textContent =
-      generalStatus === "saving" ? text.saving : text.save;
-    const dirty = anyDirty();
-    saveButton.disabled = generalSavePending || !dirty;
-    resetButton.disabled = generalSavePending;
-    const state =
-      generalStatus === "saving"
-        ? "saving"
-        : dirty
-          ? "unsaved"
-          : generalStatus === "saved"
-            ? "saved"
-            : "clean";
-    saveStatus.dataset.state = state;
-    saveStatus.textContent =
-      state === "saving"
-        ? text.saving
-        : state === "unsaved"
-          ? text.unsaved
-          : state === "saved"
-            ? text.saved
-            : text.noChanges;
-    syncFooter();
-  }
-
-  /**
-   * 保存の帯は、保存する欄のある節が出ている間と、ほかの分類に未保存の変更が
-   * 残っている間 (保存の口をなくさない) だけ出す。
-   */
-  function syncFooter(): void {
-    footer.hidden =
-      !savedSections.some((section) => !section.hidden) &&
-      !anyDirty() &&
-      !generalSavePending;
-  }
-
-  function setGeneralControlsDisabled(disabled: boolean): void {
-    for (const field of [
-      omitDirs,
-      excludeNames,
-      watchLimitNumber,
-      watchLimitRange,
-      agentRules,
-      agentRulesReset,
-    ]) {
-      field.disabled = disabled;
+  function applyGeneralFields(next: ViewerSettingsDraft, force = false): void {
+    for (const field of GENERAL_SETTING_FIELDS) {
+      if (!force && focused(DRAFT_FIELD_IDS[field])) continue;
+      general[field] = String(next[field]);
     }
-  }
-
-  function applyGeneralFields(
-    values: ViewerSettingsDraft,
-    force = false,
-  ): void {
-    setFieldValue(omitDirs, values.omitDirs, force);
-    setFieldValue(excludeNames, values.excludeNames, force);
-    setFieldValue(watchLimitNumber, String(values.watchLimit), force);
-    setFieldValue(watchLimitRange, String(values.watchLimit), force);
   }
 
   /** 選ぶ欄に保存してある値を映す (下書きが無いので、いつでも今の値)。 */
-  function applyChoices(values: ViewerSettingsChoices): void {
-    setFieldValue(language, values.language);
-    setFieldValue(sidebarFontSize, values.sidebarFontSize);
-    setFieldValue(codeFontSize, values.codeFontSize);
-    setFieldValue(terminalTone, values.terminalTone);
-    setFieldValue(shelfPlacement, values.terminalImageShelfPlacement);
-    upload.input.checked = values.uploadEnabled;
-    agentNotifyWaiting.input.checked = values.agentNotifyWaiting;
-    agentNotifyDone.input.checked = values.agentNotifyDone;
-    inferFk.input.checked = values.inferFkRails;
-    s3Tooltip.input.checked = values.s3TooltipEnabled;
+  function applyChoices(next: ViewerSettingsChoices): void {
+    choices = {
+      language: next.language,
+      sidebarFontSize: next.sidebarFontSize,
+      codeFontSize: next.codeFontSize,
+      terminalTone: next.terminalTone,
+      terminalImageShelfPlacement: next.terminalImageShelfPlacement,
+      uploadEnabled: next.uploadEnabled,
+      agentNotifyWaiting: next.agentNotifyWaiting,
+      agentNotifyDone: next.agentNotifyDone,
+      agentNotifySound: next.agentNotifySound,
+      terminalClipboardWrite: next.terminalClipboardWrite,
+      terminalOptionAsAlt: next.terminalOptionAsAlt,
+      inferFkRails: next.inferFkRails,
+      s3TooltipEnabled: next.s3TooltipEnabled,
+    };
   }
 
   function readGeneralDraft(): ViewerSettingsDraft | null {
-    const values = deps.getValues();
-    const watchLimit = Number(watchLimitNumber.value);
+    const current = deps.getValues();
+    const watchLimit = Number(general.watchLimit);
+    const field = byId<HTMLInputElement>("scope-watch-limit");
     if (
       !Number.isInteger(watchLimit) ||
-      watchLimit < values.watchLimitMin ||
-      watchLimit > values.watchLimitMax
+      watchLimit < current.watchLimitMin ||
+      watchLimit > current.watchLimitMax
     ) {
       const message = deps
         .getText()
-        .watchLimitInvalid(values.watchLimitMin, values.watchLimitMax);
-      watchLimitNumber.setCustomValidity(message);
-      saveError.textContent = message;
-      saveError.hidden = false;
+        .watchLimitInvalid(current.watchLimitMin, current.watchLimitMax);
+      field?.setCustomValidity(message);
+      saveError = message;
       generalStatus = "dirty";
-      renderGeneralSaveState();
+      draw();
       return null;
     }
-    watchLimitNumber.setCustomValidity("");
+    field?.setCustomValidity("");
     return {
-      omitDirs: omitDirs.value,
-      excludeNames: excludeNames.value,
+      omitDirs: general.omitDirs,
+      excludeNames: general.excludeNames,
       watchLimit,
     };
   }
@@ -934,8 +1467,8 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       .map((section) => section.problem?.() ?? null)
       .filter((problem): problem is string => !!problem);
     if (problems.length) {
-      saveError.textContent = problems.join("\n");
-      saveError.hidden = false;
+      saveError = problems.join("\n");
+      draw();
       return;
     }
     const draft = generalDirty ? readGeneralDraft() : null;
@@ -943,9 +1476,8 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     refreshGeneration += 1;
     generalSavePending = true;
     generalStatus = "saving";
-    clearGeneralSaveError();
-    setGeneralControlsDisabled(true);
-    renderGeneralSaveState();
+    saveError = "";
+    draw();
     let completed = false;
     try {
       if (draft) {
@@ -969,14 +1501,12 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       completed = true;
     } catch (error) {
       console.error("[code-viewer] viewer settings save failed", error);
-      saveError.textContent = formatErrorDetail(error);
-      saveError.hidden = false;
+      saveError = formatErrorDetail(error);
       generalStatus = "dirty";
     } finally {
       generalSavePending = false;
-      setGeneralControlsDisabled(false);
       if (completed) sync();
-      else renderGeneralSaveState();
+      else draw();
     }
   }
 
@@ -989,28 +1519,22 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       if (!jsonHighlighter) {
         throw new Error("JSON syntax highlighting could not be loaded");
       }
-      syncAgentRulesHighlight();
+      draw();
     } catch (error) {
       console.error("[code-viewer] JSON syntax highlighting failed", error);
-      agentRulesHighlightError.textContent = formatErrorDetail(error);
-      agentRulesHighlightError.hidden = false;
+      agentRulesHighlightError = formatErrorDetail(error);
+      draw();
     }
   }
 
-  function syncAgentRulesHighlight(): void {
-    const highlighted = highlightToInnerHtml(
-      agentRules.value,
-      "json",
-      jsonHighlighter,
-    );
-    if (highlighted) agentRulesHighlight.innerHTML = highlighted;
-    else agentRulesHighlight.textContent = agentRules.value;
-    syncAgentRulesScroll();
-  }
-
   function syncAgentRulesScroll(): void {
-    agentRulesHighlight.scrollTop = agentRules.scrollTop;
-    agentRulesHighlight.scrollLeft = agentRules.scrollLeft;
+    const editor = byId<HTMLTextAreaElement>("agent-screen-rules");
+    const highlight = root?.querySelector<HTMLElement>(
+      ".agent-screen-rules-highlight",
+    );
+    if (!editor || !highlight) return;
+    highlight.scrollTop = editor.scrollTop;
+    highlight.scrollLeft = editor.scrollLeft;
   }
 
   /**
@@ -1020,165 +1544,77 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   async function saveAgentRules(): Promise<void> {
     try {
       if (agentRulesRestore) await deps.onAgentRulesReset();
-      else await deps.onAgentRulesSave(agentRules.value);
+      else await deps.onAgentRulesSave(agentRulesValue);
     } catch (error) {
-      agentRulesError.textContent = formatErrorDetail(error);
-      agentRulesError.hidden = false;
+      agentRulesError = formatErrorDetail(error);
       throw errorWithCause("save the terminal status rules", error);
     }
   }
 
-  function applyText(): void {
-    const text = deps.getText();
-    const values = deps.getValues();
-    displayTitle.textContent = text.display;
-    uploadsTitle.textContent = text.uploadsTitle;
-    agentNotifyTitle.textContent = text.agentNotifyTitle;
-    excludedTitle.textContent = text.excludedDirectories;
-    datastoreTitle.textContent = text.datastoreTitle;
-    watchTitle.textContent = text.watchTitle;
-    agentRulesTitle.textContent = text.agentRulesTitle;
-    themeLabel.textContent = text.theme;
-    const themeKeyHelp = document.createElement("span");
-    themeKeyHelp.className = "gdp-key-hint";
-    themeKeyHelp.textContent = text.themeKeyHelp;
-    themeHelp.replaceChildren(text.themeHelp, themeKeyHelp);
-    colorThemeLabel.textContent = text.colorTheme;
-    colorThemeHelp.textContent = text.colorThemeHelp;
-    colorThemes.localize(text.colorThemeNames);
-    for (const option of Array.from(theme.options)) {
-      option.textContent =
-        text.themeNames[option.value as ThemeChoice] ?? option.value;
+  function build(): HTMLElement {
+    const element = templateElement(html`<div class="scope-settings"></div>`);
+    for (const draft of deps.drafts) {
+      draft.subscribe(() => {
+        if (draft.dirty()) {
+          generalStatus = "dirty";
+          saveError = "";
+        } else if (!anyDirty() && generalStatus === "dirty") {
+          generalStatus = "idle";
+        }
+        draw();
+      });
     }
-    terminalToneLabel.textContent = text.terminalTone;
-    terminalToneHelp.textContent = text.terminalToneHelp;
-    for (const option of Array.from(terminalTone.options)) {
-      option.textContent =
-        text.terminalToneNames[option.value as TerminalTone] ?? option.value;
-    }
-    shelfPlacementLabel.textContent = text.imageShelfPlacement;
-    shelfPlacementHelp.textContent = text.imageShelfPlacementHelp;
-    for (const option of Array.from(shelfPlacement.options)) {
-      option.textContent =
-        text.imageShelfPlacementNames[
-          option.value as TerminalImageShelfPlacement
-        ] ?? option.value;
-    }
-    languageLabel.textContent = text.language;
-    sidebarFontSizeLabel.textContent = text.fileListFontSize;
-    codeFontSizeLabel.textContent = text.codeFontSize;
-    omitDirsLabel.textContent = text.omitDirs;
-    excludeNamesLabel.textContent = text.excludeNames;
-    watchLimitLabel.textContent = text.watchLimit;
-    // スライダーと数の欄は同じ値を持つので、同じ名前で読み上げる。
-    watchLimitRange.setAttribute("aria-label", text.watchLimit);
-    agentRulesLabel.textContent = text.agentRulesLabel;
-    uiFontSizeHelp.textContent = text.fileListFontSizeHelp;
-    for (const tag of [displayShared, agentNotifyShared]) {
-      tag.textContent = text.sharedTag;
-      tag.title = text.sharedTagTitle;
-    }
-    userSettingsError.hidden = !values.userSettingsError;
-    userSettingsError.textContent = values.userSettingsError
-      ? text.userSettingsError(values.userSettingsError)
-      : "";
-    upload.text.textContent = text.uploadEnabledLabel;
-    uploadHelp.textContent = text.uploadEnabledHelp;
-    agentNotifyWaiting.text.textContent = text.agentNotifyWaitingLabel;
-    agentNotifyDone.text.textContent = text.agentNotifyDoneLabel;
-    agentNotifyHelp.textContent = text.agentNotifyHelp;
-    omitDirsHelp.textContent = text.omitDirsHelp;
-    excludeNamesHelp.textContent = text.excludeNamesHelp;
-    inferFk.text.textContent = text.datastoreInferFkLabel;
-    inferFkHelp.textContent = text.datastoreInferFkHelp;
-    s3Tooltip.text.textContent = text.datastoreS3TooltipLabel;
-    s3TooltipHelp.textContent = text.datastoreS3TooltipHelp;
-    watchLimitHelp.textContent = text.watchLimitHelp(values.watchLimitDefault);
-    agentRulesPurpose.textContent = text.agentRulesPurpose;
-    agentRulesEdit.textContent = text.agentRulesEdit;
-    agentRulesHelp.replaceChildren(
-      ...text.agentRulesHelp.map((paragraph) => {
-        const p = helpText();
-        p.textContent = paragraph;
-        return p;
-      }),
-    );
-    agentRulesGuideTitle.textContent = text.agentRulesGuideTitle;
-    agentRulesGuideIntro.textContent = text.agentRulesGuideIntro;
-    agentRulesGuideFields.textContent = text.agentRulesGuideFields;
-    agentRulesGuideMatchers.textContent = text.agentRulesGuideMatchers;
-    agentRulesGuideRegions.textContent = text.agentRulesGuideRegions;
-    agentRulesGuideExample.textContent = text.agentRulesGuideExample;
-    agentRulesReset.textContent = text.agentRulesReset;
-    saveNote.textContent = text.saveNote;
-    applySearchText();
-    resetButton.textContent = text.reset;
-    renderGeneralSaveState();
-
-    const sizeLabels: Record<(typeof FONT_SIZE_VALUES)[number], string> = {
-      compact: text.sizeSmall,
-      regular: text.sizeRegular,
-      large: text.sizeLarge,
-      xlarge: text.sizeExtraLarge,
-    };
-    for (const select of [sidebarFontSize, codeFontSize]) {
-      for (const option of Array.from(select.options)) {
-        option.textContent =
-          sizeLabels[option.value as (typeof FONT_SIZE_VALUES)[number]] ||
-          option.value;
-      }
-    }
+    void initializeJsonHighlighting();
+    return element;
   }
 
   function sync(): void {
     if (!root) return;
-    applyText();
-    const values = deps.getValues();
-    watchLimitNumber.min = String(values.watchLimitMin);
-    watchLimitNumber.max = String(values.watchLimitMax);
-    watchLimitRange.min = String(values.watchLimitMin);
-    watchLimitRange.max = String(values.watchLimitMax);
-    if (!generalDirty && !generalSavePending) applyGeneralFields(values);
-    applyChoices(values);
-    syncTheme();
-    scopeSource.textContent = values.scopeSource;
+    const next = deps.getValues();
+    values = next;
+    if (!generalDirty && !generalSavePending) applyGeneralFields(next);
+    applyChoices(next);
+    if (!focused("viewer-theme")) themeChoice = deps.getTheme();
+    colorTheme = deps.getColorTheme();
     // 書きかけの規則 (と、保存に失敗した誤りの表示) は保存するまで残す。
     if (!agentRulesDirty && !generalSavePending) {
-      setFieldValue(agentRules, values.agentRulesJson);
-      syncAgentRulesHighlight();
-      agentRulesError.textContent = values.agentRulesErrors;
-      agentRulesError.hidden = !values.agentRulesErrors;
+      if (!focused("agent-screen-rules")) agentRulesValue = next.agentRulesJson;
+      agentRulesError = next.agentRulesErrors;
     }
-    renderAgentRulesSource();
     // 取り直しで監視の上限が効くかが分かる (watchLimitApplies)。
     applyCategory();
   }
 
   function mount(host: HTMLElement): void {
+    const first = !root;
     if (!root) root = build();
     const active = document.activeElement;
-    const focused =
+    const focusedElement =
       active instanceof HTMLElement && root.contains(active) ? active : null;
     const caret =
-      focused instanceof HTMLTextAreaElement ||
-      focused instanceof HTMLInputElement
-        ? { start: focused.selectionStart, end: focused.selectionEnd }
+      focusedElement instanceof HTMLTextAreaElement ||
+      focusedElement instanceof HTMLInputElement
+        ? {
+            start: focusedElement.selectionStart,
+            end: focusedElement.selectionEnd,
+          }
         : null;
 
     host.appendChild(root);
 
-    if (focused) {
-      focused.focus();
+    if (focusedElement) {
+      focusedElement.focus();
       if (caret && caret.start !== null && caret.end !== null) {
-        (focused as HTMLTextAreaElement).setSelectionRange(
+        (focusedElement as HTMLTextAreaElement).setSelectionRange(
           caret.start,
           caret.end,
         );
       }
     }
+    refreshError = "";
     sync();
-    refreshError.hidden = true;
-    refreshError.textContent = "";
+    // 初めて描いた後に、節の文字で検索の当たりを決め直す (描く前は文字が無い)。
+    if (first) applyCategory();
     const generation = ++refreshGeneration;
     void deps.refresh().then(
       () => {
@@ -1188,8 +1624,8 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       (error: unknown) => {
         if (generation !== refreshGeneration) return;
         console.error("[code-viewer] viewer settings refresh failed", error);
-        refreshError.textContent = formatErrorDetail(error);
-        refreshError.hidden = false;
+        refreshError = formatErrorDetail(error);
+        draw();
       },
     );
   }
@@ -1199,32 +1635,28 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
    * ラベル・説明に文字を含む節をすべて出す。
    */
   function applyCategory(): void {
-    const query = search.value.trim().toLocaleLowerCase();
+    const needle = query.trim().toLocaleLowerCase();
+    const watchApplies = values?.watchLimitApplies ?? true;
     let shown = 0;
-    const watchApplies = deps.getValues().watchLimitApplies;
-    for (const [element, owner] of categorized) {
-      const visible =
-        (element !== watch || watchApplies) &&
-        (query
-          ? (element.textContent ?? "").toLocaleLowerCase().includes(query)
+    for (const [key, owner] of SECTION_ORDER) {
+      const show =
+        (key !== "watch" || watchApplies) &&
+        (needle
+          ? (sectionElement(key)?.textContent ?? "")
+              .toLocaleLowerCase()
+              .includes(needle)
           : owner === category);
-      element.hidden = !visible;
-      if (visible) shown += 1;
+      visible.set(key, show);
+      if (show) shown += 1;
     }
     // 分類に節が 1 つだけなら、その節の見出しはページの見出し (分類の名前) と役が
     // 重なる (「ショートカット」が 2 回続いた) ので出さない。検索中は分類をまたいで
     // 並ぶので出す。
-    for (const [element] of categorized)
-      element.classList.toggle(
-        "scope-settings-section-sole",
-        !query && shown === 1 && !element.hidden,
-      );
-    searchEmpty.hidden = !query || shown > 0;
-    resetButton.hidden = !generalSections.some((section) => !section.hidden);
-    syncFooter();
-    searchEmpty.textContent = query
-      ? deps.getText().searchNoMatch(search.value.trim())
-      : "";
+    sole =
+      !needle && shown === 1
+        ? (SECTION_ORDER.find(([key]) => visible.get(key))?.[0] ?? null)
+        : null;
+    draw();
   }
 
   function getCategory(): SettingsCategory {
@@ -1233,21 +1665,29 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
 
   function setCategory(next: SettingsCategory): void {
     category = next;
-    search.value = "";
+    query = "";
     applyCategory();
   }
 
   /** その id の見出しを含む節の分類 (無ければ null)。 */
   function categoryOfHeading(headingId: string): SettingsCategory | null {
-    if (!root) root = build();
+    if (!root) {
+      root = build();
+      values = deps.getValues();
+      applyChoices(values);
+      draw();
+    }
     // id は URL の # からも来るので、セレクタに組まずに比べる。
-    const owner = categorized.find(
-      ([element]) =>
-        element.id === headingId ||
-        Array.from(element.querySelectorAll("[id]")).some(
-          (child) => child.id === headingId,
-        ),
-    );
+    const owner = SECTION_ORDER.find(([key]) => {
+      const element = sectionElement(key);
+      return (
+        element !== null &&
+        (element.id === headingId ||
+          Array.from(element.querySelectorAll("[id]")).some(
+            (child) => child.id === headingId,
+          ))
+      );
+    });
     return owner ? owner[1] : null;
   }
 
@@ -1276,83 +1716,25 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   }
 
   /**
-   * 検索欄の文言。設定のページが見出しの下に置く。検索欄は節を組む前にも出し
-   * うるので、設定の節の文言 (applyText) とは別に当てる。以前は設定の節を一度
-   * 開くまで placeholder が空だった。
+   * 検索欄。設定のページが見出しの下に置く。検索欄は節を組む前にも出しうるので、
+   * 文言は節とは別に当てる (以前は設定の節を一度開くまで placeholder が空だった)。
    */
-  function applySearchText(): void {
-    const text = deps.getText();
-    search.placeholder = text.searchPlaceholder;
-    search.setAttribute("aria-label", text.searchPlaceholder);
-    if (search.value.trim())
-      searchEmpty.textContent = text.searchNoMatch(search.value.trim());
-  }
-
   function mountSearch(host: HTMLElement): void {
-    applySearchText();
+    drawSearch();
     host.appendChild(searchWrap);
   }
 
   function localize(): void {
-    applySearchText();
+    drawSearch();
     if (!root) return;
-    applyText();
+    draw();
   }
 
   /** 明暗とテーマの今の値を映す (別の窓や ⌘K・T のキーで変わったとき)。 */
   function syncTheme(): void {
-    setFieldValue(theme, deps.getTheme());
-    colorThemes.select(deps.getColorTheme());
-  }
-
-  /**
-   * テーマの見本 (全部のテーマ)。各見本はライトとダークの小さなコードと差分を並べ、
-   * そのテーマの名前の層の色 (html と同じ data-color-theme / data-theme) で描く。
-   * 押すとすぐに当てる (明暗はそのまま)。
-   */
-  function colorThemePicker() {
-    const root = document.createElement("div");
-    root.id = "viewer-color-theme";
-    root.className = "theme-picker";
-    root.setAttribute("role", "group");
-    root.setAttribute("aria-labelledby", "viewer-color-theme-label");
-    const names = new Map<ColorTheme, HTMLElement>();
-    const buttons = new Map<ColorTheme, HTMLButtonElement>();
-    for (const id of COLOR_THEMES) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "theme-choice";
-      button.dataset.colorThemeChoice = id;
-      button.setAttribute("aria-pressed", "false");
-      const swatch = document.createElement("span");
-      swatch.className = "theme-swatch";
-      swatch.setAttribute("aria-hidden", "true");
-      for (const mode of THEME_CHOICES.slice().reverse()) {
-        const pane = document.createElement("span");
-        pane.className = "theme-swatch-pane";
-        pane.dataset.theme = mode;
-        applyColorTheme(pane, id);
-        pane.innerHTML = THEME_SWATCH_HTML;
-        swatch.append(pane);
-      }
-      const name = document.createElement("span");
-      name.className = "theme-choice-name";
-      button.append(swatch, name);
-      button.addEventListener("click", () => deps.setColorTheme(id));
-      names.set(id, name);
-      buttons.set(id, button);
-      root.append(button);
-    }
-    return {
-      root,
-      localize(labels: Record<ColorTheme, string>): void {
-        for (const [id, name] of names) name.textContent = labels[id];
-      },
-      select(current: ColorTheme): void {
-        for (const [id, button] of buttons)
-          button.setAttribute("aria-pressed", String(id === current));
-      },
-    };
+    if (!focused("viewer-theme")) themeChoice = deps.getTheme();
+    colorTheme = deps.getColorTheme();
+    draw();
   }
 
   return {

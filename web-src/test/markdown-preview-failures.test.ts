@@ -1,14 +1,5 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  onTestFinished,
-  test,
-  vi,
-} from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import type { MermaidApi } from "../core/mermaid-loader";
 import type { ShikiHighlighter } from "../core/shiki-loader";
 
@@ -28,14 +19,6 @@ vi.mock("../core/mermaid-loader", () => ({
     return () => undefined;
   },
 }));
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 const { renderMarkdownHtml, renderMarkdownPreview, resolveMarkdownLinkTarget } =
   await import("../core/markdown-preview");

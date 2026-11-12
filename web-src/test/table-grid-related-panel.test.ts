@@ -5,12 +5,10 @@
 //   - リスト項目はテーブル名と条件を 1 行ずつに保ち、全文は tooltip で出す
 //   - リスト幅はドラッグで変えられ、クランプして localStorage に残る
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test } from "vitest";
 import { tableData } from "./_table-grid-fixture";
 import { q } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createTableGrid } = await import("../views/database/table-grid");
 const { dbText } = await import("../views/database/i18n");
@@ -120,10 +118,6 @@ function clickCell(root: HTMLElement, col: number) {
 describe("table-grid related panel", () => {
   afterEach(() => {
     window.localStorage.removeItem(LIST_WIDTH_KEY);
-  });
-
-  afterAll(() => {
-    GlobalRegistrator.unregister();
   });
 
   test("Enter follows a foreign key, arrow keys alone do not", async () => {

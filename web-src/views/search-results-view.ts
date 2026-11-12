@@ -1,3 +1,5 @@
+import { live } from "lit/directives/live.js";
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 import { formatErrorDetail } from "../core/error-detail";
 
@@ -11,11 +13,12 @@ import { SEARCH_16_PATH } from "../core/icons";
 import { linkOpenIntent, type OpenIntent } from "../core/link-click";
 import { buildGrepRequestParams, parseGrepQuery } from "../core/search-palette";
 import type { GrepResponse } from "../core/types";
-import { renderEmptyState } from "./empty-state";
 import {
   type SearchPaletteLanguage,
   searchPaletteText,
 } from "./search-palette-i18n";
+import { type EmptyStateOptions, emptyStateTemplate } from "./ui/empty-state";
+import { renderOwned } from "./ui/renderer";
 
 export type SearchResultsViewDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T | null;
@@ -57,24 +60,147 @@ export type SearchResultsViewHandle = {
   localize(): void;
 };
 
+/** 検索の欄の上の切り替え (正規表現・大文字小文字・単語・テストを除く)。 */
+export type SearchToggleProps = {
+  label: string;
+  title: string;
+  pressed: boolean;
+  disabled: boolean;
+  onToggle(): void;
+};
+
+export type SearchResultRowProps = {
+  key: string;
+  title: string;
+  detail: string;
+  selected: boolean;
+  /** 押し方 (クリック・中ボタン・ダブルクリック) ごとに開く。 */
+  onOpen(event: MouseEvent): void;
+};
+
+/** 検索の結果の画面 (#search-sheet) の中。 */
+export type SearchResultsProps = {
+  input: {
+    value: string;
+    placeholder: string;
+    onInput(value: string): void;
+    /** 欄の今の語で探す (Enter と［検索］)。 */
+    onRun(value: string): void;
+  };
+  runLabel: string;
+  toggles: SearchToggleProps[];
+  /** 件数や理由の 1 行。again は「もう一度探す」を添えるとき。 */
+  status: { text: string; again: { label: string; onClick(): void } | null };
+  /** 検索する前・当たらなかったときの案内 (一覧の外)。 */
+  idle: EmptyStateOptions | null;
+  groups: { path: string; rows: SearchResultRowProps[] }[];
+};
+
+export type SearchResultsView = (props: SearchResultsProps) => unknown;
+
+export const DEFAULT_VIEW: SearchResultsView = (props) => html`<div
+    class="search-results-head"
+  ><input
+      type="search"
+      class="search-results-input"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder=${props.input.placeholder}
+      aria-label=${props.input.placeholder}
+      .value=${live(props.input.value)}
+      @input=${(event: Event) =>
+        props.input.onInput((event.currentTarget as HTMLInputElement).value)}
+      @keydown=${(event: KeyboardEvent) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        props.input.onRun((event.currentTarget as HTMLInputElement).value);
+      }}
+    /><button
+      type="button"
+      class="gdp-btn gdp-btn-sm search-results-run"
+      title=${props.runLabel}
+      @click=${(event: Event) =>
+        props.input.onRun(
+          (event.currentTarget as HTMLElement)
+            .closest(".search-results-head")
+            ?.querySelector<HTMLInputElement>(".search-results-input")?.value ??
+            "",
+        )}
+    >${props.runLabel}</button></div
+  ><div class="gdp-palette-controls search-results-controls">${props.toggles.map(
+    (toggle) => html`<button
+      type="button"
+      class="gdp-palette-mode-button"
+      title=${toggle.title}
+      aria-pressed=${String(toggle.pressed)}
+      ?disabled=${toggle.disabled}
+      @click=${(event: Event) => {
+        event.preventDefault();
+        toggle.onToggle();
+      }}
+    >${toggle.label}</button>`,
+  )}</div
+  ><div class="gdp-palette-status search-results-status">${
+    props.status.again
+      ? html`${props.status.text} <button
+            type="button"
+            class="gdp-palette-status-action"
+            @click=${props.status.again.onClick}
+          >${props.status.again.label}</button>`
+      : props.status.text
+  }</div
+  ><div class="search-results-idle">${
+    props.idle ? emptyStateTemplate(props.idle) : nothing
+  }</div
+  ><div class="gdp-palette-list search-results-list" role="listbox">${props.groups.map(
+    (group) => html`<section
+      class="gdp-palette-file-group"
+      role="group"
+      aria-label=${group.path}
+    ><div class="gdp-palette-file-heading"><span
+          class="gdp-palette-file-heading-name"
+          title=${group.path}
+        >${group.path}</span><span class="gdp-palette-file-heading-count"
+          >${group.rows.length}</span
+        ></div
+      ><div class="gdp-palette-file-matches">${group.rows.map(
+        (row) => html`<button
+          type="button"
+          class="gdp-palette-row"
+          role="option"
+          data-result-key=${row.key}
+          aria-selected=${String(row.selected)}
+          @click=${row.onOpen}
+          @auxclick=${row.onOpen}
+          @dblclick=${row.onOpen}
+        ><span class="gdp-palette-row-title">${row.title}</span><span
+            class="gdp-palette-row-detail"
+          >${row.detail}</span></button>`,
+      )}</div></section>`,
+  )}</div>`;
+
 const RESULTS_MAX = 500;
 
 export function createSearchResultsView(
   deps: SearchResultsViewDeps,
+  view: SearchResultsView = DEFAULT_VIEW,
 ): SearchResultsViewHandle {
   let mounted = false;
-  let input: HTMLInputElement | null = null;
-  let runButton: HTMLButtonElement | null = null;
-  let controls: HTMLElement | null = null;
-  let status: HTMLElement | null = null;
-  let list: HTMLElement | null = null;
-  /** 検索する前の案内 (一覧 role=listbox の外に置く)。 */
-  let idle: HTMLElement | null = null;
+  /** 欄に打っている語 (まだ探していないものも)。 */
+  let draft = "";
   let query = "";
   let controller: AbortController | null = null;
   let generation = 0;
   let settingsPending = false;
   let lastResponse: { response: GrepResponse; term: string } | null = null;
+  /** 件数・理由の 1 行。changed は「リポジトリが変わった」で、探し直しを添える。 */
+  let status: { kind: "text"; text: string } | { kind: "changed" } = {
+    kind: "text",
+    text: "",
+  };
+  /** 探している間は「検索する前」の案内を出さない (結果が届いたときに案内の
+   * 高さぶん一覧が上へ跳ねていた)。 */
+  let searching = false;
   // "path\0line" of the hit opened last, so the list shows where you are;
   // kept across re-runs of the same search when that hit is still listed.
   let activeKey = "";
@@ -85,243 +211,203 @@ export function createSearchResultsView(
     return deps.$<HTMLElement>("#search-sheet");
   }
 
-  function toggleButton(
-    label: string,
-    title: string,
-    pressed: boolean,
-    onToggle: () => void,
-  ): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gdp-palette-mode-button";
-    button.textContent = label;
-    button.title = title;
-    button.setAttribute("aria-pressed", String(pressed));
-    button.disabled = settingsPending;
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      onToggle();
-    });
-    return button;
-  }
-
   async function updateFlag(
     patch: Parameters<SearchResultsViewDeps["persistGrepSettings"]>[0],
   ): Promise<void> {
     if (settingsPending) return;
     settingsPending = true;
-    renderControls();
+    draw();
     try {
       await deps.persistGrepSettings(patch);
     } catch (err) {
       console.error("Failed to save search option", err);
-      if (status)
-        status.textContent = text().saveFailed(
-          text().regexMode,
-          formatErrorDetail(err),
-        );
+      status = {
+        kind: "text",
+        text: text().saveFailed(text().regexMode, formatErrorDetail(err)),
+      };
     } finally {
       settingsPending = false;
-      renderControls();
+      draw();
       if (query) run();
     }
   }
 
-  function renderControls(): void {
-    if (!controls) return;
+  function toggles(): SearchToggleProps[] {
     const current = text();
-    controls.replaceChildren(
-      toggleButton(
+    const toggle = (
+      label: string,
+      title: string,
+      pressed: boolean,
+      onToggle: () => void,
+    ): SearchToggleProps => ({
+      label,
+      title,
+      pressed,
+      disabled: settingsPending,
+      onToggle,
+    });
+    return [
+      toggle(
         current.plain,
         current.plain,
         !deps.getGrepRegex(),
         () => void updateFlag({ grepRegex: false }),
       ),
-      toggleButton(
+      toggle(
         current.regex,
         "Alt+R",
         deps.getGrepRegex(),
         () => void updateFlag({ grepRegex: true }),
       ),
-      toggleButton(
+      toggle(
         current.matchCase,
         current.matchCaseTitle,
         deps.getGrepCaseSensitive(),
         () =>
           void updateFlag({ grepCaseSensitive: !deps.getGrepCaseSensitive() }),
       ),
-      toggleButton(
+      toggle(
         current.wholeWord,
         current.wholeWordTitle,
         deps.getGrepWholeWord(),
         () => void updateFlag({ grepWholeWord: !deps.getGrepWholeWord() }),
       ),
-      toggleButton(
+      toggle(
         current.excludeTests,
         current.excludeTestsTitle,
         deps.getGrepHideTests(),
         () => void updateFlag({ hideTests: !deps.getGrepHideTests() }),
       ),
-    );
+    ];
   }
 
-  function mount(): void {
-    const el = host();
-    if (!el || mounted) return;
-    mounted = true;
-    el.replaceChildren();
-    const head = document.createElement("div");
-    head.className = "search-results-head";
-    input = document.createElement("input");
-    input.type = "search";
-    input.className = "search-results-input";
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        run(input?.value ?? "");
-      }
-    });
-    runButton = document.createElement("button");
-    runButton.type = "button";
-    runButton.className = "gdp-btn gdp-btn-sm search-results-run";
-    runButton.addEventListener("click", () => run(input?.value ?? ""));
-    controls = document.createElement("div");
-    controls.className = "gdp-palette-controls search-results-controls";
-    status = document.createElement("div");
-    status.className = "gdp-palette-status search-results-status";
-    head.append(input, runButton);
-    list = document.createElement("div");
-    list.className = "gdp-palette-list search-results-list";
-    list.setAttribute("role", "listbox");
-    idle = document.createElement("div");
-    idle.className = "search-results-idle";
-    el.append(head, controls, status, idle, list);
-    localize();
-  }
-
-  function renderResults(): void {
-    if (!list || !status || !idle) return;
-    list.replaceChildren();
-    idle.replaceChildren();
-    if (!lastResponse) {
-      // 検索する前: 何をするか (一行と補足) と主なキー。件数の欄は空。
-      const current = text();
-      status.textContent = "";
-      idle.appendChild(
-        renderEmptyState({
-          icon: SEARCH_16_PATH,
-          title: current.resultsIdle,
-          hint: current.resultsIdleHint,
-          keys: [
-            { keys: "Enter", label: current.resultsIdleKeys.run },
-            { keys: "⌘G", label: current.resultsIdleKeys.anywhere },
-            { keys: "⌘K", label: current.resultsIdleKeys.openFile },
-          ],
-          keysLabel: current.resultsIdleKeysLabel,
-          compact: true,
-        }),
-      );
-      return;
-    }
-    const { response, term } = lastResponse;
+  function idleState(): EmptyStateOptions | null {
+    const current = text();
+    if (searching) return null;
+    // 検索する前: 何をするか (一行と補足) と主なキー。件数の欄は空。
+    if (!lastResponse)
+      return {
+        icon: SEARCH_16_PATH,
+        title: current.resultsIdle,
+        hint: current.resultsIdleHint,
+        keys: [
+          { keys: "Enter", label: current.resultsIdleKeys.run },
+          { keys: "⌘G", label: current.resultsIdleKeys.anywhere },
+          { keys: "⌘K", label: current.resultsIdleKeys.openFile },
+        ],
+        keysLabel: current.resultsIdleKeysLabel,
+        compact: true,
+      };
     // 当たらなかったら、件数の欄の「0 件」だけで画面が空にならないよう一言出す。
-    if (response.matches.length === 0) {
-      idle.appendChild(
-        renderEmptyState({
-          icon: SEARCH_16_PATH,
-          title: text().resultsNone,
-          compact: true,
-        }),
-      );
-      return;
-    }
+    if (lastResponse.response.matches.length === 0)
+      return {
+        icon: SEARCH_16_PATH,
+        title: current.resultsNone,
+        compact: true,
+      };
+    return null;
+  }
+
+  function groups(): SearchResultsProps["groups"] {
+    if (!lastResponse) return [];
+    const { response, term } = lastResponse;
     const grouped = new Map<string, GrepResponse["matches"]>();
     for (const match of response.matches) {
       const bucket = grouped.get(match.path) ?? [];
       bucket.push(match);
       grouped.set(match.path, bucket);
     }
-    for (const [path, matches] of grouped) {
-      const group = document.createElement("section");
-      group.className = "gdp-palette-file-group";
-      group.setAttribute("role", "group");
-      group.setAttribute("aria-label", path);
-      const heading = document.createElement("div");
-      heading.className = "gdp-palette-file-heading";
-      const name = document.createElement("span");
-      name.className = "gdp-palette-file-heading-name";
-      name.textContent = path;
-      name.title = path;
-      const count = document.createElement("span");
-      count.className = "gdp-palette-file-heading-count";
-      count.textContent = String(matches.length);
-      heading.append(name, count);
-      const rows = document.createElement("div");
-      rows.className = "gdp-palette-file-matches";
-      for (const match of matches) {
+    return [...grouped].map(([path, matches]) => ({
+      path,
+      rows: matches.map((match) => {
         const key = `${match.path}\0${match.line}`;
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = "gdp-palette-row";
-        row.setAttribute("role", "option");
-        row.dataset.resultKey = key;
-        row.setAttribute("aria-selected", String(key === activeKey));
-        const title = document.createElement("span");
-        title.className = "gdp-palette-row-title";
-        title.textContent = text().line(match.line, match.column);
-        const detail = document.createElement("span");
-        detail.className = "gdp-palette-row-detail";
-        detail.textContent = match.preview;
-        row.append(title, detail);
-        const openRow = (event: MouseEvent) => {
-          const intent = linkOpenIntent(event);
-          if (intent === null) return;
-          event.preventDefault();
-          setActiveRow(key);
-          const hl = match.matchText || (deps.getGrepRegex() ? "" : term);
-          deps.openMatch(
-            { path: match.path, line: match.line, ...(hl ? { hl } : {}) },
-            intent,
-          );
+        return {
+          key,
+          title: text().line(match.line, match.column),
+          detail: match.preview,
+          selected: key === activeKey,
+          onOpen: (event: MouseEvent) => {
+            const intent = linkOpenIntent(event);
+            if (intent === null) return;
+            event.preventDefault();
+            // 開いた行に印を付ける (一覧は作り直さないので、スクロールはそのまま)。
+            activeKey = key;
+            draw();
+            const hl = match.matchText || (deps.getGrepRegex() ? "" : term);
+            deps.openMatch(
+              { path: match.path, line: match.line, ...(hl ? { hl } : {}) },
+              intent,
+            );
+          },
         };
-        row.addEventListener("click", openRow);
-        row.addEventListener("auxclick", openRow);
-        row.addEventListener("dblclick", openRow);
-        rows.appendChild(row);
-      }
-      group.append(heading, rows);
-      list.appendChild(group);
-    }
+      }),
+    }));
   }
 
-  // Mark the opened hit in place (no list rebuild, so scroll stays put).
-  function setActiveRow(key: string): void {
-    activeKey = key;
-    list?.querySelectorAll<HTMLElement>(".gdp-palette-row").forEach((row) => {
-      row.setAttribute("aria-selected", String(row.dataset.resultKey === key));
-    });
+  function draw(): void {
+    const el = host();
+    if (!el || !mounted) return;
+    const current = text();
+    el.setAttribute("aria-label", current.resultsTitle);
+    renderOwned(
+      el,
+      view({
+        input: {
+          value: draft,
+          placeholder: current.resultsPlaceholder,
+          onInput: (value) => {
+            draft = value;
+          },
+          onRun: (value) => run(value),
+        },
+        runLabel: current.resultsRun,
+        toggles: toggles(),
+        status:
+          status.kind === "changed"
+            ? {
+                // 同じ語・同じ条件で検索し直すボタンを添える。
+                text: current.repositoryChanged,
+                again: {
+                  label: current.searchAgain,
+                  onClick: () => run(query),
+                },
+              }
+            : { text: status.text, again: null },
+        idle: idleState(),
+        groups: groups(),
+      }),
+    );
+  }
+
+  function mount(): void {
+    if (!host() || mounted) return;
+    mounted = true;
+    draw();
+  }
+
+  function setStatus(next: string): void {
+    status = { kind: "text", text: next };
   }
 
   function run(nextQuery?: string): void {
     if (!mounted) return;
     if (nextQuery !== undefined) query = nextQuery.trim();
-    if (input && input.value !== query) input.value = query;
+    draft = query;
     controller?.abort();
     controller = null;
     const parsed = parseGrepQuery(query);
     deps.onQueryChange?.(query);
     if (!parsed.term) {
       lastResponse = null;
-      renderResults();
+      searching = false;
+      setStatus("");
+      draw();
       return;
     }
     const myGeneration = ++generation;
-    if (status) status.textContent = text().searching;
-    // 探している間は「検索する前」の案内を出さない (結果が届いたときに案内の
-    // 高さぶん一覧が上へ跳ねていた)。
-    idle?.replaceChildren();
+    setStatus(text().searching);
+    searching = true;
+    draw();
     const ref = deps.getRef();
     const regex = deps.getGrepRegex();
     const caseSensitive = deps.getGrepCaseSensitive();
@@ -354,6 +440,7 @@ export function createSearchResultsView(
       )
       .then((response) => {
         if (myGeneration !== generation || abort.signal.aborted) return;
+        searching = false;
         const current = deps.getServerGeneration();
         if (
           response.generation !== undefined &&
@@ -361,25 +448,13 @@ export function createSearchResultsView(
           response.generation < current
         ) {
           lastResponse = null;
-          renderResults();
-          if (status) {
-            // 同じ語・同じ条件で検索し直すボタンを添える。
-            const again = document.createElement("button");
-            again.type = "button";
-            again.className = "gdp-palette-status-action";
-            again.textContent = text().searchAgain;
-            again.addEventListener("click", () => run(query));
-            status.replaceChildren(
-              document.createTextNode(`${text().repositoryChanged} `),
-              again,
-            );
-          }
+          status = { kind: "changed" };
+          draw();
           return;
         }
         lastResponse = { response, term: parsed.term };
-        renderResults();
-        if (status)
-          status.textContent = `${text().grepSummary({
+        setStatus(
+          `${text().grepSummary({
             engine: response.engine,
             regex,
             caseSensitive,
@@ -388,33 +463,19 @@ export function createSearchResultsView(
             truncated: response.truncated,
             count: response.matches.length,
             paths: parsed.paths,
-          })} · ${text().resultsScope(ref)}`;
+          })} · ${text().resultsScope(ref)}`,
+        );
+        draw();
       })
       .catch((err: unknown) => {
         if (deps.isAbortError(err) || abort.signal.aborted) return;
         if (myGeneration !== generation) return;
         console.error("Search results request failed", err);
+        searching = false;
         lastResponse = null;
-        renderResults();
-        if (status)
-          status.textContent = text().searchFailed(formatErrorDetail(err));
+        setStatus(text().searchFailed(formatErrorDetail(err)));
+        draw();
       });
-  }
-
-  function localize(): void {
-    if (!mounted) return;
-    const current = text();
-    if (input) {
-      input.placeholder = current.resultsPlaceholder;
-      input.setAttribute("aria-label", current.resultsPlaceholder);
-    }
-    if (runButton) {
-      runButton.textContent = current.resultsRun;
-      runButton.title = current.resultsRun;
-    }
-    host()?.setAttribute("aria-label", current.resultsTitle);
-    renderControls();
-    renderResults();
   }
 
   function isOpen(): boolean {
@@ -433,8 +494,8 @@ export function createSearchResultsView(
       document.body.classList.add("search-sheet-open");
       if (nextQuery !== undefined && nextQuery !== query) run(nextQuery);
       else if (nextQuery === undefined && !lastResponse && query) run(query);
-      else renderResults();
-      input?.focus();
+      else draw();
+      el.querySelector<HTMLInputElement>(".search-results-input")?.focus();
     },
     close() {
       const el = host();
@@ -452,11 +513,13 @@ export function createSearchResultsView(
       controller?.abort();
       controller = null;
       lastResponse = null;
+      searching = false;
       query = "";
+      draft = "";
       activeKey = "";
-      renderResults();
+      draw();
     },
     getQuery: () => query,
-    localize,
+    localize: draw,
   };
 }

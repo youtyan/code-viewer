@@ -1,12 +1,10 @@
 // 関連パネルの左の一覧と右の見出し (views/database/related-list.ts)。happy-dom の
 // 実描画で、2 つに分けた一覧・件数・0 件を隠す切り替え・見出しの文・空表示を見る。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { tableData } from "./_table-grid-fixture";
 import { q } from "./_test-helpers";
-
-GlobalRegistrator.register();
 
 const { createTableGrid } = await import("../views/database/table-grid");
 const { dbText } = await import("../views/database/i18n");
@@ -143,9 +141,6 @@ function setup(failCountFor?: string) {
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 describe("related list", () => {

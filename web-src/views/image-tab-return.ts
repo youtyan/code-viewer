@@ -1,5 +1,5 @@
 import type { PaneSide } from "../core/main-tabs";
-import type { MainTabsHandle } from "./main-tabs/main-tabs-view";
+import type { MainTabsHandle } from "./main-tabs/main-tabs-presenter";
 
 type Tabs = Pick<
   MainTabsHandle,

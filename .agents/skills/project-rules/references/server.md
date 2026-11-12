@@ -252,6 +252,12 @@ grep -rlnP '[\x00-\x08\x0b\x0c\x0e-\x1f]' web-src/ --include=*.ts
 - 戻り値は状態型（`ok` / `missing` / `no-server` / `no-target` / `error`）。
   **握り潰さず、状態ごとに UI の出し分けを決める**
 - git は `server/git.ts` の関数経由。docker は `server/database/adapters/docker*.ts` 経由
+- **読むだけの git に `.git/index` を書かせない。** `git.ts` の `gitInvocation` が読み取りに
+  `GIT_OPTIONAL_LOCKS=0` と `-c core.fsmonitor=false -c diff.autoRefreshIndex=false` を足す
+  (書き直しの間 git は `index.lock` を持ち、数秒おきの読み取りがエージェントの
+  `git add` / `git commit` を失敗させうる。`GIT_OPTIONAL_LOCKS` だけでは diff の書き直しが
+  止まらない)。書く git を足すなら `writesRepository` に載せる。テストは
+  `git-read-only-index.test.ts`
 - **子プロセスは `server/runtime.ts` の `spawnProcess` / `runSync` / `runAsync` / `spawnStream` だけで
   起こす**（`biome.jsonc` の `noRestrictedImports` が `node:child_process` を塞ぐ）。ここで detached に
   して端末を持たせない。持たせると対話シェル（`$SHELL -i -c`）が端末の前面を奪ったまま終わり、
@@ -282,6 +288,11 @@ docker コンテナ、OS の設定）を変える機能は、次の 3 つが揃�
 - 実体は `server/*-cli.ts`。入口は `server/cli.ts`
 - ドキュメントとの整合はテストが見る（`web-src/test/_documented-cli-fixture.ts`）。
   README / Help に書いた呼び出し方と実装がずれると落ちる
+- 利用者の画面を動かす CLI は `show` だけ（`server/show-cli.ts` → `POST /_show` → プロジェクトの
+  通知の `show` → 画面は Web Locks で 1 つの窓だけが新しいタブで開く。`views/show-claim.ts`）。
+  映している画面が無ければ 409 で理由を返す。裏が動いていなければ起こさない（`ensureServerUrl` の `wake: false`。
+  起こすと、頼まれていないのにリポジトリがプロジェクトの一覧に加わる）。使うのは利用者に頼まれたときだけ（配布スキル・help に書く）。
+  画面を動かす口を足すときもこの形にし、いま見ているタブを変えない
 - CLI からサーバを叩くときは `server/cli-helpers.ts` の `requestJson`
   （Origin と `X-Code-Viewer-Action` を付ける）
 - サーバが居るかの確認は `probeServer`。「繋がらない」(`unreachable`) と「繋がったが

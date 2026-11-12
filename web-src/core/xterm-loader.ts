@@ -43,6 +43,11 @@ export type XtermOptions = {
    * どちらの描画でも効く。淡色 (SGR 2) はこの半分)。
    */
   minimumContrastRatio?: number;
+  /**
+   * macOS で Option キーを Meta (ESC を前に付けた Alt) として送る。偽なら Option は
+   * キー配列の字 (å・¥ など) を打つ。
+   */
+  macOptionIsMeta?: boolean;
   /** 画面に出さない書き込み専用にするとき (読み取り専用ペイン)。 */
   disableStdin?: boolean;
   /** capture-pane の出力は行末に改行しか持たないので CR を補う。 */
@@ -191,6 +196,14 @@ export type XtermTerminal = {
    * ずれない)。
    */
   registerLinkProvider(provider: XtermLinkProvider): XtermDisposable;
+  /** 端末の制御の列の受け口 (OSC 52 のクリップボードなど)。 */
+  readonly parser: {
+    /** true を返すと xterm は既定の扱いをしない。 */
+    registerOscHandler(
+      ident: number,
+      callback: (data: string) => boolean | Promise<boolean>,
+    ): XtermDisposable;
+  };
   /** 描画のたびに呼ばれる。重ねている DOM の置き直しはここで判断する。 */
   onRender(
     handler: (range: { start: number; end: number }) => void,

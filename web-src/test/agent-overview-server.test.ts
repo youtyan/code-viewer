@@ -85,6 +85,7 @@ describe("projectRootResultAsync", () => {
   });
 });
 
+// ai-dup-check: allow -- ok:ペインの一覧の応答を作る試験の小道具で、タブ列の試験の panesAt とは試すものが別
 function panesResponse(
   panes: { id: string; path: string; command: string; title?: string }[],
 ): TmuxPanesResponse {
@@ -189,6 +190,7 @@ function deps(over: Partial<AgentOverviewDeps> = {}): AgentOverviewDeps {
         ? { status: "running", url: "http://127.0.0.1:64172/", launched: false }
         : { status: "absent" },
     paneAccounts: async () => new Map(),
+    paneProcessKinds: async () => ({ kinds: new Map(), errors: [] }),
     readRegistry: () => ({
       projects: [],
       error: "",
@@ -256,6 +258,41 @@ describe("buildAgentOverview", () => {
       ],
       ["%4", null],
     ]);
+  });
+
+  test("インタプリタのペインは引数から当てた種類で出し、調べられなかった理由を errors に載せる", async () => {
+    const asked: string[] = [];
+    const overview = await buildAgentOverview(
+      deps({
+        listPanes: async () =>
+          panesResponse([
+            { id: "%1", path: "/work/sample-repo", command: "node" },
+            { id: "%2", path: "/work/sample-repo", command: "node" },
+            { id: "%3", path: "/work/sample-repo", command: "zsh" },
+          ]),
+        paneProcessKinds: async (targets) => {
+          asked.push(...targets.map((target) => target.id));
+          return {
+            kinds: new Map([["%1", "claude" as const]]),
+            errors: [{ target: "%2", error: new Error("sample ps failure") }],
+          };
+        },
+      }),
+    );
+    expect(asked).toEqual(["%1", "%2", "%3"]);
+    expect(overview.panes.map((item) => [item.id, item.kind])).toEqual([
+      ["%1", "claude"],
+      // 調べられなかったものは今までどおりの判定 (コマンド名と申告)。
+      ["%2", null],
+      ["%3", null],
+    ]);
+    expect(overview.errors).toContainEqual(
+      expect.objectContaining({
+        operation: "probe_process",
+        target: "%2",
+        detail: "Error: sample ps failure",
+      }),
+    );
   });
 
   test("ペインを本体のルートでまとめ、worktree 名・種類・状態を付ける", async () => {
@@ -440,6 +477,70 @@ describe("buildAgentOverview", () => {
   });
 
   // タブが映していた tmux の場所 (セッション名とウインドウの番号) として保存する。
+  test("git の外で動くペインは、同じウインドウのペインがみな同じプロジェクトならそこにまとめる", async () => {
+    // 作業役を一時フォルダで起こすと、作業場所はリポジトリの外になる。
+    const overview = await buildAgentOverview(
+      deps({
+        listPanes: async () =>
+          panesResponse([
+            { id: "%1", path: "/work/sample-repo", command: "claude" },
+            { id: "%4", path: "/work/notes", command: "codex" },
+            {
+              id: "%2",
+              path: "/work/sample-repo/.worktrees/feature-x",
+              command: "zsh",
+            },
+          ]),
+      }),
+    );
+    expect(
+      overview.panes.map((item) => [item.id, item.project, item.worktree]),
+    ).toEqual([
+      ["%1", "/work/sample-repo", ""],
+      ["%4", "/work/sample-repo", ""],
+      ["%2", "/work/sample-repo", "feature-x"],
+    ]);
+    expect(overview.projects.map((item) => [item.root, item.git])).toEqual([
+      ["/work/sample-repo", true],
+    ]);
+  });
+
+  test("git の外で動くペインは、同じウインドウで最初に並んでいても、ほかのペインのプロジェクトを git として載せる", async () => {
+    const overview = await buildAgentOverview(
+      deps({
+        listPanes: async () =>
+          panesResponse([
+            { id: "%4", path: "/work/notes", command: "codex" },
+            { id: "%1", path: "/work/sample-repo", command: "claude" },
+          ]),
+      }),
+    );
+    expect(overview.panes.map((item) => [item.id, item.project])).toEqual([
+      ["%4", "/work/sample-repo"],
+      ["%1", "/work/sample-repo"],
+    ]);
+    expect(overview.projects.map((item) => [item.root, item.git])).toEqual([
+      ["/work/sample-repo", true],
+    ]);
+  });
+
+  test("git の外で動くペインは、同じウインドウにリポジトリが無いか 2 つ以上あれば、作業場所のままにする", async () => {
+    const alone = await buildAgentOverview(
+      deps({
+        listPanes: async () =>
+          panesResponse([{ id: "%4", path: "/work/notes", command: "codex" }]),
+      }),
+    );
+    expect(alone.panes.map((item) => [item.id, item.project])).toEqual([
+      ["%4", "/work/notes"],
+    ]);
+    // 2 つのリポジトリが並ぶウインドウ (deps の既定) は、どちらとも決めない。
+    const mixed = await buildAgentOverview(deps());
+    expect(mixed.panes.find((item) => item.id === "%4")?.project).toBe(
+      "/work/notes",
+    );
+  });
+
   test("ペインにセッション名とウインドウの番号を付ける", async () => {
     const [first, second] =
       panesResponse([

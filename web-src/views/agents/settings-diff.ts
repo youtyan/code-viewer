@@ -9,8 +9,10 @@
 //   │ 2 +  "hooks": { … }                  │ ← 追加は緑・削除は赤 (行番号つき)
 //   └──────────────────────────────────────┘ ← 長ければこの中でスクロール
 
+import { ref } from "lit/directives/ref.js";
+import { html, type TemplateResult } from "lit/html.js";
 import { abbreviateHome } from "../../core/agent-overview";
-import { el, labeled } from "./accounts-dialogs";
+import { labeledTemplate } from "./accounts-dialogs";
 
 export type SettingsDiffText = {
   /** 「書き込むファイル」の欄の名前。 */
@@ -29,34 +31,14 @@ export type SettingsDiffPlan = {
   diff: string;
 };
 
-/** 書き込む先 (リンクなら「リンク → 実体」) と差分。 */
-export function settingsDiffBlock(
-  plan: SettingsDiffPlan,
-  home: string,
-  text: SettingsDiffText,
-): HTMLElement[] {
-  const short = (path: string) => (home ? abbreviateHome(path, home) : path);
-  const where = labeled(
-    text.file,
-    plan.symlink
-      ? `${short(plan.path)} → ${short(plan.realPath)}`
-      : short(plan.path),
-  );
-  where.title = plan.symlink ? `${plan.path} → ${plan.realPath}` : plan.path;
-  if (!plan.changed || plan.diff === "") {
-    return [where, el("p", "agent-settings-diff-none", text.unchanged)];
-  }
-  const box = el("div", "agent-settings-diff");
-  if (typeof window.Diff2HtmlUI !== "function") {
-    // 見た目の部品が無い (読み込みに失敗した)。黙って省かず、差分の文字を出す。
-    console.error(
-      "[code-viewer] Diff2HtmlUI is not loaded; showing the settings diff as text",
-    );
-    const note = el("p", "agent-hooks-detail-problem", text.drawFailed);
-    box.appendChild(el("pre", "terminal-mono", plan.diff));
-    return [where, note, box];
-  }
-  new window.Diff2HtmlUI(box, plan.diff, {
+/** diff2html に描かせた箱 (同じ箱に 2 回描かない)。 */
+const drawn = new WeakSet<Element>();
+
+function drawDiff(box: Element | undefined, diff: string): void {
+  if (!(box instanceof HTMLElement) || drawn.has(box)) return;
+  drawn.add(box);
+  // 差分の見た目は diff2html (外の部品) が箱の中に描く。
+  new window.Diff2HtmlUI(box, diff, {
     drawFileList: false,
     matching: "lines",
     outputFormat: "line-by-line",
@@ -64,5 +46,37 @@ export function settingsDiffBlock(
     fileListToggle: false,
     fileContentToggle: false,
   }).draw();
-  return [where, box];
+}
+
+/** 書き込む先 (リンクなら「リンク → 実体」) と差分。 */
+export function settingsDiffTemplate(
+  plan: SettingsDiffPlan,
+  home: string,
+  text: SettingsDiffText,
+): TemplateResult {
+  const short = (path: string) => (home ? abbreviateHome(path, home) : path);
+  const where = labeledTemplate(
+    text.file,
+    plan.symlink
+      ? `${short(plan.path)} → ${short(plan.realPath)}`
+      : short(plan.path),
+    false,
+    plan.symlink ? `${plan.path} → ${plan.realPath}` : plan.path,
+  );
+  if (!plan.changed || plan.diff === "") {
+    return html`${where}<p class="agent-settings-diff-none">${text.unchanged}</p>`;
+  }
+  if (typeof window.Diff2HtmlUI !== "function") {
+    // 見た目の部品が無い (読み込みに失敗した)。黙って省かず、差分の文字を出す。
+    console.error(
+      "[code-viewer] Diff2HtmlUI is not loaded; showing the settings diff as text",
+    );
+    return html`${where}<p class="agent-hooks-detail-problem">${text.drawFailed}</p><div
+        class="agent-settings-diff"
+      ><pre class="terminal-mono">${plan.diff}</pre></div>`;
+  }
+  return html`${where}<div
+    class="agent-settings-diff"
+    ${ref((box) => drawDiff(box, plan.diff))}
+  ></div>`;
 }

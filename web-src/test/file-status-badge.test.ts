@@ -1,18 +1,10 @@
 // ファイル一覧の印 (Files のツリー・フォルダ表示・変更ファイルが使う fileBadge)。
 // マージの衝突は C で、未追跡 (U) と読み分けられる名前を両方の言語で持つ。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import "./_dom";
+import { expect, test } from "vitest";
 import { fileStatusBadge } from "../views/diff-view";
 import { DIFF_SCREEN_TEXT } from "../views/diff-view-i18n";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
 
 test.each([
   {

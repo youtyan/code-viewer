@@ -148,6 +148,29 @@ describe("reportAgentHook", () => {
     });
   });
 
+  test("an error stop is reported as needing you, with its reason", async () => {
+    const { deps, posted } = fakeDeps({
+      servers: [server("http://127.0.0.1:64001/")],
+    });
+    await reportAgentHook(
+      "claude",
+      JSON.stringify({
+        hook_event_name: "StopFailure",
+        error: "rate_limit",
+        error_details: "429 Too Many Requests",
+      }),
+      deps,
+    );
+    expect(posted[0]?.body).toMatchObject({
+      event: "ask",
+      attention: {
+        kind: "error",
+        reason: "rate_limit",
+        detail: "429 Too Many Requests",
+      },
+    });
+  });
+
   test("one failing server does not stop the others", async () => {
     const { deps, posted, failures } = fakeDeps({
       servers: [

@@ -2,9 +2,8 @@
 // 選択肢・操作札・返事を /_tmux/pane-input へ送る。端末は本物の xterm を画面に
 // 出さずに使い、流し (EventSource) と送信 (fetch) は偽物にする。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import "./_dom";
 import {
-  afterAll,
   afterEach,
   beforeAll,
   beforeEach,
@@ -28,7 +27,9 @@ vi.mock("../core/xterm-loader", () => ({
 import { terminalText } from "../views/terminal/i18n";
 import {
   createPaneView,
+  DEFAULT_VIEW,
   type PaneViewHandle,
+  type PaneViewView,
 } from "../views/terminal/pane-view";
 
 type Source = {
@@ -42,7 +43,6 @@ const posted: unknown[] = [];
 let reply: () => Response = () => new Response('{"ok":true}');
 
 beforeAll(() => {
-  GlobalRegistrator.register();
   class FakeEventSource {
     static readonly CLOSED = 2;
     readyState = 1;
@@ -82,10 +82,6 @@ beforeAll(() => {
       return reply();
     },
   });
-});
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
 });
 
 function snapshot(content: string, extra: Partial<TmuxPaneSnapshot> = {}) {
@@ -479,6 +475,39 @@ describe("画像の添付", () => {
       field: "",
       posted: expected.posted,
     });
+  });
+});
+
+describe("the pane view's view", () => {
+  test("passes the choices found on the screen to the view", async () => {
+    view.handlePopState();
+    view.dispose();
+    view.el.remove();
+    const drawn: Parameters<PaneViewView["choices"]>[0][] = [];
+    view = createPaneView(
+      {
+        getText: () => terminalText("en"),
+        describePane: () => null,
+        actionHeaders: () => ({ "X-Code-Viewer-Action": "1" }),
+        trackLoad: (promise) => promise,
+        onClose,
+      },
+      {
+        ...DEFAULT_VIEW,
+        choices: (choices) => {
+          drawn.push(choices);
+          return DEFAULT_VIEW.choices(choices);
+        },
+      },
+    );
+    document.body.append(view.el);
+    await openWith("Proceed?\n❯ 1. Yes\n  2. No");
+    expect(
+      drawn[drawn.length - 1]?.map((choice) => [choice.key, choice.label]),
+    ).toEqual([
+      ["1", "Yes"],
+      ["2", "No"],
+    ]);
   });
 });
 

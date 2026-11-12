@@ -3,10 +3,9 @@
 // 後半はアカウントの一覧の使用量と、「別のアカウントで続ける」の形。
 // パス・名前はすべて架空。
 
+import "./_dom";
 import { readFileSync } from "node:fs";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
-  afterAll,
   afterEach,
   beforeAll,
   beforeEach,
@@ -27,13 +26,9 @@ import {
 import { agentPane } from "./_test-helpers";
 
 beforeAll(() => {
-  GlobalRegistrator.register();
   const style = document.createElement("style");
   style.textContent = readFileSync("web/style.css", "utf8");
   document.head.appendChild(style);
-});
-afterAll(async () => {
-  await GlobalRegistrator.unregister();
 });
 afterEach(() => {
   document.body.replaceChildren();
@@ -74,7 +69,7 @@ function response(claude: string): AccountsResponse {
     ],
     registryError: null,
     registryPath: "/home/sample/.local/state/code-viewer/accounts.json",
-    launchCommands: { claude, codex: "codex" },
+    launchCommands: { claude, codex: "codex", opencode: "opencode" },
     lastLaunch: null,
     usageFailures: { total: 0, recent: [], log: "" },
   };
@@ -360,16 +355,23 @@ function openDialog(
 ) {
   const { client, launched } = launchClient(data);
   const opened: string[] = [];
+  /** 一覧の取り直しと開く口が呼ばれた順。 */
+  const order: string[] = [];
   const dialogs = createAccountDialogs({
     client,
     getText: () => text,
-    openPane: (pane) => opened.push(pane),
+    openPane: (pane) => {
+      opened.push(pane);
+      order.push("open");
+    },
     getOverview: () => overview,
     serverRoot: () => "/home/sample/work/sample-app",
-    refreshOverview: async () => undefined,
+    refreshOverview: async () => {
+      order.push("refresh");
+    },
   });
   const closed = dialogs.launch(options);
-  return { closed, launched, opened };
+  return { closed, launched, opened, order };
 }
 
 /** 一覧の各行: 名前・札・いつの値か・使用量の行 (または理由)。 */
@@ -485,7 +487,7 @@ describe("別のアカウントで続ける (起動の画面を引き継ぎの�
   });
 
   test("前の担当と違うアカウントを選び、フォルダとセッションを合わせ、指示と --add-dir を渡す", async () => {
-    const { closed, launched, opened } = openDialog(accountsResponse(), {
+    const { closed, launched, opened, order } = openDialog(accountsResponse(), {
       handoff: from,
     });
     const dialog = document.querySelector<HTMLElement>(".gdp-dialog");
@@ -533,6 +535,10 @@ describe("別のアカウントで続ける (起動の画面を引き継ぎの�
       ],
       ["%9"],
     ]);
+    // 一覧を取り直してから開く。開く口は一覧でペインのプロジェクトを引き、
+    // 別のプロジェクトならそこへ移る。先に開くと新しいペインが一覧に無く、
+    // いま見ているプロジェクトのタブ列に混ざった。
+    expect(order).toEqual(["refresh", "open"]);
   });
 
   test("codex を選ぶと --add-dir を付けず、画面の言語の指示を渡す", async () => {
@@ -557,6 +563,51 @@ describe("別のアカウントで続ける (起動の画面を引き継ぎの�
         project: "/home/sample/work/sample-lib",
         session: "sample-agents",
         handoff: { pane: "%4", language: "ja", fromAccount: "Work" },
+      },
+    ]);
+  });
+
+  test("opencode を選ぶと既定のアカウントで、指示は --prompt で渡し、資格情報が無くても使えると言う", async () => {
+    const data = accountsResponse();
+    const [builtin] = data.accounts;
+    if (!builtin) throw new Error("the sample response has no account");
+    data.accounts.push(
+      account({
+        id: "opencode:default",
+        agent: "opencode",
+        name: "",
+        builtin: true,
+        configDir: "/home/sample/.config/opencode",
+        login: { ...builtin.login, state: "logged-out", checkedAt: NOW },
+        usage: {
+          status: "unavailable",
+          reason: "unsupported",
+          detail: "",
+          observedAt: 0,
+        },
+      }),
+    );
+    const { closed, launched } = openDialog(data, { handoff: from });
+    [...document.querySelectorAll<HTMLButtonElement>(".seg button")]
+      .find((button) => button.textContent === "opencode")
+      ?.click();
+    const prompt = `Take over the work of the previous agent (claude · Work). Its conversation log is at ${LOG} (JSONL). Read the last request and how far it got, then continue the work. If anything is unclear, ask before you start.`;
+    expect(preview()).toBe(`opencode --prompt '${prompt}'`);
+    const dialog = document.querySelector<HTMLElement>(".gdp-dialog");
+    expect(dialog?.textContent).toContain(
+      ACCOUNTS_EN.launchOpencodeNoCredentials,
+    );
+    expect(dialog?.textContent).not.toContain(ACCOUNTS_EN.launchNeedsLogin);
+    document
+      .querySelector<HTMLButtonElement>(".gdp-dialog .gdp-dialog-confirm")
+      ?.click();
+    await closed;
+    expect(launched).toEqual([
+      {
+        accountId: "opencode:default",
+        project: "/home/sample/work/sample-lib",
+        session: "sample-agents",
+        handoff: { pane: "%4", language: "en", fromAccount: "Work" },
       },
     ]);
   });
@@ -602,10 +653,15 @@ test("「このアカウントで開く」は起動と同じ口に、アカウ�
     registry: { projects: [], error: "", path: "/home/sample/projects.json" },
   };
   let refreshed = 0;
+  // 開いた時点で一覧を取り直し終えていたか (上の起動の画面のテストと同じ理由)。
+  const refreshedWhenOpened: number[] = [];
   const dialogs = createAccountDialogs({
     client: fake.client,
     getText: () => ACCOUNTS_EN,
-    openPane: (pane) => opened.push(pane),
+    openPane: (pane) => {
+      opened.push(pane);
+      refreshedWhenOpened.push(refreshed);
+    },
     getOverview: () => overview,
     serverRoot: () => "/home/sample/work/sample-app",
     refreshOverview: async () => {
@@ -627,6 +683,7 @@ test("「このアカウントで開く」は起動と同じ口に、アカウ�
     },
   ]);
   expect(opened).toEqual(["%7"]);
+  expect(refreshedWhenOpened).toEqual([1]);
   expect([refreshed, fake.loads()]).toEqual([1, 1]);
 });
 

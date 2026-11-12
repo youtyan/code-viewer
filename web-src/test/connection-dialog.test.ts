@@ -1,12 +1,11 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import "./_dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { closeOpenDialog, getOpenDialog } from "./_dialog-helpers";
 
-GlobalRegistrator.register();
-
-const { showDatastoreConnectionDialog } = await import(
+const { showDatastoreConnectionDialog, DEFAULT_VIEW } = await import(
   "../views/database/connection-dialog"
 );
+type ConnectionFormProps = Parameters<typeof DEFAULT_VIEW>[0];
 const originalFetch = globalThis.fetch;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -65,10 +64,6 @@ function requiredVisibleLabels(): string[] {
 afterEach(() => {
   globalThis.fetch = originalFetch;
   closeOpenDialog();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
 });
 
 describe("datastore connection dialog required fields", () => {
@@ -561,6 +556,45 @@ describe("Cloudflare D1 connection", () => {
       expect(fieldRow(label).hidden).toBe(false);
     }
 
+    dialogButtons()[0].click();
+    expect(await promise).toBeNull();
+  });
+});
+
+describe("the connection form presenter", () => {
+  test("hides rows and fills defaults for the chosen kind through the view", async () => {
+    const shown: ConnectionFormProps[] = [];
+    const promise = showDatastoreConnectionDialog(
+      { language: "en", trackLoad: (load) => load },
+      undefined,
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    await tick();
+    const last = () => shown[shown.length - 1] as ConnectionFormProps;
+    expect([
+      last().kind,
+      last().hidden.user,
+      last().refs.port.value?.value,
+    ]).toEqual(["postgresql", false, "5432"]);
+
+    last().onKind("redis");
+    expect([
+      last().kind,
+      last().hidden.user,
+      last().hidden.username,
+      last().refs.port.value?.value,
+    ]).toEqual(["redis", true, false, "6379"]);
+
+    // 表示名が空のまま試すと、view に失敗の文を渡す (取得はしない)。
+    last().onTest();
+    expect(last().test).toEqual({
+      state: "error",
+      text: "Complete the required fields",
+      busy: false,
+    });
     dialogButtons()[0].click();
     expect(await promise).toBeNull();
   });

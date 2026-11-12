@@ -1,27 +1,12 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "vitest";
+import "./_dom";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { ToolId } from "../core/tools";
 import type { ToolsState } from "../core/types";
 import {
-  createToolsView,
+  createToolsPresenter,
   type ToolsViewHandle,
-} from "../views/tools/tools-view";
-
-beforeAll(() => {
-  GlobalRegistrator.register();
-});
-
-afterAll(() => {
-  GlobalRegistrator.unregister();
-});
+} from "../views/tools/tools-presenter";
+import { flushRenders } from "../views/ui/render-queue";
 
 type PatchCall = { url: string; body: unknown; keepalive: boolean };
 
@@ -107,7 +92,7 @@ async function settle(): Promise<void> {
 }
 
 function createView(): ToolsViewHandle {
-  const view = createToolsView({
+  const view = createToolsPresenter({
     $: <T extends Element = HTMLElement>(sel: string) =>
       document.querySelector<T>(sel),
     trackLoad: (promise) => promise,
@@ -126,18 +111,26 @@ function createView(): ToolsViewHandle {
 // ai-dup-check: allow -- ok:同型の "querySelector して無ければ throw" だが、
 // 対象がこのテスト専用のドロワー要素なのでダイアログ用ヘルパとは共有しない。
 function sheet(): HTMLElement {
+  flushRenders();
   const el = document.querySelector<HTMLElement>("#tools-sheet");
   if (!el) throw new Error("missing #tools-sheet");
   return el;
 }
 
+/** ツールのタブ。描き直しを済ませてから読む。 */
+function tabButtons(): HTMLButtonElement[] {
+  flushRenders();
+  return [
+    ...document.querySelectorAll<HTMLButtonElement>(".tools-tabs button"),
+  ];
+}
+
 function tabLabels(): string[] {
-  return Array.from(
-    document.querySelectorAll<HTMLButtonElement>(".tools-tabs button"),
-  ).map((button) => button.textContent ?? "");
+  return tabButtons().map((button) => button.textContent ?? "");
 }
 
 function activeTabLabel(): string {
+  flushRenders();
   const active = document.querySelector<HTMLButtonElement>(
     ".tools-tabs button.active",
   );
@@ -145,12 +138,14 @@ function activeTabLabel(): string {
 }
 
 function visiblePaneClasses(): string[] {
+  flushRenders();
   return Array.from(document.querySelectorAll<HTMLElement>(".tools-pane"))
     .filter((pane) => !pane.hidden)
     .map((pane) => pane.className);
 }
 
 function statusFor(tool: ToolId): string {
+  flushRenders();
   return (
     document.querySelector<HTMLElement>(
       `.tools-pane-${tool} .tools-pane-status`,
@@ -159,6 +154,7 @@ function statusFor(tool: ToolId): string {
 }
 
 function textareaFor(tool: ToolId): HTMLTextAreaElement {
+  flushRenders();
   const el = document.querySelector<HTMLTextAreaElement>(
     `.tools-pane-${tool} .tools-textarea`,
   );
@@ -316,9 +312,7 @@ describe("tools overlay tool selection", () => {
   test("clicking a tab swaps the visible pane and reports the change", async () => {
     const view = createView();
     await view.open();
-    const tabs =
-      document.querySelectorAll<HTMLButtonElement>(".tools-tabs button");
-    tabs[1].click();
+    tabButtons()[1].click();
 
     expect(view.getActiveTool()).toBe("mermaid");
     expect(visiblePaneClasses()).toEqual(["tools-pane tools-pane-mermaid"]);
@@ -452,9 +446,7 @@ describe("tools overlay drafts", () => {
     deferGet = true;
     const view = createView();
     const opening = view.open();
-    document
-      .querySelectorAll<HTMLButtonElement>(".tools-tabs button")[1]
-      .click();
+    tabButtons()[1].click();
     resolveGet?.({ version: 1, activeTool: "json" });
     await opening;
 
@@ -716,9 +708,7 @@ describe("tools overlay drafts", () => {
     expect(statusFor("markdown")).toBe(SAVE_REJECTED);
 
     await view.open();
-    document
-      .querySelectorAll<HTMLButtonElement>(".tools-tabs button")[1]
-      .click();
+    tabButtons()[1].click();
 
     // 別タブに移っても、保存できていないことは出したままにする。
     expect(statusFor("mermaid")).toBe(SAVE_REJECTED);
@@ -727,7 +717,7 @@ describe("tools overlay drafts", () => {
   test("re-renders the pinned failure in the new language", async () => {
     getFails = true;
     let language: "en" | "ja" = "en";
-    const view = createToolsView({
+    const view = createToolsPresenter({
       $: <T extends Element = HTMLElement>(sel: string) =>
         document.querySelector<T>(sel),
       trackLoad: (promise) => promise,
@@ -750,6 +740,7 @@ describe("tools overlay drafts", () => {
     storedState = { version: 1, drafts: { markdown: "# stored" } };
     const view = createView();
     await view.open();
+    flushRenders();
     document
       .querySelector<HTMLButtonElement>(
         ".tools-pane-markdown .tools-pane-action",

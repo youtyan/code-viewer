@@ -1,4 +1,6 @@
+import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../../core/api-url";
+import { showCopyFailure } from "../../core/copy-failure";
 import type {
   QueryHistoryEntry,
   QueryHistoryState,
@@ -8,9 +10,11 @@ import {
   formatErrorDetail,
   responseErrorMessage,
 } from "../../core/error-detail";
-import { iconSvg, SYNC_16_PATH } from "../../core/icons";
+import { SYNC_16_PATH } from "../../core/icons";
+import { iconTemplate } from "../ui/icon";
+import { detachedElement } from "../ui/renderer";
 import { type DbText, dbText } from "./i18n";
-import { fillNullOrEmpty, formatQueryValue } from "./query-value";
+import { formatQueryValue, nullOrEmptyMark } from "./query-value";
 
 export type QueryHistoryViewCallbacks = {
   getDbId: () => string | null;
@@ -35,78 +39,202 @@ type RefreshResult =
   | { type: "unchanged" }
   | { type: "error"; message: string };
 
+export type QueryHistoryMetaProps = {
+  executor: string;
+  time: string;
+  /** 時刻の元の文字 (title)。 */
+  executedAt: string;
+  stats: string;
+  /** 失敗した問い合わせの理由 (行数の代わりに「失敗」の印を出す)。 */
+  failure: string | null;
+};
+
+export type QueryHistoryDetailProps = {
+  meta: QueryHistoryMetaProps;
+  useLabel: string;
+  copyLabel: string;
+  deleteLabel: string;
+  deleteArmed: boolean;
+  sql: string;
+  error: string | null;
+  body: string | null;
+  preview: {
+    columns: string[];
+    rows: { mark: unknown; cellClass: string | null; text: string }[][];
+  } | null;
+  /** 保存した行が実際の行より少ないときの文。 */
+  truncated: string | null;
+  onUse: () => void;
+  /** 押したボタン (失敗の印と理由をそこに出す)。 */
+  onCopy: (button: HTMLElement) => void;
+  onDelete: () => void;
+};
+
+export type QueryHistoryProps = {
+  labels: {
+    refresh: string;
+    refreshTitle: string;
+    clear: string;
+    clearTitle: string;
+    placeholder: string;
+  };
+  busy: boolean;
+  result: { text: string; added: boolean; error: boolean };
+  clearArmed: boolean;
+  entries: {
+    id: string;
+    selected: boolean;
+    meta: QueryHistoryMetaProps;
+    title: string;
+    onSelect: () => void;
+  }[];
+  empty: string | null;
+  detail: QueryHistoryDetailProps | null;
+  onRefresh: () => void;
+  onClear: () => void;
+};
+
+export type QueryHistoryViewView = (props: QueryHistoryProps) => unknown;
+
+function metaTemplate(m: QueryHistoryMetaProps, className: string): unknown {
+  return html`<div class=${className}><span class="db-query-history-by"
+      >${m.executor}</span
+    ><span class="db-query-history-time" title=${m.executedAt}>${m.time}</span
+    ><span
+      class=${m.failure === null ? "db-query-history-stats" : "db-query-history-stats db-query-history-failed"}
+      title=${m.failure ?? nothing}
+      >${m.stats}</span
+    ></div>`;
+}
+
+function detailTemplate(d: QueryHistoryDetailProps): unknown {
+  const truncated = d.truncated
+    ? html`<div class="db-query-history-truncated">${d.truncated}</div>`
+    : nothing;
+  return html`${metaTemplate(d.meta, "db-query-history-detail-meta")}<div
+      class="db-query-history-detail-actions"
+    ><button class="db-btn db-btn-primary" type="button" @click=${d.onUse}
+      >${d.useLabel}</button
+    ><button
+      class="db-btn"
+      type="button"
+      @click=${(event: Event) => d.onCopy(event.currentTarget as HTMLElement)}
+    >${d.copyLabel}</button
+    ><button
+      class="db-btn db-query-history-danger"
+      type="button"
+      data-confirm=${d.deleteArmed ? "1" : nothing}
+      @click=${d.onDelete}
+    >${d.deleteLabel}</button></div
+  ><pre class="db-query-history-sql">${d.sql}</pre>${
+    d.error === null
+      ? nothing
+      : html`<pre class="db-query-error">${d.error}</pre>`
+  }${
+    d.body === null
+      ? nothing
+      : html`<div class="db-query-history-body">${d.body}</div>`
+  }${
+    d.preview
+      ? html`<div class="db-query-table-wrap"><table class="db-query-table"><thead
+              ><tr><th class="db-grid-rownum">#</th>${d.preview.columns.map(
+                (col) => html`<th>${col}</th>`,
+              )}</tr></thead
+            ><tbody>${d.preview.rows.map(
+              (row, i) =>
+                html`<tr class=${i % 2 === 1 ? "alt" : nothing}><td
+                    class="db-grid-rownum"
+                  >${i + 1}</td>${row.map(
+                    (cell) =>
+                      html`<td class=${cell.cellClass ?? nothing}>${
+                        cell.mark ?? cell.text
+                      }</td>`,
+                  )}</tr>`,
+            )}</tbody></table
+          >${truncated}</div>`
+      : nothing
+  }${truncated}`;
+}
+
+export const DEFAULT_VIEW: QueryHistoryViewView = (p) =>
+  html`<div class="db-query-history"><div class="db-query-history-toolbar"><button
+        class=${p.busy ? "db-query-history-action db-query-history-refresh spinning" : "db-query-history-action db-query-history-refresh"}
+        type="button"
+        title=${p.labels.refreshTitle}
+        aria-label=${p.labels.refreshTitle}
+        aria-busy=${p.busy ? "true" : "false"}
+        ?disabled=${p.busy}
+        @click=${p.onRefresh}
+      >${iconTemplate(SYNC_16_PATH, "octicon-sync")}<span
+          class="db-query-history-action-label"
+          >${p.labels.refresh}</span
+        ></button
+      ><span
+        class=${[
+          "db-refresh-result db-query-history-refresh-result",
+          p.result.added ? "changed" : "",
+          p.result.error ? "db-pane-error" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        aria-live="polite"
+        ?hidden=${p.result.text.length === 0}
+        >${p.result.text}</span
+      ><button
+        class="db-query-history-action db-query-history-danger"
+        type="button"
+        title=${p.labels.clearTitle}
+        data-confirm=${p.clearArmed ? "1" : nothing}
+        @click=${p.onClear}
+      >${p.labels.clear}</button></div
+    ><div class="db-query-history-body-split"><div
+        class="db-query-history-list-col"
+      ><div class="db-query-history-list">${
+        p.empty !== null
+          ? html`<div class="db-query-history-empty">${p.empty}</div>`
+          : p.entries.map(
+              (e) =>
+                html`<div
+                  class=${e.selected ? "db-query-history-entry selected" : "db-query-history-entry"}
+                  data-id=${e.id}
+                  @click=${e.onSelect}
+                >${metaTemplate(e.meta, "db-query-history-entry-meta")}<div
+                    class="db-query-history-entry-title"
+                  >${e.title}</div></div>`,
+            )
+      }</div></div
+      ><div class="db-query-history-detail-col">${
+        p.detail
+          ? detailTemplate(p.detail)
+          : html`<div class="db-query-history-detail-placeholder"
+              >${p.labels.placeholder}</div
+            >`
+      }</div></div
+    ></div
+  >`;
+
+/** 消す・全部消すの確かめを待つ時間と、「コピーしました」を出す時間。 */
+const CONFIRM_MS = 3000;
+const COPIED_MS = 1500;
+
 export function createQueryHistoryView(
   callbacks: QueryHistoryViewCallbacks,
+  view: QueryHistoryViewView = DEFAULT_VIEW,
 ): QueryHistoryView {
   const text = (): DbText => callbacks.getText?.() ?? dbText("en");
-  const el = document.createElement("div");
-  el.className = "db-query-history";
-
-  const toolbar = document.createElement("div");
-  toolbar.className = "db-query-history-toolbar";
-
-  const refreshBtn = document.createElement("button");
-  refreshBtn.className = "db-query-history-action db-query-history-refresh";
-  refreshBtn.type = "button";
-  refreshBtn.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
-  const refreshLabel = document.createElement("span");
-  refreshLabel.className = "db-query-history-action-label";
-  refreshBtn.appendChild(refreshLabel);
-
-  const refreshResult = document.createElement("span");
-  refreshResult.className = "db-refresh-result db-query-history-refresh-result";
-  refreshResult.setAttribute("aria-live", "polite");
-  refreshResult.hidden = true;
-
-  const clearBtn = document.createElement("button");
-  clearBtn.className = "db-query-history-action db-query-history-danger";
-  clearBtn.type = "button";
-  clearBtn.textContent = text().history.clearAll;
-  clearBtn.title = text().history.clearTitle;
-
-  toolbar.append(refreshBtn, refreshResult, clearBtn);
-
-  const body = document.createElement("div");
-  body.className = "db-query-history-body-split";
-
-  const listCol = document.createElement("div");
-  listCol.className = "db-query-history-list-col";
-
-  const listEl = document.createElement("div");
-  listEl.className = "db-query-history-list";
-  listCol.appendChild(listEl);
-
-  const detailCol = document.createElement("div");
-  detailCol.className = "db-query-history-detail-col";
-  const detailPlaceholder = document.createElement("div");
-  detailPlaceholder.className = "db-query-history-detail-placeholder";
-  detailPlaceholder.textContent = text().history.selectPlaceholder;
-  detailCol.appendChild(detailPlaceholder);
-
-  body.append(listCol, detailCol);
-  el.append(toolbar, body);
 
   let entries: QueryHistoryEntry[] = [];
-  const expandedIds = new Set<string>();
-  let clearConfirmTimer: ReturnType<typeof setTimeout> | null = null;
   let lastRefreshKey: string | null = null;
   let lastRefreshAt = 0;
   let inFlightRefresh: { key: string; promise: Promise<void> } | null = null;
-  const entryRowsById = new Map<string, HTMLElement>();
-  let selectedEntryRow: HTMLElement | null = null;
   let refreshResultState: RefreshResult = { type: "none" };
-
-  function syncRefreshButtonLabel(): void {
-    refreshLabel.textContent = text().history.refresh;
-    refreshBtn.title = text().history.refreshTitle;
-    refreshBtn.setAttribute("aria-label", text().history.refreshTitle);
-  }
-
-  function setRefreshBusy(isBusy: boolean): void {
-    refreshBtn.disabled = isBusy;
-    refreshBtn.classList.toggle("spinning", isBusy);
-    refreshBtn.setAttribute("aria-busy", isBusy ? "true" : "false");
-  }
+  let busy = false;
+  let selectedEntryId: string | null = null;
+  // 押して確かめを待っている「全部消す」と、詳細の「消す」(その記録の id)。
+  let clearArmed = false;
+  let clearConfirmTimer: ReturnType<typeof setTimeout> | null = null;
+  let deleteArmed: string | null = null;
+  let copiedId: string | null = null;
 
   function refreshResultText(): string {
     switch (refreshResultState.type) {
@@ -125,24 +253,142 @@ export function createQueryHistoryView(
     }
   }
 
-  function syncRefreshResult(): void {
-    const message = refreshResultText();
-    refreshResult.textContent = message;
-    refreshResult.hidden = message.length === 0;
-    refreshResult.classList.toggle(
-      "changed",
-      refreshResultState.type === "added",
-    );
-    refreshResult.classList.toggle(
-      "db-pane-error",
-      refreshResultState.type === "error",
-    );
+  function metaProps(
+    entry: QueryHistoryEntry,
+    mode: "entry" | "detail",
+  ): QueryHistoryMetaProps {
+    const t = text().history;
+    const executor = entry.executedBy === "ai" ? t.executorAi : t.executorUser;
+    const elapsed = t.elapsedLabel(entry.elapsedMs);
+    return {
+      executor: mode === "detail" ? executor : `[${executor}]`,
+      time: formatTime(entry.executedAt),
+      executedAt: entry.executedAt,
+      stats:
+        entry.error !== undefined
+          ? `${t.failedMark}, ${elapsed}`
+          : `${t.rowsLabel(entry.rowCount, entry.truncated)}, ${elapsed}`,
+      failure: entry.error ?? null,
+    };
   }
 
-  function clearRefreshResult(): void {
-    refreshResultState = { type: "none" };
-    syncRefreshResult();
+  function detailProps(entry: QueryHistoryEntry): QueryHistoryDetailProps {
+    const t = text().history;
+    const emptyLabel = text().grid.emptyValue;
+    return {
+      meta: metaProps(entry, "detail"),
+      useLabel: t.useInEditor,
+      copyLabel: copiedId === entry.id ? t.copied : t.copySql,
+      deleteLabel: deleteArmed === entry.id ? t.confirmDelete : t.delete,
+      deleteArmed: deleteArmed === entry.id,
+      sql: entry.sql,
+      error: entry.error ?? null,
+      body: entry.body ? entry.body : null,
+      preview:
+        entry.columns.length > 0 && entry.rowsPreview.length > 0
+          ? {
+              columns: entry.columns,
+              rows: entry.rowsPreview.map((row) =>
+                row.map((value) => {
+                  const shown = nullOrEmptyMark(value, emptyLabel);
+                  return {
+                    mark: shown?.mark ?? null,
+                    cellClass: shown?.cellClass ?? null,
+                    text: shown ? "" : formatQueryValue(value),
+                  };
+                }),
+              ),
+            }
+          : null,
+      truncated:
+        entry.savedRows < entry.rowCount
+          ? t.truncatedRows(entry.savedRows, entry.rowCount)
+          : null,
+      onUse: () => callbacks.copySqlToQuery(entry.sql),
+      onCopy: (button) => {
+        navigator.clipboard.writeText(entry.sql).then(
+          () => {
+            copiedId = entry.id;
+            draw();
+            setTimeout(() => {
+              if (copiedId !== entry.id) return;
+              copiedId = null;
+              draw();
+            }, COPIED_MS);
+          },
+          (error: unknown) =>
+            showCopyFailure(
+              button,
+              "copy a query from the history",
+              error,
+              button.title,
+              4000,
+            ),
+        );
+      },
+      onDelete: () => {
+        if (deleteArmed !== entry.id) {
+          deleteArmed = entry.id;
+          draw();
+          window.setTimeout(() => {
+            if (deleteArmed !== entry.id) return;
+            deleteArmed = null;
+            draw();
+          }, CONFIRM_MS);
+          return;
+        }
+        deleteArmed = null;
+        draw();
+        void deleteEntry(entry.id);
+      },
+    };
   }
+
+  function props(): QueryHistoryProps {
+    const t = text().history;
+    const selected = selectedEntryId
+      ? entries.find((entry) => entry.id === selectedEntryId)
+      : undefined;
+    const resultText = refreshResultText();
+    return {
+      labels: {
+        refresh: t.refresh,
+        refreshTitle: t.refreshTitle,
+        clear: clearArmed ? t.confirmClear : t.clearAll,
+        clearTitle: t.clearTitle,
+        placeholder: t.selectPlaceholder,
+      },
+      busy,
+      result: {
+        text: resultText,
+        added: refreshResultState.type === "added",
+        error: refreshResultState.type === "error",
+      },
+      clearArmed,
+      entries: entries.map((entry) => ({
+        id: entry.id,
+        selected: entry.id === selectedEntryId,
+        meta: metaProps(entry, "entry"),
+        title:
+          entry.title ||
+          (entry.sql.length > 80 ? `${entry.sql.slice(0, 80)}...` : entry.sql),
+        onSelect: () => {
+          selectedEntryId = entry.id;
+          // 選び直した詳細の「消す」「コピー」は、押す前の形から始める。
+          deleteArmed = null;
+          copiedId = null;
+          draw();
+        },
+      })),
+      empty: entries.length === 0 ? t.empty : null,
+      detail: selected ? detailProps(selected) : null,
+      onRefresh: () => void refresh({ force: true, announceResult: true }),
+      onClear: () => void clearAll(),
+    };
+  }
+
+  const box = detachedElement(() => view(props()));
+  const draw = () => box.draw();
 
   function setRefreshResult(
     previousEntries: QueryHistoryEntry[],
@@ -154,7 +400,6 @@ export function createQueryHistoryView(
     ).length;
     refreshResultState =
       added > 0 ? { type: "added", count: added } : { type: "unchanged" };
-    syncRefreshResult();
   }
 
   function reportHistoryError(
@@ -164,7 +409,7 @@ export function createQueryHistoryView(
   ): void {
     console.error(operation, error);
     refreshResultState = { type: "error", message };
-    syncRefreshResult();
+    draw();
   }
 
   async function parseHistoryResponse(
@@ -181,10 +426,6 @@ export function createQueryHistoryView(
     }
   }
 
-  syncRefreshButtonLabel();
-  setRefreshBusy(false);
-  syncRefreshResult();
-
   function currentRefreshParams(): { key: string; params: string } {
     const dbId = callbacks.getDbId();
     const schema = callbacks.getSchema();
@@ -193,27 +434,6 @@ export function createQueryHistoryView(
     if (schema) searchParams.set("schema", schema);
     const params = searchParams.toString() ? `?${searchParams.toString()}` : "";
     return { key: params, params };
-  }
-
-  function armButtonConfirm(
-    button: HTMLButtonElement,
-    confirmText: string,
-    defaultText: string,
-  ): boolean {
-    if (button.dataset.confirm === "1") {
-      button.dataset.confirm = "";
-      button.textContent = defaultText;
-      return true;
-    }
-    button.dataset.confirm = "1";
-    button.textContent = confirmText;
-    window.setTimeout(() => {
-      if (button.dataset.confirm === "1") {
-        button.dataset.confirm = "";
-        button.textContent = defaultText;
-      }
-    }, 3000);
-    return false;
   }
 
   async function refresh(
@@ -232,8 +452,9 @@ export function createQueryHistoryView(
       return;
     }
     const previousEntries = options.announceResult ? [...entries] : null;
-    if (options.announceResult) clearRefreshResult();
-    setRefreshBusy(true);
+    if (options.announceResult) refreshResultState = { type: "none" };
+    busy = true;
+    draw();
     const promise = (async () => {
       const res = await fetch(`${apiUrl("dbHistory")}${params}`);
       const state = await parseHistoryResponse(
@@ -248,10 +469,9 @@ export function createQueryHistoryView(
       if (
         selectedEntryId &&
         !entries.some((entry) => entry.id === selectedEntryId)
-      ) {
-        clearDetail();
-      }
-      render();
+      )
+        selectedEntryId = null;
+      draw();
     })().catch((error) => {
       reportHistoryError(
         "Failed to refresh query history",
@@ -265,251 +485,10 @@ export function createQueryHistoryView(
     } finally {
       if (inFlightRefresh?.promise === promise) {
         inFlightRefresh = null;
-        setRefreshBusy(false);
+        busy = false;
+        draw();
       }
     }
-  }
-
-  function render() {
-    listEl.innerHTML = "";
-    entryRowsById.clear();
-    selectedEntryRow = null;
-    if (entries.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "db-query-history-empty";
-      empty.textContent = text().history.empty;
-      listEl.appendChild(empty);
-      return;
-    }
-    const fragment = document.createDocumentFragment();
-    for (const entry of entries) {
-      fragment.appendChild(renderEntry(entry));
-    }
-    listEl.appendChild(fragment);
-  }
-
-  let selectedEntryId: string | null = null;
-
-  function clearDetail() {
-    selectedEntryId = null;
-    selectedEntryRow?.classList.remove("selected");
-    selectedEntryRow = null;
-    detailCol.innerHTML = "";
-    detailCol.appendChild(detailPlaceholder);
-  }
-
-  function selectEntry(entry: QueryHistoryEntry) {
-    selectedEntryId = entry.id;
-    selectedEntryRow?.classList.remove("selected");
-    selectedEntryRow = entryRowsById.get(entry.id) ?? null;
-    selectedEntryRow?.classList.add("selected");
-    renderDetail(entry);
-  }
-
-  function renderDetail(entry: QueryHistoryEntry) {
-    detailCol.innerHTML = "";
-
-    const meta = renderEntryMeta(entry, "detail");
-
-    const actions = document.createElement("div");
-    actions.className = "db-query-history-detail-actions";
-
-    const useBtn = document.createElement("button");
-    useBtn.className = "db-btn db-btn-primary";
-    useBtn.type = "button";
-    useBtn.textContent = text().history.useInEditor;
-    useBtn.addEventListener("click", () => callbacks.copySqlToQuery(entry.sql));
-
-    const copyBtn = document.createElement("button");
-    copyBtn.className = "db-btn";
-    copyBtn.type = "button";
-    copyBtn.textContent = text().history.copySql;
-    copyBtn.addEventListener("click", () => {
-      navigator.clipboard.writeText(entry.sql).then(
-        () => {
-          copyBtn.textContent = text().history.copied;
-          setTimeout(() => {
-            copyBtn.textContent = text().history.copySql;
-          }, 1500);
-        },
-        () => undefined,
-      );
-    });
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "db-btn db-query-history-danger";
-    deleteBtn.type = "button";
-    deleteBtn.textContent = text().history.delete;
-    deleteBtn.addEventListener("click", () => {
-      if (
-        !armButtonConfirm(
-          deleteBtn,
-          text().history.confirmDelete,
-          text().history.delete,
-        )
-      )
-        return;
-      deleteEntry(entry.id);
-    });
-
-    actions.append(useBtn, copyBtn, deleteBtn);
-
-    const sqlBlock = document.createElement("pre");
-    sqlBlock.className = "db-query-history-sql";
-    sqlBlock.textContent = entry.sql;
-
-    detailCol.append(meta, actions, sqlBlock);
-
-    if (entry.error !== undefined) {
-      const errorBlock = document.createElement("pre");
-      errorBlock.className = "db-query-error";
-      errorBlock.textContent = entry.error;
-      detailCol.appendChild(errorBlock);
-    }
-
-    if (entry.body) {
-      const bodyBlock = document.createElement("div");
-      bodyBlock.className = "db-query-history-body";
-      bodyBlock.textContent = entry.body;
-      detailCol.appendChild(bodyBlock);
-    }
-
-    if (entry.columns.length > 0 && entry.rowsPreview.length > 0) {
-      detailCol.appendChild(renderPreviewTable(entry));
-    }
-
-    if (entry.savedRows < entry.rowCount) {
-      const note = document.createElement("div");
-      note.className = "db-query-history-truncated";
-      note.textContent = text().history.truncatedRows(
-        entry.savedRows,
-        entry.rowCount,
-      );
-      detailCol.appendChild(note);
-    }
-  }
-
-  function renderEntry(entry: QueryHistoryEntry): HTMLElement {
-    const item = document.createElement("div");
-    item.className = "db-query-history-entry";
-    if (entry.id === selectedEntryId) {
-      item.classList.add("selected");
-      selectedEntryRow = item;
-    }
-    item.dataset.id = entry.id;
-    entryRowsById.set(entry.id, item);
-
-    const meta = renderEntryMeta(entry, "entry");
-    const title = document.createElement("div");
-    title.className = "db-query-history-entry-title";
-    title.textContent =
-      entry.title ||
-      (entry.sql.length > 80 ? `${entry.sql.slice(0, 80)}...` : entry.sql);
-
-    item.append(meta, title);
-
-    item.addEventListener("click", () => selectEntry(entry));
-
-    return item;
-  }
-
-  function renderEntryMeta(
-    entry: QueryHistoryEntry,
-    mode: "entry" | "detail",
-  ): HTMLElement {
-    const meta = document.createElement("div");
-    meta.className =
-      mode === "detail"
-        ? "db-query-history-detail-meta"
-        : "db-query-history-entry-meta";
-
-    const byIcon = document.createElement("span");
-    byIcon.className = "db-query-history-by";
-    const executor =
-      entry.executedBy === "ai"
-        ? text().history.executorAi
-        : text().history.executorUser;
-    byIcon.textContent = mode === "detail" ? executor : `[${executor}]`;
-
-    const time = document.createElement("span");
-    time.className = "db-query-history-time";
-    time.textContent = formatTime(entry.executedAt);
-    time.title = entry.executedAt;
-
-    const stats = document.createElement("span");
-    stats.className = "db-query-history-stats";
-    stats.textContent = `${text().history.rowsLabel(
-      entry.rowCount,
-      entry.truncated,
-    )}, ${text().history.elapsedLabel(entry.elapsedMs)}`;
-    if (entry.error !== undefined) {
-      // 失敗した問い合わせ: 行数の代わりに「失敗」の印 (理由は詳細に出す)。
-      stats.classList.add("db-query-history-failed");
-      stats.textContent = `${text().history.failedMark}, ${text().history.elapsedLabel(entry.elapsedMs)}`;
-      stats.title = entry.error;
-    }
-
-    meta.append(byIcon, time, stats);
-    return meta;
-  }
-
-  function renderPreviewTable(entry: QueryHistoryEntry): HTMLElement {
-    const wrapper = document.createElement("div");
-    wrapper.className = "db-query-table-wrap";
-
-    const table = document.createElement("table");
-    table.className = "db-query-table";
-
-    const thead = document.createElement("thead");
-    const headRow = document.createElement("tr");
-    const thNum = document.createElement("th");
-    thNum.textContent = "#";
-    thNum.className = "db-grid-rownum";
-    headRow.appendChild(thNum);
-    for (const col of entry.columns) {
-      const th = document.createElement("th");
-      th.textContent = col;
-      headRow.appendChild(th);
-    }
-    thead.appendChild(headRow);
-
-    const tbody = document.createElement("tbody");
-    for (let i = 0; i < entry.rowsPreview.length; i++) {
-      const row = entry.rowsPreview[i];
-      const tr = document.createElement("tr");
-      if (i % 2 === 1) tr.classList.add("alt");
-      const tdNum = document.createElement("td");
-      tdNum.className = "db-grid-rownum";
-      tdNum.textContent = String(i + 1);
-      tr.appendChild(tdNum);
-      for (const value of row) {
-        const td = document.createElement("td");
-        if (!fillNullOrEmpty(td, value, text().grid.emptyValue))
-          td.textContent = formatQueryValue(value);
-        tr.appendChild(td);
-      }
-      tbody.appendChild(tr);
-    }
-    table.append(thead, tbody);
-    wrapper.appendChild(table);
-
-    if (entry.savedRows < entry.rowCount) {
-      const note = document.createElement("div");
-      note.className = "db-query-history-truncated";
-      note.textContent = text().history.truncatedRows(
-        entry.savedRows,
-        entry.rowCount,
-      );
-      wrapper.appendChild(note);
-    }
-
-    return wrapper;
-  }
-
-  function resetDetailCol() {
-    detailCol.innerHTML = "";
-    detailCol.appendChild(detailPlaceholder);
-    selectedEntryId = null;
   }
 
   async function deleteEntry(id: string) {
@@ -531,16 +510,8 @@ export function createQueryHistoryView(
         );
       }
       entries = entries.filter((e) => e.id !== id);
-      expandedIds.delete(id);
-      if (selectedEntryId === id) resetDetailCol();
-      const itemEl = entryRowsById.get(id);
-      if (itemEl) {
-        entryRowsById.delete(id);
-        itemEl.remove();
-        if (entries.length === 0) render();
-      } else {
-        render();
-      }
+      if (selectedEntryId === id) selectedEntryId = null;
+      draw();
     } catch (error) {
       reportHistoryError(
         "Failed to delete query history entry",
@@ -550,25 +521,29 @@ export function createQueryHistoryView(
     }
   }
 
-  clearBtn.addEventListener("click", async () => {
-    const dbId = callbacks.getDbId();
-    if (clearBtn.dataset.confirm !== "1") {
-      clearBtn.dataset.confirm = "1";
-      clearBtn.textContent = text().history.confirmClear;
-      if (clearConfirmTimer) clearTimeout(clearConfirmTimer);
-      clearConfirmTimer = setTimeout(() => {
-        clearBtn.dataset.confirm = "";
-        clearBtn.textContent = text().history.clearAll;
-        clearConfirmTimer = null;
-      }, 3000);
-      return;
-    }
-    clearBtn.dataset.confirm = "";
-    clearBtn.textContent = text().history.clearAll;
+  function disarmClear(): void {
+    clearArmed = false;
     if (clearConfirmTimer) {
       clearTimeout(clearConfirmTimer);
       clearConfirmTimer = null;
     }
+  }
+
+  async function clearAll(): Promise<void> {
+    const dbId = callbacks.getDbId();
+    if (!clearArmed) {
+      clearArmed = true;
+      if (clearConfirmTimer) clearTimeout(clearConfirmTimer);
+      clearConfirmTimer = setTimeout(() => {
+        clearArmed = false;
+        clearConfirmTimer = null;
+        draw();
+      }, CONFIRM_MS);
+      draw();
+      return;
+    }
+    disarmClear();
+    draw();
     try {
       const schema = callbacks.getSchema();
       const response = await fetch(apiUrl("dbHistoryClear"), {
@@ -587,8 +562,8 @@ export function createQueryHistoryView(
         );
       }
       entries = [];
-      clearRefreshResult();
-      render();
+      refreshResultState = { type: "none" };
+      draw();
     } catch (error) {
       reportHistoryError(
         "Failed to clear query history",
@@ -596,62 +571,19 @@ export function createQueryHistoryView(
         error,
       );
     }
-  });
-
-  refreshBtn.addEventListener("click", () => {
-    refresh({ force: true, announceResult: true });
-  });
+  }
 
   function clear(): void {
     entries = [];
-    expandedIds.clear();
     lastRefreshKey = null;
     lastRefreshAt = 0;
-    clearRefreshResult();
-    if (clearConfirmTimer) {
-      clearTimeout(clearConfirmTimer);
-      clearConfirmTimer = null;
-    }
-    clearBtn.dataset.confirm = "";
-    clearBtn.textContent = text().history.clearAll;
-    clearDetail();
-    render();
+    refreshResultState = { type: "none" };
+    disarmClear();
+    selectedEntryId = null;
+    draw();
   }
 
-  function localize(): void {
-    syncRefreshButtonLabel();
-    syncRefreshResult();
-    if (clearBtn.dataset.confirm !== "1") {
-      clearBtn.textContent = text().history.clearAll;
-    }
-    clearBtn.title = text().history.clearTitle;
-    detailPlaceholder.textContent = text().history.selectPlaceholder;
-    // render() は listEl を作り直すためスクロール位置が飛ぶ。退避して復元する。
-    const prevScrollTop = listEl.scrollTop;
-    render();
-    listEl.scrollTop = prevScrollTop;
-    const selected = selectedEntryId
-      ? entries.find((e) => e.id === selectedEntryId)
-      : null;
-    if (selected) {
-      // 詳細の削除ボタンが confirm 待ち(arm 済み)だった状態を再構築後も保つ。
-      const prevDeleteArmed =
-        detailCol.querySelector<HTMLButtonElement>(".db-query-history-danger")
-          ?.dataset.confirm === "1";
-      renderDetail(selected);
-      if (prevDeleteArmed) {
-        const deleteBtn = detailCol.querySelector<HTMLButtonElement>(
-          ".db-query-history-danger",
-        );
-        if (deleteBtn) {
-          deleteBtn.dataset.confirm = "1";
-          deleteBtn.textContent = text().history.confirmDelete;
-        }
-      }
-    }
-  }
-
-  return { el, refresh, clear, localize };
+  return { el: box.element, refresh, clear, localize: draw };
 }
 
 function formatTime(iso: string): string {

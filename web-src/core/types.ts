@@ -251,12 +251,36 @@ export type AppSettingsState = {
   agentNotifyWaiting?: boolean;
   /** エージェントが作業中から止まった (終わった) とき通知を出すか。未設定なら出す。 */
   agentNotifyDone?: boolean;
-  /** エージェント一覧の「フックを入れられます」の案内を閉じた。 */
+  /**
+   * 端末の中のプログラム (tmux のコピーモードなど) が OSC 52 で送ったコピーを
+   * クリップボードに書くか。未設定なら書く。読み出しはいつも断る。
+   */
+  terminalClipboardWrite?: boolean;
+  /**
+   * macOS の Option キーを Alt (Meta) として端末へ送るか。未設定なら送らない
+   * (JIS の配列では Option+¥ でバックスラッシュを打つので、既定で奪わない)。
+   */
+  terminalOptionAsAlt?: boolean;
+  /** 入力待ち・完了のときに短い音を鳴らすか (ブラウザの通知とは別)。未設定なら鳴らさない。 */
+  agentNotifySound?: boolean;
+  /**
+   * エージェント一覧の「フックを入れられます」の案内を閉じた (古い印。どの状態で
+   * 閉じたかを覚えていない。agentHookHintDismissedFor があればそちらが効く)。
+   */
   agentHookHintDismissed?: boolean;
+  /**
+   * エージェント一覧のフックの案内を閉じたときの中身 (core/agent-hooks.ts の
+   * hookHintKey)。中身が変わったら (例: 入れたフックが古くなった) 出し直す。
+   */
+  agentHookHintDismissedFor?: string;
   /** 最初の入力待ちで出す「通知を許可すると…」の案内を閉じた (許可を訊いた後も)。 */
   agentNotifyHintDismissed?: boolean;
   /** エージェント一覧のアカウントの帯を畳んだ。 */
   agentAccountsCollapsed?: boolean;
+  /** エージェントの全体ボードの並び (プロジェクトごと / 急ぐ順)。未設定ならプロジェクトごと。 */
+  agentsBoardOrder?: "project" | "urgency";
+  /** ⌘K のパレットで最近使った操作の id (新しい順。検索欄が空のときに先に出す)。 */
+  paletteRecentActions?: string[];
   /** ターミナルの画像の棚を畳んだ。 */
   terminalImageShelfCollapsed?: boolean;
   /** 画像の棚の置き場所 (右・左・下・上)。 */

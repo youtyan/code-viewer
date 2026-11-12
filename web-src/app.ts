@@ -1,7 +1,12 @@
-import type { AgentHooksResponse } from "./core/agent-hooks";
+import {
+  type AgentHooksResponse,
+  HOOK_HINT_DISMISSED_LEGACY,
+} from "./core/agent-hooks";
 import {
   type AgentPane,
+  attentionPanes,
   headerAgentCounts,
+  nextAttentionPane,
   titleWithUnread,
 } from "./core/agent-overview";
 import {
@@ -84,7 +89,6 @@ import {
   APPS_16_PATH,
   ARROW_RIGHT_16_PATH,
   BOOK_16_PATH,
-  CHEVRON_DOWN_12_PATH,
   COMMENT_DISCUSSION_16_PATH,
   COPY_16_PATHS,
   DIFF_SPLIT_16_PATH,
@@ -93,14 +97,10 @@ import {
   GEAR_16_PATH,
   GIT_BRANCH_16_PATH,
   HISTORY_16_PATH,
-  iconSvg,
   KEBAB_16_PATH,
   MARK_GITHUB_16_PATH,
   MOON_16_PATH,
-  NEXT_16_PATHS,
-  OPEN_EXTERNAL_16_PATH,
   PLUS_16_PATH,
-  PREVIOUS_16_PATHS,
   PULSE_16_PATH,
   QUESTION_16_PATH,
   SEARCH_16_PATH,
@@ -108,7 +108,6 @@ import {
   SIDEBAR_SHOW_16_PATHS,
   SYNC_16_PATH,
   TERMINAL_16_PATHS,
-  TRIANGLE_DOWN_16_PATH,
   UNDO_16_PATH,
   X_16_PATH,
 } from "./core/icons";
@@ -197,12 +196,16 @@ import {
   createScrollMemory,
   scrollKeyOfHistoryState,
 } from "./core/scroll-memory";
-import { rememberPaletteSelection } from "./core/search-palette";
+import {
+  rememberPaletteSelection,
+  rememberRecentPaletteAction,
+} from "./core/search-palette";
 import {
   isShellSessionId,
   type ShellListResponse,
   type ShellSessionId,
 } from "./core/shell";
+import { isShowEvent, type ShowEvent } from "./core/show";
 import { sourceInternalPathKind } from "./core/source-meta";
 import {
   readStoredSize,
@@ -259,17 +262,23 @@ import { createAgentMonitor } from "./views/agents/agent-monitor";
 import { createAgentPaneOpener } from "./views/agents/agent-pane-opener";
 import { mountAgentStatus } from "./views/agents/agent-status";
 import {
+  type AgentsView,
+  createAgentsPresenter,
+} from "./views/agents/agents-presenter";
+import {
   type AgentsSidebar,
-  mountAgentsSidebar,
-} from "./views/agents/agents-sidebar";
-import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
+  createAgentsSidebarPresenter,
+} from "./views/agents/agents-sidebar-presenter";
+import { playAttentionSound } from "./views/agents/attention-sound";
+import { createAttentionToasts } from "./views/agents/attention-toast";
 import {
   type HandoffMenuActions,
   handoffMenuItems,
 } from "./views/agents/handoff";
 import { agentsText } from "./views/agents/i18n";
+import { createLaunchFailureWatch } from "./views/agents/launch-failure";
 import { paneText, shellName } from "./views/agents/pane-text";
-import { mountUsageStatus } from "./views/agents/usage-status";
+import { createUsageStatusPresenter } from "./views/agents/usage-status";
 import { createAnnotationsPlayer } from "./views/annotations-player";
 import {
   ANNOTATION_ENTRY_PARAM,
@@ -278,6 +287,7 @@ import {
   type AnnotationsUi,
   createAnnotationsUi,
 } from "./views/annotations-ui";
+import { DEFAULT_VIEW as CHROME_VIEW, fillWith } from "./views/app-chrome";
 import { createBackendState } from "./views/backend-state";
 import { type BlameViewDeps, createBlameView } from "./views/blame-view";
 import { fitBrand } from "./views/brand-fit";
@@ -289,7 +299,6 @@ import { createDiffView, type RenderResult } from "./views/diff-view";
 import { DIFF_SCREEN_TEXT, type DiffScreenText } from "./views/diff-view-i18n";
 import { createDoctorView, doctorText } from "./views/doctor-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
-import { renderEmptyState } from "./views/empty-state";
 import {
   removeFileHistoryShell as removeRenderedFileHistoryShell,
   renderFileHistoryShell as renderFileHistoryShellView,
@@ -315,7 +324,7 @@ import { createHunkExpand } from "./views/hunk-expand";
 import { createImageTabView, type ImageTabHandle } from "./views/image-tab";
 import { createImageTabReturn } from "./views/image-tab-return";
 import {
-  installHelpBlock,
+  installHelpTemplate,
   NODE_PTY_INSTALL_COMMANDS,
   showInstallDialog,
   TMUX_INSTALL_COMMANDS,
@@ -340,7 +349,7 @@ import {
 import { mainTabsText } from "./views/main-tabs/i18n";
 import {
   COMFORTABLE_PANE_WIDTH,
-  createMainTabsView,
+  createMainTabsPresenter,
   type FrontChange,
   isPageKind,
   type PanesView,
@@ -349,15 +358,16 @@ import {
   SPLIT_DIVIDER_WIDTH,
   shellGroupOf,
   type ViewScreen,
-} from "./views/main-tabs/main-tabs-view";
+} from "./views/main-tabs/main-tabs-presenter";
+import { terminalMarkTemplate } from "./views/main-tabs/main-tabs-view";
 import { pageIconPaths } from "./views/main-tabs/tab-icons";
 import { installMobileShell } from "./views/mobile-shell";
+import { CV_PAGE_SHELL } from "./views/page-shell";
 import { createProjectActions } from "./views/projects/project-actions";
 import {
   PROJECT_LOOKS,
   type ProjectLook,
   paintProjectColor,
-  projectMark,
 } from "./views/projects/project-looks";
 import {
   mountProjectSwitcher,
@@ -387,7 +397,9 @@ import {
   rememberEarlyProject,
 } from "./views/shell/early-look";
 import { type LiveSource, openLiveSource } from "./views/shell/live-hub";
+import { installWindowActive } from "./views/shell/window-active";
 import { phoneMediaQuery, workspaceRole } from "./views/shell/workspace";
+import { claimShow } from "./views/show-claim";
 import {
   CHANGES_LIST_DOM,
   createSidebar,
@@ -422,8 +434,10 @@ import {
 import { createTerminalView } from "./views/terminal/terminal-view";
 import { installTitleTooltips } from "./views/title-tooltip";
 import { toolsText } from "./views/tools/i18n";
-import { createToolsView } from "./views/tools/tools-view";
+import { createToolsPresenter } from "./views/tools/tools-presenter";
 import { mountTopbarMore } from "./views/topbar-more";
+import { renderEmptyState } from "./views/ui/empty-state";
+import { detachedElement, templateElement } from "./views/ui/renderer";
 import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
   createViewerSettings,
@@ -1855,7 +1869,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     worktree: "worktree-panel",
   } as const;
 
-  const MAIN_TABS = createMainTabsView({
+  const MAIN_TABS = createMainTabsPresenter({
     // 電話の段のタブ列の右端の「開いているタブ」(MOBILE_SHELL は後で作る)。
     onTabList: () => MOBILE_SHELL.openTabs(),
     mount: (() => {
@@ -1877,7 +1891,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     splitListColumnWidth: () => splitListColumnWidth(),
     getLanguage: () => STATE.language,
     pageLabel: (page) => uiText().nav[page],
-    screenKey: (screen) => viewScreenKey(screen),
     navigate: (route, replace) => {
       if (replace) replaceWithRoute(route);
       else navigateToRoute(route);
@@ -2261,8 +2274,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       );
     },
     prefetchByPath: (path) => DIFF_VIEW.prefetchByPath(path),
-    fileBadge: (status) => DIFF_VIEW.fileBadge(status),
-    fileEntryIcon: () => REPO_VIEW.fileEntryIcon(),
+    fileStatusTitles: () => uiText().diff.fileStatus,
     applyViewedState: () => DIFF_VIEW.applyViewedState(),
     persistCollapsedDirs: ({ added = [], removed = [] }) => {
       if (added.length === 0 && removed.length === 0) return;
@@ -2279,7 +2291,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
     },
     appendScopeParams,
-    createOpenPathButton,
+    openPathFromButton: (path, kind, button) => {
+      void openPathFromButton(path, kind, button);
+    },
     normalizeViewerFontSize,
     getSidebarFontSize: savedSidebarFontSizeSetting,
     persistSidebarHidden: (hidden) => {
@@ -2291,7 +2305,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       return patchSettings({ sidebarWidth: width });
     },
     scheduleMainSurfaceFocus,
-    setChevronIcon,
     trackLoad,
     getRepoSidebarRef: () => REPO_SIDEBAR_REF,
     setRepoSidebarRef: (ref: string | null) => {
@@ -2621,6 +2634,16 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // ---------- Search palette: extracted to search-palette-ui.ts ----------
   const SEARCH_PALETTE = createSearchPalette({
+    recentActions: {
+      get: () => APP_SETTINGS.paletteRecentActions ?? [],
+      note: (id) =>
+        void patchSettings({
+          paletteRecentActions: rememberRecentPaletteAction(
+            APP_SETTINGS.paletteRecentActions ?? [],
+            id,
+          ),
+        }),
+    },
     STATE,
     setRoute,
     openingNewTab: (run) => MAIN_TABS.openingNewTab(run),
@@ -3398,11 +3421,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   ) {
     const button = document.querySelector<HTMLButtonElement>(selector);
     if (!button) return;
-    button.innerHTML = iconSvg("seg-icon", paths);
-    const name = document.createElement("span");
-    name.className = "seg-label";
-    name.textContent = label;
-    button.append(name);
+    fillWith(button, CHROME_VIEW.layoutButton(paths, label));
     button.title = label;
     button.setAttribute("aria-label", label);
   }
@@ -3455,7 +3474,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         link.setAttribute("aria-label", label);
         const icon = link.querySelector<HTMLElement>(".goi-icon");
         if (icon && !icon.firstElementChild)
-          icon.innerHTML = iconSvg("view-strip-icon", pageIconPaths(route));
+          fillWith(
+            icon,
+            CHROME_VIEW.icon(pageIconPaths(route), "view-strip-icon"),
+          );
       });
     MAIN_TABS.localize();
     for (const view of Object.values(IMAGE_VIEWS))
@@ -3547,7 +3569,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     const topbarMore =
       document.querySelector<HTMLButtonElement>("#topbar-more");
     if (topbarMore) {
-      topbarMore.innerHTML = iconSvg("octicon-kebab-horizontal", KEBAB_16_PATH);
+      fillWith(
+        topbarMore,
+        CHROME_VIEW.icon(KEBAB_16_PATH, "octicon-kebab-horizontal"),
+      );
       topbarMore.title = text.topbar.more;
       topbarMore.setAttribute("aria-label", text.topbar.more);
     }
@@ -3798,6 +3823,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     "codeFontSize",
     "agentNotifyWaiting",
     "agentNotifyDone",
+    "agentNotifySound",
+    "terminalClipboardWrite",
+    "terminalOptionAsAlt",
   ] as const;
 
   /**
@@ -3896,6 +3924,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
     setHighlightButton("loading");
     highlightLoadPromise = new Promise((resolve, reject) => {
+      // 外の script を読む要素はここで作る。テンプレートから写した script は
+      // ブラウザが実行しないので、描き方の決まりの例外 (ui-components.test.ts)。
       const script = document.createElement("script");
       script.src = HIGHLIGHT_SRC;
       script.async = true;
@@ -3977,14 +4007,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         scheduleIdleHighlight(card, file);
       });
     WORKTREE_VIEW?.displayOptionsChanged();
-  }
-
-  function setChevronIcon(el: HTMLElement) {
-    el.innerHTML =
-      '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">' +
-      '<path fill="currentColor" d="' +
-      CHEVRON_DOWN_12_PATH +
-      '"></path></svg>';
   }
 
   function scopeOmitSourceLabel(): string {
@@ -4149,6 +4171,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       "uploadEnabled",
       "agentNotifyWaiting",
       "agentNotifyDone",
+      "agentNotifySound",
+      "terminalClipboardWrite",
+      "terminalOptionAsAlt",
     ] as const)
       if (choice[key] !== undefined) appPatch[key] = choice[key];
     if (Object.keys(appPatch).length > 0) patchSettings(appPatch);
@@ -4217,35 +4242,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     hidden?: boolean;
     value?: string;
   }): { wrap: HTMLDivElement; input: HTMLInputElement } {
-    const wrap = document.createElement("div");
-    wrap.className = `ref-selector${options.extraClass ? ` ${options.extraClass}` : ""}`;
-    wrap.dataset.refSelector = "";
-    if (options.wrapperId) wrap.id = options.wrapperId;
-    if (options.hidden) wrap.hidden = true;
-
-    const icon = document.createElement("span");
-    icon.className = "ref-selector-icon";
-    icon.setAttribute("aria-hidden", "true");
-    icon.innerHTML = iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
-
-    const input = document.createElement("input");
-    input.className = "ref-input";
-    input.id = options.id;
-    input.readOnly = true;
-    input.autocomplete = "off";
-    input.placeholder = options.placeholder;
-    if (options.title) {
-      input.title = options.title;
-      input.setAttribute("aria-label", options.title);
-    }
-    if (options.value != null) input.value = options.value;
-
-    const caret = document.createElement("span");
-    caret.className = "ref-selector-caret";
-    caret.setAttribute("aria-hidden", "true");
-    caret.innerHTML = iconSvg("octicon-triangle-down", TRIANGLE_DOWN_16_PATH);
-
-    wrap.append(icon, input, caret);
+    const wrap = templateElement<HTMLDivElement>(
+      CHROME_VIEW.refSelector(options),
+    );
+    const input = wrap.querySelector<HTMLInputElement>("input.ref-input");
+    if (!input) throw new Error("ref selector: the template has no input");
     return { wrap, input };
   }
 
@@ -4755,6 +4756,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
+  /** `code-viewer show` の出来事を新しいタブで開く (固定のタブ)。 */
+  function openShown(shown: ShowEvent): void {
+    const range = currentRange();
+    const route: AppRoute =
+      shown.view === "diff"
+        ? { screen: "diff", range, path: shown.path }
+        : {
+            screen: "file",
+            path: shown.path,
+            ref: "worktree",
+            range,
+            view: "blob",
+            ...(shown.line !== undefined ? { line: shown.line } : {}),
+          };
+    MAIN_TABS.openingNewTab(() => setRoute(route));
+  }
+
   function setRoute(route: AppRoute, replace = false) {
     // 置き換え (行の選択・裏の読み直し) では 1 ペイン表示を閉じない。
     if (!replace && leavePaneViewFirst(() => setRoute(route))) return;
@@ -4887,7 +4905,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         STATE.route.view === "history");
     const repoSidebarRoute = STATE.route.screen === "repo" || fileRepoBlobRoute;
     if (STATE.route.screen !== "help" && STATE.route.screen !== "settings") {
-      document.querySelector(".gdp-help-shell")?.remove();
+      document.querySelector(CV_PAGE_SHELL)?.remove();
     }
     // The source view a diff-hosting page keeps open in place ("View File"
     // on the history screen) gets the file-detail chrome too: the topbar
@@ -5157,17 +5175,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     kind: "directory" | "file-parent",
     title = uiText().sidebar.openDirectoryInOs,
   ): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gdp-file-header-icon gdp-open-path";
-    button.title = title;
-    button.setAttribute("aria-label", title);
-    button.innerHTML = iconSvg("octicon-link-external", OPEN_EXTERNAL_16_PATH);
-    button.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void openPathFromButton(path, kind, button);
-    });
-    return button;
+    return templateElement<HTMLButtonElement>(
+      CHROME_VIEW.openPathButton(title, (button) => {
+        void openPathFromButton(path, kind, button);
+      }),
+    );
   }
 
   // Older / newer revision stepper on a file page. The neighbours come from
@@ -5178,22 +5190,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     activeTab: FileViewTab,
   ): HTMLElement | null {
     if (activeTab === "history") return null;
-    const nav = document.createElement("span");
-    nav.className = "gdp-file-revision-nav";
     const text = uiText().global;
-    const make = (title: string, paths: string[]): HTMLButtonElement => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-file-header-icon gdp-file-revision-btn";
-      button.title = title;
-      button.setAttribute("aria-label", title);
-      button.disabled = true;
-      button.innerHTML = iconSvg("octicon-revision", paths);
-      return button;
-    };
-    const older = make(text.olderRevision, PREVIOUS_16_PATHS);
-    const newer = make(text.newerRevision, NEXT_16_PATHS);
-    nav.append(older, newer);
     const goTo = (sha: string) => {
       const view =
         STATE.route.screen === "file" && STATE.route.view === "blame"
@@ -5207,6 +5204,19 @@ window.GdpExpandLogic = GdpExpandLogic;
         range: currentRange(),
       });
     };
+    // 隣の版が届くまで (無いときも) ボタンは押せない形で置き、頭の幅を変えない。
+    let neighbors: { previous: string | null; next: string | null } = {
+      previous: null,
+      next: null,
+    };
+    const nav = detachedElement(() =>
+      CHROME_VIEW.revisionNav({
+        olderTitle: text.olderRevision,
+        newerTitle: text.newerRevision,
+        ...neighbors,
+        onGo: goTo,
+      }),
+    );
     const params = new URLSearchParams({
       path: target.path,
       ref: target.ref || "worktree",
@@ -5219,24 +5229,16 @@ window.GdpExpandLogic = GdpExpandLogic;
         },
       ),
     )
-      .then((neighbors) => {
-        if (!nav.isConnected) return;
-        if (neighbors.previous) {
-          const sha = neighbors.previous;
-          older.disabled = false;
-          older.addEventListener("click", () => goTo(sha));
-        }
-        if (neighbors.next) {
-          const sha = neighbors.next;
-          newer.disabled = false;
-          newer.addEventListener("click", () => goTo(sha));
-        }
+      .then((found) => {
+        if (!nav.element.isConnected) return;
+        neighbors = { previous: found.previous, next: found.next };
+        nav.draw();
       })
       .catch((err: unknown) => {
         if (isAbortError(err)) return;
         console.error("Failed to load file revision neighbours", err);
       });
-    return nav;
+    return nav.element;
   }
 
   function createFileRepositoryWebLink(
@@ -5306,6 +5308,32 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
   });
 
+  // 起動した直後に失敗して終わったエージェントを知らせる (views/agents/launch-failure.ts)。
+  const LAUNCH_FAILURES = createLaunchFailureWatch({
+    onFailed: (pane, failure) => {
+      const t = agentsText(STATE.language).accounts;
+      void showConfirmDialog({
+        title: t.launchFailedTitle,
+        body: t.launchFailedBody(failure.status, failure.lines),
+        confirmLabel: t.launchFailedOpen,
+        cancelLabel: t.launchFailedClose,
+      }).then((open) => {
+        if (open) openAgentPane(pane);
+      });
+    },
+    onError: (pane, error) => {
+      console.error(
+        `[code-viewer] could not check the launched pane ${pane}`,
+        error,
+      );
+      TERMINAL_NOTICE.show(
+        agentsText(STATE.language).accounts.launchCheckFailed(
+          formatErrorDetail(error),
+        ),
+      );
+    },
+  });
+
   // ---------- Accounts: views/agents/accounts-*.ts ----------
   // エージェント一覧の帯と設定画面の節が同じ結果を見る。取り直すのは、
   // どちらかが画面にある間だけ (retain)。
@@ -5314,7 +5342,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     client: ACCOUNTS_CLIENT,
     getText: () => agentsText(STATE.language).accounts,
     // 一覧の監視役と画面の関数は後で作られる。押されたときにだけ呼ぶ。
-    openPane: (pane) => openAgentPane(pane),
+    // 起動・ログインで開いたペインは、すぐ失敗して終わっていないかを後で確かめる。
+    openPane: (pane) => {
+      openAgentPane(pane);
+      LAUNCH_FAILURES.watch(pane);
+    },
     getOverview: () => AGENT_MONITOR.snapshot().overview,
     serverRoot: () => ACCOUNTS_CLIENT.snapshot().data?.serverRoot ?? "",
     refreshOverview: () => AGENT_MONITOR.refresh(),
@@ -5379,9 +5411,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       const url = URL.createObjectURL(
         new Blob([text], { type: "application/json" }),
       );
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = fileName;
+      const link = templateElement<HTMLAnchorElement>(
+        CHROME_VIEW.downloadLink(url, fileName),
+      );
       link.click();
       URL.revokeObjectURL(url);
     },
@@ -5417,6 +5449,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       uploadEnabled: APP_SETTINGS.uploadEnabled !== false,
       agentNotifyWaiting: APP_SETTINGS.agentNotifyWaiting !== false,
       agentNotifyDone: APP_SETTINGS.agentNotifyDone !== false,
+      agentNotifySound: APP_SETTINGS.agentNotifySound === true,
+      terminalClipboardWrite: APP_SETTINGS.terminalClipboardWrite !== false,
+      terminalOptionAsAlt: APP_SETTINGS.terminalOptionAsAlt === true,
       inferFkRails: DATABASE_VIEW.getDbUiPref("inferFkRails", false),
       s3TooltipEnabled: DATABASE_VIEW.getDbUiPref("s3TooltipEnabled", true),
       scopeSource: uiText().settings.scopeSource(
@@ -5445,6 +5480,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     onSave: saveViewerSettings,
     onAgentRulesSave: saveAgentScreenRules,
+    onTestSound: (kind) => playAttentionSound(kind),
     onAgentRulesReset: resetAgentScreenRuleSettings,
     agentHooksSection: AGENT_HOOKS_SETTINGS.element,
     agentAccountsSection: ACCOUNTS_SETTINGS.element,
@@ -5562,7 +5598,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     STATE,
     setRoute,
     currentRange,
-    escapeHtml,
     trackLoad,
     diffCardSelector,
     getHljs,
@@ -5639,46 +5674,52 @@ window.GdpExpandLogic = GdpExpandLogic;
       "#annotations-toggle .goi-icon",
     );
     if (annotationsIcon) {
-      annotationsIcon.innerHTML = iconSvg(
-        "octicon-comment-discussion",
-        COMMENT_DISCUSSION_16_PATH,
+      fillWith(
+        annotationsIcon,
+        CHROME_VIEW.icon(
+          COMMENT_DISCUSSION_16_PATH,
+          "octicon-comment-discussion",
+        ),
       );
     }
     const doctorIcon = document.querySelector<HTMLElement>(
       "#doctor-btn .goi-icon",
     );
     if (doctorIcon) {
-      doctorIcon.innerHTML = iconSvg("octicon-pulse", PULSE_16_PATH);
+      fillWith(doctorIcon, CHROME_VIEW.icon(PULSE_16_PATH, "octicon-pulse"));
     }
     const themeButton = document.querySelector<HTMLButtonElement>("#theme");
     if (themeButton) {
-      themeButton.innerHTML = iconSvg("octicon-moon", MOON_16_PATH);
+      fillWith(themeButton, CHROME_VIEW.icon(MOON_16_PATH, "octicon-moon"));
     }
     const copyAiContextIcon = document.querySelector<HTMLElement>(
       "#copy-ai-context .goi-icon",
     );
     if (copyAiContextIcon) {
-      copyAiContextIcon.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+      fillWith(
+        copyAiContextIcon,
+        CHROME_VIEW.icon(COPY_16_PATHS, "octicon-copy"),
+      );
     }
     const autoUpdateIcon = document.querySelector<HTMLElement>(
       "#auto-update .goi-icon",
     );
     if (autoUpdateIcon) {
-      autoUpdateIcon.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+      fillWith(autoUpdateIcon, CHROME_VIEW.icon(SYNC_16_PATH, "octicon-sync"));
     }
     const cancelRequestsIcon = document.querySelector<HTMLElement>(
       "#cancel-requests .goi-icon",
     );
     if (cancelRequestsIcon) {
-      cancelRequestsIcon.innerHTML = iconSvg("octicon-x", X_16_PATH);
+      fillWith(cancelRequestsIcon, CHROME_VIEW.icon(X_16_PATH, "octicon-x"));
     }
     const repoWebLinkIcon = document.querySelector<HTMLElement>(
       "#repo-web-link .goi-icon",
     );
     if (repoWebLinkIcon) {
-      repoWebLinkIcon.innerHTML = iconSvg(
-        "octicon-mark-github",
-        MARK_GITHUB_16_PATH,
+      fillWith(
+        repoWebLinkIcon,
+        CHROME_VIEW.icon(MARK_GITHUB_16_PATH, "octicon-mark-github"),
       );
     }
     const navIcons: [string, string, string | string[]][] = [
@@ -5692,19 +5733,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     ];
     for (const [selector, className, paths] of navIcons) {
       const icon = document.querySelector<HTMLElement>(`${selector} .goi-icon`);
-      if (icon) icon.innerHTML = iconSvg(className, paths);
+      if (icon) fillWith(icon, CHROME_VIEW.icon(paths, className));
     }
     const searchIcon = document.querySelector<HTMLElement>(
       "#search-btn .goi-icon",
     );
     if (searchIcon) {
-      searchIcon.innerHTML = iconSvg("octicon-search", SEARCH_16_PATH);
+      fillWith(searchIcon, CHROME_VIEW.icon(SEARCH_16_PATH, "octicon-search"));
     }
     const branchIcon = document.querySelector<HTMLElement>(
       "#project-branch .goi-icon",
     );
     if (branchIcon) {
-      branchIcon.innerHTML = iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
+      fillWith(
+        branchIcon,
+        CHROME_VIEW.icon(GIT_BRANCH_16_PATH, "octicon-git-branch"),
+      );
     }
   }
 
@@ -5713,12 +5757,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   // with the active language via localizeViewerChrome() instead.
   function setRefActionIcons() {
     const refReset = document.querySelector<HTMLButtonElement>("#ref-reset");
-    if (refReset) refReset.innerHTML = iconSvg("octicon-undo", UNDO_16_PATH);
+    if (refReset)
+      fillWith(refReset, CHROME_VIEW.icon(UNDO_16_PATH, "octicon-undo"));
     const reload = document.querySelector<HTMLButtonElement>("#reload-prom");
-    if (reload) reload.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+    if (reload)
+      fillWith(reload, CHROME_VIEW.icon(SYNC_16_PATH, "octicon-sync"));
     const refDots = document.querySelector<HTMLElement>(".ref-dots .goi-icon");
     if (refDots) {
-      refDots.innerHTML = iconSvg("octicon-arrow-right", ARROW_RIGHT_16_PATH);
+      fillWith(
+        refDots,
+        CHROME_VIEW.icon(ARROW_RIGHT_16_PATH, "octicon-arrow-right"),
+      );
     }
   }
 
@@ -5781,7 +5830,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // ファイル一覧の再読み込み。開いたフォルダとスクロール位置は残して、増えた・
   // 消えたファイルだけを合わせる (本文には触れない)。
   const FILE_LIST_RELOAD = $("#file-list-reload");
-  FILE_LIST_RELOAD.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+  fillWith(FILE_LIST_RELOAD, CHROME_VIEW.icon(SYNC_16_PATH, "octicon-sync"));
   FILE_LIST_RELOAD.addEventListener("click", () => {
     if (FILE_LIST_RELOAD.classList.contains("spinning")) return;
     FILE_LIST_RELOAD.classList.add("spinning");
@@ -6015,8 +6064,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }): void {
     const { handle } = opts;
     if (!handle) return;
-    const preview = document.createElement("div");
-    preview.id = opts.previewId;
+    const preview = templateElement(CHROME_VIEW.resizePreview(opts.previewId));
     document.body.appendChild(preview);
     let drag: {
       startX: number;
@@ -6466,6 +6514,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       navigateToPageTab({ screen: "agents", range: currentRange() });
       return true;
     }
+    if (
+      action === "agent-next-attention" ||
+      action === "agent-previous-attention"
+    ) {
+      openNextAttentionAgent(action === "agent-next-attention" ? 1 : -1);
+      return true;
+    }
     if (action === "goto-worktrees") {
       navigateToRoute({ screen: "worktree", range: currentRange() });
       return true;
@@ -6689,15 +6744,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   ): void {
     action.title = title;
     action.setAttribute("aria-label", title);
-    action.replaceChildren();
-    const icon = document.createElement("span");
-    icon.className = "empty-action-icon";
-    icon.setAttribute("aria-hidden", "true");
-    icon.innerHTML = iconSvg(iconName, iconPath);
-    const text = document.createElement("span");
-    text.className = "empty-action-label";
-    text.textContent = label;
-    action.append(icon, text);
+    fillWith(action, CHROME_VIEW.emptyAction(iconName, iconPath, label));
   }
 
   function navigateToEmptyDiffHistory(event: MouseEvent): void {
@@ -6712,22 +6759,12 @@ window.GdpExpandLogic = GdpExpandLogic;
   function ensureEmptyDiffActions(empty: HTMLElement): HTMLElement {
     let actions = empty.querySelector<HTMLElement>(".empty-actions");
     if (actions) return actions;
-    actions = document.createElement("div");
-    actions.className = "empty-actions";
-    actions.hidden = true;
-
-    const reload = document.createElement("button");
-    reload.type = "button";
-    reload.className = "empty-action empty-action-primary";
-    reload.dataset.emptyAction = "reload";
-    reload.addEventListener("click", () => reloadDiffFromUi(reload));
-
-    const historyLink = document.createElement("a");
-    historyLink.className = "empty-action";
-    historyLink.dataset.emptyAction = "history";
-    historyLink.addEventListener("click", navigateToEmptyDiffHistory);
-
-    actions.append(reload, historyLink);
+    actions = templateElement(
+      CHROME_VIEW.emptyDiffActions({
+        onReload: (button) => reloadDiffFromUi(button),
+        onHistory: navigateToEmptyDiffHistory,
+      }),
+    );
     empty.appendChild(actions);
     return actions;
   }
@@ -7090,7 +7127,6 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const HISTORY_VIEW = createHistoryView({
     $,
-    escapeHtml,
     getRoute: () => STATE.route,
     setRoute,
     listIsPage: () => PHONE_QUERY.matches,
@@ -7187,7 +7223,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   const DOCTOR_VIEW = createDoctorView({
     $: <T extends Element = HTMLElement>(sel: string) =>
       document.querySelector<T>(sel),
-    escapeHtml,
     trackLoad,
     getLanguage: () => STATE.language,
     onWorstStatusChange: (status) => {
@@ -7253,7 +7288,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // Tools sheet — doctor sheet と同じ「AppRoute から独立した 1 クエリキーの
   // オーバーレイ」。違いは開いているツール名まで URL に載せる点だけ。
-  const TOOLS_VIEW = createToolsView({
+  const TOOLS_VIEW = createToolsPresenter({
     $: <T extends Element = HTMLElement>(sel: string) =>
       document.querySelector<T>(sel),
     trackLoad,
@@ -7404,6 +7439,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     // 文字サイズは他の表示設定と同じ置き場 (app settings) に持たせる。
     // 保存の経路も codeFontSize などと同じ patchSettings に乗せる。
     getFontSize: terminalFontSize,
+    allowClipboardWrite: () => APP_SETTINGS.terminalClipboardWrite !== false,
+    optionAsAlt: () => APP_SETTINGS.terminalOptionAsAlt === true,
     onFontSizeChange: (size) => {
       const next = clampTerminalFontSize(size);
       if (PHONE_QUERY.matches) {
@@ -7425,6 +7462,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     // 棚の置き場所と大きさも人に付く設定 (全部の窓で同じ)。
     getImageShelfLayout: imageShelfLayout,
+    // 画面の文字の tmux のペイン ID (%12): 一覧に居るペインだけをリンクにし、
+    // 押すとエージェントの行を押したのと同じく開く。
+    isLivePane: (pane) =>
+      AGENT_MONITOR.snapshot().overview?.panes.some(
+        (item) => item.id === pane,
+      ) ?? false,
+    onOpenPane: (pane) => openAgentPane(pane),
     // 画面のファイルのパス: 端末を隠さないよう反対の面で開く (⌘/Ctrl は固定の
     // タブ)。行があればその行へ。
     onOpenFile: (path, line, kept) => {
@@ -7505,9 +7549,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function createPaneHost(side: PaneSide): HTMLElement {
     const app = document.getElementById("app");
     if (!app) throw new Error("#app is missing from index.html");
-    const host = document.createElement("div");
-    host.className = "main-pane-host";
-    host.dataset.side = side;
+    const host = templateElement(CHROME_VIEW.paneHost(side));
     app.append(host);
     return host;
   }
@@ -7535,14 +7577,21 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   let RIGHT_SOURCE: SidePane | null = null;
 
+  /** 面の箱に入れるソース表示の枠と、カードを差し込む中。 */
+  function paneSourceShell(extraClass: string): {
+    root: HTMLElement;
+    body: HTMLElement;
+  } {
+    const root = templateElement(CHROME_VIEW.paneSource(extraClass));
+    const body = root.firstElementChild;
+    if (!(body instanceof HTMLElement))
+      throw new Error("pane source: the template has no body");
+    return { root, body };
+  }
+
   function rightSourcePane(route: FileRoute): SidePane {
     if (RIGHT_SOURCE) return RIGHT_SOURCE;
-    const root = document.createElement("div");
-    root.className = "main-pane-source";
-    root.tabIndex = -1;
-    const body = document.createElement("div");
-    body.className = "main-pane-source-body";
-    root.append(body);
+    const { root, body } = paneSourceShell("");
     const scrollTarget = (): HTMLElement => {
       const virtual = root.querySelector<HTMLElement>(
         ".gdp-source-virtual-scroller",
@@ -7650,56 +7699,30 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** 別のプロジェクトのパンくず: 色の四角と名前、パス (押せない)。 */
   function foreignBreadcrumb(project: string, path: string): HTMLElement {
-    const nav = document.createElement("nav");
-    nav.className = "gdp-file-breadcrumb main-pane-foreign-crumb";
-    nav.setAttribute("aria-label", DIFF_SCREEN_TEXT[STATE.language].filePath);
     const look = PROJECT_LOOKS.get(project);
     const name = look?.name ?? (project.split("/").pop() || project);
-    nav.append(
-      projectMark(
-        look ?? {
+    return templateElement(
+      CHROME_VIEW.foreignCrumbs({
+        label: DIFF_SCREEN_TEXT[STATE.language].filePath,
+        look: look ?? {
           root: project,
           name,
           initials: projectInitials(name),
           color: null,
         },
-        "main-pane-foreign-mark",
-      ),
+        parts: [name, ...path.split("/").filter(Boolean)].map(
+          filePathDisplayText,
+        ),
+      }),
     );
-    const parts = [name, ...path.split("/").filter(Boolean)];
-    parts.forEach((part, index) => {
-      if (index > 0) {
-        const sep = document.createElement("span");
-        sep.className = "gdp-file-breadcrumb-sep";
-        sep.textContent = "/";
-        nav.append(sep);
-      }
-      const crumb = document.createElement("span");
-      crumb.className =
-        index === parts.length - 1
-          ? "gdp-file-breadcrumb-current"
-          : "gdp-file-breadcrumb-part";
-      crumb.textContent = filePathDisplayText(part);
-      nav.append(crumb);
-    });
-    return nav;
   }
 
   function foreignPane(side: PaneSide): ForeignPane {
     const existing = FOREIGN_PANES[side];
     if (existing) return existing;
-    const root = document.createElement("div");
-    root.className = "main-pane-source main-pane-foreign";
-    root.tabIndex = -1;
-    const body = document.createElement("div");
-    body.className = "main-pane-source-body";
-    root.append(body);
+    const { root, body } = paneSourceShell("main-pane-foreign");
     const noop = () => undefined;
-    const hidden = () => {
-      const el = document.createElement("span");
-      el.hidden = true;
-      return el;
-    };
+    const hidden = () => templateElement(CHROME_VIEW.hiddenSlot());
     const toForeign = (url: string) => projectApiUrl(url, pane.key);
     let pane: ForeignPane;
     const source = createSourceView({
@@ -7780,10 +7803,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** 面の箱に文言だけを出す (移る途中・読めない理由)。 */
   function showPaneMessage(side: PaneSide, message: string): void {
-    const el = document.createElement("p");
-    el.className = "main-pane-message";
-    el.textContent = message;
-    PANE_HOSTS[side].replaceChildren(el);
+    fillWith(PANE_HOSTS[side], CHROME_VIEW.paneMessage(message));
   }
 
   /** 別のプロジェクトのファイルのタブを、その面の箱に出す。 */
@@ -8154,10 +8174,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           front.target.path !== path
         )
           return;
-        const message = document.createElement("p");
-        message.className = "main-pane-message";
-        message.textContent = formatErrorDetail(error);
-        host.replaceChildren(message);
+        fillWith(host, CHROME_VIEW.paneMessage(formatErrorDetail(error)));
       },
     );
   }
@@ -8184,6 +8201,9 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // title を持つ要素に速く出る吹き出し (アプリ全体で 1 つ)。
   installTitleTooltips();
+
+  // 窓にフォーカスが無い間は、選んでいる行を中立の色にする。
+  installWindowActive();
 
   // 電話の幅の骨格 (引き出し・下からの面・下端の帯・端末の操作札)。2 面は
   // 無いので、端末は左の面のものに送る。
@@ -8365,10 +8385,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * タブ列の「＋」のメニュー: ファイルを開く・新しいシェル・既存のセッション
-   * (このサーバのシェルと、このプロジェクトの tmux のペイン)。一覧は開く
-   * 直前に取り直す。取れなかったら、理由をメニューの 1 行に出す (ファイルと
-   * 新しいシェルは使えるままにする)。
+   * タブ列の「＋」のメニュー: 開ける画面 (左の帯と同じ順)・ファイルを開く・
+   * 新しいシェル・新しいエージェント。シェルの一覧は、シェルを開けるか (開けない
+   * ときは理由を出す) を知るために開く直前に取り直す。取れなかったら、新しい
+   * シェルは押せるままにする (押したときに作れなければ理由を出す)。
    */
   async function openNewTabMenu(
     side: PaneSide,
@@ -8441,6 +8461,24 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
   }
 
+  /**
+   * side の面の前面のタブが tmux のペインを映していて、そのペインが root の
+   * プロジェクトのものなら、そのペインの今の作業場所 (別の作業ツリーで作業中など)。
+   * 新しいシェルをそこで開く。分からなければ undefined (プロジェクトの根で開く)。
+   */
+  function frontPaneFolder(
+    side: PaneSide,
+    root: string | null,
+  ): string | undefined {
+    const front = MAIN_TABS.panes().fronts[side];
+    if (front?.target.kind !== "terminal" || root === null) return undefined;
+    const session = front.target.session;
+    const pane = AGENT_MONITOR.snapshot().overview?.panes.find(
+      (item) => item.shownInShell === session,
+    );
+    return pane && pane.project === root && pane.path ? pane.path : undefined;
+  }
+
   async function openShellIn(
     root: string | null,
     side: PaneSide,
@@ -8451,7 +8489,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       return;
     }
     try {
-      await TERMINAL_VIEW.createShell(side, await shellProjectKey(root));
+      await TERMINAL_VIEW.createShell(
+        side,
+        await shellProjectKey(root),
+        undefined,
+        frontPaneFolder(side, root ?? MAIN_TABS.currentProject()),
+      );
     } catch (error) {
       console.error(
         `[code-viewer] shell create failed${root === null ? "" : ` in ${root}`}`,
@@ -8469,12 +8512,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     list: ShellListResponse | Error,
   ): ContextMenuItem[] {
     const t = terminalText(STATE.language);
-    const a = agentsText(STATE.language);
-    const overview = AGENT_MONITOR.snapshot().overview;
-    const unread = AGENT_MONITOR.snapshot().unread;
-    // 電話でここから開いたペインは、戻るでこのメニューへ戻す。
-    const reopenNewTabMenu = returnOnPhone(() => MAIN_TABS.openNewTabMenu());
-    const items: ContextMenuItem[] = [
+    return [
+      ...MAIN_TABS.newTabScreenItems(side),
+      { kind: "separator" },
       {
         label: TOUCH_QUERY.matches
           ? t.newTabOpenFile
@@ -8502,82 +8542,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         label: mainTabsText(STATE.language).newAgentHere,
         onSelect: () => launchAgent(MAIN_TABS.currentProject() ?? undefined),
       },
-      // Tools と Search は page のタブ (左の面にだけ開く)。
-      { label: uiText().nav.tools, onSelect: () => openToolsPage() },
-      { label: uiText().nav.search, onSelect: () => openSearchPage() },
     ];
-    const sessions: ContextMenuItem[] = [];
-    /** タブで開いていない未読のペイン (印を付け、まとめて読んだことにできる)。 */
-    const unreadPanes: string[] = [];
-    const mark = (paneId: string | undefined, tabbed: boolean): string => {
-      if (!paneId || tabbed || !unread.has(paneId)) return "";
-      unreadPanes.push(paneId);
-      return "● ";
-    };
-    if (list instanceof Error) {
-      sessions.push({
-        label: t.shellListFailed,
-        title: formatErrorDetail(list),
-        disabled: true,
-        onSelect: () => undefined,
-      });
-    } else {
-      for (const session of list.sessions) {
-        const tabbed = MAIN_TABS.hasTerminal(session.id);
-        const pane = paneForShell(session.id);
-        sessions.push({
-          label: `${mark(pane?.id, tabbed)}${terminalTabInfo(session.id).label}${tabbed ? ` · ${t.inTab}` : ""}`,
-          title: [pane ? paneText(pane, a).title : session.command, session.cwd]
-            .filter(Boolean)
-            .join("\n"),
-          // 電話でペインを映すシェルは、タブではなくそのペインの 1 ペイン表示で
-          // 開く (タブにしても 1 ペイン表示で開き、戻ると案内だけが残った)。
-          onSelect: () =>
-            pane && PHONE_QUERY.matches
-              ? openAgentPane(pane.id, reopenNewTabMenu)
-              : MAIN_TABS.openTerminal(session.id),
-        });
-      }
-    }
-    // このプロジェクトの tmux のペインのうち、上のシェルが映していないもの。
-    const shown = new Set(
-      list instanceof Error ? [] : list.sessions.map((item) => item.id),
-    );
-    const current = overview?.projects.find(
-      (item) => item.server.status === "current",
-    );
-    for (const pane of overview?.panes ?? []) {
-      if (pane.project !== current?.root) continue;
-      if (pane.shownInShell !== "" && shown.has(pane.shownInShell)) continue;
-      // 行の形はサイドバー・パレット・タブと同じ決まり (pane-text.ts)。
-      const row = paneText(pane, a);
-      sessions.push({
-        label: `${mark(pane.id, false)}${row.row}`,
-        title: row.title,
-        onSelect: () => openAgentPane(pane.id, reopenNewTabMenu),
-      });
-    }
-    if (sessions.length > 0) items.push({ kind: "separator" }, ...sessions);
-    else if (!(list instanceof Error))
-      items.push(
-        { kind: "separator" },
-        { label: t.noShells, disabled: true, onSelect: () => undefined },
-      );
-    items.push({ kind: "separator" });
-    if (unreadPanes.length > 0)
-      items.push({
-        label: t.markAllRead(unreadPanes.length),
-        title: t.unreadTitle,
-        onSelect: () => {
-          for (const pane of unreadPanes) AGENT_MONITOR.markRead(pane);
-        },
-      });
-    items.push({
-      label: t.allSessions,
-      onSelect: () =>
-        navigateToRoute({ screen: "agents", range: currentRange() }),
-    });
-    return items;
   }
 
   /** タブの右クリックの「セッションを止める」。確かめてから止め、タブも閉じる。 */
@@ -9465,6 +9430,28 @@ window.GdpExpandLogic = GdpExpandLogic;
       .filter((id): id is string => id !== null);
   }
 
+  /**
+   * 手が要るエージェント (入力待ち → 完了・未読) を順に開く (キー・パレット)。
+   * 起点はいま見ているペイン。1 つも無ければ最下段の吹き出しで知らせる。
+   */
+  function openNextAttentionAgent(direction: 1 | -1): void {
+    const panes = AGENT_MONITOR.snapshot().overview?.panes ?? [];
+    const shells = viewedShells();
+    const current =
+      PANE_VIEW.currentPane() ??
+      panes.find(
+        (pane) =>
+          pane.shownInShell !== "" && shells.includes(pane.shownInShell),
+      )?.id ??
+      null;
+    const target = nextAttentionPane(panes, current, direction);
+    if (!target) {
+      TERMINAL_NOTICE.show(agentsText(STATE.language).noAttentionAgents);
+      return;
+    }
+    openAgentPane(target.id);
+  }
+
   function isViewingAgentPane(pane: AgentPane): boolean {
     return (
       document.visibilityState === "visible" &&
@@ -9549,6 +9536,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       suggested: false,
     },
     {
+      id: "agent-next-attention",
+      keymap: "agent-next-attention",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "agent-previous-attention",
+      keymap: "agent-previous-attention",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
       id: "goto-tools",
       keymap: "goto-tools",
       icon: BOOK_16_PATH,
@@ -9615,7 +9614,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         title: info.name,
         detail: info.displayRoot,
         status: current ? t.currentProject : "",
-        iconHtml: iconSvg("gdp-palette-icon", FOLDER_ICON_PATHS.closed),
+        icon: CHROME_VIEW.icon(FOLDER_ICON_PATHS.closed, "gdp-palette-icon"),
         suggested: index < 5,
         run: () => {
           // 左の一覧の見出しと同じく、そのグループで最後に前面だったタブへ。
@@ -9644,7 +9643,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         detail: paneText(pane, agents).detail,
         status: agents.state[pane.state],
         statusTone: pane.state,
-        iconHtml: `<i class="terminal-mark terminal-mark-${pane.state}" aria-hidden="true"></i>`,
+        icon: terminalMarkTemplate(pane.state),
         suggested: pane.kind !== null && index < 5,
         run: () => openAgentPane(pane.id),
       });
@@ -9661,7 +9660,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         title: terminalTabInfo(session.id).label,
         detail: session.cwd,
         status: MAIN_TABS.hasTerminal(session.id) ? terminal.inTab : "",
-        iconHtml: iconSvg("gdp-palette-icon", TERMINAL_16_PATHS),
+        icon: CHROME_VIEW.icon(TERMINAL_16_PATHS, "gdp-palette-icon"),
         suggested: false,
         run: () => MAIN_TABS.openTerminal(session.id),
       });
@@ -9673,7 +9672,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         group: "actions",
         id: `action:${action.id}`,
         title: t.actions[action.id],
-        iconHtml: iconSvg("gdp-palette-icon", action.icon),
+        icon: CHROME_VIEW.icon(action.icon, "gdp-palette-icon"),
         shortcut: binding ? formatKeyBinding(binding) : "",
         suggested: action.suggested,
         run: () => {
@@ -9686,7 +9685,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       group: "actions",
       id: "action:add-project",
       title: agents.projects.addProjectMenu,
-      iconHtml: iconSvg("gdp-palette-icon", PLUS_16_PATH),
+      icon: CHROME_VIEW.icon(PLUS_16_PATH, "gdp-palette-icon"),
       shortcut: "",
       suggested: false,
       run: () => void PROJECT_ACTIONS.registerByPath(),
@@ -9704,7 +9703,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         title: t.chooseTheme(name),
         detail: otherName === name ? "" : otherName,
         status: theme === currentTheme ? t.currentTheme : "",
-        iconHtml: iconSvg("gdp-palette-icon", MOON_16_PATH),
+        icon: CHROME_VIEW.icon(MOON_16_PATH, "gdp-palette-icon"),
         suggested: false,
         run: () => setColorTheme(theme),
       });
@@ -9782,8 +9781,25 @@ window.GdpExpandLogic = GdpExpandLogic;
     void TERMINAL_VIEW.openPaneInTab(pane, MAIN_TABS.panes().focused);
   }
 
+  // 窓の中の知らせ (窓が前面のとき。押すとそのペインへ)。知らせるのは外側の
+  // ページだけなので、面の中には置かない。
+  const ATTENTION_TOASTS =
+    WORKSPACE_ROLE === "pane"
+      ? null
+      : createAttentionToasts({
+          closeLabel: () => agentsText(STATE.language).toastClose,
+          open: (pane) => openAgentPane(pane),
+        });
   const AGENT_MONITOR = createAgentMonitor({
     getText: () => agentsText(STATE.language),
+    ...(ATTENTION_TOASTS
+      ? {
+          showToast: (pane, transition, text) =>
+            ATTENTION_TOASTS.show({ pane: pane.id, transition, ...text }),
+          isWindowInFront: () =>
+            document.visibilityState === "visible" && document.hasFocus(),
+        }
+      : {}),
     // 面の中では知らせない (同じ窓の host が知らせる)。
     getNotifySettings: () =>
       WORKSPACE_ROLE === "pane"
@@ -9793,6 +9809,7 @@ window.GdpExpandLogic = GdpExpandLogic;
             finished: APP_SETTINGS.agentNotifyDone !== false,
           },
     isViewing: isViewingAgentPane,
+    getSoundEnabled: () => APP_SETTINGS.agentNotifySound === true,
     onUnreadCountChange: (count) => {
       if (count === AGENT_UNREAD_COUNT) return;
       AGENT_UNREAD_COUNT = count;
@@ -10047,6 +10064,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   AGENT_MONITOR.subscribe(() =>
     PROJECT_LOOKS.update(AGENT_MONITOR.snapshot().overview),
   );
+  AGENT_MONITOR.subscribe(syncNavExpandMark);
 
   // 電話の段の下端の帯の「エージェント」に、最下段と同じ数え方の入力待ちの件数。
   AGENT_MONITOR.subscribe(() =>
@@ -10117,7 +10135,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const navProjectsRoot = document.querySelector<HTMLElement>("#nav-projects");
   AGENTS_SIDEBAR = navProjectsRoot
-    ? mountAgentsSidebar({
+    ? createAgentsSidebarPresenter({
         root: navProjectsRoot,
         monitor: AGENT_MONITOR,
         projects: PROJECT_ACTIONS,
@@ -10205,6 +10223,33 @@ window.GdpExpandLogic = GdpExpandLogic;
         })
       : null;
 
+  /**
+   * 畳んだサイドバーの「サイドバーを表示」(#nav-expand) に、手が要るエージェント
+   * (入力待ち → 完了・未読) の一番急ぐ状態の印と数を出す。畳んでも気付けるように。
+   */
+  function navExpandLabel(): string {
+    const t = agentsText(STATE.language).sidebar;
+    const waiting = attentionPanes(
+      AGENT_MONITOR.snapshot().overview?.panes ?? [],
+    );
+    return waiting.length > 0
+      ? `${t.expand} · ${t.expandAttention(waiting.length)}`
+      : t.expand;
+  }
+
+  function syncNavExpandMark(): void {
+    const button = document.querySelector<HTMLElement>("#nav-expand");
+    if (!button) return;
+    const first = attentionPanes(
+      AGENT_MONITOR.snapshot().overview?.panes ?? [],
+    )[0];
+    if (first) button.dataset.attention = first.state;
+    else delete button.dataset.attention;
+    const label = navExpandLabel();
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+
   /** 左のサイドバーの枠の文言 (中の一覧は AGENTS_SIDEBAR が貼る)。 */
   function localizeAppNav(): void {
     const t = agentsText(STATE.language).sidebar;
@@ -10222,7 +10267,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setElementText("#nav-help .nav-foot-label", t.help);
     for (const [selector, label] of [
       ["#nav-collapse", t.collapse],
-      ["#nav-expand", t.expand],
+      ["#nav-expand", navExpandLabel()],
       ["#nav-board-link", t.board],
       ["#nav-add-project", agentsText(STATE.language).projects.addProject],
       ["#app-nav-resizer", t.resize],
@@ -10244,7 +10289,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
   const usageStatusRoot = document.querySelector<HTMLElement>("#usage-status");
   const USAGE_STATUS = usageStatusRoot
-    ? mountUsageStatus({
+    ? createUsageStatusPresenter({
         root: usageStatusRoot,
         client: ACCOUNTS_CLIENT,
         getText: () => agentsText(STATE.language),
@@ -10255,8 +10300,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       })
     : null;
 
-  AGENTS_VIEW = createAgentsView({
+  AGENTS_VIEW = createAgentsPresenter({
     projects: PROJECT_ACTIONS,
+    boardOrder: {
+      get: () => APP_SETTINGS.agentsBoardOrder ?? null,
+      set: (order) => void patchSettings({ agentsBoardOrder: order }),
+    },
     monitor: AGENT_MONITOR,
     getText: () => agentsText(STATE.language),
     setPageMode,
@@ -10267,12 +10316,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       openSettingsAt("agent-notify-section-title"),
     getHookStatus: () => AGENT_HOOK_STATUS,
     refreshHookStatus: AGENT_HOOKS_SETTINGS.refresh,
-    hookHintDismissed: () => APP_SETTINGS.agentHookHintDismissed === true,
-    dismissHookHint: () => patchSettings({ agentHookHintDismissed: true }),
+    hookHintDismissed: () =>
+      APP_SETTINGS.agentHookHintDismissedFor ??
+      (APP_SETTINGS.agentHookHintDismissed === true
+        ? HOOK_HINT_DISMISSED_LEGACY
+        : null),
+    dismissHookHint: (key) => patchSettings({ agentHookHintDismissedFor: key }),
+    repairHooks: (agent, trigger) =>
+      AGENT_HOOKS_SETTINGS.repair(agent, trigger),
     openHookSettings: () => openSettingsAt(AGENT_HOOKS_SECTION_ID),
     tmuxInstallHelp: () => {
       const a = agentsText(STATE.language);
-      return installHelpBlock(
+      return installHelpTemplate(
         {
           intro: a.tmuxInstallIntro,
           commands: TMUX_INSTALL_COMMANDS,
@@ -10378,7 +10433,6 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const REF_PICKER = createRefPicker({
     $,
-    escapeHtml,
     currentRange,
     setRange,
     setRoute,
@@ -11206,6 +11260,32 @@ window.GdpExpandLogic = GdpExpandLogic;
     es.addEventListener("reload", () => location.reload());
     es.addEventListener("annotation", (event) => {
       ANNOTATIONS_UI?.handleSse((event as MessageEvent).data);
+    });
+    // `code-viewer show`: AI が頼まれて見せるファイル・差分を新しいタブで開く
+    // (いま見ているタブは変えない)。開くのは最初に受け取った 1 つの画面だけ。
+    es.addEventListener("show", (event) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse((event as MessageEvent).data);
+      } catch (error) {
+        console.error("[code-viewer] show: the event is not JSON", error);
+        return;
+      }
+      if (!isShowEvent(parsed)) {
+        console.error("[code-viewer] show: unexpected event", parsed);
+        return;
+      }
+      const shown = parsed;
+      claimShow(shown.id).then(
+        (mine) => {
+          if (mine) openShown(shown);
+        },
+        (error: unknown) =>
+          console.error(
+            `[code-viewer] show: could not decide which window opens ${shown.path}`,
+            error,
+          ),
+      );
     });
     es.addEventListener("journal", () => {
       JOURNAL_VIEW?.handleSse();

@@ -3,7 +3,8 @@
 // 2 つの相手を想定している。
 //
 // - エージェントのフック: 設定画面の「エージェント連携」で入れたフックは
-//   `terminal hook --agent <claude|codex>` を呼ぶ (起動スクリプト経由)。
+//   `terminal hook --agent <claude|codex|opencode>` を呼ぶ (起動スクリプト経由。
+//   opencode はプラグインが起動スクリプトを呼ぶ)。
 //   フックに渡された JSON から出来事を決め、動いている全部のサーバへ申告する
 //   (terminal/hook-report.ts)。手で書いたフックからは `terminal state` で
 //   このリポジトリのサーバへ直接申告してもよい。

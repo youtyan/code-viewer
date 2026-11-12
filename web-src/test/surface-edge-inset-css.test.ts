@@ -83,7 +83,10 @@ describe("bars and surfaces keep their controls off their left and right edges",
   });
 
   test.each([
-    [".gdp-context-menu", ".gdp-context-menu button"],
+    [
+      ":is(.gdp-context-menu, .db-grid-export-menu)",
+      ":is(.gdp-context-menu, .db-grid-export-menu) > button",
+    ],
     [".project-directory-list", ".project-directory-row"],
   ])("the rows of %s sit inside its rounded corners", (surface, row) => {
     const { left, right } = inlinePadding(surface);
