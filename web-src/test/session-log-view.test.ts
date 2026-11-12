@@ -3,7 +3,7 @@
 // presenter が view に渡す値を見る。
 
 import "./_dom";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { createSessionLog } from "../views/database/session-log";
 import {
   createSessionLogView,
@@ -70,6 +70,39 @@ describe("the session log presenter", () => {
 
     last().detail?.actions?.onUse();
     expect(used).toEqual(["select 1;"]);
+  });
+
+  // コピーに失敗したら、押したボタンに失敗の印と理由を出し、console に全文を出す
+  // (黙って捨てない)。
+  test("a failed copy marks the button and gives the reason", async () => {
+    const failure = new Error("clipboard is not allowed");
+    const write = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockRejectedValue(failure);
+    const logged = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const { view, add } = setup();
+      add("select 1");
+      const copy = view.el.querySelectorAll<HTMLButtonElement>(
+        ".db-session-log-detail-actions button",
+      )[1];
+      if (!copy) throw new Error("the copy button is not rendered");
+      copy.click();
+      await vi.waitFor(() =>
+        expect(copy.classList.contains("failed")).toBe(true),
+      );
+      expect(copy.title).toContain("copy a session log entry");
+      expect(copy.title).toContain("clipboard is not allowed");
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(
+        (logged.mock.calls[0]?.[0] as Error & { cause?: unknown }).cause,
+      ).toBe(failure);
+    } finally {
+      write.mockRestore();
+      logged.mockRestore();
+    }
   });
 
   test("clearing the store drops the selection", () => {

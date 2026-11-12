@@ -1,5 +1,6 @@
 import { html, nothing } from "lit/html.js";
 import { apiUrl } from "../../core/api-url";
+import { showCopyFailure } from "../../core/copy-failure";
 import type {
   QueryHistoryEntry,
   QueryHistoryState,
@@ -64,7 +65,8 @@ export type QueryHistoryDetailProps = {
   /** 保存した行が実際の行より少ないときの文。 */
   truncated: string | null;
   onUse: () => void;
-  onCopy: () => void;
+  /** 押したボタン (失敗の印と理由をそこに出す)。 */
+  onCopy: (button: HTMLElement) => void;
   onDelete: () => void;
 };
 
@@ -113,7 +115,11 @@ function detailTemplate(d: QueryHistoryDetailProps): unknown {
       class="db-query-history-detail-actions"
     ><button class="db-btn db-btn-primary" type="button" @click=${d.onUse}
       >${d.useLabel}</button
-    ><button class="db-btn" type="button" @click=${d.onCopy}>${d.copyLabel}</button
+    ><button
+      class="db-btn"
+      type="button"
+      @click=${(event: Event) => d.onCopy(event.currentTarget as HTMLElement)}
+    >${d.copyLabel}</button
     ><button
       class="db-btn db-query-history-danger"
       type="button"
@@ -299,7 +305,7 @@ export function createQueryHistoryView(
           ? t.truncatedRows(entry.savedRows, entry.rowCount)
           : null,
       onUse: () => callbacks.copySqlToQuery(entry.sql),
-      onCopy: () => {
+      onCopy: (button) => {
         navigator.clipboard.writeText(entry.sql).then(
           () => {
             copiedId = entry.id;
@@ -310,7 +316,14 @@ export function createQueryHistoryView(
               draw();
             }, COPIED_MS);
           },
-          () => undefined,
+          (error: unknown) =>
+            showCopyFailure(
+              button,
+              "copy a query from the history",
+              error,
+              button.title,
+              4000,
+            ),
         );
       },
       onDelete: () => {

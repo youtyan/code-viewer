@@ -549,4 +549,69 @@ describe("the query history presenter", () => {
     expect([last().detail?.deleteArmed, requests.length]).toEqual([true, 1]);
     view.clear();
   });
+
+  // SQL のコピーに失敗したら、押したボタンに失敗の印と理由を出し、console に
+  // 全文を出す (黙って捨てない)。
+  test("a failed copy of the SQL marks the button and gives the reason", async () => {
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            entries: [
+              {
+                id: "sample-entry",
+                dbId: "sample.db",
+                sql: "SELECT 1",
+                columns: [],
+                rowsPreview: [],
+                rowCount: 0,
+                savedRows: 0,
+                truncated: false,
+                elapsedMs: 1,
+                executedAt: "2026-01-02T03:04:05",
+                executedBy: "user",
+                source: "browser",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )) as typeof fetch;
+    const failure = new Error("clipboard is not allowed");
+    const write = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockRejectedValue(failure);
+    const logged = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const view = createQueryHistoryView({
+        getDbId: () => "sample.db",
+        getSchema: () => null,
+        copySqlToQuery: () => undefined,
+        getText: () => dbText("en"),
+      });
+      document.body.appendChild(view.el);
+      await view.refresh({ force: true });
+      q<HTMLElement>(view.el, ".db-query-history-entry").click();
+      const copy = view.el.querySelectorAll<HTMLButtonElement>(
+        ".db-query-history-detail-actions button",
+      )[1];
+      if (!copy) throw new Error("the copy button is not rendered");
+      copy.click();
+      await vi.waitFor(() =>
+        expect(copy.classList.contains("failed")).toBe(true),
+      );
+      expect(copy.title).toContain("copy a query from the history");
+      expect(copy.title).toContain("clipboard is not allowed");
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(
+        (logged.mock.calls[0]?.[0] as Error & { cause?: unknown }).cause,
+      ).toBe(failure);
+      view.clear();
+    } finally {
+      write.mockRestore();
+      logged.mockRestore();
+    }
+  });
 });

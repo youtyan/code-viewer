@@ -9,6 +9,7 @@
 import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { html, nothing } from "lit/html.js";
+import { showCopyFailure } from "../../core/copy-failure";
 import {
   loadShikiHighlighter,
   type ShikiHighlighter,
@@ -49,7 +50,8 @@ export type SessionLogDetailProps = {
     useLabel: string;
     copyLabel: string;
     onUse: () => void;
-    onCopy: () => void;
+    /** 押したボタン (失敗の印と理由をそこに出す)。 */
+    onCopy: (button: HTMLElement) => void;
   } | null;
   /** SQL の全文。色付けできたら html、できなければ text。 */
   sql: { html: string } | { text: string } | null;
@@ -89,7 +91,7 @@ function detailTemplate(d: SessionLogDetailProps): unknown {
           >${d.actions.useLabel}</button><button
             class="db-btn"
             type="button"
-            @click=${d.actions.onCopy}
+            @click=${(event: Event) => d.actions?.onCopy(event.currentTarget as HTMLElement)}
           >${d.actions.copyLabel}</button></div>`
       : nothing
   }${
@@ -225,7 +227,7 @@ export function createSessionLogView(
               useLabel: t.useInEditor,
               copyLabel: copiedId === entry.id ? t.copied : t.copy,
               onUse: () => callbacks.copySqlToQuery?.(entry.detail ?? ""),
-              onCopy: () => copyEntry(entry),
+              onCopy: (button) => copyEntry(entry, button),
             }
           : null,
       sql: entry.detail
@@ -291,7 +293,7 @@ export function createSessionLogView(
     list.scrollTop = 0;
   }
 
-  function copyEntry(entry: SessionLogEntry): void {
+  function copyEntry(entry: SessionLogEntry, button: HTMLElement): void {
     const txt =
       entry.message && entry.detail
         ? `${entry.detail}\n\n${entry.message}`
@@ -306,7 +308,14 @@ export function createSessionLogView(
           draw();
         }, COPIED_MS);
       },
-      () => undefined,
+      (error: unknown) =>
+        showCopyFailure(
+          button,
+          "copy a session log entry",
+          error,
+          button.title,
+          4000,
+        ),
     );
   }
 
