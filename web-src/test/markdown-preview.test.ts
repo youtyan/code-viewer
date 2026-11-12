@@ -414,6 +414,23 @@ describe("markdown preview", () => {
     expect(markdownSlugify("***")).toBe("section");
   });
 
+  // mermaid 12 が中に持つ ELK の並べ方 (4MB あまり) はバンドルに入れず、図は
+  // dagre で描く。図が `layout: elk` を名指ししたときは理由を出して描き損じる。
+  test("the mermaid bundle replaces the ELK layout with a stub that says why", async () => {
+    const { WEB_BUNDLES } = await import("../../scripts/bundles.mjs");
+    const mermaidBundle = WEB_BUNDLES.find(
+      (bundle: { outfile: string }) => bundle.outfile === "web/mermaid.js",
+    );
+    expect(mermaidBundle?.alias).toEqual({
+      "elkjs/lib/elk.bundled.js": "./web-src/mermaid-elk-unavailable.ts",
+    });
+    const { default: Elk } = await import("../mermaid-elk-unavailable");
+    expect(() => new Elk()).toThrow(
+      "The ELK layout is not included in code-viewer",
+    );
+    expect(mermaidLoader.includes('layout: "dagre"')).toBe(true);
+  });
+
   test("mermaid is built as a lazy standalone asset and served by the preview server", () => {
     expect(bundles.includes("web/mermaid.js")).toBe(true);
     expect(bundles.includes("web-src/mermaid-entry.ts")).toBe(true);

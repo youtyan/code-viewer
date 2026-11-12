@@ -13,6 +13,11 @@ export const WEB_BUNDLES = [
     entry: "web-src/mermaid-entry.ts",
     format: "esm",
     outfile: "web/mermaid.js",
+    // mermaid 12 が中に持つ ELK の並べ方を入れない (4MB あまり。図は dagre で
+    // 描く)。中身と理由は web-src/mermaid-elk-unavailable.ts。
+    alias: {
+      "elkjs/lib/elk.bundled.js": "./web-src/mermaid-elk-unavailable.ts",
+    },
   },
   { entry: "web-src/shiki-entry.ts", format: "esm", outfile: "web/shiki.js" },
   { entry: "web-src/yaml-entry.ts", format: "esm", outfile: "web/yaml.js" },
@@ -55,6 +60,7 @@ export function buildWebBundle(bundle, outfile = bundle.outfile) {
     platform: "browser",
     format: bundle.format,
     outfile,
+    ...(bundle.alias ? { alias: bundle.alias } : {}),
   });
 }
 
