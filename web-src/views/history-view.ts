@@ -1360,7 +1360,18 @@ export function createHistoryView(
     if (inFlight) return inFlight;
     const started: Promise<boolean> = doLoadNextPage().finally(() => {
       // Only clear our own promise; a generation reset may have replaced it.
-      if (inFlight === started) inFlight = null;
+      if (inFlight !== started) return;
+      inFlight = null;
+      // 縦に長い窓では、描いた後も末尾の目印が読み込みの範囲 (rootMargin) に
+      // 残る。見張りは範囲に入る・出るときしか知らせないので、そのままでは次の
+      // ページを読まず、スクロールしても目印が範囲を出ないので止まったままだった。
+      // 見張り直すと今の状態を 1 回知らせるので、範囲に残っていれば次を読む
+      // (読み込みを片付けた後に見張り直す。片付ける前の知らせは同じ読み込みを
+      // 返すだけになる)。
+      if (observer && hasMore && !loading) {
+        observer.unobserve(sentinel);
+        observer.observe(sentinel);
+      }
     });
     inFlight = started;
     return started;

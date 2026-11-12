@@ -2172,3 +2172,88 @@ describe("history view commit rows, filter URL and compare", () => {
     });
   });
 });
+
+describe("history paging on a tall window", () => {
+  // 縦に長い窓では、1 ページ目を描いた後も末尾の目印が読み込みの範囲に残る。
+  // 見張り (IntersectionObserver) は範囲に入る・出るときしか知らせないので、
+  // 描いた後に見張り直して、範囲に残っていれば次のページを読む。
+  test("loads the next page when the sentinel stays in range after a page is drawn", async () => {
+    const { panel, list, banner, status, sentinel } = installHistoryViewDom();
+    // 本物の見張りと同じく、見張り始めたときに今の状態 (範囲の中) を 1 回知らせる。
+    globalThis.IntersectionObserver = class {
+      constructor(
+        private readonly callback: (
+          entries: { isIntersecting: boolean }[],
+        ) => void,
+      ) {}
+      observe() {
+        queueMicrotask(() => this.callback([{ isIntersecting: true }]));
+      }
+      disconnect() {
+        /* noop */
+      }
+      unobserve() {
+        /* noop */
+      }
+      takeRecords() {
+        return [];
+      }
+    } as unknown as typeof IntersectionObserver;
+    const commit = (n: number) => ({
+      sha: `sha${n}`.padEnd(12, "0"),
+      parents: [],
+      subject: `commit ${n}`,
+      body: "",
+      author: "Alice",
+      when: new Date().toISOString(),
+    });
+    const skips: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      const skip = new URL(String(input), "http://localhost").searchParams.get(
+        "skip",
+      );
+      skips.push(skip ?? "");
+      const page =
+        skip === "0"
+          ? { commits: [commit(1), commit(2)], hasMore: true }
+          : { commits: [commit(3)], hasMore: false };
+      return Promise.resolve(
+        new Response(JSON.stringify(page), { status: 200 }),
+      );
+    }) as unknown as typeof fetch;
+    const route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      getRoute: () => route,
+      setRoute: () => undefined,
+      applyCommitRange: async () => undefined,
+      showEmptyDiffPane: () => undefined,
+      getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory();
+    await waitFor(() => rowsOf(list).length === 4);
+
+    expect(skips).toEqual(["0", "2"]);
+    expect(rowsOf(list).map((row) => row.dataset.sha)).toEqual([
+      HISTORY_WORKTREE_COMMIT,
+      commit(1).sha,
+      commit(2).sha,
+      commit(3).sha,
+    ]);
+  });
+});
