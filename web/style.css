@@ -1558,6 +1558,12 @@ html, body {
      余白を持たない本文 (フォルダ表示・ファイル表示) は、この分だけ下げる。
      はみ出しの幅を大きく掛けて、1px でもはみ出せば上限 (頭の高さ) に張り付かせる。 */
   --head-overhang-h: clamp(calc(var(--view-head-h) * 0), calc((var(--column-head-w) - var(--listcol-shown)) * 1000), calc(var(--panel-body-top) - var(--main-tabs-h)));
+  /* ツールバー (#topbar) を隠す画面の chrome の高さ。本文はタブ列のすぐ下から
+     始まるので、頭がはみ出している間 (左のサイドバーを畳んだとき・大きい密度) は
+     その分だけ下げる (頭の 2 段目が本文の上端を隠していた。全体ボードの見出し)。
+     本文の箱ごと下げるので、高さいっぱいの画面 (ワークログ・データストア) も
+     --content-h が一緒に縮み、スクロールが出ない。 */
+  --toolbarless-chrome-h: calc(var(--global-header-h) + var(--head-overhang-h));
 
 
   --code-font-size: 13px;
@@ -4156,7 +4162,7 @@ html[data-theme="dark"] .agent-screen-rules-highlight span[style] {
    これを書かないと --chrome-h / --content-h が隠れているツールバー分だけ
    大きいままになり、消費側を 1 つずつ手当てする羽目になる。 */
 body.gdp-help-page {
-  --chrome-h: var(--global-header-h);
+  --chrome-h: var(--toolbarless-chrome-h);
 }
 body.gdp-help-page #topbar {
   display: none;
@@ -9145,7 +9151,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 }
 
 body.gdp-database-page {
-  --chrome-h: var(--global-header-h);
+  --chrome-h: var(--toolbarless-chrome-h);
 }
 
 
@@ -9596,7 +9602,7 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 }
 
 body.gdp-journal-page {
-  --chrome-h: var(--global-header-h);
+  --chrome-h: var(--toolbarless-chrome-h);
 }
 
 
@@ -16665,7 +16671,7 @@ html[data-theme="dark"] .tools-code span[style] {
 body.gdp-agents-page,
 body.gdp-tools-page,
 body.gdp-search-page {
-  --chrome-h: var(--global-header-h);
+  --chrome-h: var(--toolbarless-chrome-h);
 }
 
 .gdp-agents-page #content,

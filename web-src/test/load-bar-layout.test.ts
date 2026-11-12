@@ -30,10 +30,15 @@ function selectorMatches(
   );
 }
 
-function loadBarTopFor(bodyClass?: string): string {
+function loadBarTopFor(
+  bodyClass?: string,
+  overrides: Record<string, string> = {},
+): string {
   const bodyDeclarations = cascadedDeclarations(rules, (selector) =>
     selectorMatches(selector, "body", bodyClass),
   );
+  for (const [name, value] of Object.entries(overrides))
+    bodyDeclarations.set(name, value);
   const loadBarDeclarations = cascadedDeclarations(rules, (selector) =>
     selectorMatches(selector, "load-bar", bodyClass),
   );
@@ -60,8 +65,21 @@ describe("load-bar layout", () => {
 
   test("places the loading bar directly below the header on pages without topbar", () => {
     const header = rootLength("--global-header-h");
-    expect(loadBarTopFor("gdp-database-page")).toBe(header);
+    // 一覧の列の頭がはみ出していない (既定の密度・左のサイドバーを開いている) とき。
+    const noOverhang = { "--head-overhang-h": "0px" };
+    expect(loadBarTopFor("gdp-database-page", noOverhang)).toBe(
+      `calc(${header} + 0px)`,
+    );
     expect(loadBarTopFor("gdp-file-detail-page")).toBe(header);
     expect(loadBarTopFor("gdp-repo-page")).toBe(header);
+  });
+
+  // 頭がはみ出している間 (左のサイドバーを畳んだとき) は、本文の箱と同じだけ下がる
+  // (頭の 2 段目の下。ui-layout.md の「ページごとの chrome」)。
+  test("on a page without topbar, the loading bar moves below the head's overhang", () => {
+    const header = rootLength("--global-header-h");
+    expect(
+      loadBarTopFor("gdp-database-page", { "--head-overhang-h": "34px" }),
+    ).toBe(`calc(${header} + 34px)`);
   });
 });
