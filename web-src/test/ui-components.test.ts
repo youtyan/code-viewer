@@ -127,6 +127,8 @@ const DECLARATIVE = [
   "web-src/views/journal-view.ts",
   "web-src/views/database/",
   "web-src/views/terminal/",
+  "web-src/views/app-chrome.ts",
+  "web-src/app.ts",
 ];
 
 /**
@@ -144,10 +146,15 @@ const EXCEPTIONS: Record<string, { count: number; reason: string }> = {
     reason:
       "diff2html が描いた行の本文を、色付けの道具が返した HTML に置き換える (外の部品が描いた DOM。行ごとに lit の根を作ると、何千行の差分の色付けが重くなる)",
   },
+  "web-src/app.ts": {
+    count: 1,
+    reason:
+      "色付けの道具 (highlight.js) を読む script 要素を head に置く。テンプレートから写した script はブラウザが実行しない",
+  },
 };
 
 /** まだ書き直していない所も含めた、命令的な組み立ての数の上限。書き直したら下げる。 */
-const IMPERATIVE_LIMIT = 52;
+const IMPERATIVE_LIMIT = 3;
 
 function imperativeCount(file: string): number {
   return [...readFileSync(file, "utf8").matchAll(IMPERATIVE_DOM)].length;

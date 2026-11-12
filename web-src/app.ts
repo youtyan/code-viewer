@@ -99,10 +99,7 @@ import {
   KEBAB_16_PATH,
   MARK_GITHUB_16_PATH,
   MOON_16_PATH,
-  NEXT_16_PATHS,
-  OPEN_EXTERNAL_16_PATH,
   PLUS_16_PATH,
-  PREVIOUS_16_PATHS,
   PULSE_16_PATH,
   QUESTION_16_PATH,
   SEARCH_16_PATH,
@@ -110,7 +107,6 @@ import {
   SIDEBAR_SHOW_16_PATHS,
   SYNC_16_PATH,
   TERMINAL_16_PATHS,
-  TRIANGLE_DOWN_16_PATH,
   UNDO_16_PATH,
   X_16_PATH,
 } from "./core/icons";
@@ -290,6 +286,7 @@ import {
   type AnnotationsUi,
   createAnnotationsUi,
 } from "./views/annotations-ui";
+import { DEFAULT_VIEW as CHROME_VIEW, fillWith } from "./views/app-chrome";
 import { createBackendState } from "./views/backend-state";
 import { type BlameViewDeps, createBlameView } from "./views/blame-view";
 import { fitBrand } from "./views/brand-fit";
@@ -369,7 +366,6 @@ import {
   PROJECT_LOOKS,
   type ProjectLook,
   paintProjectColor,
-  projectMark,
 } from "./views/projects/project-looks";
 import {
   mountProjectSwitcher,
@@ -439,6 +435,7 @@ import { toolsText } from "./views/tools/i18n";
 import { createToolsPresenter } from "./views/tools/tools-presenter";
 import { mountTopbarMore } from "./views/topbar-more";
 import { renderEmptyState } from "./views/ui/empty-state";
+import { detachedElement, templateElement } from "./views/ui/renderer";
 import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
   createViewerSettings,
@@ -3422,11 +3419,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   ) {
     const button = document.querySelector<HTMLButtonElement>(selector);
     if (!button) return;
-    button.innerHTML = iconSvg("seg-icon", paths);
-    const name = document.createElement("span");
-    name.className = "seg-label";
-    name.textContent = label;
-    button.append(name);
+    fillWith(button, CHROME_VIEW.layoutButton(paths, label));
     button.title = label;
     button.setAttribute("aria-label", label);
   }
@@ -3479,7 +3472,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         link.setAttribute("aria-label", label);
         const icon = link.querySelector<HTMLElement>(".goi-icon");
         if (icon && !icon.firstElementChild)
-          icon.innerHTML = iconSvg("view-strip-icon", pageIconPaths(route));
+          fillWith(
+            icon,
+            CHROME_VIEW.icon(pageIconPaths(route), "view-strip-icon"),
+          );
       });
     MAIN_TABS.localize();
     for (const view of Object.values(IMAGE_VIEWS))
@@ -3571,7 +3567,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     const topbarMore =
       document.querySelector<HTMLButtonElement>("#topbar-more");
     if (topbarMore) {
-      topbarMore.innerHTML = iconSvg("octicon-kebab-horizontal", KEBAB_16_PATH);
+      fillWith(
+        topbarMore,
+        CHROME_VIEW.icon(KEBAB_16_PATH, "octicon-kebab-horizontal"),
+      );
       topbarMore.title = text.topbar.more;
       topbarMore.setAttribute("aria-label", text.topbar.more);
     }
@@ -3923,6 +3922,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
     setHighlightButton("loading");
     highlightLoadPromise = new Promise((resolve, reject) => {
+      // 外の script を読む要素はここで作る。テンプレートから写した script は
+      // ブラウザが実行しないので、描き方の決まりの例外 (ui-components.test.ts)。
       const script = document.createElement("script");
       script.src = HIGHLIGHT_SRC;
       script.async = true;
@@ -4007,11 +4008,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function setChevronIcon(el: HTMLElement) {
-    el.innerHTML =
-      '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">' +
-      '<path fill="currentColor" d="' +
-      CHEVRON_DOWN_12_PATH +
-      '"></path></svg>';
+    fillWith(
+      el,
+      CHROME_VIEW.icon(CHEVRON_DOWN_12_PATH, "octicon-chevron-down", 12),
+    );
   }
 
   function scopeOmitSourceLabel(): string {
@@ -4247,35 +4247,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     hidden?: boolean;
     value?: string;
   }): { wrap: HTMLDivElement; input: HTMLInputElement } {
-    const wrap = document.createElement("div");
-    wrap.className = `ref-selector${options.extraClass ? ` ${options.extraClass}` : ""}`;
-    wrap.dataset.refSelector = "";
-    if (options.wrapperId) wrap.id = options.wrapperId;
-    if (options.hidden) wrap.hidden = true;
-
-    const icon = document.createElement("span");
-    icon.className = "ref-selector-icon";
-    icon.setAttribute("aria-hidden", "true");
-    icon.innerHTML = iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
-
-    const input = document.createElement("input");
-    input.className = "ref-input";
-    input.id = options.id;
-    input.readOnly = true;
-    input.autocomplete = "off";
-    input.placeholder = options.placeholder;
-    if (options.title) {
-      input.title = options.title;
-      input.setAttribute("aria-label", options.title);
-    }
-    if (options.value != null) input.value = options.value;
-
-    const caret = document.createElement("span");
-    caret.className = "ref-selector-caret";
-    caret.setAttribute("aria-hidden", "true");
-    caret.innerHTML = iconSvg("octicon-triangle-down", TRIANGLE_DOWN_16_PATH);
-
-    wrap.append(icon, input, caret);
+    const wrap = templateElement<HTMLDivElement>(
+      CHROME_VIEW.refSelector(options),
+    );
+    const input = wrap.querySelector<HTMLInputElement>("input.ref-input");
+    if (!input) throw new Error("ref selector: the template has no input");
     return { wrap, input };
   }
 
@@ -5204,17 +5180,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     kind: "directory" | "file-parent",
     title = uiText().sidebar.openDirectoryInOs,
   ): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gdp-file-header-icon gdp-open-path";
-    button.title = title;
-    button.setAttribute("aria-label", title);
-    button.innerHTML = iconSvg("octicon-link-external", OPEN_EXTERNAL_16_PATH);
-    button.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void openPathFromButton(path, kind, button);
-    });
-    return button;
+    return templateElement<HTMLButtonElement>(
+      CHROME_VIEW.openPathButton(title, (button) => {
+        void openPathFromButton(path, kind, button);
+      }),
+    );
   }
 
   // Older / newer revision stepper on a file page. The neighbours come from
@@ -5225,22 +5195,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     activeTab: FileViewTab,
   ): HTMLElement | null {
     if (activeTab === "history") return null;
-    const nav = document.createElement("span");
-    nav.className = "gdp-file-revision-nav";
     const text = uiText().global;
-    const make = (title: string, paths: string[]): HTMLButtonElement => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-file-header-icon gdp-file-revision-btn";
-      button.title = title;
-      button.setAttribute("aria-label", title);
-      button.disabled = true;
-      button.innerHTML = iconSvg("octicon-revision", paths);
-      return button;
-    };
-    const older = make(text.olderRevision, PREVIOUS_16_PATHS);
-    const newer = make(text.newerRevision, NEXT_16_PATHS);
-    nav.append(older, newer);
     const goTo = (sha: string) => {
       const view =
         STATE.route.screen === "file" && STATE.route.view === "blame"
@@ -5254,6 +5209,19 @@ window.GdpExpandLogic = GdpExpandLogic;
         range: currentRange(),
       });
     };
+    // 隣の版が届くまで (無いときも) ボタンは押せない形で置き、頭の幅を変えない。
+    let neighbors: { previous: string | null; next: string | null } = {
+      previous: null,
+      next: null,
+    };
+    const nav = detachedElement(() =>
+      CHROME_VIEW.revisionNav({
+        olderTitle: text.olderRevision,
+        newerTitle: text.newerRevision,
+        ...neighbors,
+        onGo: goTo,
+      }),
+    );
     const params = new URLSearchParams({
       path: target.path,
       ref: target.ref || "worktree",
@@ -5266,24 +5234,16 @@ window.GdpExpandLogic = GdpExpandLogic;
         },
       ),
     )
-      .then((neighbors) => {
-        if (!nav.isConnected) return;
-        if (neighbors.previous) {
-          const sha = neighbors.previous;
-          older.disabled = false;
-          older.addEventListener("click", () => goTo(sha));
-        }
-        if (neighbors.next) {
-          const sha = neighbors.next;
-          newer.disabled = false;
-          newer.addEventListener("click", () => goTo(sha));
-        }
+      .then((found) => {
+        if (!nav.element.isConnected) return;
+        neighbors = { previous: found.previous, next: found.next };
+        nav.draw();
       })
       .catch((err: unknown) => {
         if (isAbortError(err)) return;
         console.error("Failed to load file revision neighbours", err);
       });
-    return nav;
+    return nav.element;
   }
 
   function createFileRepositoryWebLink(
@@ -5456,9 +5416,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       const url = URL.createObjectURL(
         new Blob([text], { type: "application/json" }),
       );
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = fileName;
+      const link = templateElement<HTMLAnchorElement>(
+        CHROME_VIEW.downloadLink(url, fileName),
+      );
       link.click();
       URL.revokeObjectURL(url);
     },
@@ -5719,46 +5679,52 @@ window.GdpExpandLogic = GdpExpandLogic;
       "#annotations-toggle .goi-icon",
     );
     if (annotationsIcon) {
-      annotationsIcon.innerHTML = iconSvg(
-        "octicon-comment-discussion",
-        COMMENT_DISCUSSION_16_PATH,
+      fillWith(
+        annotationsIcon,
+        CHROME_VIEW.icon(
+          COMMENT_DISCUSSION_16_PATH,
+          "octicon-comment-discussion",
+        ),
       );
     }
     const doctorIcon = document.querySelector<HTMLElement>(
       "#doctor-btn .goi-icon",
     );
     if (doctorIcon) {
-      doctorIcon.innerHTML = iconSvg("octicon-pulse", PULSE_16_PATH);
+      fillWith(doctorIcon, CHROME_VIEW.icon(PULSE_16_PATH, "octicon-pulse"));
     }
     const themeButton = document.querySelector<HTMLButtonElement>("#theme");
     if (themeButton) {
-      themeButton.innerHTML = iconSvg("octicon-moon", MOON_16_PATH);
+      fillWith(themeButton, CHROME_VIEW.icon(MOON_16_PATH, "octicon-moon"));
     }
     const copyAiContextIcon = document.querySelector<HTMLElement>(
       "#copy-ai-context .goi-icon",
     );
     if (copyAiContextIcon) {
-      copyAiContextIcon.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+      fillWith(
+        copyAiContextIcon,
+        CHROME_VIEW.icon(COPY_16_PATHS, "octicon-copy"),
+      );
     }
     const autoUpdateIcon = document.querySelector<HTMLElement>(
       "#auto-update .goi-icon",
     );
     if (autoUpdateIcon) {
-      autoUpdateIcon.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+      fillWith(autoUpdateIcon, CHROME_VIEW.icon(SYNC_16_PATH, "octicon-sync"));
     }
     const cancelRequestsIcon = document.querySelector<HTMLElement>(
       "#cancel-requests .goi-icon",
     );
     if (cancelRequestsIcon) {
-      cancelRequestsIcon.innerHTML = iconSvg("octicon-x", X_16_PATH);
+      fillWith(cancelRequestsIcon, CHROME_VIEW.icon(X_16_PATH, "octicon-x"));
     }
     const repoWebLinkIcon = document.querySelector<HTMLElement>(
       "#repo-web-link .goi-icon",
     );
     if (repoWebLinkIcon) {
-      repoWebLinkIcon.innerHTML = iconSvg(
-        "octicon-mark-github",
-        MARK_GITHUB_16_PATH,
+      fillWith(
+        repoWebLinkIcon,
+        CHROME_VIEW.icon(MARK_GITHUB_16_PATH, "octicon-mark-github"),
       );
     }
     const navIcons: [string, string, string | string[]][] = [
@@ -5772,19 +5738,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     ];
     for (const [selector, className, paths] of navIcons) {
       const icon = document.querySelector<HTMLElement>(`${selector} .goi-icon`);
-      if (icon) icon.innerHTML = iconSvg(className, paths);
+      if (icon) fillWith(icon, CHROME_VIEW.icon(paths, className));
     }
     const searchIcon = document.querySelector<HTMLElement>(
       "#search-btn .goi-icon",
     );
     if (searchIcon) {
-      searchIcon.innerHTML = iconSvg("octicon-search", SEARCH_16_PATH);
+      fillWith(searchIcon, CHROME_VIEW.icon(SEARCH_16_PATH, "octicon-search"));
     }
     const branchIcon = document.querySelector<HTMLElement>(
       "#project-branch .goi-icon",
     );
     if (branchIcon) {
-      branchIcon.innerHTML = iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
+      fillWith(
+        branchIcon,
+        CHROME_VIEW.icon(GIT_BRANCH_16_PATH, "octicon-git-branch"),
+      );
     }
   }
 
@@ -5793,12 +5762,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   // with the active language via localizeViewerChrome() instead.
   function setRefActionIcons() {
     const refReset = document.querySelector<HTMLButtonElement>("#ref-reset");
-    if (refReset) refReset.innerHTML = iconSvg("octicon-undo", UNDO_16_PATH);
+    if (refReset)
+      fillWith(refReset, CHROME_VIEW.icon(UNDO_16_PATH, "octicon-undo"));
     const reload = document.querySelector<HTMLButtonElement>("#reload-prom");
-    if (reload) reload.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+    if (reload)
+      fillWith(reload, CHROME_VIEW.icon(SYNC_16_PATH, "octicon-sync"));
     const refDots = document.querySelector<HTMLElement>(".ref-dots .goi-icon");
     if (refDots) {
-      refDots.innerHTML = iconSvg("octicon-arrow-right", ARROW_RIGHT_16_PATH);
+      fillWith(
+        refDots,
+        CHROME_VIEW.icon(ARROW_RIGHT_16_PATH, "octicon-arrow-right"),
+      );
     }
   }
 
@@ -5861,7 +5835,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // ファイル一覧の再読み込み。開いたフォルダとスクロール位置は残して、増えた・
   // 消えたファイルだけを合わせる (本文には触れない)。
   const FILE_LIST_RELOAD = $("#file-list-reload");
-  FILE_LIST_RELOAD.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+  fillWith(FILE_LIST_RELOAD, CHROME_VIEW.icon(SYNC_16_PATH, "octicon-sync"));
   FILE_LIST_RELOAD.addEventListener("click", () => {
     if (FILE_LIST_RELOAD.classList.contains("spinning")) return;
     FILE_LIST_RELOAD.classList.add("spinning");
@@ -6095,8 +6069,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }): void {
     const { handle } = opts;
     if (!handle) return;
-    const preview = document.createElement("div");
-    preview.id = opts.previewId;
+    const preview = templateElement(CHROME_VIEW.resizePreview(opts.previewId));
     document.body.appendChild(preview);
     let drag: {
       startX: number;
@@ -6776,15 +6749,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   ): void {
     action.title = title;
     action.setAttribute("aria-label", title);
-    action.replaceChildren();
-    const icon = document.createElement("span");
-    icon.className = "empty-action-icon";
-    icon.setAttribute("aria-hidden", "true");
-    icon.innerHTML = iconSvg(iconName, iconPath);
-    const text = document.createElement("span");
-    text.className = "empty-action-label";
-    text.textContent = label;
-    action.append(icon, text);
+    fillWith(action, CHROME_VIEW.emptyAction(iconName, iconPath, label));
   }
 
   function navigateToEmptyDiffHistory(event: MouseEvent): void {
@@ -6799,22 +6764,12 @@ window.GdpExpandLogic = GdpExpandLogic;
   function ensureEmptyDiffActions(empty: HTMLElement): HTMLElement {
     let actions = empty.querySelector<HTMLElement>(".empty-actions");
     if (actions) return actions;
-    actions = document.createElement("div");
-    actions.className = "empty-actions";
-    actions.hidden = true;
-
-    const reload = document.createElement("button");
-    reload.type = "button";
-    reload.className = "empty-action empty-action-primary";
-    reload.dataset.emptyAction = "reload";
-    reload.addEventListener("click", () => reloadDiffFromUi(reload));
-
-    const historyLink = document.createElement("a");
-    historyLink.className = "empty-action";
-    historyLink.dataset.emptyAction = "history";
-    historyLink.addEventListener("click", navigateToEmptyDiffHistory);
-
-    actions.append(reload, historyLink);
+    actions = templateElement(
+      CHROME_VIEW.emptyDiffActions({
+        onReload: (button) => reloadDiffFromUi(button),
+        onHistory: navigateToEmptyDiffHistory,
+      }),
+    );
     empty.appendChild(actions);
     return actions;
   }
@@ -7599,9 +7554,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function createPaneHost(side: PaneSide): HTMLElement {
     const app = document.getElementById("app");
     if (!app) throw new Error("#app is missing from index.html");
-    const host = document.createElement("div");
-    host.className = "main-pane-host";
-    host.dataset.side = side;
+    const host = templateElement(CHROME_VIEW.paneHost(side));
     app.append(host);
     return host;
   }
@@ -7629,14 +7582,21 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   let RIGHT_SOURCE: SidePane | null = null;
 
+  /** 面の箱に入れるソース表示の枠と、カードを差し込む中。 */
+  function paneSourceShell(extraClass: string): {
+    root: HTMLElement;
+    body: HTMLElement;
+  } {
+    const root = templateElement(CHROME_VIEW.paneSource(extraClass));
+    const body = root.firstElementChild;
+    if (!(body instanceof HTMLElement))
+      throw new Error("pane source: the template has no body");
+    return { root, body };
+  }
+
   function rightSourcePane(route: FileRoute): SidePane {
     if (RIGHT_SOURCE) return RIGHT_SOURCE;
-    const root = document.createElement("div");
-    root.className = "main-pane-source";
-    root.tabIndex = -1;
-    const body = document.createElement("div");
-    body.className = "main-pane-source-body";
-    root.append(body);
+    const { root, body } = paneSourceShell("");
     const scrollTarget = (): HTMLElement => {
       const virtual = root.querySelector<HTMLElement>(
         ".gdp-source-virtual-scroller",
@@ -7744,56 +7704,30 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** 別のプロジェクトのパンくず: 色の四角と名前、パス (押せない)。 */
   function foreignBreadcrumb(project: string, path: string): HTMLElement {
-    const nav = document.createElement("nav");
-    nav.className = "gdp-file-breadcrumb main-pane-foreign-crumb";
-    nav.setAttribute("aria-label", DIFF_SCREEN_TEXT[STATE.language].filePath);
     const look = PROJECT_LOOKS.get(project);
     const name = look?.name ?? (project.split("/").pop() || project);
-    nav.append(
-      projectMark(
-        look ?? {
+    return templateElement(
+      CHROME_VIEW.foreignCrumbs({
+        label: DIFF_SCREEN_TEXT[STATE.language].filePath,
+        look: look ?? {
           root: project,
           name,
           initials: projectInitials(name),
           color: null,
         },
-        "main-pane-foreign-mark",
-      ),
+        parts: [name, ...path.split("/").filter(Boolean)].map(
+          filePathDisplayText,
+        ),
+      }),
     );
-    const parts = [name, ...path.split("/").filter(Boolean)];
-    parts.forEach((part, index) => {
-      if (index > 0) {
-        const sep = document.createElement("span");
-        sep.className = "gdp-file-breadcrumb-sep";
-        sep.textContent = "/";
-        nav.append(sep);
-      }
-      const crumb = document.createElement("span");
-      crumb.className =
-        index === parts.length - 1
-          ? "gdp-file-breadcrumb-current"
-          : "gdp-file-breadcrumb-part";
-      crumb.textContent = filePathDisplayText(part);
-      nav.append(crumb);
-    });
-    return nav;
   }
 
   function foreignPane(side: PaneSide): ForeignPane {
     const existing = FOREIGN_PANES[side];
     if (existing) return existing;
-    const root = document.createElement("div");
-    root.className = "main-pane-source main-pane-foreign";
-    root.tabIndex = -1;
-    const body = document.createElement("div");
-    body.className = "main-pane-source-body";
-    root.append(body);
+    const { root, body } = paneSourceShell("main-pane-foreign");
     const noop = () => undefined;
-    const hidden = () => {
-      const el = document.createElement("span");
-      el.hidden = true;
-      return el;
-    };
+    const hidden = () => templateElement(CHROME_VIEW.hiddenSlot());
     const toForeign = (url: string) => projectApiUrl(url, pane.key);
     let pane: ForeignPane;
     const source = createSourceView({
@@ -7874,10 +7808,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** 面の箱に文言だけを出す (移る途中・読めない理由)。 */
   function showPaneMessage(side: PaneSide, message: string): void {
-    const el = document.createElement("p");
-    el.className = "main-pane-message";
-    el.textContent = message;
-    PANE_HOSTS[side].replaceChildren(el);
+    fillWith(PANE_HOSTS[side], CHROME_VIEW.paneMessage(message));
   }
 
   /** 別のプロジェクトのファイルのタブを、その面の箱に出す。 */
@@ -8248,10 +8179,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           front.target.path !== path
         )
           return;
-        const message = document.createElement("p");
-        message.className = "main-pane-message";
-        message.textContent = formatErrorDetail(error);
-        host.replaceChildren(message);
+        fillWith(host, CHROME_VIEW.paneMessage(formatErrorDetail(error)));
       },
     );
   }
