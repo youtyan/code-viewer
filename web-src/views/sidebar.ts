@@ -1325,6 +1325,8 @@ export function createSidebar(
     renderVirtualSidebarWindow();
   }
 
+  let virtualResizeObserver: ResizeObserver | null = null;
+
   function renderVirtualTreeSidebar(root: TreeNode) {
     const ul = $(DOM.list);
     SIDEBAR_TREE_ROOT = root;
@@ -1334,11 +1336,19 @@ export function createSidebar(
     ul.addEventListener("keydown", onTreeRowKeydown);
     computeVirtualSidebarVisibleRows();
     renderVirtualSidebarWindow();
-    document
-      .querySelector<HTMLElement>(DOM.root)
-      ?.addEventListener("scroll", renderVirtualSidebarWindow, {
-        passive: true,
-      });
+    const scroller = document.querySelector<HTMLElement>(DOM.root);
+    scroller?.addEventListener("scroll", renderVirtualSidebarWindow, {
+      passive: true,
+    });
+    // 箱が縦に伸びた (窓を縦に広げた) ときも、見えるようになった行を描く。描いた
+    // 範囲 (見える範囲の上下 VIRTUAL_SIDEBAR_OVERSCAN 行) より広く伸びると、
+    // スクロールするまで下が空いたままだった。同じ箱を何度見張っても 1 回に数える。
+    if (scroller && typeof ResizeObserver === "function") {
+      virtualResizeObserver ??= new ResizeObserver(() =>
+        renderVirtualSidebarWindow(),
+      );
+      virtualResizeObserver.observe(scroller);
+    }
     hydrateLazyExpandedDirs();
   }
 

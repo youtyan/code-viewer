@@ -4,7 +4,7 @@
 // スクロール量を与えて、範囲の文字とボタンの押せる・押せないで見る。
 
 import "./_dom";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { tableData } from "./_table-grid-fixture";
 import { q } from "./_test-helpers";
 
@@ -62,6 +62,10 @@ function setup(rowCount: number, visibleRows: number) {
   return { grid, viewport, pager, scrollTo };
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("table-grid pager", () => {
   test.each(["compact", "regular", "large", "xlarge"] as const)(
     "shows the visible rows and moves one screen per button at the $0 density",
@@ -111,6 +115,44 @@ describe("table-grid pager", () => {
     grid.destroy();
     grid.el.remove();
     delete document.body.dataset.sidebarFontSize;
+  });
+
+  // 表の高さが伸びた (窓を縦に広げた・下のパネルを閉じた) ときは、スクロール
+  // しなくても見えるようになった行を描く。描いた範囲 (見える範囲の上下 20 行)
+  // より広く伸びると、スクロールするまで下が空いたままだった。
+  test("draws the rows that come into view when the table grows taller", async () => {
+    const resized: Array<() => void> = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private readonly callback: () => void) {
+          resized.push(() => this.callback());
+        }
+        observe() {
+          /* the test calls the callback itself */
+        }
+        disconnect() {
+          /* noop */
+        }
+        unobserve() {
+          /* noop */
+        }
+      },
+    );
+    const { grid, viewport, scrollTo } = setup(500, 10);
+    await scrollTo(0);
+    const drawn = () =>
+      grid.el.querySelectorAll(".db-grid-body .db-grid-row").length;
+    expect(drawn()).toBe(30);
+    Object.defineProperty(viewport, "clientHeight", {
+      configurable: true,
+      value: 100 * ROW,
+    });
+    for (const notify of resized) notify();
+    await tick();
+    expect(drawn()).toBe(120);
+    grid.destroy();
+    grid.el.remove();
   });
 
   test("hides the pager for an empty table", async () => {

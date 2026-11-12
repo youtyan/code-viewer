@@ -924,11 +924,13 @@ export function createTableGrid(
     triggerExport("json");
   });
 
-  // 足元のページ送りの「見えている行の範囲」は、表の高さが変わったとき
-  // (セルの詳細を開く・下のパネルを動かす) にも合わせる。ResizeObserver の
+  // 表の高さが変わったとき (窓を縦に広げる・セルの詳細を開く・下のパネルを
+  // 動かす) は、見えるようになった行を描き、要るページを読み、足元のページ送りの
+  // 「見えている行の範囲」も合わせる (renderViewport が両方やる)。描いた範囲より
+  // 広く伸びると、スクロールするまで下が空いたままだった。ResizeObserver の
   // 無い DOM (テストの一部の環境) では、スクロールしたときにだけ合わせる。
   if (typeof ResizeObserver === "function")
-    new ResizeObserver(() => syncPager()).observe(viewport);
+    new ResizeObserver(() => renderViewport("scroll")).observe(viewport);
 
   // 幅不足で省略 (…) されたセルだけ、ホバー時に全文をネイティブ tooltip で
   // 見せる。セルごとに title を仕込むとノイズ＆再描画コストになるので、
