@@ -26,7 +26,11 @@ import {
 import { createAgentsSidebarPresenter } from "../views/agents/agents-sidebar-presenter";
 import { agentsText } from "../views/agents/i18n";
 import type { ProjectActions } from "../views/projects/project-actions";
-import { mountProjectSwitcher } from "../views/projects/project-switcher";
+import {
+  mountProjectSwitcher,
+  type ProjectSwitcherProps,
+  DEFAULT_VIEW as SWITCHER_VIEW,
+} from "../views/projects/project-switcher";
 import { PROJECTS_EN } from "../views/projects/projects-i18n";
 import {
   fakeMonitor,
@@ -391,6 +395,46 @@ describe("切替の小窓の並び", () => {
       list.querySelector(".project-switcher-row.active .project-switcher-name")
         ?.textContent,
     ).toBe("sample-app");
+    switcher.toggle();
+  });
+});
+
+describe("the project switcher presenter", () => {
+  test("passes the rows, the divider and the active row to the view", () => {
+    document.body.innerHTML =
+      '<button id="project-switcher" type="button">sample-app</button>';
+    const button = q<HTMLElement>(document.body, "#project-switcher");
+    const data = overview([pane("%1", APP.root)], [APP, LIB]);
+    const shown: ProjectSwitcherProps[] = [];
+    const switcher = mountProjectSwitcher(
+      {
+        button,
+        actions: fakeActions().actions,
+        getText: () => PROJECTS_EN,
+        getOverview: () => data,
+        subscribe: () => () => undefined,
+        currentPath: () => "/",
+        currentName: () => "sample-app",
+        shortcutLabel: () => "p",
+      },
+      {
+        ...SWITCHER_VIEW,
+        panel: (props) => {
+          shown.push(props);
+          return SWITCHER_VIEW.panel(props);
+        },
+      },
+    );
+    switcher.toggle();
+    const last = () => shown[shown.length - 1] as ProjectSwitcherProps;
+    expect(
+      last().rows.map((row) => [row.info.name, row.active, row.dividerBefore]),
+    ).toEqual([
+      ["sample-app", true, null],
+      ["sample-lib", false, PROJECTS_EN.switcherStopped],
+    ]);
+    last().rows[1]?.onPoint();
+    expect(last().rows.map((row) => row.active)).toEqual([false, true]);
     switcher.toggle();
   });
 });

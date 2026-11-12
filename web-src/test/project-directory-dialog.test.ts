@@ -8,7 +8,11 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ProjectDirectoryListing } from "../core/projects";
 import { agentsText } from "../views/agents/i18n";
 import { createProjectActions } from "../views/projects/project-actions";
-import { showProjectDirectoryDialog } from "../views/projects/project-directory-dialog";
+import {
+  DEFAULT_VIEW,
+  type ProjectDirectoryProps,
+  showProjectDirectoryDialog,
+} from "../views/projects/project-directory-dialog";
 import {
   clickDialogConfirm,
   closeOpenDialog,
@@ -334,5 +338,31 @@ describe("registering", () => {
       },
     ]);
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the project directory dialog presenter", () => {
+  test("passes the folders of the listed place to the view", async () => {
+    const shown: ProjectDirectoryProps[] = [];
+    showProjectDirectoryDialog(
+      {
+        text,
+        start: "/work",
+        list: async (path) => fakeList(path),
+        register: async () => undefined,
+      },
+      (props) => {
+        shown.push(props);
+        return DEFAULT_VIEW(props);
+      },
+    );
+    await waitFor(() => (shown[shown.length - 1]?.rows.length ?? 0) > 0);
+    expect(
+      shown[shown.length - 1]?.rows.map((row) => [row.label, row.git]),
+    ).toEqual([
+      ["..", false],
+      ["sample-app", true],
+      ["sample-notes", false],
+    ]);
   });
 });

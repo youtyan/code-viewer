@@ -20,20 +20,24 @@
 // 登録が 1 つも無いときは、いま見ているリポジトリを登録する案内だけを出す。
 // ヘッダの幅は増やさない (ボタンは既存のリポジトリ名そのもの)。
 
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { html, nothing } from "lit/html.js";
 import {
   type AgentOverviewResponse,
   type AgentProjectInfo,
   headerAgentCounts,
 } from "../../core/agent-overview";
-import { CHEVRON_DOWN_12_PATH, iconSvg } from "../../core/icons";
+import { CHEVRON_DOWN_12_PATH } from "../../core/icons";
 import { TOUCH_MEDIA_QUERY } from "../../core/mobile-layout";
 import {
   partitionProjectsByRunning,
   runningProjectRoots,
 } from "../../core/project-running";
 import { matchesProjectQuery } from "../../core/projects";
+import { iconTemplate } from "../ui/icon";
+import { detachedElement, templateElement } from "../ui/renderer";
 import type { ProjectActions } from "./project-actions";
-import { projectLook, projectMark } from "./project-looks";
+import { projectLook, projectMarkTemplate } from "./project-looks";
 import type { ProjectsText } from "./projects-i18n";
 
 export type ProjectSwitcherDeps = {
@@ -62,24 +66,180 @@ export type ProjectSwitcher = {
   localize(): void;
 };
 
+export type ProjectSwitcherRow = {
+  index: number;
+  info: AgentProjectInfo;
+  active: boolean;
+  current: boolean;
+  /** 起こしている途中なら、その文 (数と注記の代わりに出す)。 */
+  starting: string | null;
+  counts: { waiting: number; working: number };
+  note: string;
+  title: string;
+  /** 停止中の最初の行なら、前に置く区切りの文。 */
+  dividerBefore: string | null;
+  onPoint: () => void;
+  onChoose: () => void;
+};
+
+export type ProjectSwitcherProps = {
+  text: ProjectsText;
+  /** 登録が無いときは案内だけ (絞り込みも移動の説明も要らない)。 */
+  noneRegistered: boolean;
+  /** 行の代わりに出す文 (読み込み前は空文字)。 */
+  message: string | null;
+  rows: ProjectSwitcherRow[];
+  activeId: string | null;
+  /** 起こせない・登録できない理由の全文。 */
+  errors: { title: string; detail: string }[];
+  actions: { label: string; run: () => void }[];
+  refs: {
+    input: Ref<HTMLInputElement>;
+    list: Ref<HTMLElement>;
+    extra: Ref<HTMLElement>;
+  };
+  onInput: () => void;
+  onKeydown: (event: KeyboardEvent) => void;
+};
+
+export type ProjectSwitcherView = {
+  /** 切り替えのボタンの右の小さな山形。 */
+  chevron: () => unknown;
+  panel: (props: ProjectSwitcherProps) => unknown;
+};
+
+function countMark(state: "waiting" | "working", count: number): unknown {
+  return html`<span class=${`agents-count agents-count-${state}`}><i
+      class=${`terminal-mark terminal-mark-${state}`}
+      aria-hidden="true"
+    ></i>${count}</span>`;
+}
+
+export const DEFAULT_VIEW: ProjectSwitcherView = {
+  // 押すと一覧が開くことを示す小さな山形 (ほかの開く・畳むと同じアイコン)。
+  chevron: () =>
+    html`<span class="brand-chevron" aria-hidden="true">${iconTemplate(
+      CHEVRON_DOWN_12_PATH,
+      "octicon-chevron-down",
+      16,
+    )}</span>`,
+  panel: (p) => {
+    const t = p.text;
+    return html`<div
+      class="project-switcher"
+      role="dialog"
+      aria-label=${t.switcherTitle}
+      @keydown=${p.onKeydown}
+    ><div class="project-switcher-head"><strong>${t.switcherTitle}</strong><span
+          class="project-switcher-hint gdp-key-hint"
+          ?hidden=${p.noneRegistered}
+          >${t.switcherHint}</span
+        ></div
+      ><input
+        type="text"
+        class="project-switcher-input"
+        placeholder=${t.switcherPlaceholder}
+        aria-label=${t.switcherPlaceholder}
+        role="combobox"
+        aria-controls="project-switcher-list"
+        aria-activedescendant=${p.activeId ?? nothing}
+        autocomplete="off"
+        spellcheck="false"
+        ?hidden=${p.noneRegistered}
+        ${ref(p.refs.input)}
+        @input=${p.onInput}
+      /><div
+        class="project-switcher-list"
+        id="project-switcher-list"
+        role="listbox"
+        ${ref(p.refs.list)}
+      >${
+        p.message === null
+          ? nothing
+          : html`<p class="project-switcher-message">${p.message}</p>`
+      }${p.rows.map(
+        (row) =>
+          html`${
+            // 停止中の最初の行の前に区切り。読み上げは行の「停止中」の注記に任せる。
+            row.dividerBefore === null
+              ? nothing
+              : html`<div class="project-switcher-divider" aria-hidden="true"
+                  >${row.dividerBefore}</div
+                >`
+          }<button
+            type="button"
+            class=${[
+              "project-switcher-row",
+              row.active ? "active" : "",
+              row.current ? "current" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            role="option"
+            id=${`project-switcher-option-${row.index}`}
+            aria-selected=${String(row.active)}
+            title=${row.title}
+            @mousemove=${row.onPoint}
+            @click=${row.onChoose}
+          >${projectMarkTemplate(
+            projectLook(row.info),
+            "project-switcher-mark",
+          )}<span class="project-switcher-name">${row.info.name}</span><span
+              class="project-switcher-path terminal-mono"
+              >${row.info.displayRoot}</span
+            ><span class="project-switcher-status">${
+              row.starting !== null
+                ? row.starting
+                : html`${
+                    row.counts.waiting > 0
+                      ? countMark("waiting", row.counts.waiting)
+                      : nothing
+                  }${
+                    row.counts.working > 0
+                      ? countMark("working", row.counts.working)
+                      : nothing
+                  }${
+                    row.note
+                      ? html`<span class="project-switcher-note">${row.note}</span>`
+                      : nothing
+                  }`
+            }</span></button>`,
+      )}</div
+      ><div class="project-switcher-extra" ${ref(p.refs.extra)}>${p.errors.map(
+        (error) =>
+          html`<div class="project-switcher-error" role="alert"><strong
+              >${error.title}</strong
+            ><pre class="terminal-observation-errors">${error.detail}</pre></div>`,
+      )}${
+        p.actions.length > 0
+          ? html`<div class="project-switcher-actions">${p.actions.map(
+              (action) =>
+                html`<button
+                  type="button"
+                  class="project-switcher-action"
+                  @click=${action.run}
+                >${action.label}</button>`,
+            )}</div>`
+          : nothing
+      }</div></div>`;
+  },
+};
+
 export function mountProjectSwitcher(
   deps: ProjectSwitcherDeps,
+  view: ProjectSwitcherView = DEFAULT_VIEW,
 ): ProjectSwitcher {
   const { button } = deps;
   button.setAttribute("aria-haspopup", "dialog");
   button.setAttribute("aria-expanded", "false");
-  // 押すと一覧が開くことを示す小さな山形 (ほかの開く・畳むと同じアイコン)。
-  const chevron = document.createElement("span");
-  chevron.className = "brand-chevron";
-  chevron.setAttribute("aria-hidden", "true");
-  chevron.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_12_PATH);
-  button.appendChild(chevron);
+  button.appendChild(templateElement(view.chevron()));
 
-  let panel: HTMLElement | null = null;
-  let input: HTMLInputElement | null = null;
-  let list: HTMLElement | null = null;
-  let extra: HTMLElement | null = null;
-  let hint: HTMLElement | null = null;
+  const refs: ProjectSwitcherProps["refs"] = {
+    input: createRef(),
+    list: createRef(),
+    extra: createRef(),
+  };
+  let panel: { element: HTMLElement; draw(): void } | null = null;
   let active = 0;
   let cleanup: (() => void) | null = null;
 
@@ -116,7 +276,7 @@ export function mountProjectSwitcher(
   function visibleProjects(): AgentProjectInfo[] {
     const overview = deps.getOverview();
     if (!overview) return [];
-    const query = input?.value ?? "";
+    const query = refs.input.value?.value ?? "";
     return registered(overview).filter((info) =>
       matchesProjectQuery(info, query),
     );
@@ -127,77 +287,42 @@ export function mountProjectSwitcher(
     return headerAgentCounts(panes.filter((pane) => pane.project === root));
   }
 
-  function mark(state: "waiting" | "working", count: number): HTMLElement {
-    const chip = document.createElement("span");
-    chip.className = `agents-count agents-count-${state}`;
-    const dot = document.createElement("i");
-    dot.className = `terminal-mark terminal-mark-${state}`;
-    dot.setAttribute("aria-hidden", "true");
-    chip.append(dot, String(count));
-    return chip;
-  }
-
-  function row(info: AgentProjectInfo, index: number): HTMLElement {
+  function rowProps(
+    info: AgentProjectInfo,
+    index: number,
+    dividerBefore: string | null,
+  ): ProjectSwitcherRow {
     const t = deps.getText();
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "project-switcher-row";
-    item.setAttribute("role", "option");
-    item.id = `project-switcher-option-${index}`;
-    item.classList.toggle("active", index === active);
-    item.setAttribute("aria-selected", String(index === active));
     const current = info.server.status === "current";
-    item.classList.toggle("current", current);
-
-    const name = document.createElement("span");
-    name.className = "project-switcher-name";
-    name.textContent = info.name;
-    const path = document.createElement("span");
-    path.className = "project-switcher-path terminal-mono";
-    path.textContent = info.displayRoot;
-    const status = document.createElement("span");
-    status.className = "project-switcher-status";
     const counts = countsFor(info.root);
     const activity = deps.actions.activity(info.root);
-    if (activity?.kind === "starting") {
-      status.textContent = t.starting;
-    } else {
-      if (counts.waiting > 0)
-        status.appendChild(mark("waiting", counts.waiting));
-      if (counts.working > 0)
-        status.appendChild(mark("working", counts.working));
-      const note = current
+    return {
+      index,
+      info,
+      active: index === active,
+      current,
+      starting: activity?.kind === "starting" ? t.starting : null,
+      counts,
+      note: current
         ? t.switcherCurrent
         : info.server.status === "absent"
           ? t.switcherStopped
-          : "";
-      if (note) {
-        const label = document.createElement("span");
-        label.className = "project-switcher-note";
-        label.textContent = note;
-        status.appendChild(label);
-      }
-    }
-    item.append(
-      projectMark(projectLook(info), "project-switcher-mark"),
-      name,
-      path,
-      status,
-    );
-    item.title = [
-      info.root,
-      t.switcherCounts(counts.waiting, counts.working),
-      info.error,
-    ]
-      .filter(Boolean)
-      .join("\n");
-    item.addEventListener("mousemove", () => {
-      if (active === index) return;
-      active = index;
-      renderList();
-    });
-    item.addEventListener("click", () => choose(info));
-    return item;
+          : "",
+      title: [
+        info.root,
+        t.switcherCounts(counts.waiting, counts.working),
+        info.error,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      dividerBefore,
+      onPoint: () => {
+        if (active === index) return;
+        active = index;
+        renderList();
+      },
+      onChoose: () => choose(info),
+    };
   }
 
   function choose(info: AgentProjectInfo): void {
@@ -212,97 +337,67 @@ export function mountProjectSwitcher(
     void deps.actions.open(info, deps.currentPath());
   }
 
-  function renderList(): void {
-    if (!list || !extra) return;
+  function panelProps(): ProjectSwitcherProps {
     const t = deps.getText();
     const overview = deps.getOverview();
     const projects = visibleProjects();
     if (active >= projects.length) active = Math.max(0, projects.length - 1);
-    list.replaceChildren();
     const noneRegistered = !!overview && registered(overview).length === 0;
-    // 登録が無いときは案内だけ (絞り込みも移動の説明も要らない)。
-    input?.toggleAttribute("hidden", noneRegistered);
-    hint?.toggleAttribute("hidden", noneRegistered);
-    if (!overview) {
-      list.appendChild(message(""));
-    } else if (noneRegistered) {
-      list.appendChild(message(t.switcherRegisterCurrentHint));
-    } else if (projects.length === 0) {
-      list.appendChild(message(t.switcherNoMatch));
-    }
-    // 停止中の最初の行の前に区切り。読み上げは行の「停止中」の注記に任せる。
     const running = overview ? runningRoots(overview) : new Set<string>();
     const firstStopped = projects.findIndex((info) => !running.has(info.root));
-    projects.forEach((info, index) => {
-      if (index === firstStopped && index > 0) {
-        const divider = document.createElement("div");
-        divider.className = "project-switcher-divider";
-        divider.setAttribute("aria-hidden", "true");
-        divider.textContent = t.switcherStopped;
-        list?.appendChild(divider);
-      }
-      list?.appendChild(row(info, index));
-    });
-    const selected = projects[active];
-    if (selected && input) {
-      input.setAttribute(
-        "aria-activedescendant",
-        `project-switcher-option-${active}`,
-      );
-    }
-
-    extra.replaceChildren();
+    const here = currentProject(overview);
+    const actions: ProjectSwitcherProps["actions"] = [];
+    if (overview && !here?.registered)
+      actions.push({
+        label: t.switcherRegisterCurrent(here?.name ?? deps.currentName()),
+        run: () => void deps.actions.registerCurrent(),
+      });
+    if (overview)
+      actions.push({
+        label: t.addProjectMenu,
+        run: () => {
+          close();
+          void deps.actions.registerByPath();
+        },
+      });
+    const errors: ProjectSwitcherProps["errors"] = [];
     // 失敗 (起こせない・登録できない) は理由の全文をここに出す。
     for (const info of [...projects, { root: "", name: "" }]) {
       const activity = deps.actions.activity(info.root);
       if (activity?.kind !== "failed") continue;
-      const box = document.createElement("div");
-      box.className = "project-switcher-error";
-      box.setAttribute("role", "alert");
-      const title = document.createElement("strong");
-      title.textContent = activity.title;
-      const detail = document.createElement("pre");
-      detail.className = "terminal-observation-errors";
-      detail.textContent = activity.detail;
-      box.append(title, detail);
-      extra.appendChild(box);
+      errors.push({ title: activity.title, detail: activity.detail });
     }
-    const here = currentProject(overview);
-    const actions = document.createElement("div");
-    actions.className = "project-switcher-actions";
-    if (overview && !here?.registered) {
-      actions.appendChild(
-        action(
-          t.switcherRegisterCurrent(here?.name ?? deps.currentName()),
-          () => deps.actions.registerCurrent(),
+    return {
+      text: t,
+      noneRegistered,
+      message: !overview
+        ? ""
+        : noneRegistered
+          ? t.switcherRegisterCurrentHint
+          : projects.length === 0
+            ? t.switcherNoMatch
+            : null,
+      rows: projects.map((info, index) =>
+        rowProps(
+          info,
+          index,
+          index === firstStopped && index > 0 ? t.switcherStopped : null,
         ),
-      );
-    }
-    if (overview) {
-      actions.appendChild(
-        action(t.addProjectMenu, () => {
-          close();
-          return deps.actions.registerByPath();
-        }),
-      );
-    }
-    if (actions.childElementCount > 0) extra.appendChild(actions);
+      ),
+      activeId: projects[active] ? `project-switcher-option-${active}` : null,
+      errors,
+      actions,
+      refs,
+      onInput: () => {
+        active = 0;
+        renderList();
+      },
+      onKeydown,
+    };
   }
 
-  function message(text: string): HTMLElement {
-    const p = document.createElement("p");
-    p.className = "project-switcher-message";
-    p.textContent = text;
-    return p;
-  }
-
-  function action(label: string, run: () => Promise<void>): HTMLElement {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "project-switcher-action";
-    item.textContent = label;
-    item.addEventListener("click", () => void run());
-    return item;
+  function renderList(): void {
+    panel?.draw();
   }
 
   function onKeydown(event: KeyboardEvent): void {
@@ -320,7 +415,7 @@ export function mountProjectSwitcher(
       const step = event.key === "ArrowDown" ? 1 : -1;
       active = (active + step + projects.length) % projects.length;
       renderList();
-      list
+      refs.list.value
         ?.querySelector<HTMLElement>(".project-switcher-row.active")
         ?.scrollIntoView({ block: "nearest" });
       return;
@@ -335,46 +430,6 @@ export function mountProjectSwitcher(
 
   function open(): void {
     if (panel) return;
-    const t = deps.getText();
-    panel = document.createElement("div");
-    panel.className = "project-switcher";
-    panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-label", t.switcherTitle);
-    const head = document.createElement("div");
-    head.className = "project-switcher-head";
-    const title = document.createElement("strong");
-    title.textContent = t.switcherTitle;
-    hint = document.createElement("span");
-    hint.className = "project-switcher-hint gdp-key-hint";
-    hint.textContent = t.switcherHint;
-    head.append(title, hint);
-    input = document.createElement("input");
-    input.type = "text";
-    input.className = "project-switcher-input";
-    input.placeholder = t.switcherPlaceholder;
-    input.setAttribute("aria-label", t.switcherPlaceholder);
-    input.setAttribute("role", "combobox");
-    input.setAttribute("aria-controls", "project-switcher-list");
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    input.addEventListener("input", () => {
-      active = 0;
-      renderList();
-    });
-    list = document.createElement("div");
-    list.className = "project-switcher-list";
-    list.id = "project-switcher-list";
-    list.setAttribute("role", "listbox");
-    extra = document.createElement("div");
-    extra.className = "project-switcher-extra";
-    panel.append(head, input, list, extra);
-    panel.addEventListener("keydown", onKeydown);
-    document.body.appendChild(panel);
-
-    const rect = button.getBoundingClientRect();
-    panel.style.left = `${Math.max(8, rect.left)}px`;
-    panel.style.top = `${rect.bottom + 4}px`;
-
     // いま居るプロジェクトから始める (Enter 1 回で「次」へは行かない)。
     const overview = deps.getOverview();
     active = Math.max(
@@ -385,13 +440,19 @@ export function mountProjectSwitcher(
           )
         : 0,
     );
-    renderList();
+    const opened = detachedElement(() => view.panel(panelProps()));
+    panel = opened;
+    document.body.appendChild(opened.element);
+
+    const rect = button.getBoundingClientRect();
+    opened.element.style.left = `${Math.max(8, rect.left)}px`;
+    opened.element.style.top = `${rect.bottom + 4}px`;
     button.setAttribute("aria-expanded", "true");
     const unsubscribeOverview = deps.subscribe(renderList);
     const unsubscribeActions = deps.actions.subscribe(renderList);
     const onPointerDown = (event: Event) => {
       const target = event.target as Node;
-      if (panel?.contains(target) || button.contains(target)) return;
+      if (panel?.element.contains(target) || button.contains(target)) return;
       close();
     };
     // ダイアログ (登録の確認など) を開いたら、それを邪魔しないよう閉じる。
@@ -403,12 +464,13 @@ export function mountProjectSwitcher(
       document.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("resize", close);
     };
-    if (input.hidden) {
-      extra.querySelector<HTMLElement>("button")?.focus();
+    const input = refs.input.value;
+    if (input?.hidden) {
+      refs.extra.value?.querySelector<HTMLElement>("button")?.focus();
     } else if (!window.matchMedia?.(TOUCH_MEDIA_QUERY).matches) {
       // 指の画面では絞り込みの欄に焦点を置かない (ソフトキーボードが出て、選ぶ
       // 一覧を隠した)。
-      input.focus();
+      input?.focus();
     }
   }
 
@@ -416,12 +478,8 @@ export function mountProjectSwitcher(
     if (!panel) return;
     cleanup?.();
     cleanup = null;
-    panel.remove();
+    panel.element.remove();
     panel = null;
-    input = null;
-    list = null;
-    extra = null;
-    hint = null;
     button.setAttribute("aria-expanded", "false");
   }
 
