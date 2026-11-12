@@ -355,16 +355,23 @@ function openDialog(
 ) {
   const { client, launched } = launchClient(data);
   const opened: string[] = [];
+  /** 一覧の取り直しと開く口が呼ばれた順。 */
+  const order: string[] = [];
   const dialogs = createAccountDialogs({
     client,
     getText: () => text,
-    openPane: (pane) => opened.push(pane),
+    openPane: (pane) => {
+      opened.push(pane);
+      order.push("open");
+    },
     getOverview: () => overview,
     serverRoot: () => "/home/sample/work/sample-app",
-    refreshOverview: async () => undefined,
+    refreshOverview: async () => {
+      order.push("refresh");
+    },
   });
   const closed = dialogs.launch(options);
-  return { closed, launched, opened };
+  return { closed, launched, opened, order };
 }
 
 /** 一覧の各行: 名前・札・いつの値か・使用量の行 (または理由)。 */
@@ -480,7 +487,7 @@ describe("別のアカウントで続ける (起動の画面を引き継ぎの�
   });
 
   test("前の担当と違うアカウントを選び、フォルダとセッションを合わせ、指示と --add-dir を渡す", async () => {
-    const { closed, launched, opened } = openDialog(accountsResponse(), {
+    const { closed, launched, opened, order } = openDialog(accountsResponse(), {
       handoff: from,
     });
     const dialog = document.querySelector<HTMLElement>(".gdp-dialog");
@@ -528,6 +535,10 @@ describe("別のアカウントで続ける (起動の画面を引き継ぎの�
       ],
       ["%9"],
     ]);
+    // 一覧を取り直してから開く。開く口は一覧でペインのプロジェクトを引き、
+    // 別のプロジェクトならそこへ移る。先に開くと新しいペインが一覧に無く、
+    // いま見ているプロジェクトのタブ列に混ざった。
+    expect(order).toEqual(["refresh", "open"]);
   });
 
   test("codex を選ぶと --add-dir を付けず、画面の言語の指示を渡す", async () => {
@@ -642,10 +653,15 @@ test("「このアカウントで開く」は起動と同じ口に、アカウ�
     registry: { projects: [], error: "", path: "/home/sample/projects.json" },
   };
   let refreshed = 0;
+  // 開いた時点で一覧を取り直し終えていたか (上の起動の画面のテストと同じ理由)。
+  const refreshedWhenOpened: number[] = [];
   const dialogs = createAccountDialogs({
     client: fake.client,
     getText: () => ACCOUNTS_EN,
-    openPane: (pane) => opened.push(pane),
+    openPane: (pane) => {
+      opened.push(pane);
+      refreshedWhenOpened.push(refreshed);
+    },
     getOverview: () => overview,
     serverRoot: () => "/home/sample/work/sample-app",
     refreshOverview: async () => {
@@ -667,6 +683,7 @@ test("「このアカウントで開く」は起動と同じ口に、アカウ�
     },
   ]);
   expect(opened).toEqual(["%7"]);
+  expect(refreshedWhenOpened).toEqual([1]);
   expect([refreshed, fake.loads()]).toEqual([1, 1]);
 });
 

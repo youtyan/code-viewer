@@ -1180,9 +1180,22 @@ export function createAccountDialogs(
         deps.client.snapshot().data?.lastLaunch ?? null,
       ),
     });
-    deps.openPane(result.paneId);
-    await Promise.all([deps.refreshOverview(), deps.client.load()]);
+    await openLaunchedPane(result.paneId);
     return statusLineNotice(result, text()).join("\n");
+  }
+
+  /**
+   * 起動したペインを開く。一覧を取り直してから開く: 開く口 (openAgentPane) は
+   * 一覧でペインのプロジェクトを引き、別のプロジェクトならそこへ移って開く。
+   * 取り直す前に開くと新しいペインが一覧に無く、いま見ているプロジェクトの
+   * タブ列に別のプロジェクトのエージェントが混ざった。取り直しは失敗しても
+   * 投げない (理由は監視役が出す) ので、そのときは今の面で開く。
+   */
+  async function openLaunchedPane(pane: string): Promise<void> {
+    const accounts = deps.client.load();
+    await deps.refreshOverview();
+    deps.openPane(pane);
+    await accounts;
   }
 
   async function login(account: AccountEntry): Promise<string> {
@@ -1527,8 +1540,7 @@ export function createAccountDialogs(
               }
             : {}),
         });
-        deps.openPane(result.paneId);
-        await Promise.all([deps.refreshOverview(), deps.client.load()]);
+        await openLaunchedPane(result.paneId);
         return [
           t.launchStarted(result.session),
           ...(result.rememberError
