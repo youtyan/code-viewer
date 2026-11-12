@@ -676,6 +676,31 @@ describe("registering the launch root", () => {
 
     expect(caught).toEqual(expect.objectContaining({ cause: failure }));
   });
+
+  // git の外のフォルダもプロジェクトにする。git を呼べないときだけは、git の外か
+  // どうかが分からない (リポジトリの中のサブディレクトリかもしれない) ので載せない。
+  test.each([
+    { kind: "root" as const, registered: true },
+    { kind: "outside" as const, registered: true },
+    { kind: "error" as const, registered: false },
+  ])(
+    "a $kind launch folder is registered: $registered",
+    async ({ kind, registered }) => {
+      const seen: string[] = [];
+      await registerLaunchRoot("/work/sample-app", {
+        repoRootResult: () =>
+          kind === "root"
+            ? { kind, root: "/work/sample-app" }
+            : kind === "outside"
+              ? { kind }
+              : { kind, error: "sample git failure" },
+        register: async (root) => {
+          seen.push(root);
+        },
+      });
+      expect(seen).toEqual(registered ? ["/work/sample-app"] : []);
+    },
+  );
 });
 
 describe("forwarding to a project process", () => {

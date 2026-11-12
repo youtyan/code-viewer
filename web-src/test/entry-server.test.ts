@@ -1189,15 +1189,20 @@ describe("`code-viewer` in another folder", () => {
     }).toEqual({ status: 1, stdout: "", refused: true });
   });
 
-  test("starts outside git, says why the folder is not registered and does not register it", async () => {
+  test("starts outside git, registers the folder itself and says which features are unavailable", async () => {
     const box = sandbox();
     const folder = join(box.dir, "plain-folder");
     mkdirSync(folder);
     const entry = await startEntry(box, folder);
     expect(entry.output()).toContain(
-      `${realpathSync(folder)} is not a git repository, so it is not added to the projects`,
+      `${realpathSync(folder)} is not a git repository; it is opened as a project, but diffs, history, worktrees and blame are unavailable`,
     );
-    expect(existsSync(join(box.stateDir, "projects.json"))).toBe(false);
+    const registry = JSON.parse(
+      readFileSync(join(box.stateDir, "projects.json"), "utf8"),
+    ) as { projects: { root: string }[] };
+    expect(registry.projects.map((project) => project.root)).toEqual([
+      realpathSync(folder),
+    ]);
   });
 });
 

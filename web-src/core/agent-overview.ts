@@ -265,19 +265,27 @@ export type AgentProjectServer =
   | { status: "absent" }
   /** 登録はあるが確かめられなかった。理由を出す。 */
   | { status: "unreachable" | "invalid"; detail: string }
-  /** git 管理外。サーバの登録簿は git のルートで引くので調べない。 */
+  /**
+   * 開けないプロジェクト (git の外で、登録もしていないペインの作業場所)。
+   * サーバを調べない。
+   */
   | { status: "none" };
 
 export type AgentProjectInfo = {
   /**
    * 束ねる鍵。git の本体の作業ツリーのルート。worktree で動いているペインも
-   * 本体のルートに寄せる。git 管理外ならペインの cwd そのもの。
+   * 本体のルートに寄せる。git 管理外なら、それを含む登録したプロジェクト (git の
+   * 外のフォルダを登録したもの) の根、無ければペインの cwd そのもの。
    */
   root: string;
   /** 表示名。root のフォルダ名。 */
   name: string;
   /** 見出しに出すパス。ホーム配下は `~/…` に縮める (全体は root)。 */
   displayRoot: string;
+  /**
+   * git のリポジトリか。開ける・エージェントを起動できるかは、これではなく
+   * projectOpenable (git の外のフォルダも登録すれば開ける)。
+   */
   git: boolean;
   /** git を呼べなかったときの理由。空なら問題なし。 */
   error: string;
@@ -298,6 +306,18 @@ export type AgentProjectInfo = {
     upstream: boolean;
   };
 };
+
+/**
+ * プロジェクトとして開ける (裏を起こせる・エージェントを起動できる) か。git の
+ * リポジトリか、登録したプロジェクト (git の外のフォルダも登録できる)。git の外で
+ * 登録していないペインの作業場所 (一時フォルダなど) は開かない: 押しただけで
+ * 任意の作業場所がプロジェクトに加わらないように、先に登録してもらう。
+ */
+export function projectOpenable(
+  info: Pick<AgentProjectInfo, "git" | "registered">,
+): boolean {
+  return info.git || info.registered !== null;
+}
 
 /**
  * 左のサイドバーの行の、名前の後ろの補足: 主でないブランチと上流との差 (`feature ↑2 ↓1`)。

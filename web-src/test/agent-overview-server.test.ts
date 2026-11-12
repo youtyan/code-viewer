@@ -709,6 +709,10 @@ describe("registered projects in the overview", () => {
           path: "/work/projects.json",
         }),
         rootExists: (root) => root !== "/work/gone-repo",
+        resolveProject: async (path) =>
+          path === "/work/quiet-repo"
+            ? { kind: "root", root: path, toplevel: path }
+            : (deps().resolveProject(path) as Promise<ProjectResolution>),
       }),
     );
     const byRoot = new Map(overview.projects.map((info) => [info.root, info]));
@@ -737,6 +741,59 @@ describe("registered projects in the overview", () => {
       "/work/gone-repo does not exist",
     );
     expect(byRoot.get("/work/sample-repo")?.registered).toBeNull();
+  });
+
+  // git の外のフォルダも登録できる。その中で動くペインは (サブフォルダでも) 登録の
+  // 根に入り、git ではない (git: false) が開ける (サーバを調べる)。登録していない
+  // git の外の作業場所は今までどおり開かない (サーバを調べない)。
+  test("a registered folder outside git gathers its panes and can be opened", async () => {
+    const listed = panesResponse([
+      { id: "%4", path: "/work/notes", command: "zsh" },
+      { id: "%5", path: "/work/notes/drafts", command: "claude" },
+      { id: "%6", path: "/work/scratch", command: "zsh" },
+    ]);
+    const looked: string[] = [];
+    const overview = await buildAgentOverview(
+      deps({
+        listPanes: async () => listed,
+        resolveProject: async (path) =>
+          path.startsWith("/work/") &&
+          !path.startsWith("/work/sample-repo") &&
+          !path.startsWith("/work/another-repo")
+            ? { kind: "outside" }
+            : (deps().resolveProject(path) as Promise<ProjectResolution>),
+        readRegistry: () => ({
+          projects: [
+            registeredInfo("/work/notes", "notes", 0),
+            registeredInfo("/work/plain-docs", "plain-docs", 1),
+          ],
+          error: "",
+          path: "/work/projects.json",
+        }),
+        findServer: async (root) => {
+          looked.push(root);
+          return { status: "absent" };
+        },
+      }),
+    );
+    expect(overview.panes.map((pane) => [pane.id, pane.project])).toEqual([
+      ["%4", "/work/notes"],
+      ["%5", "/work/notes"],
+      ["%6", "/work/scratch"],
+    ]);
+    expect(
+      overview.projects.map((info) => [
+        info.root,
+        info.git,
+        info.registered !== null,
+        info.server.status,
+      ]),
+    ).toEqual([
+      ["/work/notes", false, true, "absent"],
+      ["/work/scratch", false, false, "none"],
+      ["/work/plain-docs", false, true, "absent"],
+    ]);
+    expect(looked.sort()).toEqual(["/work/notes", "/work/plain-docs"]);
   });
 
   test("an unreadable registry keeps the list and reports the reason", async () => {

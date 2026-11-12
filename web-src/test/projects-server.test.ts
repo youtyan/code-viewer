@@ -120,17 +120,47 @@ describe("the project registry on disk", () => {
     expect(registered()).toEqual([root]);
   });
 
-  test("a folder outside git is refused with the reason", async () => {
+  // git の外のフォルダは、そのフォルダ自身の実パスを鍵に登録する (git の機能だけが
+  // 使えないプロジェクトになる)。無い・ディレクトリでないパスは理由を付けて断り、
+  // 登録簿を作らない。
+  test("a folder outside git registers its own real path once", async () => {
     mkdirSync(join(dir, "plain"));
+    const add = (path: string) =>
+      changeProjects({ action: "add", path }, dir, 1, registryPath);
+    expect((await add(join(dir, "plain"))).root).toBe(join(dir, "plain"));
+    const again = await add(join(dir, "plain", ".")).catch(
+      (caught: unknown) => caught,
+    );
+    expect((again as ProjectRegistryError).code).toBe("conflict");
+    expect(registered()).toEqual([join(dir, "plain")]);
+  });
+
+  test.each([
+    {
+      name: "a missing path",
+      make: () => join(dir, "missing"),
+      code: "not-found",
+      message: "missing does not exist",
+    },
+    {
+      name: "a file",
+      make: () => {
+        writeFileSync(join(dir, "notes.txt"), "sample\n");
+        return join(dir, "notes.txt");
+      },
+      code: "invalid",
+      message: "notes.txt is not a directory",
+    },
+  ])("$name is refused with the reason", async ({ make, code, message }) => {
     const error = await changeProjects(
-      { action: "add", path: join(dir, "plain") },
+      { action: "add", path: make() },
       dir,
       1,
       registryPath,
     ).catch((caught: unknown) => caught);
-    expect((error as Error).message).toContain(
-      "is not inside a git repository",
-    );
+    expect(error).toBeInstanceOf(ProjectRegistryError);
+    expect((error as ProjectRegistryError).code).toBe(code);
+    expect((error as Error).message).toContain(message);
     expect(existsSync(registryPath)).toBe(false);
   });
 

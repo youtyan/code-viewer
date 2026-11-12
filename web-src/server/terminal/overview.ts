@@ -26,6 +26,7 @@ import {
   type AgentProjectServer,
   abbreviateHome,
   agentKindOf,
+  projectOpenable,
 } from "../../core/agent-overview";
 import type {
   AgentStateObservationError,
@@ -248,6 +249,20 @@ export async function buildAgentOverview(
     roots.add(resolution.root);
     windowRoots.set(windowKey(place), roots);
   }
+  // git の外で動くペインは、それを含む登録したプロジェクト (git の外のフォルダを
+  // 登録したもの) があれば、その一番近い根に入れる。ウインドウから借りるより先:
+  // 登録は利用者がそのフォルダをプロジェクトと決めたもの。
+  const registry = await deps.readRegistry();
+  const registeredRootOf = (path: string): string | null => {
+    let found: string | null = null;
+    for (const project of registry.projects) {
+      const inside =
+        path === project.root || path.startsWith(`${project.root}/`);
+      if (inside && (!found || project.root.length > found.length))
+        found = project.root;
+    }
+    return found;
+  };
   const windowRootOf = (paneId: string): string | null => {
     const place = placeOf.get(paneId);
     const roots = place ? windowRoots.get(windowKey(place)) : undefined;
@@ -258,10 +273,14 @@ export async function buildAgentOverview(
       kind: "error" as const,
       error: `project for ${pane.path} was not resolved`,
     };
+    const outside = resolution.kind === "outside";
+    const registeredOutside = outside ? registeredRootOf(pane.path) : null;
     const borrowed =
-      resolution.kind === "outside" ? windowRootOf(pane.id) : null;
+      outside && !registeredOutside ? windowRootOf(pane.id) : null;
     const root =
-      resolution.kind === "root" ? resolution.root : (borrowed ?? pane.path);
+      resolution.kind === "root"
+        ? resolution.root
+        : (registeredOutside ?? borrowed ?? pane.path);
     if (!projects.has(root)) {
       projects.set(root, {
         root,
@@ -319,9 +338,25 @@ export async function buildAgentOverview(
     });
   }
 
-  // 登録したプロジェクトを合わせる。同じ git ルートなら 1 つにまとめ、
-  // 表示名は登録の名前にする。エージェントの居ないものは行の無い見出しになる。
-  const registry = await deps.readRegistry();
+  // 登録したプロジェクトを合わせる。同じ根なら 1 つにまとめ、表示名は登録の
+  // 名前にする。エージェントの居ないものは行の無い見出しになる。git のリポジトリ
+  // かは根を引いて決める (git の外のフォルダも登録できる。引けなければ git の外と
+  // 同じに数え、理由は出さない: 開いた裏が git の失敗を出す)。
+  const unseen = registry.projects.filter(
+    (registered) => !projects.has(registered.root),
+  );
+  const registeredGit = new Map(
+    await Promise.all(
+      unseen.map(
+        async (registered) =>
+          [
+            registered.root,
+            deps.rootExists(registered.root) &&
+              (await deps.resolveProject(registered.root)).kind === "root",
+          ] as const,
+      ),
+    ),
+  );
   for (const registered of registry.projects) {
     const found = projects.get(registered.root);
     if (found) {
@@ -333,7 +368,7 @@ export async function buildAgentOverview(
       root: registered.root,
       name: registered.name,
       displayRoot: abbreviateHome(registered.root, deps.home),
-      git: true,
+      git: registeredGit.get(registered.root) === true,
       error: deps.rootExists(registered.root)
         ? ""
         : `${registered.root} does not exist`,
@@ -343,21 +378,19 @@ export async function buildAgentOverview(
   }
 
   await Promise.all(
-    [...projects.values()]
-      .filter((info) => info.git)
-      .map(async (info) => {
-        if (info.root === deps.serverRoot) {
-          info.server = { status: "current" };
-          return;
-        }
-        info.server = await deps.findServer(info.root);
-        if (
-          info.server.status === "unreachable" ||
-          info.server.status === "invalid"
-        ) {
-          errors.push(error("find_server", info.root, info.server.detail, now));
-        }
-      }),
+    [...projects.values()].filter(projectOpenable).map(async (info) => {
+      if (info.root === deps.serverRoot) {
+        info.server = { status: "current" };
+        return;
+      }
+      info.server = await deps.findServer(info.root);
+      if (
+        info.server.status === "unreachable" ||
+        info.server.status === "invalid"
+      ) {
+        errors.push(error("find_server", info.root, info.server.detail, now));
+      }
+    }),
   );
 
   return {
