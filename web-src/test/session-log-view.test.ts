@@ -96,9 +96,7 @@ describe("the session log presenter", () => {
       expect(copy.title).toContain("copy a session log entry");
       expect(copy.title).toContain("clipboard is not allowed");
       expect(logged).toHaveBeenCalledTimes(1);
-      expect(
-        (logged.mock.calls[0]?.[0] as Error & { cause?: unknown }).cause,
-      ).toBe(failure);
+      expect(logged.mock.calls[0]?.[0]).toMatchObject({ cause: failure });
     } finally {
       write.mockRestore();
       logged.mockRestore();

@@ -605,9 +605,7 @@ describe("the query history presenter", () => {
       expect(copy.title).toContain("copy a query from the history");
       expect(copy.title).toContain("clipboard is not allowed");
       expect(logged).toHaveBeenCalledTimes(1);
-      expect(
-        (logged.mock.calls[0]?.[0] as Error & { cause?: unknown }).cause,
-      ).toBe(failure);
+      expect(logged.mock.calls[0]?.[0]).toMatchObject({ cause: failure });
       view.clear();
     } finally {
       write.mockRestore();
