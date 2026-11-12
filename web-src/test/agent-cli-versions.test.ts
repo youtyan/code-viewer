@@ -14,6 +14,8 @@ describe("agentCliVersionIn", () => {
       version: "2.1.286",
     },
     { name: "codex", output: "codex-cli 0.159.3\n", version: "0.159.3" },
+    { name: "opencode 1", output: "1.19.5\n", version: "1.19.5" },
+    { name: "opencode 2", output: "opencode v2.2.7\n", version: "2.2.7" },
     {
       name: "a pre-release",
       output: "2.2.0-beta.1 (Claude Code)\n",
@@ -26,6 +28,11 @@ describe("agentCliVersionIn", () => {
     },
     { name: "nothing printed", output: "", version: null },
     { name: "two numbers only", output: "codex-cli 0.159\n", version: null },
+    {
+      name: "digits glued to a word are not a version",
+      output: "build2.2.7\n",
+      version: null,
+    },
   ])("$name", ({ output, version }) => {
     expect(agentCliVersionIn(output)).toBe(version);
   });

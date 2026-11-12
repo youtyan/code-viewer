@@ -11,8 +11,10 @@
 //   のディレクトリには app-server を起こさない (起こすとそこに状態のファイルを
 //   作るため)
 // - opencode: `opencode auth list` (https://opencode.ai/docs/cli/providers/)。
-//   機械向けの形は無く、人向けの一覧 (「N credentials」「N environment
-//   variables」と、提供元ごとの「● 名前 方式」の行) を読む。メールアドレスは
+//   機械向けの形は無く、人向けの一覧を読む。opencode 1 は「N credentials」
+//   「N environment variables」と提供元ごとの「● 名前 方式」の行、opencode 2
+//   (2.2.7 で確かめた) は 1 件 1 行の「提供元  名前  方式 (stored /
+//   environment)」で、無ければ「No authenticated integrations」。メールアドレスは
 //   出さない。保存した資格情報か、資格情報の環境変数が 1 つでもあれば
 //   ログイン済みとし、提供元の名前を「誰として」の欄に出す (opencode の
 //   「誰として」は、どの提供元に繋がっているか)
@@ -43,6 +45,7 @@ import {
 } from "../runtime";
 import { accountReadArgv, loginStatusArgv } from "./launch";
 import { markClaudeOnboarded, type OnboardingMark } from "./onboarding";
+import { sharedServerArgs } from "./shared-server";
 
 export const LOGIN_CACHE_MS = 60_000;
 const LOGIN_TIMEOUT_MS = 8000;
@@ -355,9 +358,14 @@ export function parseCodexLoginStatus(
   return { ...base, state: "unknown", detail: describeFailure(asked, result) };
 }
 
+/** opencode 2 の `opencode auth list` の、資格情報が 1 つも無いときの 1 行。 */
+const OPENCODE_NO_INTEGRATIONS = "No authenticated integrations";
+
 /**
- * `opencode auth list` の答え。行の頭の飾り (│ ● └) と色の制御文字を除いて、
- * 件数の行と提供元の行を読む。件数の行が 1 つも無ければ読めない (unknown)。
+ * `opencode auth list` の答え。行の頭の飾り (│ ● └) と色の制御文字を除いて読む。
+ * opencode 1 の形 (件数の行と提供元の行) か opencode 2 の形 (空白 2 つ以上で
+ * 区切った 3 列の行か、OPENCODE_NO_INTEGRATIONS) のどちらでもなければ、
+ * 読めない (unknown)。
  */
 export function parseOpencodeAuthList(
   result: RunResult,
@@ -393,11 +401,7 @@ export function parseOpencodeAuthList(
   const credentials = count(/^(\d+) credentials?$/);
   const environment = count(/^(\d+) environment variables?$/);
   if (credentials === null && environment === null) {
-    return {
-      ...base,
-      state: "unknown",
-      detail: `${describeFailure(asked, result)}; no "N credentials" line in the output`,
-    };
+    return opencode2AuthList(lines, base, asked, result);
   }
   if ((credentials ?? 0) + (environment ?? 0) === 0) {
     return { ...base, state: "logged-out" };
@@ -423,6 +427,30 @@ export function parseOpencodeAuthList(
       ? ""
       : `${asked} counted credentials but listed no provider names`,
   };
+}
+
+/** opencode 2 の形の `opencode auth list` を読む (parseOpencodeAuthList)。 */
+function opencode2AuthList(
+  lines: string[],
+  base: Omit<AccountLogin, "state">,
+  asked: string,
+  result: RunResult,
+): AccountLogin {
+  if (lines.includes(OPENCODE_NO_INTEGRATIONS)) {
+    return { ...base, state: "logged-out" };
+  }
+  const rows = lines
+    .filter((line) => line !== "")
+    .map((line) => line.split(/\s{2,}/));
+  if (rows.length === 0 || rows.some((columns) => columns.length !== 3)) {
+    return {
+      ...base,
+      state: "unknown",
+      detail: `${describeFailure(asked, result)}; neither an "N credentials" line (opencode 1) nor only "<integration>  <name>  <kind>" rows (opencode 2) in the output`,
+    };
+  }
+  const providers = [...new Set(rows.map((columns) => columns[0] ?? ""))];
+  return { ...base, state: "logged-in", who: providers.join(", ") };
 }
 
 /**
@@ -536,7 +564,16 @@ export function createLoginChecker(
     command: string,
   ): Promise<AccountLogin> {
     const env = accountEnv(account);
-    const args = loginStatusArgv(account.agent, command);
+    // opencode 2 は裏のサーバが無ければ起こしてから答えるので、code-viewer の
+    // 環境で起こさないよう --standalone で訊く (shared-server.ts)。
+    const extra =
+      account.agent === "opencode"
+        ? await sharedServerArgs(account.agent, command, "/", {
+            run: (argv) => deps.run(argv, env),
+            now: deps.now,
+          })
+        : [];
+    const args = loginStatusArgv(account.agent, command, extra);
     let result: RunResult;
     try {
       result = await deps.run(args, env);

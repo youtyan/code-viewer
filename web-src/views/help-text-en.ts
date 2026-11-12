@@ -1035,6 +1035,13 @@ export function helpTextEn(w: HelpWriter): HelpTexts {
                     ". opencode reads plugins when it starts, so restart an opencode that is already running.",
                   ],
                 },
+                {
+                  text: [
+                    "Start opencode 2 yourself with ",
+                    code("--standalone"),
+                    ". Without it the plugin runs in the shared background service, which cannot tell the pane, and reports nothing (opencode started from code-viewer gets it).",
+                  ],
+                },
               ],
             },
             {

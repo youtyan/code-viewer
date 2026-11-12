@@ -147,10 +147,14 @@ describe("paths", () => {
       expected: "/tmp/sample-xdg/opencode",
     },
     {
-      // 足して読む場所で、全体の設定 (プラグインを置く所) は変えない。
+      // opencode 2 はここの plugins/ だけを読む (1 は足して読む)。どちらでも
+      // 読まれる場所に置く。
       agent: "opencode",
-      env: { OPENCODE_CONFIG_DIR: "/tmp/sample-extra" },
-      expected: "/home/sample/.config/opencode",
+      env: {
+        OPENCODE_CONFIG_DIR: "/tmp/sample-extra",
+        XDG_CONFIG_HOME: "/tmp/sample-xdg",
+      },
+      expected: "/tmp/sample-extra",
     },
   ] satisfies {
     agent: HookAgent;

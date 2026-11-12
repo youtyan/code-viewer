@@ -1018,6 +1018,13 @@ export function helpTextJa(w: HelpWriter): HelpTexts {
                     " を書きます。動いている opencode は起動し直します。",
                   ],
                 },
+                {
+                  text: [
+                    "自分で起動する opencode 2 には ",
+                    code("--standalone"),
+                    " を付けます。付けないとプラグインが共有の裏のサーバで動き、知らせません (code-viewer から起こすものには付けます)。",
+                  ],
+                },
               ],
             },
             {

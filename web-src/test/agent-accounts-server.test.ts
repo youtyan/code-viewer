@@ -62,6 +62,7 @@ import {
   updateAccountRegistry,
 } from "../server/accounts/registry";
 import { createAccountService } from "../server/accounts/service";
+import { forgetAgentHelp } from "../server/accounts/shared-server";
 import {
   claudeUsageFile,
   lastCodexUsage,
@@ -87,6 +88,8 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
+  // opencode の --help の答え (shared-server.ts) をテストの間に持ち越さない。
+  forgetAgentHelp();
 });
 
 function seedDefaultClaude(): void {
@@ -1000,14 +1003,41 @@ describe("login status (asked from the CLI itself)", () => {
           "opencode auth list: the command was not found (exit 127: zsh:1: command not found: opencode)",
       },
     },
+    // opencode 2 (2.2.7 の形): 1 件 1 行の「提供元  名前  方式」。
     {
-      name: "output without the count line",
+      name: "opencode 2: no credentials",
+      out: ok("No authenticated integrations\n"),
+      expected: { state: "logged-out", who: "" },
+    },
+    {
+      name: "opencode 2: stored and environment credentials",
+      out: ok(
+        [
+          "Sample Provider  Sample Provider             stored",
+          "Sample Provider  SAMPLE_API_KEY              environment",
+          "Other Provider   OTHER_API_KEY               environment",
+          "",
+        ].join("\n"),
+      ),
+      expected: {
+        state: "logged-in",
+        who: "Sample Provider, Other Provider",
+        whoDetail: "",
+      },
+    },
+    {
+      name: "output in neither form",
       out: ok("sample output"),
       expected: {
         state: "unknown",
         detail:
-          'opencode auth list exited with 0 (stdout 13 bytes, not shown); no "N credentials" line in the output',
+          'opencode auth list exited with 0 (stdout 13 bytes, not shown); neither an "N credentials" line (opencode 1) nor only "<integration>  <name>  <kind>" rows (opencode 2) in the output',
       },
+    },
+    {
+      name: "opencode 2 rows mixed with an unknown line",
+      out: ok("Sample Provider  Sample Provider  stored\nsample output\n"),
+      expected: { state: "unknown" },
     },
   ])("opencode: $name", ({ out, expected }) => {
     const login = parseOpencodeAuthList(out, AT);
@@ -1430,6 +1460,9 @@ describe("login status (asked from the CLI itself)", () => {
       createLoginChecker({
         async run(args) {
           asked.push(args.slice(-2));
+          // opencode 1 の --help (--standalone が無い)。
+          if (args[args.length - 1] === "--help")
+            return ok("Options:\n  --prompt  prompt to use\n");
           return args[args.length - 1] === "list"
             ? ok("└  1 credential\n●  Sample Provider api\n")
             : ok("", 1, "unexpected\n");
@@ -1463,6 +1496,35 @@ describe("login status (asked from the CLI itself)", () => {
       id: "opencode:default",
     });
     expect(probed).toEqual([]);
+  });
+
+  test("opencode 2: auth list is asked with --standalone, so no background service is started", async () => {
+    const opencodeAccount = {
+      id: "opencode:default",
+      agent: "opencode" as const,
+      name: "",
+      configDir: "/home/sample/.config/opencode",
+      builtin: true,
+      managed: false,
+    };
+    const asked: string[][] = [];
+    const checker = createLoginChecker({
+      async run(args) {
+        asked.push(args.slice(5));
+        if (args[args.length - 1] === "--help")
+          return ok("FLAGS\n  --standalone   Run with a private server\n");
+        return ok("Sample Provider  Sample Provider  stored\n");
+      },
+      async rpc() {
+        throw new Error("opencode does not use app-server");
+      },
+      now: () => AT,
+      markOnboarded: async () => ({ status: "already" as const }),
+    });
+    await expect(
+      checker.status(opencodeAccount, "/opt/sample/opencode-2"),
+    ).resolves.toMatchObject({ state: "logged-in", who: "Sample Provider" });
+    expect(asked).toEqual([["--help"], ["auth", "list", "--standalone"]]);
   });
 
   test("opencode: the environment is passed as it is (no variable picks an account)", () => {

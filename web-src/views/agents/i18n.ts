@@ -376,7 +376,7 @@ const HOOKS_EN: AgentHooksText = {
     },
     opencode: {
       install:
-        "opencode loads plugins when it starts, so this works in opencode started from now on. Restart a running one to pick it up.",
+        "This works in opencode started from now on with Open opencode. opencode 2 started by hand reports only with --standalone: its shared background service cannot tell which pane a session is in. Restart a running one to pick it up.",
       uninstall:
         "opencode started from now on no longer loads the plugin. A running one keeps it until restarted.",
     },
@@ -387,7 +387,7 @@ const HOOKS_EN: AgentHooksText = {
     codex:
       "codex runs the hooks once you trust them: in the tab Open codex opens, open /hooks and trust the code-viewer hooks.",
     opencode:
-      "opencode loads the plugin when it starts: Open opencode starts one that reports its state. Restart opencode that is already running.",
+      "Open opencode starts one that reports its state. opencode 2 started by hand reports only when started with opencode --standalone. Restart opencode that is already running.",
   },
   openAgent: {
     claude: "Open claude",
@@ -503,7 +503,7 @@ const HOOKS_JA: AgentHooksText = {
     },
     opencode: {
       install:
-        "opencode は起動するときにプラグインを読むので、これから起動する opencode で効きます。動いているものは起動し直すと効きます。",
+        "これから［opencode を開く］で起動する opencode で効きます。自分で起動する opencode 2 は --standalone を付けたときだけ知らせます。動いているものは起動し直すと効きます。",
       uninstall:
         "これから起動する opencode では読まれません。動いているものには、起動し直すまで残ります。",
     },
@@ -514,7 +514,7 @@ const HOOKS_JA: AgentHooksText = {
     codex:
       "codex は信頼するまでフックを実行しません。［codex を開く］で開いたタブで /hooks を開き、code-viewer のフックを信頼すると効きます。",
     opencode:
-      "opencode は起動するときにプラグインを読みます。［opencode を開く］で起動したものから状態を知らせます。動いている opencode は起動し直してください。",
+      "［opencode を開く］で起動したものから状態を知らせます。自分で起動する opencode 2 は opencode --standalone で起動したときだけ知らせます。動いている opencode は起動し直してください。",
   },
   openAgent: {
     claude: "claude を開く",

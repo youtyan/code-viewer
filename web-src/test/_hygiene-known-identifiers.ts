@@ -67,6 +67,7 @@ export const KNOWN_SNAKE_CASE_IDENTIFIERS: readonly string[] = [
   "ds_store",
   "duplicate_id",
   "elicitation_dialog",
+  "error_details",
   "error_message",
   "escaped_values",
   "event_msg",

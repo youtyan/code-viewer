@@ -15,11 +15,13 @@
 // 見分ける。ほかのツールが入れたフックは読むだけで、1 つも消さず、順序も
 // 変えない。
 //
-// opencode には設定ファイルのフックが無い。代わりに、起動時に
+// opencode には設定ファイルのフックが無い。代わりに、
 // `<設定ディレクトリ>/plugins/` の .js を読むプラグインの仕組みがある
-// (https://opencode.ai/docs/plugins/)。code-viewer は自分だけのファイル
+// (https://opencode.ai/docs/plugins.md)。code-viewer は自分だけのファイル
 // (OPENCODE_PLUGIN_FILE) を 1 つ置き、その中で受けた出来事を同じ起動
-// スクリプトに渡す。中身は opencodePluginSource が作る。
+// スクリプトに渡す。中身は opencodePluginSource が作る。opencode 2 と 1 で
+// プラグインの API が違う (https://opencode.ai/docs/build/plugins/migrate-v1.md)
+// ので、1 つのファイルで両方に答える。
 
 import {
   type AgentAttention,
@@ -59,6 +61,13 @@ export type HookSpec = {
   timeout: number;
   /** claude の async。バックグラウンドで走らせ、エージェントを待たせない。 */
   async?: boolean;
+  /**
+   * opencode のどの版のプラグインの API が送る出来事か (1 = opencode 1 の
+   * `event`、2 = opencode 2 の `ctx.event.subscribe()`)。無ければ両方が送るか、
+   * プラグインが自分で名付けたもの。プラグインは 2 の出来事だけを購読する
+   * (知らない名前は opencode 2 がログに警告を出す)。
+   */
+  api?: 1 | 2;
 };
 
 /**
@@ -76,12 +85,15 @@ export type HookSpec = {
  * - codex の SessionEnd と Interrupt は既定 1 秒・上限 3 秒 (公式)
  * - claude の StopFailure (API の失敗・上限・認証切れでターンが止まった) は
  *   完了にしない。人の手が要る (ask) として、理由を agentAttentionForHook で添える
- * - opencode はプラグインの event で受ける出来事 (手元の 1.19.5 で観測し、
- *   @opencode-ai/sdk の Event 型で欄を確かめた)。session.status は作業中の
- *   busy と再試行の retry だけ (idle は session.idle と重なる)。
- *   permission.updated は古い版の許可の出来事 (今の版は permission.asked)。
- *   OPENCODE_START / OPENCODE_DISPOSE はプラグインの読み込み・終わり
- *   (dispose) で、opencode の出来事ではなくプラグインが自分で名付けたもの
+ * - opencode はプラグインが受ける出来事。api: 1 は opencode 1 の event (手元の
+ *   1.19.5 で観測し、@opencode-ai/sdk の Event 型で欄を確かめた)。session.status
+ *   は作業中の busy と再試行の retry だけ (idle は session.idle と重なる)。
+ *   permission.updated は 1 の古い版の許可の出来事。api: 2 は opencode 2 の
+ *   出来事 (2.2.7 で観測。2 は session.status・session.idle・question.* を送らず、
+ *   1 ターンを session.execution.* で、質問を form.* で送る)。permission.asked と
+ *   permission.replied は両方の名前。OPENCODE_START / OPENCODE_DISPOSE は
+ *   プラグインの読み込み・終わり (1 の dispose・2 の setup が返す片付け) で、
+ *   opencode の出来事ではなくプラグインが自分で名付けたもの
  */
 export const HOOK_SPECS: Record<HookAgent, readonly HookSpec[]> = {
   claude: [
@@ -113,14 +125,21 @@ export const HOOK_SPECS: Record<HookAgent, readonly HookSpec[]> = {
   ],
   opencode: [
     { event: "code-viewer.start", timeout: 5 },
-    { event: "session.status", matcher: "busy|retry", timeout: 5 },
+    { event: "session.status", matcher: "busy|retry", timeout: 5, api: 1 },
     { event: "permission.asked", timeout: 5 },
-    { event: "permission.updated", timeout: 5 },
+    { event: "permission.updated", timeout: 5, api: 1 },
     { event: "permission.replied", timeout: 5 },
-    { event: "question.asked", timeout: 5 },
-    { event: "question.replied", timeout: 5 },
-    { event: "question.rejected", timeout: 5 },
-    { event: "session.idle", timeout: 5 },
+    { event: "question.asked", timeout: 5, api: 1 },
+    { event: "question.replied", timeout: 5, api: 1 },
+    { event: "question.rejected", timeout: 5, api: 1 },
+    { event: "session.idle", timeout: 5, api: 1 },
+    { event: "session.execution.started", timeout: 5, api: 2 },
+    { event: "session.execution.succeeded", timeout: 5, api: 2 },
+    { event: "session.execution.failed", timeout: 5, api: 2 },
+    { event: "session.execution.interrupted", timeout: 5, api: 2 },
+    { event: "form.created", timeout: 5, api: 2 },
+    { event: "form.replied", timeout: 5, api: 2 },
+    { event: "form.cancelled", timeout: 5, api: 2 },
     { event: "code-viewer.dispose", timeout: 3 },
   ],
 };
@@ -129,7 +148,13 @@ export const HOOK_SPECS: Record<HookAgent, readonly HookSpec[]> = {
 export const OPENCODE_START = "code-viewer.start";
 export const OPENCODE_DISPOSE = "code-viewer.dispose";
 
-/** opencode のプラグインが渡す出来事と申告の対応。 */
+/**
+ * opencode のプラグインが渡す出来事と申告の対応。opencode 2 の
+ * session.execution.failed (モデルの呼び出しの失敗など、再試行しない失敗で
+ * ターンが止まった) は claude の StopFailure と同じく完了にせず、入力待ちに
+ * して理由を添える。interrupted (Esc・許可を断った・質問を閉じた) は入力欄に
+ * 戻っただけなので待機。
+ */
 const OPENCODE_EVENTS = new Map<string, AgentEvent>([
   [OPENCODE_START, "ready"],
   ["session.status", "progress"],
@@ -140,8 +165,31 @@ const OPENCODE_EVENTS = new Map<string, AgentEvent>([
   ["question.replied", "progress"],
   ["question.rejected", "progress"],
   ["session.idle", "stop"],
+  ["session.execution.started", "progress"],
+  ["session.execution.succeeded", "stop"],
+  ["session.execution.failed", "ask"],
+  ["session.execution.interrupted", "ready"],
+  ["form.created", "ask"],
+  ["form.replied", "progress"],
+  ["form.cancelled", "progress"],
   [OPENCODE_DISPOSE, "exit"],
 ]);
+
+/** opencode の質問 (1 の question ツール・2 のフォーム)。 */
+const OPENCODE_QUESTIONS = new Set(["question.asked", "form.created"]);
+
+/** 下請けのセッションからも送る出来事 (許可と質問とその答え)。 */
+const OPENCODE_CHILD_EVENTS = [
+  "permission.asked",
+  "permission.updated",
+  "permission.replied",
+  "question.asked",
+  "question.replied",
+  "question.rejected",
+  "form.created",
+  "form.replied",
+  "form.cancelled",
+];
 
 /**
  * opencode の出来事を申告に直す。session.status は status.type が
@@ -215,7 +263,8 @@ function attentionText(value: unknown): string {
 /**
  * 入力待ち (ask) の理由。agentEventForHook が ask を返す入力にだけ値を返す。
  * StopFailure の欄 (`error` = 種類、`error_details` = 補足) は claude の公式の
- * hooks の文書のもの。
+ * hooks の文書のもの。opencode の session.execution.failed は、プラグインが
+ * 出来事の `data.error.type` と `data.error.message` を同じ名前の欄に入れて渡す。
  */
 export function agentAttentionForHook(
   agent: HookAgent,
@@ -223,7 +272,10 @@ export function agentAttentionForHook(
 ): AgentAttention | null {
   if (agentEventForHook(agent, input) !== "ask") return null;
   const name = input.hook_event_name;
-  if (name === "StopFailure") {
+  if (
+    name === "StopFailure" ||
+    (agent === "opencode" && name === "session.execution.failed")
+  ) {
     return {
       kind: "error",
       reason: attentionText(input.error),
@@ -237,11 +289,14 @@ export function agentAttentionForHook(
   if (name === "PermissionRequest") {
     return { kind: "permission", reason: "", detail: "" };
   }
-  // opencode の許可 (permission.asked / 古い版の permission.updated) と質問
-  // (question ツール)。
+  // opencode の許可 (permission.asked / 1 の古い版の permission.updated) と質問
+  // (1 の question ツール・2 のフォーム)。
   if (agent === "opencode") {
     return {
-      kind: name === "question.asked" ? "question" : "permission",
+      kind:
+        typeof name === "string" && OPENCODE_QUESTIONS.has(name)
+          ? "question"
+          : "permission",
       reason: "",
       detail: "",
     };
@@ -710,11 +765,29 @@ export type OpencodePluginTarget = { launcher: string; failureLog: string };
  * 起動スクリプトの場所だけを持ち、code-viewer の場所は持たない (版が上がっても
  * 中身が変わらない)。
  *
- * - 受ける出来事と打ち切り時間は HOOK_SPECS.opencode から作る
- * - 同じセッションで同じ出来事が続けば 2 回目からは呼ばない (session.status の
- *   busy は 1 ターンに何度も来る)
+ * - opencode 2 と 1 の両方に 1 つの default export で答える。2 は `id` と
+ *   `setup(ctx)` を読み、1 (1.18.29 以降) は `server()` を呼ぶ (公式の
+ *   migrate-v1 の「Support V1 and V2 from one package」)。`@opencode/plugin` を
+ *   import しない素の定義で、2.2.7 が読み込むことを確かめた
+ * - opencode 2 は既定で、最初に起こした端末が始めた共有の裏のサーバ
+ *   (`opencode serve --service`) にプラグインを読ませる。裏のサーバの環境の
+ *   TMUX_PANE はその最初の端末のもので、どの会話がどのペインのものか分からない
+ *   (2.2.7 で、裏のサーバは端末を閉じた後も残り、TMUX_PANE を持ち続けた)。そこでは
+ *   申告せず、理由を失敗の記録に 1 つ残す。code-viewer が起こす opencode には
+ *   `--standalone` を付ける (server/accounts/shared-server.ts)。そのときプラグインは
+ *   ペインの opencode の子 (`serve --stdio`) で動き、終わると片付けが呼ばれる
+ * - 受ける出来事と打ち切り時間は HOOK_SPECS.opencode から作る。2 では api: 1 の
+ *   ものを除いた名前と、下請けを見分ける session.created だけを購読する
+ * - 同じセッションで同じ出来事が続けば 2 回目からは呼ばない (1 の session.status
+ *   の busy は 1 ターンに何度も来る)
  * - 起動スクリプトは 1 つずつ順に呼ぶ (申告の時刻は CLI が付けるので、並べると
- *   順序が入れ替わる)
+ *   順序が入れ替わる)。opencode 2 は設定のフォルダが変わるとプラグインを読み直す
+ *   ので、読み直した後も同じ列に並べる (前の片付けの申告が後の読み込みの申告を
+ *   追い越さない)
+ * - opencode 2 は答えの残っている許可・質問 (出来事の id) をセッションごとに
+ *   数え、全部に答えるまで答えの出来事を送らない。モデルが道具を並べて呼ぶと
+ *   許可が同時に 2 つ出て、1 つ目に答えた時点で「作業中」に戻すと理由が消えた
+ *   (2.2.7 で観測)
  * - 子のセッション (task で起こした下請け) は、許可と質問のほかは送らない。
  *   下請けの終わりで親が「完了」に見えないようにする
  * - 起動スクリプトを起こせなかったときは、起動スクリプトと同じ失敗の記録に
@@ -728,9 +801,22 @@ export function opencodePluginSource(target: OpencodePluginTarget): string {
       { timeout: spec.timeout, matcher: spec.matcher ?? null },
     ]),
   );
+  const v2Types = [
+    "session.created",
+    ...HOOK_SPECS.opencode
+      .filter(
+        (spec) =>
+          spec.api !== 1 &&
+          spec.event !== OPENCODE_START &&
+          spec.event !== OPENCODE_DISPOSE,
+      )
+      .map((spec) => spec.event),
+  ];
   return `// ${AGENT_HOOK_MARKER}: written by code-viewer (Settings > Agent integration).
 // Tells code-viewer when this opencode is working, waiting for you, or done, by
 // calling code-viewer's hook launcher. Remove it there, or delete this file.
+// One default export answers opencode 2 (id and setup) and opencode 1.18.29 or
+// later (server).
 import { appendFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 
@@ -739,67 +825,142 @@ const FAILURE_LOG = ${JSON.stringify(target.failureLog)};
 const EVENTS = ${JSON.stringify(events)};
 const START = ${JSON.stringify(OPENCODE_START)};
 const DISPOSE = ${JSON.stringify(OPENCODE_DISPOSE)};
-const CHILD_EVENTS = new Set(["permission.asked", "permission.updated", "permission.replied", "question.asked", "question.replied", "question.rejected"]);
+// A sub-session (a task's helper) reports only these, so that its end does not
+// make the main session look done.
+const CHILD_EVENTS = new Set(${JSON.stringify(OPENCODE_CHILD_EVENTS)});
+// opencode 2 event types to subscribe to.
+const V2_TYPES = ${JSON.stringify(v2Types)};
+// One queue per opencode process, kept across reloads, so that reports reach
+// code-viewer in the order they happened.
+const QUEUE = Symbol.for(${JSON.stringify(`${AGENT_HOOK_MARKER}.queue`)});
 
-function recordFailure(name, detail) {
+function recordFailure(name, stage, detail) {
   try {
-    appendFileSync(FAILURE_LOG, JSON.stringify({ at: Date.now(), agent: "opencode", hookEvent: name, stage: "launch", detail }) + "\\n", { mode: 0o600 });
+    appendFileSync(FAILURE_LOG, JSON.stringify({ at: Date.now(), agent: "opencode", hookEvent: name, stage, detail }) + "\\n", { mode: 0o600 });
   } catch (error) {
-    console.error(\`[${AGENT_HOOK_MARKER}] \${detail}; the failure log \${FAILURE_LOG} could not be written either\`, error);
+    console.error("[${AGENT_HOOK_MARKER}] " + detail + "; the failure log " + FAILURE_LOG + " could not be written either", error);
   }
 }
 
-export const CodeViewerAgentHook = async ({ directory }) => {
+function enqueue(task) {
+  const next = (globalThis[QUEUE] ?? Promise.resolve()).then(task);
+  globalThis[QUEUE] = next;
+  return next;
+}
+
+function send(input) {
+  const name = input.hook_event_name;
+  const spec = EVENTS[name];
+  return new Promise((resolve) => {
+    const child = spawn(LAUNCHER, ["opencode"], { stdio: ["pipe", "ignore", "ignore"] });
+    const timer = setTimeout(() => child.kill(), spec.timeout * 1000);
+    child.on("exit", (code, signal) => {
+      clearTimeout(timer);
+      if (signal || code !== 0) {
+        recordFailure(name, "launch", LAUNCHER + " ended with " + (signal ? "signal " + signal + " (the limit is " + spec.timeout + "s)" : "exit code " + code));
+      }
+      resolve();
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      recordFailure(name, "launch", "could not run " + LAUNCHER + ": " + (error?.stack ?? error));
+      resolve();
+    });
+    child.stdin.on("error", (error) => recordFailure(name, "launch", "could not pass the event to " + LAUNCHER + ": " + (error?.stack ?? error)));
+    child.stdin.end(JSON.stringify(input));
+  });
+}
+
+function text(value) {
+  return typeof value === "string" ? value : "";
+}
+
+// What opencode 1 and 2 share once each has read its own event shape.
+function reporter(directory) {
   const children = new Set();
   const last = new Map();
-  // 1 つずつ順に送る。申告の時刻は CLI が起きたときに付くので、並べて起こすと
-  // 後の出来事 (完了) が先の出来事 (作業中) より前に着くことがある。
-  let queue = Promise.resolve();
-  const report = (name, sessionID, status) =>
-    (queue = queue.then(() => send(name, sessionID, status)));
-  const send = (name, sessionID, status) =>
-    new Promise((resolve) => {
-      const spec = EVENTS[name];
-      const input = JSON.stringify({ hook_event_name: name, session_id: sessionID, cwd: directory, status });
-      const child = spawn(LAUNCHER, ["opencode"], { stdio: ["pipe", "ignore", "ignore"] });
-      const timer = setTimeout(() => child.kill(), spec.timeout * 1000);
-      child.on("exit", (code, signal) => {
-        clearTimeout(timer);
-        if (signal || code !== 0) {
-          recordFailure(name, \`\${LAUNCHER} ended with \${signal ? \`signal \${signal} (the limit is \${spec.timeout}s)\` : \`exit code \${code}\`}\`);
-        }
-        resolve();
-      });
-      child.on("error", (error) => {
-        clearTimeout(timer);
-        recordFailure(name, \`could not run \${LAUNCHER}: \${error?.stack ?? error}\`);
-        resolve();
-      });
-      child.stdin.on("error", (error) => recordFailure(name, \`could not pass the event to \${LAUNCHER}: \${error?.stack ?? error}\`));
-      child.stdin.end(input);
-    });
-  report(START, "", "");
+  const report = (name, sessionID, extra) =>
+    enqueue(() => send({ hook_event_name: name, session_id: sessionID, cwd: directory, status: "", ...extra }));
   return {
-    event: async ({ event }) => {
-      const props = event.properties ?? {};
-      if (event.type === "session.created" && props.info?.parentID) {
-        children.add(props.info.id);
-        return;
-      }
-      const spec = Object.hasOwn(EVENTS, event.type) ? EVENTS[event.type] : null;
-      if (!spec || event.type === START || event.type === DISPOSE) return;
-      const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
-      if (children.has(sessionID) && !CHILD_EVENTS.has(event.type)) return;
-      const status = event.type === "session.status" ? String(props.status?.type ?? "") : "";
-      if (spec.matcher && !new RegExp(\`^(?:\${spec.matcher})$\`).test(status)) return;
-      const key = \`\${event.type}:\${status}\`;
+    start: () => report(START, "", {}),
+    dispose: () => report(DISPOSE, "", {}),
+    child: (sessionID) => {
+      if (sessionID) children.add(sessionID);
+    },
+    event(type, sessionID, extra) {
+      const spec = Object.hasOwn(EVENTS, type) ? EVENTS[type] : null;
+      if (!spec || type === START || type === DISPOSE) return;
+      if (children.has(sessionID) && !CHILD_EVENTS.has(type)) return;
+      const status = text(extra.status);
+      if (spec.matcher && !new RegExp("^(?:" + spec.matcher + ")$").test(status)) return;
+      const key = type + ":" + status;
       if (last.get(sessionID) === key) return;
       last.set(sessionID, key);
-      report(event.type, sessionID, status);
+      report(type, sessionID, extra);
     },
-    // 終わるときは届くまで待つ (待たないと、送る前にプロセスが終わる)。
-    dispose: () => report(DISPOSE, "", ""),
   };
+}
+
+export default {
+  id: "code-viewer.agent-hook",
+  // opencode 2.
+  setup(ctx) {
+    if (process.argv.includes("--service")) {
+      recordFailure(START, "service", "opencode loaded this plugin in its shared background service (opencode serve --service), which keeps the tmux pane of the terminal that started it and cannot tell which pane a session belongs to, so nothing is reported from it. Start opencode with --standalone; code-viewer does this when it starts opencode.");
+      return undefined;
+    }
+    const hooks = reporter(text(ctx.location?.directory));
+    const controller = new AbortController();
+    // Permissions and questions still waiting for an answer, per session. A
+    // model can ask several at once; answering one is not back to work yet.
+    const open = new Map();
+    const waiting = (sessionID) => open.get(sessionID) ?? open.set(sessionID, new Set()).get(sessionID);
+    hooks.start();
+    (async () => {
+      for await (const event of ctx.event.subscribe({ types: V2_TYPES, signal: controller.signal })) {
+        const data = event.data ?? {};
+        if (event.type === "session.created") {
+          if (data.parentID) hooks.child(text(data.sessionID));
+          continue;
+        }
+        const sessionID = text(data.sessionID) || text(data.form?.sessionID);
+        if (event.type === "permission.asked" || event.type === "form.created") {
+          waiting(sessionID).add(text(data.id) || text(data.form?.id));
+        } else if (event.type === "permission.replied" || event.type === "form.replied" || event.type === "form.cancelled") {
+          const ids = waiting(sessionID);
+          ids.delete(text(data.requestID) || text(data.id));
+          if (ids.size > 0) continue;
+        } else if (event.type.startsWith("session.execution.")) {
+          open.delete(sessionID);
+        }
+        hooks.event(event.type, sessionID, event.type === "session.execution.failed" ? { error: text(data.error?.type), error_details: text(data.error?.message) } : {});
+      }
+      if (!controller.signal.aborted) recordFailure(START, "events", "opencode ended the event stream; nothing more is reported until opencode restarts");
+    })().catch((error) => {
+      if (!controller.signal.aborted) recordFailure(START, "events", "the opencode event stream failed; nothing more is reported until opencode restarts: " + (error?.stack ?? error));
+    });
+    // Wait until it is delivered; otherwise opencode exits before the report.
+    return () => {
+      controller.abort();
+      return hooks.dispose();
+    };
+  },
+  // opencode 1 (1.18.29 or later).
+  async server({ directory }) {
+    const hooks = reporter(text(directory));
+    hooks.start();
+    return {
+      event: async ({ event }) => {
+        const props = event.properties ?? {};
+        if (event.type === "session.created") {
+          if (props.info?.parentID) hooks.child(text(props.info.id));
+          return;
+        }
+        hooks.event(event.type, text(props.sessionID), event.type === "session.status" ? { status: String(props.status?.type ?? "") } : {});
+      },
+      dispose: () => hooks.dispose(),
+    };
+  },
 };
 `;
 }

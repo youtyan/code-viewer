@@ -99,6 +99,25 @@ describe("agentAttentionForHook", () => {
     ],
     ["opencode", { hook_event_name: "permission.replied" }, null],
     ["opencode", { hook_event_name: "session.idle" }, null],
+    // opencode 2: 質問はフォーム、止まったターンは session.execution.failed
+    // (プラグインが data.error.type / message を error / error_details に入れる)。
+    [
+      "opencode",
+      { hook_event_name: "form.created" },
+      { kind: "question", reason: "", detail: "" },
+    ],
+    [
+      "opencode",
+      {
+        hook_event_name: "session.execution.failed",
+        error: "provider.auth",
+        error_details: "sample failure",
+      },
+      { kind: "error", reason: "provider.auth", detail: "sample failure" },
+    ],
+    ["opencode", { hook_event_name: "form.replied" }, null],
+    ["opencode", { hook_event_name: "session.execution.succeeded" }, null],
+    ["opencode", { hook_event_name: "session.execution.interrupted" }, null],
   ] satisfies [HookAgent, Record<string, unknown>, AgentAttention | null][])(
     "%s %j -> %j",
     (agent, input, expected) => {

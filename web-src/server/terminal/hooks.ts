@@ -75,12 +75,15 @@ type Env = Record<string, string | undefined>;
 
 /**
  * 設定ディレクトリの既定。エージェント自身と同じ環境変数を見る
- * (CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_CONFIG_HOME)。無ければ ~/.claude・
- * ~/.codex・~/.config/opencode。呼び出し側は別のディレクトリを渡してよい
- * (アカウントごとの設定など)。
+ * (CLAUDE_CONFIG_DIR / CODEX_HOME / OPENCODE_CONFIG_DIR・XDG_CONFIG_HOME)。
+ * 無ければ ~/.claude・~/.codex・~/.config/opencode。呼び出し側は別の
+ * ディレクトリを渡してよい (アカウントごとの設定など)。
  *
- * opencode の OPENCODE_CONFIG_DIR は全体の設定に足して読む場所で、全体の
- * 設定 (ここ) は変わらない (`opencode debug paths` の config) ので見ない。
+ * opencode の OPENCODE_CONFIG_DIR は、2 では全体の設定の場所そのものになり
+ * (`opencode debug paths` の config がそこを指す)、プラグインはその `plugins/`
+ * だけから読む (2.2.7 で、~/.config/opencode/plugins/ のプラグインは読まれな
+ * かった)。1 では全体の設定に足して読む場所で、そこの `plugins/` も読む
+ * (1.19.5)。どちらでも読まれるので、あればそこに置く。
  */
 export function defaultAgentConfigDir(
   agent: HookAgent,
@@ -89,7 +92,10 @@ export function defaultAgentConfigDir(
 ): string {
   if (agent === "claude") return env.CLAUDE_CONFIG_DIR || join(home, ".claude");
   if (agent === "opencode") {
-    return join(env.XDG_CONFIG_HOME || join(home, ".config"), "opencode");
+    return (
+      env.OPENCODE_CONFIG_DIR ||
+      join(env.XDG_CONFIG_HOME || join(home, ".config"), "opencode")
+    );
   }
   return env.CODEX_HOME || join(home, ".codex");
 }

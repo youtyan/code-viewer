@@ -1337,7 +1337,7 @@ export type HandoffFrom = {
  * - file: フックが渡した会話記録のファイル (claude・codex。
  *   core/agent-state.ts の AgentConversation の transcriptPath)
  * - opencode-session: opencode は会話をファイルに持たない (データベース)。
- *   公式の `opencode export <セッション>` で書き出して読ませる
+ *   公式の書き出しのコマンド (opencodeExportCommand) で書き出して読ませる
  */
 export type HandoffSource =
   | { transcriptPath: string; opencodeSession?: undefined }
@@ -1346,7 +1346,7 @@ export type HandoffSource =
 /**
  * 引き継ぎに使える会話の在りか。無ければ null (引き継げない)。opencode の
  * セッションは、opencode の申告の記録に限る (ほかの種類のセッションの名前は
- * opencode export に渡せない)。
+ * opencode の書き出しに渡せない)。
  */
 export function handoffSource(
   agent: string | null | undefined,
@@ -1363,6 +1363,20 @@ export function handoffSource(
 }
 
 /**
+ * opencode のセッションを JSON で書き出すコマンド。opencode 2 は
+ * `opencode session export <セッション>` (2.2.7 の `opencode session --help`)。
+ * opencode 1 の `opencode export <セッション>` は 2 には無い (opencode1ExportCommand)。
+ */
+export function opencodeExportCommand(session: string): string {
+  return `opencode session export ${session}`;
+}
+
+/** opencode 1 の書き出しのコマンド。引き継ぎの指示に、古い版の人向けに添える。 */
+function opencode1ExportCommand(session: string): string {
+  return `opencode export ${session}`;
+}
+
+/**
  * 「別のアカウントで続ける」で、次の担当に最初の指示として渡す文。記録の
  * 中身を code-viewer が読んで要約することはしない (書式が公式に約束されて
  * いない)。読むのは次の担当のエージェント自身。
@@ -1373,8 +1387,8 @@ export function handoffPrompt(
 ): string {
   if (from.opencodeSession !== undefined) {
     return language === "ja"
-      ? `前の担当（${from.agent}・${from.account}）の作業を引き継いでください。前の担当の会話は opencode のセッション ${from.opencodeSession} にあります。\`opencode export ${from.opencodeSession}\` を実行すると JSON で書き出されます。最後の依頼と、どこまで進んだかを読んで、続きをやってください。わからないことは、作業を始める前に聞いてください。`
-      : `Take over the work of the previous agent (${from.agent} · ${from.account}). Its conversation is the opencode session ${from.opencodeSession}; run \`opencode export ${from.opencodeSession}\` to print it as JSON. Read the last request and how far it got, then continue the work. If anything is unclear, ask before you start.`;
+      ? `前の担当（${from.agent}・${from.account}）の作業を引き継いでください。前の担当の会話は opencode のセッション ${from.opencodeSession} にあります。\`${opencodeExportCommand(from.opencodeSession)}\`（opencode 1 は \`${opencode1ExportCommand(from.opencodeSession)}\`）を実行すると JSON で書き出されます。最後の依頼と、どこまで進んだかを読んで、続きをやってください。わからないことは、作業を始める前に聞いてください。`
+      : `Take over the work of the previous agent (${from.agent} · ${from.account}). Its conversation is the opencode session ${from.opencodeSession}; run \`${opencodeExportCommand(from.opencodeSession)}\` (opencode 1: \`${opencode1ExportCommand(from.opencodeSession)}\`) to print it as JSON. Read the last request and how far it got, then continue the work. If anything is unclear, ask before you start.`;
   }
   return language === "ja"
     ? `前の担当（${from.agent}・${from.account}）の作業を引き継いでください。前の担当の会話記録は ${from.transcriptPath}（JSONL）にあります。最後の依頼と、どこまで進んだかを読んで、続きをやってください。わからないことは、作業を始める前に聞いてください。`
@@ -1402,7 +1416,7 @@ export function transcriptDir(transcriptPath: string): string {
  *   作業フォルダの外を読むのは permission の external_directory が決める
  *   (https://opencode.ai/docs/permissions/)
  * - 記録のファイルが無い (前の担当が opencode) なら claude にも `--add-dir`
- *   を付けない (読むフォルダが無い。`opencode export` の出力を読む)
+ *   を付けない (読むフォルダが無い。opencodeExportCommand の出力を読む)
  */
 export function handoffArgs(
   agent: AccountAgent,

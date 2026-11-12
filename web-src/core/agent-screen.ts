@@ -270,7 +270,8 @@ export const DEFAULT_AGENT_SCREEN_RULES: AgentScreenRuleSet = {
       contains: ["enter submit", "esc dismiss"],
     },
     {
-      // opencode の許可の画面。下端の選択肢の行 (`Allow once  Allow always
+      // opencode の許可の画面。下端の選択肢の行 (1.19.5 は `Allow once  Allow
+      // always  Reject … enter confirm`、2.2.7 は `Allow once   Always allow
       // Reject … enter confirm`)。見出し (`Permission required`) は許可の中身
       // (コマンドや差分) の長さで下端から離れるので条件にしない。
       id: "opencode_permission",
@@ -278,19 +279,29 @@ export const DEFAULT_AGENT_SCREEN_RULES: AgentScreenRuleSet = {
       priority: 964,
       region: "bottom_non_empty",
       lines: 6,
-      lineRegex: ["Allow once {2,}Allow always"],
+      any: [
+        { lineRegex: ["Allow once {2,}Allow always"] },
+        { lineRegex: ["Allow once {2,}Always allow"] },
+      ],
       contains: ["enter confirm"],
     },
     {
-      // opencode の作業中の行 (`<動く印>  esc interrupt  …`)。入力欄の下の
-      // 1 行で、印の字は動くので「字の後に空白 2 つで esc interrupt」の形だけを
-      // 見る (本文の「… esc interrupt」は空白 1 つ)。claude・codex の
-      // `esc to interrupt` とは綴りが違う。
+      // opencode の作業中の行 (`<動く印> esc interrupt  …`)。入力欄の下の
+      // 1 行。claude・codex の `esc to interrupt` とは綴りが違う。印の字は動く。
+      // - 1.19.5 は印の後に空白 2 つ。「字の後に空白 2 つで esc interrupt」の
+      //   形を見る (本文の「… esc interrupt」は空白 1 つ)
+      // - 2.2.7 は印 (⬝ と ■ が流れる) の後に空白 1 つ。本文と分けるため、印の字の
+      //   直後に限る
+      // - Esc を 1 回押すと、止まるまで `<印> esc again to interrupt` (2.2.7)
       id: "opencode_working",
       state: "working",
       priority: 958,
       region: "whole_recent",
-      lineRegex: ["\\S {2}esc interrupt\\b"],
+      any: [
+        { lineRegex: ["\\S {2}esc interrupt\\b"] },
+        { lineRegex: ["[⬝■] esc interrupt\\b"] },
+        { lineRegex: ["[⬝■] {1,2}esc again to interrupt\\b"] },
+      ],
     },
     {
       // opencode の入力欄の下端 (`╹▀▀▀…`)。作業中も出ているので、作業中の行が
@@ -302,6 +313,7 @@ export const DEFAULT_AGENT_SCREEN_RULES: AgentScreenRuleSet = {
       lineRegex: ["╹▀{8}"],
       not: [
         { contains: ["esc interrupt"] },
+        { contains: ["esc again to interrupt"] },
         { contains: ["enter confirm"] },
         { contains: ["esc dismiss"] },
       ],

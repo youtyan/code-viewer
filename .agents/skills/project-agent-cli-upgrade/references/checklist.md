@@ -23,8 +23,8 @@
 | H4 | 両方 | 書き込む先と形: claude は `<設定ディレクトリ>/settings.json` の `hooks`、codex は `<CODEX_HOME>/hooks.json` の `hooks`。`hooks.<出来事>` は配列で、各要素の `hooks` も配列。コメントなしの JSON | `web-src/server/terminal/hooks.ts#agentHookFile`・`web-src/server/terminal/hooks.ts#defaultAgentConfigDir`・`web-src/core/agent-hooks.ts#checkHookShape` | 置き場所が変わると設定の行が「未設定」。形が変わると「読めない」で書き込みを断る（見える） | `web-src/test/agent-hooks-server.test.ts` |
 | H5 | 両方 | フックの呼ばれ方: `command` をシェルで分けて動かす・エージェントの環境（`TMUX_PANE` / `CODE_VIEWER_SHELL_ID`）を受け継ぐ・終了コード 0 は止めない・stdout を出さない（claude は一部の出来事の stdout を会話に足す）。**確かめた（2026-11-12、codex 0.167.1）**: codex は共有の裏のサーバを既定で自動起動し（0.157.0 から。`daemon_auto_start`）、フックはその裏のサーバの中で**最初に起こした端末の環境**のまま走る（別の端末の codex のターンの申告が、最初の端末のペインとして届いた）。code-viewer が起こす codex には `--no-daemon` を付けて避ける（L9） | `web-src/server/terminal/hooks.ts#hookLauncherScript`・`web-src/server/terminal-cli.ts#runHook` | 環境が渡らないと「tmux の外」として黙って何もしない（失敗の記録も残らない） | `web-src/test/agent-hook-report.test.ts` |
 | H6 | codex | 新しいフックは利用者が `/hooks` で信頼するまで動かない。信頼は定義の文字列のハッシュで覚える。hooks の機能は `codex features list` の `hooks` が `stable true` | `web-src/server/terminal/hooks.ts#agentHookCommand` | 信頼の仕組みや機能の名前が変わると、入れたのに黙って動かない（設定の行は「入っている」のまま） | なし |
-| H7 | opencode | フックの代わりのプラグイン: `<全体の設定>/plugins/*.js` を起動時に読み、書き出した関数を呼ぶ（https://opencode.ai/docs/plugins/）。関数の引数の `directory`、返す `event` と `dispose`。出来事 `session.status`（`properties.status.type` が `busy` / `retry` / `idle`）・`session.idle`・`permission.asked`（古い版は `permission.updated`）・`permission.replied`・`question.asked` / `replied` / `rejected`・`session.created`（`properties.info.parentID` で下請けのセッション）。各出来事の `properties.sessionID`。1.19.5 で観測（2026-11-12） | `web-src/core/agent-hooks.ts#HOOK_SPECS`・`web-src/core/agent-hooks.ts#opencodePluginSource`・`web-src/core/agent-hooks.ts#agentEventForHook` | 読み込まれないと黙って画面の推測に落ちる。出来事の名前・欄が変わると作業中・入力待ち・完了の申告が来ない | `web-src/test/agent-hooks-opencode-plugin.test.ts`・`web-src/test/agent-hooks-core.test.ts` |
-| H8 | opencode | プラグインの置き場所は全体の設定 `${XDG_CONFIG_HOME:-~/.config}/opencode`（`opencode debug paths` の `config`。`OPENCODE_CONFIG_DIR` は足して読む場所で、全体の設定は変わらない）。プラグインは opencode のプロセスの環境（`TMUX_PANE`）を受け継ぐ | `web-src/server/terminal/hooks.ts#defaultAgentConfigDir`・`web-src/server/terminal/hooks.ts#agentHookFile` | 置き場所が変わると設定の行が「未設定」。環境が渡らないと「tmux の外」として申告が届かない | `web-src/test/agent-hooks-server.test.ts` |
+| H7 | opencode | フックの代わりのプラグイン: `<全体の設定>/plugins/*.js` を読む（https://opencode.ai/docs/plugins.md ）。1 つの default export に、2 が読む `id`・`setup(ctx)` と 1（1.18.29 以降）が呼ぶ `server()` を持たせる（https://opencode.ai/docs/build/plugins/migrate-v1.md の「Support V1 and V2 from one package」）。**2**（2.2.7 で観測、2026-11-13）: `ctx.location.directory`・`ctx.event.subscribe({ types, signal })`・setup が返す片付け。出来事 `session.execution.started` / `succeeded` / `failed`（`data.error.type`・`message`）/ `interrupted`・`permission.asked`（`data.id`）/ `permission.replied`（`data.requestID`）・`form.created`（`data.form.id`・`data.form.sessionID`）/ `form.replied` / `form.cancelled`・`session.created`（`data.parentID` で下請け）。各出来事の `data.sessionID`。既定では共有の裏のサーバ（`opencode serve --service`）で動き、その `TMUX_PANE` は最初の端末のもの（`process.argv` の `--service` で見分けて申告しない）。**1**（1.19.5 で観測、2026-11-12）: `server({ directory })` が返す `event` と `dispose`。出来事 `session.status`（`properties.status.type` が `busy` / `retry` / `idle`）・`session.idle`・`permission.asked`（古い版は `permission.updated`）・`permission.replied`・`question.asked` / `replied` / `rejected`・`session.created`（`properties.info.parentID`）。各出来事の `properties.sessionID` | `web-src/core/agent-hooks.ts#HOOK_SPECS`・`web-src/core/agent-hooks.ts#opencodePluginSource`・`web-src/core/agent-hooks.ts#agentEventForHook`・`web-src/core/agent-hooks.ts#agentAttentionForHook` | 読み込まれないと黙って画面の推測に落ちる（2.2.7 で 1 の形のプラグインは「Plugin must export a default definition…」で読み込みに失敗した）。出来事の名前・欄が変わると作業中・入力待ち・完了の申告が来ない | `web-src/test/agent-hooks-opencode-plugin.test.ts`・`web-src/test/agent-hooks-core.test.ts`・`web-src/test/agent-attention.test.ts` |
+| H8 | opencode | プラグインの置き場所は全体の設定（`opencode debug paths` の `config`）。`OPENCODE_CONFIG_DIR` があればそこ: 2 ではそれが全体の設定になり、その `plugins/` だけを読む（2.2.7）。1 では足して読む場所で、そこも読む（1.19.5）。無ければ `${XDG_CONFIG_HOME:-~/.config}/opencode`。プラグインは opencode のプロセスの環境（`TMUX_PANE`）を受け継ぐ（2 は `--standalone` のときだけペインの環境。L10） | `web-src/server/terminal/hooks.ts#defaultAgentConfigDir`・`web-src/server/terminal/hooks.ts#agentHookFile` | 置き場所が変わると設定の行が「未設定」。環境が渡らないと「tmux の外」として申告が届かない | `web-src/test/agent-hooks-server.test.ts` |
 
 **確かめ方**
 
@@ -38,6 +38,13 @@
   codex features list | grep -E '^hooks\b'
   ```
 
+- A（H7）: https://opencode.ai/docs/build/plugins/migrate-v1.md と https://opencode.ai/docs/build/plugins/server.md の
+  default export の形・`ctx.event.subscribe`・片付け。出来事の名前と欄は文書に一覧が無いので C で見る
+- B（H8・L10）: `opencode debug paths config`（`OPENCODE_CONFIG_DIR=<一時フォルダ>` を付けたときも）、
+  `opencode --help | grep -- --standalone`
+- C（H7）: 砂場（`agents.md` の 10。`HOME` ごと分ける）の `plugins/` に、届いた出来事の `type` と欄の名前だけを
+  書く観測用のプラグインを置き、`opencode --standalone` に話しかける・許可を出す・質問を出す・下請けを起こす・
+  Esc で止める・終える。code-viewer のプラグインを入れて `source` が `hook` で working → waiting → done と動くこと
 - C（H1〜H6）: フックを入れたエージェントに話しかけ、許可の画面を出し、終わらせる。そのたびに
   `code-viewer terminal list --json | jq -c '.states[] | {target, state, source, agent}'` で
   `source` が `hook`、`state` が working → waiting → done と動くこと。codex は `/hooks` で
@@ -125,7 +132,7 @@
 | A7 | codex | `codex login status` の文言（stdout と stderr を合わせる）: `not logged in` / `logged in using (ChatGPT\|an API key…)`。メールを訊くのは `ChatGPT` のときだけ | `web-src/server/accounts/login.ts#parseCodexLoginStatus` | 文言が変わると「不明」。方式の言い方が変わるとメールが黙って出ない | `web-src/test/agent-accounts-server.test.ts` |
 | A8 | codex | app-server の `account/read`（`refreshToken: false`）の答え `result.account` が `{type: "chatgpt", email, planType}`・`{type: "apiKey"}`・null。未ログインのディレクトリでは app-server を起こさない | `web-src/server/accounts/login.ts#parseCodexAccountRead`・`web-src/server/accounts/login.ts#ACCOUNT_READ_REQUESTS` | メールが出ず、理由が行に出る | `web-src/test/agent-accounts-server.test.ts` |
 | A9 | claude | 対話の画面は `<設定ディレクトリ>/.claude.json` の `hasCompletedOnboarding` で初回の案内を飛ばす。`claude auth login` はこの印を付けない（上流は直さないと閉じた: anthropics/claude-code#67149） | `web-src/server/accounts/onboarding.ts#markClaudeOnboarded` | code-viewer で作ったアカウントを開くと初回の案内をやり直させる（ログインが消えたように見える） | `web-src/test/accounts-onboarding.test.ts` |
-| A10 | opencode | 認証の置き場所はデータのフォルダ（`opencode auth list` の `Credentials <場所>`。`XDG_DATA_HOME` で動く）で、opencode だけに効く変数で分けられない → 既定のアカウントだけ。ログインは `opencode auth login`、状態は `opencode auth list` の人向けの一覧（`N credentials`・`N environment variables`・`● 提供元 方式` の行。`auth` は `providers` の別名） | `web-src/core/agent-accounts.ts#ACCOUNT_ENV`・`web-src/server/accounts/launch.ts#AGENT_SUBCOMMANDS`・`web-src/server/accounts/login.ts#parseOpencodeAuthList` | 件数の行の形が変わると「不明」（見える）。分ける変数ができたら、アカウントを足せるようにできる | `web-src/test/agent-accounts-server.test.ts`・`web-src/test/agent-accounts-core.test.ts` |
+| A10 | opencode | 認証の置き場所はデータのフォルダ（`XDG_DATA_HOME` で動く）で、opencode だけに効く変数で分けられない → 既定のアカウントだけ。ログインは `opencode auth login`、状態は `opencode auth list` の人向けの一覧。**1**: `N credentials`・`N environment variables`・`● 提供元 方式` の行。**2**（2.2.7）: 1 件 1 行の「提供元␣␣名前␣␣方式（`stored` / `environment`）」、無ければ `No authenticated integrations`。2 は裏のサーバが無ければ起こしてから答えるので `--standalone` を付けて訊く（L10） | `web-src/core/agent-accounts.ts#ACCOUNT_ENV`・`web-src/server/accounts/launch.ts#AGENT_SUBCOMMANDS`・`web-src/server/accounts/login.ts#parseOpencodeAuthList` | 一覧の形が変わると「不明」（見える）。分ける変数ができたら、アカウントを足せるようにできる | `web-src/test/agent-accounts-server.test.ts`・`web-src/test/agent-accounts-core.test.ts` |
 
 **確かめ方**
 
@@ -177,8 +184,9 @@
 | L5 | 両方 | エージェントのプロセスがペインのシェルの子孫で、名前が `pane_current_command` と同じ。`CLAUDE_CONFIG_DIR` / `CODEX_HOME` を受け継ぐ。**要 C**（2026-10-02 時点で未確認）: codex 0.157.0 からの共有の裏のサーバ（H5）で、作業するプロセスがペインのシェルの子孫でなくなっていないか | `web-src/server/accounts/process-env.ts#findAgentProcess` | 行のアカウントが「不明」と理由 | `web-src/test/agent-accounts-server.test.ts` |
 | L6 | 両方 | `transcript_path` が実在するファイルを指す（中身は読まない） | `web-src/server/terminal/agent-conversations.ts#decideConversationRestore` | 再起動の後に会話の場所を戻さず、理由をログに出す | `web-src/test/agent-conversations.test.ts` |
 | L7 | claude | 起動に `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` を足すと、設定の `tui`（全画面表示）より優先して通常の表示で動き、会話が tmux の過去の行に残る | `web-src/core/agent-accounts.ts#LAUNCH_ENV` | 全画面表示のまま起動し、スマホの読む画面で過去の出力が読めない（ペインの `alternate_on` が 1） | `web-src/test/agent-accounts-core.test.ts` |
-| L9 | codex | `--no-daemon`（共有の裏のサーバを使わず、その codex の中で道具とフックを走らせる）。`codex --help` に載っている版だけ起動に付ける（知らない版に付けると起動ごと失敗する） | `web-src/server/accounts/codex-daemon.ts#codexDaemonArgs` | 付かないと、code-viewer から起こした codex の状態が別のペインに付く（H5）。名前が変わると `--help` に載らず黙って付かなくなる | `web-src/test/codex-daemon.test.ts` |
-| L8 | opencode | 前面のコマンド名は `opencode`。起動は `opencode`、引き継ぎの指示は `opencode --prompt "<指示>"`。opencode が前の担当なら、会話は `opencode export <セッション>` で書き出させる（会話のファイルは無い） | `web-src/core/agent-overview.ts#agentKindOf`・`web-src/core/agent-accounts.ts#handoffArgs`・`web-src/core/agent-accounts.ts#handoffPrompt` | 種類が分からない・指示が渡らない・書き出せない | `web-src/test/agent-overview-core.test.ts`・`web-src/test/agent-handoff.test.ts` |
+| L9 | codex | `--no-daemon`（共有の裏のサーバを使わず、その codex の中で道具とフックを走らせる）。`codex --help` に載っている版だけ起動に付ける（知らない版に付けると起動ごと失敗する） | `web-src/server/accounts/shared-server.ts#sharedServerArgs` | 付かないと、code-viewer から起こした codex の状態が別のペインに付く（H5）。名前が変わると `--help` に載らず黙って付かなくなる | `web-src/test/shared-server.test.ts` |
+| L8 | opencode | 前面のコマンド名は `opencode`（2.2.7 も）。起動は `opencode`、引き継ぎの指示は `opencode --prompt "<指示>"`。opencode が前の担当なら、会話は `opencode session export <セッション>`（2。1 は `opencode export <セッション>`）で書き出させる（会話のファイルは無い） | `web-src/core/agent-overview.ts#agentKindOf`・`web-src/core/agent-accounts.ts#handoffArgs`・`web-src/core/agent-accounts.ts#handoffPrompt`・`web-src/core/agent-accounts.ts#opencodeExportCommand` | 種類が分からない・指示が渡らない・書き出せない | `web-src/test/agent-overview-core.test.ts`・`web-src/test/agent-handoff.test.ts` |
+| L10 | opencode | `--standalone`（2 の共有の裏のサーバ `opencode serve --service` を使わず、その opencode の子の `serve --stdio` でプラグインを動かす。終わると片付けが呼ばれる）。`opencode --help` に載っている版（2）だけ、起動と `opencode auth list` に付ける。1 には無い | `web-src/server/accounts/shared-server.ts#sharedServerArgs`・`web-src/server/accounts/login.ts#createLoginChecker` | 付かないと、code-viewer から起こした opencode の申告が来ない（プラグインが裏のサーバでは申告しない）。`auth list` が裏のサーバを code-viewer の環境で起こす | `web-src/test/shared-server.test.ts`・`web-src/test/agent-accounts-server.test.ts` |
 
 **確かめ方**
 
@@ -206,7 +214,7 @@
 | S3 | claude | 電話の読む画面: スピナーの行・`⎿ Waiting…`・入力欄の上下の `─` の線（全幅、0 桁目から）・`⏺` / `⎿` の印 | `web-src/core/pane-reflow.ts#withoutTransient` | 見た目だけ（消えるはずの行が残る・折り返しを誤る） | `web-src/test/pane-reflow.test.ts` |
 | S4 | 両方 | 選択肢 `1. …` と、数字のキーでそれを選べること | `web-src/core/pane-reflow.ts#findChoices` | 電話のボタンが出ない・押しても違うものを選ぶ | `web-src/test/pane-reflow.test.ts` |
 | S5 | claude | 添付の行の折り返し（`› [image] /path/ban (124.9KB)` の次の行に続き） | `web-src/core/terminal-images.ts#joinBrokenPathLines` | 画像の棚がそのパスを拾わない | `web-src/test/terminal-images-core.test.ts` |
-| S6 | opencode | 画面ルール: 作業中は入力欄の下の行の `<印>  esc interrupt`、許可は `Allow once  Allow always  Reject` と `enter confirm`、質問は `enter submit` と `esc dismiss`、待機は入力欄の下端 `╹▀▀▀`（1.19.5 の実画面で観測） | `web-src/core/agent-screen.ts#DEFAULT_AGENT_SCREEN_RULES` | 作業中・入力待ちが「待機」に見える（フックが無いとき） | `web-src/test/agent-screen-core.test.ts` |
+| S6 | opencode | 画面ルール: 作業中は入力欄の下の行の `<印>  esc interrupt`（1.19.5 は空白 2 つ、2.2.7 は `⬝`・`■` の印の後に空白 1 つ）と、Esc を 1 回押した後の `<印> esc again to interrupt`（2.2.7）、許可は `Allow once  Allow always  Reject`（1.19.5）/ `Allow once   Always allow   Reject`（2.2.7）と `enter confirm`、質問は `enter submit` と `esc dismiss`、待機は入力欄の下端 `╹▀▀▀` | `web-src/core/agent-screen.ts#DEFAULT_AGENT_SCREEN_RULES` | 作業中・入力待ちが「待機」に見える（フックが無いとき・2 を `--standalone` なしで起こしたとき） | `web-src/test/agent-screen-core.test.ts` |
 
 **確かめ方**
 
@@ -270,7 +278,7 @@
 - A（W1）: 上の各群で変わった所が文書に書かれていないか引く
 
   ```sh
-  grep -n -E "claude auth|codex login|/hooks|/usage|rateLimits|\.codex/skills|statusLine" \
+  grep -n -E "claude auth|codex login|/hooks|/usage|rateLimits|\.codex/skills|statusLine|opencode auth|opencode (session )?export|--standalone|opencode/plugins" \
     README.md README_ja.md web-src/views/help-text-*.ts web-src/views/agents/*i18n.ts \
     web-src/server/accounts-cli.ts web-src/server/skill-cli.ts skills/*/SKILL.md
   ```

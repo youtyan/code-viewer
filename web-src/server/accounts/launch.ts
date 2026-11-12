@@ -281,12 +281,19 @@ export function accountReadArgv(command: string): string[] {
   return agentCommandArgv(command, ["app-server"]);
 }
 
-/** ログインの状態を訊く argv (server/accounts/login.ts)。 */
+/**
+ * ログインの状態を訊く argv (server/accounts/login.ts)。extra は後ろに足す引数
+ * (opencode 2 の `--standalone`。shared-server.ts)。
+ */
 export function loginStatusArgv(
   agent: AccountAgent,
   command: string,
+  extra: readonly string[] = [],
 ): string[] {
-  return agentCommandArgv(command, AGENT_SUBCOMMANDS.status[agent]);
+  return agentCommandArgv(command, [
+    ...AGENT_SUBCOMMANDS.status[agent],
+    ...extra,
+  ]);
 }
 
 /**

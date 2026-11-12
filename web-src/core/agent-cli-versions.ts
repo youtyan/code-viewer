@@ -18,13 +18,16 @@ export type CheckedAgentCli = {
 export const CHECKED_AGENT_CLI_VERSIONS: Record<HookAgent, CheckedAgentCli> = {
   claude: { version: "2.1.286", checkedOn: "2026-10-02" },
   codex: { version: "0.159.3", checkedOn: "2026-10-02" },
-  opencode: { version: "1.19.5", checkedOn: "2026-11-12" },
+  opencode: { version: "2.2.7", checkedOn: "2026-11-13" },
 };
 
 /**
- * `--version` の出力の中の版 (`2.1.286 (Claude Code)`・`codex-cli 0.159.3`・`1.19.5`)。
+ * `--version` の出力の中の版 (`2.1.286 (Claude Code)`・`codex-cli 0.159.3`・
+ * opencode 1 の `1.19.5`・opencode 2 の `opencode v2.2.7`)。頭の `v` は除く。
  * 対話シェルを通すので前に端末向けの文字列が付くことがある。無ければ null。
  */
 export function agentCliVersionIn(output: string): string | null {
-  return /\b\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?/.exec(output)?.[0] ?? null;
+  return (
+    /(?<![\w.])v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)/.exec(output)?.[1] ?? null
+  );
 }

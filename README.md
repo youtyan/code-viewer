@@ -217,7 +217,7 @@ Marks in the file list:
 
 How the state is decided, strongest first:
 
-1. Hooks: claude, codex and opencode report it themselves (for opencode, a plugin file in `~/.config/opencode/plugins/`; restart a running opencode). **Set up** in **Settings → Agents → Agent integration** shows the file and the diff before writing, backs up the file, and keeps your other hooks. If the settings file is generated (for example from dotfiles), it shows the hooks to add to the source instead. codex runs new hooks only after you trust them in `/hooks`.
+1. Hooks: claude, codex and opencode report it themselves (for opencode, a plugin file in `~/.config/opencode/plugins/`; restart a running opencode, and start opencode 2 with `--standalone` when you start it yourself, since its shared background service cannot tell the pane — opencode started from code-viewer gets it). **Set up** in **Settings → Agents → Agent integration** shows the file and the diff before writing, backs up the file, and keeps your other hooks. If the settings file is generated (for example from dotfiles), it shows the hooks to add to the source instead. codex runs new hooks only after you trust them in `/hooks`.
 2. Screen text: rules match what the agent shows. Edit them as JSON in **Settings → Advanced**.
 3. Screen motion: whether the screen keeps changing.
 

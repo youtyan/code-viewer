@@ -27,6 +27,7 @@ import {
   launchCommandLine,
   MAX_ACCOUNT_TAG,
   MAX_ACCOUNT_TAGS,
+  opencodeExportCommand,
   renameAccount,
   type ShareEntry,
   type StatusLinePlanResponse,
@@ -1401,10 +1402,10 @@ export function createAccountDialogs(
               log: {
                 // opencode は記録のファイルが無く、セッションを書き出すコマンドを渡す。
                 text: source?.opencodeSession
-                  ? `opencode export ${source.opencodeSession}`
+                  ? opencodeExportCommand(source.opencodeSession)
                   : abbreviateHome(transcriptPath, home),
                 title: source?.opencodeSession
-                  ? `opencode export ${source.opencodeSession}`
+                  ? opencodeExportCommand(source.opencodeSession)
                   : transcriptPath,
               },
               hint: t.handoffLogHint,

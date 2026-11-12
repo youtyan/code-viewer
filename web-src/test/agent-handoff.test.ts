@@ -442,10 +442,10 @@ describe("引き継ぎの起動の引数", () => {
       opencodeSession: "sessionSample",
     };
     expect(handoffPrompt("en", from)).toBe(
-      "Take over the work of the previous agent (opencode · Default). Its conversation is the opencode session sessionSample; run `opencode export sessionSample` to print it as JSON. Read the last request and how far it got, then continue the work. If anything is unclear, ask before you start.",
+      "Take over the work of the previous agent (opencode · Default). Its conversation is the opencode session sessionSample; run `opencode session export sessionSample` (opencode 1: `opencode export sessionSample`) to print it as JSON. Read the last request and how far it got, then continue the work. If anything is unclear, ask before you start.",
     );
     expect(handoffPrompt("ja", { ...from, account: "既定" })).toBe(
-      "前の担当（opencode・既定）の作業を引き継いでください。前の担当の会話は opencode のセッション sessionSample にあります。`opencode export sessionSample` を実行すると JSON で書き出されます。最後の依頼と、どこまで進んだかを読んで、続きをやってください。わからないことは、作業を始める前に聞いてください。",
+      "前の担当（opencode・既定）の作業を引き継いでください。前の担当の会話は opencode のセッション sessionSample にあります。`opencode session export sessionSample`（opencode 1 は `opencode export sessionSample`）を実行すると JSON で書き出されます。最後の依頼と、どこまで進んだかを読んで、続きをやってください。わからないことは、作業を始める前に聞いてください。",
     );
   });
 
@@ -490,7 +490,7 @@ describe("引き継ぎの起動の引数", () => {
       expected: null,
     },
     {
-      // codex の transcript_path は null になりうる。opencode export には渡せない。
+      // codex の transcript_path は null になりうる。opencode の書き出しには渡せない。
       name: "codex でセッションだけなら引き継げない",
       agent: "codex",
       conversation: { sessionId: "abc", transcriptPath: "", cwd: "/w" },

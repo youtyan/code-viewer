@@ -50,7 +50,6 @@ import {
   statusLineFailureLog,
   statusLineWrapperPath,
 } from "../terminal/statusline";
-import { codexDaemonArgs } from "./codex-daemon";
 import {
   accountWindowName,
   agentCommandArgv,
@@ -72,6 +71,7 @@ import {
   updateAccountRegistry,
 } from "./registry";
 import { sharedAccountService } from "./service";
+import { sharedServerArgs } from "./shared-server";
 import { sharedUsageChecker } from "./usage-check";
 
 /** 本文の上限。名前・パス・コマンドとリンクの一覧だけが来る。 */
@@ -378,9 +378,9 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
       folder: cwd,
       home: service.paths.home,
     });
-    // codex は共有の裏のサーバを使わせない (フックが別のペインを指す。codex-daemon.ts)。
-    const daemon =
-      account.agent === "codex" ? await codexDaemonArgs(command, cwd) : [];
+    // codex と opencode は共有の裏のサーバを使わせない (フックが別のペインを
+    // 指す。shared-server.ts)。
+    const daemon = await sharedServerArgs(account.agent, command, cwd);
     const pane = await openAccountWindow({
       agent: account.agent,
       account,

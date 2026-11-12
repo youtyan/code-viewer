@@ -478,6 +478,46 @@ describe("detectAgentScreen: opencode", () => {
       expected: { state: "waiting", ruleId: "opencode_permission" },
     },
     {
+      name: "2.2.7 の作業中 (印の後の空白が 1 つ)",
+      screen: opencodeScreen([
+        OC_BOX_BOTTOM,
+        `   ⬝⬝⬝⬝⬝⬝⬝⬝ esc interrupt${OC_SIDE}shift+tab agents  ctrl+p commands    ~/sample:main`,
+      ]),
+      expected: { state: "working", ruleId: "opencode_working" },
+    },
+    {
+      name: "2.2.7 の作業中 (Esc を 1 回押した後)",
+      screen: opencodeScreen([
+        OC_BOX_BOTTOM,
+        `   ⬝⬝⬝■■■■■ esc again to interrupt${OC_SIDE}10.7K (4%)  ctrl+p commands`,
+      ]),
+      expected: { state: "working", ruleId: "opencode_working" },
+    },
+    {
+      name: "2.2.7 の待機 (入力欄の下にフォルダと案内だけ)",
+      screen: opencodeScreen([
+        OC_BOX_BOTTOM,
+        `  ~/sample:main${OC_SIDE}10.9K (4%)  ctrl+p commands`,
+      ]),
+      expected: { state: "idle", ruleId: "opencode_prompt" },
+    },
+    {
+      name: "2.2.7 の入力待ち (許可の選択肢が Always allow)",
+      screen: [
+        "  ┃  ⠸ sample-command",
+        "  ┃",
+        "     Press ctrl+b to move running work to the background",
+        "  ┃",
+        "  ┃  △ Permission required",
+        "  ┃",
+        "  ┃  $ sample-command",
+        "  ┃",
+        `  ┃   Allow once   Always allow   Reject${OC_SIDE}ctrl+f fullscreen  ⇆ select  enter confirm`,
+        `  ┃${OC_SIDE}~/sample:main`,
+      ].join("\n"),
+      expected: { state: "waiting", ruleId: "opencode_permission" },
+    },
+    {
       name: "入力待ち (質問の選択肢)",
       screen: [
         "     → Asked 1 question",
@@ -511,6 +551,14 @@ describe("detectAgentScreen: opencode", () => {
       screen: opencodeScreen(
         [OC_BOX_BOTTOM, "   ~/sample"],
         ["     press esc interrupt to stop it"],
+      ),
+      not: "opencode_working",
+    },
+    {
+      name: "会話の本文に出た esc again to interrupt は、印の字の後でなければ作業中にしない",
+      screen: opencodeScreen(
+        [OC_BOX_BOTTOM, "   ~/sample"],
+        ["     press esc again to interrupt it"],
       ),
       not: "opencode_working",
     },

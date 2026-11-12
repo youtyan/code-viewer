@@ -344,13 +344,45 @@ main・master・名前と同じブランチは出さない）を小さく出し�
 |---|---|---|
 | claude | `<設定ディレクトリ>/settings.json` の `hooks` | コマンド `<状態ディレクトリ>/agent-hooks/code-viewer-agent-hook claude` |
 | codex | `<CODEX_HOME>/hooks.json` | 同じ形で `… codex` |
-| opencode | `${XDG_CONFIG_HOME:-~/.config}/opencode/plugins/code-viewer-agent-hook.js`（無ければ `plugins/` も作る） | プラグインのファイル 1 つ（`opencodePluginSource`）。中身が起動スクリプトを `… opencode` で呼ぶ |
+| opencode | `${OPENCODE_CONFIG_DIR:-${XDG_CONFIG_HOME:-~/.config}/opencode}/plugins/code-viewer-agent-hook.js`（無ければ `plugins/` も作る） | プラグインのファイル 1 つ（`opencodePluginSource`）。中身が起動スクリプトを `… opencode` で呼ぶ |
 | 全部 | `<状態ディレクトリ>/agent-hooks/code-viewer-agent-hook` | 起動スクリプト（node と code-viewer の場所を持つ） |
 
 ### opencode のプラグイン
 
-opencode には設定ファイルのフックが無く、起動時に `plugins/` の .js を読むプラグインの仕組みが
-ある（https://opencode.ai/docs/plugins/）。code-viewer は自分だけのファイルを 1 つ置く。
+opencode には設定ファイルのフックが無く、`plugins/` の .js を読むプラグインの仕組みが
+ある（https://opencode.ai/docs/plugins.md）。code-viewer は自分だけのファイルを 1 つ置く。
+
+**opencode 2 と 1 でプラグインの API が違う**（2026-11-13。2.2.7 に上げた利用者で、1.19.5 で作った
+プラグインが「Plugin must export a default definition with an id and an effect or setup function」で
+読み込めなかった。https://opencode.ai/docs/build/plugins/migrate-v1.md ）。1 つの default export に、
+2 が読む `id` と `setup(ctx)`、1（1.18.29 以降）が呼ぶ `server()` を両方持たせる（公式の
+「Support V1 and V2 from one package」）。`@opencode/plugin` は import しない（依存の無いファイル 1 つ）。
+素の定義の object を 2.2.7 が読むことは実物で確かめた。ほかに書き出すものを足さない（1 は書き出した
+関数をそれぞれプラグインとして呼ぶので二重に申告する）。1.18.29 より古い 1 は対象外。
+
+| | opencode 1 | opencode 2 |
+|---|---|---|
+| 呼ばれ方 | `server({ directory })` が `event` と `dispose` を返す | `setup(ctx)`。出来事は `ctx.event.subscribe({ types, signal })`、片付けは setup が返す関数 |
+| 出来事の欄 | `event.properties` | `event.data`（2.2.7 で観測。欄の名前は logs に残した型だけ） |
+| 1 ターン | `session.status` の busy → `session.idle` | `session.execution.started` → `succeeded` / `failed` / `interrupted` |
+| 質問 | `question.asked` / `replied` / `rejected` | `form.created`（`data.form.sessionID`）/ `form.replied` / `form.cancelled` |
+| 許可 | `permission.asked`（古い版 `permission.updated`）/ `permission.replied` | `permission.asked`（`data.id`）/ `permission.replied`（`data.requestID`）。断っても replied で、続いて interrupted |
+| 下請け | `session.created` の `properties.info.parentID` | `session.created` の `data.parentID`（`data.sessionID` が下請け） |
+
+- **opencode 2 は既定で共有の裏のサーバ（`opencode serve --service`）にプラグインを読ませる**。裏のサーバは
+  最初に起こした端末の子として始まり、端末を閉じても残って（親が launchd に変わる）その端末の
+  `TMUX_PANE` を持ち続ける（2.2.7 で確かめた）。codex の `--no-daemon`（下）と同じ問題で、どの会話が
+  どのペインか分からない。プラグインは `process.argv` に `--service` があれば申告せず、理由を
+  `failures.jsonl` に 1 件残す（stage `service`）。code-viewer が起こす opencode には `--standalone` を付ける
+  （`server/accounts/shared-server.ts`。`--help` に載る版だけ）。そのときプラグインはペインの opencode の子
+  （`serve --stdio`）で動き、`TMUX_PANE` はそのペインのもの、終わると片付けが呼ばれ `exit` が届く。
+  ログインの状態の `opencode auth list` にも付ける（付けないと、裏のサーバが無いときに code-viewer の環境で
+  起こしてしまう）。自分で起こす opencode 2 は利用者が `--standalone` を付ける（ヘルプ・設定の案内）
+- opencode 2 の `session.execution.failed`（`data.error.type`・`message`）は claude の `StopFailure` と同じく
+  完了にせず入力待ち（理由 = エラー）。`interrupted`（Esc・許可を断った・質問を閉じた）は待機（`ready`）
+- opencode 2 は答えの残っている許可・質問を id でセッションごとに数え、全部に答えるまで答えの出来事を
+  送らない（モデルが道具を並べて呼ぶと許可が同時に 2 つ出て、1 つ目の答えで「作業中」に戻り理由が
+  消えた）
 
 - **ファイルの中身ごと code-viewer のもの。** 入れる = 書く、外す = 消す（`settings-file.ts` の
   約束をそのまま通す。読み方だけ JSON でない `parse` を渡し、消すときは `next` が null）。中身に
@@ -361,14 +393,20 @@ opencode には設定ファイルのフックが無く、起動時に `plugins/`
   `status` を渡すだけ。決めるのは core）
 - プラグインは同じセッションで同じ出来事が続けば 1 回にまとめ（`session.status` の busy は 1 ターンに
   何度も来る）、起動スクリプトを **1 つずつ順に** 呼ぶ（申告の時刻は CLI が起きたときに付くので、
-  並べて起こすと完了が作業中より先に着く）。下請けのセッション（`session.created` の `parentID`）は
+  並べて起こすと完了が作業中より先に着く）。列は `globalThis` に置き、opencode 2 がプラグインを
+  読み直しても同じ列に並べる。下請けのセッション（`session.created` の `parentID`）は
   許可と質問だけを送る（下請けの終わりで親が「完了」に見えないように）
 - 起動スクリプトを起こせない・異常終了したときは、起動スクリプトと同じ `failures.jsonl` に残す
   （子の出力は端末の画面を崩すので捨てる）
-- 置くのは全体の設定（`OPENCODE_CONFIG_DIR` は足して読む場所で、全体の設定は変わらない）。opencode は
-  起動時にプラグインを読むので、動いているものには起動し直すまで効かない
-- 確かめるときは本物の設定に置かない。`OPENCODE_CONFIG_DIR=<一時フォルダ>` で起動すると、その
-  `plugins/` も読む（足して読む場所なので本物はそのまま）
+- 置くのは全体の設定。`OPENCODE_CONFIG_DIR` があればそこ（`server/terminal/hooks.ts` の
+  `defaultAgentConfigDir`）: 2 ではそれが全体の設定の場所になり、その `plugins/` だけを読む
+  （2.2.7 で `~/.config/opencode/plugins/` は読まれなかった）。1 では足して読む場所で、そこも読む。
+  動いているものには起動し直すまで効かない（案内はそう書く）
+- 確かめるときは本物の設定に置かない。砂場（10）の `HOME` を変えれば全体の設定も砂場に移る。
+  opencode 2 の裏のサーバの待ち受けのポートは `HOME` を変えても同じ既定（49374）なので、利用者の
+  裏のサーバが動いていると砂場の裏のサーバは起きない。砂場では `opencode service set port <空き>` を
+  先に動かす（砂場の設定に書く）か、`--standalone` で起こす。`node` などが mise の shim だと、`HOME` を
+  変えたシェルでは動かない（信頼の記録が `HOME` の下）ので、絶対パスで起こす
 
 出来事と申告の対応は `core/agent-hooks.ts` の `HOOK_SPECS` と `agentEventForHook`（**2 つは
 必ず一緒に直す**）。上のコメントに入れなかった出来事とその理由がある。要点:
@@ -496,7 +534,7 @@ codex は既定で、最初に起こした端末が始めた共有の裏のサ�
 `TMUX_PANE` は最初の端末のペインになり、2 つ目以降の codex の状態がそのペインに付く（2026-11-12 に
 確かめた: 登録簿を空に向けた別の tmux の codex の 1 ターンが、失敗の記録に出ずに利用者の入口へ
 最初の端末のペインとして届いた。利用者の codex 4 つの出どころが全部 `screen` だった原因）。
-code-viewer が起こす codex には `--no-daemon` を付ける（`server/accounts/codex-daemon.ts`。`--help` に
+code-viewer が起こす codex には `--no-daemon` を付ける（`server/accounts/shared-server.ts`。`--help` に
 載っている版だけ。知らない版に付けると起動ごと失敗する。`--help` は 5 秒で打ち切る: 包んだコマンドが
 `--help` で終わらないと起動の要求ごと止まった）。自分で起こす codex は利用者が付ける（ヘルプ）。
 **codex のフックの状態がおかしいときは、まず共有の裏のサーバの環境（`ps eww` の `TMUX_PANE`）を見る。**
@@ -546,7 +584,8 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 `OPENCODE_CONFIG_DIR` は認証を動かさないので、分けない。`ACCOUNT_ENV.opencode` が null で、
 登録・新しく作るは `checkAddAccount` が `single-account` で断る（登録簿に書かれていても読めない扱い）。
 ペインのアカウントはプロセスを調べずに既定とする。ログインは `opencode auth login`、状態は
-`opencode auth list`（人向けの一覧の件数の行。メールアドレスは出ないので「誰として」に提供元の名前）
+`opencode auth list`（人向けの一覧。1 は件数の行、2 は 1 件 1 行の「提供元  名前  方式」と、無ければ
+`No authenticated integrations`。メールアドレスは出ないので「誰として」に提供元の名前）
 登録簿は `<状態ディレクトリ>/accounts.json`（起動コマンドと前回の起動の選択も同じファイル）。
 「新しく作る」の設定ディレクトリは
 `<状態ディレクトリ>/accounts/<種類>-<表示名の slug>`（同名があれば `-2`、`-3`）で、
@@ -780,7 +819,8 @@ A のアカウントのエージェントの作業を、ログインし直さず
    - opencode: `opencode --prompt "<指示>"`（`opencode --help`）。作業フォルダの外を読むかは
      permission の `external_directory` が決める（https://opencode.ai/docs/permissions/）
    - 前の担当が opencode: 会話のファイルが無い（データベース）。フックの `session_id` を使い、
-     指示に `opencode export <セッション>` で書き出して読むよう書く（`handoffSource`）。
+     指示に `opencode session export <セッション>`（1 は `opencode export <セッション>`。2 には無い）で
+     書き出して読むよう書く（`handoffSource`・`opencodeExportCommand`）。
      code-viewer は書き出さない・読まない（4 の「中身は読まない」と同じ）
    - codex: `codex "<指示>"` だけ。codex の `--add-dir` は書き込みの許可を足すもの（公式の CLI
      reference）で、読むだけには強すぎる。既定のサンドボックス（workspace-write / read-only）は
