@@ -199,9 +199,6 @@ function createDiffViewForShellTest(
       setServerGeneration: (generation) => {
         serverGeneration = generation;
       },
-      invalidateRepoSidebar() {
-        /* noop */
-      },
       diffText: () => text,
       getDiffRoot: overrides.getDiffRoot,
       $: <T extends Element = HTMLElement>(sel: string): T => {

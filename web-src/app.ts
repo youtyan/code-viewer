@@ -5754,7 +5754,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     setServerGeneration: (generation: number) => {
       SERVER_GENERATION = generation;
     },
-    invalidateRepoSidebar,
     diffText: () => uiText().diff,
     getDiffRoot: () => activeFileHistoryDiffHost || $("#diff"),
     getEmptyPane: () => activeFileHistoryEmptyHost || $("#empty"),
