@@ -7307,7 +7307,6 @@ window.GdpExpandLogic = GdpExpandLogic;
           window._lastMeta = null;
         },
         renderMeta,
-        invalidateRepoSidebar,
         clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
         placeSidebarToggle,
         setStatus,

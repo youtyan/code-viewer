@@ -7,7 +7,6 @@ export type EmptyDiffPaneDeps = {
   setFiles(files: FileMeta[]): void;
   clearLastMeta(): void;
   renderMeta(meta: DiffMeta | null): void;
-  invalidateRepoSidebar(): void;
   clearLoadQueue(): void;
   placeSidebarToggle(): void;
   setStatus(status: "live"): void;
@@ -26,7 +25,6 @@ export function showEmptyHistoryDiffPane(deps: EmptyDiffPaneDeps) {
   deps.setFiles([]);
   deps.clearLastMeta();
   deps.renderMeta(null);
-  deps.invalidateRepoSidebar();
   deps.clearLoadQueue();
   if (deps.empty) {
     deps.empty.classList.remove("hidden");
