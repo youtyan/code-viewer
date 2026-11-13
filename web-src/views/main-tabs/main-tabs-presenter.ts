@@ -2482,6 +2482,8 @@ export function createMainTabsPresenter(
 
   /** タブの中身の幅 (上限で切った後) の控え。畳んで描いていないタブの幅に使う。 */
   const naturalWidths = new Map<string, number>();
+  /** 列ごとの、最後に幅を合わせたときの材料 (fitTabs)。 */
+  const fittedInputs: Partial<Record<PaneSide, string>> = {};
 
   /**
    * 列に入りきらないときだけ、全部のタブを同じ割合で縮める (core/tab-widths.ts)。
@@ -2494,9 +2496,21 @@ export function createMainTabsPresenter(
     const section = sections[side];
     if (!section) return;
     const { strip, newButton } = section;
+    const style = getComputedStyle(strip);
+    // 幅を決める材料 (列の幅・字と単位の大きさ・列の中身) が前回と同じなら、幅を
+    // 消して測り直さない。描き直しはエージェントの監視の知らせ (1.5 秒ごと) でも
+    // 起き、そのたびに全部のタブのレイアウトを計算し直していた。
+    const inputs = [
+      strip.clientWidth,
+      style.font,
+      style.getPropertyValue("--space-unit"),
+      style.getPropertyValue("--icon-md"),
+      strip.innerHTML.replace(/--main-tab-w:[^;"]*;?/g, ""),
+    ].join("\n");
+    if (fittedInputs[side] === inputs) return;
+    fittedInputs[side] = inputs;
     const els = [...strip.querySelectorAll<HTMLElement>(".main-tab")];
     for (const el of els) el.style.removeProperty("--main-tab-w");
-    const style = getComputedStyle(strip);
     const unit = Number.parseFloat(style.getPropertyValue("--space-unit"));
     const gap = Number.parseFloat(style.columnGap) || 0;
     // 寸法の無い所 (測れない・列が描かれていない) では中身の幅のまま。
