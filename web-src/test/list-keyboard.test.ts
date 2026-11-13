@@ -106,6 +106,8 @@ describe("list tab stop", () => {
   test("止まり場所が変わらなければ書かず、変わったら移る行だけに書く", () => {
     const { list, rows } = installRows(["a", "b", "c"], "b");
     syncRows(list, rows);
+    // 属性の無い行も -1 を持つ (属性が無いと focus() でフォーカスを置けない)。
+    const attributes = rows.map((row) => row.getAttribute("tabindex"));
     const observer = new MutationObserver(() => undefined);
     observer.observe(list, { attributes: true, subtree: true });
     const written = () =>
@@ -125,7 +127,8 @@ describe("list tab stop", () => {
     rows[2]?.classList.add("active");
     observer.takeRecords();
     syncRows(list, rows);
-    expect({ unchanged, moved: written() }).toEqual({
+    expect({ attributes, unchanged, moved: written() }).toEqual({
+      attributes: ["-1", "0", "-1"],
       unchanged: [],
       moved: [
         "b aria-selected",

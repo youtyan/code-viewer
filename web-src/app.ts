@@ -446,11 +446,8 @@ import { toolsText } from "./views/tools/i18n";
 import { createToolsPresenter } from "./views/tools/tools-presenter";
 import { mountTopbarMore } from "./views/topbar-more";
 import { renderEmptyState } from "./views/ui/empty-state";
-import {
-  detachedElement,
-  setAttributeIfChanged,
-  templateElement,
-} from "./views/ui/renderer";
+import { setAttributeIfChanged } from "./views/ui/attributes";
+import { detachedElement, templateElement } from "./views/ui/renderer";
 import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
   createViewerSettings,
@@ -6923,6 +6920,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       trigger.classList.add("spinning");
       trigger.setAttribute("aria-busy", "true");
     }
+    // 自動更新を切っていると、変更の通知ではファイル一覧を追わない。押して
+    // 読み直すときは一覧も合わせる (変更の知らせの帯の再読み込みと同じ)。
+    followRepoSidebar();
     load().finally(() => {
       setTimeout(() => {
         topbarButton.classList.remove("spinning");
@@ -10356,8 +10356,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const first = attentionPanes(
       AGENT_MONITOR.snapshot().overview?.panes ?? [],
     )[0];
-    if (first) button.dataset.attention = first.state;
-    else delete button.dataset.attention;
+    setAttributeIfChanged(button, "data-attention", first?.state ?? null);
     const label = navExpandLabel();
     setAttributeIfChanged(button, "title", label);
     setAttributeIfChanged(button, "aria-label", label);

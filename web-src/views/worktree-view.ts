@@ -55,12 +55,8 @@ import { pageLanguage } from "./page-language";
 import type { PageView } from "./page-view";
 import { treeLevelPad } from "./tree-indent";
 import { iconTemplate } from "./ui/icon";
-import {
-  detachedElement,
-  renderOwned,
-  setAttributeIfChanged,
-  templateElement,
-} from "./ui/renderer";
+import { setAttributeIfChanged } from "./ui/attributes";
+import { detachedElement, renderOwned, templateElement } from "./ui/renderer";
 import { showFormDialog } from "./ui-dialog";
 import type { WorktreeText } from "./worktree-i18n";
 
@@ -2242,21 +2238,22 @@ export function createWorktreeView(
   function syncFileTabStop(list: HTMLElement, focused?: FocusedListRow | null) {
     const t = text();
     const tree = list.classList.contains("tree");
-    list.setAttribute("role", tree ? "tree" : "listbox");
-    list.setAttribute("aria-label", t.panes.fileListLabel);
+    setAttributeIfChanged(list, "role", tree ? "tree" : "listbox");
+    setAttributeIfChanged(list, "aria-label", t.panes.fileListLabel);
     const rows = fileRows();
     for (const item of list.querySelectorAll<HTMLElement>("li")) {
       if (rows.includes(item)) {
-        item.setAttribute("role", tree ? "treeitem" : "option");
+        setAttributeIfChanged(item, "role", tree ? "treeitem" : "option");
         if (item.dataset.worktreeDir !== undefined)
-          item.setAttribute(
+          setAttributeIfChanged(
+            item,
             "aria-expanded",
             String(!item.classList.contains("collapsed")),
           );
-      } else item.setAttribute("role", "none");
+      } else setAttributeIfChanged(item, "role", "none");
     }
     for (const group of list.querySelectorAll<HTMLElement>(".tree-children"))
-      group.setAttribute("role", "group");
+      setAttributeIfChanged(group, "role", "group");
     syncListTabStop(list, {
       rows,
       shown: shownFileRows(),

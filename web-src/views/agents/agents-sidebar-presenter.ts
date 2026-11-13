@@ -42,7 +42,8 @@ import { applyTabStop } from "../list-tab-stop";
 import type { ProjectActions } from "../projects/project-actions";
 import { projectLook } from "../projects/project-looks";
 import { showProjectMenu } from "../projects/project-menu";
-import { createRenderer, setAttributeIfChanged } from "../ui/renderer";
+import { setAttributeIfChanged } from "../ui/attributes";
+import { createRenderer } from "../ui/renderer";
 import { agentCardTemplate } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
 import {

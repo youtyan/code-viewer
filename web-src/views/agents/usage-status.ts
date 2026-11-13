@@ -27,7 +27,8 @@ import {
 } from "../../core/agent-accounts";
 import { formatErrorDetail } from "../../core/error-detail";
 import { createLayer } from "../ui/layer";
-import { createRenderer, setAttributeIfChanged } from "../ui/renderer";
+import { setAttributeIfChanged } from "../ui/attributes";
+import { createRenderer } from "../ui/renderer";
 import type { AccountsClient } from "./accounts-client";
 import { accountDisplayName } from "./accounts-dialogs";
 import type { AgentsText } from "./i18n";

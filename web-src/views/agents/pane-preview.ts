@@ -38,7 +38,7 @@ import {
 } from "../../core/pane-preview";
 import type { TerminalCaptureResponse } from "../../core/terminal-capture";
 import { createLayer } from "../ui/layer";
-import { setAttributeIfChanged } from "../ui/renderer";
+import { setAttributeIfChanged } from "../ui/attributes";
 
 /** 覗ける行の印。値はペインの id (`%3`)。 */
 const PANE_ATTR = "data-preview-pane";

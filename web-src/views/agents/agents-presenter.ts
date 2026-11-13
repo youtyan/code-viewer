@@ -56,11 +56,8 @@ import type { ProjectActions } from "../projects/project-actions";
 import { projectLook } from "../projects/project-looks";
 import { showProjectMenu } from "../projects/project-menu";
 import { emptyStateTemplate } from "../ui/empty-state";
-import {
-  createRenderer,
-  setAttributeIfChanged,
-  templateElement,
-} from "../ui/renderer";
+import { setAttributeIfChanged } from "../ui/attributes";
+import { createRenderer, templateElement } from "../ui/renderer";
 import { showAlertDialog } from "../ui-dialog";
 import { accountTagListTemplate } from "./account-tags";
 import type { AccountsBand } from "./accounts-band";

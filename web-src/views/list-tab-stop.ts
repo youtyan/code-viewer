@@ -8,7 +8,7 @@
 // なら選んだ行へ、そうでなければ同じ行の同じ部品へ戻す。行を作り直す一覧は、
 // 作り直す前に focusedListRow で控えて渡す (作り直すとフォーカスが body へ落ちる)。
 
-import { setAttributeIfChanged } from "./ui/renderer";
+import { setAttributeIfChanged } from "./ui/attributes";
 
 /**
  * フォーカスのあった行 (鍵) と、それが行そのものか中の部品か。部品なら、行の中の
@@ -68,8 +68,11 @@ export function applyTabStop(
 ): void {
   for (const item of items) {
     const want = item === stop ? 0 : -1;
+    // 属性の無い行は tabIndex が -1 を返すが、属性が無いと focus() で
+    // フォーカスを置けない (作業ツリーの一覧の行)。無ければ書く。
     for (const node of [item, ...actionsOf(item)])
-      if (node.tabIndex !== want) node.tabIndex = want;
+      if (node.tabIndex !== want || !node.hasAttribute("tabindex"))
+        node.tabIndex = want;
   }
 }
 

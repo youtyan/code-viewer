@@ -158,11 +158,19 @@ test("redrawing the virtual tree keeps the row elements and moves only the activ
     sameRows: row("src/alpha.ts") === alpha && row("src/beta.ts") === beta,
     alphaActive: alpha?.classList.contains("active"),
     betaActive: beta?.classList.contains("active"),
-    tabStops: [alpha?.tabIndex, beta?.tabIndex],
+    // 行と行の中のボタンを合わせて、止まり場所は選んだ行の 1 つだけ。
+    tabStops: [
+      ...document.querySelectorAll<HTMLElement>(
+        '#file-list-rows [tabindex="0"]',
+      ),
+    ].map(
+      (el) =>
+        el.closest("li")?.dataset.path ?? el.closest("li")?.dataset.dirpath,
+    ),
   }).toEqual({
     sameRows: true,
     alphaActive: false,
     betaActive: true,
-    tabStops: [-1, 0],
+    tabStops: ["src/beta.ts"],
   });
 });

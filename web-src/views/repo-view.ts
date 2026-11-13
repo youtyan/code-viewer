@@ -53,11 +53,8 @@ import { type RepoViewLanguage, repoViewText } from "./repo-view-i18n";
 import { createRepositoryWebLink as renderRepositoryWebLink } from "./repository-web-link";
 import { sidebarAncestorDirs } from "./sidebar";
 import { iconTemplate } from "./ui/icon";
-import {
-  renderOwned,
-  setAttributeIfChanged,
-  templateElement,
-} from "./ui/renderer";
+import { setAttributeIfChanged } from "./ui/attributes";
+import { renderOwned, templateElement } from "./ui/renderer";
 import {
   showAlertDialog,
   showConfirmDialog,

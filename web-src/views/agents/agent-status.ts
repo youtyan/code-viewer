@@ -8,7 +8,8 @@
 
 import { html } from "lit/html.js";
 import { headerAgentCounts } from "../../core/agent-overview";
-import { renderOwned, setAttributeIfChanged } from "../ui/renderer";
+import { setAttributeIfChanged } from "../ui/attributes";
+import { renderOwned } from "../ui/renderer";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
 
