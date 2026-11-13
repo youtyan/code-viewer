@@ -2,8 +2,8 @@
 // <div role="separator" tabindex="0">。ポインタとキーの扱いは
 // core/drag-resizer.ts の attachDragResizer をそのまま使う (つながっている間だけ)。
 
-import { html } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
+import { html } from "lit/html.js";
 import { attachDragResizer } from "../../core/drag-resizer";
 import { defineElement } from "./element";
 

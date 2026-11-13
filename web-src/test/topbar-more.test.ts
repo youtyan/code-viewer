@@ -5,6 +5,7 @@
 
 import "./_dom";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+
 const { topbarMoreItems } = await import("../views/topbar-more");
 
 const originalRects = HTMLElement.prototype.getClientRects;

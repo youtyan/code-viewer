@@ -5,8 +5,8 @@
 // 押したら cv-select (detail: { value }) を出す。今の値を押しても出す
 // (今の値を押し直したときの扱いは使う側が決める)。
 
-import { html, nothing } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
+import { html, nothing } from "lit/html.js";
 import { defineElement } from "./element";
 
 export const CV_SEGMENTED = "cv-segmented";

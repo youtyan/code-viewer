@@ -4,12 +4,12 @@
 import { html } from "lit/html.js";
 import { TOOL_IDS, type ToolId } from "../../core/tools";
 import type { ToolsText } from "./i18n";
-import type { StructuredFormat } from "./structured-text";
 import type {
   DraftInputEvent,
   ScratchpadFlash,
   ScratchpadRender,
 } from "./scratchpad-pane";
+import type { StructuredFormat } from "./structured-text";
 
 export type ToolsViewProps = {
   text: ToolsText;

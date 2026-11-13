@@ -5,8 +5,8 @@
 // 色を持たない。押したことは中の <button> の click がそのまま外へ届く
 // (無効の間は届かない)。
 
-import { html, nothing } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
+import { html, nothing } from "lit/html.js";
 import { defineElement } from "./element";
 import { iconTemplate } from "./icon";
 

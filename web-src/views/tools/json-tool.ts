@@ -5,8 +5,8 @@
 // YAML パーサは web/yaml.js を lazy import する。JSON を貼って JSON で出す
 // 限りロードは走らない。強調の HTML は shiki が作るもの (外の部品)。
 
-import { html } from "lit/html.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { html } from "lit/html.js";
 import {
   highlightToInnerHtml,
   loadShikiHighlighter,

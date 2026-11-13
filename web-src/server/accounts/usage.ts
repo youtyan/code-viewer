@@ -22,8 +22,10 @@ import type {
   AccountUsage,
   UsageWindow,
 } from "../../core/agent-accounts";
-import { usageSupported } from "../../core/agent-accounts";
-import { usageWindowsConflict } from "../../core/agent-accounts";
+import {
+  usageSupported,
+  usageWindowsConflict,
+} from "../../core/agent-accounts";
 import { formatErrorDetail } from "../../core/error-detail";
 import { errno } from "../terminal/settings-file";
 

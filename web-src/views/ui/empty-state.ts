@@ -4,8 +4,8 @@
 // キーの行だけを足す (style.css の「空の状態の案内」の節)。文言は呼び出し側が
 // 自分の i18n から渡す (ここは言語を持たない)。
 
-import { html, nothing } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
+import { html, nothing } from "lit/html.js";
 import { defineElement } from "./element";
 import { iconTemplate } from "./icon";
 import { templateElement } from "./renderer";

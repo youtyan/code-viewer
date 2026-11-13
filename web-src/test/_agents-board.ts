@@ -2,12 +2,12 @@
 // プロジェクトの操作を偽物にして描く。全体ボードのテスト (agents-view-empty・
 // agents-hook-hint) が使う。
 
+import type { AgentHooksResponse, HookAgent } from "../core/agent-hooks";
 import type {
   AgentOverviewResponse,
   AgentPane,
   AgentProjectInfo,
 } from "../core/agent-overview";
-import type { AgentHooksResponse, HookAgent } from "../core/agent-hooks";
 import type { AgentMonitor } from "../views/agents/agent-monitor";
 import { createAgentsPresenter } from "../views/agents/agents-presenter";
 import type { AgentsBoardView, BoardOrder } from "../views/agents/agents-view";

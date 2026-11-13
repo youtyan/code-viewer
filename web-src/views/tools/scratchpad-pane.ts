@@ -9,8 +9,8 @@
 // 上書きしないようにするため (Request Lifecycle Discipline と同じ考え方を、fetch
 // ではなく描画に当てたもの)。
 
-import { html, nothing, render } from "lit/html.js";
 import { live } from "lit/directives/live.js";
+import { html, nothing, render } from "lit/html.js";
 import { formatErrorDetail } from "../../core/error-detail";
 import { defineElement } from "../ui/element";
 import { emptyStateTemplate } from "../ui/empty-state";

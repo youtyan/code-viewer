@@ -5,8 +5,8 @@
 // キーの割り当ては出さない (OS や環境でキーが違い、OS の決まりともぶつかる。
 // キーはパレット・ヘルプのキーの一覧・title が示す)。
 
-import { html, nothing } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
+import { html, nothing } from "lit/html.js";
 import { defineElement } from "./element";
 
 export const CV_MENU = "cv-menu";
