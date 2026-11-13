@@ -6,6 +6,7 @@
 // toggle). Extracted from app.ts.
 
 import { keyed } from "lit/directives/keyed.js";
+import { repeat } from "lit/directives/repeat.js";
 import { nothing, type TemplateResult } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 import { classifyDiffFileKind } from "../core/diff-file-kinds";
@@ -1172,44 +1173,43 @@ export function createSidebar(
     if (!ul.classList.contains("tree-virtual")) return;
     const { start, end } = sidebarVirtualRange();
     const rowHeight = virtualRowHeight();
-    const rows: TemplateResult[] = [];
-    for (let i = start; i < end; i++) {
-      const row = SIDEBAR_VISIBLE_ROWS[i];
-      const active = row.path === SIDEBAR_VIRTUAL_ACTIVE_PATH;
-      const top = i * rowHeight;
-      if (row.kind === "dir" && row.dir)
-        rows.push(
-          dirRowTemplate(row.dir, row.depth, SIDEBAR_ON_FILE_CLICK, {
-            collapsed: dirEffectiveCollapsed(row.dir).effectiveCollapsed,
-            virtual: true,
-            toggleDir: virtualToggleDir(row.dir),
-            active,
-            top,
-          }),
-        );
-      else if (row.file)
-        rows.push(
-          fileRowTemplate(row.file, row.depth, SIDEBAR_ON_FILE_CLICK, {
-            active,
-            top,
-          }),
-        );
-    }
     const focused = focusedTreeRow(ul);
-    // 窓の行は描くたびに作り直す (行の要素を使い回さない。位置・開閉の印を
-    // 前の窓から持ち越さない)。
-    WINDOW_SEQ += 1;
-    renderOwned(ul, keyed(WINDOW_SEQ, rows));
+    // 行はパスで使い回し、変わった行だけを書き換える (描くたびに全部作り直すと、
+    // 変わっていない木が通知のたびに描き直された)。外から付ける印 (active・
+    // tabindex) は view が live() で描くので、使い回した行に前の印は残らない。
+    renderOwned(
+      ul,
+      repeat(
+        SIDEBAR_VISIBLE_ROWS.slice(start, end),
+        (row) => row.path,
+        (row, offset) => {
+          const active = row.path === SIDEBAR_VIRTUAL_ACTIVE_PATH;
+          const top = (start + offset) * rowHeight;
+          if (row.kind === "dir" && row.dir)
+            return dirRowTemplate(row.dir, row.depth, SIDEBAR_ON_FILE_CLICK, {
+              collapsed: dirEffectiveCollapsed(row.dir).effectiveCollapsed,
+              virtual: true,
+              toggleDir: virtualToggleDir(row.dir),
+              active,
+              top,
+            });
+          return row.file
+            ? fileRowTemplate(row.file, row.depth, SIDEBAR_ON_FILE_CLICK, {
+                active,
+                top,
+              })
+            : nothing;
+        },
+      ),
+    );
     ul.style.height = `${SIDEBAR_VISIBLE_ROWS.length * rowHeight}px`;
     syncTreeTabStop(ul, focused);
   }
 
-  /** 仮想表示の窓を描いた回数 (描くたびに行を作り直すための鍵)。 */
-  let WINDOW_SEQ = 0;
-
   // Files の木は Tab の止まり場所を 1 つだけ持つ (roving tabindex): 選んでいる
-  // 行、描いていなければ描いている先頭の行が tabIndex 0。行は選び直し・スクロール
-  // のたびに作り直すので、木の行 (か、その中のボタン) にフォーカスがあったら戻す:
+  // 行、描いていなければ描いている先頭の行が tabIndex 0。行はスクロールで窓から
+  // 出ると消え、並びが変わると動く (動かすとフォーカスが外れる) ので、木の行
+  // (か、その中のボタン) にフォーカスがあったら戻す:
   // 選び直した (j k でも ↑↓ でも) なら選んだ行へ、そうでなければ同じ行の同じ
   // 部品へ。どちらも描いていなければ #sidebar (キーの範囲はそのまま)。差分の
   // 一覧は対象にしない。
