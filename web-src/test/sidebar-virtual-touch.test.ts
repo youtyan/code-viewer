@@ -124,7 +124,7 @@ test("the virtual tree draws the rows that come into view when the list grows ta
 
 // 変更の通知のたびに、選んでいる行の印付け (markActive) と絞り込み (applyFilter)
 // が窓を描き直す。行を描くたびに作り直していた間は、何も変わっていない木が通知の
-// たびに描き直された。行は使い回し、印だけを付け替える。
+// たびに描き直された。行は使い回し、印 (active と Tab の止まり場所) だけを付け替える。
 test("redrawing the virtual tree keeps the row elements and moves only the active mark", () => {
   pointer(false);
   installSidebarDom(FILE_LIST_DOM);
@@ -158,5 +158,11 @@ test("redrawing the virtual tree keeps the row elements and moves only the activ
     sameRows: row("src/alpha.ts") === alpha && row("src/beta.ts") === beta,
     alphaActive: alpha?.classList.contains("active"),
     betaActive: beta?.classList.contains("active"),
-  }).toEqual({ sameRows: true, alphaActive: false, betaActive: true });
+    tabStops: [alpha?.tabIndex, beta?.tabIndex],
+  }).toEqual({
+    sameRows: true,
+    alphaActive: false,
+    betaActive: true,
+    tabStops: [-1, 0],
+  });
 });

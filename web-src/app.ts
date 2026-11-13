@@ -446,7 +446,11 @@ import { toolsText } from "./views/tools/i18n";
 import { createToolsPresenter } from "./views/tools/tools-presenter";
 import { mountTopbarMore } from "./views/topbar-more";
 import { renderEmptyState } from "./views/ui/empty-state";
-import { detachedElement, templateElement } from "./views/ui/renderer";
+import {
+  detachedElement,
+  setAttributeIfChanged,
+  templateElement,
+} from "./views/ui/renderer";
 import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
   createViewerSettings,
@@ -5119,91 +5123,60 @@ window.GdpExpandLogic = GdpExpandLogic;
       : "diff";
   }
 
+  /** 画面の入口のリンクの行き先 (入口の無い名前は null)。 */
+  function headerLinkRoute(name: string | undefined): AppRoute | null {
+    const range = currentRange();
+    switch (name) {
+      case "repo":
+        return {
+          screen: "repo",
+          ref: STATE.repoRef || "worktree",
+          path: "",
+          range,
+        };
+      // On the history screen the live range tracks the selected commit;
+      // the Diff Viewer link keeps the range the user picked before.
+      case "diff":
+        return { screen: "diff", range: preHistoryRange ?? range };
+      case "history":
+        return { screen: "history", ref: "HEAD", range };
+      case "journal":
+      case "database":
+      case "worktree":
+      case "agents":
+      case "settings":
+        return { screen: name, range };
+      case "help":
+        return {
+          screen: "help",
+          lang:
+            STATE.route.screen === "help"
+              ? helpLanguageFromRoute(STATE.route)
+              : STATE.language,
+          section: helpSectionFromRoute(STATE.route),
+          range,
+        };
+      default:
+        return null;
+    }
+  }
+
   function syncHeaderMenu() {
     document
       .querySelectorAll<HTMLAnchorElement>(ROUTE_LINK_SELECTOR)
       .forEach((link) => {
         const active = link.dataset.route === headerRouteForFront();
         link.classList.toggle("active", active);
-        link.setAttribute("aria-current", active ? "page" : "false");
+        setAttributeIfChanged(link, "aria-current", active ? "page" : "false");
         // href にもオーバーレイの状態を載せる。載せないと、Tools や Doctor を
         // 開いたままメニューを押した瞬間にシートが閉じたことになる。
-        if (link.dataset.route === "repo") {
-          link.href = withOverlayState(
-            buildRoute({
-              screen: "repo",
-              ref: STATE.repoRef || "worktree",
-              path: "",
-              range: currentRange(),
-            }),
+        const target = headerLinkRoute(link.dataset.route);
+        if (target)
+          setAttributeIfChanged(
+            link,
+            "href",
+            withOverlayState(buildRoute(target)),
           );
-        }
-        if (link.dataset.route === "diff") {
-          // On the history screen the live range tracks the selected commit;
-          // the Diff Viewer link keeps the range the user picked before.
-          link.href = withOverlayState(
-            buildRoute({
-              screen: "diff",
-              range: preHistoryRange ?? currentRange(),
-            }),
-          );
-        }
-        if (link.dataset.route === "history") {
-          link.href = withOverlayState(
-            buildRoute({
-              screen: "history",
-              ref: "HEAD",
-              range: currentRange(),
-            }),
-          );
-        }
-        if (link.dataset.route === "journal") {
-          link.href = withOverlayState(
-            buildRoute({
-              screen: "journal",
-              range: currentRange(),
-            }),
-          );
-        }
-        if (link.dataset.route === "database") {
-          link.href = withOverlayState(
-            buildRoute({
-              screen: "database",
-              range: currentRange(),
-            }),
-          );
-        }
-        if (link.dataset.route === "worktree") {
-          link.href = withOverlayState(
-            buildRoute({
-              screen: "worktree",
-              range: currentRange(),
-            }),
-          );
-        }
-        if (link.dataset.route === "agents") {
-          link.href = withOverlayState(
-            buildRoute({ screen: "agents", range: currentRange() }),
-          );
-        }
-        if (link.dataset.route === "help") {
-          link.href = withOverlayState(
-            buildRoute({
-              screen: "help",
-              lang:
-                STATE.route.screen === "help"
-                  ? helpLanguageFromRoute(STATE.route)
-                  : STATE.language,
-              section: helpSectionFromRoute(STATE.route),
-              range: currentRange(),
-            }),
-          );
-        }
-        if (link.dataset.route === "settings") {
-          link.href = withOverlayState(
-            buildRoute({ screen: "settings", range: currentRange() }),
-          );
-        }
       });
   }
 
@@ -10386,8 +10359,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (first) button.dataset.attention = first.state;
     else delete button.dataset.attention;
     const label = navExpandLabel();
-    button.title = label;
-    button.setAttribute("aria-label", label);
+    setAttributeIfChanged(button, "title", label);
+    setAttributeIfChanged(button, "aria-label", label);
   }
 
   /** 左のサイドバーの枠の文言 (中の一覧は AGENTS_SIDEBAR が貼る)。 */

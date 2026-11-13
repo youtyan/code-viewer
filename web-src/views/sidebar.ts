@@ -28,6 +28,7 @@ import type {
 import { TREE_WITHOUT_COMMIT_DATES } from "../core/types";
 import { DIFF_SCREEN_TEXT } from "./diff-view-i18n";
 import {
+  applyTabStop,
   type FocusedListRow,
   focusedListRow,
   syncListTabStop,
@@ -45,7 +46,11 @@ import {
   type SidebarView,
 } from "./sidebar-view";
 import { treeLevelPad } from "./tree-indent";
-import { renderOwned, templateElement } from "./ui/renderer";
+import {
+  renderOwned,
+  setAttributeIfChanged,
+  templateElement,
+} from "./ui/renderer";
 
 export type ViewerFontSize = "compact" | "regular" | "large" | "xlarge";
 
@@ -359,13 +364,14 @@ export function createSidebar(
     // 文言が「畳む / 出す」と状態で変わるので、押した状態 (aria-pressed) は
     // 付けない (「出す、押されている」と読まれて逆に聞こえた)。ファイル一覧が
     // 出ているかを開閉 (aria-expanded) で伝える。
-    button.setAttribute(
+    setAttributeIfChanged(
+      button,
       "aria-expanded",
       STATE.sidebarHidden ? "false" : "true",
     );
     const toggleTitle = sidebarToggleTitle(STATE.sidebarHidden);
-    button.title = toggleTitle;
-    button.setAttribute("aria-label", toggleTitle);
+    setAttributeIfChanged(button, "title", toggleTitle);
+    setAttributeIfChanged(button, "aria-label", toggleTitle);
     syncSidebarToggleIcon(button);
     return button;
   }
@@ -1240,9 +1246,9 @@ export function createSidebar(
     // 行の中のボタン (フォルダを OS で開く) は止まり場所の行の分だけ Tab に入れる。
     const actionOf = (row: HTMLElement | undefined) =>
       row?.querySelector<HTMLElement>("[data-row-action]") ?? null;
-    if (stop) stop.tabIndex = 0;
-    const stopAction = actionOf(stop);
-    if (stopAction) stopAction.tabIndex = 0;
+    applyTabStop(rows, stop ?? null, (row) =>
+      row.querySelectorAll<HTMLElement>("[data-row-action]"),
+    );
     if (!focused) return;
     const same = rows.find((row) => treeRowPath(row) === focused.path);
     const moved = active && treeRowPath(active) !== focused.path;

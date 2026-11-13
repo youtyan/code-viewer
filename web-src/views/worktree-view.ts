@@ -55,7 +55,12 @@ import { pageLanguage } from "./page-language";
 import type { PageView } from "./page-view";
 import { treeLevelPad } from "./tree-indent";
 import { iconTemplate } from "./ui/icon";
-import { detachedElement, renderOwned, templateElement } from "./ui/renderer";
+import {
+  detachedElement,
+  renderOwned,
+  setAttributeIfChanged,
+  templateElement,
+} from "./ui/renderer";
 import { showFormDialog } from "./ui-dialog";
 import type { WorktreeText } from "./worktree-i18n";
 
@@ -2299,7 +2304,7 @@ export function createWorktreeView(
     for (const button of sidebarViewButtons()) {
       const active = button.dataset.view === (tree ? "tree" : "flat");
       button.classList.toggle("active", active);
-      button.setAttribute("aria-pressed", String(active));
+      setAttributeIfChanged(button, "aria-pressed", String(active));
     }
     for (const button of document.querySelectorAll<HTMLButtonElement>(
       ".sb-tree-action",

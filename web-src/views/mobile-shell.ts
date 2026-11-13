@@ -1100,6 +1100,8 @@ export function installMobileShell(
     openTabs: () => setOpen("tabs"),
     close,
     setWaitingAgents(count) {
+      // 監視の知らせ (1.5 秒ごと) で呼ばれる。数が同じなら帯を書き直さない。
+      if (count === waitingAgents) return;
       waitingAgents = count;
       syncBar();
     },

@@ -53,7 +53,11 @@ import { type RepoViewLanguage, repoViewText } from "./repo-view-i18n";
 import { createRepositoryWebLink as renderRepositoryWebLink } from "./repository-web-link";
 import { sidebarAncestorDirs } from "./sidebar";
 import { iconTemplate } from "./ui/icon";
-import { renderOwned, templateElement } from "./ui/renderer";
+import {
+  renderOwned,
+  setAttributeIfChanged,
+  templateElement,
+} from "./ui/renderer";
 import {
   showAlertDialog,
   showConfirmDialog,
@@ -638,13 +642,21 @@ export function createRepoView(
     input.value = activeRef || ref || "worktree";
     // 既定 (worktree) のときはツリーの頭で小さなアイコンだけにし、ほかの ref を
     // 選んでいるときは値を出す (style.css のツリーの頭の節)。
-    wrap.dataset.defaultRef = String(input.value === "worktree");
+    setAttributeIfChanged(
+      wrap,
+      "data-default-ref",
+      String(input.value === "worktree"),
+    );
     // git のリポジトリでないプロジェクトでは ref を選べない (作業ツリーだけ)。
     // 隠さずに押せなくし、理由を title に出す (ref-picker.ts は開かない)。
     const unavailable = gitUnavailableReason();
     input.disabled = unavailable !== null;
-    input.title = unavailable ?? input.getAttribute("aria-label") ?? "";
-    wrap.setAttribute("aria-disabled", String(unavailable !== null));
+    setAttributeIfChanged(
+      input,
+      "title",
+      unavailable ?? input.getAttribute("aria-label") ?? "",
+    );
+    setAttributeIfChanged(wrap, "aria-disabled", String(unavailable !== null));
     wrap.hidden = activeRef == null;
     wrap.style.display = activeRef == null ? "none" : "";
     syncSidebarHeaderHeight();

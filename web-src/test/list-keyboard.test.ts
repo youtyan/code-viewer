@@ -101,6 +101,42 @@ describe("list tab stop", () => {
     });
   });
 
+  // 一覧はエージェントの監視の知らせ (1.5 秒ごと) でも描き直す。止まり場所が
+  // 同じなのに全部の行へ書き直すと、そのたびに属性の書き込みが走っていた。
+  test("止まり場所が変わらなければ書かず、変わったら移る行だけに書く", () => {
+    const { list, rows } = installRows(["a", "b", "c"], "b");
+    syncRows(list, rows);
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(list, { attributes: true, subtree: true });
+    const written = () =>
+      [
+        ...new Set(
+          observer
+            .takeRecords()
+            .map(
+              (r) =>
+                `${(r.target as HTMLElement).closest("li")?.dataset.key ?? "list"} ${r.attributeName}`,
+            ),
+        ),
+      ].sort();
+    syncRows(list, rows);
+    const unchanged = written();
+    rows[1]?.classList.remove("active");
+    rows[2]?.classList.add("active");
+    observer.takeRecords();
+    syncRows(list, rows);
+    expect({ unchanged, moved: written() }).toEqual({
+      unchanged: [],
+      moved: [
+        "b aria-selected",
+        "b tabindex",
+        "c aria-selected",
+        "c tabindex",
+        "list data-tab-stop-active",
+      ],
+    });
+  });
+
   test("選び直したら、選んだ行へフォーカスを移す", () => {
     const { list, rows } = installRows(["a", "b", "c"], "a");
     syncRows(list, rows);

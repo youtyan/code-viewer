@@ -38,6 +38,7 @@ import {
 } from "../../core/pane-preview";
 import type { TerminalCaptureResponse } from "../../core/terminal-capture";
 import { createLayer } from "../ui/layer";
+import { setAttributeIfChanged } from "../ui/renderer";
 
 /** 覗ける行の印。値はペインの id (`%3`)。 */
 const PANE_ATTR = "data-preview-pane";
@@ -57,8 +58,9 @@ export type PanePreviewText = {
 
 /** 行を覗ける行にする。name は窓の見出し (種類 · 要約 · 場所)。 */
 export function markPreviewRow(row: HTMLElement, pane: string, name: string) {
-  row.setAttribute(PANE_ATTR, pane);
-  row.setAttribute(NAME_ATTR, name);
+  // カードを描くたび (エージェントの監視で 1.5 秒ごと) に呼ばれる。
+  setAttributeIfChanged(row, PANE_ATTR, pane);
+  setAttributeIfChanged(row, NAME_ATTR, name);
 }
 
 /** 410 (ペインが閉じた)。ほかの失敗と分けて、取り直しを止める。 */

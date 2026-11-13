@@ -8,6 +8,8 @@
 // なら選んだ行へ、そうでなければ同じ行の同じ部品へ戻す。行を作り直す一覧は、
 // 作り直す前に focusedListRow で控えて渡す (作り直すとフォーカスが body へ落ちる)。
 
+import { setAttributeIfChanged } from "./ui/renderer";
+
 /**
  * フォーカスのあった行 (鍵) と、それが行そのものか中の部品か。部品なら、行の中の
  * フォーカスできる部品の何番目か (作り直した後の同じ部品へ戻す)。
@@ -52,6 +54,25 @@ export type ListTabStopOptions = {
   memo?: HTMLElement;
 };
 
+/**
+ * 止まり場所を stop の 1 つにし、ほか (と、その中の部品) を -1 にする。値が変わる
+ * 要素だけに書く: テンプレートで全部を -1 に戻してから 0 を付け直すと、変わって
+ * いない一覧でも描き直しのたびに 2 回ずつ書いていた (エージェントは 1.5 秒ごと)。
+ * items に入れなかった行は触らない (隠れた行は止まり場所になれず、見えるようになる
+ * ときに描き直しで付け直される)。
+ */
+export function applyTabStop(
+  items: Iterable<HTMLElement>,
+  stop: HTMLElement | null,
+  actionsOf: (item: HTMLElement) => Iterable<HTMLElement> = () => [],
+): void {
+  for (const item of items) {
+    const want = item === stop ? 0 : -1;
+    for (const node of [item, ...actionsOf(item)])
+      if (node.tabIndex !== want) node.tabIndex = want;
+  }
+}
+
 /** list の行 (rowSelector) にフォーカスがあれば、その鍵を返す。 */
 export function focusedListRow(
   list: HTMLElement,
@@ -83,17 +104,15 @@ export function syncListTabStop(
     actionSelector
       ? [...row.querySelectorAll<HTMLElement>(actionSelector)]
       : [];
-  for (const row of rows) {
-    row.tabIndex = row === stop ? 0 : -1;
-    if (options.ariaSelected)
-      row.setAttribute("aria-selected", String(row === active));
-    for (const action of actionsOf(row))
-      action.tabIndex = row === stop ? 0 : -1;
-  }
+  applyTabStop(rows, stop, actionsOf);
+  if (options.ariaSelected)
+    for (const row of rows) {
+      setAttributeIfChanged(row, "aria-selected", String(row === active));
+    }
   const activeKey = active ? keyOf(active) : "";
   const memo = options.memo ?? list;
   const previousKey = memo.dataset.tabStopActive ?? "";
-  memo.dataset.tabStopActive = activeKey;
+  setAttributeIfChanged(memo, "data-tab-stop-active", activeKey);
   const focused =
     options.focused === undefined
       ? focusedFrom(list, rows, keyOf)

@@ -27,7 +27,7 @@ import {
 } from "../../core/agent-accounts";
 import { formatErrorDetail } from "../../core/error-detail";
 import { createLayer } from "../ui/layer";
-import { createRenderer } from "../ui/renderer";
+import { createRenderer, setAttributeIfChanged } from "../ui/renderer";
 import type { AccountsClient } from "./accounts-client";
 import { accountDisplayName } from "./accounts-dialogs";
 import type { AgentsText } from "./i18n";
@@ -164,7 +164,11 @@ export function createUsageStatusPresenter(
     ]);
     if (!force && next === lastSignature) return;
     lastSignature = next;
-    root.setAttribute("aria-label", deps.getText().sidebar.usageLabel);
+    setAttributeIfChanged(
+      root,
+      "aria-label",
+      deps.getText().sidebar.usageLabel,
+    );
     items = (data?.accounts ?? [])
       .map((account) => itemProps(account, now))
       .filter((item): item is UsageItemProps => item !== null);

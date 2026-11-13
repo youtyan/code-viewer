@@ -8,7 +8,7 @@
 
 import { html } from "lit/html.js";
 import { headerAgentCounts } from "../../core/agent-overview";
-import { renderOwned } from "../ui/renderer";
+import { renderOwned, setAttributeIfChanged } from "../ui/renderer";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
 
@@ -73,8 +73,8 @@ export function mountAgentStatus(
     const title = error
       ? text.headerFailed(error)
       : text.headerTitle(counts.waiting, counts.working);
-    button.title = title;
-    button.setAttribute("aria-label", title);
+    setAttributeIfChanged(button, "title", title);
+    setAttributeIfChanged(button, "aria-label", title);
     button.hidden = false;
   }
 
