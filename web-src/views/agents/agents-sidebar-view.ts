@@ -210,7 +210,7 @@ function project(
       type="button"
       class="nav-project-toggle"
       role="treeitem"
-      tabindex=${live("-1")}
+      tabindex="-1"
       data-nav-item=${`project:${item.root}`}
       aria-expanded=${item.hasAgents ? String(!item.collapsed) : nothing}
       aria-current=${item.here ? "page" : nothing}
@@ -333,7 +333,7 @@ export const DEFAULT_VIEW: AgentsSidebarView = (props) => {
                 class="nav-section-title nav-stopped-toggle"
                 id="nav-stopped-title"
                 role="treeitem"
-                tabindex=${live("-1")}
+                tabindex="-1"
                 data-nav-item="stopped"
                 aria-expanded=${String(stopped.open)}
                 title=${stopped.title}

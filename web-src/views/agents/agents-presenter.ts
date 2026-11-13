@@ -50,11 +50,13 @@ import {
   runningProjectRoots,
 } from "../../core/project-running";
 import { showContextMenu } from "../context-menu";
+import { applyTabStop } from "../list-tab-stop";
 import type { PageView } from "../page-view";
 import type { ProjectActions } from "../projects/project-actions";
 import { projectLook } from "../projects/project-looks";
 import { showProjectMenu } from "../projects/project-menu";
 import { emptyStateTemplate } from "../ui/empty-state";
+import { setAttributeIfChanged } from "../ui/attributes";
 import { createRenderer, templateElement } from "../ui/renderer";
 import { showAlertDialog } from "../ui-dialog";
 import { accountTagListTemplate } from "./account-tags";
@@ -925,7 +927,7 @@ export function createAgentsPresenter(
         ? document.activeElement.getAttribute(NAV_ATTR)
         : null;
     props = buildProps();
-    root.setAttribute("aria-label", props.ariaLabel);
+    setAttributeIfChanged(root, "aria-label", props.ariaLabel);
     deps.accountsBand.render();
     renderer.flush();
 
@@ -941,7 +943,7 @@ export function createAgentsPresenter(
       navs.find((item) => item.classList.contains("active")) ??
       navs.find((item) => item.classList.contains("agents-row")) ??
       navs[0];
-    if (tabStop) tabStop.tabIndex = 0;
+    applyTabStop(navs, tabStop ?? null);
     restore?.focus({ preventScroll: true });
   }
 
@@ -978,8 +980,7 @@ export function createAgentsPresenter(
     const target = navs[next];
     if (!target) return;
     event.preventDefault();
-    for (const item of navs) item.tabIndex = -1;
-    target.tabIndex = 0;
+    applyTabStop(navs, target);
     target.focus();
     target.scrollIntoView({ block: "nearest" });
   }

@@ -2,6 +2,7 @@
 // Claude /usage と Codex account/rateLimits/read はモデルに応答を求めない。
 // 更新に失敗したら理由と全文のコピーを出す。旧サーバからの画面待ちの応答も扱う。
 
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import {
   type AccountStatus,
   type UsageCheckFailure,
@@ -11,7 +12,6 @@ import {
 import { abbreviateHome } from "../../core/agent-overview";
 import { showCopyFailure } from "../../core/copy-failure";
 import { formatErrorDetail } from "../../core/error-detail";
-import { html, nothing, type TemplateResult } from "lit/html.js";
 import type { ContextMenuItem } from "../context-menu";
 import { defineElement } from "../ui/element";
 import type { AccountsClient, UsageCheckState } from "./accounts-client";

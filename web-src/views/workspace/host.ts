@@ -8,8 +8,8 @@
 // - 面の並び・URL・タブの配置は窓ごとに保存する (views/workspace/store.ts)
 // - どの面も最小の大きさで並ばない窓では、フォーカスのある面だけを出す
 
-import { html } from "lit/html.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { html } from "lit/html.js";
 import { attachDragResizer } from "../../core/drag-resizer";
 import {
   closePane,

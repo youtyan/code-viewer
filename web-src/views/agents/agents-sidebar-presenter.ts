@@ -38,9 +38,11 @@ import {
 } from "../../core/project-running";
 import { projectDropBefore } from "../../core/projects";
 import { showContextMenu } from "../context-menu";
+import { applyTabStop } from "../list-tab-stop";
 import type { ProjectActions } from "../projects/project-actions";
 import { projectLook } from "../projects/project-looks";
 import { showProjectMenu } from "../projects/project-menu";
+import { setAttributeIfChanged } from "../ui/attributes";
 import { createRenderer } from "../ui/renderer";
 import { agentCardTemplate } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
@@ -726,7 +728,7 @@ export function createAgentsSidebarPresenter(
     lastSignature = next;
     const focused = focusedKeys();
     currentProps = buildProps();
-    root.setAttribute("aria-label", currentProps.ariaLabel);
+    setAttributeIfChanged(root, "aria-label", currentProps.ariaLabel);
     // 描いた直後にフォーカスを戻し、Tab で入る 1 つを決めるので、まとめずに
     // いまここで描く。
     renderer.flush();
@@ -752,7 +754,7 @@ export function createAgentsSidebarPresenter(
       restore ??
       items.find((item) => item.classList.contains("active")) ??
       items[0];
-    if (tabStop) tabStop.tabIndex = 0;
+    applyTabStop(items, tabStop ?? null);
     if (focused) (action ?? tabStop)?.focus({ preventScroll: true });
   }
 
@@ -842,8 +844,7 @@ export function createAgentsSidebarPresenter(
     const item = items[next];
     if (!item) return;
     event.preventDefault();
-    for (const other of items) other.tabIndex = -1;
-    item.tabIndex = 0;
+    applyTabStop(items, item);
     item.focus();
     item.scrollIntoView({ block: "nearest" });
   }

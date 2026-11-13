@@ -194,7 +194,7 @@ export const DEFAULT_VIEW: SidebarView = {
   dirRow: (props) =>
     html`<li
       class=${live(props.className)}
-      tabindex=${live("-1")}
+      tabindex="-1"
       data-dirpath=${props.path}
       data-type="tree"
       data-children-omitted-reason=${ifDefined(props.omittedReason)}
@@ -224,7 +224,7 @@ export const DEFAULT_VIEW: SidebarView = {
   fileRow: (props) =>
     html`<li
       class=${live(props.className)}
-      tabindex=${live("-1")}
+      tabindex="-1"
       data-path=${props.path}
       data-type=${props.type}
       title=${ifDefined(props.title)}
@@ -240,7 +240,7 @@ export const DEFAULT_VIEW: SidebarView = {
   flatRow: (props) =>
     html`<li
       class=${live(props.className)}
-      tabindex=${live("-1")}
+      tabindex="-1"
       data-index=${String(props.index)}
       data-path=${props.path}
       data-type=${props.type}

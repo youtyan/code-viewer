@@ -1,8 +1,8 @@
 // 最下段の使用量の欄と、押すと開くポップオーバーの表示。usage-status.ts
 // (presenter) が渡す値だけから描く。
 
-import { html, nothing, type TemplateResult } from "lit/html.js";
 import { ifDefined } from "lit/directives/if-defined.js";
+import { html, nothing, type TemplateResult } from "lit/html.js";
 import { SYNC_16_PATH } from "../../core/icons";
 import { iconTemplate } from "../ui/icon";
 

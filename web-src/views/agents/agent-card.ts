@@ -11,7 +11,6 @@
 // 違う) が持つ。
 
 import { ifDefined } from "lit/directives/if-defined.js";
-import { live } from "lit/directives/live.js";
 import { ref } from "lit/directives/ref.js";
 import { html, nothing, render, type TemplateResult } from "lit/html.js";
 import {
@@ -171,7 +170,7 @@ export function agentRowTemplate(
     data-nav-item=${options.base === "nav-agent" ? key : nothing}
     data-agent-nav=${options.base === "agents-row" ? key : nothing}
     role="treeitem"
-    tabindex=${live("-1")}
+    tabindex="-1"
     aria-current=${options.active ? "true" : nothing}
     title=${options.title}
     aria-label=${ifDefined(options.ariaLabel)}

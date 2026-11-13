@@ -45,7 +45,6 @@ describe("history empty diff pane", () => {
     };
     const sidebarRenders: SidebarItem[][] = [];
     const metaRenders: Array<DiffMeta | null> = [];
-    let repoInvalidated = 0;
     let loadQueueCleared = 0;
     let togglePlaced = 0;
     const statuses: string[] = [];
@@ -64,9 +63,6 @@ describe("history empty diff pane", () => {
       },
       renderMeta(meta) {
         metaRenders.push(meta);
-      },
-      invalidateRepoSidebar() {
-        repoInvalidated++;
       },
       clearLoadQueue() {
         loadQueueCleared++;
@@ -89,7 +85,6 @@ describe("history empty diff pane", () => {
     expect(files).toEqual([]);
     expect(lastMeta).toBeNull();
     expect(metaRenders).toEqual([null]);
-    expect(repoInvalidated).toBe(1);
     expect(loadQueueCleared).toBe(1);
     expect(togglePlaced).toBe(1);
     expect(empty.removedClasses).toEqual(["hidden", "empty-with-actions"]);
@@ -117,9 +112,6 @@ describe("history empty diff pane", () => {
         /* noop */
       },
       renderMeta() {
-        /* noop */
-      },
-      invalidateRepoSidebar() {
         /* noop */
       },
       clearLoadQueue() {

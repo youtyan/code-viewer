@@ -356,9 +356,6 @@ describe("sidebar toggle placement", () => {
       renderMeta() {
         /* noop */
       },
-      invalidateRepoSidebar() {
-        /* noop */
-      },
       clearLoadQueue() {
         /* noop */
       },

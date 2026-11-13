@@ -5,6 +5,7 @@
 import "./_dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { TOUCH_MEDIA_QUERY } from "../core/mobile-layout";
+import { FILE_LIST_DOM } from "../views/sidebar";
 import { createSidebarForTest, installSidebarDom } from "./_sidebar-fixture";
 
 const originalMatchMedia = () => window.matchMedia;
@@ -119,4 +120,57 @@ test("the virtual tree draws the rows that come into view when the list grows ta
   setHeight(100 * 30);
   for (const notify of resized) notify();
   expect(drawn()).toBe(116);
+});
+
+// 変更の通知のたびに、選んでいる行の印付け (markActive) と絞り込み (applyFilter)
+// が窓を描き直す。行を描くたびに作り直していた間は、何も変わっていない木が通知の
+// たびに描き直された。行は使い回し、印 (active と Tab の止まり場所) だけを付け替える。
+test("redrawing the virtual tree keeps the row elements and moves only the active mark", () => {
+  pointer(false);
+  installSidebarDom(FILE_LIST_DOM);
+  const sidebar = createSidebarForTest({ dom: FILE_LIST_DOM });
+  sidebar.renderSidebar(
+    [
+      { path: "src", type: "tree" as const },
+      { path: "src/alpha.ts", type: "blob" as const },
+      { path: "src/beta.ts", type: "blob" as const },
+    ],
+    () => {
+      /* noop */
+    },
+  );
+  const row = (path: string) =>
+    document.querySelector<HTMLElement>(
+      `#file-list-rows li[data-path="${path}"]`,
+    );
+  const alpha = row("src/alpha.ts");
+  const beta = row("src/beta.ts");
+
+  sidebar.markActive("src/alpha.ts");
+  sidebar.applyFilter();
+  expect([
+    row("src/alpha.ts") === alpha,
+    alpha?.classList.contains("active"),
+  ]).toEqual([true, true]);
+
+  sidebar.markActive("src/beta.ts");
+  expect({
+    sameRows: row("src/alpha.ts") === alpha && row("src/beta.ts") === beta,
+    alphaActive: alpha?.classList.contains("active"),
+    betaActive: beta?.classList.contains("active"),
+    // 行と行の中のボタンを合わせて、止まり場所は選んだ行の 1 つだけ。
+    tabStops: [
+      ...document.querySelectorAll<HTMLElement>(
+        '#file-list-rows [tabindex="0"]',
+      ),
+    ].map(
+      (el) =>
+        el.closest("li")?.dataset.path ?? el.closest("li")?.dataset.dirpath,
+    ),
+  }).toEqual({
+    sameRows: true,
+    alphaActive: false,
+    betaActive: true,
+    tabStops: ["src/beta.ts"],
+  });
 });

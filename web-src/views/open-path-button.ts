@@ -1,7 +1,6 @@
 // フォルダを OS のファイルの画面で開くボタン (ファイルの頭・左のファイル一覧の
 // フォルダの行)。押しても外 (行・頭) の押しには伝えない。
 
-import { live } from "lit/directives/live.js";
 import { html, nothing } from "lit/html.js";
 import { OPEN_EXTERNAL_16_PATH } from "../core/icons";
 import { iconTemplate } from "./ui/icon";
@@ -17,7 +16,7 @@ export function openPathButtonTemplate(
     class="gdp-file-header-icon gdp-open-path"
     title=${title}
     aria-label=${title}
-    tabindex=${rowAction ? live("-1") : nothing}
+    tabindex=${rowAction ? "-1" : nothing}
     data-row-action=${rowAction ? "" : nothing}
     @click=${(event: MouseEvent) => {
       event.stopPropagation();

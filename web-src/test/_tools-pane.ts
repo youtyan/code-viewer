@@ -3,8 +3,8 @@
 
 import { toolsText } from "../views/tools/i18n";
 import {
-  type CvScratchpadPane,
   CV_SCRATCHPAD_PANE,
+  type CvScratchpadPane,
   defineCvScratchpadPane,
   type ScratchpadPaneProps,
 } from "../views/tools/scratchpad-pane";

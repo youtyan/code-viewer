@@ -34,8 +34,8 @@ import { basename, dirname, join } from "node:path";
 import {
   AGENT_HOOK_MARKER,
   type AgentHookFailure,
-  type AgentHookState,
   type AgentHookPlanResponse,
+  type AgentHookState,
   type AgentHookStatus,
   type AgentHooksResponse,
   checkHookShape,

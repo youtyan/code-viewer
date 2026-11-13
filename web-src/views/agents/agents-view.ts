@@ -225,7 +225,7 @@ function projectTemplate(
     type="button"
     class="agents-project-toggle"
     data-agent-nav=${`project:${project.root}`}
-    tabindex=${live("-1")}
+    tabindex="-1"
     aria-expanded=${String(!project.collapsed)}
     title=${project.toggleTitle}
     @click=${() => props.onToggleProject(project.root)}
@@ -304,7 +304,7 @@ function listEntryTemplate(
         type="button"
         class="agents-stopped-toggle"
         data-agent-nav="stopped"
-        tabindex=${live("-1")}
+        tabindex="-1"
         aria-expanded=${String(entry.open)}
         title=${entry.title}
         @click=${() => props.onToggleStopped()}

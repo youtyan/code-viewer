@@ -6,6 +6,7 @@
 // toggle). Extracted from app.ts.
 
 import { keyed } from "lit/directives/keyed.js";
+import { repeat } from "lit/directives/repeat.js";
 import { nothing, type TemplateResult } from "lit/html.js";
 import { apiUrl } from "../core/api-url";
 import { classifyDiffFileKind } from "../core/diff-file-kinds";
@@ -27,6 +28,7 @@ import type {
 import { TREE_WITHOUT_COMMIT_DATES } from "../core/types";
 import { DIFF_SCREEN_TEXT } from "./diff-view-i18n";
 import {
+  applyTabStop,
   type FocusedListRow,
   focusedListRow,
   syncListTabStop,
@@ -44,6 +46,7 @@ import {
   type SidebarView,
 } from "./sidebar-view";
 import { treeLevelPad } from "./tree-indent";
+import { setAttributeIfChanged } from "./ui/attributes";
 import { renderOwned, templateElement } from "./ui/renderer";
 
 export type ViewerFontSize = "compact" | "regular" | "large" | "xlarge";
@@ -358,13 +361,14 @@ export function createSidebar(
     // 文言が「畳む / 出す」と状態で変わるので、押した状態 (aria-pressed) は
     // 付けない (「出す、押されている」と読まれて逆に聞こえた)。ファイル一覧が
     // 出ているかを開閉 (aria-expanded) で伝える。
-    button.setAttribute(
+    setAttributeIfChanged(
+      button,
       "aria-expanded",
       STATE.sidebarHidden ? "false" : "true",
     );
     const toggleTitle = sidebarToggleTitle(STATE.sidebarHidden);
-    button.title = toggleTitle;
-    button.setAttribute("aria-label", toggleTitle);
+    setAttributeIfChanged(button, "title", toggleTitle);
+    setAttributeIfChanged(button, "aria-label", toggleTitle);
     syncSidebarToggleIcon(button);
     return button;
   }
@@ -1172,48 +1176,51 @@ export function createSidebar(
     if (!ul.classList.contains("tree-virtual")) return;
     const { start, end } = sidebarVirtualRange();
     const rowHeight = virtualRowHeight();
-    const rows: TemplateResult[] = [];
-    for (let i = start; i < end; i++) {
-      const row = SIDEBAR_VISIBLE_ROWS[i];
-      const active = row.path === SIDEBAR_VIRTUAL_ACTIVE_PATH;
-      const top = i * rowHeight;
-      if (row.kind === "dir" && row.dir)
-        rows.push(
-          dirRowTemplate(row.dir, row.depth, SIDEBAR_ON_FILE_CLICK, {
-            collapsed: dirEffectiveCollapsed(row.dir).effectiveCollapsed,
-            virtual: true,
-            toggleDir: virtualToggleDir(row.dir),
-            active,
-            top,
-          }),
-        );
-      else if (row.file)
-        rows.push(
-          fileRowTemplate(row.file, row.depth, SIDEBAR_ON_FILE_CLICK, {
-            active,
-            top,
-          }),
-        );
-    }
     const focused = focusedTreeRow(ul);
-    // 窓の行は描くたびに作り直す (行の要素を使い回さない。位置・開閉の印を
-    // 前の窓から持ち越さない)。
-    WINDOW_SEQ += 1;
-    renderOwned(ul, keyed(WINDOW_SEQ, rows));
+    // 行は種類とパスで使い回し、変わった行だけを書き換える (描くたびに全部作り
+    // 直すと、変わっていない木が通知のたびに描き直された)。消したファイルと同じ
+    // 名前のフォルダは同じパスで並ぶので、鍵に種類も入れる。使い回した行の印は、
+    // active は view が live() で描き直し、tabindex は直後の syncTreeTabStop が
+    // 窓の全行に付け直す。
+    renderOwned(
+      ul,
+      repeat(
+        SIDEBAR_VISIBLE_ROWS.slice(start, end),
+        (row) => `${row.kind}:${row.path}`,
+        (row, offset) => {
+          const active = row.path === SIDEBAR_VIRTUAL_ACTIVE_PATH;
+          const top = (start + offset) * rowHeight;
+          if (row.kind === "dir" && row.dir)
+            return dirRowTemplate(row.dir, row.depth, SIDEBAR_ON_FILE_CLICK, {
+              collapsed: dirEffectiveCollapsed(row.dir).effectiveCollapsed,
+              virtual: true,
+              toggleDir: virtualToggleDir(row.dir),
+              active,
+              top,
+            });
+          return row.file
+            ? fileRowTemplate(row.file, row.depth, SIDEBAR_ON_FILE_CLICK, {
+                active,
+                top,
+              })
+            : nothing;
+        },
+      ),
+    );
     ul.style.height = `${SIDEBAR_VISIBLE_ROWS.length * rowHeight}px`;
     syncTreeTabStop(ul, focused);
   }
 
-  /** 仮想表示の窓を描いた回数 (描くたびに行を作り直すための鍵)。 */
-  let WINDOW_SEQ = 0;
-
   // Files の木は Tab の止まり場所を 1 つだけ持つ (roving tabindex): 選んでいる
-  // 行、描いていなければ描いている先頭の行が tabIndex 0。行は選び直し・スクロール
-  // のたびに作り直すので、木の行 (か、その中のボタン) にフォーカスがあったら戻す:
+  // 行、描いていなければ描いている先頭の行が tabIndex 0。行はスクロールで窓から
+  // 出ると消え、並びが変わると動く (動かすとフォーカスが外れる) ので、木の行
+  // (か、その中のボタン) にフォーカスがあったら戻す:
   // 選び直した (j k でも ↑↓ でも) なら選んだ行へ、そうでなければ同じ行の同じ
   // 部品へ。どちらも描いていなければ #sidebar (キーの範囲はそのまま)。差分の
   // 一覧は対象にしない。
   const TREE_ROW_SELECTOR = ":scope > li[data-path], :scope > li[data-dirpath]";
+  /** 行の中のボタン (フォルダを OS で開く)。止まり場所の行の分だけ Tab に入れる。 */
+  const ROW_ACTION_SELECTOR = "[data-row-action]";
 
   type FocusedTreeRow = { path: string; onAction: boolean };
 
@@ -1239,10 +1246,10 @@ export function createSidebar(
     const stop = active ?? rows[0];
     // 行の中のボタン (フォルダを OS で開く) は止まり場所の行の分だけ Tab に入れる。
     const actionOf = (row: HTMLElement | undefined) =>
-      row?.querySelector<HTMLElement>("[data-row-action]") ?? null;
-    if (stop) stop.tabIndex = 0;
-    const stopAction = actionOf(stop);
-    if (stopAction) stopAction.tabIndex = 0;
+      row?.querySelector<HTMLElement>(ROW_ACTION_SELECTOR) ?? null;
+    applyTabStop(rows, stop ?? null, (row) =>
+      row.querySelectorAll<HTMLElement>(ROW_ACTION_SELECTOR),
+    );
     if (!focused) return;
     const same = rows.find((row) => treeRowPath(row) === focused.path);
     const moved = active && treeRowPath(active) !== focused.path;
@@ -1683,7 +1690,8 @@ export function createSidebar(
     const rows = $$<HTMLElement>(SIDEBAR_ITEM_SELECTOR);
     for (const row of rows)
       if (row.dataset.dirpath !== undefined)
-        row.setAttribute(
+        setAttributeIfChanged(
+          row,
           "aria-expanded",
           String(!row.classList.contains("collapsed")),
         );
@@ -1692,7 +1700,7 @@ export function createSidebar(
       shown: rows.filter(isSidebarRowVisible),
       keyOf: sidebarItemPath,
       isActive: (row) => row.classList.contains("active"),
-      actionSelector: "[data-row-action]",
+      actionSelector: ROW_ACTION_SELECTOR,
       ariaSelected: true,
       ...(focused === undefined ? {} : { focused }),
       fallback: document.querySelector<HTMLElement>(DOM.root),
@@ -1713,15 +1721,16 @@ export function createSidebar(
       ul.removeAttribute("aria-label");
       return;
     }
-    ul.setAttribute("role", treeMode ? "tree" : "listbox");
-    ul.setAttribute(
+    setAttributeIfChanged(ul, "role", treeMode ? "tree" : "listbox");
+    setAttributeIfChanged(
+      ul,
       "aria-label",
       DIFF_SCREEN_TEXT[pageLanguage()].fileListLabel,
     );
     for (const row of $$<HTMLElement>(SIDEBAR_ITEM_SELECTOR))
-      row.setAttribute("role", treeMode ? "treeitem" : "option");
+      setAttributeIfChanged(row, "role", treeMode ? "treeitem" : "option");
     for (const group of ul.querySelectorAll<HTMLElement>(".tree-children"))
-      group.setAttribute("role", "group");
+      setAttributeIfChanged(group, "role", "group");
   }
 
   /** 見出しの全部開く / 全部畳むのボタンを、この一覧に付ける (一覧ごとに 1 組)。 */

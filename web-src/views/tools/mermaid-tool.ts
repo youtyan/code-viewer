@@ -2,9 +2,9 @@
 // 1 枚の図として描く。ズーム / ドラッグパンは ER 図と同じ cv-diagram-viewport を
 // 使うので、操作感は DB の ER タブと揃う。図の SVG は mermaid が作るもの (外の部品)。
 
-import { html } from "lit/html.js";
 import { keyed } from "lit/directives/keyed.js";
 import { createRef, ref } from "lit/directives/ref.js";
+import { html } from "lit/html.js";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { loadMermaid } from "../../core/mermaid-loader";
 import { phoneMediaQuery } from "../shell/workspace";

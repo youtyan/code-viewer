@@ -96,7 +96,6 @@ export type DiffViewDeps = {
   applyHideTests(): void;
   getServerGeneration(): number;
   setServerGeneration(generation: number): void;
-  invalidateRepoSidebar(): void;
   diffText(): DiffViewText;
   $: <T extends Element = HTMLElement>(sel: string) => T;
   $$: <T extends Element = HTMLElement>(sel: string) => T[];
@@ -518,7 +517,6 @@ export function createDiffView(deps: DiffViewDeps, view = DEFAULT_VIEW) {
     applyHideTests,
     getServerGeneration,
     setServerGeneration,
-    invalidateRepoSidebar,
     diffText,
     getDiffRoot,
     getEmptyPane,
@@ -1265,7 +1263,6 @@ export function createDiffView(deps: DiffViewDeps, view = DEFAULT_VIEW) {
 
     STATE.files = newFiles;
     const canUpdateSidebar = !isEmbeddedDiffMode?.();
-    if (canUpdateSidebar) invalidateRepoSidebar();
     setServerGeneration(meta.generation || 0);
     window._lastMeta = meta;
     renderMeta(meta);
