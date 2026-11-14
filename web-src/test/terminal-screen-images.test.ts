@@ -1260,19 +1260,28 @@ describe("棚のサムネイルと端末の文字", () => {
   }
 
   test.each([
-    { name: "カーソル", enter: "pointerenter", leave: "pointerleave" },
-    { name: "フォーカス", enter: "focus", leave: "blur" },
+    {
+      name: "カーソル",
+      enter: (el: HTMLElement) => el.dispatchEvent(new Event("pointerenter")),
+      leave: (el: HTMLElement) => el.dispatchEvent(new Event("pointerleave")),
+    },
+    {
+      // 押して付いたフォーカスでは示さない (image-shelf の :focus-visible)。
+      name: "キー操作のフォーカス",
+      enter: (el: HTMLElement) => el.focus(),
+      leave: (el: HTMLElement) => el.blur(),
+    },
   ])(
     "$name が載ると端末の中のパスを強く強調し、離れると外す",
     async ({ enter, leave }) => {
       await shelfWithOut();
-      shelfOpen().dispatchEvent(new Event(enter));
+      enter(shelfOpen());
       // "wrote docs/out.png" はバッファの 1 行目 (0 始まり) の 6 桁目から 12 桁。
       expect(marks(".terminal-link-hover")).toEqual([
         { row: 1, col: 6, cols: 12 },
       ]);
 
-      shelfOpen().dispatchEvent(new Event(leave));
+      leave(shelfOpen());
       expect(marks(".terminal-link-hover")).toEqual([]);
     },
   );

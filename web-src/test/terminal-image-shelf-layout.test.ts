@@ -13,7 +13,7 @@
 
 import "./_dom";
 import { readFileSync } from "node:fs";
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   TERMINAL_IMAGE_SHELF_HEIGHT,
   TERMINAL_IMAGE_SHELF_WIDTH,
@@ -258,14 +258,23 @@ describe("見出しの行の詳しい表示 (浮く札は作らない)", () => {
     return el;
   };
 
+  const enterBy = {
+    pointer: () => open().dispatchEvent(new Event("pointerenter")),
+    keyboardFocus: () => open().focus(),
+  };
+  const leaveBy = {
+    pointer: () => open().dispatchEvent(new Event("pointerleave")),
+    keyboardFocus: () => open().blur(),
+  };
+
   test.each([
-    { name: "カーソル", enter: "pointerenter", leave: "pointerleave" },
-    { name: "フォーカス", enter: "focus", leave: "blur" },
-  ])(
+    { name: "カーソル", by: "pointer" },
+    { name: "キー操作のフォーカス", by: "keyboardFocus" },
+  ] as const)(
     "$name が載っている間だけ、題と件数の代わりにパスを出す",
-    ({ enter, leave }) => {
+    ({ by }) => {
       expect(shown()).toEqual({ title: true, detail: null });
-      open().dispatchEvent(new Event(enter));
+      enterBy[by]();
       // パスはディレクトリとファイル名に分け、省略はディレクトリの側だけ (CSS)。
       expect(shown()).toEqual({
         title: false,
@@ -277,11 +286,24 @@ describe("見出しの行の詳しい表示 (浮く札は作らない)", () => {
       expect(
         document.querySelector(".title-tooltip, [role=tooltip]"),
       ).toBeNull();
-      open().dispatchEvent(new Event(leave));
+      leaveBy[by]();
       expect(shown()).toEqual({ title: true, detail: null });
       expect(head().hasAttribute("title")).toBe(false);
     },
   );
+
+  test("押して付いたフォーカス (:focus-visible でない) では、マウスが離れたら消す", () => {
+    // 押して開いた項目にはフォーカスが残る。それで出したままにすると、
+    // マウスが離れても端末のペインの枠と詳細が残っていた。
+    const item = open();
+    vi.spyOn(item, "matches").mockImplementation(
+      (selector) => selector !== ":focus-visible",
+    );
+    item.dispatchEvent(new Event("pointerenter"));
+    item.focus();
+    item.dispatchEvent(new Event("pointerleave"));
+    expect(shown()).toEqual({ title: true, detail: null });
+  });
 
   test("読めなかった画像は理由を出す", () => {
     shelf.render([
