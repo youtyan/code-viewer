@@ -56,8 +56,10 @@ vi.mock("../core/xterm-loader", async () => {
       x < term.cols
         ? { getChars: () => text[x] ?? "", getWidth: () => 1 }
         : undefined,
-    translateToString: (trimRight?: boolean) =>
-      trimRight ? text.replace(/\s+$/, "") : text.padEnd(term.cols),
+    translateToString: (trimRight = false, start = 0, end = term.cols) => {
+      const part = text.padEnd(term.cols).slice(start, end);
+      return trimRight ? part.replace(/\s+$/, "") : part;
+    },
   });
   class FakeTerminal {
     element: HTMLElement | undefined;

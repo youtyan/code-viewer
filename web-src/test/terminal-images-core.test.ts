@@ -292,6 +292,11 @@ describe("joinBrokenPathLines", () => {
       expected: "/tmp/out.png",
     },
     {
+      name: "パス片は、その行で / を含む最後の語 (語の途中の / から前後へ広げる)",
+      text: "a/b then x/y.p z\n　ng",
+      expected: "x/y.png",
+    },
+    {
       name: "パス片が無い行は候補にしない",
       text: "no path here\nnext.png",
       expected: "",

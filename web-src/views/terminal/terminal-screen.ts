@@ -141,6 +141,62 @@ const MAX_REMEMBERED_TARGETS = 8;
  */
 const SHELL_SCAN_TAIL = 512;
 
+/** 画面の 1 行の文字と、文字の添字 → マス目の桁・字の幅 (範囲の外は undefined)。 */
+type ScreenRowText = {
+  text: string;
+  cell(index: number): number | undefined;
+  width(index: number): number | undefined;
+};
+
+/** バッファの行の番号つき。 */
+type ScreenRow = ScreenRowText & { index: number };
+
+/** 空白から `~` まで (表示できる ASCII) 以外の字。 */
+const NON_ASCII_RE = /[^ -~]/;
+
+const EMPTY_ROW: ScreenRowText = {
+  text: "",
+  cell: () => undefined,
+  width: () => undefined,
+};
+
+/** バッファの行の from から to (含まない) の桁を 1 マスずつ調べて起こす。 */
+function readCells(
+  line: XtermBufferLine,
+  from: number,
+  to: number,
+): ScreenRowText {
+  let text = "";
+  const cells: number[] = [];
+  const widths: number[] = [];
+  for (let x = from; x < to; x += 1) {
+    const cell = line.getCell(x);
+    if (!cell) break;
+    const width = cell.getWidth();
+    // 全角の字の後ろ半分。字は前の桁が持っている。
+    if (width === 0) continue;
+    const chars = cell.getChars() || " ";
+    for (let i = 0; i < chars.length; i += 1) {
+      cells.push(x);
+      widths.push(width);
+    }
+    text += chars;
+  }
+  const trimmed = text.replace(/\s+$/, "");
+  return {
+    text: trimmed,
+    cell: (i) => (i < trimmed.length ? cells[i] : undefined),
+    width: (i) => (i < trimmed.length ? widths[i] : undefined),
+  };
+}
+
+/**
+ * 出力で描き直されたときに、画面のリンクを読み直す最短の間隔。読み直しは
+ * 画面の全部の行を読むので、流れ続ける画面で毎フレーム読むとページの手が
+ * 塞がる。マウスが載ったときは間隔を待たずに読み直す (currentLinks)。
+ */
+export const LINKS_REFRESH_MS = 100;
+
 /**
  * 同じ綴りを聞き直すまでの間。同じパスがもう一度出力に出たら、上書きされた
  * かもしれないので聞き直す (更新時刻が変わっていれば棚の先頭へ上がる)。
@@ -434,6 +490,12 @@ export function createTerminalScreen(
   let screenLinks: ScreenLink[] = [];
   /** 描き直しの予約 (requestAnimationFrame)。 */
   let linksFrame: number | null = null;
+  /** 出力の後の読み直しを LINKS_REFRESH_MS まで待たせている時計。 */
+  let linksTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 画面が描き直された後、screenLinks をまだ読み直していない。 */
+  let linksStale = false;
+  /** 最後に screenLinks を読んだ時刻 (performance.now)。 */
+  let linksReadAt = Number.NEGATIVE_INFINITY;
   /**
    * 画面のファイルのパス → プロジェクトの中の実在するファイル (無ければ null)。
    * attach ごとに作り直す (相対パスの起点がシェルで変わる)。
@@ -491,7 +553,7 @@ export function createTerminalScreen(
   const linkLayer = createTerminalLinkLayer(screenEl, {
     getText: () => deps.getText(),
     term: () => term,
-    links: () => screenLinks,
+    links: () => currentLinks(),
     open: (link, mode) => openScreenLink(link, mode),
     copyValue: (link) =>
       link.url ??
@@ -993,53 +1055,92 @@ export function createTerminalScreen(
   }
 
   /**
-   * バッファの 1 行を文字列にし、文字列の添字 → マス目の桁の表も作る。全角の
-   * 字は 2 マスを取るので、添字と桁は一致しない。
+   * バッファの 1 行を文字列にし、文字列の添字 → マス目の桁 (cell) と字の幅
+   * (width) も引けるようにする。全角の字は 2 マスを取るので、添字と桁は一致
+   * しない。
+   *
+   * 描き直しのたびに画面の全部の行を読むので、文字列は xterm の
+   * translateToString で起こし、マスを 1 つずつ調べるのは桁を引かれたとき
+   * (その行にリンクがあったとき) だけにする。ASCII だけの行は添字 = 桁。
+   * 範囲の左端が全角の字の後ろ半分なら、translateToString は空白を 1 つ出す
+   * (1 マスずつ調べる方は飛ばす) ので、初めから 1 マスずつ調べる。
    */
   function readRow(
     line: XtermBufferLine | undefined,
     columns?: { from: number; to: number },
-  ): {
-    text: string;
-    cells: number[];
-    widths: number[];
-  } {
-    if (!line) return { text: "", cells: [], widths: [] };
-    let text = "";
-    const cells: number[] = [];
-    const widths: number[] = [];
+  ): ScreenRowText {
+    if (!line) return EMPTY_ROW;
+    const from = columns?.from ?? 0;
     // columns を渡すと、その桁の範囲だけを読む (tmux のペイン 1 つぶん)。
     const to = Math.min(line.length, columns?.to ?? line.length);
-    for (let x = columns?.from ?? 0; x < to; x += 1) {
-      const cell = line.getCell(x);
-      if (!cell) break;
-      const width = cell.getWidth();
-      // 全角の字の後ろ半分。字は前の桁が持っている。
-      if (width === 0) continue;
-      const chars = cell.getChars() || " ";
-      for (let i = 0; i < chars.length; i += 1) {
-        cells.push(x);
-        widths.push(width);
-      }
-      text += chars;
-    }
-    const trimmed = text.replace(/\s+$/, "");
+    if (from > 0 && line.getCell(from)?.getWidth() === 0)
+      return readCells(line, from, to);
+    const text = line.translateToString(false, from, to).replace(/\s+$/, "");
+    if (!NON_ASCII_RE.test(text))
+      return {
+        text,
+        cell: (i) => (i >= 0 && i < text.length ? from + i : undefined),
+        width: (i) => (i >= 0 && i < text.length ? 1 : undefined),
+      };
+    let table: ScreenRowText | null = null;
+    // 2 つの起こし方で文字列が食い違ったら (起こり得ないはずの壊れたマス)、
+    // 位置を当て推量しない (そのリンクは出さない)。
+    const lookup = () => {
+      table ??= readCells(line, from, to);
+      return table.text === text ? table : EMPTY_ROW;
+    };
     return {
-      text: trimmed,
-      cells: cells.slice(0, trimmed.length),
-      widths: widths.slice(0, trimmed.length),
+      text,
+      cell: (i) => lookup().cell(i),
+      width: (i) => lookup().width(i),
     };
   }
 
   /** 描き直しを次の描画の前に 1 回だけ行う (出力が続いても重くしない)。 */
   function scheduleLinks(): void {
+    linksStale = true;
     if (linksFrame !== null || disposed) return;
     linksFrame = requestAnimationFrame(() => {
       linksFrame = null;
+      if (linksTimer !== null) clearTimeout(linksTimer);
+      linksTimer = null;
       if (disposed) return;
-      screenLinks = computeLinks();
+      readLinks();
       linkLayer.render();
     });
+  }
+
+  /**
+   * 出力で描き直されたとき。前に読んでから LINKS_REFRESH_MS 経つまでは
+   * 待ってから読む (待つ間に届いた描き直しは 1 回にまとまる)。
+   */
+  function scheduleLinksAfterOutput(): void {
+    linksStale = true;
+    if (linksFrame !== null || linksTimer !== null || disposed) return;
+    const wait = linksReadAt + LINKS_REFRESH_MS - performance.now();
+    if (wait <= 0) {
+      scheduleLinks();
+      return;
+    }
+    linksTimer = setTimeout(() => {
+      linksTimer = null;
+      scheduleLinks();
+    }, wait);
+  }
+
+  function readLinks(): void {
+    linksStale = false;
+    linksReadAt = performance.now();
+    screenLinks = computeLinks();
+  }
+
+  /**
+   * 今の画面のリンク。描き直しの後でまだ読み直していなければ、ここで読む
+   * (マウスの位置を調べるときに、前の画面のリンクを当てない)。
+   */
+  function currentLinks(): ScreenLink[] {
+    if (linksStale && !disposed) readLinks();
+    return screenLinks;
   }
 
   /**
@@ -1099,9 +1200,14 @@ export function createTerminalScreen(
           segments,
         });
       };
-      for (const found of findImagePathLinks(texts, region.width, (value) =>
-        known.has(value),
-      )) {
+      // 棚が空なら、印を付ける画像のパスは無い (知らない綴りはリンクにしない)。
+      const imageLinks =
+        known.size === 0
+          ? []
+          : findImagePathLinks(texts, region.width, (value) =>
+              known.has(value),
+            );
+      for (const found of imageLinks) {
         const entry = shelfEntryByCandidate(shelfEntries, found.candidate);
         if (!entry?.image) continue;
         add(
@@ -1159,7 +1265,7 @@ export function createTerminalScreen(
    * 1 行目の始まりから範囲の右端まで・2 行目の左端から終わりまで。
    */
   function linkSegments(
-    rows: Array<{ index: number; cells: number[]; widths: number[] }>,
+    rows: ScreenRow[],
     link: PathLink,
     left: number,
     right: number,
@@ -1262,20 +1368,20 @@ export function createTerminalScreen(
    * x・y とも 0 始まりで、endX は最後の字が占める最後のマス (含む)。
    */
   function linkCells(
-    rows: Array<{ index: number; cells: number[]; widths: number[] }>,
+    rows: ScreenRow[],
     link: PathLink,
   ): { startX: number; startY: number; endX: number; endY: number } | null {
     const start = rows[link.start.row];
     const end = rows[link.end.row];
     if (!start || !end) return null;
     const lastIndex = link.end.col - 1;
-    const startX = start.cells[link.start.col];
-    const endCell = end.cells[lastIndex];
+    const startX = start.cell(link.start.col);
+    const endCell = end.cell(lastIndex);
     if (startX === undefined || endCell === undefined) return null;
     return {
       startX,
       startY: start.index,
-      endX: endCell + (end.widths[lastIndex] ?? 1) - 1,
+      endX: endCell + (end.width(lastIndex) ?? 1) - 1,
       endY: end.index,
     };
   }
@@ -1854,9 +1960,9 @@ export function createTerminalScreen(
     screenEl.dataset.renderer = useWebglRenderer(created, api, () => {
       screenEl.dataset.renderer = "dom";
     });
-    // 画面のリンクは描き直しのたびに見えている範囲だけを読み直す (xterm の
+    // 画面のリンクは描き直しの後に見えている範囲だけを読み直す (xterm の
     // リンクは代替画面・tmux のマウスの下で出入りと押下が届かないので使わない)。
-    created.onRender(() => scheduleLinks());
+    created.onRender(() => scheduleLinksAfterOutput());
     created.onScroll(() => scheduleLinks());
     // 桁数・行数が変われば覆う所も変わる (届いている tmux の大きさと合わなく
     // なれば、合うまで隠す)。
@@ -2152,6 +2258,8 @@ export function createTerminalScreen(
       revealTimer = null;
       if (linksFrame !== null) cancelAnimationFrame(linksFrame);
       linksFrame = null;
+      if (linksTimer !== null) clearTimeout(linksTimer);
+      linksTimer = null;
       linkLayer.dispose();
       resizeObserver?.disconnect();
       resizeObserver = null;

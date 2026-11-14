@@ -34,6 +34,7 @@ import { terminalText } from "../views/terminal/i18n";
 import { LINK_BAR_HIDE_MS } from "../views/terminal/terminal-links-layer";
 import {
   createTerminalScreen,
+  LINKS_REFRESH_MS,
   type TerminalScreenHandle,
 } from "../views/terminal/terminal-screen";
 import { type Deferred, deferred } from "./_test-helpers";
@@ -90,7 +91,18 @@ vi.mock("../core/xterm-loader", async () => {
           ? { getChars: () => cell.chars, getWidth: () => cell.width }
           : undefined;
       },
-      translateToString: () => text,
+      // 本物と同じく、字の幅だけ進む (全角の後ろ半分のマスは飛ばす。範囲の
+      // 左端が後ろ半分なら空白を 1 つ出す)。
+      translateToString: (trimRight = false, start = 0, end = cols) => {
+        let out = "";
+        let x = start;
+        while (x < end) {
+          const cell = cells[x];
+          out += cell?.chars || " ";
+          x += cell?.width || 1;
+        }
+        return trimRight ? out.replace(/\s+$/, "") : out;
+      },
     };
   };
   class FakeTerminal {
@@ -923,10 +935,11 @@ describe("文字の中の画像パス (リンク)", () => {
     expect(marks(".terminal-link-mark")).toEqual([
       { row: 1, col: 6, cols: 12 },
     ]);
-    // 棚に無い画像のパスには引かない。
+    // 棚に無い画像のパスには引かない。出力の後の読み直しは、前に読んでから
+    // LINKS_REFRESH_MS 経ってから。
     fakeState().lines = ["wrote docs/unknown.png"];
     source.emitOutput("\n");
-    await flush();
+    await new Promise((resolve) => setTimeout(resolve, LINKS_REFRESH_MS));
     await nextFrame();
     expect(marks(".terminal-link-mark")).toEqual([]);
   });

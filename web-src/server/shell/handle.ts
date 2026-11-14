@@ -43,22 +43,58 @@ import {
 /** 画面が選ぶ作業場所の長さの上限。 */
 const MAX_SHELL_CWD_LENGTH = 4096;
 
+/**
+ * 出力を続けて送るときの最短の間隔。PTY の出力は細かく届き、tmux で何枚もの
+ * ペインが動くと 1 秒に数千回になる。1 回ずつ知らせにすると、ブラウザは
+ * 知らせごとの手間 (読み解き・端末への書き込み・画像のパスの走査) で手が
+ * 塞がった。間が空いた後の最初の出力 (打鍵の反響) は待たせずに送る。
+ */
+export const SHELL_OUTPUT_BATCH_MS = 16;
+
+/** 溜めた出力がこれを超えたら、間隔を待たずに送る (1 回の知らせを大きくしすぎない)。 */
+export const SHELL_OUTPUT_BATCH_CHARS = 256 * 1024;
+
 /** シェルの出力を流しへ送り続ける。シェルが無ければ gone、終われば exited を送って閉じる。 */
 export function startShellStream(id: ShellSessionId, stream: SseStream): void {
-  const sub = subscribeShell(
-    id,
-    (chunk) => stream.send("output", JSON.stringify({ data: chunk })),
-    (exitCode) => {
-      stream.send("exited", JSON.stringify({ exitCode }));
-      stream.close();
-    },
-  );
+  let pending = "";
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let sentAt = Number.NEGATIVE_INFINITY;
+  const flush = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (!pending) return;
+    const data = pending;
+    pending = "";
+    sentAt = performance.now();
+    stream.send("output", JSON.stringify({ data }));
+  };
+  const push = (chunk: string) => {
+    pending += chunk;
+    if (pending.length >= SHELL_OUTPUT_BATCH_CHARS) {
+      flush();
+      return;
+    }
+    if (timer) return;
+    const wait = sentAt + SHELL_OUTPUT_BATCH_MS - performance.now();
+    if (wait <= 0) flush();
+    else timer = setTimeout(flush, wait);
+  };
+  const sub = subscribeShell(id, push, (exitCode) => {
+    // 溜めていた出力を先に送る (exited の後の出力は誰も読まない)。
+    flush();
+    stream.send("exited", JSON.stringify({ exitCode }));
+    stream.close();
+  });
   if (!sub) {
     stream.send("gone", "1");
     stream.close();
     return;
   }
-  stream.onClose(() => sub.unsubscribe());
+  stream.onClose(() => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    sub.unsubscribe();
+  });
   // そろえられなかったのは映していない別のシェル。このシェルの画面は流し続ける。
   if (sub.aligned.status === "error")
     console.error(

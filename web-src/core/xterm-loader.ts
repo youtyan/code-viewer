@@ -102,7 +102,12 @@ export type XtermBufferLine = {
   /** マス目の数 (端末の桁数)。 */
   readonly length: number;
   getCell(x: number): XtermBufferCell | undefined;
-  translateToString(trimRight?: boolean): string;
+  /** endColumn は含まない。全角の字は 1 字で 2 マス進む (後ろ半分のマスは飛ばす)。 */
+  translateToString(
+    trimRight?: boolean,
+    startColumn?: number,
+    endColumn?: number,
+  ): string;
 };
 
 /** リンクの範囲。x・y とも 1 始まりで、end は含む。 */

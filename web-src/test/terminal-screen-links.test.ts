@@ -52,8 +52,10 @@ vi.mock("../core/xterm-loader", async () => {
       x < term.cols
         ? { getChars: () => text[x] ?? "", getWidth: () => 1 }
         : undefined,
-    translateToString: (trimRight?: boolean) =>
-      trimRight ? text.replace(/\s+$/, "") : text.padEnd(term.cols),
+    translateToString: (trimRight = false, start = 0, end = term.cols) => {
+      const part = text.padEnd(term.cols).slice(start, end);
+      return trimRight ? part.replace(/\s+$/, "") : part;
+    },
   });
   class FakeTerminal {
     element: HTMLElement | undefined;
@@ -376,6 +378,15 @@ describe("何をリンクにするか", () => {
   ])("$name", ({ row, col, expected }) => {
     mouseAt("mousemove", row, col);
     expect(strong()).toEqual(expected);
+  });
+
+  test("出力で書き換わった直後でも、マウスは今の画面のリンクに当たる", () => {
+    // 出力の後の読み直しは間隔を空けて行うが、マウスの位置を調べるときは
+    // 待たずに読み直す (前の画面のリンクを当てない)。
+    term.lines[0] = "a https://example.com/x";
+    emitOutput("\r\n");
+    mouseAt("mousemove", 0, 10);
+    expect(strong()).toEqual([{ row: 0, col: 2, cols: 21 }]);
   });
 
   test("ファイルのパスは見えている分だけ 1 回訊き、覚えておく", async () => {

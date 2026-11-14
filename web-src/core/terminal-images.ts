@@ -516,18 +516,25 @@ export function joinBrokenPathLines(text: string): string {
   return candidates.join("\n");
 }
 
-/** その行にある「パスらしい最後の語」と、その語が始まる桁。無ければ null。 */
+const SPACE_RE = /\s/;
+
+/**
+ * その行にある「パスらしい最後の語」(`/` を含む、空白で区切った最後の語) と、
+ * その語が始まる桁。無ければ null。
+ *
+ * それは行の最後の `/` を含む語なので、そこから前後の空白まで広げる。語を
+ * 全部切り出して調べると、出力が流れ続ける端末で走査の大半をここが占めた。
+ */
 function lastPathFragment(
   line: string,
 ): { text: string; index: number } | null {
-  let found: { text: string; index: number } | null = null;
-  const words = /\S+/g;
-  for (const match of line.matchAll(words)) {
-    if (match[0].includes("/")) {
-      found = { text: match[0], index: match.index ?? 0 };
-    }
-  }
-  return found;
+  const slash = line.lastIndexOf("/");
+  if (slash < 0) return null;
+  let start = slash;
+  while (start > 0 && !SPACE_RE.test(line.charAt(start - 1))) start -= 1;
+  let end = slash + 1;
+  while (end < line.length && !SPACE_RE.test(line.charAt(end))) end += 1;
+  return { text: line.slice(start, end), index: start };
 }
 
 /** 行頭の空白を飛ばした最初の語。 */
