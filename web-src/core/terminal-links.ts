@@ -95,10 +95,35 @@ type Found = Omit<TerminalTextLink, "start" | "end"> & {
   length: number;
 };
 
+/**
+ * 行の文字列 → 拾ったもの。画面は描き直しのたびに全部の行を読み直すが、
+ * 変わらない行がほとんどで、流れた行も同じ文字列のまま別の行へ移るだけ。
+ * 9 ペインの tmux を映すと、正規表現の走査がページの処理の半分近くを
+ * 占めていた。上限を超えたら丸ごと捨てて作り直す。
+ */
+const matchCache = new Map<string, readonly Readonly<Found>[]>();
+const MATCH_CACHE_LIMIT = 4096;
+
 /** 1 本の文字列の中の URL・ファイルのパス・ペイン ID (重なるものは URL を取る)。 */
-export function matchTextLinks(text: string): Found[] {
+export function matchTextLinks(text: string): readonly Readonly<Found>[] {
+  const cached = matchCache.get(text);
+  if (cached) return cached;
+  if (matchCache.size >= MATCH_CACHE_LIMIT) matchCache.clear();
+  const found = Object.freeze(
+    scanTextLinks(text).map((item) => Object.freeze(item)),
+  );
+  matchCache.set(text, found);
+  return found;
+}
+
+function scanTextLinks(text: string): Found[] {
   const found: Found[] = [];
-  for (const match of text.matchAll(URL_RE)) {
+  // どの形も、必ず含む字がある (URL は `://`、パスは `/`、ペイン ID は `%`)。
+  // 無い行に正規表現を掛けない。
+  const hasSlash = text.includes("/");
+  const hasPercent = text.includes("%");
+  if (!hasSlash && !hasPercent) return found;
+  for (const match of hasSlash ? text.matchAll(URL_RE) : []) {
     const url = trimUrl(match[0]);
     if (url.length <= "https://".length || url.length > MAX_LINK_LENGTH)
       continue;
@@ -114,7 +139,7 @@ export function matchTextLinks(text: string): Found[] {
     found.some(
       (item) => index >= item.index && index < item.index + item.length,
     );
-  for (const match of text.matchAll(FILE_RE)) {
+  for (const match of hasSlash ? text.matchAll(FILE_RE) : []) {
     if (insideUrl(match.index)) continue;
     let path = match[1] ?? "";
     let full = match[0];
@@ -141,7 +166,7 @@ export function matchTextLinks(text: string): Found[] {
     found.some(
       (item) => index >= item.index && index < item.index + item.length,
     );
-  for (const match of text.matchAll(PANE_ID_RE)) {
+  for (const match of hasPercent ? text.matchAll(PANE_ID_RE) : []) {
     if (insideFound(match.index)) continue;
     found.push({
       kind: "pane",

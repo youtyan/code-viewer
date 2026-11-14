@@ -272,14 +272,11 @@ export function createTerminalLinkLayer(
   function render(): void {
     const term = deps.term();
     const screen = screenEl();
-    const size = cell();
-    if (!term || !screen || !size) {
+    if (!term || !screen) {
       layer.replaceChildren();
       return;
     }
     if (layer.parentElement !== screen) screen.append(layer);
-    layer.style.setProperty("--link-cell-w", `${size.w}px`);
-    layer.style.setProperty("--link-cell-h", `${size.h}px`);
     const top = term.buffer.active.viewportY;
     const visible = (segment: LinkSegment) =>
       segment.y >= top && segment.y < top + term.rows;
@@ -298,7 +295,16 @@ export function createTerminalLinkLayer(
       ...(strong ?? []),
     ].filter(visible))
       parts.push(segmentPart(segment, "terminal-link-hover", top));
-    layer.replaceChildren(...templateElements(view.segments(parts)));
+    // 描く印が無いときは、マスの寸法を測らず (測るとレイアウトが走る)、空の
+    // 層を作り直さない。出力が流れる間は描き直しのたびにここを通る。
+    const size = parts.length > 0 ? cell() : null;
+    if (!size) {
+      if (layer.firstChild) layer.replaceChildren();
+    } else {
+      layer.style.setProperty("--link-cell-w", `${size.w}px`);
+      layer.style.setProperty("--link-cell-h", `${size.h}px`);
+      layer.replaceChildren(...templateElements(view.segments(parts)));
+    }
     // 帯を出している間に文字列が消えた (流れた・書き換わった) ら帯も消す。
     if (hovered && !current) setHovered(null);
   }
