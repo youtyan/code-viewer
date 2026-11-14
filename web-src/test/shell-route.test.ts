@@ -2,8 +2,13 @@
 // 実際にシェルを起動するケースは環境依存になるので、ここでは扱わない
 // (プロセスの生成と入出力は手動のエンドツーエンド検証でカバーしている)。
 
-import { describe, expect, test, vi } from "vitest";
-import { handleShellRoute } from "../server/shell/handle";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import {
+  handleShellRoute,
+  SHELL_OUTPUT_BATCH_CHARS,
+  SHELL_OUTPUT_BATCH_MS,
+  startShellStream,
+} from "../server/shell/handle";
 import * as shellSession from "../server/shell/session";
 import { callRoute, postRoute } from "./_test-helpers";
 
@@ -203,5 +208,79 @@ describe("the folder a new shell starts in", () => {
     await post("/_shell/create", body);
     expect(spawn.mock.calls[0]?.[0]).toBe(expected);
     spawn.mockRestore();
+  });
+});
+
+// PTY の出力は細かく届く (tmux で何枚ものペインが動くと 1 秒に数千回)。1 回ずつ
+// 知らせにするとブラウザの手が塞がるので、間隔の中に届いた分はまとめて送る。
+describe("shell output stream", () => {
+  function openStream() {
+    let onData: (chunk: string) => void = () => undefined;
+    let onExit: (exitCode: number) => void = () => undefined;
+    const subscribe = vi
+      .spyOn(shellSession, "subscribeShell")
+      .mockImplementation((_id, data, exit) => {
+        onData = data;
+        onExit = exit;
+        return {
+          replay: "",
+          unseen: "",
+          aligned: { status: "ok" },
+          unsubscribe: () => undefined,
+        };
+      });
+    const sent: Array<[string, string]> = [];
+    startShellStream("shell-sample1", {
+      send: (event, data) => {
+        sent.push([event, event === "output" ? JSON.parse(data).data : data]);
+      },
+      close: () => undefined,
+      onClose: () => undefined,
+      closed: false,
+      backlog: () => 0,
+    });
+    subscribe.mockRestore();
+    return { sent, data: (chunk: string) => onData(chunk), exit: onExit };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("an output after a pause goes at once; the rest of a burst goes together", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const stream = openStream();
+    stream.data("a");
+    stream.data("b");
+    stream.data("c");
+    expect(stream.sent).toEqual([
+      ["open", "ok"],
+      ["output", "a"],
+    ]);
+    vi.advanceTimersByTime(SHELL_OUTPUT_BATCH_MS);
+    expect(stream.sent.slice(2)).toEqual([["output", "bc"]]);
+  });
+
+  test("a large burst goes without waiting for the interval", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const stream = openStream();
+    stream.data("a");
+    stream.data("x".repeat(SHELL_OUTPUT_BATCH_CHARS));
+    expect(stream.sent.slice(2).map(([, data]) => data.length)).toEqual([
+      SHELL_OUTPUT_BATCH_CHARS,
+    ]);
+  });
+
+  test("the held output goes before exited", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const stream = openStream();
+    stream.data("a");
+    stream.data("bye");
+    stream.exit(0);
+    expect(stream.sent.slice(1)).toEqual([
+      ["output", "a"],
+      ["output", "bye"],
+      ["exited", '{"exitCode":0}'],
+    ]);
   });
 });
