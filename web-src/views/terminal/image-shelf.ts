@@ -576,6 +576,9 @@ export function createImageShelf(
       locate();
     });
     open.addEventListener("focus", () => {
+      // キー操作で付いたフォーカスだけ。押して開いた項目にはフォーカスが
+      // 残るので、マウスが離れても枠と詳細が出たままになっていた。
+      if (!open.matches(":focus-visible")) return;
       focusedKey = li.dataset.key ?? null;
       locate();
     });
