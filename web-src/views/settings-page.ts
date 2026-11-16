@@ -11,7 +11,7 @@ import {
   helpSectionName,
 } from "./help-page";
 import { createPageShell } from "./page-shell";
-import { templateElement } from "./ui/renderer";
+import { renderOwned, templateElement } from "./ui/renderer";
 import type { SettingsCategory } from "./viewer-settings";
 
 export type SettingsPageDeps = {
@@ -146,7 +146,7 @@ export function createSettingsPage(
     deps.removeStandaloneSource();
     deps.clearLoadQueue();
     deps.$("#empty").classList.add("hidden");
-    deps.$("#meta").textContent = "";
+    renderOwned(deps.$("#meta"), nothing);
     const lang = deps.getLanguage();
     const categories = deps.settingsCategories();
     const active = deps.getSettingsCategory();

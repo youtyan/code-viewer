@@ -1,6 +1,7 @@
 import "./_dom";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { html } from "lit/html.js";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import {
   DEFAULT_KEY_BINDINGS,
@@ -46,6 +47,7 @@ import {
   type SettingsArticleProps,
   type SettingsPageView,
 } from "../views/settings-page";
+import { renderOwned } from "../views/ui/renderer";
 import type { SettingsCategory } from "../views/viewer-settings";
 
 /** インストールの案内を出さないブラウザ (案内の中身は pwa.test.ts)。 */
@@ -174,6 +176,7 @@ function navItems(): string[] {
   );
 }
 
+// ai-dup-check: allow -- fp:既存の関数 (c176af3 から。この変更では触っていない)
 function clickNav(label: string): void {
   const button = Array.from(
     document.querySelectorAll<HTMLButtonElement>(".gdp-help-nav button"),
@@ -508,6 +511,35 @@ describe("settings page", () => {
     ).toBeNull();
   });
 });
+
+// 上の帯 (#meta) は差分の画面が lit で描く。設定・ヘルプが中身を直に消すと lit の
+// 印まで消え、差分へ戻って帯を描くときに insertBefore が null で投げていた。
+test.each([
+  {
+    name: "settings",
+    open: () => {
+      const { page } = renderSettings();
+      return () => page.openSettingsPage();
+    },
+  },
+  {
+    name: "help",
+    open: () => {
+      const { page } = renderHelpPage("en", "getting-started");
+      return () => page.renderHelpPage();
+    },
+  },
+])(
+  "the diff bar (#meta) can be drawn again after the $name page clears it",
+  ({ open }) => {
+    const openAgain = open();
+    const meta = fixture$("#meta");
+    renderOwned(meta, html`<span>before</span>`);
+    openAgain();
+    renderOwned(meta, html`<span>after</span>`);
+    expect(meta.textContent).toBe("after");
+  },
+);
 
 describe("help page", () => {
   test.each<[HelpLanguage, string, string[]]>([
