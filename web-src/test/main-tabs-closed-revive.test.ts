@@ -39,7 +39,7 @@ function openWindow(
   document.body.append(mount);
   let route = current;
   const saves: SerializedLayout[] = [];
-  /** replaceBody で置き換えた本文の画面。 */
+  /** 置き換え (replace) で移した本文の画面。 */
   const replaced: string[] = [];
   const handle = createMainTabsPresenter({
     mount,
@@ -47,13 +47,9 @@ function openWindow(
     pageLabel: (page) => page,
     // app.ts と同じ: 置き換え (replace) は syncRoute(route, false)。
     navigate: (next, replace) => {
+      if (replace) replaced.push(next.screen);
       route = next;
       handle.syncRoute(next, !replace);
-    },
-    replaceBody: (next) => {
-      replaced.push(next.screen);
-      route = next;
-      handle.syncRoute(next, false);
     },
     currentRoute: () => route,
     defaultRoute: (target: TabTarget): AppRoute =>

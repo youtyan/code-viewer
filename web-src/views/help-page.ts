@@ -353,7 +353,7 @@ export function createHelpPage(
     deps.removeStandaloneSource();
     deps.clearLoadQueue();
     deps.$("#empty").classList.add("hidden");
-    deps.$("#meta").textContent = "";
+    renderOwned(deps.$("#meta"), nothing);
 
     const lang =
       deps.getRoute().screen === "help" &&

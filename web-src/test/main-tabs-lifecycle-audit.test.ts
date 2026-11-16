@@ -232,10 +232,11 @@ function openWindow(
     mount,
     getLanguage: () => "en",
     pageLabel: (page) => page,
-    navigate: (route) => {
+    navigate: (route, replace) => {
       current = route;
       urls.push(routeName(route));
-      handle.syncRoute(route);
+      // app.ts と同じ: 置き換え (replace) は前面を変えない。
+      handle.syncRoute(route, !replace);
     },
     currentRoute: () => current,
     defaultRoute: (target: TabTarget): AppRoute =>
@@ -484,6 +485,7 @@ function pickMenu(label: string): void {
 }
 
 /** グループの札を押す (畳む / 開く)。 */
+// ai-dup-check: allow -- fp:既存の関数 (1ca0ad6 から。この変更では触っていない)
 function toggleGroup(win: Window, root: string): void {
   const toggle = win.mount.querySelector<HTMLElement>(
     `.main-tab-group[data-group="${root}"] .main-tab-group-toggle`,
