@@ -87,7 +87,8 @@ function setup(
           replace: replace === true,
         });
         current = route;
-        handle.syncRoute(route);
+        // app.ts と同じ: 置き換え (replace) は前面を変えない。
+        handle.syncRoute(route, !replace);
       },
       currentRoute: () => current,
       defaultRoute: (target: TabTarget): AppRoute =>

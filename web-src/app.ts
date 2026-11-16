@@ -1979,18 +1979,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       // 左の面のファイルのまま残っていた。
       syncFocusedPaneUrl("replace");
     },
-    // 前面 (ターミナル・画像) の下の本文だけを置き換える (閉じた画面のタブの
-    // route を本文と URL に残さない)。setRoute の置き換えは syncRoute(route,
-    // false) なので前面は変えない。URL の ?terminal= は setRoute が組み直すので戻す。
-    replaceBody: (route) => {
-      const terminal = parseTerminalOverlay(window.location.search);
-      setRoute(route, true);
-      if (terminal === null) return;
-      const path = window.location.pathname + window.location.search;
-      const next = withTerminalOverlay(path, terminal);
-      if (next !== path)
-        history.replaceState(history.state, "", next + window.location.hash);
-    },
     // 窓ごとの前面。sessionStorage は取り出すだけで例外になる環境があるので、
     // 取り出しも呼ばれたときにする (例外は読む・書く側が理由ごと出す)。
     windowStorage: {
@@ -10581,14 +10569,23 @@ window.GdpExpandLogic = GdpExpandLogic;
    * キーボードから画面を移る。メニューのリンクを踏んだときと同じ経路を
    * 通したいので、URL を積んでから applyRouteFromLocation に任せる。
    */
-  /** 履歴を積まずにその route へ (本文の面を合わせ直すとき)。 */
+  /**
+   * 履歴を積まずにその route へ (本文の面を合わせ直す・閉じた画面のタブの代わりを
+   * 出す)。本文は描くが、前面 (ターミナル・画像) は変えず、URL の ?terminal= も残す。
+   */
   function replaceWithRoute(route: AppRoute): void {
+    const terminal = parseTerminalOverlay(window.location.search);
     history.replaceState(
       historyStateForRoute(route, true),
       "",
       urlForRoute(route),
     );
-    applyRouteFromLocation();
+    applyRouteFromLocation(false);
+    if (terminal === null) return;
+    const path = window.location.pathname + window.location.search;
+    const next = withTerminalOverlay(path, terminal);
+    if (next !== path)
+      history.replaceState(history.state, "", next + window.location.hash);
   }
 
   function navigateToRoute(route: AppRoute): void {
@@ -10602,7 +10599,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyRouteFromLocation();
   }
 
-  function applyRouteFromLocation() {
+  /** activateTab: その route のタブを前面に出すか (置き換えでは出さない)。 */
+  function applyRouteFromLocation(activateTab = true) {
     upgradeLegacyPanelUrl();
     // URL が右の面のファイル (pane=right): 右の面で開き、本文は描き直さない。
     // 右に開けない (1 面で狭い・ファイルでない) なら pane=right を外して本文へ。
@@ -10680,7 +10678,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.repoRef = STATE.route.ref || "worktree";
     ANNOTATIONS_UI?.restoreSessionFromUrl();
     replaceUrlWithCurrentRoute();
-    MAIN_TABS.syncRoute(STATE.route);
+    MAIN_TABS.syncRoute(STATE.route, activateTab);
     syncRefInputs();
     syncHeaderMenu();
     syncLineRefPill();

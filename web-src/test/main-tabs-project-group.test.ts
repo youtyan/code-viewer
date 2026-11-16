@@ -94,9 +94,10 @@ async function open(saved: unknown, root: string, route: AppRoute) {
     mount,
     getLanguage: () => "en",
     pageLabel: (page) => page,
-    navigate: (next) => {
+    navigate: (next, replace) => {
       current = next;
-      handle.syncRoute(next);
+      // app.ts と同じ: 置き換え (replace) は前面を変えない。
+      handle.syncRoute(next, !replace);
     },
     currentRoute: () => current,
     defaultRoute: (target: TabTarget): AppRoute =>

@@ -212,14 +212,14 @@ export type MainTabsDeps = {
   getLanguage(): MainTabsLang;
   /** page のタブの名前 (画面の入口と同じ文言)。repo はフォルダ表示の入口の名前。 */
   pageLabel(page: PageKind | "repo"): string;
-  /** その route を開く (replace なら履歴を積まない)。 */
-  navigate(route: AppRoute, replace?: boolean): void;
   /**
-   * 前面 (ターミナル・画像) を変えずに、その下の本文の route だけを置き換える
-   * (履歴は積まない。URL の ?terminal= などの重ね書きは残す)。本文の route の
-   * タブが閉じられたときに使う (followClosedBody)。
+   * その route を開いて本文を描く。本文を移す入口はこれ 1 つ (route だけ替えて
+   * 描かない入口を作らない: 描かずに route だけ替えると、changeAndGo の「覚えた
+   * route = 今の route なら移らない」が描かれていない画面を信じ、設定のタブのまま
+   * 本文が履歴になっていた)。replace なら履歴を積まず、前面 (ターミナル・画像) も
+   * URL の ?terminal= も変えない (本文だけを置き換える)。
    */
-  replaceBody?(route: AppRoute): void;
+  navigate(route: AppRoute, replace?: boolean): void;
   /**
    * この窓だけに残り、読み直しでは消えない保存 (app は sessionStorage)。窓ごとの
    * 前面を覚え、読み直し (restore の keepSavedFront) ではそれを保存した配置の
@@ -1439,7 +1439,7 @@ export function createMainTabsPresenter(
       .reverse()
       .flatMap((id) => pane.tabs.filter((tab) => tab.id === id));
     const next = [...recent, ...pane.tabs].find((tab) => routeTab(tab));
-    deps.replaceBody?.(next ? routeOf(next) : homeRoute());
+    deps.navigate(next ? routeOf(next) : homeRoute(), true);
   }
 
   /**
